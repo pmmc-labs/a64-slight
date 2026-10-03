@@ -26,6 +26,16 @@
 #endif
 .endm
 
+// Constants with addresses in them (quoted lists), which the loader may
+// have to fix up before they become read-only.
+.macro CONSTDATA
+#if defined(__APPLE__)
+    .section __DATA,__const
+#else
+    .section .data.rel.ro
+#endif
+.endm
+
 // The address of a symbol, on Mach-O and on ELF.
 .macro LOADADDR reg, sym
 #if defined(__APPLE__)

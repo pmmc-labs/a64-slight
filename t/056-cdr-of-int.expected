@@ -1,0 +1,2 @@
+fault: not a cons: 5 (cdr at t/056-cdr-of-int.slight:1:1)
+exit: 1

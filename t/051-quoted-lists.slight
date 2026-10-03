@@ -1,0 +1,10 @@
+(pprint '(a b c))
+(pprint '(1 (2 (3)) () -4))
+(pprint (quote (#true #false)))
+(pprint (car '(x y)))
+(pprint (cdr '(x y)))
+; a quoted list and a built one are eq?
+(pprint (eq? '(1 (2 3)) (list 1 (list 2 3))))
+(defun quoted () '(q r s))
+(pprint (eq? (quoted) (quoted)))
+(cons :p (quoted))

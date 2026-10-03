@@ -14,10 +14,11 @@
 // between Mach-O and ELF stay in one header, and rt.h's constants (RT_TRUE,
 // RT_FAULT_OVERFLOW, ...) can be used by name.
 //
-// So far (docs/PLAN.md, steps 1-3): integers, #true/#false, (), symbols and
-// quote, the integer primitives, eq?/ne?, type predicates, cond, let, do,
-// pprint, defun and calls. The top-level forms that aren't defuns are the
-// body of slight_main.
+// So far (docs/PLAN.md, steps 1-4): integers, #true/#false, (), symbols,
+// lists (cons cells bump-allocated in the process's heap, or static data
+// when quoted), the integer and list primitives, eq?/ne?, type predicates,
+// cond, let, do, pprint, defun and calls. The top-level forms that aren't
+// defuns are the body of slight_main.
 
 import { CompileError } from './errors.ts';
 import { list, NIL, posOf, show, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
@@ -45,15 +46,16 @@ type Cx = { readonly fns: Fns; readonly env: Env; readonly si: number; readonly 
 type Syms = { readonly name: string; readonly id: number; readonly next: Syms } | null;
 
 // What compiling accumulates: how many labels have been made, how many
-// frame slots the current function needs, the symbols, and the out-of-line
-// code (fault calls, preemption) and read-only data to emit after all the
-// functions.
+// frame slots the current function needs, the symbols, the out-of-line
+// code (fault calls, preemption) to emit after all the functions, and the
+// read-only data: strings (data) and quoted lists (consts).
 type St = {
     readonly labels: number;
     readonly slots: number;
     readonly symbols: Syms;
     readonly stubs: Code;
     readonly data: Code;
+    readonly consts: Code;
 };
 
 const MAX_ARGS = 8;     // x0..x7
@@ -70,7 +72,7 @@ export function compileProgram(forms: Sexp): string {
     const defuns  = all.filter((f) => isForm(f, 'defun')).map((f) => checkDefun(f as Pair));
     const fns     = defuns.reduce<Fns>(declare, null);
     const top     = all.filter((f) => !isForm(f, 'defun'));
-    const empty: St = { labels: 0, slots: 0, symbols: null, stubs: [], data: [] };
+    const empty: St = { labels: 0, slots: 0, symbols: null, stubs: [], data: [], consts: [] };
     const st0 = RESERVED_SYMBOLS.reduce((st, name) => symbolId(st, name)[1], empty);
 
     const [code, st1] = defuns.reduce<[Code, St]>(([acc, st], d) => {
@@ -92,6 +94,9 @@ export function compileProgram(forms: Sexp): string {
         '    RODATA',
         st2.data,
         symbolTable(st2.symbols),
+        '',
+        '    CONSTDATA',
+        st2.consts,
     ]).join('\n') + '\n';
 }
 
@@ -122,7 +127,7 @@ function checkDefun(x: Pair): Defun {
     }
     if (name.t !== 'sym') throw new CompileError(`defun needs a name, not ${show(name)}`, posOf(name) ?? x.pos);
     checkBindable(name);
-    if (BUILTINS.includes(name.name)) throw new CompileError(`can't define ${name.name}: it's a builtin`, name.pos);
+    if (isBuiltin(name.name)) throw new CompileError(`can't define ${name.name}: it's a builtin`, name.pos);
     const ps = toArray(params);
     if (ps === null) throw new CompileError(`${name.name}'s parameters must be a list, not ${show(params)}`, posOf(params) ?? x.pos);
     const syms = ps.map((p) => {
@@ -301,8 +306,11 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
         const [code, st1] = compileExpr(args[0]!, operand, st);
         return [[code, predicate[0], boolIf(predicate[1])], st1];
     }
-    const same = EQUALITY[head.name];
-    if (same !== undefined) return compileBinary(x, head.name, args, operand, st, (s) => [compare(same), s], false);
+    if (head.name === 'eq?' || head.name === 'ne?') return compileEquality(x, head.name, args, operand, st);
+    if (head.name === 'cons') return compileCons(x, args, operand, st);
+    if (head.name === 'list') return compileList(x, args, operand, st);
+    const path = cxrPath(head.name);
+    if (path !== null) return compileCxr(x, head.name, path, args, operand, st);
     const arith = ARITH[head.name];
     if (arith !== undefined) {
         return compileBinary(x, head.name, args, operand, st, (s) => {
@@ -320,16 +328,52 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
 const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;
 
 // A constant. Symbols are their compile-time ids; integers and () quote
-// to themselves. Quoted lists need the heap (step 4), strings and floats
-// boxes (step 5).
+// to themselves; a quoted list is static data, shared by every process and
+// never copied or collected. Strings and floats need boxes (step 5).
 function compileQuote(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     checkArity(x, 'quote', args, 1);
     const datum = args[0]!;
     if (datum.t === 'int' || datum.t === 'nil') return compileExpr(datum, cx, st);
+    if (datum.t === 'pair') {
+        const [name, st1] = staticList(x, datum, st);
+        return [[`    LOADADDR x0, ${name}`, '    orr  x0, x0, #RT_TAG_LIST'], st1];
+    }
     if (datum.t !== 'sym') throw notYet(x);
     const [id, st1] = symbolId(st, datum.name);
     const [first, ...rest] = loadWord('x0', symbolWord(id));
     return [[`${first}    // '${datum.name}`, rest], st1];
+}
+
+// A quoted list's cells, side by side in the constant data, each one's
+// cdr pointing at the next; nested lists first, so their words are known.
+// Returns the label of the first cell.
+function staticList(x: Pair, list: Pair, st: St): [string, St] {
+    const [words, st1] = toArray(list)!.reduce<[readonly string[], St]>(([ws, s], item) => {
+        const [w, s1] = staticWord(x, item, s);
+        return [[...ws, w], s1];
+    }, [[], st]);
+    const [name, st2] = label(st1, 'quoted');
+    const cells = words.map((w, i) => `    .quad ${w}, ${i + 1 < words.length ? `${name}+${16 * (i + 1) + RT_TAG_LIST}` : 'RT_NIL'}`);
+    return [name, { ...st2, consts: [st2.consts, '    .p2align 4', `${name}:`, cells] }];
+}
+
+function staticWord(x: Pair, item: Sexp, st: St): [string, St] {
+    switch (item.t) {
+        case 'int':
+            return [`0x${BigInt.asUintN(64, intWord(item.v)).toString(16)}`, st];
+        case 'nil':
+            return ['RT_NIL', st];
+        case 'sym': {
+            const [id, st1] = symbolId(st, item.name);
+            return [`0x${symbolWord(id).toString(16)}`, st1];
+        }
+        case 'pair': {
+            const [name, st1] = staticList(x, item, st);
+            return [`${name}+${RT_TAG_LIST}`, st1];
+        }
+        default:
+            throw notYet(x);
+    }
 }
 
 function symbolId(st: St, name: string): [number, St] {
@@ -362,15 +406,22 @@ const ARITH: Readonly<Record<string, (overflow: string) => Code>> = {
 // words compare like the integers.
 const COMPARE: Readonly<Record<string, string>> = { '==': 'eq', '!=': 'ne', '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge' };
 
-// Equality on any two values. Every value so far is one word, so it's
-// comparing words; with lists (step 4) it becomes structural.
-const EQUALITY: Readonly<Record<string, string>> = { 'eq?': 'eq', 'ne?': 'ne' };
+const RT_TAG_LIST = 1;
+
+// Sets Z when x0 is not a cons: when its tag isn't the list tag, ccmp
+// skips the second compare and sets Z (#4) itself; otherwise Z means nil.
+const IS_CONS: Code = [
+    '    and  x1, x0, #RT_TAG_MASK',
+    '    cmp  x1, #RT_TAG_LIST',
+    '    ccmp x0, #RT_NIL, #4, eq',
+];
 
 // Type predicates: a test of x0 that sets the flags, and the condition that
 // means yes. #true and #false are symbols too, so sym? says yes to them.
 const PREDICATES: Readonly<Record<string, readonly [Code, string]>> = {
     'int?':  [['    tst  x0, #1'], 'eq'],
     'nil?':  [['    cmp  x0, #RT_NIL'], 'eq'],
+    'cons?': [IS_CONS, 'ne'],
     'sym?':  [['    and  x1, x0, #RT_TAG_MASK', '    cmp  x1, #RT_TAG_SYMBOL'], 'eq'],
     // when x0 is #true, ccmp skips the second compare and sets Z (#4) itself
     'bool?': [['    cmp  x0, #RT_TRUE', '    ccmp x0, #RT_FALSE, #4, ne'], 'eq'],
@@ -378,7 +429,9 @@ const PREDICATES: Readonly<Record<string, readonly [Code, string]>> = {
 
 // The names a defun can't take.
 const BUILTINS: readonly string[] =
-    ['pprint', ...[ARITH, COMPARE, EQUALITY, PREDICATES].flatMap((table) => Object.keys(table))];
+    ['pprint', 'eq?', 'ne?', 'cons', 'list', ...[ARITH, COMPARE, PREDICATES].flatMap((table) => Object.keys(table))];
+
+const isBuiltin = (name: string): boolean => BUILTINS.includes(name) || cxrPath(name) !== null;
 
 // x0 = #true if cond holds, otherwise #false.
 const boolIf = (cond: string): Code => ['    mov  x0, #RT_TRUE', '    mov  x2, #RT_FALSE', `    csel x0, x0, x2, ${cond}`];
@@ -402,10 +455,120 @@ function compileBinary(x: Pair, name: string, args: readonly Sexp[], cx: Cx, st:
     ], st4];
 }
 
+// eq? and ne?. The same word is equal. Otherwise two lists can still be
+// equal, which rt_equal works out; but when either side is a literal
+// immediate (an integer, a symbol, ()), the words decide.
+function compileEquality(x: Pair, name: string, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    const negate = name === 'ne?' ? ['    cmp  x0, #RT_TRUE', boolIf('ne')] : [];
+    if (args.some(isImmediateLiteral)) {
+        return compileBinary(x, name, args, cx, st, (s) => [[compare('eq'), negate], s], false);
+    }
+    return compileBinary(x, name, args, cx, st, (s) => {
+        const [same, s1] = label(s, 'same');
+        const [done, s2] = label(s1, 'equal_done');
+        return [[
+            '    cmp  x1, x0',
+            `    b.eq ${same}`,
+            '    bl   rt_equal',
+            `    b    ${done}`,
+            `${same}:`,
+            '    mov  x0, #RT_TRUE',
+            `${done}:`,
+            negate,
+        ], s2];
+    }, false);
+}
+
+function isImmediateLiteral(x: Sexp): boolean {
+    if (x.t === 'int' || x.t === 'nil') return true;
+    if (x.t === 'sym') return RESERVED_SYMBOLS.includes(x.name);
+    return isForm(x, 'quote') && x.t === 'pair' && x.cdr.t === 'pair' && x.cdr.car.t !== 'pair';
+}
+
 function checkArity(x: Pair, name: string, args: readonly Sexp[], n: number): void {
     if (args.length !== n) {
         throw new CompileError(`${name} takes ${n} argument${n === 1 ? '' : 's'}, not ${args.length}`, x.pos);
     }
+}
+
+// --- lists ------------------------------------------------------------------
+
+// Bump-allocates `bytes` from the process's heap into x2, branching to
+// `full` when there isn't room (there's no GC yet: step 9). Clobbers x3,
+// x4 and x5.
+function alloc(bytes: number, full: string): Code {
+    return [
+        '    ldr  x2, [x28, #RT_PROC_HEAP_PTR]',
+        '    ldr  x3, [x28, #RT_PROC_HEAP_LIMIT]',
+        addImm('x4', 'x2', bytes, 'x5'),
+        '    cmp  x4, x3',
+        `    b.hi ${full}`,
+        '    str  x4, [x28, #RT_PROC_HEAP_PTR]',
+    ];
+}
+
+// dst = src + n, for any n.
+function addImm(dst: string, src: string, n: number, scratch: string): Code {
+    return n <= 4095 ? `    add  ${dst}, ${src}, #${n}` : [loadWord(scratch, BigInt(n)), `    add  ${dst}, ${src}, ${scratch}`];
+}
+
+// (cons x xs): xs must be a list, so every list stays proper.
+function compileCons(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    checkArity(x, 'cons', args, 2);
+    const [head, st1]    = compileExpr(args[0]!, cx, st);
+    const [tail, st2]    = compileExpr(args[1]!, { ...cx, si: cx.si + 1 }, useSlot(st1, cx.si));
+    const [notList, st3] = faultLabel(st2, 'RT_FAULT_NOT_LIST', 'cons', x.pos);
+    const [full, st4]    = faultLabel(st3, 'RT_FAULT_HEAP', 'cons', x.pos);
+    return [[
+        head, `    str  x0, ${slot(cx.si)}`,
+        tail,
+        '    and  x1, x0, #RT_TAG_MASK',
+        '    cmp  x1, #RT_TAG_LIST',
+        `    b.ne ${notList}`,
+        alloc(16, full),
+        `    ldr  x1, ${slot(cx.si)}`,
+        '    stp  x1, x0, [x2]',
+        '    orr  x0, x2, #RT_TAG_LIST',
+    ], st4];
+}
+
+// (list a b ...): the elements wait in slots, then one allocation holds
+// all the cells, side by side.
+function compileList(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    if (args.length === 0) return ['    mov  x0, #RT_NIL', st];
+    const [code, st1] = args.reduce<[Code, St]>(([acc, s], arg, i) => {
+        const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i }, s);
+        return [[acc, c, `    str  x0, ${slot(cx.si + i)}`], useSlot(s1, cx.si + i)];
+    }, [[], st]);
+    const [full, st2] = faultLabel(st1, 'RT_FAULT_HEAP', 'list', x.pos);
+    const cells = args.map((_, i) => [
+        `    ldr  x5, ${slot(cx.si + i)}`,
+        `    str  x5, [x2, #${16 * i}]`,
+        i + 1 < args.length ? addImm('x6', 'x2', 16 * (i + 1) + RT_TAG_LIST, 'x7') : '    mov  x6, #RT_NIL',
+        `    str  x6, [x2, #${16 * i + 8}]`,
+    ]);
+    return [[code, alloc(16 * args.length, full), cells, '    orr  x0, x2, #RT_TAG_LIST'], st2];
+}
+
+// car, cdr, and c[ad]{2,4}r: the letters between c and r, applied right
+// to left. Each step needs a cons. Returns null for any other name.
+function cxrPath(name: string): readonly string[] | null {
+    const middle = name.slice(1, -1);
+    const isCxr = name.length >= 3 && name.length <= 6 && name.startsWith('c') && name.endsWith('r')
+        && [...middle].every((ch) => ch === 'a' || ch === 'd');
+    return isCxr ? [...middle].reverse() : null;
+}
+
+function compileCxr(x: Pair, name: string, path: readonly string[], args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    checkArity(x, name, args, 1);
+    const [code, st1]    = compileExpr(args[0]!, cx, st);
+    const [notCons, st2] = faultLabel(st1, 'RT_FAULT_NOT_CONS', name, x.pos);
+    const steps = path.map((step) => [
+        IS_CONS,
+        `    b.eq ${notCons}`,
+        step === 'a' ? '    ldur x0, [x0, #-1]    // car' : '    ldur x0, [x0, #7]     // cdr',
+    ]);
+    return [[code, steps], st2];
 }
 
 // --- cond -------------------------------------------------------------------
@@ -469,7 +632,8 @@ function label(st: St, hint: string): [string, St] {
     return [`L${hint}_${st.labels}`, { ...st, labels: st.labels + 1 }];
 }
 
-type Fault = 'RT_FAULT_NOT_INT' | 'RT_FAULT_OVERFLOW' | 'RT_FAULT_NOT_BOOL' | 'RT_FAULT_NO_CLAUSE' | 'RT_FAULT_STACK';
+type Fault = 'RT_FAULT_NOT_INT' | 'RT_FAULT_OVERFLOW' | 'RT_FAULT_NOT_BOOL' | 'RT_FAULT_NO_CLAUSE' | 'RT_FAULT_STACK'
+           | 'RT_FAULT_NOT_CONS' | 'RT_FAULT_NOT_LIST' | 'RT_FAULT_HEAP';
 
 // A label to branch to when `what`, at `pos`, goes wrong: an out-of-line
 // call to rt_fault, with the offending value (if any) in x0.

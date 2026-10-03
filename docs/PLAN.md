@@ -4,8 +4,8 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–3 done (under qemu, and natively on macOS as of
-step 2). Step 4 is next.
+**Progress:** steps 0–4 done (under qemu, and natively on macOS as of
+step 2). Step 5 is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -89,7 +89,11 @@ the colon, as in ts-slight (D52).
   data section for printing.
 - `eq?`/`ne?` on immediates; `sym?`, `bool?`.
 
-### 4. Heap and lists
+### 4. Heap and lists (done)
+
+`c[ad]r` goes up to four letters (Common Lisp's set, which covers the
+examples). `eq?` calls the runtime's `rt_equal` only when the words differ
+and neither side is a literal immediate.
 
 - A per-process heap: chunk chain, bump allocation. No GC yet: one big
   chunk and a limit that faults.

@@ -1,0 +1,2 @@
+fault: heap exhausted (cons at t/059-heap-exhausted.slight:2:24)
+exit: 1

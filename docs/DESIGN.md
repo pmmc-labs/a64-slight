@@ -203,7 +203,11 @@ Keep ts-slight's names where possible
 - comparison: `== != < <= > >=`, structural `eq?`/`ne?`
 - type predicates: `nil? cons? sym? str? num? int? float? lambda? pid? bool?`
   (`sym?` is true for `#true` and `#false`: they're symbols)
-- lists: `cons car cdr list` and the `cadr` family
+- lists: `cons car cdr list`, and `c[ad]r` with up to four letters
+  (`cadr`, `cddr`, `caddr`, ...). `car`/`cdr` of anything but a cons
+  faults, and so does `cons` onto anything but a list, so every list is
+  proper (both as in ts-slight). Inside a quoted list, `:a` reads as
+  `(quote a)`, as it did in ts-slight; write `'(a b)`, not `'(:a :b)`.
 - strings: `str-len` (bytes), `substring`, `concat`/`~` (renders numbers and
   symbols, as in ts-slight), `index-of`, `str-split`, `str-join`,
   `string->int`, `symbol->string`, `string->symbol` (looks up the
@@ -267,6 +271,22 @@ needed: the REPL and line editing are slight code over key events.
   can't refer to themselves, and there's no local `defun`.
 
 ### Process heaps and GC
+
+**So far (step 4):** one 64 MB chunk per process, mapped lazily, and a
+fault when it's full. The heap pointer and limit live in the process
+struct (`[x28, #RT_PROC_HEAP_PTR]`), so C builtins that allocate can use
+them with nothing to sync (D57). Compiled code allocates inline:
+
+```
+    ldr  x2, [x28, #RT_PROC_HEAP_PTR]
+    ldr  x3, [x28, #RT_PROC_HEAP_LIMIT]
+    add  x4, x2, #16                        // bytes
+    cmp  x4, x3
+    b.hi Lfault_N                           // fault: heap exhausted
+    str  x4, [x28, #RT_PROC_HEAP_PTR]       // x2 = the new cell
+```
+
+**The plan (step 9):**
 
 - Each process has its own heap: a chain of chunks with bump allocation and
   ordinary absolute pointers.

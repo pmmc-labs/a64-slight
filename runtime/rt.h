@@ -29,9 +29,14 @@
 #define RT_FAULT_NOT_BOOL    3    // a cond test was neither #true nor #false
 #define RT_FAULT_NO_CLAUSE   4    // no cond clause matched
 #define RT_FAULT_STACK       5    // a function was called with the stack nearly full
+#define RT_FAULT_NOT_CONS    6    // car or cdr of something that isn't a cons
+#define RT_FAULT_NOT_LIST    7    // cons onto something that isn't a list
+#define RT_FAULT_HEAP        8    // the heap is full
 
 #define RT_PROC_REDUCTIONS   0    // rt_proc_t.reductions: the reduction check at function entry
 #define RT_PROC_STACK_LIMIT  8    // rt_proc_t.stack_limit: the stack check at function entry
+#define RT_PROC_HEAP_PTR    16    // rt_proc_t.heap_ptr: where the next allocation goes
+#define RT_PROC_HEAP_LIMIT  24    // rt_proc_t.heap_limit: the end of the heap
 
 #ifndef __ASSEMBLER__
 
@@ -47,7 +52,15 @@ typedef uint64_t rt_value_t;
 typedef struct rt_proc {
     int64_t   reductions;   // calls left before rt_preempt
     uintptr_t stack_limit;  // a function entered with sp below this faults
+    uintptr_t heap_ptr;     // bump allocation: compiled code adds to this...
+    uintptr_t heap_limit;   // ...and faults when it would pass this
 } rt_proc_t;
+
+// A cons cell is two words with no header; a list value points at it,
+// plus RT_TAG_LIST.
+static inline rt_value_t rt_car(rt_value_t v) { return ((const rt_value_t *)(v - RT_TAG_LIST))[0]; }
+static inline rt_value_t rt_cdr(rt_value_t v) { return ((const rt_value_t *)(v - RT_TAG_LIST))[1]; }
+static inline int        rt_is_cons(rt_value_t v) { return (v & RT_TAG_MASK) == RT_TAG_LIST && v != RT_NIL; }
 
 // --- emitted by the compiler -------------------------------------------------
 
@@ -68,6 +81,10 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) RT_ASM(rt_faul
 
 // Prints a value and a newline. Returns nil.
 rt_value_t rt_pprint(rt_value_t v) RT_ASM(rt_pprint);
+
+// eq? for two values that aren't the same word: RT_TRUE if they're
+// structurally equal, RT_FALSE if not.
+rt_value_t rt_equal(rt_value_t a, rt_value_t b) RT_ASM(rt_equal);
 
 // Called when proc's reductions run out. For now it just refills them;
 // once there are processes, it's where a process gets preempted.

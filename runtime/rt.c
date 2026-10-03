@@ -13,10 +13,13 @@
 
 _Static_assert(offsetof(rt_proc_t, reductions)  == RT_PROC_REDUCTIONS,  "RT_PROC_REDUCTIONS");
 _Static_assert(offsetof(rt_proc_t, stack_limit) == RT_PROC_STACK_LIMIT, "RT_PROC_STACK_LIMIT");
+_Static_assert(offsetof(rt_proc_t, heap_ptr)    == RT_PROC_HEAP_PTR,    "RT_PROC_HEAP_PTR");
+_Static_assert(offsetof(rt_proc_t, heap_limit)  == RT_PROC_HEAP_LIMIT,  "RT_PROC_HEAP_LIMIT");
 
 #define QUOTA          1000             // reductions between preemptions
 #define STACK_BYTES    (8 << 20)        // the root process's stack
 #define STACK_HEADROOM (64 << 10)       // room left below the limit for one frame and a C call
+#define HEAP_BYTES     (64 << 20)       // the root process's heap; there's no GC yet
 _Static_assert(RT_FALSE == (0 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_FALSE is symbol 0");
 _Static_assert(RT_TRUE  == (1 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_TRUE is symbol 1");
 
@@ -36,6 +39,17 @@ static void print_value(FILE *out, rt_value_t v) {
         fputs("()", out);
         return;
     }
+    if (rt_is_cons(v)) {
+        fputc('(', out);
+        for (;;) {
+            print_value(out, rt_car(v));
+            v = rt_cdr(v);
+            if (v == RT_NIL) break;
+            fputc(' ', out);
+        }
+        fputc(')', out);
+        return;
+    }
     if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
         const char *name = symbol_name(v >> RT_SYMBOL_SHIFT);
         if (name) {
@@ -52,6 +66,20 @@ rt_value_t rt_pprint(rt_value_t v) {
     return RT_NIL;
 }
 
+// Structural: recursive down the cars, a loop along the cdrs.
+static int equal(rt_value_t a, rt_value_t b) {
+    for (;;) {
+        if (a == b) return 1;
+        if (!rt_is_cons(a) || !rt_is_cons(b) || !equal(rt_car(a), rt_car(b))) return 0;
+        a = rt_cdr(a);
+        b = rt_cdr(b);
+    }
+}
+
+rt_value_t rt_equal(rt_value_t a, rt_value_t b) {
+    return equal(a, b) ? RT_TRUE : RT_FALSE;
+}
+
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
     fflush(stdout);                             // so a fault lands after the output before it
     fputs("fault: ", stderr);
@@ -61,6 +89,9 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
         case RT_FAULT_NOT_BOOL:  fputs("not a boolean: ", stderr);  print_value(stderr, value); break;
         case RT_FAULT_NO_CLAUSE: fputs("no cond clause matched", stderr); break;
         case RT_FAULT_STACK:     fputs("stack overflow", stderr); break;
+        case RT_FAULT_NOT_CONS:  fputs("not a cons: ", stderr);     print_value(stderr, value); break;
+        case RT_FAULT_NOT_LIST:  fputs("not a list: ", stderr);     print_value(stderr, value); break;
+        case RT_FAULT_HEAP:      fputs("heap exhausted", stderr); break;
         default:                 fprintf(stderr, "unknown fault %" PRIu64, fault); break;
     }
     fprintf(stderr, " (%s)\n", site);
@@ -86,9 +117,21 @@ static void *new_stack(rt_proc_t *proc, size_t bytes) {
     return base + guard + bytes;
 }
 
+// One chunk for now, mapped lazily; collection comes in step 9.
+static void new_heap(rt_proc_t *proc, size_t bytes) {
+    char *base = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (base == MAP_FAILED) {
+        perror("rt: can't allocate a heap");
+        exit(2);
+    }
+    proc->heap_ptr   = (uintptr_t)base;
+    proc->heap_limit = (uintptr_t)(base + bytes);
+}
+
 int main(void) {
     rt_proc_t  root = { .reductions = QUOTA };
     void      *top  = new_stack(&root, STACK_BYTES);
+    new_heap(&root, HEAP_BYTES);
     rt_value_t v    = rt_enter(&root, slight_main, top);
     print_value(stdout, v);
     putchar('\n');

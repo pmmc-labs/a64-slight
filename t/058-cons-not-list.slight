@@ -1,0 +1,2 @@
+(pprint (cons 1 (list 2)))
+(cons 1 2)

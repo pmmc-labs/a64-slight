@@ -1,0 +1,8 @@
+(pprint (cons? (list 1)))
+(pprint (cons? '(a)))
+(pprint (cons? ()))
+(pprint (cons? 1))
+(pprint (cons? :a))
+(pprint (nil? (cdr (list 1))))
+(pprint (int? (list 1)))
+(sym? (list :a))

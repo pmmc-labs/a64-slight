@@ -1,0 +1,48 @@
+; the usual list functions, tail-recursive with accumulators
+(defun range (n acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (range (- n 1) (cons n acc)))))
+
+(defun sum (xs acc)
+    (cond
+        ((nil? xs) acc)
+        (#true     (sum (cdr xs) (+ acc (car xs))))))
+
+(defun len (xs n)
+    (cond
+        ((nil? xs) n)
+        (#true     (len (cdr xs) (+ n 1)))))
+
+(defun rev (xs acc)
+    (cond
+        ((nil? xs) acc)
+        (#true     (rev (cdr xs) (cons (car xs) acc)))))
+
+(defun append (xs ys) (rev (rev xs ()) ys))
+
+(defun squares (xs acc)
+    (cond
+        ((nil? xs) (rev acc ()))
+        (#true     (squares (cdr xs) (cons (* (car xs) (car xs)) acc)))))
+
+(defun evens (xs acc)
+    (cond
+        ((nil? xs) (rev acc ()))
+        ((== 0 (- (car xs) (* 2 (div2 (car xs))))) (evens (cdr xs) (cons (car xs) acc)))
+        (#true     (evens (cdr xs) acc))))
+
+; no integer division yet: halve by counting
+(defun div2 (n) (div2-loop n 0))
+(defun div2-loop (n q)
+    (cond
+        ((< n 2) q)
+        (#true   (div2-loop (- n 2) (+ q 1)))))
+
+(let big (range 100000 ()))
+(pprint (sum big 0))
+(pprint (len big 0))
+(pprint (rev (range 5 ()) ()))
+(pprint (append (range 3 ()) (range 2 ())))
+(pprint (squares (range 5 ()) ()))
+(evens (range 10 ()) ())

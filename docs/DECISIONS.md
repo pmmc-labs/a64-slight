@@ -300,3 +300,37 @@ and floats).
 `#true` is 1 (rt.h), then each symbol gets the next id the first time the
 compiler sees it. The names go into `slight_symbol_names` in id order.
 
+## Step 4
+
+**D56. `car`/`cdr` of a non-cons and `cons` onto a non-list fault.**
+*(Default, as in ts-slight.)* So every list is proper, and printing and
+`eq?` never meet a dotted pair.
+
+**D57. The heap pointer and limit live in the process struct.** *(Default,
+agreed in passing.)* Two loads and a store per allocation, but C builtins
+that allocate (strings, step 5) bump the same pointer with nothing to
+sync. Rejected for now: keeping them in callee-saved registers (faster,
+but every C call that allocates would have to sync them). Revisit if
+profiling says so.
+
+**D58. One 64 MB heap chunk per process until GC.** *(Default.)* As PLAN
+step 4 said. It's mapped lazily, so unused space costs nothing, but step 7
+will want something smaller per process, or step 9's chunk chain, before a
+million processes can each have one.
+
+**D59. `c[ad]r` up to four letters.** *(Default.)* Common Lisp's 28 plus
+`car`/`cdr`; ts-slight had seven of them, and the examples use `cadr`,
+`cddr`, `caddr`, `cadddr` and `cddddr`. A five-letter name like `caddddr`
+is an ordinary name a program can define.
+
+**D60. Quoted lists are static data.** *(Default; DESIGN had it.)* Cells
+side by side in a constant section (`__DATA,__const` on macOS,
+`.data.rel.ro` on ELF, since they hold addresses the loader fixes up),
+shared by every process and never collected.
+
+**D61. `eq?` calls the runtime only when it must.** *(Default.)* When
+either side is a literal immediate (an integer, a symbol, `()`), comparing
+the words decides it, so symbol dispatch like `(eq? dir :up)` stays a
+single compare. Otherwise the same word is equal, and when the words
+differ it calls `rt_equal`, which compares lists structurally.
+

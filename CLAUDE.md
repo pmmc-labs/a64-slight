@@ -6,14 +6,16 @@ TypeScript for now and should self-host later.
 
 ## Status
 
-**Steps 0–3 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
+**Steps 0–4 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
 a compiler for integers, `#true`/`#false`, `()`, symbols (`:kw`, `'sym`),
-`+ - *` (with overflow faults), comparisons, `eq?`/`ne?`, `int? nil? sym?
-bool?`, `cond`, `let`, `do`, `pprint`, and top-level `defun`s with calls
-and tail calls (arguments in `x0`–`x7`; stack and reduction checks at
-every function entry). `make test` passes under qemu on x86 Linux, and
-natively on macOS (Stevan's M2 Max, checked after step 2). **Next: step 4**
-(heap and lists). Update this section as steps land.
+lists (`cons car cdr list c[ad]r`, quoted lists as static data, a 64 MB
+heap per process with no GC yet), `+ - *` (with overflow faults),
+comparisons, structural `eq?`/`ne?`, `int? nil? sym? bool? cons?`, `cond`,
+`let`, `do`, `pprint`, and top-level `defun`s with calls and tail calls
+(arguments in `x0`–`x7`; stack and reduction checks at every function
+entry). `make test` passes under qemu on x86 Linux, and natively on macOS
+(Stevan's M2 Max, checked after step 2). **Next: step 5** (strings and
+floats). Update this section as steps land.
 
 ## Read first, in this order
 

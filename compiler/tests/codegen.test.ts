@@ -75,8 +75,8 @@ test("a program with no top-level expressions has the value ()", () => {
 test('what isn\'t built yet is an error, with a position', () => {
     assert.throws(() => compile('42\n  "hi"'), (e: unknown) =>
         e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: "hi"');
-    assert.throws(() => compile("'(a b)"), (e: unknown) =>
-        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (quote (a b))');
+    assert.throws(() => compile('(lambda (x) x)'), (e: unknown) =>
+        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (lambda (x) x)');
 });
 
 const fails = (src: string, message: string): void => {
@@ -232,5 +232,50 @@ test('equality and the predicates are builtins', () => {
 test('eq? takes any values, so it has no integer check', () => {
     assert.doesNotMatch(compile('(eq? :a 1)'), /RT_FAULT_NOT_INT/);
     assert.match(compile('(== 1 1)'), /RT_FAULT_NOT_INT/);
+});
+
+// --- lists ------------------------------------------------------------------
+
+test('car, cdr, and c[ad]r with up to four letters are builtins', () => {
+    for (const name of ['car', 'cdr', 'cadr', 'cddr', 'caar', 'caddr', 'cadddr', 'cddddr', 'list', 'cons', 'cons?']) {
+        fails(`(defun ${name} (x) x)`, `test.slight:1:8: can't define ${name}: it's a builtin`);
+    }
+    // five letters is just a name
+    assert.match(compile('(defun caddddr (x) x) (caddddr 1)'), /b {4}fn_caddddr {4}\/\/ tail call/);
+    fails('(cr 1)', "test.slight:1:2: unknown function 'cr'");
+    fails('(cxr 1)', "test.slight:1:2: unknown function 'cxr'");
+});
+
+test('a c[ad]r applies its letters right to left', () => {
+    const steps = (src: string): string[] => compile(src).split('\n').filter((l) => /\/\/ c[ad]r$/.test(l)).map((l) => l.slice(-3));
+    assert.deepEqual(steps('(cadr (list 1 2))'), ['cdr', 'car']);
+    assert.deepEqual(steps('(cdar (list (list 1 2)))'), ['car', 'cdr']);
+    assert.deepEqual(steps('(cadddr (list 1 2 3 4))'), ['cdr', 'cdr', 'cdr', 'car']);
+});
+
+test('list primitives check their arity', () => {
+    fails('(cons 1)', 'test.slight:1:1: cons takes 2 arguments, not 1');
+    fails('(car)', 'test.slight:1:1: car takes 1 argument, not 0');
+    fails('(cadr 1 2)', 'test.slight:1:1: cadr takes 1 argument, not 2');
+});
+
+test('a quoted list is cells in the constant data', () => {
+    const asm = compile("'(1 (a) ())");
+    const consts = asm.slice(asm.indexOf('CONSTDATA'));
+    // the inner list first, then the outer one: 1, (a), (), each cell's cdr the next cell
+    assert.match(consts, /Lquoted_0:\n {4}\.quad 0x15, RT_NIL\n/);
+    assert.match(consts, /Lquoted_1:\n {4}\.quad 0x2, Lquoted_1\+17\n {4}\.quad Lquoted_0\+1, Lquoted_1\+33\n {4}\.quad RT_NIL, RT_NIL\n/);
+    assert.match(asm, /LOADADDR x0, Lquoted_1\n {4}orr {2}x0, x0, #RT_TAG_LIST/);
+    fails('\'(1 "two")', 'test.slight:1:1: not supported yet: (quote (1 "two"))');
+});
+
+test("eq? calls rt_equal unless one side is a literal immediate", () => {
+    const callsEqual = (src: string): boolean => compile(src).includes('bl   rt_equal');
+    assert.equal(callsEqual('(eq? (list 1) (list 1))'), true);
+    assert.equal(callsEqual("(eq? '(1) (list 1))"), true);
+    assert.equal(callsEqual('(eq? (list 1) :a)'), false);
+    assert.equal(callsEqual('(eq? 5 (list 1))'), false);
+    assert.equal(callsEqual('(eq? () (list 1))'), false);
+    assert.equal(callsEqual('(ne? #true (list 1))'), false);
 });
 
