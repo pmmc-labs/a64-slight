@@ -6,14 +6,14 @@ TypeScript for now and should self-host later.
 
 ## Status
 
-**Steps 0–2 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
-a compiler for integers, `#true`/`#false`, `()`, `+ - *` (with overflow
-faults), comparisons, `cond`, `let`, `do`, `pprint`, and top-level `defun`s
-with calls and tail calls (arguments in `x0`–`x7`; stack and reduction
-checks at every function entry). Verified under qemu on x86 Linux. It
-hasn't been run on macOS yet; the generated code and `rt_asm.S` do
-assemble for Mach-O. **Next: step 3** (symbols and quote). Update this
-section as steps land.
+**Steps 0–3 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
+a compiler for integers, `#true`/`#false`, `()`, symbols (`:kw`, `'sym`),
+`+ - *` (with overflow faults), comparisons, `eq?`/`ne?`, `int? nil? sym?
+bool?`, `cond`, `let`, `do`, `pprint`, and top-level `defun`s with calls
+and tail calls (arguments in `x0`–`x7`; stack and reduction checks at
+every function entry). `make test` passes under qemu on x86 Linux, and
+natively on macOS (Stevan's M2 Max, checked after step 2). **Next: step 4**
+(heap and lists). Update this section as steps land.
 
 ## Read first, in this order
 

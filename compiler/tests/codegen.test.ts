@@ -75,8 +75,8 @@ test("a program with no top-level expressions has the value ()", () => {
 test('what isn\'t built yet is an error, with a position', () => {
     assert.throws(() => compile('42\n  "hi"'), (e: unknown) =>
         e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: "hi"');
-    assert.throws(() => compile(':ping'), (e: unknown) =>
-        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (quote ping)');
+    assert.throws(() => compile("'(a b)"), (e: unknown) =>
+        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (quote (a b))');
 });
 
 const fails = (src: string, message: string): void => {
@@ -193,5 +193,44 @@ test('function labels spell out everything but letters and digits', () => {
     // different names, different labels
     const names = ['a-b', 'a_2db', 'a__b', 'a_b', 'ab', 'a/b', 'a_2fb'];
     assert.equal(new Set(names.map(functionLabel)).size, names.length);
+});
+
+// --- symbols ----------------------------------------------------------------
+
+const symbolTable = (asm: string): string[] => {
+    const lines = asm.split('\n');
+    const start = lines.indexOf('slight_symbol_names:');
+    const count = Number(/slight_symbol_count:\n {4}\.quad (\d+)/.exec(asm)![1]);
+    const names = lines.slice(start + 1).map((l) => /^ {4}\.asciz "(.*)"$/.exec(l)?.[1]).filter((n) => n !== undefined);
+    assert.equal(names.length, count);
+    return names;
+};
+
+test('symbols get ids in order of first mention, after #false and #true', () => {
+    assert.deepEqual(symbolTable(compile(':b \'a :b (quote c) :a')), ['#false', '#true', 'b', 'a', 'c']);
+    assert.deepEqual(symbolTable(compile('42')), ['#false', '#true']);
+    assert.deepEqual(symbolTable(compile("'#true :x")), ['#false', '#true', 'x']);
+});
+
+test('a symbol is its id, shifted and tagged', () => {
+    assert.match(compile(':a'), /movz x0, #0x15, lsl #0 {4}\/\/ 'a/);     // id 2: 2 << 3 | 5
+});
+
+test('quote takes one thing', () => {
+    fails('(quote)', 'test.slight:1:1: quote takes 1 argument, not 0');
+    fails('(quote a b)', 'test.slight:1:1: quote takes 1 argument, not 2');
+    fails('\'"hi"', 'test.slight:1:1: not supported yet: (quote "hi")');
+});
+
+test('equality and the predicates are builtins', () => {
+    fails('(eq? 1)', 'test.slight:1:1: eq? takes 2 arguments, not 1');
+    fails('(nil? 1 2)', 'test.slight:1:1: nil? takes 1 argument, not 2');
+    fails('(defun sym? (x) x)', "test.slight:1:8: can't define sym?: it's a builtin");
+    fails('(defun ne? (a b) a)', "test.slight:1:8: can't define ne?: it's a builtin");
+});
+
+test('eq? takes any values, so it has no integer check', () => {
+    assert.doesNotMatch(compile('(eq? :a 1)'), /RT_FAULT_NOT_INT/);
+    assert.match(compile('(== 1 1)'), /RT_FAULT_NOT_INT/);
 });
 

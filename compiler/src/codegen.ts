@@ -14,13 +14,14 @@
 // between Mach-O and ELF stay in one header, and rt.h's constants (RT_TRUE,
 // RT_FAULT_OVERFLOW, ...) can be used by name.
 //
-// So far (docs/PLAN.md, steps 1 and 2): integers, #true/#false, (), the
-// integer primitives, cond, let, do, pprint, defun and calls. The top-level
-// forms that aren't defuns are the body of slight_main.
+// So far (docs/PLAN.md, steps 1-3): integers, #true/#false, (), symbols and
+// quote, the integer primitives, eq?/ne?, type predicates, cond, let, do,
+// pprint, defun and calls. The top-level forms that aren't defuns are the
+// body of slight_main.
 
 import { CompileError } from './errors.ts';
 import { list, NIL, posOf, show, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
-import { intWord, RESERVED_SYMBOLS } from './values.ts';
+import { intWord, RESERVED_SYMBOLS, symbolWord } from './values.ts';
 
 // Lines of assembly, as a tree, so that joining pieces is cheap. flatten()
 // turns it into lines once at the end.
@@ -39,10 +40,21 @@ type Fns = { readonly fn: Fn; readonly next: Fns } | null;
 // and whether it's in tail position.
 type Cx = { readonly fns: Fns; readonly env: Env; readonly si: number; readonly tail: boolean };
 
+// The symbols seen so far, newest first: an association list from name to
+// id. Ids are handed out in order, starting with the reserved symbols.
+type Syms = { readonly name: string; readonly id: number; readonly next: Syms } | null;
+
 // What compiling accumulates: how many labels have been made, how many
-// frame slots the current function needs, and the out-of-line code (fault
-// calls, preemption) and read-only data to emit after all the functions.
-type St = { readonly labels: number; readonly slots: number; readonly stubs: Code; readonly data: Code };
+// frame slots the current function needs, the symbols, and the out-of-line
+// code (fault calls, preemption) and read-only data to emit after all the
+// functions.
+type St = {
+    readonly labels: number;
+    readonly slots: number;
+    readonly symbols: Syms;
+    readonly stubs: Code;
+    readonly data: Code;
+};
 
 const MAX_ARGS = 8;     // x0..x7
 
@@ -58,7 +70,8 @@ export function compileProgram(forms: Sexp): string {
     const defuns  = all.filter((f) => isForm(f, 'defun')).map((f) => checkDefun(f as Pair));
     const fns     = defuns.reduce<Fns>(declare, null);
     const top     = all.filter((f) => !isForm(f, 'defun'));
-    const st0: St = { labels: 0, slots: 0, stubs: [], data: [] };
+    const empty: St = { labels: 0, slots: 0, symbols: null, stubs: [], data: [] };
+    const st0 = RESERVED_SYMBOLS.reduce((st, name) => symbolId(st, name)[1], empty);
 
     const [code, st1] = defuns.reduce<[Code, St]>(([acc, st], d) => {
         const [c, s] = compileFunction(lookupFn(fns, d.name.name)!.label, d, fns, st);
@@ -78,12 +91,14 @@ export function compileProgram(forms: Sexp): string {
         '',
         '    RODATA',
         st2.data,
-        symbolTable(RESERVED_SYMBOLS),
+        symbolTable(st2.symbols),
     ]).join('\n') + '\n';
 }
 
 // Every symbol's name, in id order, for the runtime's printer.
-function symbolTable(names: readonly string[]): Code {
+function symbolTable(symbols: Syms): Code {
+    const names: string[] = [];
+    for (; symbols !== null; symbols = symbols.next) names.unshift(symbols.name);
     return [
         '    .p2align 3',
         '    .globl slight_symbol_count',
@@ -269,6 +284,8 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             throw new CompileError('let can only be a form of a body (a function, do or cond clause)', x.pos);
         case 'defun':
             throw new CompileError('defun is only allowed at the top level', x.pos);
+        case 'quote':
+            return compileQuote(x, args, cx, st);
     }
     if (SPECIAL_FORMS.includes(head.name)) throw notYet(x);
     if (lookup(cx.env, head.name) !== null) throw notYet(x);   // calling a local: closures, step 6
@@ -278,6 +295,14 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
         const [code, st1] = compileExpr(args[0]!, operand, st);
         return [[code, '    bl   rt_pprint'], st1];
     }
+    const predicate = PREDICATES[head.name];
+    if (predicate !== undefined) {
+        checkArity(x, head.name, args, 1);
+        const [code, st1] = compileExpr(args[0]!, operand, st);
+        return [[code, predicate[0], boolIf(predicate[1])], st1];
+    }
+    const same = EQUALITY[head.name];
+    if (same !== undefined) return compileBinary(x, head.name, args, operand, st, (s) => [compare(same), s], false);
     const arith = ARITH[head.name];
     if (arith !== undefined) {
         return compileBinary(x, head.name, args, operand, st, (s) => {
@@ -293,6 +318,25 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
 }
 
 const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;
+
+// A constant. Symbols are their compile-time ids; integers and () quote
+// to themselves. Quoted lists need the heap (step 4), strings and floats
+// boxes (step 5).
+function compileQuote(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    checkArity(x, 'quote', args, 1);
+    const datum = args[0]!;
+    if (datum.t === 'int' || datum.t === 'nil') return compileExpr(datum, cx, st);
+    if (datum.t !== 'sym') throw notYet(x);
+    const [id, st1] = symbolId(st, datum.name);
+    const [first, ...rest] = loadWord('x0', symbolWord(id));
+    return [[`${first}    // '${datum.name}`, rest], st1];
+}
+
+function symbolId(st: St, name: string): [number, St] {
+    for (let s = st.symbols; s !== null; s = s.next) if (s.name === name) return [s.id, st];
+    const id = st.symbols === null ? 0 : st.symbols.id + 1;
+    return [id, { ...st, symbols: { name, id, next: st.symbols } }];
+}
 
 // --- primitives ---------------------------------------------------------------
 
@@ -318,26 +362,39 @@ const ARITH: Readonly<Record<string, (overflow: string) => Code>> = {
 // words compare like the integers.
 const COMPARE: Readonly<Record<string, string>> = { '==': 'eq', '!=': 'ne', '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge' };
 
+// Equality on any two values. Every value so far is one word, so it's
+// comparing words; with lists (step 4) it becomes structural.
+const EQUALITY: Readonly<Record<string, string>> = { 'eq?': 'eq', 'ne?': 'ne' };
+
+// Type predicates: a test of x0 that sets the flags, and the condition that
+// means yes. #true and #false are symbols too, so sym? says yes to them.
+const PREDICATES: Readonly<Record<string, readonly [Code, string]>> = {
+    'int?':  [['    tst  x0, #1'], 'eq'],
+    'nil?':  [['    cmp  x0, #RT_NIL'], 'eq'],
+    'sym?':  [['    and  x1, x0, #RT_TAG_MASK', '    cmp  x1, #RT_TAG_SYMBOL'], 'eq'],
+    // when x0 is #true, ccmp skips the second compare and sets Z (#4) itself
+    'bool?': [['    cmp  x0, #RT_TRUE', '    ccmp x0, #RT_FALSE, #4, ne'], 'eq'],
+};
+
 // The names a defun can't take.
-const BUILTINS: readonly string[] = ['pprint', ...Object.keys(ARITH), ...Object.keys(COMPARE)];
+const BUILTINS: readonly string[] =
+    ['pprint', ...[ARITH, COMPARE, EQUALITY, PREDICATES].flatMap((table) => Object.keys(table))];
 
-const compare = (cond: string): Code => [
-    '    cmp  x1, x0',
-    '    mov  x0, #RT_TRUE',
-    '    mov  x2, #RT_FALSE',
-    `    csel x0, x0, x2, ${cond}`,
-];
+// x0 = #true if cond holds, otherwise #false.
+const boolIf = (cond: string): Code => ['    mov  x0, #RT_TRUE', '    mov  x2, #RT_FALSE', `    csel x0, x0, x2, ${cond}`];
 
-// Both operands must be integers. The left one waits in slot si while the
-// right one is computed; then op combines x1 (left) and x0 (right).
+const compare = (cond: string): Code => ['    cmp  x1, x0', boolIf(cond)];
+
+// The left operand waits in slot si while the right one is computed; then
+// op combines x1 (left) and x0 (right). With ints, both must be integers.
 function compileBinary(x: Pair, name: string, args: readonly Sexp[], cx: Cx, st: St,
-                       op: (st: St) => [Code, St]): [Code, St] {
+                       op: (st: St) => [Code, St], ints = true): [Code, St] {
     checkArity(x, name, args, 2);
     const [left, st1]    = compileExpr(args[0]!, cx, st);
     const [right, st2]   = compileExpr(args[1]!, { ...cx, si: cx.si + 1 }, useSlot(st1, cx.si));
-    const [notInt, st3]  = faultLabel(st2, 'RT_FAULT_NOT_INT', name, x.pos);
+    const [notInt, st3]  = ints ? faultLabel(st2, 'RT_FAULT_NOT_INT', name, x.pos) : ['', st2];
     const [combine, st4] = op(st3);
-    const isInt = ['    tst  x0, #1', `    b.ne ${notInt}`];
+    const isInt = ints ? ['    tst  x0, #1', `    b.ne ${notInt}`] : [];
     return [[
         left, isInt, `    str  x0, ${slot(cx.si)}`,
         right, isInt, `    ldr  x1, ${slot(cx.si)}`,

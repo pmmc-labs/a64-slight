@@ -202,6 +202,7 @@ Keep ts-slight's names where possible
   `sin`, `cos`, `exp`, `abs`, `min`, `max` and friends wrap libm.
 - comparison: `== != < <= > >=`, structural `eq?`/`ne?`
 - type predicates: `nil? cons? sym? str? num? int? float? lambda? pid? bool?`
+  (`sym?` is true for `#true` and `#false`: they're symbols)
 - lists: `cons car cdr list` and the `cadr` family
 - strings: `str-len` (bytes), `substring`, `concat`/`~` (renders numbers and
   symbols, as in ts-slight), `index-of`, `str-split`, `str-join`,
@@ -210,7 +211,8 @@ Keep ts-slight's names where possible
   `bytes->string`, `format-num`
 - processes: `send join monitor kill after raise`
 - I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols`, `pprint`
-  (prints its argument and a newline, returns `()`, as in ts-slight),
+  (prints its argument and a newline, returns `()`, as in ts-slight;
+  symbols print without the colon, so `:ping` prints as `ping`),
   `sleep`, `slurp`, `spew`
 - **(open)** whether `apply` is a builtin
 

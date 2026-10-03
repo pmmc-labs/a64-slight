@@ -1,0 +1,2 @@
+fault: not a boolean: yes (cond test at t/045-symbol-not-bool.slight:2:6)
+exit: 1

@@ -282,3 +282,21 @@ only `defun`s compiles.
 `TIMEOUT` seconds (60) with a watchdog in plain `sh`, since macOS has no
 `timeout(1)`. A mutation that made a loop spin forever showed the need.
 
+## Step 3
+
+**D52. Symbols print without the colon.** *(User.)* As in ts-slight:
+`(pprint :ping)` prints `ping`. `:ping` and `'ping` are the same symbol.
+
+**D53. `sym?` is true for `#true` and `#false`.** *(Default.)* It follows
+from D13: booleans are reserved symbols. (In ts-slight booleans were their
+own type, so `sym?` said no.) `bool?` is true only for those two.
+
+**D54. `eq?` compares words until there are lists.** *(Default.)* Every
+value so far is a single word, so word equality is structural equality.
+Step 4 adds the structural comparison for lists (and step 5 for strings
+and floats).
+
+**D55. Symbol ids follow first mention.** *(Default.)* `#false` is 0 and
+`#true` is 1 (rt.h), then each symbol gets the next id the first time the
+compiler sees it. The names go into `slight_symbol_names` in id order.
+

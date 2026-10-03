@@ -1,0 +1,18 @@
+(defun opposite (dir)
+    (cond
+        ((eq? dir :up)    :down)
+        ((eq? dir :down)  :up)
+        ((eq? dir :left)  :right)
+        ((eq? dir :right) :left)
+        (#true            :nowhere)))
+
+(defun turn (dir n)
+    (cond
+        ((== n 0) dir)
+        (#true    (turn (opposite dir) (- n 1)))))
+
+(pprint (opposite :up))
+(pprint (opposite :left))
+(pprint (opposite :sideways))
+(pprint (turn :up 1000001))
+(turn :up 1000000)

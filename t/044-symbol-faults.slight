@@ -1,0 +1,2 @@
+(pprint (cond ((eq? :a :a) :yes)))
+(+ 1 :two)

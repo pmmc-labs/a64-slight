@@ -4,8 +4,8 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–2 done (verified under qemu; macOS not yet run).
-Step 3 is next.
+**Progress:** steps 0–3 done (under qemu, and natively on macOS as of
+step 2). Step 4 is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -79,7 +79,11 @@ non-tail recursion faults cleanly. The 10⁸-iteration loop is golden test
 - The reduction check at entries and tail calls. Until step 7 the
   preempt handler just resets the counter.
 
-### 3. Symbols and quote
+### 3. Symbols and quote (done)
+
+`int?` and `nil?` came along with `sym?` and `bool?`. Quoted lists wait
+for step 4, which also has to make `eq?` structural. Symbols print without
+the colon, as in ts-slight (D52).
 
 - The compile-time symbol table; `:kw` and `'sym`; symbol names in the
   data section for printing.

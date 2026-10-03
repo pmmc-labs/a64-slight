@@ -1,0 +1,14 @@
+; symbols print without the colon, as in ts-slight
+(pprint :ping)
+(pprint (quote pong))
+(pprint 'pang)
+(pprint :a/b)
+(pprint :even?)
+(pprint :ArrowUp)
+(pprint 'cond)
+(pprint :é)
+; quoting what quotes to itself
+(pprint '#true)
+(pprint '())
+(pprint '42)
+:done

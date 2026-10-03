@@ -47,9 +47,10 @@ for the packages.
 
 ## Status
 
-The design is settled, and implementation is at step 0 of the plan: the
-compiler reads slight and compiles integer literals to a native binary.
-See:
+The design is settled, and implementation is through step 3 of the plan:
+integers, booleans, symbols, `cond`/`let`/`do`, and functions with tail
+calls compile to native binaries, which pass their tests on macOS and
+under qemu. Next are lists and the heap. See:
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): the design
 - [`docs/PLAN.md`](docs/PLAN.md): the build order
