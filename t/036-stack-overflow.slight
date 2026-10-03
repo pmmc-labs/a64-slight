@@ -1,0 +1,4 @@
+; not a tail call, and it never stops
+(defun depth (n) (+ 1 (depth (+ n 1))))
+(pprint 1)
+(depth 0)

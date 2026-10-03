@@ -4,8 +4,8 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0 and 1 done (verified under qemu; macOS not yet
-run). Step 2 is next.
+**Progress:** steps 0–2 done (verified under qemu; macOS not yet run).
+Step 3 is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -65,7 +65,12 @@ exit 1 for now, and the golden tests check that output too.
 - `cond`, `let`, `do`.
 - The runtime's printer for these.
 
-### 2. Functions and tail calls
+### 2. Functions and tail calls (done)
+
+Calling convention B (D47): arguments in `x0`–`x7`, so at most 8. Every
+function entry also checks the stack against a limit (D48), so deep
+non-tail recursion faults cleanly. The 10⁸-iteration loop is golden test
+032 (about 2 s under qemu).
 
 - `defun`, calls, arity checks at compile time.
 - Tail calls as jumps; a loop of 10⁸ iterations runs in constant stack.

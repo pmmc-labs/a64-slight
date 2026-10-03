@@ -80,8 +80,8 @@ Function bodies and clause bodies can hold several forms, as if wrapped in
 `and`, `or` and `not` are prelude functions on booleans, so `and` and `or`
 evaluate all their arguments. `cond` is the short-circuit form.
 
-**(open)** Max arity is 7 (one register per argument, see the ABI below).
-More would go on the stack later.
+A function takes at most 8 parameters, one register each (see the
+register convention below). More could go on the stack later.
 
 ### The `recv` rule
 
@@ -186,7 +186,8 @@ call each other in any order. Every other top-level form, in order, becomes
 the body of the root process; a top-level `let` binds for the rest of the
 root process only, and `defun`s can't see it. The program's exit status
 follows the root process's Result. ts-slight's examples (`examples/`) are
-all written this way.
+all written this way. Built this way in step 2; a program with no
+top-level expressions has the value `()`.
 
 ### Builtins and the prelude
 
@@ -329,30 +330,53 @@ needed: the REPL and line editing are slight code over key events.
 
 ### Register convention
 
-Carried over from the spike (`spike/aarch64/actor.h`, `rt.h`):
+Carried over from the spike (`spike/aarch64/actor.h`, `rt.h`), with
+AAPCS64's argument registers (D47):
 
 | Register | Role |
 |---|---|
-| `x28` | the current process. Set by the runtime, never written by compiled code. The reduction counter is at `[x28, #0]`. |
-| `x19`–`x27` | callee-saved, and preserved by every runtime op *including* ones that suspend |
+| `x0`–`x7` | a function's arguments, in order; the result comes back in `x0`. The same as C, so compiled functions and the runtime's C functions are called the same way. |
+| `x9` | the closure, for a call through a closure (step 6) |
+| `x16` | scratch for the checks at function entry |
+| `x28` | the current process. Set by the runtime, never written by compiled code. |
+| `x19`–`x27` | callee-saved. Compiled code never uses them, and every runtime op preserves them *including* the ones that suspend. |
 | `x18` | never touched (it belongs to macOS) |
 | the rest | as AAPCS64 |
 
-**(open)** The calling convention for compiled slight functions. My
-proposal: arguments in `x1`–`x7`, the closure (or static closure) in `x0`,
-the result back in `x0`. That matches the spike's x0 = control,
-x1–x7 = payload, and gives closures a home. The heap pointer and limit
-could live in callee-saved registers (say `x26`/`x27`) or in the process
-struct. Settle these in plan step 2.
+Compiled code keeps nothing in registers across a call: every value that
+has to wait is in a frame slot. Where the heap pointer and limit live is
+for step 4.
 
-The reduction check, at each function entry and tail call:
+**A function's frame** is `x29`/`x30` on top, then its slots, addressed up
+from `sp`; the parameters go to the first slots straight away. A call in
+tail position loads the arguments, takes the frame down
+(`mov sp, x29; ldp x29, x30, [sp], #16`) and branches, so loops run in
+constant stack.
+
+**Every function entry** (so every call and every tail call) runs two
+checks:
 
 ```
-    ldr  x16, [x28]
+    ldr  x16, [x28, #RT_PROC_STACK_LIMIT]   // room on the stack?
+    cmp  sp, x16
+    b.lo Lfault_N                           // fault: stack overflow
+    str  x0, [sp, #0]                       // save the parameters
+    ...
+    ldr  x16, [x28, #RT_PROC_REDUCTIONS]    // reductions used up?
     subs x16, x16, #1
-    str  x16, [x28]
-    b.le Lpreempt           // bl rt_preempt, then continue
+    str  x16, [x28, #RT_PROC_REDUCTIONS]
+    b.le Lpreempt_N                         // mov x0, x28; bl rt_preempt
 ```
+
+The stack check is Go's: compare `sp` with a limit in the process, rather
+than catch a guard-page `SIGSEGV` on an alternate signal stack (D48). The
+limit sits 64 KB above the bottom, which leaves room for the frame that
+tripped it and a call to `rt_fault`; a guard page under the stack still
+catches anything that slips past. The root process runs on its own 8 MB
+`mmap`ed stack. The quota is 1,000 reductions; for now `rt_preempt` just
+refills it, and in step 7 it is where a process gets preempted. The
+parameters are saved before the reduction check because `rt_preempt` is
+a C call and may clobber `x0`–`x7`.
 
 ## Compiler
 
@@ -418,13 +442,12 @@ line-by-line translation.
 Collected from above:
 
 1. Exact `recv` pattern syntax and matching details.
-2. `cond`: must tests be booleans? What happens when no clause matches?
-3. Max arity (7) and the calling convention for compiled functions.
-4. Names for integer division and remainder (`div`, `%`?).
-5. Exit-record retention policy.
-6. Bounded mailboxes.
-7. FIFO run queue (proposed) vs. the spike's ticks.
-8. Whether `apply` is a builtin.
-9. Program structure: top-level forms as the root process.
-10. `kill`'s exit reason.
-11. GC at base-of-stack tail calls outside state functions.
+2. Names for integer division and remainder (`div`, `%`?).
+3. Exit-record retention policy.
+4. Bounded mailboxes.
+5. FIFO run queue (proposed) vs. the spike's ticks.
+6. Whether `apply` is a builtin.
+7. Program structure: top-level forms as the root process (built this way).
+8. `kill`'s exit reason.
+9. GC at base-of-stack tail calls outside state functions.
+10. The shape of a fault's reason.

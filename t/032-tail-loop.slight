@@ -1,0 +1,8 @@
+; 100 million iterations. A loop is a tail call, so it runs in constant
+; stack; it also runs out of reductions 100,000 times along the way.
+(defun count (n acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (count (- n 1) (+ acc 1)))))
+
+(count 100000000 0)

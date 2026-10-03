@@ -1,0 +1,3 @@
+9
+fault: integer overflow (* at t/037-fault-in-function.slight:1:19)
+exit: 1

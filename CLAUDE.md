@@ -6,14 +6,14 @@ TypeScript for now and should self-host later.
 
 ## Status
 
-**Steps 0 and 1 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader,
-and a compiler for integers, `#true`/`#false`, `()`, `+ - *` (with
-overflow faults), comparisons, `cond`, `let`, `do` and `pprint`, all in
-the body of the root process. Verified under qemu on x86 Linux. It hasn't
-been run on macOS yet; the generated code and `rt_asm.S` do assemble for
-Mach-O. **Next: step 2** (functions and tail calls). Its calling
-convention is (open): propose it before building. Update this section as
-steps land.
+**Steps 0–2 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
+a compiler for integers, `#true`/`#false`, `()`, `+ - *` (with overflow
+faults), comparisons, `cond`, `let`, `do`, `pprint`, and top-level `defun`s
+with calls and tail calls (arguments in `x0`–`x7`; stack and reduction
+checks at every function entry). Verified under qemu on x86 Linux. It
+hasn't been run on macOS yet; the generated code and `rt_asm.S` do
+assemble for Mach-O. **Next: step 3** (symbols and quote). Update this
+section as steps land.
 
 ## Read first, in this order
 
@@ -109,7 +109,9 @@ works and has the runtime pieces to borrow.
 - `npm install` once, for `typescript` (used only by `make check`).
 - `make test`: unit tests, the runtime header check, then the golden tests.
 - `make unit`, `make golden`, `make headers`: one at a time.
-  `t/run.sh t/003-int-max.slight` runs one golden test.
+  `t/run.sh t/003-int-max.slight` runs one golden test. A golden test
+  that runs longer than `TIMEOUT` seconds (default 60) is killed and
+  fails.
 - `make check`: `tsc --noEmit`.
 - `node bin/slightc.ts -o out file.slight ...`: compile and link. It writes
   `out.S` next to `out`. `-S` writes only the assembly. On x86, run the

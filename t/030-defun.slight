@@ -1,0 +1,16 @@
+(defun double (x) (* x 2))
+(defun add3 (a b c) (+ a (+ b c)))
+(defun answer () 42)
+(pprint (double 21))
+(pprint (add3 1 2 3))
+(pprint (answer))
+; a defun can come after the code that calls it
+(pprint (later 5))
+(defun later (n) (- n 1))
+; eight parameters, each in its own register (x0..x7)
+(defun digits (a b c d e f g h)
+    (+ a (* 10 (+ b (* 10 (+ c (* 10 (+ d (* 10 (+ e (* 10 (+ f (* 10 (+ g (* 10 h)))))))))))))))
+(pprint (digits 1 2 3 4 5 6 7 8))
+; arguments are evaluated left to right
+(defun second (a b) b)
+(second (pprint 7) (pprint 8))

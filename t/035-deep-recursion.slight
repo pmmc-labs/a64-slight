@@ -1,0 +1,7 @@
+; not a tail call, but 100,000 levels fit on the stack
+(defun sum (n)
+    (cond
+        ((== n 0) 0)
+        (#true    (+ n (sum (- n 1))))))
+
+(sum 100000)

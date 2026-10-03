@@ -28,8 +28,10 @@
 #define RT_FAULT_OVERFLOW    2    // an integer result doesn't fit in 63 bits
 #define RT_FAULT_NOT_BOOL    3    // a cond test was neither #true nor #false
 #define RT_FAULT_NO_CLAUSE   4    // no cond clause matched
+#define RT_FAULT_STACK       5    // a function was called with the stack nearly full
 
-#define RT_PROC_REDUCTIONS   0    // rt_proc_t.reductions (the reduction check: [x28, #0])
+#define RT_PROC_REDUCTIONS   0    // rt_proc_t.reductions: the reduction check at function entry
+#define RT_PROC_STACK_LIMIT  8    // rt_proc_t.stack_limit: the stack check at function entry
 
 #ifndef __ASSEMBLER__
 
@@ -43,7 +45,8 @@ typedef uint64_t rt_value_t;
 
 // A process. Compiled code finds the current one in x28.
 typedef struct rt_proc {
-    int64_t reductions;
+    int64_t   reductions;   // calls left before rt_preempt
+    uintptr_t stack_limit;  // a function entered with sp below this faults
 } rt_proc_t;
 
 // --- emitted by the compiler -------------------------------------------------
@@ -66,10 +69,15 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) RT_ASM(rt_faul
 // Prints a value and a newline. Returns nil.
 rt_value_t rt_pprint(rt_value_t v) RT_ASM(rt_pprint);
 
+// Called when proc's reductions run out. For now it just refills them;
+// once there are processes, it's where a process gets preempted.
+void rt_preempt(rt_proc_t *proc) RT_ASM(rt_preempt);
+
 // --- the runtime itself -------------------------------------------------------
 
-// Runs fn with x28 = proc, and returns its result (rt_asm.S).
-rt_value_t rt_enter(rt_proc_t *proc, rt_value_t (*fn)(void)) RT_ASM(rt_enter);
+// Runs fn on the stack that ends at stack_top, with x28 = proc, and
+// returns its result (rt_asm.S).
+rt_value_t rt_enter(rt_proc_t *proc, rt_value_t (*fn)(void), void *stack_top) RT_ASM(rt_enter);
 
 #endif // __ASSEMBLER__
 #endif // RT_H

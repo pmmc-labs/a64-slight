@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { asmString, compileProgram, loadWord } from '../src/codegen.ts';
+import { asmString, compileProgram, functionLabel, loadWord } from '../src/codegen.ts';
 import { CompileError } from '../src/errors.ts';
 import { read } from '../src/reader.ts';
 
@@ -67,8 +67,9 @@ test('every form is compiled, in order', () => {
     assert.deepEqual(loads.map((l) => l.split('// ')[1]), ['1', '2', '3']);
 });
 
-test('an empty program is an error', () => {
-    assert.throws(() => compile('; nothing'), (e: unknown) => e instanceof CompileError && /empty/.test(e.message));
+test("a program with no top-level expressions has the value ()", () => {
+    assert.match(compile('; nothing'), /FUNC slight_main[^]*mov {2}x0, #RT_NIL/);
+    assert.match(compile('(defun f () 1)'), /FUNC slight_main[^]*mov {2}x0, #RT_NIL/);
 });
 
 test('what isn\'t built yet is an error, with a position', () => {
@@ -130,3 +131,67 @@ test('strings in the assembly are escaped byte by byte', () => {
     assert.equal(asmString('say "hi"\\'), '"say \\042hi\\042\\134"');
     assert.equal(asmString('é\n'), '"\\303\\251\\012"');
 });
+
+// --- functions --------------------------------------------------------------
+
+test('defun is (defun name (params...) body...)', () => {
+    fails('(defun f (x))', 'test.slight:1:1: defun is (defun name (params...) body...)');
+    fails('(defun (x) 1)', 'test.slight:1:1: defun is (defun name (params...) body...)');
+    fails('(defun 5 (x) 1)', 'test.slight:1:8: defun needs a name, not 5');
+    fails('(defun f x 1)', "test.slight:1:10: f's parameters must be a list, not x");
+    fails('(defun f (x 5) 1)', 'test.slight:1:13: a parameter must be a name, not 5');
+    fails('(defun f (x y x) 1)', 'test.slight:1:15: x is a parameter twice');
+    fails('(defun f (a b c d e f g h i) 1)', 'test.slight:1:8: f has 9 parameters; the most is 8');
+});
+
+test("some names can't be defined", () => {
+    fails('(defun f () 1) (defun f () 2)', 'test.slight:1:23: f is already defined');
+    fails('(defun pprint (x) x)', "test.slight:1:8: can't define pprint: it's a builtin");
+    fails('(defun + (a b) a)', "test.slight:1:8: can't define +: it's a builtin");
+    fails('(defun cond () 1)', "test.slight:1:8: can't bind cond");
+    fails('(defun f (#true) 1)', "test.slight:1:11: can't bind #true");
+});
+
+test('defun is only allowed at the top level', () => {
+    fails('(do (defun f () 1))', 'test.slight:1:5: defun is only allowed at the top level');
+});
+
+test('calls are checked against the function', () => {
+    fails('(defun f (x) x) (f 1 2)', 'test.slight:1:17: f takes 1 argument, not 2');
+    fails('(defun f (x y) x) (f)', 'test.slight:1:19: f takes 2 arguments, not 0');
+    fails('(defun f () 1) f', "test.slight:1:16: functions as values aren't supported yet: f");
+});
+
+test("a defun can't see the top level's lets", () => {
+    fails('(let x 1) (defun f () x) (f)', "test.slight:1:23: unknown name 'x'");
+});
+
+test('a call in tail position is a jump; any other call returns', () => {
+    const asm = compile('(defun f (n) (cond ((== n 0) 0) (#true (+ 1 (g n))))) (defun g (n) (f (- n 1))) (f 3)');
+    assert.match(asm, /^ {4}bl {3}fn_g$/m);
+    assert.match(asm, /^ {4}b {4}fn_f {4}\/\/ tail call$/m);
+    assert.match(asm, /mov {2}sp, x29\n {4}ldp {2}x29, x30, \[sp\], #16\n {4}b {4}fn_f/);
+});
+
+test('every function checks the stack and its reductions on entry', () => {
+    const asm = compile('(defun f (a b) (+ a b)) (f 1 2)');
+    const entry = asm.slice(asm.indexOf('fn_f:'));
+    for (const check of ['ldr  x16, [x28, #RT_PROC_STACK_LIMIT]', 'b.lo Lfault_', 'str  x0, [sp, #0]    // a',
+                         'str  x1, [sp, #8]    // b', 'ldr  x16, [x28, #RT_PROC_REDUCTIONS]', 'b.le Lpreempt_']) {
+        assert.ok(entry.includes(check), check);
+    }
+    // the parameters are saved before rt_preempt could clobber x0..x7
+    assert.ok(entry.indexOf('// b') < entry.indexOf('RT_PROC_REDUCTIONS'));
+});
+
+test('function labels spell out everything but letters and digits', () => {
+    assert.equal(functionLabel('fib'), 'fn_fib');
+    assert.equal(functionLabel('sum-to'), 'fn_sum_2dto');
+    assert.equal(functionLabel('even?'), 'fn_even_3f');
+    assert.equal(functionLabel('a_b'), 'fn_a__b');
+    assert.equal(functionLabel('é'), 'fn__c3_a9');
+    // different names, different labels
+    const names = ['a-b', 'a_2db', 'a__b', 'a_b', 'ab', 'a/b', 'a_2fb'];
+    assert.equal(new Set(names.map(functionLabel)).size, names.length);
+});
+

@@ -1,0 +1,13 @@
+(defun even? (n)
+    (cond
+        ((== n 0) #true)
+        (#true    (odd? (- n 1)))))
+
+(defun odd? (n)
+    (cond
+        ((== n 0) #false)
+        (#true    (even? (- n 1)))))
+
+(pprint (even? 1000001))
+(pprint (odd? 1000001))
+(even? 0)

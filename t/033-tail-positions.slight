@@ -1,0 +1,33 @@
+; Each loops a million times: about 40 MB of frames if these were not
+; tail calls, and the stack is 8 MB.
+(defun via-cond (n)
+    (cond
+        ((== n 0) 0)
+        (#true    (via-cond (- n 1)))))
+
+(defun via-do (n)
+    (do (cond
+        ((== n 0) 1)
+        (#true    (via-do (- n 1))))))
+
+(defun via-let (n)
+    (let m (- n 1))
+    (cond
+        ((< m 0) 2)
+        (#true   (via-let m))))
+
+(defun via-last-let (n)
+    (cond
+        ((== n 0) 3)
+        (#true    (let r (via-last-let (- n 1))))))
+
+(defun via-body (n)
+    (cond
+        ((== n 0) 4)
+        (#true    (+ 1 1) (via-body (- n 1)))))
+
+(pprint (via-cond 1000000))
+(pprint (via-do 1000000))
+(pprint (via-let 1000000))
+(pprint (via-last-let 1000000))
+(via-body 1000000)

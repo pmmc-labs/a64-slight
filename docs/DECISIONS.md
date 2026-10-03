@@ -250,3 +250,35 @@ flushes stdout first, so the order is stable.
 take exactly two arguments, as in ts-slight's notes. Both must be
 integers (floats come in step 5); anything else faults.
 
+## Step 2
+
+**D47. Calling convention B: AAPCS64's argument registers.** *(User.)*
+Arguments in `x0`–`x7` (so at most 8), the result in `x0`, and the closure
+in `x9` for calls through a closure (step 6). Compiled functions and C
+builtins are called the same way, and compiled functions are ordinary
+C-callable functions, which helps when `fork` starts them (step 7).
+Rejected: A, arguments in `x1`–`x7` with the closure in `x0` (the spike's
+runtime-op convention; C builtins would need the arguments moved); C,
+arguments on the stack (Ghuloum's original).
+
+**D48. The stack check is a comparison at function entry.** *(Default.)*
+`sp` against a limit in the process struct, three instructions, as in Go.
+Rejected: catching guard-page `SIGSEGV`s on an alternate signal stack,
+which is harder to get right and can't easily tell a stack overflow from
+other faults. The same check will give each process's fixed-size stack a
+clean overflow fault in step 7. The root process runs on an 8 MB `mmap`ed
+stack with a guard page; the limit leaves 64 KB of headroom.
+
+**D49. The reduction check is at function entry only.** *(Default.)* A
+tail call jumps to the target's entry, so the one check covers calls and
+tail calls, and every loop. The parameters are saved to the frame first,
+because `rt_preempt` is a C call. The quota is 1,000.
+
+**D50. A program with no top-level expressions has the value `()`.**
+*(Default.)* Replaces step 0's "the program is empty" error, so a file of
+only `defun`s compiles.
+
+**D51. Golden tests time out.** *(Default.)* `t/run.sh` kills a test after
+`TIMEOUT` seconds (60) with a watchdog in plain `sh`, since macOS has no
+`timeout(1)`. A mutation that made a loop spin forever showed the need.
+

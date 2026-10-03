@@ -8,8 +8,15 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
+#include <unistd.h>
 
-_Static_assert(offsetof(rt_proc_t, reductions) == RT_PROC_REDUCTIONS, "RT_PROC_REDUCTIONS");
+_Static_assert(offsetof(rt_proc_t, reductions)  == RT_PROC_REDUCTIONS,  "RT_PROC_REDUCTIONS");
+_Static_assert(offsetof(rt_proc_t, stack_limit) == RT_PROC_STACK_LIMIT, "RT_PROC_STACK_LIMIT");
+
+#define QUOTA          1000             // reductions between preemptions
+#define STACK_BYTES    (8 << 20)        // the root process's stack
+#define STACK_HEADROOM (64 << 10)       // room left below the limit for one frame and a C call
 _Static_assert(RT_FALSE == (0 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_FALSE is symbol 0");
 _Static_assert(RT_TRUE  == (1 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_TRUE is symbol 1");
 
@@ -53,15 +60,36 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
         case RT_FAULT_OVERFLOW:  fputs("integer overflow", stderr); break;
         case RT_FAULT_NOT_BOOL:  fputs("not a boolean: ", stderr);  print_value(stderr, value); break;
         case RT_FAULT_NO_CLAUSE: fputs("no cond clause matched", stderr); break;
+        case RT_FAULT_STACK:     fputs("stack overflow", stderr); break;
         default:                 fprintf(stderr, "unknown fault %" PRIu64, fault); break;
     }
     fprintf(stderr, " (%s)\n", site);
     exit(1);
 }
 
+void rt_preempt(rt_proc_t *proc) {
+    proc->reductions = QUOTA;
+}
+
+// A stack of `bytes` with a guard page under it, so running off the end
+// crashes instead of corrupting memory. Returns its top, and sets the
+// process's limit far enough above the bottom that the function that
+// trips the check still has room to call rt_fault.
+static void *new_stack(rt_proc_t *proc, size_t bytes) {
+    size_t guard = (size_t)sysconf(_SC_PAGESIZE);
+    char  *base  = mmap(NULL, guard + bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
+    if (base == MAP_FAILED || mprotect(base, guard, PROT_NONE) != 0) {
+        perror("rt: can't allocate a stack");
+        exit(2);
+    }
+    proc->stack_limit = (uintptr_t)(base + guard + STACK_HEADROOM);
+    return base + guard + bytes;
+}
+
 int main(void) {
-    rt_proc_t  root = { .reductions = INT64_MAX };
-    rt_value_t v    = rt_enter(&root, slight_main);
+    rt_proc_t  root = { .reductions = QUOTA };
+    void      *top  = new_stack(&root, STACK_BYTES);
+    rt_value_t v    = rt_enter(&root, slight_main, top);
     print_value(stdout, v);
     putchar('\n');
     return 0;

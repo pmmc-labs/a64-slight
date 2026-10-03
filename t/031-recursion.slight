@@ -1,0 +1,15 @@
+(defun fact (n)
+    (cond
+        ((== n 0) 1)
+        (#true    (* n (fact (- n 1))))))
+
+(defun fib (n)
+    (cond
+        ((< n 2) n)
+        (#true   (+ (fib (- n 1)) (fib (- n 2))))))
+
+(pprint (fact 0))
+(pprint (fact 10))
+(pprint (fact 20))
+(pprint (fib 20))
+(+ (fib 10) (fact 5))

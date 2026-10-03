@@ -5,9 +5,12 @@
 // Register convention for compiled code (docs/DESIGN.md):
 //   x28        the current process. Set by the runtime, never written by
 //              compiled code.
-//   x19..x27   callee-saved, and preserved by every runtime op
+//   x19..x27   callee-saved. Compiled code never uses them, and every
+//              runtime op preserves them.
 //   x18        never touched: it belongs to the platform on macOS
 //   x0         the accumulator: every expression leaves its value here
+//   x0..x7     a function's arguments, in order; the result comes back in x0
+//   x16        scratch for the checks at function entry
 
 #ifndef ASM_H
 #define ASM_H

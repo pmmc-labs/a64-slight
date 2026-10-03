@@ -11,9 +11,17 @@ esac
 [ $# -eq 0 ] && set -- t/*.slight
 mkdir -p build/t
 
+# A test that runs longer than $TIMEOUT seconds is killed, and fails.
+# (macOS has no timeout(1), hence the watchdog.)
+TIMEOUT=${TIMEOUT-60}
 output() {
-    $RUN "./$1" 2>&1
+    $RUN "./$1" 2>&1 &
+    pid=$!
+    ( sleep "$TIMEOUT" && kill "$pid" && echo "killed after ${TIMEOUT}s" >&2 ) >/dev/null 2>&1 &
+    watchdog=$!
+    wait "$pid"
     status=$?
+    kill "$watchdog" 2>/dev/null
     [ $status -eq 0 ] || echo "exit: $status"
 }
 

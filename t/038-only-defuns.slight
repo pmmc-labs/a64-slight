@@ -1,0 +1,2 @@
+; no top-level expressions: the program's value is ()
+(defun f () 1)
