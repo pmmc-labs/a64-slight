@@ -23,9 +23,10 @@ waiting in `recv` gives back, and the lifecycle: `join`, `monitor`,
 `kill`, `raise`, exit records, and faults that end just their process
 with `(:error (kind value site))` (`runtime/process.c`).
 Eleven of ts-slight's examples are ported (`examples/`). `make test`
-passes under qemu on x86 Linux, and natively on macOS (Stevan's M2 Max,
-checked after step 6). **Next: step 10** (devices and I/O: timers,
-`sleep`, the terminal, files). Update this section as steps land.
+passes under qemu on x86 Linux, and natively on macOS (Stevan runs it on
+his M2 Max after every step, and reports only failures). **Next: step 10**
+(devices and I/O). Its proposals in `docs/PLAN.md` aren't confirmed yet:
+ask about them before building. Update this section as steps land.
 
 ## Read first, in this order
 

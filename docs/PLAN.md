@@ -4,8 +4,9 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–9 done (under qemu, and natively on macOS as of
-step 6). Step 10 is next.
+**Progress:** steps 0–9 done (under qemu, and natively on macOS: Stevan
+runs `make test` on his M2 Max after every step). Step 10 is next; its
+proposals below are still to be confirmed.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -181,11 +182,41 @@ Cheney's scan (D107). `SLIGHT_POISON` makes missed pointers fail loudly.
 
 ### 10. Devices and I/O
 
-- The event loop (`kqueue` on macOS, `poll` on Linux), timers in a binary
-  heap, `after`, `sleep`, a virtual clock for tests.
-- tty raw mode, escape-sequence decoding, `connect :keypress`,
-  `tty/screen/rows`, `tty/screen/cols`.
-- `slurp`, `spew`.
+**Proposed after step 9, not yet confirmed.** Stevan wanted to try the
+language before starting this; ask about each of these first, then
+record the outcome in `DECISIONS.md`.
+
+- **Split it into three steps**, each committed with its tests:
+    - **10a. Timers.** `(after ms pid msg)`, `(sleep ms)`, timers in a
+      binary heap, and an event loop (`kqueue` on macOS, `poll` on Linux)
+      that waits for the next timer when nothing can run.
+    - **10b. The terminal.** Raw mode, escape-sequence decoding,
+      `connect :keypress`, `tty/screen/rows`, `tty/screen/cols`.
+    - **10c. Files.** `slurp`, `spew`.
+- **A virtual clock for tests**, chosen by the environment:
+  `SLIGHT_CLOCK=virtual`, which `t/run.sh` sets (as it sets
+  `SLIGHT_POISON`). Time starts at 0 and moves only when nothing can run
+  and a timer is pending, jumping straight to it, so timer tests are exact
+  and take no real time.
+- **What they return.** `after` returns `()`. `sleep` blocks only the
+  caller, which keeps its stack, and returns `()`: DESIGN says blocking
+  calls return a Result, but `sleep` can't fail. `slurp` returns
+  `(:ok string)` or `(:error reason)`, and `spew` `(:ok ())` or
+  `(:error reason)`.
+- **Timers and deadlock.** A pending timer counts as something that can
+  still happen: a root waiting for a message a timer will send isn't
+  deadlocked, and the program doesn't end while timers are pending.
+
+Still to work out when each sub-step starts:
+
+- 10b: how golden tests feed keypresses. Perhaps `:keypress` reads stdin
+  whether or not it's a terminal (raw mode only when it is), so a test can
+  pipe bytes in.
+- 10c: the shape of an I/O error's reason, say `(:error (enoent "path"))`
+  after the fault reasons (D98).
+- Then port `ping-pong-tournament` (it needs `sleep`), and the device
+  examples (`key-catcher`, `divisions`, `tail-chase-game`, the window
+  managers).
 
 ### 11. Port the examples
 
