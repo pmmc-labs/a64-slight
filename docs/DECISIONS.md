@@ -576,14 +576,14 @@ always has; `raise` or `kill` prints `error: <reason>`; either way the
 program exits 1. Errors print when they happen, the value at the end
 (D93), and other processes still run to the end.
 
-**D100. Faults are logged in every process; `raise` and `kill` only in
-the root.** *(User agreed to logging errors from other processes; Claude
-narrowed it to faults.)* A fault is always a bug, so it's logged as
-`fault in #<pid N>: ...` even if someone will `join` the process. `raise`
-and `kill` are the program's own choices, and whoever joins or monitors
-sees them. Rejected: logging every `(:error ...)` (a supervisor killing
-its workers would fill the log), and logging nothing (a crash that nobody
-joins would be invisible).
+**D100. Faults are logged in every process; `raise` and `kill` only in the
+root.** *(User agreed to logging errors from other processes; Claude
+narrowed it to faults, and the user confirmed that after step 8.)* A fault
+is always a bug, so it's logged as `fault in #<pid N>: ...` even if
+someone will `join` the process. `raise` and `kill` are the program's own
+choices, and whoever joins or monitors sees them. Rejected: logging every
+`(:error ...)` (a supervisor killing its workers would fill the log), and
+logging nothing (a crash that nobody joins would be invisible).
 
 **D101. The details of `join`, `monitor` and `kill`.** *(User.)*
 `(join $$)` faults (`:join-self`), and so does giving any of them
@@ -617,3 +617,49 @@ core).
 `fixed-tournament` takes the `cadr`. A function that waits in `recv`
 can't be a value, so `fixed-tournament` forks its game by name.
 `ping-pong-tournament` waits for `sleep` (step 10).
+
+## Step 9
+
+**D105. Collection happens only at `recv`.** *(User.)* When a receive
+function asks for its next message, before it takes one, the stack is
+empty (the `recv` rule), so the roots are just its arguments, in its
+frame; `rt_recv` already had them, to restart the function after waiting,
+so the compiler didn't change. Every actor loop passes through there.
+Rejected for now: also collecting at tail calls between state functions
+(more compiler work for loops that reach `recv` soon anyway), and at
+tail calls from the bottom of the stack in plain loops (a runtime `sp`
+check). So the root, unless it ends in a receive function, and a process
+that never waits for a message, never collect, and the 64 MB limit is
+what stops them.
+
+**D106. When to collect, and the limit.** *(User.)* Once the heap in use
+(all its chunks, less what's free in the current one) reaches twice what
+survived the last collection, and never below 256 KB, so a short-lived or
+small process never collects. The limit stays 64 MB per process.
+
+**D107. Copying with forwarding pointers and a work stack.** *(Default.)*
+Each object is copied once and leaves a forwarding pointer behind (a moved
+cell's car becomes a boxed null, a moved box's header 0: neither is
+possible otherwise), so sharing is kept and a DAG can't blow up into a
+tree. Cheney's algorithm scans to-space in order, but a cons cell has no
+header to say what it is, so a stack of copied cells and closures whose
+fields still need forwarding takes the scan's place; forwarding the cdr
+before the car keeps it short along a list. To-space is fresh chunks of up
+to 1 MB (or the old heap's size, if smaller), and allocation carries on in
+the last one. Rejected: headers on cons cells (a cell would grow from 16
+bytes to 32, with the alignment, everywhere, for the collector's sake),
+and recursive copying (a deep structure would overflow the C stack).
+
+**D108. The collector is tested by volume, and with poisoning.**
+*(User agreed to testing without a heap-size builtin.)* Each GC test
+allocates far more than 64 MB over a process's life, so it only passes if
+garbage is collected: a store actor whose state is replaced on every
+message, a DAG of 60 cells that is 2^30 as a tree, two players volleying
+over 100 MB of messages each, and a handler that allocates 80 MB between
+messages and faults. With `SLIGHT_POISON` set in the environment (as
+`t/run.sh` sets it), the collector fills what it frees with garbage, so a
+pointer it missed fails at once instead of reading memory that still looks
+right; without it, a mutation that skipped a closure's captured values
+passed. Rejected: a builtin to read the heap's size (more language), and
+always poisoning (collection would cost the whole heap, not just what
+survives).

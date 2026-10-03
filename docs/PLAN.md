@@ -4,8 +4,8 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–8 done (under qemu, and natively on macOS as of
-step 6). Step 9 is next.
+**Progress:** steps 0–9 done (under qemu, and natively on macOS as of
+step 6). Step 10 is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -166,7 +166,13 @@ logging faults from every process (D100, narrowed to faults: `raise` and
   can run".
 - Port the tournaments, `pub-sub`, `even-odd-actors`.
 
-### 9. GC
+### 9. GC (done)
+
+Agreed: collect only at `recv` (D105), once the heap in use has doubled
+since the last collection and is at least 256 KB, with the 64 MB limit
+kept (D106); and test by volume, with no heap-size builtin (D108).
+Cons cells have no header, so the copy uses a work stack rather than
+Cheney's scan (D107). `SLIGHT_POISON` makes missed pointers fail loudly.
 
 - Cheney copying at `recv` and at tail calls from state functions; the
   "heap doubled" trigger; the per-process heap limit.

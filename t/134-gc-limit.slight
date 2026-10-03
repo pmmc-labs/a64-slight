@@ -1,0 +1,27 @@
+; Collection only happens when a receive function waits for its next
+; message. Three rounds of 24 MB of garbage, one per message, are fine;
+; a round of 80 MB within one message hits the 64 MB limit, garbage or not.
+
+(defun make-list (n acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (make-list (- n 1) (cons n acc)))))
+
+; 80 KB of garbage per step
+(defun churn (n)
+    (cond
+        ((== n 0) :done)
+        (#true    (make-list 5000 ()) (churn (- n 1)))))
+
+(defun worker (rounds)
+    (recv
+        ((:churn n) (churn n) (pprint (list :round rounds :done)) (worker (+ rounds 1)))
+        (:stop      rounds)))
+
+(let w (fork (worker 1)))
+(send w (list :churn 300))
+(send w (list :churn 300))
+(send w (list :churn 300))
+(send w (list :churn 1000))
+(send w :stop)
+(join w)

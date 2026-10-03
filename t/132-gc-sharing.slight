@@ -1,0 +1,25 @@
+; Collection keeps sharing. This actor's state is a DAG of 60 cells that
+; would be 2^30 of them as a tree, so a collector that copied it as a tree
+; would run out of memory. The churn makes enough garbage to collect about
+; every fourth message. The two halves are still one object at the end,
+; so eq? sees the same word at once, instead of comparing 2^29 cells.
+
+(defun double (x n)
+    (cond
+        ((== n 0) x)
+        (#true    (double (list x x) (- n 1)))))
+
+(defun depth (x)
+    (cond
+        ((cons? x) (+ 1 (depth (car x))))
+        (#true     0)))
+
+(defun holder (dag churned)
+    (recv
+        (:churn (holder dag (+ churned (length (range 0 5000)))))
+        (:stop  (list (depth dag) (eq? (car dag) (cadr dag)) churned))))
+
+(let h (fork (holder (double :leaf 30) 0)))
+(dotimes 0 200 (lambda (i) (send h :churn)))
+(send h :stop)
+(join h)

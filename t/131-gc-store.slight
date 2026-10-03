@@ -1,0 +1,17 @@
+; The garbage collector. This actor replaces its state on every message,
+; allocating about 100 MB over its life against a 64 MB limit, so it only
+; finishes if its garbage is collected. Its state (a long list, a string,
+; a float, and a closure over a list) must come through every collection
+; intact.
+
+(defun adder (ys) (lambda (n) (+ n (cadr ys))))
+
+(defun store (xs label ratio add)
+    (recv
+        (:bump (store (map inc xs) label ratio add))
+        (:stop (list (sum xs) label ratio (add 1)))))
+
+(let s (fork (store (range 0 10000) (~ "count" "er") (/ 1 4) (adder (list 100 200)))))
+(dotimes 0 300 (lambda (i) (send s :bump)))
+(send s :stop)
+(join s)

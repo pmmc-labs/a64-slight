@@ -26,7 +26,8 @@
 #define STACK_HEADROOM (64 << 10)       // room left below the limit for one frame and a C call
 #define CHUNK_FIRST    (4 << 10)        // a process's first heap chunk...
 #define CHUNK_MAX      (1 << 20)        // ...doubling up to this
-#define HEAP_MAX       (64 << 20)       // all of a process's chunks; there's no GC yet
+#define HEAP_MAX       (64 << 20)       // all of a process's chunks
+#define GC_MIN         (256 << 10)      // a heap smaller than this is never collected
 
 // A pid's entry in the table: the process while it runs, then its exit
 // record: (:ok value) or (:error value).
@@ -43,6 +44,7 @@ static rt_proc_t  *ready_head, *ready_tail;
 static rt_ctx_t    scheduler;
 static void       *free_stacks;         // a list through each stack's first word
 static size_t      page;
+static int         poison;              // SLIGHT_POISON: fill what the collector frees
 
 // --- the run queue ------------------------------------------------------------
 
@@ -147,11 +149,15 @@ void rt_heap_grow(uint64_t bytes, const char *site) {
     p->heap_limit = p->heap_ptr + size;
 }
 
-static void free_heap(rt_proc_t *p) {
-    for (rt_chunk_t *c = p->chunks, *next; c; c = next) {
+static void free_chunks(rt_chunk_t *c) {
+    for (rt_chunk_t *next; c; c = next) {
         next = c->next;
         free(c);
     }
+}
+
+static void free_heap(rt_proc_t *p) {
+    free_chunks(p->chunks);
     p->chunks     = NULL;
     p->heap_ptr   = p->heap_limit = 0;
     p->heap_bytes = 0;
@@ -246,6 +252,110 @@ static rt_value_t copy_here(rt_value_t v) {
     return out;
 }
 
+// --- garbage collection -------------------------------------------------------
+//
+// Only when a receive function asks for its next message (D105). The recv
+// rule means the stack is empty then, so the roots are just its arguments,
+// in its frame. The live data is copied into fresh chunks and the old ones
+// freed; C code never sees anything move.
+//
+// Copying leaves a forwarding pointer behind, so sharing is kept: a DAG
+// stays a DAG. Cons cells have no header, so to-space can't be scanned in
+// order as Cheney's algorithm would; instead, each copied cons or closure
+// goes on a stack of objects whose fields still point at the old heap.
+// Taking the cdr first keeps that stack short along a list.
+
+#define GC_MOVED_CONS RT_TAG_BOXED      // in a moved cell's car: a boxed null, which no value is
+#define GC_MOVED_BOX  0                 // in a moved box's header: no box has type 0
+
+typedef struct {
+    rt_chunk_t *chunks;                 // to-space, newest first
+    uintptr_t   ptr, limit;
+    size_t      bytes, live, size;      // to-space's capacity, what's in it, the size of a new chunk
+    rt_value_t *todo;                   // copied, with fields still to forward
+    size_t      ntodo, todo_cap;
+} gc_t;
+
+static void *gc_alloc(gc_t *g, size_t bytes) {
+    if (g->limit - g->ptr < bytes) {
+        size_t      size = bytes > g->size ? bytes : g->size;
+        rt_chunk_t *c    = new_chunk(size);
+        c->next   = g->chunks;
+        g->chunks = c;
+        g->bytes += size;
+        g->ptr    = (uintptr_t)(c + 1);
+        g->limit  = g->ptr + size;
+    }
+    void *at = (void *)g->ptr;
+    g->ptr  += bytes;
+    g->live += bytes;
+    return at;
+}
+
+static void gc_todo(gc_t *g, rt_value_t v) {
+    if (g->ntodo == g->todo_cap) {
+        g->todo_cap = g->todo_cap ? g->todo_cap * 2 : 256;
+        g->todo     = realloc(g->todo, g->todo_cap * sizeof *g->todo);
+        if (!g->todo) {
+            perror("rt: out of memory");
+            exit(2);
+        }
+    }
+    g->todo[g->ntodo++] = v;
+}
+
+// Where v lives now, copying it there if it hasn't been yet.
+static rt_value_t forward(gc_t *g, rt_value_t v) {
+    if (!is_pointer(v)) return v;
+    if (rt_is_cons(v)) {
+        rt_value_t *old = (rt_value_t *)(v - RT_TAG_LIST);
+        if (old[0] == GC_MOVED_CONS) return old[1];
+        rt_value_t *new = gc_alloc(g, 16);
+        new[0] = old[0];
+        new[1] = old[1];
+        old[0] = GC_MOVED_CONS;
+        old[1] = (rt_value_t)new | RT_TAG_LIST;
+        gc_todo(g, old[1]);
+        return old[1];
+    }
+    uint64_t *old = (uint64_t *)(v - RT_TAG_BOXED);
+    if (old[0] == GC_MOVED_BOX) return old[1];
+    size_t    bytes = box_bytes(v);
+    uint64_t *new   = gc_alloc(g, bytes);
+    memcpy(new, old, bytes);
+    old[0] = GC_MOVED_BOX;
+    old[1] = (rt_value_t)new | RT_TAG_BOXED;
+    if ((new[0] & RT_BOX_TYPE_MASK) == RT_BOX_CLOSURE) gc_todo(g, old[1]);
+    return old[1];
+}
+
+static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n) {
+    gc_t g = { .size = p->heap_bytes < CHUNK_MAX ? p->heap_bytes : CHUNK_MAX };
+    for (uint64_t i = 0; i < n; i++) roots[i] = forward(&g, roots[i]);
+    while (g.ntodo) {
+        rt_value_t v = g.todo[--g.ntodo];
+        if (rt_is_cons(v)) {
+            rt_value_t *cell = (rt_value_t *)(v - RT_TAG_LIST);
+            cell[1] = forward(&g, cell[1]);
+            cell[0] = forward(&g, cell[0]);
+        } else {
+            uint64_t *box = (uint64_t *)(v - RT_TAG_BOXED);
+            for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) box[4 + i] = forward(&g, box[4 + i]);
+        }
+    }
+    free(g.todo);
+    // With SLIGHT_POISON set (t/run.sh sets it), a pointer the collector
+    // missed finds garbage at once instead of memory that looks fine
+    // until it's reused: 0xabab... is a boxed pointer to nowhere.
+    for (rt_chunk_t *c = p->chunks; c && poison; c = c->next) memset(c + 1, 0xab, c->size);
+    free_chunks(p->chunks);
+    p->chunks     = g.chunks;
+    p->heap_bytes = g.bytes;
+    p->heap_ptr   = g.ptr;
+    p->heap_limit = g.limit;
+    p->gc_at      = 2 * g.live > GC_MIN ? 2 * g.live : GC_MIN;
+}
+
 // --- processes ----------------------------------------------------------------
 
 rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
@@ -267,6 +377,7 @@ rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
     p->pid      = id << RT_PID_SHIFT | RT_TAG_PID;
     p->parent   = parent;
     p->code     = code;
+    p->gc_at    = GC_MIN;
     enqueue(p);
     return p;
 }
@@ -308,8 +419,9 @@ rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
     return RT_NIL;
 }
 
-rt_value_t rt_recv(const rt_value_t *args, uint64_t n, rt_code_t code) {
+rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) {
     rt_proc_t *p = rt_current;
+    if (p->heap_bytes - (p->heap_limit - p->heap_ptr) >= p->gc_at) collect(p, args, n);
     rt_msg_t  *m = p->mail;
     if (m) {
         p->mail = m->next;
@@ -494,7 +606,8 @@ void rt_run(void) {
 }
 
 int main(void) {
-    page = (size_t)sysconf(_SC_PAGESIZE);
+    page   = (size_t)sysconf(_SC_PAGESIZE);
+    poison = getenv("SLIGHT_POISON") != NULL;
     rt_new_process((rt_code_t)slight_main, RT_NIL);
     rt_run();
     const entry_t *root = &procs[1];

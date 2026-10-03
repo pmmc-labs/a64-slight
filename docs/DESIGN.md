@@ -359,13 +359,13 @@ needed: the REPL and line editing are slight code over key events.
 
 ### Process heaps and GC
 
-**So far (step 7):** a chain of `malloc`ed chunks per process (D89). The
-first, 4 KB, comes with the first allocation (so a process that allocates
-nothing has no heap); each new one is twice the last, up to 1 MB. Message
-chunks join the chain when received. All of a process's chunks together
-are capped at 64 MB, and past that the allocation faults. With no GC yet,
-that includes every message the process has ever received. The heap
-pointer and limit live in the process struct
+Each process has its own heap: a chain of `malloc`ed chunks (D89), with
+bump allocation and ordinary absolute pointers. The first chunk, 4 KB,
+comes with the first allocation (so a process that allocates nothing has
+no heap); each new one is twice the last, up to 1 MB. Message chunks join
+the chain when received. All of a process's chunks together are capped at
+64 MB, and past that the allocation faults (`:heap`). The heap pointer and
+limit live in the process struct
 (`[x28, #RT_PROC_HEAP_PTR]`), so C builtins that allocate can use them with
 nothing to sync (D57). Compiled code allocates inline, and calls the
 runtime only to start a new chunk:
@@ -380,28 +380,34 @@ Lalloc_N:
     str  x4, [x28, #RT_PROC_HEAP_PTR]       // x2 = the new cell
 ```
 
-**The plan (step 9):**
+**Collection** (step 9):
 
-- Each process has its own heap: a chain of chunks with bump allocation and
-  ordinary absolute pointers.
-- **Collection runs only where the stack is empty**: at `recv` (roots: the
-  receive function's arguments, plus the message) and at tail calls made
-  from the base of the stack (roots: the tail call's arguments). It's a
-  Cheney copy of the live data into one fresh chunk, after which the old
-  chunks are freed.
-- It runs once the heap has roughly doubled since the last collection, so a
-  short-lived process never collects.
+- **It runs only when a receive function asks for its next message**
+  (D105), in `rt_recv`, before it takes one. The `recv` rule means the
+  stack is empty then, so the roots are just the receive function's
+  arguments, in its frame. Nothing else in the frame is live, and nothing
+  outside the process's heap points into it.
+- It runs once the heap in use (its chunks, less what's free in the
+  current one) reaches twice what survived the last collection, and never
+  below 256 KB, so a short-lived or small process never collects (D106).
+- The live data is copied into fresh chunks (of up to 1 MB each), and the
+  old ones are freed. Copying leaves a forwarding pointer, so sharing is
+  kept: a DAG stays a DAG. Cons cells have no header, so to-space can't be
+  scanned in order as in Cheney's algorithm; a stack of copied objects
+  whose fields still need forwarding takes its place (D107).
 - In the middle of a handler, the heap only grows.
 - **C builtins never see an object move.** No handles, no rooting API, no
   stack maps, no write barrier.
-- **The gotcha:** an allocation-heavy loop called from inside an expression
-  (not in tail position) can't collect until it returns. A per-process heap
-  limit turns that into a fault instead of exhausting memory. Write long
-  loops in tail position, or split the work across messages.
-- **(open)** The compiler knows state functions always run at the base of
-  the stack. Collecting at other base-of-stack tail calls (say a plain loop
-  that is a `fork` body) needs a runtime check of `sp` against the stack
-  base. Start with state functions only.
+- **The gotcha:** a process that allocates without waiting for a message
+  never collects: an allocation-heavy loop inside a handler, the root
+  (unless it ends in a receive function), or a process that never calls
+  `recv`. The 64 MB limit turns that into a fault instead of exhausting
+  memory. Split long work across messages.
+- Collecting at other places where the stack is empty (a plain loop that
+  is a `fork` body, say, or tail calls between state functions) would need
+  a runtime check of `sp`, or more from the compiler. Left out for now.
+- `SLIGHT_POISON=1` in the environment fills what the collector frees with
+  garbage, so a pointer it missed fails at once; `t/run.sh` sets it.
 
 ### Messages
 
@@ -543,8 +549,9 @@ that's just a walk over every function.
 6. **Mark tail calls.**
 7. **Generate code**, Ghuloum-style: the accumulator is `x0`, temporaries
    spill to the stack, no register allocation. Tagged values, a reduction
-   check at entries and tail calls, collection points at `recv` and at
-   tail calls from state functions.
+   check at entries and tail calls. Collection needs nothing from the
+   compiler: `recv` already passes its function's arguments to the
+   runtime, to restart it after waiting.
 8. **Emit data**: string literals, quoted constants, static closures, the
    symbol name table.
 
@@ -580,8 +587,9 @@ line-by-line translation.
 Collected from above:
 
 1. Program structure: top-level forms as the root process (built this way).
-2. GC at base-of-stack tail calls outside state functions.
+2. Collecting anywhere but `recv` (see "Process heaps and GC").
 
 Settled in step 7: `recv` syntax (D85), the run queue (D86), the fault,
 `raise` and `kill` reasons (D87), exit records and mailboxes (D88). In
-step 8: the fault kinds (D98), and what gets logged (D99, D100).
+step 8: the fault kinds (D98), and what gets logged (D99, D100). In
+step 9: collecting only at `recv` (D105).

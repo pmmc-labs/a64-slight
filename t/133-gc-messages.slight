@@ -1,0 +1,23 @@
+; Received messages join the receiver's heap, and are collected with it.
+; Two players volley 200,000 balls, each carrying a fresh 30-element list:
+; each player sends and receives over 100 MB of them.
+
+(defun player (name)
+    (recv
+        ((:serve to)
+            (send to (list :ball 1 $$ (range 1 31)))
+            (player name))
+        ((:ball n from payload)
+            (cond
+                ((>= n 200000)
+                    (send from (list :done n))
+                    (list name n (sum payload)))
+                (#true
+                    (send from (list :ball (+ n 1) $$ (range n (+ n 30))))
+                    (player name))))
+        ((:done n) (list name n))))
+
+(let a (fork (player :a)))
+(let b (fork (player :b)))
+(send a (list :serve b))
+(list (join a) (join b))

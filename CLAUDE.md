@@ -6,25 +6,26 @@ TypeScript for now and should self-host later.
 
 ## Status
 
-**Steps 0–8 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
+**Steps 0–9 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
 a compiler for integers, floats, `#true`/`#false`, `()`, symbols, lists
-(a heap per process of chunks, capped at 64 MB, with no GC yet), strings,
-closures (`lambda`, functions and builtins as values, `apply`), arithmetic
-(integers inline; floats and mixed in C), structural `eq?`, type
-predicates, the string and math builtins (C, in `runtime/`), `cond`,
-`let`, `do`, `pprint`, `tty/write`, and top-level `defun`s with calls and
-tail calls (arguments in `x0`–`x7`; stack and reduction checks at every
-function entry). The prelude (`lib/prelude.slight`) is compiled with
-every program; `lib/test.slight` is a TAP library. Processes: `fork`,
-`send`, `recv` (receive functions, with the `recv` rule checked by
-`classify.ts`), `$$`, `^$$`, `yield`, preemption, a FIFO run queue, pooled
-stacks that a process waiting in `recv` gives back, and the lifecycle:
-`join`, `monitor`, `kill`, `raise`, exit records, and faults that end just
-their process with `(:error (kind value site))` (`runtime/process.c`).
+(a heap per process of chunks, capped at 64 MB, and collected when a
+receive function waits for a message), strings, closures (`lambda`,
+functions and builtins as values, `apply`), arithmetic (integers inline;
+floats and mixed in C), structural `eq?`, type predicates, the string and
+math builtins (C, in `runtime/`), `cond`, `let`, `do`, `pprint`,
+`tty/write`, and top-level `defun`s with calls and tail calls (arguments
+in `x0`–`x7`; stack and reduction checks at every function entry). The
+prelude (`lib/prelude.slight`) is compiled with every program;
+`lib/test.slight` is a TAP library. Processes: `fork`, `send`, `recv`
+(receive functions, with the `recv` rule checked by `classify.ts`), `$$`,
+`^$$`, `yield`, preemption, a FIFO run queue, pooled stacks that a process
+waiting in `recv` gives back, and the lifecycle: `join`, `monitor`,
+`kill`, `raise`, exit records, and faults that end just their process
+with `(:error (kind value site))` (`runtime/process.c`).
 Eleven of ts-slight's examples are ported (`examples/`). `make test`
 passes under qemu on x86 Linux, and natively on macOS (Stevan's M2 Max,
-checked after step 6). **Next: step 9** (GC). Update this section as
-steps land.
+checked after step 6). **Next: step 10** (devices and I/O: timers,
+`sleep`, the terminal, files). Update this section as steps land.
 
 ## Read first, in this order
 
@@ -118,7 +119,7 @@ works and has the runtime pieces to borrow.
 | `bin/slightc.ts` | The driver: read, compile, write `out.S`, link with clang |
 | `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts`, `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
-| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, `main`), `strings.c`, `numbers.c` |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, `main`), `strings.c`, `numbers.c` |
 | `lib/` | `prelude.slight` (compiled with every program), `test.slight` (TAP, opt-in) |
 | `examples/` | ts-slight's examples, ported; each with a `.expected` is a golden test |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`; `models/` (Python models that produced expected output). A first line `; with: lib/test.slight` compiles that in too. |
@@ -138,6 +139,9 @@ works and has the runtime pieces to borrow.
   result with `qemu-aarch64 ./out`.
 - Exit codes from `slightc`: 0 ok, 1 compile error, 2 usage or toolchain
   error. `SLIGHT_CC` overrides the C compiler command.
+- `SLIGHT_POISON=1` when running a compiled program makes the collector
+  fill what it frees with garbage, so a pointer it missed fails at once.
+  `t/run.sh` sets it.
 
 The runtime prints the root process's value, followed by a newline, once
 nothing can run. Faults are logged to stderr as they happen (`fault: ...`

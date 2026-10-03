@@ -161,6 +161,7 @@ typedef struct rt_proc {
     rt_chunk_t     *chunks;
     size_t          heap_bytes; // in all its chunks
     size_t          next_chunk; // the size of the next chunk it allocates in
+    size_t          gc_at;      // collect at recv once this much of the heap is in use
     rt_msg_t       *mail, *mail_last;
     struct rt_proc *next_ready;
     struct rt_proc *joiners;    // blocked in join on this one, in the order they joined
@@ -207,11 +208,13 @@ extern const char     slight_symbol_names[] RT_ASM(slight_symbol_names);
 
 // Processes (process.c). rt_recv returns the next message, or, when there
 // is none, remembers code(args...) and gives up the stack; the process
-// starts again at code when a message comes. rt_fork starts code(values...)
+// starts again at code when a message comes. First, it may collect
+// garbage, with args (the receive function's, in its frame) as the roots,
+// which it updates. rt_fork starts code(values...)
 // in a new process, with the values deep-copied into its heap.
 rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
-rt_value_t rt_recv(const rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
+rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
 void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_letter);
 void       rt_yield(void) RT_ASM(rt_yield);
 

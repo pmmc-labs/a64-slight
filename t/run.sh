@@ -21,6 +21,9 @@ mkdir -p build/t
 # A test that runs longer than $TIMEOUT seconds is killed, and fails.
 # (macOS has no timeout(1), hence the watchdog.)
 TIMEOUT=${TIMEOUT-60}
+
+# The collector poisons what it frees, so a pointer it missed fails loudly.
+export SLIGHT_POISON=1
 output() {
     $RUN "./$1" 2>&1 &
     pid=$!
