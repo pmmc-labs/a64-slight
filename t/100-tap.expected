@@ -1,0 +1,11 @@
+ok 1 - one is less than two
+ok 2 - addition
+# a comment
+ok 3 - lists
+not ok 4 - this one fails
+not ok 5 - so does this
+#          got: 2
+#     expected: 3
+1..5
+# Looks like you failed 2 tests of 5.
+#false

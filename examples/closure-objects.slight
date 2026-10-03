@@ -1,0 +1,45 @@
+; closure-objects, from ts-slight's examples: objects are closures over
+; their fields, answering messages. Changes: case became cond; there's no
+; gensym, so an object is given its id; there's no raise yet, so an unknown
+; message answers (method-not-found m).
+
+(defun Object (oid)
+    (lambda (m)
+        (cond
+            ((eq? m :oid)   oid)
+            ((eq? m :class) Object)
+            ((eq? m :===)   (lambda (o) (eq? oid (o :oid))))
+            (#true          (list :method-not-found m)))))
+
+(defun Point (oid x y)
+    (let super (Object oid))
+    (lambda (m)
+        (cond
+            ((eq? m :class)  Point)
+            ((eq? m :x)      x)
+            ((eq? m :y)      y)
+            ((eq? m :+)      (lambda (o) (Point (list oid :+ (o :oid)) (+ x (o :x)) (+ y (o :y)))))
+            ((eq? m :-)      (lambda (o) (Point (list oid :- (o :oid)) (- x (o :x)) (- y (o :y)))))
+            ((eq? m :==)     (lambda (o) (and (== x (o :x)) (== y (o :y)))))
+            ((eq? m :!=)     (lambda (o) (or  (!= x (o :x)) (!= y (o :y)))))
+            ((eq? m :to-str) (concat "Point:" x ":" y))
+            (#true           (super m)))))
+
+(let obj1 (Object 1))
+(let obj2 (Object 2))
+
+(pprint (obj1 :oid))
+(pprint (obj2 :oid))
+(pprint ((obj1 :===) obj2))
+
+(let p1 (Point :p1 10 20))
+(let p2 (Point :p2 20 10))
+(let p3 (Point :p3 20 10))
+
+(pprint (((p1 :+) p2) :to-str))
+(pprint (((p1 :+) p2) :oid))
+(pprint ((p2 :==)  p3))
+(pprint ((p2 :===) p3))
+(pprint ((p1 :==) ((((p1 :+) p2) :-) p3)))
+(pprint (((p1 :class) :p4 25 30) :to-str))
+(p1 :fly)

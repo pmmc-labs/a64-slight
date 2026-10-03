@@ -1,0 +1,13 @@
+(defun add3 (a b c) (+ a (+ b c)))
+(pprint (apply add3 '(1 2 3)))
+(pprint (apply + (list 4 5)))
+(pprint (apply (lambda () :none) ()))
+(pprint (apply (lambda (a b c d e f g h) (list h g f e d c b a)) (range 1 9)))
+; apply in tail position is a tail call: a million of these would need far
+; more than the 8 MB of stack otherwise
+(defun count-down (n)
+    (cond
+        ((== n 0) :done)
+        (#true    (apply count-down (list (- n 1))))))
+
+(count-down 1000000)

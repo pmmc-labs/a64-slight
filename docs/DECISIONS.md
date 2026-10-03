@@ -413,3 +413,54 @@ requires `sqrt` to be correctly rounded, so its results are compared
 exactly; `sin cos tan exp pow` are compared to 12 places, apart from cases
 that are exact everywhere (`(sin 0)`, `(pow 2 10)`).
 
+## Step 6
+
+**D77. `apply` is a builtin.** *(User.)* `(apply f xs)`, at most 8
+elements. It's a short assembly routine (`rt_apply`) that spreads the list
+into `x0`–`x7` and jumps to `f`, so a call to `apply` in tail position is
+still a tail call. `meta-circular` defines its own `apply` and will need
+another name.
+
+**D78. The prelude's confusing names were changed.** *(User allowed it;
+the changes are mine.)* `filter` keeps what matches and `remove` drops it
+(ts-slight's `filter` dropped and `grep` kept; `grep` is gone). `(range
+start end)` is half-open with no step (ts-slight's took a step and always
+ended with `end`, which gave `game-of-life-actors` a grid one wider than
+asked). `take` and `skip` stop at the end of the list rather than fault.
+`starts-with?`/`ends-with?` got their `?`. `concat-list` is gone:
+`str-join` does it. Kept: `fold/l`/`fold/r` (init, f, list), `assoc`
+(adds, as in Clojure) and `lookup` (`:not-found`), `nth` and `find`
+(`()` when there's nothing), `dotimes`, `pad-start`/`pad-end` (s, n,
+fill). Every loop in the prelude is a tail call.
+
+**D79. A lambda copies its captured values into its frame on entry.**
+*(Default.)* Then they're ordinary locals in the body, and the code for
+using one doesn't depend on where it came from. Rejected for now: reading
+them from the closure at each use (less copying; more kinds of variable
+in the code generator). Lambdas that capture nothing, and `defun`s used as
+values, are static closures, never allocated.
+
+**D80. The prelude has its own namespace.** *(Default.)* A program can
+define a function with a prelude name; its own code uses its definition,
+and the prelude keeps calling its own (labels `pf_...` vs `fn_...`). So
+`(defun reverse ...)` can't break the prelude's `map`. Rejected: making
+prelude names reserved (programs like golden test 053 define `range` and
+`sum`), and letting a program's definition replace the prelude's
+everywhere (a different `reverse` would break `map`).
+
+**D81. Builtins can be values, through small wrapper functions.**
+*(Default.)* `(fold/l 0 + xs)` and `(map car xs)` work: the first use of a
+fixed-arity builtin as a value compiles a function that calls it, plus a
+static closure. Builtins that take a varying number of arguments (`list`,
+`concat`, `tty/write`, `format-num`) can't be values.
+
+**D82. The test library is opt-in.** *(Default.)* `lib/test.slight`
+isn't part of the prelude (its names, `ok` and `is`, are too common). A
+golden test asks for it with a first line `; with: lib/test.slight`.
+`ok` takes a boolean, as `cond` does (ts-slight's took anything but
+`#false` and `()`), and tests are numbered from 1, as TAP expects.
+
+**D83. Ported examples live in `examples/` and are golden tests.**
+*(Default.)* Each that has a `.expected` runs in `make test`. The header
+comment of each says what changed from ts-slight's version.
+

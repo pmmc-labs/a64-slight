@@ -26,6 +26,15 @@
 #define RT_BOX_SIZE_SHIFT    8
 #define RT_BOX_STRING        1
 #define RT_BOX_FLOAT         2    // size 8: an IEEE double
+#define RT_BOX_CLOSURE       3    // size: how many captured values
+
+// A closure's words after the header: the code, its arity, its name (a C
+// string, for printing), then the captured values. Offsets are from a
+// closure *value* (tagged), as compiled code uses them.
+#define RT_CLOSURE_CODE      5    //  8 - RT_TAG_BOXED
+#define RT_CLOSURE_ARITY    13    // 16 - RT_TAG_BOXED
+#define RT_CLOSURE_NAME     21    // 24 - RT_TAG_BOXED
+#define RT_CLOSURE_FREE     29    // 32 - RT_TAG_BOXED: the first captured value
 
 #define RT_NIL               1    // the list tag on a null pointer
 #define RT_FALSE             5    // symbol 0
@@ -45,6 +54,8 @@
 #define RT_FAULT_RANGE      11    // an index, a byte, or a rounded float out of range
 #define RT_FAULT_NOT_NUMBER 12    // arithmetic on something that isn't a number
 #define RT_FAULT_DIV_ZERO   13    // division by zero
+#define RT_FAULT_NOT_FUNC   14    // a call to something that isn't a function
+#define RT_FAULT_ARITY      15    // a function called with the wrong number of arguments
 
 // What rt_compare is asked.
 #define RT_CMP_EQ            0
@@ -90,6 +101,7 @@ static inline int rt_is_box(rt_value_t v, uint64_t type) {
 }
 static inline int         rt_is_string(rt_value_t v)    { return rt_is_box(v, RT_BOX_STRING); }
 static inline int         rt_is_float(rt_value_t v)     { return rt_is_box(v, RT_BOX_FLOAT); }
+static inline int         rt_is_closure(rt_value_t v)   { return rt_is_box(v, RT_BOX_CLOSURE); }
 static inline double      rt_float_value(rt_value_t v) {
     double d;
     __builtin_memcpy(&d, rt_box(v) + 1, sizeof d);
@@ -143,6 +155,11 @@ rt_value_t rt_byte_at(rt_value_t s, rt_value_t i, const char *site) RT_ASM(rt_by
 rt_value_t rt_bytes_to_string(rt_value_t xs, const char *site) RT_ASM(rt_bytes_to_string);
 rt_value_t rt_format_num(rt_value_t n, rt_value_t width, rt_value_t fill, const char *site) RT_ASM(rt_format_num);
 rt_value_t rt_tty_write(rt_value_t args, const char *site) RT_ASM(rt_tty_write);
+
+// Functions. rt_apply calls f with the elements of args as its arguments,
+// by jumping to it, so f returns straight to apply's caller (rt_asm.S).
+rt_value_t rt_apply(rt_value_t f, rt_value_t args, const char *site) RT_ASM(rt_apply);
+rt_value_t rt_is_lambda(rt_value_t v) RT_ASM(rt_is_lambda);
 
 // Numbers (numbers.c). The compiler does arithmetic on two integers
 // inline, and calls these for anything else.

@@ -1,0 +1,22 @@
+(pprint ((lambda (x) (* x 2)) 21))
+(pprint ((lambda () 7)))
+(defun make-adder (n) (lambda (x) (+ x n)))
+(let add5 (make-adder 5))
+(pprint (add5 10))
+(pprint ((make-adder 1) 2))
+; capture is by value: a later let makes a new n
+(let n 1)
+(let get-n (lambda () n))
+(let n 2)
+(pprint (get-n))
+(pprint n)
+; the inner lambda captures from both enclosing scopes
+(let k 10)
+(let nested (lambda (a) (lambda (b) (+ a (+ b k)))))
+(pprint ((nested 1) 2))
+; a lambda with a let of its own, closing over two parameters
+(defun labeller (name start) (lambda (step) (let next (+ start step)) (concat name ":" next)))
+(pprint ((labeller "c" 10) 5))
+; closures in a list
+(let fs (list (make-adder 1) (make-adder 2) (make-adder 3)))
+(map (lambda (f) (f 100)) fs)

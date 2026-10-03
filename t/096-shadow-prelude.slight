@@ -1,0 +1,7 @@
+; a definition with a prelude name shadows the prelude's, for this
+; program's code only: the prelude's map still uses the prelude's reverse
+(defun reverse (xs) :mine)
+(pprint (reverse '(1 2 3)))
+(pprint (map inc '(1 2 3)))
+(defun length (xs) 42)
+(length ())

@@ -131,6 +131,12 @@ void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
         render_float(b, rt_float_value(v));
         return;
     }
+    if (rt_is_closure(v)) {
+        buf_str(b, "#<function ");
+        buf_str(b, (const char *)rt_box(v)[3]);
+        buf_str(b, ">");
+        return;
+    }
     if (rt_is_string(v)) {
         if (!raw) buf_str(b, "\"");
         rt_buf_add(b, rt_string_bytes(v), rt_string_len(v));
@@ -182,6 +188,10 @@ rt_value_t rt_equal(rt_value_t a, rt_value_t b) {
     return equal(a, b) ? RT_TRUE : RT_FALSE;
 }
 
+rt_value_t rt_is_lambda(rt_value_t v) {
+    return rt_is_closure(v) ? RT_TRUE : RT_FALSE;
+}
+
 // --- faults -------------------------------------------------------------------
 
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
@@ -201,6 +211,8 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
         case RT_FAULT_RANGE:      fputs("out of range: ", stderr);   print_value(stderr, value); break;
         case RT_FAULT_NOT_NUMBER: fputs("not a number: ", stderr);   print_value(stderr, value); break;
         case RT_FAULT_DIV_ZERO:   fputs("division by zero", stderr); break;
+        case RT_FAULT_NOT_FUNC:   fputs("not a function: ", stderr); print_value(stderr, value); break;
+        case RT_FAULT_ARITY:      fputs("wrong number of arguments for ", stderr); print_value(stderr, value); break;
         default:                  fprintf(stderr, "unknown fault %" PRIu64, fault); break;
     }
     fprintf(stderr, " (%s)\n", site);

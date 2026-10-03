@@ -4,8 +4,8 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–5 done (under qemu, and natively on macOS as of
-step 2). Step 6 is next.
+**Progress:** steps 0–6 done (under qemu, and natively on macOS as of
+step 5). Step 7 is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -115,7 +115,11 @@ shortest form that reads back the same; `(== 1 1.0)` is `#true` and
 - Floats: literals, arithmetic with promotion, `/` gives a float, `div`
   and `%` **(open: names)**, rounding to integers, libm wrappers.
 
-### 6. Closures and the prelude
+### 6. Closures and the prelude (done)
+
+`apply` became a builtin (D77), and the prelude's names were tidied
+(D78). The five ported examples are in `examples/`, each with a
+`.expected` that `t/run.sh` checks.
 
 - `lambda`, closure conversion, indirect calls with an arity check,
   static closures for `defun`s used as values.
@@ -178,13 +182,15 @@ the three-stage bootstrap from DESIGN.md.
 
 From a survey of `reference/ts-slight/examples/`. Almost all of them need
 mechanical changes: `if`/`when`/`case` become `cond`; `head`/`tail` become
-`car`/`cdr`; `sys/io/print-ln` becomes `pprint` or `tty/write`. Beyond
-that:
+`car`/`cdr`; `sys/io/print-ln` becomes `pprint` or `tty/write`; `grep`
+becomes `filter`, and `(range a b 1)` becomes `(range a (+ b 1))` (D78);
+`meta-circular`'s own `apply` needs another name, now that `apply` is a
+builtin. Beyond that:
 
 | Example | Needs |
 |---|---|
-| `fib`, `fold-konts`, `game-of-life`, `simple-crappy-adts`, `scratchpad` | nothing else (pure) |
-| `closure-objects` | drop `gensym` |
+| `fib`, `fold-konts`, `game-of-life`, `simple-crappy-adts`, `closure-objects` | ported in step 6 (`examples/`) |
+| `scratchpad` | nothing else (pure) |
 | `ping-pong`, `pub-sub`, `ring-benchmark`, `million-forks`, `even-odd-actors`, `simple-db-server`, `fixed-tournament`, `ping-pong-tournament`, `game-of-life-actors` | `(recv)` used as an expression mid-function becomes receive functions; `simple-db-server`'s `db-client` does `(recv)` inside a lambda, so it needs restructuring |
 | `active-objects` | as above, plus drop `gensym` |
 | `key-catcher`, `divisions`, `tail-chase-game`, `window-manager`, `better-window-manager` | as above, plus devices (step 10) |

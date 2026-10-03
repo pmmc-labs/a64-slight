@@ -1,0 +1,29 @@
+; fold-konts, from ts-slight's examples, which timed different ways of
+; folding a 1,440-element list. There's no time-it, so this checks that
+; they agree instead. Changes: if became cond, head and tail became car and
+; cdr, and the list is built rather than written out.
+
+(defun hand-written-foldr (init f seq)
+    (cond
+        ((nil? seq) init)
+        (#true      (f (car seq) (hand-written-foldr init f (cdr seq))))))
+
+(defun old-map (f lst)
+    (cond
+        ((nil? lst) ())
+        (#true      (cons (f (car lst)) (old-map f (cdr lst))))))
+
+; 0 to 9, 144 times
+(let the-big-list (fold/l () (lambda (acc i) (append (range 0 10) acc)) (range 0 144)))
+
+(let by-foldr  (hand-written-foldr () (lambda (x acc) (cons (inc x) acc)) the-big-list))
+(let by-map    (old-map inc the-big-list))
+(let by-new    (map inc the-big-list))
+(let by-fold-r (fold/r () (lambda (x acc) (cons (inc x) acc)) the-big-list))
+
+(pprint (length the-big-list))
+(pprint (sum by-foldr))
+(pprint (eq? by-foldr by-map))
+(pprint (eq? by-map by-new))
+(pprint (eq? by-new by-fold-r))
+(eq? the-big-list (reverse (reverse the-big-list)))

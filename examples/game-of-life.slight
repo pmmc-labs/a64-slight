@@ -1,0 +1,77 @@
+; game-of-life (the one without actors), from ts-slight's examples. A grid
+; is (shape board): shape is (rows cols), and board is a list of rows of
+; cells, each (x y state). Changes: if and case became cond; a glider
+; instead of a random start (there's no rand); the grid wraps around
+; correctly (the original's wrap-around was one off); there's no time-it.
+
+(defun init-grid (h w init-cell)
+    (list
+        (list h w)
+        (map (lambda (x) (map (lambda (y) (init-cell x y)) (range 0 w))) (range 0 h))))
+
+(defun grid-shape (grid) (car grid))
+(defun grid-board (grid) (cadr grid))
+
+(defun wrap-around (n size) (% (+ n size) size))
+
+(defun grid-cell-at (x y grid)
+    (let shape (grid-shape grid))
+    (nth (wrap-around y (cadr shape)) (nth (wrap-around x (car shape)) (grid-board grid))))
+
+(defun glider-cell (x y)
+    (list x y (cond
+        ((member? (list x y) '((0 1) (1 2) (2 0) (2 1) (2 2))) :LIVE)
+        (#true :DEAD))))
+
+(defun get-cell-neighbors (cell grid)
+    (let x (car  cell))
+    (let y (cadr cell))
+    (map
+        (lambda (pair) (grid-cell-at (+ x (car pair)) (+ y (cadr pair)) grid))
+        '((-1 0) (-1 1) (0 1) (1 1) (1 0) (1 -1) (0 -1) (-1 -1))))
+
+(defun apply-rules (cell n)
+    (list
+        (car  cell)
+        (cadr cell)
+        (cond
+            ((eq? (caddr cell) :LIVE)
+                (cond
+                    ((< n 2) :DEAD)
+                    ((> n 3) :DEAD)
+                    (#true   :LIVE)))
+            (#true
+                (cond
+                    ((== n 3) :LIVE)
+                    (#true    :DEAD))))))
+
+(defun count-living-neighbors (neighbors)
+    (fold/l 0 (lambda (acc neighbor)
+        (cond
+            ((eq? (caddr neighbor) :LIVE) (+ acc 1))
+            (#true                        acc)))
+        neighbors))
+
+(defun tick (grid)
+    (list
+        (grid-shape grid)
+        (map (lambda (row)
+            (map (lambda (cell)
+                (apply-rules cell (count-living-neighbors (get-cell-neighbors cell grid))))
+                row))
+            (grid-board grid))))
+
+(defun display-grid (grid gen)
+    (tty/write "generation " gen \n)
+    (map (lambda (row)
+        (tty/write (str-join "" (map (lambda (c) (cond ((eq? (caddr c) :LIVE) "@") (#true "_"))) row)) \n))
+        (grid-board grid)))
+
+(defun run-n-generations (n grid gen)
+    (cond
+        ((== n 0) gen)
+        (#true
+            (display-grid grid gen)
+            (run-n-generations (- n 1) (tick grid) (+ gen 1)))))
+
+(run-n-generations 4 (init-grid 6 8 glider-cell) 0)

@@ -1,0 +1,2 @@
+fault: not a function: 5 (call at t/097-not-a-function.slight:2:1)
+exit: 1

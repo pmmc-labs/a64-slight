@@ -14,15 +14,21 @@
 // between Mach-O and ELF stay in one header, and rt.h's constants (RT_TRUE,
 // RT_FAULT_OVERFLOW, ...) can be used by name.
 //
-// So far (docs/PLAN.md, steps 1-5): integers, floats, #true/#false, (),
+// So far (docs/PLAN.md, steps 1-6): integers, floats, #true/#false, (),
 // symbols, lists (cons cells bump-allocated in the process's heap, or
-// static data when quoted), strings, the numeric, list and string
-// primitives, eq?/ne?, type predicates, cond, let, do, pprint, defun and
-// calls. Floats and strings are boxes; their literals are static data. The
+// static data when quoted), strings, closures, the numeric, list and
+// string primitives, eq?/ne?, type predicates, cond, let, do, pprint,
+// defun, lambda, apply, and calls. Floats, strings and closures are boxes;
+// literals, and closures that capture nothing, are static data. The
 // top-level forms that aren't defuns are the body of slight_main.
+//
+// The prelude (lib/prelude.slight) is compiled with every program. Its
+// functions are in their own namespace: a program can define a function
+// with a prelude name, and then its code uses its own definition while the
+// prelude keeps using the prelude's (D80).
 
 import { CompileError } from './errors.ts';
-import { float, list, NIL, posOf, show, str, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { float, list, NIL, posOf, show, str, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { intWord, RESERVED_SYMBOLS, symbolWord } from './values.ts';
 
 // Lines of assembly, as a tree, so that joining pieces is cheap. flatten()
@@ -34,7 +40,8 @@ type Code = string | readonly Code[];
 type Env = { readonly name: string; readonly slot: number; readonly next: Env } | null;
 
 // The top-level functions: an association list from name to label and arity.
-type Fn  = { readonly name: string; readonly label: string; readonly arity: number };
+type Module = 'user' | 'prelude';
+type Fn  = { readonly name: string; readonly label: string; readonly arity: number; readonly module: Module };
 type Fns = { readonly fn: Fn; readonly next: Fns } | null;
 
 // Where an expression is being compiled: the functions and locals it can
@@ -57,6 +64,8 @@ type St = {
     readonly stubs: Code;
     readonly data: Code;
     readonly consts: Code;
+    readonly lambdas: Code;                 // functions compiled along the way: lambdas, builtin wrappers
+    readonly closures: readonly string[];   // functions whose static closure has been emitted
 };
 
 const MAX_ARGS = 8;     // x0..x7
@@ -68,36 +77,48 @@ const EPILOGUE: Code = ['    mov  sp, x29', '    ldp  x29, x30, [sp], #16'];
 
 // --- the program ------------------------------------------------------------
 
-export function compileProgram(forms: Sexp): string {
-    const all     = toArray(forms)!;
-    const defuns  = all.filter((f) => isForm(f, 'defun')).map((f) => checkDefun(f as Pair));
-    const fns     = defuns.reduce<Fns>(declare, null);
-    const top     = all.filter((f) => !isForm(f, 'defun'));
-    const empty: St = { labels: 0, slots: 0, symbols: null, stubs: [], data: [], consts: [] };
+export function compileProgram(forms: Sexp, prelude: Sexp = NIL): string {
+    const preludeForms = toArray(prelude)!;
+    preludeForms.forEach((f) => {
+        if (!isForm(f, 'defun')) throw new CompileError(`the prelude can only define functions, not ${show(f)}`, posOf(f));
+    });
+    const preludeDefuns = preludeForms.map((f) => checkDefun(f as Pair));
+    const preludeFns    = preludeDefuns.reduce<Fns>((fns, d) => declare(fns, d, 'prelude'), null);
+
+    const all    = toArray(forms)!;
+    const defuns = all.filter((f) => isForm(f, 'defun')).map((f) => checkDefun(f as Pair));
+    const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user'), preludeFns);
+    const top    = all.filter((f) => !isForm(f, 'defun'));
+    const empty: St = { labels: 0, slots: 0, symbols: null, stubs: [], data: [], consts: [], lambdas: [], closures: [] };
     const st0 = RESERVED_SYMBOLS.reduce((st, name) => symbolId(st, name)[1], empty);
 
-    const [code, st1] = defuns.reduce<[Code, St]>(([acc, st], d) => {
-        const [c, s] = compileFunction(lookupFn(fns, d.name.name)!.label, d, fns, st);
-        return [[acc, c], s];
-    }, [[], st0]);
+    const compileAll = (ds: readonly Defun[], visible: Fns, module: Module, st: St): [Code, St] =>
+        ds.reduce<[Code, St]>(([acc, s], d) => {
+            const [c, s1] = compileFunction(findFn(visible, d.name.name, module)!.label, d, [], visible, s);
+            return [[acc, c], s1];
+        }, [[], st]);
+    const [preludeCode, st1] = compileAll(preludeDefuns, preludeFns, 'prelude', st0);
+    const [code, st2]        = compileAll(defuns, fns, 'user', st1);
     const main: Defun = { name: { t: 'sym', name: 'the top level', pos: null }, params: [], body: list(...top, ...(top.length === 0 ? [NIL] : [])), pos: null };
-    const [mainCode, st2] = compileFunction('slight_main', main, fns, st1);
+    const [mainCode, st3] = compileFunction('slight_main', main, [], fns, st2);
 
     return flatten([
         '// generated by slightc -- do not edit',
         '#include "asm.h"',
         '',
         '    .text',
+        preludeCode,
         code,
+        st3.lambdas,
         mainCode,
-        st2.stubs,
+        st3.stubs,
         '',
         '    RODATA',
-        st2.data,
-        symbolTable(st2.symbols),
+        st3.data,
+        symbolTable(st3.symbols),
         '',
         '    CONSTDATA',
-        st2.consts,
+        st3.consts,
     ]).join('\n') + '\n';
 }
 
@@ -129,8 +150,12 @@ function checkDefun(x: Pair): Defun {
     if (name.t !== 'sym') throw new CompileError(`defun needs a name, not ${show(name)}`, posOf(name) ?? x.pos);
     checkBindable(name);
     if (isBuiltin(name.name)) throw new CompileError(`can't define ${name.name}: it's a builtin`, name.pos);
+    return { name, params: checkParams(name.name, params, x, name.pos), body: list(...items.slice(3)), pos: x.pos };
+}
+
+function checkParams(owner: string, params: Sexp, x: Pair, ownerPos: Pos | null): readonly Sym[] {
     const ps = toArray(params);
-    if (ps === null) throw new CompileError(`${name.name}'s parameters must be a list, not ${show(params)}`, posOf(params) ?? x.pos);
+    if (ps === null) throw new CompileError(`${owner}'s parameters must be a list, not ${show(params)}`, posOf(params) ?? x.pos);
     const syms = ps.map((p) => {
         if (p.t !== 'sym') throw new CompileError(`a parameter must be a name, not ${show(p)}`, posOf(p) ?? x.pos);
         checkBindable(p);
@@ -140,24 +165,37 @@ function checkDefun(x: Pair): Defun {
         if (syms.findIndex((q) => q.name === p.name) !== i) throw new CompileError(`${p.name} is a parameter twice`, p.pos);
     });
     if (syms.length > MAX_ARGS) {
-        throw new CompileError(`${name.name} has ${syms.length} parameters; the most is ${MAX_ARGS}`, name.pos);
+        throw new CompileError(`${owner} has ${syms.length} parameters; the most is ${MAX_ARGS}`, ownerPos ?? x.pos);
     }
-    return { name, params: syms, body: list(...items.slice(3)), pos: x.pos };
+    return syms;
 }
 
-function declare(fns: Fns, d: Defun): Fns {
-    if (lookupFn(fns, d.name.name) !== null) throw new CompileError(`${d.name.name} is already defined`, d.name.pos);
-    return { fn: { name: d.name.name, label: functionLabel(d.name.name), arity: d.params.length }, next: fns };
+// A program's functions are declared on top of the prelude's, so they
+// shadow them; only a second definition in the same module is an error.
+function declare(fns: Fns, d: Defun, module: Module): Fns {
+    const existing = lookupFn(fns, d.name.name);
+    if (existing !== null && existing.module === module) throw new CompileError(`${d.name.name} is already defined`, d.name.pos);
+    const label = module === 'user' ? functionLabel(d.name.name) : `pf_${functionLabel(d.name.name).slice(3)}`;
+    return { fn: { name: d.name.name, label, arity: d.params.length, module }, next: fns };
+}
+
+function findFn(fns: Fns, name: string, module: Module): Fn | null {
+    for (; fns !== null; fns = fns.next) if (fns.fn.name === name && fns.fn.module === module) return fns.fn;
+    return null;
 }
 
 // The frame: x29/x30 on top, then the slots, addressed up from sp. The
-// parameters go to the first slots straight away. Then two checks, which
-// every call and every tail call passes through: is there room on the
-// stack, and are this process's reductions used up?
-function compileFunction(entry: string, d: Defun, fns: Fns, st: St): [Code, St] {
-    const env = d.params.reduce<Env>((e, p, i) => ({ name: p.name, slot: i, next: e }), null);
-    const cx: Cx = { fns, env, si: d.params.length, tail: true };
-    const [body, st1] = compileBody(d.body, cx, { ...st, slots: d.params.length });
+// parameters go to the first slots straight away, then a closure's
+// captured values (`free`) from the closure in x9, so inside the body
+// they're all just locals. Then two checks, which every call and every
+// tail call passes through: is there room on the stack, and are this
+// process's reductions used up? (x9 is gone after rt_preempt, hence the
+// order.)
+function compileFunction(entry: string, d: Defun, free: readonly string[], fns: Fns, st: St): [Code, St] {
+    const locals = [...d.params.map((p) => p.name), ...free];
+    const env = locals.reduce<Env>((e, name, i) => ({ name, slot: i, next: e }), null);
+    const cx: Cx = { fns, env, si: locals.length, tail: true };
+    const [body, st1] = compileBody(d.body, cx, { ...st, slots: locals.length });
     const size = 16 * Math.ceil(st1.slots / 2);
     if (size > 4095) throw new CompileError(`${d.name.name} needs too many frame slots (${st1.slots})`, d.pos);
     const [overflow, st2] = faultLabel(st1, 'RT_FAULT_STACK', d.name.name, d.pos);
@@ -173,6 +211,10 @@ function compileFunction(entry: string, d: Defun, fns: Fns, st: St): [Code, St] 
         '    cmp  sp, x16',
         `    b.lo ${overflow}`,
         d.params.map((p, i) => `    str  x${i}, ${slot(i)}    // ${p.name}`),
+        free.map((name, i) => [
+            closureField('x16', 'x9', `RT_CLOSURE_FREE + ${8 * i}`, 29 + 8 * i),
+            `    str  x16, ${slot(d.params.length + i)}    // ${name}`,
+        ]),
         '    ldr  x16, [x28, #RT_PROC_REDUCTIONS]',
         '    subs x16, x16, #1',
         '    str  x16, [x28, #RT_PROC_REDUCTIONS]',
@@ -283,7 +325,9 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     if (si !== null) return [`    ldr  x0, ${slot(si)}    // ${x.name}`, st];
     const constant = CONSTANTS[x.name];
     if (constant !== undefined) return compileExpr(constant, cx, st);
-    if (lookupFn(cx.fns, x.name) !== null) throw new CompileError(`functions as values aren't supported yet: ${x.name}`, x.pos);
+    const fn = lookupFn(cx.fns, x.name);
+    if (fn !== null) return loadClosure(staticClosure(fn.label, fn.arity, fn.name, st));
+    if (isBuiltin(x.name)) return loadClosure(builtinWrapper(x, st));
     throw new CompileError(`unknown name '${x.name}'`, x.pos);
 }
 
@@ -317,7 +361,8 @@ function loadFloat(v: number, st: St): [Code, St] {
 function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     const head = x.car;
     const args = toArray(x.cdr)!;
-    if (head.t !== 'sym') throw notYet(x);
+    if (head.t === 'pair') return compileClosureCall(x, head, args, cx, st);
+    if (head.t !== 'sym') throw new CompileError(`${show(head)} isn't a function`, posOf(head) ?? x.pos);
     switch (head.name) {
         case 'cond':
             return compileCond(x, args, cx, st);
@@ -330,9 +375,12 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             throw new CompileError('defun is only allowed at the top level', x.pos);
         case 'quote':
             return compileQuote(x, args, cx, st);
+        case 'lambda':
+            return compileLambda(x, cx, st);
     }
     if (SPECIAL_FORMS.includes(head.name)) throw notYet(x);
-    if (lookup(cx.env, head.name) !== null) throw notYet(x);   // calling a local: closures, step 6
+    if (lookup(cx.env, head.name) !== null) return compileClosureCall(x, head, args, cx, st);
+    if (head.name === 'apply') return compileApply(x, args, cx, st);
     const operand: Cx = { ...cx, tail: false };
     if (head.name === 'pprint') {
         checkArity(x, 'pprint', args, 1);
@@ -378,6 +426,192 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
 }
 
 const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;
+
+// --- closures -----------------------------------------------------------------
+
+// A closure is a box: the header (how many values it captured, and the
+// closure type), the code, the arity, the name (for printing), then the
+// captured values.
+
+// reg = the closure field at `offset` (rt.h's name for it, and its value)
+// from the closure value in base.
+function closureField(reg: string, base: string, name: string, offset: number): Code {
+    return offset <= 255 ? `    ldur ${reg}, [${base}, #${name}]` : [`    add  ${reg}, ${base}, #${offset}`, `    ldr  ${reg}, [${reg}]`];
+}
+
+// A closure that captures nothing, in the constant data: one per function.
+function staticClosure(code: string, arity: number, name: string, st: St): [string, St] {
+    const closure = `${code}_closure`;
+    if (st.closures.includes(closure)) return [closure, st];
+    const [nameLabel, st1] = cString(name, st);
+    const box = [
+        '    .p2align 4',
+        `${closure}:`,
+        '    .quad 0 << RT_BOX_SIZE_SHIFT | RT_BOX_CLOSURE',
+        `    .quad ${code}, ${arity}, ${nameLabel}`,
+    ];
+    return [closure, { ...st1, consts: [st1.consts, box], closures: [...st1.closures, closure] }];
+}
+
+function loadClosure([closure, st]: [string, St]): [Code, St] {
+    return [[`    LOADADDR x0, ${closure}`, '    orr  x0, x0, #RT_TAG_BOXED'], st];
+}
+
+function cString(text: string, st: St): [string, St] {
+    const [name, st1] = label(st, 'name');
+    return [name, { ...st1, data: [st1.data, `${name}:`, `    .asciz ${asmString(text)}`] }];
+}
+
+// (lambda (params...) body...): the body becomes a function of its own,
+// and the lambda's value is a closure over it, carrying the values of the
+// enclosing locals the body uses. Lambdas capture by value, and can't
+// refer to themselves (D11).
+function compileLambda(x: Pair, cx: Cx, st: St): [Code, St] {
+    const items = toArray(x)!;
+    if (items.length < 3) throw new CompileError('lambda is (lambda (params...) body...)', x.pos);
+    const params = checkParams('lambda', items[1]!, x, x.pos);
+    const body   = list(...items.slice(2));
+    const free   = freeVars(body, params.map((p) => p.name), cx.env);
+    const where  = x.pos === null ? 'lambda' : `lambda at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
+    const [entry, st1] = label(st, 'lambda');
+    const d: Defun = { name: { t: 'sym', name: where, pos: x.pos }, params, body, pos: x.pos };
+    const [code, st2]  = compileFunction(entry, d, free, cx.fns, st1);
+    const st3: St = { ...st2, slots: st.slots, lambdas: [st2.lambdas, code] };
+    if (free.length === 0) return loadClosure(staticClosure(entry, params.length, where, st3));
+
+    const [nameLabel, st4] = cString(where, st3);
+    const [full, st5]      = faultLabel(st4, 'RT_FAULT_HEAP', 'lambda', x.pos);
+    return [[
+        alloc(32 + 8 * free.length, full),
+        `    mov  x3, #${free.length} << RT_BOX_SIZE_SHIFT | RT_BOX_CLOSURE`,
+        `    LOADADDR x4, ${entry}`,
+        '    stp  x3, x4, [x2]',
+        `    mov  x3, #${params.length}`,
+        `    LOADADDR x4, ${nameLabel}`,
+        '    stp  x3, x4, [x2, #16]',
+        free.map((name, i) => [`    ldr  x3, ${slot(lookup(cx.env, name)!)}    // ${name}`, `    str  x3, [x2, #${32 + 8 * i}]`]),
+        '    orr  x0, x2, #RT_TAG_BOXED',
+    ], st5];
+}
+
+// The enclosing locals (outer) that a lambda's body uses, in order of
+// first use: everything its closure has to carry. bound are the names the
+// body binds itself, which hide outer ones.
+function freeVars(body: Sexp, bound: readonly string[], outer: Env): readonly string[] {
+    const found: string[] = [];
+    const use = (name: string, b: readonly string[]): void => {
+        if (!b.includes(name) && !found.includes(name) && lookup(outer, name) !== null) found.push(name);
+    };
+    const scanBody = (forms: Sexp, b: readonly string[]): void => {
+        for (; forms.t === 'pair'; forms = forms.cdr) {
+            const form = forms.car;
+            if (isForm(form, 'let') && form.t === 'pair') {
+                const [, name, expr] = toArray(form) ?? [];
+                if (expr !== undefined) scan(expr, b);
+                if (name !== undefined && name.t === 'sym') b = [...b, name.name];
+            } else {
+                scan(form, b);
+            }
+        }
+    };
+    const scan = (x: Sexp, b: readonly string[]): void => {
+        if (x.t === 'sym') return use(x.name, b);
+        if (x.t !== 'pair') return;
+        const head = x.car;
+        if (head.t === 'sym' && head.name === 'quote') return;
+        if (head.t === 'sym' && head.name === 'lambda') {
+            const params = x.cdr.t === 'pair' ? toArray(x.cdr.car) ?? [] : [];
+            const names  = params.filter((p) => p.t === 'sym').map((p) => (p as Sym).name);
+            if (x.cdr.t === 'pair') scanBody(x.cdr.cdr, [...b, ...names]);
+            return;
+        }
+        if (head.t === 'sym' && head.name === 'cond') {
+            for (let c = x.cdr; c.t === 'pair'; c = c.cdr) {
+                if (c.car.t === 'pair') {
+                    scan(c.car.car, b);
+                    scanBody(c.car.cdr, b);
+                }
+            }
+            return;
+        }
+        if (head.t === 'sym' && head.name === 'do') return scanBody(x.cdr, b);
+        for (let e: Sexp = x; e.t === 'pair'; e = e.cdr) scan(e.car, b);
+    };
+    scanBody(body, bound);
+    return found;
+}
+
+// A call through a value: the function (head) waits in slot si and the
+// arguments above it. It must be a closure that takes this many
+// arguments. The closure goes in x9 for its code to find its captured
+// values; in tail position the frame comes down first, as for any call.
+function compileClosureCall(x: Pair, head: Sexp, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    if (args.length > MAX_ARGS) throw new CompileError(`a call can pass at most ${MAX_ARGS} arguments`, x.pos);
+    const [fn, st1] = compileExpr(head, { ...cx, tail: false }, st);
+    const [code, st2] = args.reduce<[Code, St]>(([acc, s], arg, i) => {
+        const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + 1 + i, tail: false }, s);
+        return [[acc, c, `    str  x0, ${slot(cx.si + 1 + i)}`], useSlot(s1, cx.si + 1 + i)];
+    }, [[], useSlot(st1, cx.si)]);
+    const plural = args.length === 1 ? '' : 's';
+    const [notFn, st3] = faultLabel(st2, 'RT_FAULT_NOT_FUNC', 'call', x.pos);
+    const [arity, st4] = faultLabel(st3, 'RT_FAULT_ARITY', `call with ${args.length} argument${plural}`, x.pos);
+    return [[
+        fn, `    str  x0, ${slot(cx.si)}`,
+        code,
+        `    ldr  x0, ${slot(cx.si)}`,
+        '    and  x16, x0, #RT_TAG_MASK',
+        '    cmp  x16, #RT_TAG_BOXED',
+        `    b.ne ${notFn}`,
+        '    ldur x16, [x0, #-RT_TAG_BOXED]',
+        '    and  x16, x16, #RT_BOX_TYPE_MASK',
+        '    cmp  x16, #RT_BOX_CLOSURE',
+        `    b.ne ${notFn}`,
+        '    ldur x16, [x0, #RT_CLOSURE_ARITY]',
+        `    cmp  x16, #${args.length}`,
+        `    b.ne ${arity}`,
+        '    mov  x9, x0',
+        args.map((_, i) => `    ldr  x${i}, ${slot(cx.si + 1 + i)}`),
+        '    ldur x16, [x9, #RT_CLOSURE_CODE]',
+        cx.tail ? [EPILOGUE, '    br   x16    // tail call'] : '    blr  x16',
+    ], st4];
+}
+
+// (apply f xs): rt_apply spreads xs into the argument registers and jumps
+// to f, so in tail position this is a tail call too.
+function compileApply(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    checkArity(x, 'apply', args, 2);
+    const [f, st1]    = compileExpr(args[0]!, { ...cx, tail: false }, st);
+    const [xs, st2]   = compileExpr(args[1]!, { ...cx, si: cx.si + 1, tail: false }, useSlot(st1, cx.si));
+    const [site, st3] = siteLabel(st2, 'apply', x.pos);
+    return [[
+        f, `    str  x0, ${slot(cx.si)}`,
+        xs,
+        '    mov  x1, x0',
+        `    ldr  x0, ${slot(cx.si)}`,
+        `    LOADADDR x2, ${site}`,
+        cx.tail ? [EPILOGUE, '    b    rt_apply    // tail call'] : '    bl   rt_apply',
+    ], st3];
+}
+
+// A builtin used as a value, like (map car xs): a small function that
+// calls it, compiled the first time it's needed, and its closure.
+function builtinWrapper(x: Sym, st: St): [string, St] {
+    const arity = builtinArity(x.name);
+    if (arity === null) throw new CompileError(`${x.name} can't be used as a value: it takes a varying number of arguments`, x.pos);
+    const entry = `bi_${functionLabel(x.name).slice(3)}`;
+    if (st.closures.includes(`${entry}_closure`)) return [`${entry}_closure`, st];
+    const params = [...Array(arity).keys()].map((i) => sym(`a${i}`, x.pos));
+    const d: Defun = { name: x, params, body: list(list(x, ...params)), pos: x.pos };
+    const [code, st1] = compileFunction(entry, d, [], null, st);
+    return staticClosure(entry, arity, x.name, { ...st1, slots: st.slots, lambdas: [st1.lambdas, code] });
+}
+
+function builtinArity(name: string): number | null {
+    if (name in ARITH || name in COMPARE || name in DIVISION || ['eq?', 'ne?', 'cons', 'apply'].includes(name)) return 2;
+    if (name in PREDICATES || name === 'pprint' || cxrPath(name) !== null) return 1;
+    const c = C_BUILTINS[name];
+    return c !== undefined && !c.variadic && c.min === c.max ? c.min : null;
+}
 
 // A constant. Symbols are their compile-time ids; integers and () quote
 // to themselves; a quoted list is static data, shared by every process and
@@ -553,11 +787,12 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'cos':            fixed('rt_cos', 1),
     'tan':            fixed('rt_tan', 1),
     'exp':            fixed('rt_exp', 1),
+    'lambda?':        fixed('rt_is_lambda', 1),
 };
 
 // The names a defun can't take.
 const BUILTINS: readonly string[] = [
-    'pprint', 'eq?', 'ne?', 'cons', 'list',
+    'pprint', 'eq?', 'ne?', 'cons', 'list', 'apply',
     ...[ARITH, COMPARE, DIVISION, PREDICATES, C_BUILTINS].flatMap((table) => Object.keys(table)),
 ];
 
@@ -818,7 +1053,8 @@ function label(st: St, hint: string): [string, St] {
 }
 
 type Fault = 'RT_FAULT_NOT_INT' | 'RT_FAULT_OVERFLOW' | 'RT_FAULT_NOT_BOOL' | 'RT_FAULT_NO_CLAUSE' | 'RT_FAULT_STACK'
-           | 'RT_FAULT_NOT_CONS' | 'RT_FAULT_NOT_LIST' | 'RT_FAULT_HEAP' | 'RT_FAULT_DIV_ZERO';
+           | 'RT_FAULT_NOT_CONS' | 'RT_FAULT_NOT_LIST' | 'RT_FAULT_HEAP' | 'RT_FAULT_DIV_ZERO'
+           | 'RT_FAULT_NOT_FUNC' | 'RT_FAULT_ARITY';
 
 // A label to branch to when `what`, at `pos`, goes wrong: an out-of-line
 // call to rt_fault, with the offending value (if any) in x0.

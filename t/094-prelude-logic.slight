@@ -1,0 +1,12 @@
+(pprint (not #true))
+(pprint (not #false))
+(pprint (and #true #true))
+(pprint (and #true #false))
+(pprint (and #false #true))
+(pprint (and #false #false))
+(pprint (or #true #false))
+(pprint (or #false #true))
+(pprint (or #false #false))
+(pprint (or #true #true))
+; not short-circuiting: both sides run
+(and (do (pprint 1) #false) (do (pprint 2) #true))

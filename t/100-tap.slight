@@ -1,0 +1,8 @@
+; with: lib/test.slight
+(run-tests (list
+    (ok (< 1 2) "one is less than two")
+    (is (+ 1 1) 2 "addition")
+    (diag "a comment")
+    (is (list 1 "two") (list 1 "two") "lists")
+    (ok (> 1 2) "this one fails")
+    (is (+ 1 1) 3 "so does this")))

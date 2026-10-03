@@ -1,0 +1,11 @@
+; fib, from ts-slight's examples. Changes: if became cond; there's no
+; @ARGV or time-it, so n is fixed.
+
+(defun fib (n)
+    (cond
+        ((< n 2) n)
+        (#true   (+ (fib (- n 1)) (fib (- n 2))))))
+
+(let n 25)
+(tty/write "fib(" n ") = ")
+(fib n)

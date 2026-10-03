@@ -75,8 +75,8 @@ test("a program with no top-level expressions has the value ()", () => {
 test('what isn\'t built yet is an error, with a position', () => {
     assert.throws(() => compile('42\n  (fork 1)'), (e: unknown) =>
         e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: (fork 1)');
-    assert.throws(() => compile('(lambda (x) x)'), (e: unknown) =>
-        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (lambda (x) x)');
+    assert.throws(() => compile('(recv)'), (e: unknown) =>
+        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (recv)');
 });
 
 const fails = (src: string, message: string): void => {
@@ -114,8 +114,8 @@ test('do needs a form', () => {
     fails('(do)', 'test.slight:1:1: do needs at least one form');
 });
 
-test('locals can shadow builtins, but calling a local is not built yet', () => {
-    fails('(let pprint 1) (pprint 2)', 'test.slight:1:16: not supported yet: (pprint 2)');
+test('a local that shadows a builtin is called as a closure', () => {
+    assert.match(compile('(let pprint (lambda (x) x)) (pprint 2)'), /ldur x16, \[x9, #RT_CLOSURE_CODE\]/);
 });
 
 test('a slot is reused once the value in it is dead', () => {
@@ -159,7 +159,7 @@ test('defun is only allowed at the top level', () => {
 test('calls are checked against the function', () => {
     fails('(defun f (x) x) (f 1 2)', 'test.slight:1:17: f takes 1 argument, not 2');
     fails('(defun f (x y) x) (f)', 'test.slight:1:19: f takes 2 arguments, not 0');
-    fails('(defun f () 1) f', "test.slight:1:16: functions as values aren't supported yet: f");
+    assert.match(compile('(defun f () 1) f'), /LOADADDR x0, fn_f_closure/);
 });
 
 test("a defun can't see the top level's lets", () => {
@@ -348,5 +348,75 @@ test('the math builtins are builtins', () => {
     }
     fails('(sqrt 1 2)', 'test.slight:1:1: sqrt takes 1 argument, not 2');
     fails('(div 1)', 'test.slight:1:1: div takes 2 arguments, not 1');
+});
+
+// --- closures and the prelude -------------------------------------------------
+
+const compileWith = (src: string, prelude: string): string =>
+    compileProgram(read(src, 'test.slight'), read(prelude, 'prelude.slight'));
+
+test('a lambda that captures nothing is a static closure', () => {
+    const asm = compile('(lambda (x) x)');
+    assert.match(asm, /Llambda_\d+_closure:\n {4}\.quad 0 << RT_BOX_SIZE_SHIFT \| RT_BOX_CLOSURE\n {4}\.quad Llambda_\d+, 1, Lname_\d+/);
+    assert.doesNotMatch(asm, /RT_PROC_HEAP_PTR/);
+    // a parameter hides an outer local of the same name
+    assert.doesNotMatch(compile('(let x 1) (lambda (x) x)'), /RT_PROC_HEAP_PTR/);
+});
+
+test('a lambda that captures is allocated, with its values in order of first use', () => {
+    const asm = compile('(let a 1) (let b 2) (lambda () (+ b a))');
+    assert.match(asm, /mov {2}x3, #2 << RT_BOX_SIZE_SHIFT \| RT_BOX_CLOSURE/);
+    assert.match(asm, /ldr {2}x3, \[sp, #8\] {4}\/\/ b\n {4}str {2}x3, \[x2, #32\]\n {4}ldr {2}x3, \[sp, #0\] {4}\/\/ a\n {4}str {2}x3, \[x2, #40\]/);
+    // inside, they're copied out of the closure (x9) into the frame
+    assert.match(asm, /ldur x16, \[x9, #RT_CLOSURE_FREE \+ 0\]\n {4}str {2}x16, \[sp, #0\] {4}\/\/ b/);
+    assert.match(asm, /ldur x16, \[x9, #RT_CLOSURE_FREE \+ 8\]\n {4}str {2}x16, \[sp, #8\] {4}\/\/ a/);
+});
+
+test('a nested lambda makes its outer lambda capture too', () => {
+    const asm = compile('(let k 1) (lambda (a) (lambda (b) (+ a (+ b k))))');
+    assert.match(asm, /mov {2}x3, #1 << RT_BOX_SIZE_SHIFT \| RT_BOX_CLOSURE/);    // the outer captures k
+    assert.match(asm, /mov {2}x3, #2 << RT_BOX_SIZE_SHIFT \| RT_BOX_CLOSURE/);    // the inner a and k
+});
+
+test('a call through a value checks it, puts it in x9, and tail-calls with br', () => {
+    const asm = compile('(defun f (g) (g 1)) (f f)');
+    assert.match(asm, /cmp {2}x16, #RT_BOX_CLOSURE\n {4}b\.ne Lfault_\d+\n {4}ldur x16, \[x0, #RT_CLOSURE_ARITY\]\n {4}cmp {2}x16, #1/);
+    assert.match(asm, /mov {2}x9, x0\n {4}ldr {2}x0, \[sp, #\d+\]\n {4}ldur x16, \[x9, #RT_CLOSURE_CODE\]\n {4}mov {2}sp, x29\n {4}ldp {2}x29, x30, \[sp\], #16\n {4}br {3}x16/);
+    assert.match(compile('(defun f (g) (+ 1 (g 1))) (f f)'), /blr {2}x16/);
+    fails('(5 1)', "test.slight:1:2: 5 isn't a function");
+});
+
+test('apply in tail position is a jump to rt_apply', () => {
+    assert.match(compile('(apply car (list 1))'), /b {4}rt_apply {4}\/\/ tail call/);
+    assert.match(compile('(+ 1 (apply car (list 1)))'), /bl {3}rt_apply/);
+    fails('(apply car)', 'test.slight:1:1: apply takes 2 arguments, not 1');
+});
+
+test('a builtin used as a value is a small wrapper function', () => {
+    const asm = compile('(let f car) (let g car) (f (list 1))');
+    assert.match(asm, /bi_car:\n|bi_car: {4}\/\/ car/);
+    assert.equal(asm.split('bi_car_closure:').length, 2);       // made once
+    fails('(let f list)', "test.slight:1:8: list can't be used as a value: it takes a varying number of arguments");
+    fails('(let f format-num)', "test.slight:1:8: format-num can't be used as a value: it takes a varying number of arguments");
+});
+
+test('lambda is (lambda (params...) body...)', () => {
+    fails('(lambda (x))', 'test.slight:1:1: lambda is (lambda (params...) body...)');
+    fails('(lambda x x)', "test.slight:1:9: lambda's parameters must be a list, not x");
+    fails('(lambda (x x) x)', 'test.slight:1:12: x is a parameter twice');
+});
+
+test("the prelude's functions are in their own namespace", () => {
+    const prelude = '(defun twice (x) (* 2 x)) (defun quad (x) (twice (twice x)))';
+    const asm = compileWith('(defun twice (x) x) (twice (quad 1))', prelude);
+    assert.match(asm, /pf_twice: {4}\/\/ twice/);
+    assert.match(asm, /fn_twice: {4}\/\/ twice/);
+    // the prelude's quad calls the prelude's twice; the program calls its own
+    assert.match(asm.slice(asm.indexOf('pf_quad:')), /bl {3}pf_twice/);
+    assert.match(asm.slice(asm.indexOf('FUNC slight_main')), /bl {3}pf_quad[^]*b {4}fn_twice/);
+    assert.throws(() => compileWith('(defun quad (x) x) (defun quad (x) x)', prelude),
+        (e: unknown) => e instanceof CompileError && /quad is already defined/.test(e.message));
+    assert.throws(() => compileWith('1', '(pprint 1)'),
+        (e: unknown) => e instanceof CompileError && /the prelude can only define functions/.test(e.message));
 });
 

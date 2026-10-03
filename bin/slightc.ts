@@ -26,6 +26,7 @@ import { read } from '../compiler/src/reader.ts';
 import { NIL, append, type Sexp } from '../compiler/src/sexp.ts';
 
 const RUNTIME_DIR = fileURLToPath(new URL('../runtime/', import.meta.url));
+const PRELUDE     = fileURLToPath(new URL('../lib/prelude.slight', import.meta.url));
 const RUNTIME_SRC = ['rt.c', 'strings.c', 'numbers.c', 'rt_asm.S'].map((f) => join(RUNTIME_DIR, f));
 const CFLAGS      = ['-O2', '-g', '-std=gnu11', '-Wall', '-Wextra', '-I', RUNTIME_DIR];
 
@@ -74,7 +75,7 @@ function main(): void {
     let asm: string;
     try {
         const forms = opts.files.reduce<Sexp>((acc, file) => append(acc, read(readSource(file), file)), NIL);
-        asm = compileProgram(forms);
+        asm = compileProgram(forms, read(readSource(PRELUDE), 'lib/prelude.slight'));
     } catch (e) {
         if (!(e instanceof CompileError)) throw e;
         process.stderr.write(`${e.message}\n`);

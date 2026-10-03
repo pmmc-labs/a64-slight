@@ -1,0 +1,8 @@
+; a call through a closure in tail position is a tail call too: this loops
+; a million times through a closure that's passed itself
+(let spin (lambda (self n)
+    (cond
+        ((== n 0) :done)
+        (#true    (self self (- n 1))))))
+
+(spin spin 1000000)

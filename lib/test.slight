@@ -1,0 +1,56 @@
+; A TAP test library, after ts-slight's lib/Test.slight. Not part of the
+; prelude: compile it in when you want it (node bin/slightc.ts lib/test.slight
+; your-tests.slight). A test is a function of the counts so far, (n
+; failed), that prints its result and returns the new counts; run-tests
+; runs a list of them, prints the plan, and returns #true if all passed.
+;
+;     (run-tests (list
+;         (ok (< 1 2) "one is less than two")
+;         (is (+ 1 1) 2 "addition")
+;         (diag "a comment")))
+
+(defun run-tests (tests) (run-tests-loop tests 0 0))
+
+(defun run-tests-loop (tests n failed)
+    (cond
+        ((nil? tests) (done-testing n failed))
+        (#true
+            (let counts ((car tests) n failed))
+            (run-tests-loop (cdr tests) (car counts) (cadr counts)))))
+
+(defun done-testing (n failed)
+    (tty/write "1.." n \n)
+    (cond
+        ((== failed 0) #true)
+        (#true
+            (tty/write "# Looks like you failed " failed " test" (cond ((== failed 1) "") (#true "s")) " of " n "." \n)
+            #false)))
+
+; Passes if test is #true.
+(defun ok (test msg)
+    (lambda (n failed)
+        (cond
+            (test
+                (tty/write "ok " (+ n 1) " - " msg \n)
+                (list (+ n 1) failed))
+            (#true
+                (tty/write "not ok " (+ n 1) " - " msg \n)
+                (list (+ n 1) (+ failed 1))))))
+
+; Passes if got and expected are eq?; if not, shows both.
+(defun is (got expected msg)
+    (lambda (n failed)
+        (let counts ((ok (eq? got expected) msg) n failed))
+        (cond
+            ((eq? got expected) counts)
+            (#true
+                (tty/write "#          got: ")
+                (pprint got)
+                (tty/write "#     expected: ")
+                (pprint expected)
+                counts))))
+
+(defun diag (msg)
+    (lambda (n failed)
+        (tty/write "# " msg \n)
+        (list n failed)))

@@ -1,0 +1,171 @@
+; The prelude: compiled with every program. It can only define functions.
+;
+; The names and argument orders are ts-slight's (reference/ts-slight/lib/
+; Prelude.slight), except where they were confusing (D78): filter keeps
+; what matches and remove drops it (ts-slight's filter dropped, and grep
+; kept); range is (range start end), from start up to but not including
+; end; take and skip stop at the end of the list; starts-with? and
+; ends-with? end in ? like the other predicates; concat-list is gone (it
+; was str-join). Every loop is a tail call, so long lists are fine.
+
+; --- numbers and booleans ---------------------------------------------------
+
+(defun inc (n) (+ n 1))
+(defun dec (n) (- n 1))
+
+; On booleans only, and not short-circuiting: both sides are always
+; evaluated. Use cond to short-circuit.
+(defun not (a)
+    (cond
+        (a      #false)
+        (#true  #true)))
+
+(defun and (a b)
+    (cond
+        (a      (cond (b #true) (#true #false)))
+        (#true  (cond (b #false) (#true #false)))))
+
+(defun or (a b)
+    (cond
+        (a      (cond (b #true) (#true #true)))
+        (#true  (cond (b #true) (#true #false)))))
+
+; --- folds --------------------------------------------------------------------
+
+; (f acc x) for each x, from the left.
+(defun fold/l (acc f xs)
+    (cond
+        ((nil? xs) acc)
+        (#true     (fold/l (f acc (car xs)) f (cdr xs)))))
+
+; (f x acc) for each x, from the right.
+(defun fold/r (acc f xs)
+    (fold/l acc (lambda (acc x) (f x acc)) (reverse xs)))
+
+; --- lists --------------------------------------------------------------------
+
+(defun reverse (xs)
+    (fold/l () (lambda (acc x) (cons x acc)) xs))
+
+(defun length (xs)
+    (fold/l 0 (lambda (n x) (+ n 1)) xs))
+
+(defun append (xs ys)
+    (fold/l ys (lambda (acc x) (cons x acc)) (reverse xs)))
+
+(defun sum (xs)
+    (fold/l 0 (lambda (acc n) (+ acc n)) xs))
+
+(defun product (xs)
+    (fold/l 1 (lambda (acc n) (* acc n)) xs))
+
+(defun map (f xs)
+    (reverse (fold/l () (lambda (acc x) (cons (f x) acc)) xs)))
+
+; The elements for which (f x) is #true.
+(defun filter (f xs)
+    (reverse (fold/l () (lambda (acc x) (cond ((f x) (cons x acc)) (#true acc))) xs)))
+
+; The elements for which (f x) is #false.
+(defun remove (f xs)
+    (reverse (fold/l () (lambda (acc x) (cond ((f x) acc) (#true (cons x acc)))) xs)))
+
+; The first n elements, or all of them if there are fewer.
+(defun take (n xs) (take-loop n xs ()))
+(defun take-loop (n xs acc)
+    (cond
+        ((== n 0)  (reverse acc))
+        ((nil? xs) (reverse acc))
+        (#true     (take-loop (- n 1) (cdr xs) (cons (car xs) acc)))))
+
+; All but the first n elements, or () if there are fewer.
+(defun skip (n xs)
+    (cond
+        ((== n 0)  xs)
+        ((nil? xs) xs)
+        (#true     (skip (- n 1) (cdr xs)))))
+
+; The element at index i, or () if there isn't one.
+(defun nth (i xs)
+    (cond
+        ((nil? xs) ())
+        ((== i 0)  (car xs))
+        (#true     (nth (- i 1) (cdr xs)))))
+
+; The first element for which (f x) is #true, or ().
+(defun find (f xs)
+    (cond
+        ((nil? xs)   ())
+        ((f (car xs)) (car xs))
+        (#true       (find f (cdr xs)))))
+
+(defun member? (x xs)
+    (cond
+        ((nil? xs)         #false)
+        ((eq? x (car xs))  #true)
+        (#true             (member? x (cdr xs)))))
+
+; start, start + 1, ... up to but not including end.
+(defun range (start end) (range-loop (- end 1) start ()))
+(defun range-loop (n start acc)
+    (cond
+        ((< n start) acc)
+        (#true       (range-loop (- n 1) start (cons n acc)))))
+
+; (f i) for i from start up to but not including end, for its effects.
+(defun dotimes (start end f)
+    (cond
+        ((>= start end) ())
+        (#true          (f start) (dotimes (+ start 1) end f))))
+
+; --- association lists: ((key value) ...) -------------------------------------
+
+(defun assoc (k v table)
+    (cons (list k v) table))
+
+; The value for k, or :not-found.
+(defun lookup (k table)
+    (cond
+        ((nil? table)            :not-found)
+        ((eq? k (car (car table))) (cadr (car table)))
+        (#true                   (lookup k (cdr table)))))
+
+; --- strings ------------------------------------------------------------------
+
+(defun str-repeat (s n) (str-repeat-loop s n ""))
+(defun str-repeat-loop (s n acc)
+    (cond
+        ((<= n 0) acc)
+        (#true    (str-repeat-loop s (- n 1) (~ acc s)))))
+
+(defun starts-with? (s m)
+    (cond
+        ((> (str-len m) (str-len s)) #false)
+        (#true                       (eq? (substring s 0 (str-len m)) m))))
+
+(defun ends-with? (s m)
+    (cond
+        ((> (str-len m) (str-len s)) #false)
+        (#true                       (eq? (substring s (- (str-len s) (str-len m)) (str-len s)) m))))
+
+; s padded to n bytes with fill, repeated and cut to fit, as JavaScript's
+; padStart and padEnd do.
+(defun pad-start (s n fill) (~ (padding s n fill) s))
+(defun pad-end (s n fill) (~ s (padding s n fill)))
+(defun padding (s n fill)
+    (let need (- n (str-len s)))
+    (cond
+        ((<= need 0)          "")
+        ((== (str-len fill) 0) "")
+        (#true                (substring (str-repeat fill (+ 1 (div need (str-len fill)))) 0 need))))
+
+; ASCII only (D27): other bytes are left alone.
+(defun uc (s) (bytes->string (map (lambda (b) (cond ((and (>= b 97) (<= b 122)) (- b 32)) (#true b))) (bytes s))))
+(defun lc (s) (bytes->string (map (lambda (b) (cond ((and (>= b 65) (<= b 90)) (+ b 32)) (#true b))) (bytes s))))
+
+; The bytes of s, as a list of integers.
+(defun bytes (s) (bytes-loop s (- (str-len s) 1) ()))
+(defun bytes-loop (s i acc)
+    (cond
+        ((< i 0) acc)
+        (#true   (bytes-loop s (- i 1) (cons (byte-at s i) acc)))))

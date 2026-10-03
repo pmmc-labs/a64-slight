@@ -1,0 +1,10 @@
+1
+2
+#false
+"Point:30:30"
+(p1 + p2)
+#true
+#false
+#true
+"Point:25:30"
+(method-not-found fly)

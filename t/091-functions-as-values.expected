@@ -1,0 +1,16 @@
+81
+(1 4 9)
+"hi!!"
+(a b)
+55
+(1 2 0)
+x
+y
+(() ())
+#<function square>
+#<function car>
+#<function lambda at t/091-functions-as-values.slight:13:9>
+#true
+#true
+#false
+#true

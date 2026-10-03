@@ -1,0 +1,4 @@
+(defun add (a b) (+ a b))
+(let g add)
+(pprint (g 1 2))
+(g 1)

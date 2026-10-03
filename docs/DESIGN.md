@@ -226,12 +226,37 @@ Keep ts-slight's names where possible
   (prints its argument and a newline, returns `()`, as in ts-slight;
   symbols print without the colon, so `:ping` prints as `ping`),
   `sleep`, `slurp`, `spew`
-- **(open)** whether `apply` is a builtin
+- functions: `apply` (`(apply f xs)`, at most 8 elements; a tail call in
+  tail position), `lambda?`
 
-**In slight (the prelude):** `map filter grep fold/l fold/r reverse append
-concat-list length nth range member? find assoc lookup take skip sum product
-inc dec dotimes`, `and or not`, and string helpers: `uc lc` (ASCII),
-`pad-start pad-end str-repeat starts-with ends-with`.
+**In slight (the prelude, `lib/prelude.slight`):** compiled with every
+program; it can only define functions.
+
+| | |
+|---|---|
+| numbers, booleans | `inc dec`; `not and or` (booleans only, both sides always evaluated) |
+| folds | `(fold/l init f xs)` with `(f acc x)`; `(fold/r init f xs)` with `(f x acc)` |
+| lists | `reverse length append sum product map`; `(filter f xs)` keeps what `f` says `#true` to, `(remove f xs)` drops it; `(take n xs)`, `(skip n xs)` stop at the end of the list; `(nth i xs)` and `(find f xs)` give `()` when there's nothing; `member?`; `(range start end)` is `start` up to but not including `end`; `(dotimes start end f)` |
+| association lists | `(assoc k v table)` adds `(k v)`; `(lookup k table)` gives the value or `:not-found` |
+| strings | `uc lc` (ASCII), `(pad-start s n fill)`, `(pad-end s n fill)`, `(str-repeat s n)`, `starts-with?`, `ends-with?` |
+
+These are ts-slight's, adjusted where they were confusing (D78): its
+`filter` dropped what matched and `grep` kept it; its `range` took a step
+and always ended with `end`; its `take` faulted past the end of the list;
+`starts-with`/`ends-with` had no `?`; `concat-list` was `str-join`.
+
+A program can define a function with a prelude name. Its own code then
+uses its definition, and the prelude keeps using the prelude's (D80).
+
+**Functions as values.** A `defun` name, a `lambda`, or a builtin with a
+fixed number of arguments (`(map car xs)`, `(fold/l 0 + xs)`) can be used
+as a value. Builtins with a varying number (`list`, `concat`,
+`format-num`) can't.
+
+**Tests in slight:** `lib/test.slight` is a TAP library after ts-slight's
+`lib/Test.slight`: `(run-tests (list (ok test msg) (is got expected msg)
+(diag msg)))`. It isn't part of the prelude; a golden test whose first line
+is `; with: lib/test.slight` gets it compiled in.
 
 ### Strings
 
@@ -296,7 +321,13 @@ needed: the REPL and line editing are slight code over key events.
 - **Strings**: header (byte length), the bytes, then a NUL that the length
   doesn't count, so a string can go straight to C.
 - **Floats**: header plus 8 bytes.
-- **Closures**: header, code pointer, arity, then the captured values.
+- **Closures**: header (the number of captured values, and the closure
+  type), code pointer, arity, name (a C string, for printing:
+  `#<function square>`, `#<function lambda at t/x.slight:3:9>`), then the
+  captured values. A lambda's body is a function of its own; on entry it
+  copies its captured values from the closure (in `x9`) into its frame, so
+  inside, they're ordinary locals (D79). A lambda that captures nothing,
+  and every `defun` used as a value, is a static closure.
 - **Static data**: string literals, quoted constants, and the static
   closures for top-level functions live in the binary. Every process shares
   them. They're never collected and are sent without copying. The collector
@@ -511,12 +542,10 @@ line-by-line translation.
 Collected from above:
 
 1. Exact `recv` pattern syntax and matching details.
-2. Names for integer division and remainder (`div`, `%`?).
-3. Exit-record retention policy.
-4. Bounded mailboxes.
-5. FIFO run queue (proposed) vs. the spike's ticks.
-6. Whether `apply` is a builtin.
-7. Program structure: top-level forms as the root process (built this way).
-8. `kill`'s exit reason.
-9. GC at base-of-stack tail calls outside state functions.
-10. The shape of a fault's reason.
+2. Exit-record retention policy.
+3. Bounded mailboxes.
+4. FIFO run queue (proposed) vs. the spike's ticks.
+5. Program structure: top-level forms as the root process (built this way).
+6. `kill`'s exit reason.
+7. GC at base-of-stack tail calls outside state functions.
+8. The shape of a fault's reason.
