@@ -37,7 +37,8 @@ ask about them before building. Update this section as steps land.
 3. [`docs/DECISIONS.md`](docs/DECISIONS.md): why, and what was turned down.
    Check it before "improving" something; it may have been decided against.
 4. [`docs/BACKGROUND.md`](docs/BACKGROUND.md): AVM, VM3, the spike, prior
-   art. Optional.
+   art, and notes on other targets, multiple cores and embedded boards.
+   Optional.
 
 Reference material (read-only, never built): [`reference/`](reference/README.md)
 holds ts-slight's examples and libraries (the target user surface) and the

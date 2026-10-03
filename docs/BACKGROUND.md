@@ -93,6 +93,161 @@ Lessons that carry over:
 - Guard-page hits (`SIGSEGV`) currently kill the whole program. Turning
   them into a process fault needs an alternate signal stack. Not done yet.
 
+## Looking back, and ahead (after step 9)
+
+Answers to questions Stevan asked once steps 0–9 were done. The estimates
+are in sessions of the size the plan's steps have taken.
+
+### What survived of VM3's calling convention
+
+Very little of the convention itself. Function calls use AAPCS64, the
+platform's C convention (D47): arguments in `x0`–`x7`, the result in `x0`.
+Compiled functions are ordinary C-callable functions, and builtins and
+runtime calls are a plain `bl`. On top of that: `x28` is always the
+current process, every entry checks the stack and the reduction count, and
+tail calls are branches.
+
+The asynchronous half is gone, removed by the `recv` rule (D8):
+`REQUEST`/`AWAIT`/`REPLY`/`REPLY_TO`, reply addresses, refs and `PENDING`;
+the mailbox cursor and `MSG_SKIP`; MESSAGE and SIGNAL frames and signal
+handlers; tags owned by modules, with arities; `@state`; the operand
+stack; and the ticks with their delivery phases. That's about a third of
+the document, and all of what made it a calling convention.
+
+What survived:
+
+- **The key idea, changed.** The sketch's `YIELD` was a commit point that
+  faulted unless the PROCESS frame was the only frame, and a suspended
+  `RECV` simply ran again on waking. The `recv` rule is that check moved
+  to compile time, and running again became calling the receive function
+  again with its arguments. That's why a waiting process holds no stack,
+  and why the collector needed nothing from the compiler.
+- **The sketch's run-to-completion style** became the only style.
+- **The process semantics.** `%EXIT (pid, reason)` became `monitor`'s
+  `(:exit pid result)`, `WATCH` became `monitor`, `WAIT` became `join`;
+  stopping with a reason, the dead-letter queue, deadlock detection,
+  per-pair FIFO order, and determinism (from a FIFO run queue rather than
+  ticks) all carried over.
+- **The spike's native layer:** the 25-instruction `rt_switch`
+  (unchanged), `x28` for the process, `x18` left alone, and the Mach-O and
+  ELF macros.
+
+The spike predicted this: with a native stack per process, the
+asynchronous convention collapses into the platform's synchronous one.
+
+### Other targets: x86-64 and RISC-V
+
+What's AArch64-specific: `codegen.ts` emits AArch64 text directly (about
+140 emitting lines and 35 mnemonics, in 1,318 lines), `rt_asm.S` (126
+lines: `rt_switch`, `rt_trampoline`, `rt_apply`), `asm.h` (57), and the
+saved-register layout (`rt_ctx_t`, and `start` in `process.c`). The rest
+carries over: the reader, `classify.ts`, the code generator's structure
+(the value in an accumulator, temporaries in frame slots, the tagging),
+about 1,270 lines of C runtime including the collector, and every golden
+test. The tests are the real asset: a backend is done when the same
+outputs come out.
+
+- **First, for either target (about 1 session):** separate the code
+  generator's structure from its instruction text, behind a small target
+  interface: slot loads and stores, tag tests, compare-and-branch, calls,
+  tail calls, allocation, prologue and epilogue. Worth doing before the
+  self-hosting port anyway.
+- **x86-64 (2–3 sessions after that).** System V passes only six
+  arguments in registers, against our eight, so slight-to-slight calls
+  would use our own registers and only calls into C the System V ones.
+  Two-operand instructions; pin `r15` (say) for the process. Overflow is
+  easier (`jo`). `idiv` traps on zero, where AArch64's `sdiv` returns 0,
+  but the compiler checks first anyway. Cloud sessions run on x86-64
+  Linux, so tests would run natively, without qemu.
+- **RISC-V, RV64 (about 2 sessions).** The closest cousin: 32 registers,
+  load/store, arguments in `a0`–`a7` (exactly eight, as D47 has), and
+  `s11` could be the process register. No condition flags, so an
+  overflow check costs about three more instructions per operation; no
+  `csel` in the base ISA (branches, or the Zicond extension); 12-bit
+  immediates, so longer constant sequences. Tested with `qemu-riscv64`.
+- **A 32-bit target** (Cortex-M, RV32) is a bigger change: 31-bit
+  integers, 4-byte words and 8-byte cells change the value layout and the
+  runtime's offsets, not just the instruction text.
+
+### Multiple cores
+
+On a hosted OS, not without threads: the kernel owns the cores, so using
+N of them takes at least N OS threads. They needn't be visible, though.
+The usual design (the BEAM's schedulers, Go's Ms and Ps) is one OS thread
+per core, each running the scheduler loop with its own run queue, taking
+work from the others when idle; slight programs never see a thread. On
+bare metal it's literally threadless: wake the other cores (PSCI
+`CPU_ON` on ARM, SBI `hart_start` on RISC-V) and point each at a stack
+and the scheduler loop.
+
+The design suits it unusually well: no shared mutable data, a heap per
+process, copied messages, and a collector that only ever touches its own
+process's heap, so there's never a stop-the-world pause. What would need
+synchronizing is all in the runtime, and small:
+
+- mailboxes: an atomic multi-producer queue per process, plus a
+  compare-and-swap on the process's state, so a message that arrives as
+  the receiver decides to wait can't be lost;
+- run queues: one per core, with stealing;
+- the process table: it's grown with `realloc` today, which moves it; it
+  would need a structure that doesn't move, and an atomic pid counter;
+- locks on the join and monitor lists, the stack pool, and terminal
+  output;
+- acquire/release ordering for all of it: AArch64 reorders memory
+  accesses (`ldar`/`stlr`, or the LSE atomics).
+
+The costs: interleavings stop being deterministic, so tests need a
+single-core mode (like the virtual clock); every send pays an atomic
+operation; an idle core needs waking (a futex on Linux, `SEV` or an
+inter-processor interrupt on bare metal). Not a bad idea, but a step of
+its own once the language settles. The test is the one the VM3 sketch
+listed: the same results on one core or N.
+
+### Embedded boards
+
+**AArch64 Linux boards work today, unchanged:** `slightc` makes static
+`aarch64-linux` binaries, which is what qemu runs here. Copy one to a
+Raspberry Pi 3, 4, 5 or Zero 2 W and run it.
+
+What the runtime asks of the OS is small: `malloc`, `calloc`, `realloc`
+and `free`; `mmap` and `mprotect` for stacks with guard pages; stdout and
+stderr; `sysconf`, `getenv`, `exit`; and libm. Step 10 adds waiting on
+timers, terminal raw mode, and file I/O.
+
+**Bare metal is a natural fit, arguably more than an RTOS.** The runtime
+already is a small scheduler: processes, message passing, memory per
+process, and isolation by the language. Preemption counts reductions, so
+scheduling needs no timer interrupt; interrupts are only for timers and
+devices. An RTOS would add a second scheduler to work around. A
+bare-metal AArch64 port needs:
+
+- boot code: drop to EL1, zero `.bss`, enable the FPU (floats use the `d`
+  registers), and turn on the MMU and caches with an identity map (with
+  the MMU off, memory is Device memory: unaligned accesses fault, and
+  exclusive loads and stores don't work);
+- a UART driver for stdout and stderr (a PL011 on the Pi), and an
+  allocator (picolibc or newlib, which also bring `printf` and libm, or
+  our own);
+- stacks from plain RAM, smaller than 8 MB (64 KB, say); the stack check
+  at every entry (D48) already gives a clean fault, so guard pages are
+  optional;
+- for step 10, the generic timer and the GIC; interrupt handlers push
+  into preallocated rings that the scheduler drains, since a handler
+  can't `malloc`.
+
+QEMU's `virt` machine has a PL011, a GIC and the generic timer, so it's
+a good test bed before a real board. About 2–3 sessions to boot and pass
+the non-device golden tests.
+
+**Microcontrollers** (STM32, RP2040 and RP2350, ESP32, nRF) are 32-bit,
+so they need the 32-bit target above, and budgets of a few hundred KB of
+RAM rather than 64 MB heaps and 8 MB stacks. A bigger project.
+
+**One caveat everywhere:** there's no memory protection between slight
+processes; isolation comes from the language (no pointers, immutable
+data, copied messages), as in the BEAM. A bug in the C runtime takes
+everything down.
+
 ## Prior art
 
 - **Abdulaziz Ghuloum, "An Incremental Approach to Compiler Construction"**
