@@ -6,8 +6,12 @@ TypeScript for now and should self-host later.
 
 ## Status
 
-**Design agreed, nothing built yet.** The next step is step 0 of
-[`docs/PLAN.md`](docs/PLAN.md). Update this section as steps land.
+**Step 0 of [`docs/PLAN.md`](docs/PLAN.md) is done**: the reader, a
+compiler that handles integer literals, the minimal runtime, and the test
+setup. It has been verified under qemu on x86 Linux. It hasn't been run on
+macOS yet; the generated code and `rt_asm.S` do assemble for Mach-O.
+**Next: step 1** (immediates and control). Update this section as steps
+land.
 
 ## Read first, in this order
 
@@ -55,8 +59,12 @@ works and has the runtime pieces to borrow.
   ```
 
 - The compiler is **slight-shaped**: pure functions over immutable
-  s-expressions, recursion over loops, association lists for environments,
-  no classes. It will be ported to slight line by line.
+  s-expressions, association lists for environments, no classes (except
+  `CompileError`, which plays the part of `raise`). It will be ported to
+  slight line by line. Node has no tail calls, so a loop is fine where
+  slight would use a tail-recursive function. Reassign only locals, and
+  never mutate shared data. Prefer character tests to regexes, since slight
+  has no regexes.
 - In C headers shared with assembly, prefix every name `RT_`/`rt_` (macOS's
   `<stdlib.h>` pulls in `<sys/wait.h>`, which has a `P_PID`).
 - Comments explain why, not what. Match the density of the spike's code.
@@ -83,7 +91,29 @@ works and has the runtime pieces to borrow.
 - Don't use `-Werror`; a different Apple clang version shouldn't break the
   build.
 
+## Layout
+
+| Path | |
+|---|---|
+| `bin/slightc.ts` | The driver: read, compile, write `out.S`, link with clang |
+| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `codegen.ts`, `errors.ts` |
+| `compiler/tests/` | Unit tests, `node:test` |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S`, `rt.c` |
+| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c` |
+| `build/` | Output (ignored) |
+
 ## Commands
 
-None yet. Step 0 adds `npm test`, `npm run check` (`tsc --noEmit`), `make`,
-`make test`, and `node bin/slightc.ts file.slight -o out`. Record them here.
+- `npm install` once, for `typescript` (used only by `make check`).
+- `make test`: unit tests, the runtime header check, then the golden tests.
+- `make unit`, `make golden`, `make headers`: one at a time.
+  `t/run.sh t/003-int-max.slight` runs one golden test.
+- `make check`: `tsc --noEmit`.
+- `node bin/slightc.ts -o out file.slight ...`: compile and link. It writes
+  `out.S` next to `out`. `-S` writes only the assembly. On x86, run the
+  result with `qemu-aarch64 ./out`.
+- Exit codes from `slightc`: 0 ok, 1 compile error, 2 usage or toolchain
+  error. `SLIGHT_CC` overrides the C compiler command.
+
+For now the runtime prints the root process's result, followed by a
+newline. That's what the golden tests check.

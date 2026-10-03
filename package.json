@@ -1,0 +1,14 @@
+{
+    "name": "a64-slight",
+    "private": true,
+    "type": "module",
+    "devDependencies": {
+        "@types/node": "^22.13.17",
+        "typescript": "^5.9.3"
+    },
+    "scripts": {
+        "check": "tsc --noEmit",
+        "test": "node --test \"compiler/tests/**/*.test.ts\"",
+        "slightc": "node bin/slightc.ts"
+    }
+}

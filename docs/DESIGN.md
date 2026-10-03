@@ -36,7 +36,8 @@ Same reader as ts-slight (see `reference/ts-slight/src/parser.ts` and
 
 - `( ... )` lists; `()` is nil
 - integers (`42`, `-7`) and floats (`3.14`)
-- strings in double quotes, with escapes
+- strings in double quotes, with escapes: `\"` `\\` `\n` `\t` `\r` `\e`
+  `\u{hex}`
 - symbols. `:name` is a keyword, a symbol that evaluates to itself.
   `#true`/`#false` are the booleans.
 - `'x` is `(quote x)`

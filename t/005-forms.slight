@@ -1,0 +1,4 @@
+; a program is a sequence of forms, and its value is the last one's
+1
+2   ; comments end at the line's end
+3

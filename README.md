@@ -34,9 +34,22 @@ where the roots are those arguments.
 
 Targets macOS on Apple Silicon first, and AArch64 Linux from the same code.
 
+## Building
+
+```
+npm install          # once: typescript, for `make check`
+make test            # unit tests, runtime header check, golden tests
+node bin/slightc.ts -o hello t/000-int.slight && ./hello
+```
+
+On an x86 machine it cross-compiles and runs under qemu; see `CLAUDE.md`
+for the packages.
+
 ## Status
 
-The design is settled; implementation hasn't started. See:
+The design is settled, and implementation is at step 0 of the plan: the
+compiler reads slight and compiles integer literals to a native binary.
+See:
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): the design
 - [`docs/PLAN.md`](docs/PLAN.md): the build order

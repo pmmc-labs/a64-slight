@@ -192,3 +192,32 @@ keep a working compiler with passing tests at every step.
 **D36. A new repo, `pmmc-labs/a64-slight`.** *(User asked for a new
 pmmc-labs repo; the name is mine, after the `<lang>-slight` convention.)*
 VM3 and AVM stay as they are; their useful bits are copied here.
+
+## Step 0
+
+**D37. Reader details.** *(Default.)* The reader is ts-cpi's, with these
+changes:
+- `#true`/`#false` read as symbols (D13).
+- Integers are 63-bit, and a literal out of range is a compile error.
+- Strings also accept `\r` and `\e` (ESC); ts-slight strings had no escapes
+  at all, so its bare `\e` constants did that job, and they still read as
+  symbols.
+- Quasiquote, unquote and dotted pairs are errors.
+- Symbols are records compared by name (slight can't make symbols at
+  runtime, so the self-hosted compiler will hold source symbols as data
+  too).
+- Every atom carries a position, not just lists.
+
+**D38. `slightc` compiles the runtime sources with every program.** *(Default.)*
+Simplest possible build: no runtime build step, no stale archive. Revisit
+if it gets slow.
+
+**D39. "Slight-shaped" allows loops where slight would tail-recurse.**
+*(Default.)* Node has no tail calls, and a recursive tokenizer would
+overflow the JS stack on a large file. A `for (;;)` that only reassigns
+locals ports to a tail-recursive function directly.
+
+**D40. For now, the runtime prints the root process's result.** *(Default,
+from PLAN step 0.)* It's how the golden tests observe programs before
+`pprint` exists. Revisit when processes land (step 7), since the exit
+status is meant to follow the root's Result.

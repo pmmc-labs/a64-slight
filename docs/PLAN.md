@@ -2,7 +2,10 @@
 
 Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
-be a session or two each. Nothing has been built yet; step 0 is next.
+be a session or two each.
+
+**Progress:** step 0 done (verified under qemu; macOS not yet run). Step 1
+is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -29,7 +32,13 @@ macro (macOS adds a leading underscore to C symbols).
 
 ## Steps
 
-### 0. Scaffold
+### 0. Scaffold (done)
+
+What landed matches the layout above, except that `lib/` and `examples/`
+don't exist yet and the runtime has no Makefile of its own: `slightc` passes
+`runtime/rt.c` and `runtime/rt_asm.S` to clang along with the generated
+assembly, so there's nothing to build first. If that gets slow, it can
+become a prebuilt archive.
 
 - `package.json`, `tsconfig.json` (copy ts-cpi's: strict,
   `erasableSyntaxOnly`, `allowImportingTsExtensions`), `node --test`
