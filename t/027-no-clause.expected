@@ -1,0 +1,2 @@
+fault: no cond clause matched (cond at t/027-no-clause.slight:2:1)
+exit: 1

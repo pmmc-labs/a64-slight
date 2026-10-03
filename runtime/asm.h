@@ -14,6 +14,15 @@
 
 #include "rt.h"
 
+// Read-only data: strings and constants with no pointers in them.
+.macro RODATA
+#if defined(__APPLE__)
+    .section __TEXT,__const
+#else
+    .section .rodata
+#endif
+.endm
+
 // The address of a symbol, on Mach-O and on ELF.
 .macro LOADADDR reg, sym
 #if defined(__APPLE__)

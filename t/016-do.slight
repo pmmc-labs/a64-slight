@@ -1,0 +1,6 @@
+(pprint (do 1 2 3))
+; a let inside a do covers the rest of that do
+(let x 1)
+(pprint (do (let x 2) (let y 3) (+ x y)))
+(pprint x)
+(do (pprint 4) (pprint 5) 6)

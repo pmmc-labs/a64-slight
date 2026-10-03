@@ -1,0 +1,2 @@
+fault: integer overflow (- at t/021-overflow-sub.slight:1:1)
+exit: 1

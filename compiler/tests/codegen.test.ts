@@ -5,7 +5,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { compileProgram, loadWord } from '../src/codegen.ts';
+import { asmString, compileProgram, loadWord } from '../src/codegen.ts';
 import { CompileError } from '../src/errors.ts';
 import { read } from '../src/reader.ts';
 
@@ -71,9 +71,62 @@ test('an empty program is an error', () => {
     assert.throws(() => compile('; nothing'), (e: unknown) => e instanceof CompileError && /empty/.test(e.message));
 });
 
-test('what step 0 does not support is an error, with a position', () => {
+test('what isn\'t built yet is an error, with a position', () => {
     assert.throws(() => compile('42\n  "hi"'), (e: unknown) =>
         e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: "hi"');
-    assert.throws(() => compile('(+ 1 2)'), (e: unknown) =>
-        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (+ 1 2)');
+    assert.throws(() => compile(':ping'), (e: unknown) =>
+        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (quote ping)');
+});
+
+const fails = (src: string, message: string): void => {
+    assert.throws(() => compile(src), (e: unknown) => e instanceof CompileError && e.message === message);
+};
+
+test('names must be bound', () => {
+    fails('(+ x 1)', "test.slight:1:4: unknown name 'x'");
+    fails('(do (let x 1) x) x', "test.slight:1:18: unknown name 'x'");
+    fails('(frob 1)', "test.slight:1:2: unknown function 'frob'");
+});
+
+test('primitives check their arity', () => {
+    fails('(+ 1)', 'test.slight:1:1: + takes 2 arguments, not 1');
+    fails('(< 1 2 3)', 'test.slight:1:1: < takes 2 arguments, not 3');
+    fails('(pprint)', 'test.slight:1:1: pprint takes 1 argument, not 0');
+});
+
+test('let is (let name expr), and only in a body', () => {
+    fails('(let x)', 'test.slight:1:1: let is (let name expr), not (let x)');
+    fails('(let x 1 2)', 'test.slight:1:1: let is (let name expr), not (let x 1 2)');
+    fails('(let 5 1)', 'test.slight:1:6: let needs a name, not 5');
+    fails('(let #true 1)', "test.slight:1:6: can't bind #true");
+    fails('(let cond 1)', "test.slight:1:6: can't bind cond");
+    fails('(+ (let x 1) 2)', 'test.slight:1:4: let can only be a form of a body (a function, do or cond clause)');
+});
+
+test('cond needs clauses with bodies', () => {
+    fails('(cond)', 'test.slight:1:1: cond needs at least one clause');
+    fails('(cond (#true))', 'test.slight:1:7: a cond clause is (test body...), not (#true)');
+    fails('(cond 5)', 'test.slight:1:7: a cond clause is (test body...), not 5');
+});
+
+test('do needs a form', () => {
+    fails('(do)', 'test.slight:1:1: do needs at least one form');
+});
+
+test('locals can shadow builtins, but calling a local is not built yet', () => {
+    fails('(let pprint 1) (pprint 2)', 'test.slight:1:16: not supported yet: (pprint 2)');
+});
+
+test('a slot is reused once the value in it is dead', () => {
+    const frame = (src: string): string | undefined => /sub {2}sp, sp, #(\d+)/.exec(compile(src))?.[1];
+    assert.equal(frame('42'), undefined);
+    assert.equal(frame('(+ 1 2) (+ 3 4)'), '16');            // one slot, rounded up to 16 bytes
+    assert.equal(frame('(+ 1 (+ 2 (+ 3 4)))'), '32');        // three waiting left operands
+    assert.equal(frame('(let a 1) (let b 2) (+ a b)'), '32'); // a, b, and +'s left operand
+});
+
+test('strings in the assembly are escaped byte by byte', () => {
+    assert.equal(asmString('t/a.slight:1:2'), '"t/a.slight:1:2"');
+    assert.equal(asmString('say "hi"\\'), '"say \\042hi\\042\\134"');
+    assert.equal(asmString('é\n'), '"\\303\\251\\012"');
 });

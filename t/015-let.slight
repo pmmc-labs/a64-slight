@@ -1,0 +1,10 @@
+; let binds for the rest of the body
+(let x 10)
+(let y (* x 2))
+(pprint (+ x y))
+; a later let shadows an earlier one
+(let x (+ x 1))
+(pprint x)
+(pprint y)
+; as the last form, a let gives its value
+(let z (- y x))

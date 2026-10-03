@@ -221,3 +221,32 @@ locals ports to a tail-recursive function directly.
 from PLAN step 0.)* It's how the golden tests observe programs before
 `pprint` exists. Revisit when processes land (step 7), since the exit
 status is meant to follow the root's Result.
+
+## Step 1
+
+**D41. `cond` tests must be booleans, and no matching clause faults.**
+*(User.)* As ts-slight required. A test that is literally `#true` compiles
+to no check.
+
+**D42. `let` as the last form of a body gives its value.** *(Default.)* As
+in ts-slight. A `let` anywhere but directly in a body is a compile error.
+Binding `#true`, `#false` or a special form's name is a compile error;
+locals may shadow builtins.
+
+**D43. `pprint` arrives in step 1, and returns `()`.** *(Default.)* It was
+planned for step 3, but golden tests need to print more than one value
+per file. Its return value follows ts-slight.
+
+**D44. Faults report to stderr and exit 1, for now.** *(Default.)* Each
+fault site passes rt_fault a string saying what and where, like
+`+ at t/x.slight:2:1`. Once there are processes and lists, a fault ends
+only its process with `(:error ...)`; the reason's shape is still open.
+
+**D45. Golden tests check stderr and the exit status too.** *(Default.)*
+Stdout and stderr together, then `exit: N` when N isn't 0. rt_fault
+flushes stdout first, so the order is stable.
+
+**D46. Binary primitives only.** *(Default.)* `+ - * == != < <= > >=`
+take exactly two arguments, as in ts-slight's notes. Both must be
+integers (floats come in step 5); anything else faults.
+

@@ -4,8 +4,8 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** step 0 done (verified under qemu; macOS not yet run). Step 1
-is next.
+**Progress:** steps 0 and 1 done (verified under qemu; macOS not yet
+run). Step 2 is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -53,7 +53,11 @@ become a prebuilt archive.
 - The golden test runner. **Done when** `42` compiles, runs and prints
   `42`, natively on macOS and under qemu on x86 Linux.
 
-### 1. Immediates and control
+### 1. Immediates and control (done)
+
+`pprint` came forward from step 3 (for immediates only, so far), so that
+a golden test can check many values. Faults print a line to stderr and
+exit 1 for now, and the golden tests check that output too.
 
 - Integers (63-bit, overflow faults), `#true`/`#false` (reserved symbol
   ids), `()`.

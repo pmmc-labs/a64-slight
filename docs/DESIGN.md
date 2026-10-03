@@ -65,8 +65,8 @@ Booleans are the reserved symbols `#true` and `#false`.
 |------|---------|
 | `(defun name (params...) body...)` | Top level only. No local `defun`. |
 | `(lambda (params...) body...)` | A closure. Captures free variables **by value**. Always a *plain* function (see the `recv` rule). Can't refer to itself. |
-| `(let name expr)` | Binds `name` for the rest of the enclosing body. |
-| `(cond (test body...) ...)` | The only conditional. `if`, `when` and `case` are gone. |
+| `(let name expr)` | Binds `name` for the rest of the enclosing body. Only allowed directly in a body. As the last form of a body, its value is `expr`'s (as in ts-slight). |
+| `(cond (test body...) ...)` | The only conditional. `if`, `when` and `case` are gone. Each test must be `#true` or `#false`, or the process faults; so does running out of clauses. |
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
 | `(fork expr)` | Runs `expr` in a new process and returns its pid. |
@@ -79,11 +79,6 @@ Function bodies and clause bodies can hold several forms, as if wrapped in
 
 `and`, `or` and `not` are prelude functions on booleans, so `and` and `or`
 evaluate all their arguments. `cond` is the short-circuit form.
-
-**(open)** Does a `cond` test have to be a boolean (ts-slight required it),
-or is anything other than `#false` true? What does a `cond` with no matching
-clause return, or does it fault? I'd suggest booleans required, and no match
-faults.
 
 **(open)** Max arity is 7 (one register per argument, see the ABI below).
 More would go on the stack later.
@@ -165,8 +160,12 @@ reply refs.
 
 - A process whose entry expression returns a value ends with `(:ok value)`.
 - **Errors are values**: `(:ok v)` and `(:error e)`. There's no `catch`.
-  A fault (overflow, a builtin given the wrong type, an arity mismatch, the
-  heap limit) ends the process with `(:error ...)`.
+  A fault (overflow, a builtin given the wrong type, a `cond` test that
+  isn't a boolean, no `cond` clause matching, an arity mismatch, the heap
+  limit) ends the process with `(:error ...)`. **(open)** The shape of a
+  fault's reason. Until there are processes and lists (steps 4 and 7), a
+  fault prints `fault: <what> (<where> at file:line:col)` to stderr and
+  exits with status 1.
 - **Preemption.** Every loop is a tail call, so a reduction counter is
   checked at each function entry and tail call. When it runs out, the
   process pauses where it is, *keeping its stack*, and goes to the back of
@@ -209,7 +208,8 @@ Keep ts-slight's names where possible
   compile-time table; an unknown name gives `#false`), `byte-at`,
   `bytes->string`, `format-num`
 - processes: `send join monitor kill after raise`
-- I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols`, `pprint`,
+- I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols`, `pprint`
+  (prints its argument and a newline, returns `()`, as in ts-slight),
   `sleep`, `slurp`, `spew`
 - **(open)** whether `apply` is a builtin
 
@@ -390,9 +390,10 @@ Expect 1,500–2,500 lines for a first version.
 
 ### Style: "slight-shaped"
 
-Pure functions over immutable s-expressions, recursion instead of loops,
-association lists for environments, no classes. Then porting the compiler
-to slight is a near line-by-line translation.
+Pure functions over immutable s-expressions, recursion instead of loops
+(or a loop where slight would tail-recurse: D39), association lists for
+environments, no classes. Then porting the compiler to slight is a near
+line-by-line translation.
 
 ### Bootstrap (plan step 12)
 
@@ -405,7 +406,8 @@ to slight is a near line-by-line translation.
 ## Testing
 
 - **Golden tests**: compile a `.slight` file, run it (under qemu on x86),
-  diff stdout against a `.expected` file, like `spike/aarch64/t/run.sh`.
+  diff its stdout and stderr against a `.expected` file, with a last line
+  `exit: N` when the exit status isn't 0. Like `spike/aarch64/t/run.sh`.
   Every plan step adds some.
 - **Compiler unit tests** with `node:test`, per pass.
 - A slight-level test library in the style of ts-slight's `lib/Test.slight`

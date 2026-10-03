@@ -1,0 +1,19 @@
+(pprint (cond ((< 1 2) 10) (#true 20)))
+(pprint (cond ((> 1 2) 10) (#true 20)))
+(pprint (cond (#false 1) ((== 1 2) 2) ((== 2 2) 3) (#true 4)))
+; a clause body is several forms; the last one is the value
+(pprint (cond ((== 1 1) (pprint 7) 8)))
+; nested, with lets in the clause bodies
+(let n 15)
+(cond
+    ((> n 10)
+        (let m (- n 10))
+        (cond
+            ((== m 5) (pprint 105))
+            (#true    (pprint m))))
+    (#true
+        (pprint 0)))
+; only the chosen clause runs
+(cond
+    ((== n 15) (pprint 1))
+    ((== n 15) (pprint 2)))

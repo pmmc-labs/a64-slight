@@ -6,12 +6,14 @@ TypeScript for now and should self-host later.
 
 ## Status
 
-**Step 0 of [`docs/PLAN.md`](docs/PLAN.md) is done**: the reader, a
-compiler that handles integer literals, the minimal runtime, and the test
-setup. It has been verified under qemu on x86 Linux. It hasn't been run on
-macOS yet; the generated code and `rt_asm.S` do assemble for Mach-O.
-**Next: step 1** (immediates and control). Update this section as steps
-land.
+**Steps 0 and 1 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader,
+and a compiler for integers, `#true`/`#false`, `()`, `+ - *` (with
+overflow faults), comparisons, `cond`, `let`, `do` and `pprint`, all in
+the body of the root process. Verified under qemu on x86 Linux. It hasn't
+been run on macOS yet; the generated code and `rt_asm.S` do assemble for
+Mach-O. **Next: step 2** (functions and tail calls). Its calling
+convention is (open): propose it before building. Update this section as
+steps land.
 
 ## Read first, in this order
 
@@ -96,7 +98,7 @@ works and has the runtime pieces to borrow.
 | Path | |
 |---|---|
 | `bin/slightc.ts` | The driver: read, compile, write `out.S`, link with clang |
-| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `codegen.ts`, `errors.ts` |
+| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `codegen.ts`, `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S`, `rt.c` |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c` |
@@ -116,4 +118,7 @@ works and has the runtime pieces to borrow.
   error. `SLIGHT_CC` overrides the C compiler command.
 
 For now the runtime prints the root process's result, followed by a
-newline. That's what the golden tests check.
+newline, and a fault prints `fault: ...` to stderr and exits 1. The golden
+tests check stdout and stderr together, plus `exit: N` when the status
+isn't 0. Write expected output by working it out independently (by hand
+or in Python), never by copying what the compiler printed.
