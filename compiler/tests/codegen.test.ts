@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { asmString, compileProgram, functionLabel, loadWord } from '../src/codegen.ts';
 import { CompileError } from '../src/errors.ts';
 import { read } from '../src/reader.ts';
+import { RESERVED_SYMBOLS, RUNTIME_SYMBOLS } from '../src/values.ts';
 
 // Runs a movz/movn/movk sequence and returns the register's value.
 function simulate(lines: readonly string[]): bigint {
@@ -206,14 +207,19 @@ const symbolTable = (asm: string): string[] => {
     return names;
 };
 
-test('symbols get ids in order of first mention, after #false and #true', () => {
-    assert.deepEqual(symbolTable(compile(':b \'a :b (quote c) :a')), ['#false', '#true', 'b', 'a', 'c']);
-    assert.deepEqual(symbolTable(compile('42')), ['#false', '#true']);
-    assert.deepEqual(symbolTable(compile("'#true :x")), ['#false', '#true', 'x']);
+// Every program has these, in order; its own symbols come after.
+const BUILT_IN = [...RESERVED_SYMBOLS, ...RUNTIME_SYMBOLS];
+const firstWord = ((BUILT_IN.length << 3) | 5).toString(16);    // the first program symbol's id, shifted and tagged
+
+test('symbols get ids in order of first mention, after #false, #true and the runtime\'s', () => {
+    assert.deepEqual(BUILT_IN.slice(0, 4), ['#false', '#true', 'ok', 'error']);
+    assert.deepEqual(symbolTable(compile(':b \'a :b (quote c) :a')), [...BUILT_IN, 'b', 'a', 'c']);
+    assert.deepEqual(symbolTable(compile('42')), BUILT_IN);
+    assert.deepEqual(symbolTable(compile("'#true :x :ok")), [...BUILT_IN, 'x']);
 });
 
 test('a symbol is its id, shifted and tagged', () => {
-    assert.match(compile(':a'), /movz x0, #0x15, lsl #0 {4}\/\/ 'a/);     // id 2: 2 << 3 | 5
+    assert.match(compile(':a'), new RegExp(`movz x0, #0x${firstWord}, lsl #0 {4}// 'a`));
 });
 
 test('quote takes one thing', () => {
@@ -262,7 +268,7 @@ test('a quoted list is cells in the constant data', () => {
     const asm = compile("'(1 (a) ())");
     const consts = asm.slice(asm.indexOf('CONSTDATA'));
     // the inner list first, then the outer one: 1, (a), (), each cell's cdr the next cell
-    assert.match(consts, /Lquoted_0:\n {4}\.quad 0x15, RT_NIL\n/);
+    assert.match(consts, new RegExp(`Lquoted_0:\\n {4}\\.quad 0x${firstWord}, RT_NIL\\n`));
     assert.match(consts, /Lquoted_1:\n {4}\.quad 0x2, Lquoted_1\+17\n {4}\.quad Lquoted_0\+1, Lquoted_1\+33\n {4}\.quad RT_NIL, RT_NIL\n/);
     assert.match(asm, /LOADADDR x0, Lquoted_1\n {4}orr {2}x0, x0, #RT_TAG_LIST/);
 });
@@ -482,3 +488,12 @@ test('$$ and ^$$ are the process and its parent', () => {
     fails('(let $$ 1)', "test.slight:1:6: can't bind $$");
 });
 
+
+test('join, monitor, kill and raise are builtins in the runtime, and can be values', () => {
+    for (const [name, fn] of [['join', 'rt_join'], ['monitor', 'rt_monitor'], ['kill', 'rt_kill'], ['raise', 'rt_raise']]) {
+        assert.match(compile(`(${name} 1)`), new RegExp(`LOADADDR x1, Lsite_\\d+\\n {4}bl {3}${fn}\\n`));
+        assert.match(compile(`(let f ${name})`), new RegExp(`LOADADDR x0, bi_${name}_closure`));
+        fails(`(${name})`, `test.slight:1:1: ${name} takes 1 argument, not 0`);
+        fails(`(defun ${name} (x) x)`, `test.slight:1:8: can't define ${name}: it's a builtin`);
+    }
+});

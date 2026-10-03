@@ -1,0 +1,11 @@
+; A fault in the root is logged as before, and the program exits 1, but
+; other processes still run to the end.
+
+(defun later (n)
+    (cond
+        ((== n 0) (pprint :child-done))
+        (#true    (later (- n 1)))))
+
+(fork (later 3000))
+(pprint :root-start)
+(car ())

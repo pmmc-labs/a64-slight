@@ -1,0 +1,5 @@
+(#<pid 2> received 1)
+(#<pid 2> received 2)
+(#<pid 3> received 1)
+(#<pid 3> received 2)
+((ok broker-done) (ok sub-done) (ok sub-done))

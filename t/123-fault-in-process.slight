@@ -1,0 +1,15 @@
+; A fault ends only its process, with (:error (kind value site)), and is
+; logged with the process's pid. The root carries on, and exits 0.
+
+(defun first-of (x) (car x))
+
+(let r (join (fork (first-of 5))))
+(pprint (car r))
+(let reason (cadr r))
+(pprint (car reason))
+(pprint (cadr reason))
+(pprint (caddr reason))
+(pprint (str? (caddr reason)))
+(pprint (join (fork (* 4611686018427387903 2))))
+(pprint (join (fork (cond (#false 1)))))
+:still-here

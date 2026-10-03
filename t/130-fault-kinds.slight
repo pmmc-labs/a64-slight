@@ -1,0 +1,18 @@
+; Faults of every sort end just their process, stack and heap faults
+; included; and the next processes get the stack and the memory back.
+
+(defun depth (n) (+ 1 (depth (+ n 1))))
+(defun grow (xs) (grow (cons 1 xs)))
+(defun kind (pid) (car (cadr (join pid))))
+(defun sum-down (n)
+    (cond
+        ((== n 0) 0)
+        (#true    (+ n (sum-down (- n 1))))))
+
+(pprint (kind (fork (depth 0))))
+(pprint (kind (fork (grow ()))))
+(pprint (kind (fork (/ 1 0))))
+(pprint (kind (fork (str-len 5))))
+(pprint (join (fork (sum-down 10000))))
+(pprint (join (fork (length (range 0 100000)))))
+:done

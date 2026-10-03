@@ -1,0 +1,4 @@
+root-start
+fault: not a cons: () (car at t/129-root-fault.slight:11:1)
+child-done
+exit: 1

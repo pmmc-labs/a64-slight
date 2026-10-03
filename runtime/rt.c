@@ -202,30 +202,57 @@ rt_value_t rt_is_lambda(rt_value_t v) {
 
 // --- faults -------------------------------------------------------------------
 
+// What each fault says in the log, and whether it shows the value.
+static const struct {
+    const char *what;
+    int         shows;
+} faults[RT_FAULT_COUNT + 1] = {
+    [RT_FAULT_NOT_INT]    = { "not an integer: ", 1 },
+    [RT_FAULT_OVERFLOW]   = { "integer overflow", 0 },
+    [RT_FAULT_NOT_BOOL]   = { "not a boolean: ", 1 },
+    [RT_FAULT_NO_CLAUSE]  = { "no cond clause matched", 0 },
+    [RT_FAULT_STACK]      = { "stack overflow", 0 },
+    [RT_FAULT_NOT_CONS]   = { "not a cons: ", 1 },
+    [RT_FAULT_NOT_LIST]   = { "not a list: ", 1 },
+    [RT_FAULT_HEAP]       = { "heap exhausted", 0 },
+    [RT_FAULT_NOT_STRING] = { "not a string: ", 1 },
+    [RT_FAULT_NOT_SYMBOL] = { "not a symbol: ", 1 },
+    [RT_FAULT_RANGE]      = { "out of range: ", 1 },
+    [RT_FAULT_NOT_NUMBER] = { "not a number: ", 1 },
+    [RT_FAULT_DIV_ZERO]   = { "division by zero", 0 },
+    [RT_FAULT_NOT_FUNC]   = { "not a function: ", 1 },
+    [RT_FAULT_ARITY]      = { "wrong number of arguments for ", 1 },
+    [RT_FAULT_NOT_PID]    = { "not a pid: ", 1 },
+    [RT_FAULT_JOIN_SELF]  = { "a process can't join itself: ", 1 },
+};
+
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
+    if (fault < 1 || fault > RT_FAULT_COUNT) abort();
+    if (!faults[fault].shows) value = RT_NIL;   // whatever the caller had in the register
+
+    rt_buf_t b = { 0 };
+    buf_str(&b, faults[fault].what);
+    if (faults[fault].shows) rt_render(&b, value, 0);
+    uint64_t id = rt_current->pid >> RT_PID_SHIFT;
     fflush(stdout);                             // so a fault lands after the output before it
-    fputs("fault: ", stderr);
-    switch (fault) {
-        case RT_FAULT_NOT_INT:    fputs("not an integer: ", stderr); print_value(stderr, value); break;
-        case RT_FAULT_OVERFLOW:   fputs("integer overflow", stderr); break;
-        case RT_FAULT_NOT_BOOL:   fputs("not a boolean: ", stderr);  print_value(stderr, value); break;
-        case RT_FAULT_NO_CLAUSE:  fputs("no cond clause matched", stderr); break;
-        case RT_FAULT_STACK:      fputs("stack overflow", stderr); break;
-        case RT_FAULT_NOT_CONS:   fputs("not a cons: ", stderr);     print_value(stderr, value); break;
-        case RT_FAULT_NOT_LIST:   fputs("not a list: ", stderr);     print_value(stderr, value); break;
-        case RT_FAULT_HEAP:       fputs("heap exhausted", stderr); break;
-        case RT_FAULT_NOT_STRING: fputs("not a string: ", stderr);   print_value(stderr, value); break;
-        case RT_FAULT_NOT_SYMBOL: fputs("not a symbol: ", stderr);   print_value(stderr, value); break;
-        case RT_FAULT_RANGE:      fputs("out of range: ", stderr);   print_value(stderr, value); break;
-        case RT_FAULT_NOT_NUMBER: fputs("not a number: ", stderr);   print_value(stderr, value); break;
-        case RT_FAULT_DIV_ZERO:   fputs("division by zero", stderr); break;
-        case RT_FAULT_NOT_FUNC:   fputs("not a function: ", stderr); print_value(stderr, value); break;
-        case RT_FAULT_ARITY:      fputs("wrong number of arguments for ", stderr); print_value(stderr, value); break;
-        case RT_FAULT_NOT_PID:    fputs("not a pid: ", stderr);      print_value(stderr, value); break;
-        default:                  fprintf(stderr, "unknown fault %" PRIu64, fault); break;
-    }
-    fprintf(stderr, " (%s)\n", site);
-    exit(1);
+    if (id == 1) fprintf(stderr, "fault: %.*s (%s)\n", (int)b.len, b.bytes, site);
+    else         fprintf(stderr, "fault in #<pid %" PRIu64 ">: %.*s (%s)\n", id, (int)b.len, b.bytes, site);
+    rt_buf_free(&b);
+
+    // The reason, (kind value site), goes on this stack: rt_end copies it
+    // out, and the heap may be what ran out. The string is a box like any
+    // other, padded as the copier expects.
+    size_t     len = strlen(site);
+    uint64_t   space[len / 8 + 6];
+    uint64_t  *str = (uint64_t *)(((uintptr_t)space + 15) & ~(uintptr_t)15);
+    str[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
+    memcpy(str + 1, site, len + 1);
+    _Alignas(16) rt_value_t cells[6] = {
+        rt_symbol(RT_SYM_FAULTS - 1 + fault), (rt_value_t)&cells[2] | RT_TAG_LIST,
+        value,                                (rt_value_t)&cells[4] | RT_TAG_LIST,
+        (rt_value_t)str | RT_TAG_BOXED,       RT_NIL,
+    };
+    rt_end(0, (rt_value_t)cells | RT_TAG_LIST, 1);
 }
 
 // --- the heap -----------------------------------------------------------------

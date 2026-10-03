@@ -1,0 +1,8 @@
+fault in #<pid 2>: not a pid: 5 (join at t/128-pid-faults.slight:3:21)
+(error (not-a-pid 5 "join at t/128-pid-faults.slight:3:21"))
+fault in #<pid 3>: not a pid: x (monitor at t/128-pid-faults.slight:4:21)
+(error (not-a-pid x "monitor at t/128-pid-faults.slight:4:21"))
+fault in #<pid 4>: not a pid: "p" (kill at t/128-pid-faults.slight:5:21)
+(error (not-a-pid "p" "kill at t/128-pid-faults.slight:5:21"))
+fault: a process can't join itself: #<pid 1> (join at t/128-pid-faults.slight:6:1)
+exit: 1

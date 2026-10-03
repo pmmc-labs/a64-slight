@@ -1,5 +1,5 @@
 // process.c -- processes: the table, the run queue, stacks, heaps,
-// messages, and the scheduler.
+// messages, how processes end, and the scheduler.
 //
 // One core. The scheduler runs on the C stack and switches to a process
 // with rt_switch; the process switches back when it pauses (preempted, or
@@ -7,9 +7,14 @@
 // needs one: waiting in recv, it's just (code, args, mailbox), and it gives
 // its stack back to the pool. A message arriving puts it back in the run
 // queue, and it starts again at code, on a stack from the pool.
+//
+// A process that ends leaves an exit record in the table, kept for good
+// (D88), so join and monitor can ask about it at any time; everything else
+// it had is freed.
 
 #include "rt.h"
 
+#include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -23,15 +28,21 @@
 #define CHUNK_MAX      (1 << 20)        // ...doubling up to this
 #define HEAP_MAX       (64 << 20)       // all of a process's chunks; there's no GC yet
 
-static rt_proc_t **procs;               // by pid
+// A pid's entry in the table: the process while it runs, then its exit
+// record: (:ok value) or (:error value).
+typedef struct {
+    rt_proc_t  *proc;                   // NULL once it has ended
+    rt_value_t  value;
+    rt_chunk_t *chunk;                  // where value lives, or NULL if it needs no space
+    int         ok;
+} entry_t;
+
+static entry_t    *procs;               // by pid number; the root is 1
 static uint64_t    nprocs, procs_cap;
 static rt_proc_t  *ready_head, *ready_tail;
 static rt_ctx_t    scheduler;
 static void       *free_stacks;         // a list through each stack's first word
 static size_t      page;
-
-static rt_buf_t    root_result;
-static int         root_done;
 
 // --- the run queue ------------------------------------------------------------
 
@@ -50,6 +61,17 @@ static rt_proc_t *dequeue(void) {
         if (!ready_head) ready_tail = NULL;
     }
     return p;
+}
+
+// Takes p out of the run queue, wherever it is: only kill needs this.
+static void unqueue(rt_proc_t *p) {
+    rt_proc_t **link = &ready_head, *prev = NULL;
+    while (*link != p) {
+        prev = *link;
+        link = &prev->next_ready;
+    }
+    *link = p->next_ready;
+    if (ready_tail == p) ready_tail = prev;
 }
 
 // Back to the scheduler. Returns when the scheduler switches back, which
@@ -133,6 +155,12 @@ static void free_heap(rt_proc_t *p) {
     p->chunks     = NULL;
     p->heap_ptr   = p->heap_limit = 0;
     p->heap_bytes = 0;
+    for (rt_msg_t *m = p->mail, *next; m; m = next) {
+        next = m->next;
+        free(m->chunk);
+        free(m);
+    }
+    p->mail = p->mail_last = NULL;
 }
 
 // --- copying values between processes -----------------------------------------
@@ -210,6 +238,14 @@ static rt_chunk_t *copy_values(const rt_value_t *from, rt_value_t *into, uint64_
     return c;
 }
 
+// A copy of v in the current process's heap.
+static rt_value_t copy_here(rt_value_t v) {
+    rt_value_t  out;
+    rt_chunk_t *c = copy_values(&v, &out, 1);
+    if (c) adopt(rt_current, c);
+    return out;
+}
+
 // --- processes ----------------------------------------------------------------
 
 rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
@@ -227,7 +263,7 @@ rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
         exit(2);
     }
     uint64_t id = ++nprocs;                     // pids start at 1: the root
-    procs[id]   = p;
+    procs[id]   = (entry_t){ .proc = p };
     p->pid      = id << RT_PID_SHIFT | RT_TAG_PID;
     p->parent   = parent;
     p->code     = code;
@@ -235,9 +271,11 @@ rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
     return p;
 }
 
-static rt_proc_t *lookup(rt_value_t pid) {
-    uint64_t id = pid >> RT_PID_SHIFT;
-    return id >= 1 && id <= nprocs ? procs[id] : NULL;
+// pid's entry. Every pid came from fork, so it has one. Don't hold on to
+// it across a switch: a fork can move the table.
+static entry_t *entry(rt_value_t pid, const char *site) {
+    if ((pid & RT_TAG_MASK) != RT_TAG_PID) rt_fault(RT_FAULT_NOT_PID, pid, site);
+    return &procs[pid >> RT_PID_SHIFT];
 }
 
 rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
@@ -248,11 +286,8 @@ rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const c
     return p->pid;
 }
 
-// To a process that has ended, a message just disappears, as in Erlang.
-rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
-    if ((pid & RT_TAG_MASK) != RT_TAG_PID) rt_fault(RT_FAULT_NOT_PID, pid, site);
-    rt_proc_t *p = lookup(pid);
-    if (!p || p->state == RT_DONE) return RT_NIL;
+// A copy of msg into p's mailbox; p wakes if it's waiting for one.
+static void deliver(rt_proc_t *p, rt_value_t msg) {
     rt_msg_t *m = malloc(sizeof *m);
     if (!m) {
         perror("rt: out of memory");
@@ -264,6 +299,12 @@ rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
     else              p->mail = m;
     p->mail_last = m;
     if (p->state == RT_WAITING) enqueue(p);
+}
+
+// To a process that has ended, a message just disappears, as in Erlang.
+rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
+    rt_proc_t *p = entry(pid, site)->proc;
+    if (p) deliver(p, msg);
     return RT_NIL;
 }
 
@@ -293,6 +334,134 @@ void rt_dead_letter(rt_value_t msg, const char *site) {
     rt_buf_free(&b);
 }
 
+// --- how processes end --------------------------------------------------------
+//
+// Values built here, like (:ok value) around a record's value, are built
+// on the C stack, and copied to where they're going.
+
+static rt_value_t cons_at(rt_value_t *cell, rt_value_t car, rt_value_t cdr) {
+    cell[0] = car;
+    cell[1] = cdr;
+    return (rt_value_t)cell | RT_TAG_LIST;
+}
+
+// The result in e, (:ok value) or (:error reason), in cells (4 words).
+static rt_value_t result_at(rt_value_t *cells, const entry_t *e) {
+    return cons_at(cells, rt_symbol(e->ok ? RT_SYM_OK : RT_SYM_ERROR), cons_at(cells + 2, e->value, RT_NIL));
+}
+
+// Sends (:exit pid result) to `to`, about the process that ended at e.
+static void notify(rt_value_t to, rt_value_t pid, const entry_t *e) {
+    rt_proc_t *w = procs[to >> RT_PID_SHIFT].proc;
+    if (!w) return;
+    _Alignas(16) rt_value_t cells[10];
+    rt_value_t result = result_at(cells, e);
+    deliver(w, cons_at(cells + 4, rt_symbol(RT_SYM_EXIT), cons_at(cells + 6, pid, cons_at(cells + 8, result, RT_NIL))));
+}
+
+// p ends. Its result goes into its exit record, its joiners wake, its
+// monitors hear, and its heap and mail are freed. Its stack and struct are
+// the caller's to free (retire), since p may be running on that stack.
+static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
+    uint64_t id = p->pid >> RT_PID_SHIFT;
+    entry_t *e  = &procs[id];
+    e->ok    = ok;
+    e->chunk = copy_values(&value, &e->value, 1);
+    if (id == 1 && !ok && !logged) {
+        rt_buf_t b = { 0 };
+        rt_render(&b, e->value, 0);
+        fflush(stdout);
+        fprintf(stderr, "error: %.*s\n", (int)b.len, b.bytes);
+        rt_buf_free(&b);
+    }
+    for (rt_proc_t *j = p->joiners, *next; j; j = next) {
+        next = j->next_joiner;
+        enqueue(j);
+    }
+    for (rt_watch_t *w = p->watchers, *next; w; w = next) {
+        next = w->next;
+        notify(w->pid, p->pid, e);
+        free(w);
+    }
+    free_heap(p);
+    p->state = RT_DONE;
+}
+
+static void retire(rt_proc_t *p) {
+    if (p->stack) release_stack(p);
+    procs[p->pid >> RT_PID_SHIFT].proc = NULL;
+    free(p);
+}
+
+void rt_end(int ok, rt_value_t value, int logged) {
+    rt_proc_t *p = rt_current;
+    finish(p, ok, value, logged);
+    to_scheduler(p);                            // which retires it
+    __builtin_unreachable();
+}
+
+void rt_exit(rt_proc_t *p, rt_value_t result) {
+    (void)p;                                    // it's rt_current
+    rt_end(1, result, 0);
+}
+
+rt_value_t rt_raise(rt_value_t reason, const char *site) {
+    (void)site;
+    rt_end(0, reason, 0);
+}
+
+rt_value_t rt_join(rt_value_t pid, const char *site) {
+    rt_proc_t *p = rt_current;
+    rt_proc_t *t = entry(pid, site)->proc;
+    if (pid == p->pid) rt_fault(RT_FAULT_JOIN_SELF, pid, site);
+    if (t) {
+        rt_proc_t **link = &t->joiners;
+        while (*link) link = &(*link)->next_joiner;
+        *link          = p;
+        p->next_joiner = NULL;
+        p->joining     = pid;
+        p->state       = RT_JOINING;
+        to_scheduler(p);                        // until t ends, and finish wakes us
+    }
+    _Alignas(16) rt_value_t cells[4];
+    return copy_here(result_at(cells, &procs[pid >> RT_PID_SHIFT]));
+}
+
+rt_value_t rt_monitor(rt_value_t pid, const char *site) {
+    entry_t *e = entry(pid, site);
+    if (!e->proc) {
+        notify(rt_current->pid, pid, e);
+        return RT_NIL;
+    }
+    rt_watch_t *w = malloc(sizeof *w);
+    if (!w) {
+        perror("rt: out of memory");
+        exit(2);
+    }
+    w->next = NULL;
+    w->pid  = rt_current->pid;
+    rt_watch_t **link = &e->proc->watchers;
+    while (*link) link = &(*link)->next;
+    *link = w;
+    return RT_NIL;
+}
+
+rt_value_t rt_kill(rt_value_t pid, const char *site) {
+    rt_proc_t *p = entry(pid, site)->proc;
+    if (!p) return RT_NIL;
+    if (p == rt_current) rt_end(0, rt_symbol(RT_SYM_KILLED), 0);
+    if (p->state == RT_READY) unqueue(p);
+    if (p->state == RT_JOINING) {
+        rt_proc_t  *t    = procs[p->joining >> RT_PID_SHIFT].proc;
+        rt_proc_t **link = &t->joiners;
+        while (*link != p) link = &(*link)->next_joiner;
+        *link = p->next_joiner;
+    }
+    finish(p, 0, rt_symbol(RT_SYM_KILLED), 0);
+    retire(p);
+    return RT_NIL;
+}
+
 void rt_preempt(rt_proc_t *p) {
     p->reductions = QUOTA;
     if (ready_head) {
@@ -308,16 +477,6 @@ void rt_yield(void) {
     to_scheduler(p);
 }
 
-void rt_exit(rt_proc_t *p, rt_value_t result) {
-    if (p == procs[1]) {
-        rt_render(&root_result, result, 0);
-        root_done = 1;
-    }
-    p->state = RT_DONE;
-    to_scheduler(p);
-    __builtin_unreachable();
-}
-
 // --- the scheduler ------------------------------------------------------------
 
 void rt_run(void) {
@@ -327,17 +486,10 @@ void rt_run(void) {
         p->state   = RT_RUNNING;
         rt_current = p;
         rt_switch(&scheduler, &p->ctx);
-        // back: it paused (and queued itself again), waits in recv, or ended
-        if (p->state == RT_WAITING || p->state == RT_DONE) release_stack(p);
-        if (p->state == RT_DONE) {
-            free_heap(p);
-            for (rt_msg_t *m = p->mail, *next; m; m = next) {
-                next = m->next;
-                free(m->chunk);
-                free(m);
-            }
-            p->mail = p->mail_last = NULL;
-        }
+        // back: it paused (and queued itself again), waits in recv or
+        // join, or ended
+        if (p->state == RT_WAITING)   release_stack(p);
+        else if (p->state == RT_DONE) retire(p);
     }
 }
 
@@ -345,12 +497,21 @@ int main(void) {
     page = (size_t)sysconf(_SC_PAGESIZE);
     rt_new_process((rt_code_t)slight_main, RT_NIL);
     rt_run();
-    if (!root_done) {
+    const entry_t *root = &procs[1];
+    if (root->proc) {
         fflush(stdout);
-        fputs("deadlock: the root process is waiting for a message, and nothing else can run\n", stderr);
+        if (root->proc->state == RT_JOINING) {
+            fprintf(stderr, "deadlock: the root process is waiting for #<pid %" PRIu64 "> to end, and nothing else can run\n",
+                    root->proc->joining >> RT_PID_SHIFT);
+        } else {
+            fputs("deadlock: the root process is waiting for a message, and nothing else can run\n", stderr);
+        }
         return 1;
     }
-    fwrite(root_result.bytes, 1, root_result.len, stdout);
+    if (!root->ok) return 1;
+    rt_buf_t b = { 0 };
+    rt_render(&b, root->value, 0);
+    fwrite(b.bytes, 1, b.len, stdout);
     putchar('\n');
     return 0;
 }

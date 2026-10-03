@@ -1,0 +1,14 @@
+; raise ends the process with (:error reason). It isn't logged, except in
+; the root, where it's the program's result: "error: reason", and exit 1.
+; Other processes still run.
+
+(defun check (n)
+    (cond
+        ((< n 0) (raise (list :negative n)))
+        (#true   n)))
+
+(pprint (join (fork (check 5))))
+(pprint (join (fork (check -2))))
+(fork (pprint :after-the-root))
+(check -7)
+(pprint :not-reached)

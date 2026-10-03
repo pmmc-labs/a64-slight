@@ -1,0 +1,5 @@
+(ok 5)
+(error (negative -2))
+error: (negative -7)
+after-the-root
+exit: 1

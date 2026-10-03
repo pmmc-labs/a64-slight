@@ -158,9 +158,9 @@ reply refs.
 | `(connect :keypress expr)` | `fork`, plus the new process receives the source's events as messages. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
-| `(join pid)` | **Blocking** wait for `pid` to end. Returns `(:ok value)` or `(:error reason)`. Works on any pid (not just children), anywhere (including inside lambdas), and after the process has already ended. `(join $$)` is an error. |
-| `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller. There are no automatic messages to the parent. |
-| `(kill pid)` | Ends `pid` with `(:error :killed)` (D87). |
+| `(join pid)` | **Blocking** wait for `pid` to end. Returns `(:ok value)` or `(:error reason)`. Works on any pid (not just children), anywhere (including inside lambdas), any number of times, and after the process has already ended. Joiners wake in the order they joined. `(join $$)` faults (`:join-self`). |
+| `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has. Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
+| `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, or blocked in `join`. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` after `ms` milliseconds. |
 | `(raise reason)` | Ends the current process with `(:error reason)`. |
 
@@ -170,10 +170,16 @@ reply refs.
   isn't a boolean, no `cond` clause matching, an arity mismatch, the heap
   limit) ends the process with `(:error (kind value site))` (D87): `kind` a
   keyword such as `:overflow` or `:not-a-list`, `value` the offending value
-  (or `()`), `site` a string like `"car at file:line:col"`. `(raise r)`
-  ends it with `(:error r)`. Until step 8, a fault still prints
-  `fault: <what> (<where> at file:line:col)` to stderr and ends the whole
-  program with status 1.
+  (or `()`), `site` a string like `"car at file:line:col"`. The kinds are
+  listed in `runtime/rt.h` (`RT_FAULT_...`). `(raise r)` ends it with
+  `(:error r)`. `join`, `monitor` and `kill` given something that isn't a
+  pid fault (`:not-a-pid`).
+- **What gets logged** (D99, D100). A fault is logged to stderr when it
+  happens, since it's always a bug: `fault: <what> (<where> at
+  file:line:col)` in the root, `fault in #<pid N>: ...` anywhere else.
+  `raise` and `kill` aren't logged, except in the root, whose error is the
+  program's: `error: <reason>`. The program exits 1 if the root ends with
+  an error, and otherwise prints the root's value and exits 0.
 - **Preemption.** Every loop is a tail call, so a reduction counter is
   checked at each function entry and tail call. When it runs out, the
   process pauses where it is, *keeping its stack*, and goes to the back of
@@ -182,14 +188,15 @@ reply refs.
   (preempted or yielded), blocked in `join`, or blocked in a syscall holds a
   stack. A process waiting in `recv` holds none.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
-  sources, no blocked I/O) is detected and reported. So far (step 7): if
+  sources, no blocked I/O) is detected and reported. So far (step 8): if
   the run queue empties before the root process has ended, the program
   prints `deadlock: the root process is waiting for a message, and nothing
-  else can run` to stderr and exits 1.
+  else can run` (or `... waiting for #<pid N> to end, ...`, in `join`) to
+  stderr and exits 1.
 - **The program ends when nothing can run**, not when the root ends: other
-  processes keep running after the root has its value, and the root's value
-  is printed last. Processes still waiting in `recv` at that point are
-  dropped (D93).
+  processes keep running after the root has its value (or its error), and
+  the root's value is printed last. Processes still waiting in `recv` or
+  `join` at that point are dropped (D93).
 - **Blocking syscalls.** Since a process can block with its stack, `sleep`,
   `slurp` and `spew` block only the calling process and return a Result.
   This follows from the `join` decision, but wasn't discussed on its own.
@@ -412,13 +419,17 @@ Lalloc_N:
   queue it to run the entry function.
 - Ending: the Result is copied into a small per-pid **exit record**.
   Processes blocked in `join` on it wake with a copy; later `join`s read
-  the record; monitors get `(:exit pid result)`. Then the heap and the
-  stack are freed.
+  the record; monitors get `(:exit pid result)`. Then the heap, the
+  mailbox, the stack and the process struct are freed (D102). Nothing
+  on a stack needs cleaning up, so `kill` frees a process wherever it is
+  (D103).
+- The record is the pid's 32-byte entry in the process table: the value
+  (or the error's reason), and a chunk holding a copy of it if it needs
+  memory. `(:ok v)` and `(:exit pid result)` are built when asked for.
 - Exit records are kept forever (D88). That doesn't matter at hundreds or
-  thousands of processes. A system that churns through millions will need
-  a retention policy, such as dropping the record once the parent has seen
-  it. (So far, step 7, the whole process struct is kept, about 350 bytes;
-  step 8 shrinks that to the record.)
+  thousands of processes, and a million cost 32 MB. A system that churns
+  through many millions will need a retention policy, such as dropping
+  the record once the parent has seen it.
 
 ### Scheduler
 
@@ -572,4 +583,5 @@ Collected from above:
 2. GC at base-of-stack tail calls outside state functions.
 
 Settled in step 7: `recv` syntax (D85), the run queue (D86), the fault,
-`raise` and `kill` reasons (D87), exit records and mailboxes (D88).
+`raise` and `kill` reasons (D87), exit records and mailboxes (D88). In
+step 8: the fault kinds (D98), and what gets logged (D99, D100).

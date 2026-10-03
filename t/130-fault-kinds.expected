@@ -1,0 +1,11 @@
+fault in #<pid 2>: stack overflow (depth at t/130-fault-kinds.slight:4:1)
+stack
+fault in #<pid 3>: heap exhausted (cons at t/130-fault-kinds.slight:5:24)
+heap
+fault in #<pid 4>: division by zero (/ at t/130-fault-kinds.slight:14:21)
+div-by-zero
+fault in #<pid 5>: not a string: 5 (str-len at t/130-fault-kinds.slight:15:21)
+not-a-string
+(ok 50005000)
+(ok 100000)
+done

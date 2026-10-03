@@ -546,10 +546,74 @@ compile error; put them in a list.
 a guard page below, and pooled: a process takes one when it runs and gives
 it back when it waits in `recv` or ends. The stack check (D48) keeps 64 KB
 of headroom for a frame and a C call. A process struct (about 350 bytes)
-is never freed yet; step 8 shrinks what's kept to the exit record (D88).
+is never freed yet; step 8 shrinks what's kept to the exit record (D88;
+done in D102).
 
 **D97. The actor examples.** *(Default, under D84.)* `ping-pong`,
 `ring-benchmark` and `million-forks` are ported: a `(recv)` in the middle
 of a function became a receive function, the `(yield ...)` around loops is
 gone (preemption does that), and with no `join` or timing yet they print
 as they go and use fixed sizes.
+
+## Step 8
+
+**D98. Fault kinds are keywords, named in `rt.h`.** *(User.)* A fault's
+reason is `(kind value site)`: `kind` one of `:not-an-int`, `:overflow`,
+`:not-a-bool`, `:no-clause`, `:stack`, `:not-a-cons`, `:not-a-list`,
+`:heap`, `:not-a-string`, `:not-a-symbol`, `:out-of-range`,
+`:not-a-number`, `:div-by-zero`, `:not-a-function`, `:arity`,
+`:not-a-pid` or `:join-self`; `value` the offending value, or `()` for
+the faults that have none (overflow, no clause, stack, heap, division by
+zero); `site` a string, `"car at file:line:col"`. The runtime can't make
+symbols (ids are fixed at compile time, D55), so the ones it needs (`ok`,
+`error`, `exit`, `killed` and the kinds) get the ids after `#true` in
+every program, and `rt.h` numbers them. `values.test.ts` checks the two
+lists agree, reading the kinds from `rt.h`'s comments.
+
+**D99. How the root's result shows.** *(User.)* `(:ok v)` prints `v`
+when the program ends, and exits 0. A fault prints `fault: ...` as it
+always has; `raise` or `kill` prints `error: <reason>`; either way the
+program exits 1. Errors print when they happen, the value at the end
+(D93), and other processes still run to the end.
+
+**D100. Faults are logged in every process; `raise` and `kill` only in
+the root.** *(User agreed to logging errors from other processes; Claude
+narrowed it to faults.)* A fault is always a bug, so it's logged as
+`fault in #<pid N>: ...` even if someone will `join` the process. `raise`
+and `kill` are the program's own choices, and whoever joins or monitors
+sees them. Rejected: logging every `(:error ...)` (a supervisor killing
+its workers would fill the log), and logging nothing (a crash that nobody
+joins would be invisible).
+
+**D101. The details of `join`, `monitor` and `kill`.** *(User.)*
+`(join $$)` faults (`:join-self`), and so does giving any of them
+something that isn't a pid (`:not-a-pid`). `kill` and `monitor` return
+`()`. `(kill $$)` ends the caller, and killing a process that has ended
+does nothing. Monitoring a process that has ended sends the message at
+once; monitoring twice sends two. Joiners wake, and monitors hear, in the
+order they asked. A root stuck in `join` is a deadlock too, and the
+message says which pid it's waiting for.
+
+**D102. Exit records are table entries.** *(Default.)* When a process
+ends, its struct (about 350 bytes) is freed, and its pid's entry in the
+process table (32 bytes) keeps the result: the value, and a chunk holding
+a copy of it if it needs memory. `(:ok v)`, `(:error r)` and
+`(:exit pid result)` are built when they're asked for, so a process that
+ends with an immediate (`()`, an integer, a symbol) costs just its entry:
+32 MB for `million-forks`. Replaces D96's "never freed".
+
+**D103. A killed process is freed wherever it is.** *(Default.)* Nothing
+on a process's stack holds a resource: compiled code holds none, and a C
+builtin can't be preempted or killed partway (except `join`, which holds
+none either). So `kill` takes the process out of the run queue or a
+joiner list, frees its stack, heap and mail, and leaves its exit record,
+whatever state it's in. Rejected: delivering the kill when the target
+next runs, as Erlang's exit signals do (more states, and no gain on one
+core).
+
+**D104. More actor examples.** *(Default, under D84.)* `pub-sub`,
+`even-odd-actors` and `fixed-tournament` are ported; `ping-pong` uses
+`join` again, as the original does. `join` gives `(:ok value)`, so
+`fixed-tournament` takes the `cadr`. A function that waits in `recv`
+can't be a value, so `fixed-tournament` forks its game by name.
+`ping-pong-tournament` waits for `sleep` (step 10).

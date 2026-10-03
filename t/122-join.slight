@@ -1,0 +1,29 @@
+; join waits for a process to end and gives its result, (:ok value): any
+; number of times, from anywhere (here, inside map's lambda), before or
+; after the process ends. Joiners wake in the order they joined.
+
+(defun count-to (n acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (count-to (- n 1) (+ acc 1)))))
+
+(defun waiter (name target)
+    (pprint (list name (join target)))
+    name)
+
+; forks n processes, so the process table grows while someone is joining
+(defun spawn (n)
+    (cond
+        ((== n 0) :spawned)
+        (#true    (fork n) (spawn (- n 1)))))
+
+(let slow  (fork (count-to 5000 0)))
+(let quick (fork (list :hello $$)))
+(let w1    (fork (waiter :first slow)))
+(let w2    (fork (waiter :second slow)))
+(pprint (join slow))
+(pprint (join slow))
+(pprint (join quick))
+(pprint (map join (list w1 w2)))
+(pprint (join (fork (spawn 3000))))
+(join w2)

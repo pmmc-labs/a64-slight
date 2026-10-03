@@ -1,0 +1,52 @@
+; kill ends a process with (:error :killed), whatever it's doing: waiting
+; for a message, ready to run (started or not), or blocked in join; or
+; the caller itself. Killing a process that has ended does nothing.
+
+(defun server ()
+    (recv
+        (msg (pprint (list :server-got msg)) (server))))
+
+(defun count-to (n acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (count-to (- n 1) (+ acc 1)))))
+
+(defun suicide ()
+    (kill $$)
+    (pprint :not-reached))
+
+; waiting in recv; a message sent after it's killed goes nowhere
+(let s (fork (server)))
+(send s :one)
+(yield ())
+(pprint (kill s))
+(send s :two)
+(pprint (join s))
+
+; never started
+(let never (fork (pprint :never-runs)))
+(kill never)
+(pprint (join never))
+
+; preempted, so holding a stack
+(let busy (fork (count-to 100000 0)))
+(yield ())
+(kill busy)
+(pprint (join busy))
+
+; blocked in join; then what it was joining ends, and mustn't wake it
+(let s2 (fork (server)))
+(let blocked (fork (join s2)))
+(yield ())
+(kill blocked)
+(pprint (join blocked))
+(kill s2)
+(pprint (join s2))
+
+(pprint (join (fork (suicide))))
+
+(let done (fork :finished))
+(pprint (join done))
+(kill done)
+(pprint (join done))
+:end

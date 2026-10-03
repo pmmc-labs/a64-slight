@@ -1,0 +1,11 @@
+fault in #<pid 2>: not a cons: 5 (car at t/123-fault-in-process.slight:4:21)
+error
+not-a-cons
+5
+"car at t/123-fault-in-process.slight:4:21"
+#true
+fault in #<pid 3>: integer overflow (* at t/123-fault-in-process.slight:13:21)
+(error (overflow () "* at t/123-fault-in-process.slight:13:21"))
+fault in #<pid 4>: no cond clause matched (cond at t/123-fault-in-process.slight:14:21)
+(error (no-clause () "cond at t/123-fault-in-process.slight:14:21"))
+still-here

@@ -1,7 +1,6 @@
 ; ping-pong, from ts-slight's examples. Changes: a (recv) in the middle of
 ; a function became a receive function (pinger-wait), so send-then-wait is
-; two functions; if became cond; there's no join yet, so the processes
-; print as they go, and it's 3 rounds, not 30.
+; two functions; if became cond; join gives (:ok value).
 
 (defun ponger ()
     (recv
@@ -26,5 +25,4 @@
             (pinger target (- n 1)))))
 
 (let pong (fork (ponger)))
-(fork (pinger pong 3))
-:started
+(list (join (fork (pinger pong 30))) (join pong))

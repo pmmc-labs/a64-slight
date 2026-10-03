@@ -1,0 +1,9 @@
+; The root waiting in join for a process that waits forever is a
+; deadlock too.
+
+(defun server ()
+    (recv
+        (msg (server))))
+
+(pprint :before)
+(join (fork (server)))

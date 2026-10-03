@@ -1,0 +1,7 @@
+; join, monitor and kill take a pid, and a process can't join itself.
+
+(pprint (join (fork (join 5))))
+(pprint (join (fork (monitor :x))))
+(pprint (join (fork (kill "p"))))
+(join $$)
+(pprint :not-reached)

@@ -47,13 +47,13 @@ for the packages.
 
 ## Status
 
-The design is settled, and implementation is through step 7 of the plan:
+The design is settled, and implementation is through step 8 of the plan:
 integers, floats, strings, booleans, symbols, lists, `cond`/`let`/`do`,
 functions with tail calls, closures, a prelude, and processes (`fork`,
-`send`, `recv`, preemption) compile to native binaries, which pass their
-tests on macOS and under qemu. A million processes passing a message
-down a chain run in a few seconds. Next: `join`, `monitor`, `kill` and
-per-process faults. See:
+`send`, `recv`, `join`, `monitor`, `kill`, `raise`, preemption, faults
+that end just their process) compile to native binaries, which pass
+their tests on macOS and under qemu. A million processes passing a
+message down a chain run in a few seconds. Next: garbage collection. See:
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): the design
 - [`docs/PLAN.md`](docs/PLAN.md): the build order

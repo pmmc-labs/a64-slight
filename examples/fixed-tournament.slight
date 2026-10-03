@@ -1,0 +1,89 @@
+; fixed-tournament, from ts-slight's examples: N games, each playing
+; exactly R rallies, so every game must finish with counters (R R-1). Any
+; other result prints a FAIL.
+;
+; Changes: a (recv) in the middle of a function became receive functions;
+; case, if and when became cond and recv patterns; the sizes are fixed
+; (no @ARGV) and there's no timing (no time-it); a game is forked by name,
+; since a function that waits in recv can't be passed around as a value;
+; join gives (:ok value); the (yield ...) around each loop is gone.
+
+(defun player (game limit counter)
+    (recv
+        ((:Serve reply-to)
+            (send reply-to (list :Ping $$))
+            (player game limit counter))
+        ((:Ping reply-to)
+            (rally game limit (+ counter 1) reply-to :Pong))
+        ((:Pong reply-to)
+            (rally game limit (+ counter 1) reply-to :Ping))
+        ((:Stop reply-to)
+            (send game (list :Final counter)))))
+
+; one rally step: bump the counter, either keep the volley going or, once
+; this player reaches the limit, stop the peer and report to the game
+(defun rally (game limit counter reply-to reply-tag)
+    (cond
+        ((>= counter limit)
+            (send reply-to (list :Stop $$))
+            (send game (list :Final counter)))
+        (#true
+            (send reply-to (list reply-tag $$))
+            (player game limit counter))))
+
+(defun game (limit)
+    (let me $$)     ; $$ inside the fork would be the child
+    (let p1 (fork (player me limit 0)))
+    (let p2 (fork (player me limit 0)))
+    (game-start p1 p2))
+
+; wait for the :START gate, serve, then collect the two finals: p2 always
+; reaches the limit first, so they arrive (R) then (R-1)
+(defun game-start (p1 p2)
+    (recv
+        (start
+            (send p1 (list :Serve p2))
+            (game-finals ()))))
+
+(defun game-finals (finals)
+    (recv
+        ((:Final counter)
+            (cond
+                ((nil? finals) (game-finals (list counter)))
+                (#true         (list (car finals) counter))))))
+
+(defun setup-tournament (n limit)
+    (cond
+        ((== n 0) ())
+        (#true    (cons (fork (game limit)) (setup-tournament (- n 1) limit)))))
+
+(defun start-tournament (pids)
+    (map (lambda (pid) (send pid :START) pid) pids))
+
+(defun await-results (pids)
+    (map (lambda (pid) (cadr (join pid))) pids))
+
+(defun verify-results (expected results)
+    (fold/l 0 (lambda (failures r)
+        (cond
+            ((eq? r expected) failures)
+            (#true
+                (tty/write "FAIL: expected " expected " got " r \n)
+                (+ failures 1))))
+        results))
+
+(let num-games 100)
+(let rallies   1000)
+
+(tty/write "tournament: " num-games " games x " rallies " rallies" \n)
+
+(let pids (setup-tournament num-games rallies))
+
+(yield ())  ; let every game fork its players and park at recv
+
+(let results (await-results (start-tournament pids)))
+
+(let failures (verify-results (list rallies (- rallies 1)) results))
+(cond
+    ((== failures 0) (tty/write "PASS: " num-games " games, every game exactly (" rallies " " (- rallies 1) ")" \n))
+    (#true           (tty/write "FAIL: " failures " of " num-games " games wrong" \n)))

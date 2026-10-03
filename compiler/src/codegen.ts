@@ -30,7 +30,7 @@
 
 import { CompileError } from './errors.ts';
 import { float, list, NIL, posOf, show, str, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
-import { intWord, RESERVED_SYMBOLS, symbolWord } from './values.ts';
+import { intWord, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from './values.ts';
 import { isReceiveBody, patternNames, stateFunctions } from './classify.ts';
 
 // Lines of assembly, as a tree, so that joining pieces is cheap. flatten()
@@ -103,7 +103,7 @@ export function compileProgram(forms: Sexp, prelude: Sexp = NIL): string {
     const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user', state.includes(d.name.name)), preludeFns);
     const top    = all.filter((f) => !isForm(f, 'defun'));
     const empty: St = { labels: 0, slots: 0, symbols: null, stubs: [], data: [], consts: [], lambdas: [], closures: [] };
-    const st0 = RESERVED_SYMBOLS.reduce((st, name) => symbolId(st, name)[1], empty);
+    const st0 = [...RESERVED_SYMBOLS, ...RUNTIME_SYMBOLS].reduce((st, name) => symbolId(st, name)[1], empty);
 
     const compileAll = (ds: readonly Defun[], visible: Fns, module: Module, st: St): [Code, St] =>
         ds.reduce<[Code, St]>(([acc, s], d) => {
@@ -968,6 +968,10 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'exp':            fixed('rt_exp', 1),
     'lambda?':        fixed('rt_is_lambda', 1),
     'send':           fixed('rt_send', 2),
+    'join':           fixed('rt_join', 1),
+    'monitor':        fixed('rt_monitor', 1),
+    'kill':           fixed('rt_kill', 1),
+    'raise':          fixed('rt_raise', 1),
 };
 
 // The names a defun can't take.

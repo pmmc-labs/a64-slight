@@ -4,8 +4,8 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–7 done (under qemu, and natively on macOS as of
-step 6). Step 8 is next.
+**Progress:** steps 0–8 done (under qemu, and natively on macOS as of
+step 6). Step 9 is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -152,7 +152,13 @@ deadlock report is the simple one (D93), and a process's value is dropped
 - A process ends with `(:ok value)`.
 - **Done when** a ported `ping-pong` and `ring-benchmark` pass.
 
-### 8. Process lifecycle
+### 8. Process lifecycle (done)
+
+Agreed: the fault kinds (D98), how the root's result shows (D99), and
+logging faults from every process (D100, narrowed to faults: `raise` and
+`kill` are logged only in the root). An ended process keeps just a
+32-byte exit record (D102), and `kill` frees a process wherever it is
+(D103). `ping-pong-tournament` waits for `sleep`.
 
 - `join` (blocking, exit records), `monitor`, `kill`, `raise`.
 - Faults (overflow, bad types, arity, heap limit) become `(:error ...)`.
@@ -203,7 +209,9 @@ builtin. Beyond that:
 | `fib`, `fold-konts`, `game-of-life`, `simple-crappy-adts`, `closure-objects` | ported in step 6 (`examples/`) |
 | `scratchpad` | nothing else (pure) |
 | `ping-pong`, `ring-benchmark`, `million-forks` | ported in step 7 (`examples/`, D97) |
-| `pub-sub`, `even-odd-actors`, `simple-db-server`, `fixed-tournament`, `ping-pong-tournament`, `game-of-life-actors` | `(recv)` used as an expression mid-function becomes receive functions; `simple-db-server`'s `db-client` does `(recv)` inside a lambda, so it needs restructuring |
+| `pub-sub`, `even-odd-actors`, `fixed-tournament` | ported in step 8 (D104) |
+| `ping-pong-tournament` | `sleep` (step 10) |
+| `simple-db-server`, `game-of-life-actors` | `(recv)` used as an expression mid-function becomes receive functions; `simple-db-server`'s `db-client` does `(recv)` inside a lambda, so it needs restructuring |
 | `active-objects` | as above, plus drop `gensym` |
 | `key-catcher`, `divisions`, `tail-chase-game`, `window-manager`, `better-window-manager` | as above, plus devices (step 10) |
 | `meta-circular` | `join`/`yield`/`apply`; no `recv`, so likely as-is |

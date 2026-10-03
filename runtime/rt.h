@@ -41,23 +41,36 @@
 #define RT_FALSE             5    // symbol 0
 #define RT_TRUE             13    // symbol 1
 
-// What rt_fault is told went wrong.
-#define RT_FAULT_NOT_INT     1    // an integer operation was given something else
-#define RT_FAULT_OVERFLOW    2    // an integer result doesn't fit in 63 bits
-#define RT_FAULT_NOT_BOOL    3    // a cond test was neither #true nor #false
-#define RT_FAULT_NO_CLAUSE   4    // no cond clause matched
-#define RT_FAULT_STACK       5    // a function was called with the stack nearly full
-#define RT_FAULT_NOT_CONS    6    // car or cdr of something that isn't a cons
-#define RT_FAULT_NOT_LIST    7    // cons onto something that isn't a list
-#define RT_FAULT_HEAP        8    // the heap is full
-#define RT_FAULT_NOT_STRING  9    // a string operation was given something else
-#define RT_FAULT_NOT_SYMBOL 10    // a symbol operation was given something else
-#define RT_FAULT_RANGE      11    // an index, a byte, or a rounded float out of range
-#define RT_FAULT_NOT_NUMBER 12    // arithmetic on something that isn't a number
-#define RT_FAULT_DIV_ZERO   13    // division by zero
-#define RT_FAULT_NOT_FUNC   14    // a call to something that isn't a function
-#define RT_FAULT_ARITY      15    // a function called with the wrong number of arguments
-#define RT_FAULT_NOT_PID    16    // send to something that isn't a pid
+// What rt_fault is told went wrong, and the keyword that names it in the
+// process's (:error (kind value site)). compiler/tests/values.test.ts
+// reads the keywords from here.
+#define RT_FAULT_NOT_INT     1    // :not-an-int      an integer operation was given something else
+#define RT_FAULT_OVERFLOW    2    // :overflow        an integer result doesn't fit in 63 bits
+#define RT_FAULT_NOT_BOOL    3    // :not-a-bool      a cond test was neither #true nor #false
+#define RT_FAULT_NO_CLAUSE   4    // :no-clause       no cond clause matched
+#define RT_FAULT_STACK       5    // :stack           a function was called with the stack nearly full
+#define RT_FAULT_NOT_CONS    6    // :not-a-cons      car or cdr of something that isn't a cons
+#define RT_FAULT_NOT_LIST    7    // :not-a-list      cons onto something that isn't a list
+#define RT_FAULT_HEAP        8    // :heap            the heap is full
+#define RT_FAULT_NOT_STRING  9    // :not-a-string    a string operation was given something else
+#define RT_FAULT_NOT_SYMBOL 10    // :not-a-symbol    a symbol operation was given something else
+#define RT_FAULT_RANGE      11    // :out-of-range    an index, a byte, or a rounded float out of range
+#define RT_FAULT_NOT_NUMBER 12    // :not-a-number    arithmetic on something that isn't a number
+#define RT_FAULT_DIV_ZERO   13    // :div-by-zero     division by zero
+#define RT_FAULT_NOT_FUNC   14    // :not-a-function  a call to something that isn't a function
+#define RT_FAULT_ARITY      15    // :arity           a function called with the wrong number of arguments
+#define RT_FAULT_NOT_PID    16    // :not-a-pid       a process operation was given something else
+#define RT_FAULT_JOIN_SELF  17    // :join-self       (join $$), which would wait forever
+#define RT_FAULT_COUNT      17
+
+// Symbols the runtime makes: every program has them, after #false and
+// #true, in this order (values.ts, RUNTIME_SYMBOLS). The fault kinds
+// follow: RT_FAULT_x is symbol RT_SYM_FAULTS - 1 + x.
+#define RT_SYM_OK            2
+#define RT_SYM_ERROR         3
+#define RT_SYM_EXIT          4
+#define RT_SYM_KILLED        5
+#define RT_SYM_FAULTS        6
 
 // What rt_compare is asked.
 #define RT_CMP_EQ            0
@@ -120,7 +133,15 @@ typedef struct rt_msg {
     rt_chunk_t    *chunk;       // what value lives in; NULL if it needed none
 } rt_msg_t;
 
-typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_DONE } rt_state_t;
+// READY: in the run queue. WAITING: in recv, with no stack. JOINING:
+// blocked in join, keeping its stack. DONE: ended, about to be freed.
+typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_DONE } rt_state_t;
+
+// Someone to tell when a process ends: monitor's list.
+typedef struct rt_watch {
+    struct rt_watch *next;
+    rt_value_t       pid;
+} rt_watch_t;
 
 // A process. Compiled code finds the current one in x28, and uses the
 // fields up to ctx; the rest are the runtime's.
@@ -142,6 +163,10 @@ typedef struct rt_proc {
     size_t          next_chunk; // the size of the next chunk it allocates in
     rt_msg_t       *mail, *mail_last;
     struct rt_proc *next_ready;
+    struct rt_proc *joiners;    // blocked in join on this one, in the order they joined
+    struct rt_proc *next_joiner;
+    rt_value_t      joining;    // while JOINING: whom
+    rt_watch_t     *watchers;   // monitoring this one, in order
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -167,6 +192,7 @@ static inline const char *rt_string_bytes(rt_value_t v) { return (const char *)(
 
 static inline rt_value_t rt_int(int64_t n)        { return (rt_value_t)((uint64_t)n << 1); }
 static inline int64_t    rt_int_value(rt_value_t v) { return (int64_t)v >> 1; }
+static inline rt_value_t rt_symbol(uint64_t id)    { return id << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL; }
 
 // --- emitted by the compiler -------------------------------------------------
 
@@ -189,13 +215,24 @@ rt_value_t rt_recv(const rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt
 void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_letter);
 void       rt_yield(void) RT_ASM(rt_yield);
 
+// The lifecycle (process.c). rt_join waits for pid to end, keeping the
+// stack, and returns (:ok value) or (:error reason). rt_monitor has
+// (:exit pid result) sent to the caller when pid ends, or at once if it
+// has. rt_kill ends pid with (:error :killed). rt_raise ends the caller
+// with (:error reason). Each returns ().
+rt_value_t rt_join(rt_value_t pid, const char *site) RT_ASM(rt_join);
+rt_value_t rt_monitor(rt_value_t pid, const char *site) RT_ASM(rt_monitor);
+rt_value_t rt_kill(rt_value_t pid, const char *site) RT_ASM(rt_kill);
+__attribute__((noreturn))
+rt_value_t rt_raise(rt_value_t reason, const char *site) RT_ASM(rt_raise);
+
 // Makes room for `bytes` in the current process's heap: a new chunk.
 // Faults at `site` when the heap would pass its limit.
 void rt_heap_grow(uint64_t bytes, const char *site) RT_ASM(rt_heap_grow);
 
 // Something went wrong at `site` (a description and a source position);
-// `value` is the offending value, where there is one. Ends the program for
-// now; it will end only the process once there are processes.
+// `value` is the offending value, where there is one. Logs a line to
+// stderr and ends the current process with (:error (kind value site)).
 __attribute__((noreturn))
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) RT_ASM(rt_fault);
 
@@ -298,6 +335,12 @@ void rt_trampoline(void) RT_ASM(rt_trampoline);
 // The end of a process, with its result. Doesn't return.
 __attribute__((noreturn))
 void rt_exit(rt_proc_t *proc, rt_value_t result) RT_ASM(rt_exit);
+
+// Ends the current process with (:ok value) or (:error value). An error
+// in the root process is logged to stderr, unless `logged` says the
+// caller (rt_fault) already has.
+__attribute__((noreturn))
+void rt_end(int ok, rt_value_t value, int logged);
 
 // Static data: the compiler brackets its read-only and constant data with
 // these, so the runtime can tell values it doesn't have to copy.

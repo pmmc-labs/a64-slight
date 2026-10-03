@@ -1,0 +1,26 @@
+; monitor: when the process ends, the caller gets (:exit pid result); at
+; once, if it has already ended. Monitoring twice means two messages.
+; (The root can wait in recv by ending in a receive function.)
+
+(defun server ()
+    (recv
+        (msg (server))))
+
+(defun watcher (n)
+    (recv
+        ((:exit pid result)
+            (pprint (list :exit pid result))
+            (cond
+                ((== n 1) :watched)
+                (#true    (watcher (- n 1)))))))
+
+(let a (fork :quick))
+(yield ())
+(monitor a)
+(let b (fork (server)))
+(monitor b)
+(monitor b)
+(let c (fork (car 5)))
+(monitor c)
+(kill b)
+(watcher 4)

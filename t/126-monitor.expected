@@ -1,0 +1,6 @@
+(exit #<pid 2> (ok quick))
+(exit #<pid 3> (error killed))
+(exit #<pid 3> (error killed))
+fault in #<pid 4>: not a cons: 5 (car at t/126-monitor.slight:23:14)
+(exit #<pid 4> (error (not-a-cons 5 "car at t/126-monitor.slight:23:14")))
+watched

@@ -1,0 +1,68 @@
+; even-odd-actors, from ts-slight's examples: two processes decide whether
+; a number is even by passing it back and forth, counting down. Changes:
+; a (recv) in the middle of a function became a receive function, so each
+; actor is three functions (print, wait, reply); the root collects the
+; four answers in a receive function too; when and if became cond; the
+; (yield ...) around each loop is gone (preemption does that).
+
+(defun is-it-even? (reply-to)
+    (pprint :running-is-it-even?)
+    (even-wait reply-to))
+
+(defun even-wait (reply-to)
+    (recv
+        (msg
+            (pprint (list :is-it-even? :got msg))
+            (cond
+                ((eq? (car msg) :IS-EVEN?) (even-reply reply-to (cadr msg) (caddr msg)))
+                (#true                     ())))))
+
+(defun even-reply (reply-to n ask-odd?)
+    (cond
+        ((== n 0) (send reply-to (list :IT-IS-EVEN!)))
+        (#true    (send ask-odd? (list :IS-ODD? (- n 1) $$))))
+    (is-it-even? reply-to))
+
+(defun is-it-odd? (reply-to)
+    (pprint :running-is-it-odd?)
+    (odd-wait reply-to))
+
+(defun odd-wait (reply-to)
+    (recv
+        (msg
+            (pprint (list :is-it-odd? :got msg))
+            (cond
+                ((eq? (car msg) :IS-ODD?) (odd-reply reply-to (cadr msg) (caddr msg)))
+                (#true                    ())))))
+
+(defun odd-reply (reply-to n ask-even?)
+    (cond
+        ((== n 0) (send reply-to (list :IT-IS-ODD!)))
+        (#true    (send ask-even? (list :IS-EVEN? (- n 1) $$))))
+    (is-it-odd? reply-to))
+
+; the root: wait for n answers, print them, and stop both actors
+(defun collect (n answers is-even? is-odd?)
+    (cond
+        ((== n 0)
+            (pprint (reverse answers))
+            (send is-even? (list :STOP))
+            (send is-odd?  (list :STOP)))
+        (#true (collect-wait n answers is-even? is-odd?))))
+
+(defun collect-wait (n answers is-even? is-odd?)
+    (recv
+        (answer (collect (- n 1) (cons answer answers) is-even? is-odd?))))
+
+(let $reply-to $$)
+
+(let is-even? (fork (is-it-even? $reply-to)))
+(let is-odd?  (fork (is-it-odd?  $reply-to)))
+
+(pprint $reply-to)
+(send is-even? (list :IS-EVEN? 21 is-odd?))
+(send is-even? (list :IS-EVEN? 36 is-odd?))
+(send is-even? (list :IS-EVEN? 57 is-odd?))
+(send is-even? (list :IS-EVEN? 92 is-odd?))
+
+(collect 4 () is-even? is-odd?)
