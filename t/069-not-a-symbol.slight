@@ -1,0 +1,3 @@
+(defun name-of (x) (symbol->string x))
+(pprint (name-of :ok))
+(name-of "ok")

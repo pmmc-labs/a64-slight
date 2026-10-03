@@ -1,0 +1,16 @@
+; pprint shows strings in quotes, as ts-slight did
+(pprint "hello")
+(pprint "")
+(pprint "tab\there")
+(pprint "two\nlines")
+(pprint (list "a" (list "b") 1))
+(pprint '"quoted")
+(pprint '("in" ("a" "list")))
+(pprint (str? "x"))
+(pprint (str? :x))
+(pprint (str? 1))
+; lengths are in bytes
+(pprint (str-len "hello"))
+(pprint (str-len ""))
+(pprint (str-len "é"))
+(str-len "héllo")

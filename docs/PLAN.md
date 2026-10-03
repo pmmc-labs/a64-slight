@@ -4,8 +4,8 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–4 done (under qemu, and natively on macOS as of
-step 2). Step 5 is next.
+**Progress:** steps 0–4 and the strings half of step 5 done (under qemu,
+and natively on macOS as of step 2). Floats are next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -100,7 +100,15 @@ and neither side is a literal immediate.
 - `cons car cdr list` and the `cadr` family, `nil? cons?`, structural
   `eq?`, quoted list constants in static data, `pprint` for lists.
 
-### 5. Strings and floats
+### 5. Strings and floats (strings done)
+
+Strings landed first, as 5a; floats are 5b. The string builtins are in
+`runtime/strings.c`. The ASCII case mapping and the padding and searching
+helpers (`uc lc pad-start pad-end str-repeat starts-with ends-with`) wait
+for the prelude in step 6. Agreed for floats: `div` and `%` truncate
+toward zero, and dividing by zero faults; floats print as `3.0`, or the
+shortest form that reads back the same; `(== 1 1.0)` is `#true` and
+`(eq? 1 1.0)` is `#false` (D68–D70).
 
 - Boxed objects with headers. String literals in static data.
 - The string builtins in C (see DESIGN.md), `concat`/`~`, `tty/write`.

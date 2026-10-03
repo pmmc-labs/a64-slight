@@ -1,0 +1,22 @@
+; build a string a piece at a time, then take it apart again
+(defun digits (n acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (digits (- n 1) (~ acc (format-num (- n (* 10 (tens n))) 1))))))
+
+; n mod 10 the slow way: no integer division until floats arrive
+(defun tens (n) (tens-loop n 0))
+(defun tens-loop (n q)
+    (cond
+        ((< n 10) q)
+        (#true    (tens-loop (- n 10) (+ q 1)))))
+
+(let s (digits 1000 ""))
+(pprint (str-len s))
+(pprint (substring s 0 12))
+(length-of (str-split s "0"))
+(defun length-of (xs) (count xs 0))
+(defun count (xs n)
+    (cond
+        ((nil? xs) n)
+        (#true     (count (cdr xs) (+ n 1)))))

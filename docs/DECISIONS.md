@@ -334,3 +334,47 @@ the words decides it, so symbol dispatch like `(eq? dir :up)` stays a
 single compare. Otherwise the same word is equal, and when the words
 differ it calls `rt_equal`, which compares lists structurally.
 
+## Step 5a: strings
+
+**D62. String builtins keep ts-slight's edge cases.** *(Default.)*
+ts-slight's were JavaScript's: `substring` clamps and swaps its indexes,
+`index-of` finds `""` at 0, `str-split` on `""` gives `()`, `format-num`
+pads like `padStart`, `concat` and `str-join` render non-strings as
+`pprint` does. Indexes and lengths count bytes (DESIGN, level 1). Where
+JavaScript would give `NaN`, a fault instead: `byte-at` out of range,
+`bytes->string` given something other than 0–255.
+
+**D63. C builtins are passed the call's site.** *(Default.)* In the
+register after the arguments, so a fault raised in C reports the slight
+source position, as the compiler's own checks do. Rejected: inline type
+checks before every call (more code), or C faults without positions.
+
+**D64. `pprint` doesn't escape inside strings.** *(Default, as ts-slight.)*
+`(pprint "a\"b")` prints `"a"b"`.
+
+**D65. `tty/write` takes its arguments as they are.** *(Default.)*
+ts-slight also accepted one list argument and wrote its elements; here a
+list is written as `pprint` shows it, like any other value.
+
+**D66. `string->int` gives `#false` for anything that isn't an integer.**
+*(Default.)* Like `string->symbol` (D14), rather than a fault or a Result.
+
+**D67. The running process is a C global, `rt_current`.** *(Default.)* C
+builtins need it to allocate. Single core, so a global is enough; the
+scheduler (step 7) will set it at every switch.
+
+## Step 5b: floats (agreed, not built yet)
+
+**D68. `div` and `%` truncate toward zero.** *(User.)* Like C, AArch64's
+`sdiv`, and ts-slight's `%` (JavaScript's). `(% -7 2)` is -1. Dividing by
+zero faults; `sdiv` would quietly give 0. Rejected: floor division
+(Python's), handier for wrapping around.
+
+**D69. Floats print as `3.0`, otherwise as the shortest text that reads
+back as the same double.** *(User.)* ts-slight printed `3.0` as `3`
+because JavaScript has one number type; slight has two.
+
+**D70. `(== 1 1.0)` is `#true`, `(eq? 1 1.0)` is `#false`.** *(User.)*
+The comparisons compare numbers; `eq?` compares values, and an integer and
+a float are different values.
+

@@ -1,0 +1,6 @@
+; tty/write writes strings as they are, anything else as pprint shows it
+(tty/write "hello " 42 " " :sym " " (list 1 "two") \n)
+(tty/write "no newline")
+(tty/write \n "tab:" \t "end" \n)
+(pprint (tty/write))
+(str-len (concat \e "[0m"))

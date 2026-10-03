@@ -14,11 +14,12 @@
 // between Mach-O and ELF stay in one header, and rt.h's constants (RT_TRUE,
 // RT_FAULT_OVERFLOW, ...) can be used by name.
 //
-// So far (docs/PLAN.md, steps 1-4): integers, #true/#false, (), symbols,
+// So far (docs/PLAN.md, steps 1-5a): integers, #true/#false, (), symbols,
 // lists (cons cells bump-allocated in the process's heap, or static data
-// when quoted), the integer and list primitives, eq?/ne?, type predicates,
-// cond, let, do, pprint, defun and calls. The top-level forms that aren't
-// defuns are the body of slight_main.
+// when quoted), strings (boxes; literals are static data), the integer,
+// list and string primitives, eq?/ne?, type predicates, cond, let, do,
+// pprint, defun and calls. The top-level forms that aren't defuns are the
+// body of slight_main.
 
 import { CompileError } from './errors.ts';
 import { list, NIL, posOf, show, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
@@ -257,8 +258,10 @@ function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
         }
         case 'nil':
             return ['    mov  x0, #RT_NIL', st];
+        case 'str':
+            return loadString(x.v, st);
         case 'sym':
-            return [compileName(x, cx), st];
+            return compileName(x, cx, st);
         case 'pair':
             return compileForm(x, cx, st);
         default:
@@ -266,13 +269,32 @@ function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
     }
 }
 
-function compileName(x: Sym, cx: Cx): Code {
-    if (x.name === '#true') return '    mov  x0, #RT_TRUE';
-    if (x.name === '#false') return '    mov  x0, #RT_FALSE';
+// ts-slight's names for control characters, as strings.
+const STRING_CONSTANTS: Readonly<Record<string, string>> = { '\\n': '\n', '\\r': '\r', '\\t': '\t', '\\e': '\x1b' };
+
+function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
+    if (x.name === '#true') return ['    mov  x0, #RT_TRUE', st];
+    if (x.name === '#false') return ['    mov  x0, #RT_FALSE', st];
     const si = lookup(cx.env, x.name);
-    if (si !== null) return `    ldr  x0, ${slot(si)}    // ${x.name}`;
+    if (si !== null) return [`    ldr  x0, ${slot(si)}    // ${x.name}`, st];
+    const constant = STRING_CONSTANTS[x.name];
+    if (constant !== undefined) return loadString(constant, st);
     if (lookupFn(cx.fns, x.name) !== null) throw new CompileError(`functions as values aren't supported yet: ${x.name}`, x.pos);
     throw new CompileError(`unknown name '${x.name}'`, x.pos);
+}
+
+// A string literal is a box in the read-only data: the header (its length
+// in bytes and the string type), the bytes, and a NUL.
+function staticString(s: string, st: St): [string, St] {
+    const [name, st1] = label(st, 'string');
+    const length = new TextEncoder().encode(s).length;
+    const box = ['    .p2align 4', `${name}:`, `    .quad ${length} << RT_BOX_SIZE_SHIFT | RT_BOX_STRING`, `    .asciz ${asmString(s)}`];
+    return [name, { ...st1, data: [st1.data, box] }];
+}
+
+function loadString(s: string, st: St): [Code, St] {
+    const [name, st1] = staticString(s, st);
+    return [[`    LOADADDR x0, ${name}`, '    orr  x0, x0, #RT_TAG_BOXED'], st1];
 }
 
 function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
@@ -306,6 +328,8 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
         const [code, st1] = compileExpr(args[0]!, operand, st);
         return [[code, predicate[0], boolIf(predicate[1])], st1];
     }
+    const builtin = C_BUILTINS[head.name];
+    if (builtin !== undefined) return compileCBuiltin(x, head.name, builtin, args, operand, st);
     if (head.name === 'eq?' || head.name === 'ne?') return compileEquality(x, head.name, args, operand, st);
     if (head.name === 'cons') return compileCons(x, args, operand, st);
     if (head.name === 'list') return compileList(x, args, operand, st);
@@ -333,7 +357,7 @@ const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t ===
 function compileQuote(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     checkArity(x, 'quote', args, 1);
     const datum = args[0]!;
-    if (datum.t === 'int' || datum.t === 'nil') return compileExpr(datum, cx, st);
+    if (datum.t === 'int' || datum.t === 'nil' || datum.t === 'str') return compileExpr(datum, cx, st);
     if (datum.t === 'pair') {
         const [name, st1] = staticList(x, datum, st);
         return [[`    LOADADDR x0, ${name}`, '    orr  x0, x0, #RT_TAG_LIST'], st1];
@@ -363,6 +387,10 @@ function staticWord(x: Pair, item: Sexp, st: St): [string, St] {
             return [`0x${BigInt.asUintN(64, intWord(item.v)).toString(16)}`, st];
         case 'nil':
             return ['RT_NIL', st];
+        case 'str': {
+            const [name, st1] = staticString(item.v, st);
+            return [`${name}+RT_TAG_BOXED`, st1];
+        }
         case 'sym': {
             const [id, st1] = symbolId(st, item.name);
             return [`0x${symbolWord(id).toString(16)}`, st1];
@@ -427,9 +455,38 @@ const PREDICATES: Readonly<Record<string, readonly [Code, string]>> = {
     'bool?': [['    cmp  x0, #RT_TRUE', '    ccmp x0, #RT_FALSE, #4, ne'], 'eq'],
 };
 
+// Builtins written in C (runtime/strings.c): the C function, and how many
+// arguments it takes. Missing optional arguments are passed as (). The
+// call's site goes in the register after the arguments, for the faults
+// the C code raises. A variadic builtin gets its arguments as one list.
+type CBuiltin = { readonly fn: string; readonly min: number; readonly max: number; readonly variadic: boolean };
+
+const fixed    = (fn: string, min: number, max = min): CBuiltin => ({ fn, min, max, variadic: false });
+const variadic = (fn: string): CBuiltin => ({ fn, min: 0, max: 1, variadic: true });
+
+const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
+    'str?':           fixed('rt_is_str', 1),
+    'str-len':        fixed('rt_str_len', 1),
+    'substring':      fixed('rt_substring', 3),
+    'concat':         variadic('rt_concat'),
+    '~':              fixed('rt_concat2', 2),
+    'index-of':       fixed('rt_index_of', 2),
+    'str-split':      fixed('rt_str_split', 2),
+    'str-join':       fixed('rt_str_join', 2),
+    'string->int':    fixed('rt_string_to_int', 1),
+    'symbol->string': fixed('rt_symbol_to_string', 1),
+    'string->symbol': fixed('rt_string_to_symbol', 1),
+    'byte-at':        fixed('rt_byte_at', 2),
+    'bytes->string':  fixed('rt_bytes_to_string', 1),
+    'format-num':     fixed('rt_format_num', 2, 3),
+    'tty/write':      variadic('rt_tty_write'),
+};
+
 // The names a defun can't take.
-const BUILTINS: readonly string[] =
-    ['pprint', 'eq?', 'ne?', 'cons', 'list', ...[ARITH, COMPARE, PREDICATES].flatMap((table) => Object.keys(table))];
+const BUILTINS: readonly string[] = [
+    'pprint', 'eq?', 'ne?', 'cons', 'list',
+    ...[ARITH, COMPARE, PREDICATES, C_BUILTINS].flatMap((table) => Object.keys(table)),
+];
 
 const isBuiltin = (name: string): boolean => BUILTINS.includes(name) || cxrPath(name) !== null;
 
@@ -482,7 +539,29 @@ function compileEquality(x: Pair, name: string, args: readonly Sexp[], cx: Cx, s
 function isImmediateLiteral(x: Sexp): boolean {
     if (x.t === 'int' || x.t === 'nil') return true;
     if (x.t === 'sym') return RESERVED_SYMBOLS.includes(x.name);
-    return isForm(x, 'quote') && x.t === 'pair' && x.cdr.t === 'pair' && x.cdr.car.t !== 'pair';
+    if (!isForm(x, 'quote') || x.t !== 'pair' || x.cdr.t !== 'pair') return false;
+    const datum = x.cdr.car;
+    return datum.t === 'sym' || datum.t === 'int' || datum.t === 'nil';
+}
+
+function compileCBuiltin(x: Pair, name: string, b: CBuiltin, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    if (b.variadic) {
+        const [list, st1] = compileList(x, args, cx, st);
+        const [site, st2] = siteLabel(st1, name, x.pos);
+        return [[list, `    LOADADDR x1, ${site}`, `    bl   ${b.fn}`], st2];
+    }
+    if (args.length < b.min || args.length > b.max) {
+        const n = b.min === b.max ? `${b.min}` : `${b.min} or ${b.max}`;
+        throw new CompileError(`${name} takes ${n} argument${n === '1' ? '' : 's'}, not ${args.length}`, x.pos);
+    }
+    const [code, st1] = args.reduce<[Code, St]>(([acc, s], arg, i) => {
+        const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i }, s);
+        return [[acc, c, `    str  x0, ${slot(cx.si + i)}`], useSlot(s1, cx.si + i)];
+    }, [[], st]);
+    const [site, st2] = siteLabel(st1, name, x.pos);
+    const loads = [...Array(b.max).keys()].map((i) =>
+        i < args.length ? `    ldr  x${i}, ${slot(cx.si + i)}` : `    mov  x${i}, #RT_NIL`);
+    return [[code, loads, `    LOADADDR x${b.max}, ${site}`, `    bl   ${b.fn}`], st2];
 }
 
 function checkArity(x: Pair, name: string, args: readonly Sexp[], n: number): void {
@@ -639,16 +718,23 @@ type Fault = 'RT_FAULT_NOT_INT' | 'RT_FAULT_OVERFLOW' | 'RT_FAULT_NOT_BOOL' | 'R
 // call to rt_fault, with the offending value (if any) in x0.
 function faultLabel(st: St, fault: Fault, what: string, pos: Pos | null): [string, St] {
     const [name, st1] = label(st, 'fault');
-    const site = pos === null ? what : `${what} at ${pos.file}:${pos.line}:${pos.col}`;
+    const [site, st2] = siteLabel(st1, what, pos);
     const stub = [
         `${name}:`,
         '    mov  x1, x0',
         `    mov  x0, #${fault}`,
-        `    LOADADDR x2, ${name}_site`,
+        `    LOADADDR x2, ${site}`,
         '    bl   rt_fault',
     ];
-    const data = [`${name}_site:`, `    .asciz ${asmString(site)}`];
-    return [name, { ...st1, stubs: [st1.stubs, stub], data: [st1.data, data] }];
+    return [name, { ...st2, stubs: [st2.stubs, stub] }];
+}
+
+// A string saying what is happening where, like "+ at t/x.slight:2:1",
+// for the runtime's fault messages.
+function siteLabel(st: St, what: string, pos: Pos | null): [string, St] {
+    const [name, st1] = label(st, 'site');
+    const text = pos === null ? what : `${what} at ${pos.file}:${pos.line}:${pos.col}`;
+    return [name, { ...st1, data: [st1.data, `${name}:`, `    .asciz ${asmString(text)}`] }];
 }
 
 const notYet = (x: Sexp): CompileError => new CompileError(`not supported yet: ${show(x)}`, posOf(x));

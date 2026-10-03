@@ -19,6 +19,13 @@
 #define RT_TAG_PID           7    // 111
 #define RT_SYMBOL_SHIFT      3    // a symbol is id << 3 | RT_TAG_SYMBOL
 
+// A boxed value points at a header word: the box's type in the low byte,
+// its size above. A string's size is its length in bytes; the bytes follow
+// the header, then a NUL that the length doesn't count.
+#define RT_BOX_TYPE_MASK  0xff
+#define RT_BOX_SIZE_SHIFT    8
+#define RT_BOX_STRING        1
+
 #define RT_NIL               1    // the list tag on a null pointer
 #define RT_FALSE             5    // symbol 0
 #define RT_TRUE             13    // symbol 1
@@ -32,6 +39,9 @@
 #define RT_FAULT_NOT_CONS    6    // car or cdr of something that isn't a cons
 #define RT_FAULT_NOT_LIST    7    // cons onto something that isn't a list
 #define RT_FAULT_HEAP        8    // the heap is full
+#define RT_FAULT_NOT_STRING  9    // a string operation was given something else
+#define RT_FAULT_NOT_SYMBOL 10    // a symbol operation was given something else
+#define RT_FAULT_RANGE      11    // an index or a byte value out of range
 
 #define RT_PROC_REDUCTIONS   0    // rt_proc_t.reductions: the reduction check at function entry
 #define RT_PROC_STACK_LIMIT  8    // rt_proc_t.stack_limit: the stack check at function entry
@@ -40,6 +50,7 @@
 
 #ifndef __ASSEMBLER__
 
+#include <stddef.h>
 #include <stdint.h>
 
 // Give a C symbol the exact name the assembly uses, on Linux and on macOS
@@ -61,6 +72,17 @@ typedef struct rt_proc {
 static inline rt_value_t rt_car(rt_value_t v) { return ((const rt_value_t *)(v - RT_TAG_LIST))[0]; }
 static inline rt_value_t rt_cdr(rt_value_t v) { return ((const rt_value_t *)(v - RT_TAG_LIST))[1]; }
 static inline int        rt_is_cons(rt_value_t v) { return (v & RT_TAG_MASK) == RT_TAG_LIST && v != RT_NIL; }
+
+static inline const uint64_t *rt_box(rt_value_t v) { return (const uint64_t *)(v - RT_TAG_BOXED); }
+static inline int rt_is_box(rt_value_t v, uint64_t type) {
+    return (v & RT_TAG_MASK) == RT_TAG_BOXED && (rt_box(v)[0] & RT_BOX_TYPE_MASK) == type;
+}
+static inline int         rt_is_string(rt_value_t v)    { return rt_is_box(v, RT_BOX_STRING); }
+static inline uint64_t    rt_string_len(rt_value_t v)   { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
+static inline const char *rt_string_bytes(rt_value_t v) { return (const char *)(rt_box(v) + 1); }
+
+static inline rt_value_t rt_int(int64_t n)        { return (rt_value_t)((uint64_t)n << 1); }
+static inline int64_t    rt_int_value(rt_value_t v) { return (int64_t)v >> 1; }
 
 // --- emitted by the compiler -------------------------------------------------
 
@@ -86,11 +108,56 @@ rt_value_t rt_pprint(rt_value_t v) RT_ASM(rt_pprint);
 // structurally equal, RT_FALSE if not.
 rt_value_t rt_equal(rt_value_t a, rt_value_t b) RT_ASM(rt_equal);
 
+// Builtins written in C (strings.c). Each takes the call's site last, for
+// its faults. The variadic ones (concat, tty/write) take their arguments
+// as a list.
+rt_value_t rt_is_str(rt_value_t v) RT_ASM(rt_is_str);
+rt_value_t rt_str_len(rt_value_t s, const char *site) RT_ASM(rt_str_len);
+rt_value_t rt_substring(rt_value_t s, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_substring);
+rt_value_t rt_concat(rt_value_t args, const char *site) RT_ASM(rt_concat);
+rt_value_t rt_concat2(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_concat2);
+rt_value_t rt_index_of(rt_value_t s, rt_value_t m, const char *site) RT_ASM(rt_index_of);
+rt_value_t rt_str_split(rt_value_t s, rt_value_t sep, const char *site) RT_ASM(rt_str_split);
+rt_value_t rt_str_join(rt_value_t sep, rt_value_t xs, const char *site) RT_ASM(rt_str_join);
+rt_value_t rt_string_to_int(rt_value_t s, const char *site) RT_ASM(rt_string_to_int);
+rt_value_t rt_symbol_to_string(rt_value_t sym, const char *site) RT_ASM(rt_symbol_to_string);
+rt_value_t rt_string_to_symbol(rt_value_t s, const char *site) RT_ASM(rt_string_to_symbol);
+rt_value_t rt_byte_at(rt_value_t s, rt_value_t i, const char *site) RT_ASM(rt_byte_at);
+rt_value_t rt_bytes_to_string(rt_value_t xs, const char *site) RT_ASM(rt_bytes_to_string);
+rt_value_t rt_format_num(rt_value_t n, rt_value_t width, rt_value_t fill, const char *site) RT_ASM(rt_format_num);
+rt_value_t rt_tty_write(rt_value_t args, const char *site) RT_ASM(rt_tty_write);
+
 // Called when proc's reductions run out. For now it just refills them;
 // once there are processes, it's where a process gets preempted.
 void rt_preempt(rt_proc_t *proc) RT_ASM(rt_preempt);
 
 // --- the runtime itself -------------------------------------------------------
+
+// The process that is running.
+extern rt_proc_t *rt_current;
+
+// Allocates from the current process's heap, in 16-byte units; faults at
+// `site` when the heap is full.
+void *rt_alloc(size_t bytes, const char *site);
+
+// A new string holding a copy of len bytes.
+rt_value_t rt_new_string(const char *bytes, size_t len, const char *site);
+
+// Text, for printing values and building strings: a growable buffer.
+typedef struct rt_buf {
+    char  *bytes;
+    size_t len, cap;
+} rt_buf_t;
+
+void rt_buf_add(rt_buf_t *b, const char *bytes, size_t len);
+void rt_buf_free(rt_buf_t *b);
+
+// Appends v as pprint shows it. With raw, a string is its bytes, without
+// quotes (concat and tty/write); strings inside lists are always quoted.
+void rt_render(rt_buf_t *b, rt_value_t v, int raw);
+
+// The name of symbol id, or NULL.
+const char *rt_symbol_name(uint64_t id);
 
 // Runs fn on the stack that ends at stack_top, with x28 = proc, and
 // returns its result (rt_asm.S).

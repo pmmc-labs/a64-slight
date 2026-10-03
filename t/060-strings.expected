@@ -1,0 +1,15 @@
+"hello"
+""
+"tab	here"
+"two
+lines"
+("a" ("b") 1)
+"quoted"
+("in" ("a" "list"))
+#true
+#false
+#false
+5
+0
+2
+6

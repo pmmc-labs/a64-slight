@@ -73,8 +73,8 @@ test("a program with no top-level expressions has the value ()", () => {
 });
 
 test('what isn\'t built yet is an error, with a position', () => {
-    assert.throws(() => compile('42\n  "hi"'), (e: unknown) =>
-        e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: "hi"');
+    assert.throws(() => compile('42\n  1.5'), (e: unknown) =>
+        e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: 1.5');
     assert.throws(() => compile('(lambda (x) x)'), (e: unknown) =>
         e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (lambda (x) x)');
 });
@@ -219,7 +219,7 @@ test('a symbol is its id, shifted and tagged', () => {
 test('quote takes one thing', () => {
     fails('(quote)', 'test.slight:1:1: quote takes 1 argument, not 0');
     fails('(quote a b)', 'test.slight:1:1: quote takes 1 argument, not 2');
-    fails('\'"hi"', 'test.slight:1:1: not supported yet: (quote "hi")');
+    fails("'1.5", 'test.slight:1:1: not supported yet: (quote 1.5)');
 });
 
 test('equality and the predicates are builtins', () => {
@@ -266,7 +266,7 @@ test('a quoted list is cells in the constant data', () => {
     assert.match(consts, /Lquoted_0:\n {4}\.quad 0x15, RT_NIL\n/);
     assert.match(consts, /Lquoted_1:\n {4}\.quad 0x2, Lquoted_1\+17\n {4}\.quad Lquoted_0\+1, Lquoted_1\+33\n {4}\.quad RT_NIL, RT_NIL\n/);
     assert.match(asm, /LOADADDR x0, Lquoted_1\n {4}orr {2}x0, x0, #RT_TAG_LIST/);
-    fails('\'(1 "two")', 'test.slight:1:1: not supported yet: (quote (1 "two"))');
+    fails("'(1 2.5)", 'test.slight:1:1: not supported yet: (quote (1 2.5))');
 });
 
 test("eq? calls rt_equal unless one side is a literal immediate", () => {
@@ -277,5 +277,43 @@ test("eq? calls rt_equal unless one side is a literal immediate", () => {
     assert.equal(callsEqual('(eq? 5 (list 1))'), false);
     assert.equal(callsEqual('(eq? () (list 1))'), false);
     assert.equal(callsEqual('(ne? #true (list 1))'), false);
+});
+
+// --- strings ----------------------------------------------------------------
+
+test('a string literal is a box in the read-only data', () => {
+    const asm = compile('"héllo"');
+    assert.match(asm, /Lstring_0:\n {4}\.quad 6 << RT_BOX_SIZE_SHIFT \| RT_BOX_STRING\n {4}\.asciz "h\\303\\251llo"/);
+    assert.match(asm, /LOADADDR x0, Lstring_0\n {4}orr {2}x0, x0, #RT_TAG_BOXED/);
+    assert.ok(asm.indexOf('Lstring_0:') > asm.indexOf('RODATA'));
+});
+
+test("ts-slight's control-character names are strings, unless shadowed", () => {
+    assert.match(compile('\\e'), /\.quad 1 << RT_BOX_SIZE_SHIFT \| RT_BOX_STRING\n {4}\.asciz "\\033"/);
+    assert.match(compile('(let \\n 5) \\n'), /ldr {2}x0, \[sp, #0\] {4}\/\/ \\n/);
+});
+
+test('C builtins get their site after their arguments', () => {
+    assert.match(compile('(str-len "a")'), /ldr {2}x0, \[sp, #0\]\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_str_len/);
+    // a missing optional argument is ()
+    assert.match(compile('(format-num 1 2)'), /mov {2}x2, #RT_NIL\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_format_num/);
+    // a variadic one gets a list
+    assert.match(compile('(concat "a" 1)'), /orr {2}x0, x2, #RT_TAG_LIST\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_concat/);
+    assert.match(compile('(concat)'), /mov {2}x0, #RT_NIL\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_concat/);
+});
+
+test('C builtins check their arity', () => {
+    fails('(substring "a" 1)', 'test.slight:1:1: substring takes 3 arguments, not 2');
+    fails('(format-num 1)', 'test.slight:1:1: format-num takes 2 or 3 arguments, not 1');
+    fails('(format-num 1 2 3 4)', 'test.slight:1:1: format-num takes 2 or 3 arguments, not 4');
+    fails('(str? "a" "b")', 'test.slight:1:1: str? takes 1 argument, not 2');
+    fails('(defun concat (x) x)', "test.slight:1:8: can't define concat: it's a builtin");
+    fails('(defun tty/write (x) x)', "test.slight:1:8: can't define tty/write: it's a builtin");
+});
+
+test('strings in quoted lists, and eq? on strings', () => {
+    assert.match(compile('\'("a")'), /\.quad Lstring_0\+RT_TAG_BOXED, RT_NIL/);
+    assert.ok(compile('(eq? "a" (list 1))').includes('bl   rt_equal'));
+    assert.ok(compile('(eq? \'"a" (list 1))').includes('bl   rt_equal'));
 });
 

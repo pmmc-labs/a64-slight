@@ -208,11 +208,10 @@ Keep ts-slight's names where possible
   faults, and so does `cons` onto anything but a list, so every list is
   proper (both as in ts-slight). Inside a quoted list, `:a` reads as
   `(quote a)`, as it did in ts-slight; write `'(a b)`, not `'(:a :b)`.
-- strings: `str-len` (bytes), `substring`, `concat`/`~` (renders numbers and
-  symbols, as in ts-slight), `index-of`, `str-split`, `str-join`,
-  `string->int`, `symbol->string`, `string->symbol` (looks up the
-  compile-time table; an unknown name gives `#false`), `byte-at`,
-  `bytes->string`, `format-num`
+- strings: `str?`, `str-len` (bytes), `substring`, `concat`/`~`,
+  `index-of`, `str-split`, `str-join`, `string->int`, `symbol->string`,
+  `string->symbol`, `byte-at`, `bytes->string`, `format-num`. See
+  Strings below for how each behaves.
 - processes: `send join monitor kill after raise`
 - I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols`, `pprint`
   (prints its argument and a newline, returns `()`, as in ts-slight;
@@ -236,6 +235,32 @@ inc dec dotimes`, `and or not`, and string helpers: `uc lc` (ASCII),
 - There's no character type. A character is an integer or a one-character
   string.
 - Build strings by collecting pieces in a list and joining them.
+- `\n`, `\r`, `\t` and `\e` are names for one-character strings, as in
+  ts-slight; string literals also take those escapes, plus `\"`, `\\` and
+  `\u{hex}`.
+
+**The builtins (step 5a).** Where ts-slight's behaviour (which was
+JavaScript's) differs from what you might guess, it wins (D62):
+
+| Builtin | |
+|---|---|
+| `(str? x)` | |
+| `(str-len s)` | length in bytes |
+| `(substring s start end)` | bytes `[start, end)`; each index clamped to the string, and swapped if `start > end` |
+| `(concat x ...)` | any values: strings as their bytes, anything else as `pprint` shows it |
+| `(~ a b)` | two strings only |
+| `(index-of s m)` | byte index of the first `m`, or -1; an empty `m` is at 0 |
+| `(str-split s sep)` | the pieces between the `sep`s; `""` gives `()`; an empty `sep` splits into bytes |
+| `(str-join sep xs)` | `xs` rendered as `concat` does, with `sep` between |
+| `(string->int s)` | a decimal integer that fits in 63 bits, or `#false` |
+| `(symbol->string sym)`, `(string->symbol s)` | the latter is `#false` unless the program mentions that symbol (D14) |
+| `(byte-at s i)` | a byte as an integer; an index out of range faults |
+| `(bytes->string xs)` | integers 0–255 to a string |
+| `(format-num n width [fill])` | `n` padded at the start to `width`, with `fill` (default `" "`) repeated as JavaScript's `padStart` does |
+| `(tty/write x ...)` | writes its arguments, rendered as `concat` does, and flushes; returns `()` |
+
+`pprint` shows a string in double quotes with nothing escaped inside, as
+ts-slight did. `eq?` compares strings byte by byte.
 
 ### Not in the language
 
@@ -349,6 +374,15 @@ them with nothing to sync (D57). Compiled code allocates inline:
   decodes the terminal's escape sequences.
 - C libraries come in later as drivers exposed as processes, never as
   direct calls that could stall the runtime.
+
+### Builtins in C
+
+A builtin written in C is an ordinary AAPCS64 function. The compiler
+passes the call's site (`"str-len at t/x.slight:2:1"`) in the register
+after the arguments, so faults raised inside C still say where in the
+program they happened (D63). A variadic builtin (`concat`, `tty/write`)
+gets its arguments as one list. C code allocates with `rt_alloc`, which
+bumps the heap pointer of `rt_current`, the running process.
 
 ### Register convention
 

@@ -6,16 +6,18 @@ TypeScript for now and should self-host later.
 
 ## Status
 
-**Steps 0–4 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
-a compiler for integers, `#true`/`#false`, `()`, symbols (`:kw`, `'sym`),
-lists (`cons car cdr list c[ad]r`, quoted lists as static data, a 64 MB
-heap per process with no GC yet), `+ - *` (with overflow faults),
-comparisons, structural `eq?`/`ne?`, `int? nil? sym? bool? cons?`, `cond`,
-`let`, `do`, `pprint`, and top-level `defun`s with calls and tail calls
-(arguments in `x0`–`x7`; stack and reduction checks at every function
-entry). `make test` passes under qemu on x86 Linux, and natively on macOS
-(Stevan's M2 Max, checked after step 2). **Next: step 5** (strings and
-floats). Update this section as steps land.
+**Steps 0–4 of [`docs/PLAN.md`](docs/PLAN.md) and the strings half of
+step 5 are done**: the reader, and a compiler for integers,
+`#true`/`#false`, `()`, symbols (`:kw`, `'sym`), lists (`cons car cdr list
+c[ad]r`, quoted lists as static data, a 64 MB heap per process with no GC
+yet), strings (boxed; the builtins are C in `runtime/strings.c`), `+ - *`
+(with overflow faults), comparisons, structural `eq?`/`ne?`, type
+predicates, `cond`, `let`, `do`, `pprint`, `tty/write`, and top-level
+`defun`s with calls and tail calls (arguments in `x0`–`x7`; stack and
+reduction checks at every function entry). `make test` passes under qemu
+on x86 Linux, and natively on macOS (Stevan's M2 Max, checked after step
+2). **Next: floats** (the rest of step 5; the decisions are in PLAN.md).
+Update this section as steps land.
 
 ## Read first, in this order
 
@@ -102,7 +104,7 @@ works and has the runtime pieces to borrow.
 | `bin/slightc.ts` | The driver: read, compile, write `out.S`, link with clang |
 | `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `codegen.ts`, `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
-| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S`, `rt.c` |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S`, `rt.c` (the core: faults, heap, printing, equality), `strings.c` |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c` |
 | `build/` | Output (ignored) |
 

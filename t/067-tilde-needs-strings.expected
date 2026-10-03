@@ -1,0 +1,2 @@
+fault: not a string: 1 (~ at t/067-tilde-needs-strings.slight:1:1)
+exit: 1

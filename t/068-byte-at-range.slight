@@ -1,0 +1,2 @@
+(pprint (byte-at "abc" 2))
+(byte-at "abc" 3)
