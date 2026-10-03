@@ -192,7 +192,7 @@ rt_value_t rt_bytes_to_string(rt_value_t xs, const char *site) {
 // n as text, padded at the start to `width` bytes with fill (default " "),
 // repeated and cut to fit, as JavaScript's padStart does.
 rt_value_t rt_format_num(rt_value_t n, rt_value_t width, rt_value_t fill, const char *site) {
-    need_int(n, site);
+    if ((n & RT_TAG_INT_MASK) && !rt_is_float(n)) rt_fault(RT_FAULT_NOT_NUMBER, n, site);
     int64_t w = need_int(width, site);
     if (fill == RT_NIL) fill = rt_new_string(" ", 1, site);
     need_string(fill, site);

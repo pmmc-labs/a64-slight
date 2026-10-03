@@ -14,15 +14,15 @@
 // between Mach-O and ELF stay in one header, and rt.h's constants (RT_TRUE,
 // RT_FAULT_OVERFLOW, ...) can be used by name.
 //
-// So far (docs/PLAN.md, steps 1-5a): integers, #true/#false, (), symbols,
-// lists (cons cells bump-allocated in the process's heap, or static data
-// when quoted), strings (boxes; literals are static data), the integer,
-// list and string primitives, eq?/ne?, type predicates, cond, let, do,
-// pprint, defun and calls. The top-level forms that aren't defuns are the
-// body of slight_main.
+// So far (docs/PLAN.md, steps 1-5): integers, floats, #true/#false, (),
+// symbols, lists (cons cells bump-allocated in the process's heap, or
+// static data when quoted), strings, the numeric, list and string
+// primitives, eq?/ne?, type predicates, cond, let, do, pprint, defun and
+// calls. Floats and strings are boxes; their literals are static data. The
+// top-level forms that aren't defuns are the body of slight_main.
 
 import { CompileError } from './errors.ts';
-import { list, NIL, posOf, show, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { float, list, NIL, posOf, show, str, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { intWord, RESERVED_SYMBOLS, symbolWord } from './values.ts';
 
 // Lines of assembly, as a tree, so that joining pieces is cheap. flatten()
@@ -260,6 +260,8 @@ function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
             return ['    mov  x0, #RT_NIL', st];
         case 'str':
             return loadString(x.v, st);
+        case 'float':
+            return loadFloat(x.v, st);
         case 'sym':
             return compileName(x, cx, st);
         case 'pair':
@@ -269,16 +271,18 @@ function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
     }
 }
 
-// ts-slight's names for control characters, as strings.
-const STRING_CONSTANTS: Readonly<Record<string, string>> = { '\\n': '\n', '\\r': '\r', '\\t': '\t', '\\e': '\x1b' };
+// Names for constants, from ts-slight: control characters, and PI.
+const CONSTANTS: Readonly<Record<string, Sexp>> = {
+    '\\n': str('\n'), '\\r': str('\r'), '\\t': str('\t'), '\\e': str('\x1b'), 'PI': float(Math.PI),
+};
 
 function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     if (x.name === '#true') return ['    mov  x0, #RT_TRUE', st];
     if (x.name === '#false') return ['    mov  x0, #RT_FALSE', st];
     const si = lookup(cx.env, x.name);
     if (si !== null) return [`    ldr  x0, ${slot(si)}    // ${x.name}`, st];
-    const constant = STRING_CONSTANTS[x.name];
-    if (constant !== undefined) return loadString(constant, st);
+    const constant = CONSTANTS[x.name];
+    if (constant !== undefined) return compileExpr(constant, cx, st);
     if (lookupFn(cx.fns, x.name) !== null) throw new CompileError(`functions as values aren't supported yet: ${x.name}`, x.pos);
     throw new CompileError(`unknown name '${x.name}'`, x.pos);
 }
@@ -294,6 +298,19 @@ function staticString(s: string, st: St): [string, St] {
 
 function loadString(s: string, st: St): [Code, St] {
     const [name, st1] = staticString(s, st);
+    return [[`    LOADADDR x0, ${name}`, '    orr  x0, x0, #RT_TAG_BOXED'], st1];
+}
+
+// A float literal is a box too: the header, then the double's bits.
+function staticFloat(v: number, st: St): [string, St] {
+    const [name, st1] = label(st, 'float');
+    const bits = new DataView(new Float64Array([v]).buffer).getBigUint64(0, true);
+    const box  = ['    .p2align 4', `${name}:`, '    .quad 8 << RT_BOX_SIZE_SHIFT | RT_BOX_FLOAT', `    .quad 0x${bits.toString(16)}    // ${v}`];
+    return [name, { ...st1, data: [st1.data, box] }];
+}
+
+function loadFloat(v: number, st: St): [Code, St] {
+    const [name, st1] = staticFloat(v, st);
     return [[`    LOADADDR x0, ${name}`, '    orr  x0, x0, #RT_TAG_BOXED'], st1];
 }
 
@@ -337,13 +354,24 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (path !== null) return compileCxr(x, head.name, path, args, operand, st);
     const arith = ARITH[head.name];
     if (arith !== undefined) {
-        return compileBinary(x, head.name, args, operand, st, (s) => {
+        return compileNumeric(x, head.name, args, operand, st, arith.fn, [], (s) => {
             const [overflow, s1] = faultLabel(s, 'RT_FAULT_OVERFLOW', head.name, x.pos);
-            return [arith(overflow), s1];
+            return [arith.inline(overflow), s1];
         });
     }
-    const cond = COMPARE[head.name];
-    if (cond !== undefined) return compileBinary(x, head.name, args, operand, st, (s) => [compare(cond), s]);
+    const cmp = COMPARE[head.name];
+    if (cmp !== undefined) {
+        const [cond, op] = cmp;
+        return compileNumeric(x, head.name, args, operand, st, 'rt_compare', [`    mov  x2, #${op}`], (s) => [compare(cond), s]);
+    }
+    const division = DIVISION[head.name];
+    if (division !== undefined) {
+        return compileBinary(x, head.name, args, operand, st, (s) => {
+            const [zero, s1]     = faultLabel(s, 'RT_FAULT_DIV_ZERO', head.name, x.pos);
+            const [overflow, s2] = faultLabel(s1, 'RT_FAULT_OVERFLOW', head.name, x.pos);
+            return [division(zero, overflow), s2];
+        });
+    }
     const fn = lookupFn(cx.fns, head.name);
     if (fn !== null) return compileCall(x, fn, args, cx, st);
     throw new CompileError(`unknown function '${head.name}'`, head.pos);
@@ -357,7 +385,7 @@ const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t ===
 function compileQuote(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     checkArity(x, 'quote', args, 1);
     const datum = args[0]!;
-    if (datum.t === 'int' || datum.t === 'nil' || datum.t === 'str') return compileExpr(datum, cx, st);
+    if (datum.t === 'int' || datum.t === 'nil' || datum.t === 'str' || datum.t === 'float') return compileExpr(datum, cx, st);
     if (datum.t === 'pair') {
         const [name, st1] = staticList(x, datum, st);
         return [[`    LOADADDR x0, ${name}`, '    orr  x0, x0, #RT_TAG_LIST'], st1];
@@ -391,6 +419,10 @@ function staticWord(x: Pair, item: Sexp, st: St): [string, St] {
             const [name, st1] = staticString(item.v, st);
             return [`${name}+RT_TAG_BOXED`, st1];
         }
+        case 'float': {
+            const [name, st1] = staticFloat(item.v, st);
+            return [`${name}+RT_TAG_BOXED`, st1];
+        }
         case 'sym': {
             const [id, st1] = symbolId(st, item.name);
             return [`0x${symbolWord(id).toString(16)}`, st1];
@@ -412,27 +444,52 @@ function symbolId(st: St, name: string): [number, St] {
 
 // --- primitives ---------------------------------------------------------------
 
-// Integer arithmetic on x1 (left) and x0 (right), both known to be
-// integers, into x0, branching to `overflow` when the result doesn't fit.
-const ARITH: Readonly<Record<string, (overflow: string) => Code>> = {
+// + - * on any two numbers: inline, two integers in x1 (left) and x0
+// (right) into x0, branching to `overflow` when the result doesn't fit;
+// anything else is the runtime's fn.
+type Arith = { readonly fn: string; readonly inline: (overflow: string) => Code };
+
+const ARITH: Readonly<Record<string, Arith>> = {
     // Tagged integers are n << 1, so adding or subtracting the words adds or
     // subtracts the integers, and 64-bit overflow is exactly 63-bit overflow.
-    '+': (overflow) => ['    adds x0, x1, x0', `    b.vs ${overflow}`],
-    '-': (overflow) => ['    subs x0, x1, x0', `    b.vs ${overflow}`],
+    '+': { fn: 'rt_add', inline: (overflow) => ['    adds x0, x1, x0', `    b.vs ${overflow}`] },
+    '-': { fn: 'rt_sub', inline: (overflow) => ['    subs x0, x1, x0', `    b.vs ${overflow}`] },
     // (a << 1) * b = (a * b) << 1: untag one side. It overflows when the high
     // half of the 128-bit product isn't just the low half's sign.
-    '*': (overflow) => [
+    '*': { fn: 'rt_mul', inline: (overflow) => [
         '    asr  x2, x0, #1',
         '    smulh x3, x1, x2',
         '    mul  x0, x1, x2',
         '    cmp  x3, x0, asr #63',
         `    b.ne ${overflow}`,
-    ],
+    ] },
 };
 
-// Integer comparisons, by condition code. Tagging keeps the order, so the
-// words compare like the integers.
-const COMPARE: Readonly<Record<string, string>> = { '==': 'eq', '!=': 'ne', '<': 'lt', '<=': 'le', '>': 'gt', '>=': 'ge' };
+// Comparisons on any two numbers: the condition code for two integers
+// (tagging keeps the order, so the words compare like the integers), and
+// what to ask rt_compare otherwise.
+const COMPARE: Readonly<Record<string, readonly [string, string]>> = {
+    '==': ['eq', 'RT_CMP_EQ'], '!=': ['ne', 'RT_CMP_NE'],
+    '<':  ['lt', 'RT_CMP_LT'], '<=': ['le', 'RT_CMP_LE'],
+    '>':  ['gt', 'RT_CMP_GT'], '>=': ['ge', 'RT_CMP_GE'],
+};
+
+// div and %: integers only, truncating toward zero (D68). sdiv of the two
+// tagged words gives the plain quotient (2a / 2b = a / b), and the tagged
+// remainder is 2a - q * 2b. Only -2^62 div -1 overflows.
+const DIVISION: Readonly<Record<string, (zero: string, overflow: string) => Code>> = {
+    'div': (zero, overflow) => [
+        `    cbz  x0, ${zero}`,
+        '    sdiv x2, x1, x0',
+        '    adds x0, x2, x2',
+        `    b.vs ${overflow}`,
+    ],
+    '%': (zero) => [
+        `    cbz  x0, ${zero}`,
+        '    sdiv x2, x1, x0',
+        '    msub x0, x2, x0, x1',
+    ],
+};
 
 const RT_TAG_LIST = 1;
 
@@ -480,12 +537,28 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'bytes->string':  fixed('rt_bytes_to_string', 1),
     'format-num':     fixed('rt_format_num', 2, 3),
     'tty/write':      variadic('rt_tty_write'),
+    '/':              fixed('rt_divide', 2),
+    'float?':         fixed('rt_is_flt', 1),
+    'num?':           fixed('rt_is_num', 1),
+    'ceil':           fixed('rt_ceil', 1),
+    'floor':          fixed('rt_floor', 1),
+    'round':          fixed('rt_round', 1),
+    'trunc':          fixed('rt_trunc', 1),
+    'abs':            fixed('rt_abs', 1),
+    'min':            fixed('rt_min', 2),
+    'max':            fixed('rt_max', 2),
+    'pow':            fixed('rt_pow', 2),
+    'sqrt':           fixed('rt_sqrt', 1),
+    'sin':            fixed('rt_sin', 1),
+    'cos':            fixed('rt_cos', 1),
+    'tan':            fixed('rt_tan', 1),
+    'exp':            fixed('rt_exp', 1),
 };
 
 // The names a defun can't take.
 const BUILTINS: readonly string[] = [
     'pprint', 'eq?', 'ne?', 'cons', 'list',
-    ...[ARITH, COMPARE, PREDICATES, C_BUILTINS].flatMap((table) => Object.keys(table)),
+    ...[ARITH, COMPARE, DIVISION, PREDICATES, C_BUILTINS].flatMap((table) => Object.keys(table)),
 ];
 
 const isBuiltin = (name: string): boolean => BUILTINS.includes(name) || cxrPath(name) !== null;
@@ -494,6 +567,39 @@ const isBuiltin = (name: string): boolean => BUILTINS.includes(name) || cxrPath(
 const boolIf = (cond: string): Code => ['    mov  x0, #RT_TRUE', '    mov  x2, #RT_FALSE', `    csel x0, x0, x2, ${cond}`];
 
 const compare = (cond: string): Code => ['    cmp  x1, x0', boolIf(cond)];
+
+// Arithmetic and comparisons. The left operand waits in slot si while the
+// right one is computed. Two integers (both tag bits clear) take the inline
+// path; anything else goes out of line to the runtime's fn(left, right,
+// ...extra, site), which promotes to float or faults "not a number".
+function compileNumeric(x: Pair, name: string, args: readonly Sexp[], cx: Cx, st: St,
+                        fn: string, extra: readonly string[], inline: (st: St) => [Code, St]): [Code, St] {
+    checkArity(x, name, args, 2);
+    const [left, st1]  = compileExpr(args[0]!, cx, st);
+    const [right, st2] = compileExpr(args[1]!, { ...cx, si: cx.si + 1 }, useSlot(st1, cx.si));
+    const [slow, st3]  = label(st2, 'slow');
+    const [site, st4]  = siteLabel(st3, name, x.pos);
+    const [fast, st5]  = inline(st4);
+    const stub = [
+        `${slow}:`,
+        '    mov  x2, x0',
+        '    mov  x0, x1',
+        '    mov  x1, x2',
+        extra,
+        `    LOADADDR x${2 + extra.length}, ${site}`,
+        `    bl   ${fn}`,
+        `    b    ${slow}_done`,
+    ];
+    return [[
+        left, `    str  x0, ${slot(cx.si)}`,
+        right, `    ldr  x1, ${slot(cx.si)}`,
+        '    orr  x2, x0, x1',
+        '    tst  x2, #1',
+        `    b.ne ${slow}`,
+        fast,
+        `${slow}_done:`,
+    ], { ...st5, stubs: [st5.stubs, stub] }];
+}
 
 // The left operand waits in slot si while the right one is computed; then
 // op combines x1 (left) and x0 (right). With ints, both must be integers.
@@ -712,7 +818,7 @@ function label(st: St, hint: string): [string, St] {
 }
 
 type Fault = 'RT_FAULT_NOT_INT' | 'RT_FAULT_OVERFLOW' | 'RT_FAULT_NOT_BOOL' | 'RT_FAULT_NO_CLAUSE' | 'RT_FAULT_STACK'
-           | 'RT_FAULT_NOT_CONS' | 'RT_FAULT_NOT_LIST' | 'RT_FAULT_HEAP';
+           | 'RT_FAULT_NOT_CONS' | 'RT_FAULT_NOT_LIST' | 'RT_FAULT_HEAP' | 'RT_FAULT_DIV_ZERO';
 
 // A label to branch to when `what`, at `pos`, goes wrong: an out-of-line
 // call to rt_fault, with the offending value (if any) in x0.

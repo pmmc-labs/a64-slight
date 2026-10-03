@@ -1,0 +1,11 @@
+; div and % truncate toward zero
+(pprint (div 7 2))
+(pprint (% 7 2))
+(pprint (div -7 2))
+(pprint (% -7 2))
+(pprint (div 7 -2))
+(pprint (% 7 -2))
+(pprint (div -4611686018427387904 1))
+(pprint (% -4611686018427387904 -1))
+(pprint (div 0 5))
+(% 4611686018427387903 10)

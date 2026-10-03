@@ -25,6 +25,7 @@
 #define RT_BOX_TYPE_MASK  0xff
 #define RT_BOX_SIZE_SHIFT    8
 #define RT_BOX_STRING        1
+#define RT_BOX_FLOAT         2    // size 8: an IEEE double
 
 #define RT_NIL               1    // the list tag on a null pointer
 #define RT_FALSE             5    // symbol 0
@@ -41,7 +42,17 @@
 #define RT_FAULT_HEAP        8    // the heap is full
 #define RT_FAULT_NOT_STRING  9    // a string operation was given something else
 #define RT_FAULT_NOT_SYMBOL 10    // a symbol operation was given something else
-#define RT_FAULT_RANGE      11    // an index or a byte value out of range
+#define RT_FAULT_RANGE      11    // an index, a byte, or a rounded float out of range
+#define RT_FAULT_NOT_NUMBER 12    // arithmetic on something that isn't a number
+#define RT_FAULT_DIV_ZERO   13    // division by zero
+
+// What rt_compare is asked.
+#define RT_CMP_EQ            0
+#define RT_CMP_NE            1
+#define RT_CMP_LT            2
+#define RT_CMP_LE            3
+#define RT_CMP_GT            4
+#define RT_CMP_GE            5
 
 #define RT_PROC_REDUCTIONS   0    // rt_proc_t.reductions: the reduction check at function entry
 #define RT_PROC_STACK_LIMIT  8    // rt_proc_t.stack_limit: the stack check at function entry
@@ -78,6 +89,12 @@ static inline int rt_is_box(rt_value_t v, uint64_t type) {
     return (v & RT_TAG_MASK) == RT_TAG_BOXED && (rt_box(v)[0] & RT_BOX_TYPE_MASK) == type;
 }
 static inline int         rt_is_string(rt_value_t v)    { return rt_is_box(v, RT_BOX_STRING); }
+static inline int         rt_is_float(rt_value_t v)     { return rt_is_box(v, RT_BOX_FLOAT); }
+static inline double      rt_float_value(rt_value_t v) {
+    double d;
+    __builtin_memcpy(&d, rt_box(v) + 1, sizeof d);
+    return d;
+}
 static inline uint64_t    rt_string_len(rt_value_t v)   { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
 static inline const char *rt_string_bytes(rt_value_t v) { return (const char *)(rt_box(v) + 1); }
 
@@ -127,6 +144,29 @@ rt_value_t rt_bytes_to_string(rt_value_t xs, const char *site) RT_ASM(rt_bytes_t
 rt_value_t rt_format_num(rt_value_t n, rt_value_t width, rt_value_t fill, const char *site) RT_ASM(rt_format_num);
 rt_value_t rt_tty_write(rt_value_t args, const char *site) RT_ASM(rt_tty_write);
 
+// Numbers (numbers.c). The compiler does arithmetic on two integers
+// inline, and calls these for anything else.
+rt_value_t rt_add(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_add);
+rt_value_t rt_sub(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_sub);
+rt_value_t rt_mul(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_mul);
+rt_value_t rt_divide(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_divide);
+rt_value_t rt_compare(rt_value_t a, rt_value_t b, uint64_t op, const char *site) RT_ASM(rt_compare);
+rt_value_t rt_is_flt(rt_value_t v) RT_ASM(rt_is_flt);
+rt_value_t rt_is_num(rt_value_t v) RT_ASM(rt_is_num);
+rt_value_t rt_ceil(rt_value_t x, const char *site) RT_ASM(rt_ceil);
+rt_value_t rt_floor(rt_value_t x, const char *site) RT_ASM(rt_floor);
+rt_value_t rt_round(rt_value_t x, const char *site) RT_ASM(rt_round);
+rt_value_t rt_trunc(rt_value_t x, const char *site) RT_ASM(rt_trunc);
+rt_value_t rt_abs(rt_value_t x, const char *site) RT_ASM(rt_abs);
+rt_value_t rt_min(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_min);
+rt_value_t rt_max(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_max);
+rt_value_t rt_pow(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_pow);
+rt_value_t rt_sqrt(rt_value_t x, const char *site) RT_ASM(rt_sqrt);
+rt_value_t rt_sin(rt_value_t x, const char *site) RT_ASM(rt_sin);
+rt_value_t rt_cos(rt_value_t x, const char *site) RT_ASM(rt_cos);
+rt_value_t rt_tan(rt_value_t x, const char *site) RT_ASM(rt_tan);
+rt_value_t rt_exp(rt_value_t x, const char *site) RT_ASM(rt_exp);
+
 // Called when proc's reductions run out. For now it just refills them;
 // once there are processes, it's where a process gets preempted.
 void rt_preempt(rt_proc_t *proc) RT_ASM(rt_preempt);
@@ -142,6 +182,9 @@ void *rt_alloc(size_t bytes, const char *site);
 
 // A new string holding a copy of len bytes.
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site);
+
+// A new float.
+rt_value_t rt_new_float(double d, const char *site);
 
 // Text, for printing values and building strings: a growable buffer.
 typedef struct rt_buf {

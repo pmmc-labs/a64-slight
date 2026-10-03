@@ -73,8 +73,8 @@ test("a program with no top-level expressions has the value ()", () => {
 });
 
 test('what isn\'t built yet is an error, with a position', () => {
-    assert.throws(() => compile('42\n  1.5'), (e: unknown) =>
-        e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: 1.5');
+    assert.throws(() => compile('42\n  (fork 1)'), (e: unknown) =>
+        e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: (fork 1)');
     assert.throws(() => compile('(lambda (x) x)'), (e: unknown) =>
         e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (lambda (x) x)');
 });
@@ -219,7 +219,6 @@ test('a symbol is its id, shifted and tagged', () => {
 test('quote takes one thing', () => {
     fails('(quote)', 'test.slight:1:1: quote takes 1 argument, not 0');
     fails('(quote a b)', 'test.slight:1:1: quote takes 1 argument, not 2');
-    fails("'1.5", 'test.slight:1:1: not supported yet: (quote 1.5)');
 });
 
 test('equality and the predicates are builtins', () => {
@@ -231,7 +230,7 @@ test('equality and the predicates are builtins', () => {
 
 test('eq? takes any values, so it has no integer check', () => {
     assert.doesNotMatch(compile('(eq? :a 1)'), /RT_FAULT_NOT_INT/);
-    assert.match(compile('(== 1 1)'), /RT_FAULT_NOT_INT/);
+    assert.match(compile('(== 1 1)'), /bl {3}rt_compare/);
 });
 
 // --- lists ------------------------------------------------------------------
@@ -266,7 +265,6 @@ test('a quoted list is cells in the constant data', () => {
     assert.match(consts, /Lquoted_0:\n {4}\.quad 0x15, RT_NIL\n/);
     assert.match(consts, /Lquoted_1:\n {4}\.quad 0x2, Lquoted_1\+17\n {4}\.quad Lquoted_0\+1, Lquoted_1\+33\n {4}\.quad RT_NIL, RT_NIL\n/);
     assert.match(asm, /LOADADDR x0, Lquoted_1\n {4}orr {2}x0, x0, #RT_TAG_LIST/);
-    fails("'(1 2.5)", 'test.slight:1:1: not supported yet: (quote (1 2.5))');
 });
 
 test("eq? calls rt_equal unless one side is a literal immediate", () => {
@@ -315,5 +313,40 @@ test('strings in quoted lists, and eq? on strings', () => {
     assert.match(compile('\'("a")'), /\.quad Lstring_0\+RT_TAG_BOXED, RT_NIL/);
     assert.ok(compile('(eq? "a" (list 1))').includes('bl   rt_equal'));
     assert.ok(compile('(eq? \'"a" (list 1))').includes('bl   rt_equal'));
+});
+
+// --- numbers ----------------------------------------------------------------
+
+test('a float literal is a box holding the double', () => {
+    const asm = compile('1.5');
+    assert.match(asm, /Lfloat_0:\n {4}\.quad 8 << RT_BOX_SIZE_SHIFT \| RT_BOX_FLOAT\n {4}\.quad 0x3ff8000000000000 {4}\/\/ 1\.5/);
+    assert.match(compile("'(2.5)"), /\.quad Lfloat_0\+RT_TAG_BOXED, RT_NIL/);
+    assert.match(compile('PI'), /\.quad 0x400921fb54442d18/);
+});
+
+test('+ and < on two integers are inline; anything else goes out of line', () => {
+    const add = compile('(+ 1 2)');
+    assert.match(add, /orr {2}x2, x0, x1\n {4}tst {2}x2, #1\n {4}b\.ne (Lslow_\d+)\n {4}adds x0, x1, x0/);
+    const slow = /b\.ne (Lslow_\d+)/.exec(add)![1]!;
+    // out of line: left back in x0, right in x1, then the site
+    assert.ok(add.includes(`${slow}:\n    mov  x2, x0\n    mov  x0, x1\n    mov  x1, x2\n    LOADADDR x2, Lsite_`));
+    assert.ok(add.includes(`bl   rt_add\n    b    ${slow}_done`));
+    assert.match(compile('(< 1 2)'), /mov {2}x2, #RT_CMP_LT\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_compare/);
+});
+
+test('div and % are integers only, and check for zero', () => {
+    const asm = compile('(div 7 2) (% 7 2)');
+    assert.match(asm, /cbz {2}x0, Lfault_\d+\n {4}sdiv x2, x1, x0\n {4}adds x0, x2, x2/);
+    assert.match(asm, /cbz {2}x0, Lfault_\d+\n {4}sdiv x2, x1, x0\n {4}msub x0, x2, x0, x1/);
+    assert.match(asm, /RT_FAULT_DIV_ZERO/);
+    assert.match(asm, /RT_FAULT_NOT_INT/);
+});
+
+test('the math builtins are builtins', () => {
+    for (const name of ['/', 'div', '%', 'ceil', 'round', 'sqrt', 'pow', 'min', 'float?', 'num?']) {
+        fails(`(defun ${name} (x) x)`, `test.slight:1:8: can't define ${name}: it's a builtin`);
+    }
+    fails('(sqrt 1 2)', 'test.slight:1:1: sqrt takes 1 argument, not 2');
+    fails('(div 1)', 'test.slight:1:1: div takes 2 arguments, not 1');
 });
 

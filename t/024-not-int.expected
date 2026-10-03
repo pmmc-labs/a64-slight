@@ -1,3 +1,0 @@
-3
-fault: not an integer: #true (+ at t/024-not-int.slight:2:1)
-exit: 1

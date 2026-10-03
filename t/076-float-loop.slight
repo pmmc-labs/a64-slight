@@ -1,0 +1,7 @@
+; a float accumulator through a tail-recursive loop: 0.1 added 1000 times
+(defun add-up (n acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (add-up (- n 1) (+ acc 0.1)))))
+
+(add-up 1000 0)

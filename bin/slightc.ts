@@ -26,7 +26,7 @@ import { read } from '../compiler/src/reader.ts';
 import { NIL, append, type Sexp } from '../compiler/src/sexp.ts';
 
 const RUNTIME_DIR = fileURLToPath(new URL('../runtime/', import.meta.url));
-const RUNTIME_SRC = ['rt.c', 'strings.c', 'rt_asm.S'].map((f) => join(RUNTIME_DIR, f));
+const RUNTIME_SRC = ['rt.c', 'strings.c', 'numbers.c', 'rt_asm.S'].map((f) => join(RUNTIME_DIR, f));
 const CFLAGS      = ['-O2', '-g', '-std=gnu11', '-Wall', '-Wextra', '-I', RUNTIME_DIR];
 
 function usage(message: string): never {
@@ -61,7 +61,10 @@ function compilerCommand(): readonly string[] {
     const override = process.env['SLIGHT_CC'];
     if (override) return override.split(/\s+/).filter((s) => s !== '');
     if (process.arch === 'arm64') return [process.platform === 'darwin' ? 'cc' : 'clang'];
-    return ['clang', '--target=aarch64-linux-gnu', '--sysroot=/usr/aarch64-linux-gnu', '-fuse-ld=lld', '-static'];
+    // No --sysroot: clang finds Debian/Ubuntu's cross toolchain itself, and
+    // with --sysroot lld can't follow the absolute paths in the sysroot's
+    // libm.a (a linker script).
+    return ['clang', '--target=aarch64-linux-gnu', '-fuse-ld=lld', '-static'];
 }
 
 function main(): void {
@@ -87,7 +90,7 @@ function main(): void {
     writeFileSync(asmFile, asm);
 
     const [cc, ...ccArgs] = compilerCommand();
-    const result = spawnSync(cc!, [...ccArgs, ...CFLAGS, asmFile, ...RUNTIME_SRC, '-o', out], { stdio: 'inherit' });
+    const result = spawnSync(cc!, [...ccArgs, ...CFLAGS, asmFile, ...RUNTIME_SRC, '-lm', '-o', out], { stdio: 'inherit' });
     if (result.error) usage(`couldn't run ${cc}: ${result.error.message}`);
     if (result.status !== 0) process.exit(2);
 }

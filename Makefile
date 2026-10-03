@@ -11,7 +11,7 @@ ARCH := $(shell uname -m)
 ifneq ($(filter arm64 aarch64,$(ARCH)),)
   CC ?= cc
 else
-  CC := clang --target=aarch64-linux-gnu --sysroot=/usr/aarch64-linux-gnu
+  CC := clang --target=aarch64-linux-gnu
 endif
 
 test: unit headers golden

@@ -196,11 +196,20 @@ Keep ts-slight's names where possible
 `lib/Prelude.slight`).
 
 **In C (or assembly):**
-- arithmetic: `+ - * /`, `div` and `%` **(open: the names)**. `/` always
-  returns a float. Mixed integer and float arithmetic gives a float.
-  `ceil`, `floor`, `round` and `trunc` return integers. `sqrt`, `pow`,
-  `sin`, `cos`, `exp`, `abs`, `min`, `max` and friends wrap libm.
-- comparison: `== != < <= > >=`, structural `eq?`/`ne?`
+- arithmetic: `+ - *` on any two numbers; an integer and a float give a
+  float, and an integer result that doesn't fit in 63 bits faults. `/`
+  always returns a float. `div` and `%` take integers only and truncate
+  toward zero (`(% -7 2)` is -1). Dividing by zero faults, with `/` too.
+  `ceil`, `floor`, `round` and `trunc` return integers (`round` sends
+  halves up, as ts-slight's did: `(round -2.5)` is -2), and fault if the
+  result doesn't fit. `sqrt pow sin cos tan exp` always return floats.
+  `abs`, `min` and `max` keep their argument's type. `PI` is a float.
+  `float?` and `num?` alongside `int?`. Floats print in the shortest form
+  that reads back as the same double, laid out as JavaScript does, but
+  always with a `.` or an exponent: `3.0`, `0.1`, `1e+21`, `nan`, `inf`.
+- comparison: `== != < <= > >=` on any two numbers (`(== 1 1.0)` is
+  `#true`), structural `eq?`/`ne?` on any values (`(eq? 1 1.0)` is
+  `#false`)
 - type predicates: `nil? cons? sym? str? num? int? float? lambda? pid? bool?`
   (`sym?` is true for `#true` and `#false`: they're symbols)
 - lists: `cons car cdr list`, and `c[ad]r` with up to four letters
@@ -376,6 +385,10 @@ them with nothing to sync (D57). Compiled code allocates inline:
   direct calls that could stall the runtime.
 
 ### Builtins in C
+
+Arithmetic and comparisons on two integers are inline: one `orr` and one
+`tst` check both tag bits, and anything else branches out of line to the
+runtime (`rt_add`, `rt_compare`, ...), which promotes to float or faults.
 
 A builtin written in C is an ordinary AAPCS64 function. The compiler
 passes the call's site (`"str-len at t/x.slight:2:1"`) in the register

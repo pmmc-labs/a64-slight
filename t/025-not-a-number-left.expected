@@ -1,0 +1,2 @@
+fault: not a number: () (< at t/025-not-a-number-left.slight:1:1)
+exit: 1

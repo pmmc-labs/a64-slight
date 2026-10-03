@@ -1,0 +1,16 @@
+; floats print with a "." or an exponent, in the shortest form that reads back
+(pprint 3.0)
+(pprint 2.5)
+(pprint 0.1)
+(pprint -0.5)
+(pprint 100.0)
+(pprint 123456.789)
+(pprint 1.0e21)
+(pprint 1.0e20)
+(pprint 1.5e-7)
+(pprint 0.000001)
+(pprint 0.0)
+(pprint (+ 0.1 0.2))
+(pprint (/ 1 3))
+(pprint (pow 2 60))
+PI

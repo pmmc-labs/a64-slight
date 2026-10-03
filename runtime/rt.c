@@ -4,6 +4,7 @@
 #include "rt.h"
 
 #include <inttypes.h>
+#include <math.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -53,6 +54,57 @@ const char *rt_symbol_name(uint64_t id) {
     return name;
 }
 
+// The shortest text that reads back as the same double, laid out as
+// JavaScript lays out numbers, except that it always has a "." or an
+// exponent, so it can't be mistaken for an integer: 3.0, 0.1, 1e+21.
+static void render_float(rt_buf_t *b, double d) {
+    const char *special = isnan(d) ? "nan" : isinf(d) ? (d < 0 ? "-inf" : "inf")
+                        : d == 0 ? (signbit(d) ? "-0.0" : "0.0") : NULL;
+    if (special) {
+        buf_str(b, special);
+        return;
+    }
+
+    // the fewest significant digits that round-trip, as d.ddde±x
+    char e[40];
+    for (int p = 1; p <= 17; p++) {
+        snprintf(e, sizeof e, "%.*e", p - 1, d);
+        if (strtod(e, NULL) == d) break;
+    }
+    const char *s = e;
+    if (*s == '-') {
+        buf_str(b, "-");
+        s++;
+    }
+    char digits[20];
+    int  k = 0;
+    for (; *s != 'e'; s++) if (*s != '.') digits[k++] = *s;
+    int n = atoi(s + 1) + 1;                    // the decimal point goes after n digits
+
+    if (k <= n && n <= 21) {                    // 300.0
+        rt_buf_add(b, digits, (size_t)k);
+        for (int i = k; i < n; i++) buf_str(b, "0");
+        buf_str(b, ".0");
+    } else if (0 < n && n <= 21) {              // 3.25
+        rt_buf_add(b, digits, (size_t)n);
+        buf_str(b, ".");
+        rt_buf_add(b, digits + n, (size_t)(k - n));
+    } else if (-6 < n && n <= 0) {              // 0.000325
+        buf_str(b, "0.");
+        for (int i = n; i < 0; i++) buf_str(b, "0");
+        rt_buf_add(b, digits, (size_t)k);
+    } else {                                    // 3.25e+21
+        char exp[16];
+        rt_buf_add(b, digits, 1);
+        if (k > 1) {
+            buf_str(b, ".");
+            rt_buf_add(b, digits + 1, (size_t)(k - 1));
+        }
+        snprintf(exp, sizeof exp, "e%c%d", n - 1 < 0 ? '-' : '+', abs(n - 1));
+        buf_str(b, exp);
+    }
+}
+
 void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
     char num[32];
     if ((v & RT_TAG_INT_MASK) == 0) {
@@ -73,6 +125,10 @@ void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
             buf_str(b, " ");
         }
         buf_str(b, ")");
+        return;
+    }
+    if (rt_is_float(v)) {
+        render_float(b, rt_float_value(v));
         return;
     }
     if (rt_is_string(v)) {
@@ -111,6 +167,7 @@ rt_value_t rt_pprint(rt_value_t v) {
 static int equal(rt_value_t a, rt_value_t b) {
     for (;;) {
         if (a == b) return 1;
+        if (rt_is_float(a) && rt_is_float(b)) return rt_float_value(a) == rt_float_value(b);
         if (rt_is_string(a) && rt_is_string(b)) {
             return rt_string_len(a) == rt_string_len(b)
                 && memcmp(rt_string_bytes(a), rt_string_bytes(b), rt_string_len(a)) == 0;
@@ -142,6 +199,8 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
         case RT_FAULT_NOT_STRING: fputs("not a string: ", stderr);   print_value(stderr, value); break;
         case RT_FAULT_NOT_SYMBOL: fputs("not a symbol: ", stderr);   print_value(stderr, value); break;
         case RT_FAULT_RANGE:      fputs("out of range: ", stderr);   print_value(stderr, value); break;
+        case RT_FAULT_NOT_NUMBER: fputs("not a number: ", stderr);   print_value(stderr, value); break;
+        case RT_FAULT_DIV_ZERO:   fputs("division by zero", stderr); break;
         default:                  fprintf(stderr, "unknown fault %" PRIu64, fault); break;
     }
     fprintf(stderr, " (%s)\n", site);
@@ -163,6 +222,13 @@ rt_value_t rt_new_string(const char *bytes, size_t len, const char *site) {
     box[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
     memcpy(box + 1, bytes, len);
     ((char *)(box + 1))[len] = '\0';
+    return (rt_value_t)box | RT_TAG_BOXED;
+}
+
+rt_value_t rt_new_float(double d, const char *site) {
+    uint64_t *box = rt_alloc(16, site);
+    box[0] = (uint64_t)sizeof d << RT_BOX_SIZE_SHIFT | RT_BOX_FLOAT;
+    memcpy(box + 1, &d, sizeof d);
     return (rt_value_t)box | RT_TAG_BOXED;
 }
 

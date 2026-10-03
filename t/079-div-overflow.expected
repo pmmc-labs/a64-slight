@@ -1,0 +1,2 @@
+fault: integer overflow (div at t/079-div-overflow.slight:2:1)
+exit: 1

@@ -1,0 +1,9 @@
+; eq? compares values: an integer and a float are different values
+(pprint (eq? 1 1.0))
+(pprint (eq? 1.5 1.5))
+(pprint (eq? 1.5 (/ 3 2)))
+(pprint (eq? (list 1.5) (list (/ 3 2))))
+(pprint '(1.5 (2.0)))
+(pprint (concat "pi is about " (round PI) ", or " PI))
+(pprint (format-num 2.5 6 "0"))
+(str-join " " (list 0.5 1 1.0))

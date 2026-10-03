@@ -1,0 +1,2 @@
+; / by zero faults too, even as a float
+(/ 1 0.0)

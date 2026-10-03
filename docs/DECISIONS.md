@@ -363,7 +363,7 @@ list is written as `pprint` shows it, like any other value.
 builtins need it to allocate. Single core, so a global is enough; the
 scheduler (step 7) will set it at every switch.
 
-## Step 5b: floats (agreed, not built yet)
+## Step 5b: floats
 
 **D68. `div` and `%` truncate toward zero.** *(User.)* Like C, AArch64's
 `sdiv`, and ts-slight's `%` (JavaScript's). `(% -7 2)` is -1. Dividing by
@@ -377,4 +377,31 @@ because JavaScript has one number type; slight has two.
 **D70. `(== 1 1.0)` is `#true`, `(eq? 1 1.0)` is `#false`.** *(User.)*
 The comparisons compare numbers; `eq?` compares values, and an integer and
 a float are different values.
+
+**D71. `/` by zero faults too.** *(Default.)* D68 said so for `div` and
+`%`; `/` follows, rather than returning `inf` as JavaScript did. Floats
+can still reach `inf` and `nan` other ways (overflow, `(sqrt -1)`), and
+print as `inf`, `-inf` and `nan`.
+
+**D72. The math builtins.** *(Default.)* ts-slight's set, less `rand` and
+`hex`: `sqrt pow sin cos tan exp` always return floats (as `/` does, so
+`(pow 2 10)` is `1024.0`); `abs`, `min` and `max` keep their argument's
+type (`min`/`max` return the argument itself, the first on a tie);
+`ceil floor round trunc` return integers and fault when the result
+doesn't fit; `round` is JavaScript's (halves up), as ts-slight's was. `PI`
+is a constant, like `\n`.
+
+**D73. Arithmetic on non-numbers says "not a number".** *(Default.)*
+`+ - *` and the comparisons accept floats now, so their fault changed from
+"not an integer"; `div` and `%` still say "not an integer".
+
+**D74. Integer fast path, everything else in C.** *(Default.)* Two
+integers stay inline: one `orr`/`tst` tests both tag bits. Anything else
+branches to an out-of-line stub that calls `rt_add`, `rt_compare` and so
+on, which promote to float or fault. `/` always calls C.
+
+**D75. The cross-compile drops `--sysroot`.** *(Default.)* With it, lld
+can't link `-lm` on Debian/Ubuntu, whose cross sysroot's `libm.a` is a
+linker script with absolute paths; without it, clang finds the cross
+toolchain by itself. macOS is unaffected.
 

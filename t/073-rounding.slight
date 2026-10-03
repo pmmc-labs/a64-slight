@@ -1,0 +1,13 @@
+; ceil, floor, round and trunc give integers; round sends halves up, as ts-slight did
+(pprint (ceil 1.2))
+(pprint (ceil -1.5))
+(pprint (floor -1.5))
+(pprint (trunc -1.5))
+(pprint (trunc 1.5))
+(pprint (round 2.5))
+(pprint (round -2.5))
+(pprint (round 2.4))
+(pprint (round -2.6))
+(pprint (round 7))
+(pprint (ceil (* 0.5 41)))
+(int? (floor 2.0))
