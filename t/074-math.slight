@@ -1,10 +1,18 @@
+; sqrt is correctly rounded everywhere (IEEE 754 requires it), so all its
+; digits are exact. sin, cos, tan, exp and pow are only as good as the
+; platform's libm (macOS's tan of 1.0 is one bit off glibc's), so apart from
+; exact cases they're checked to 12 places.
+(defun close? (a b) (< (abs (- a b)) 1.0e-12))
+
 (pprint (sqrt 2))
 (pprint (pow 2 10))
-(pprint (pow 2 0.5))
+(pprint (close? (pow 2 0.5) 1.4142135623730951))
 (pprint (sin 0))
 (pprint (cos 0))
-(pprint (tan 1.0))
-(pprint (exp 1))
+(pprint (close? (tan 1.0) 1.5574077246549023))
+(pprint (close? (tan 1.0) 1.5574077246))
+(pprint (close? (exp 1) 2.718281828459045))
+(pprint (float? (tan 1.0)))
 (pprint (abs -5))
 (pprint (abs -2.5))
 (pprint (min 3 1.5))

@@ -130,4 +130,6 @@ For now the runtime prints the root process's result, followed by a
 newline, and a fault prints `fault: ...` to stderr and exits 1. The golden
 tests check stdout and stderr together, plus `exit: N` when the status
 isn't 0. Write expected output by working it out independently (by hand
-or in Python), never by copying what the compiler printed.
+or in Python), never by copying what the compiler printed. Don't let a
+test depend on the last bit of a libm function other than `sqrt`: macOS's
+and glibc's differ (D76).

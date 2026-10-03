@@ -405,3 +405,11 @@ can't link `-lm` on Debian/Ubuntu, whose cross sysroot's `libm.a` is a
 linker script with absolute paths; without it, clang finds the cross
 toolchain by itself. macOS is unaffected.
 
+**D76. Golden tests don't depend on libm's last bit.** *(Default, after a
+macOS failure.)* macOS's `tan(1.0)` is `1.557407724654902`, glibc's
+`1.5574077246549023`; the second is the correctly rounded one (checked to
+60 digits), the first one ULP off, which libm's accuracy allows. IEEE 754
+requires `sqrt` to be correctly rounded, so its results are compared
+exactly; `sin cos tan exp pow` are compared to 12 places, apart from cases
+that are exact everywhere (`(sin 0)`, `(pow 2 10)`).
+
