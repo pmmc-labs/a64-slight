@@ -1,0 +1,99 @@
+;; -----------------------------------------------------------------------------
+;; Begin Prelude
+;; -----------------------------------------------------------------------------
+
+(defun inc (n) (+ n 1))
+(defun dec (n) (- n 1))
+
+(defun apply (f args) (slight/eval (cons f args)))
+
+(defun dotimes (start end f)
+    (if (>= start end) ()
+        (do (f start) (dotimes (+ start 1) end f))))
+
+;; -----------------------------------------------------------------------------
+;; List functions
+;; -----------------------------------------------------------------------------
+
+(defun length (lst)
+    (fold/l 0 (lambda (acc x) (inc acc)) lst))
+
+(defun reverse (lst)
+    (when (not (nil? lst)) (fold/l () (lambda (acc x) (cons x acc)) lst)))
+
+(defun append (lhs rhs)
+    (if (nil? lhs) rhs
+    (if (nil? rhs) lhs
+        (fold/r rhs (lambda (x acc) (cons x acc)) lhs))))
+
+(defun concat-list (sep lst)
+    (when (not (nil? lst))
+        (fold/l (car lst) (lambda (acc f) (concat acc sep f)) (cdr lst))))
+
+(defun sum (lst)
+    (fold/l 0 (lambda (acc n) (+ acc n)) lst))
+
+(defun product (lst)
+    (fold/l 1 (lambda (acc n) (* acc n)) lst))
+
+(defun map (f lst)
+    (fold/r () (lambda (x acc) (cons (f x) acc)) lst))
+
+(defun grep (f lst)
+    (fold/r () (lambda (x acc) (if (true? (f x)) (cons x acc) acc)) lst))
+
+(defun filter (f lst)
+    (fold/r () (lambda (x acc) (if (false? (f x)) (cons x acc) acc)) lst))
+
+(defun skip (n lst)
+    (if (== n 0) lst
+        (skip (dec n) (cdr lst))))
+
+(defun take (n lst)
+    (if (== n 0) ()
+        (cons (car lst) (take (dec n) (cdr lst)))))
+
+(defun nth (i lst)
+    (if (nil? lst) ()
+        (if (== i 0)
+            (head lst)
+            (nth (- i 1) (tail lst)))))
+
+(defun find (f lst)
+    (when (not (nil? lst))
+        (if (f (head lst)) (head lst)
+            (find f (tail lst)))))
+
+(defun member? (x lst)
+    (if (nil? lst) #false
+        (if (eq? x (head lst)) #true
+            (member? x (tail lst)))))
+
+(defun range (start end step)
+    (if (>= start end)
+        (cons end ())
+        (cons start (range (+ start step) end step))))
+
+;; associative lists ...
+
+(defun assoc (k v table)
+    (cons (list k v) table))
+
+(defun lookup (k table)
+    (if (nil? table) :not-found
+        (if (eq? k (car (car table)))
+            (cadr (car table))
+            (lookup k (cdr table)))))
+
+;; -----------------------------------------------------------------------------
+;; System functions
+;; -----------------------------------------------------------------------------
+
+(defun sleep (ms) (syscall 'sleep ms))
+
+(defun slurp (p)   (syscall 'slurp p))
+(defun spew  (p d) (syscall 'spew  p d))
+
+;; -----------------------------------------------------------------------------
+;; End Prelude
+;; -----------------------------------------------------------------------------

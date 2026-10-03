@@ -1,0 +1,3 @@
+say: 40
+dead letter: ^/multiplier:product(999) from <1:/main> to <2:/multiplier>
+done: 20 processes, 39 ticks, 0 faults
