@@ -4,8 +4,8 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–6 done (under qemu, and natively on macOS as of
-step 5). Step 7 is next.
+**Progress:** steps 0–7 done (under qemu, and natively on macOS as of
+step 6). Step 8 is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -17,7 +17,7 @@ compiler/        the TypeScript compiler
     src/         one file per pass, plus the driver
     tests/       node:test, per pass
 bin/slightc.ts   compile .slight files to a native binary
-runtime/         C and assembly: rt.h, rt.c, rt_asm.S, gc.c, ...
+runtime/         C and assembly: rt.h, rt.c, process.c, rt_asm.S, gc.c, ...
 lib/             prelude.slight (compiled into every program)
 t/               golden tests: NNN-name.slight + NNN-name.expected, run.sh
 examples/        ported ts-slight examples
@@ -130,9 +130,15 @@ shortest form that reads back the same; `(== 1 1.0)` is `#true` and
   `closure-objects` (minus `gensym`), `simple-crappy-adts`,
   `game-of-life` (the non-actor one).
 
-### 7. Processes
+### 7. Processes (done)
 
-The big step. The spike already holds most of the runtime pieces.
+Settled with the user: the `recv` patterns (D85), a FIFO run queue (D86),
+and the error reasons step 8 will build (D87). The heap became a chunk
+chain now rather than in step 9 (D89), since received messages join it as
+chunks. `million-forks` came forward from step 8: a million processes
+run in a few seconds under qemu. Faults still end the whole program, the
+deadlock report is the simple one (D93), and a process's value is dropped
+(the root's is printed): `(:ok value)` arrives with exit records in step 8.
 
 - The process struct; a FIFO run queue; `rt_switch` from the spike.
 - A stack pool: `mmap`ed stacks with guard pages, taken when a process
@@ -150,8 +156,9 @@ The big step. The spike already holds most of the runtime pieces.
 
 - `join` (blocking, exit records), `monitor`, `kill`, `raise`.
 - Faults (overflow, bad types, arity, heap limit) become `(:error ...)`.
-- Deadlock detection.
-- Port the tournaments, `pub-sub`, `even-odd-actors`, `million-forks`.
+- Deadlock detection, beyond step 7's "the root is waiting and nothing
+  can run".
+- Port the tournaments, `pub-sub`, `even-odd-actors`.
 
 ### 9. GC
 
@@ -195,7 +202,8 @@ builtin. Beyond that:
 |---|---|
 | `fib`, `fold-konts`, `game-of-life`, `simple-crappy-adts`, `closure-objects` | ported in step 6 (`examples/`) |
 | `scratchpad` | nothing else (pure) |
-| `ping-pong`, `pub-sub`, `ring-benchmark`, `million-forks`, `even-odd-actors`, `simple-db-server`, `fixed-tournament`, `ping-pong-tournament`, `game-of-life-actors` | `(recv)` used as an expression mid-function becomes receive functions; `simple-db-server`'s `db-client` does `(recv)` inside a lambda, so it needs restructuring |
+| `ping-pong`, `ring-benchmark`, `million-forks` | ported in step 7 (`examples/`, D97) |
+| `pub-sub`, `even-odd-actors`, `simple-db-server`, `fixed-tournament`, `ping-pong-tournament`, `game-of-life-actors` | `(recv)` used as an expression mid-function becomes receive functions; `simple-db-server`'s `db-client` does `(recv)` inside a lambda, so it needs restructuring |
 | `active-objects` | as above, plus drop `gensym` |
 | `key-catcher`, `divisions`, `tail-chase-game`, `window-manager`, `better-window-manager` | as above, plus devices (step 10) |
 | `meta-circular` | `join`/`yield`/`apply`; no `recv`, so likely as-is |

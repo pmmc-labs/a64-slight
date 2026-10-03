@@ -1,0 +1,3 @@
+(defun wait-forever () (recv (msg msg)))
+(pprint :waiting)
+(wait-forever)

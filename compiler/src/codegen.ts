@@ -14,11 +14,12 @@
 // between Mach-O and ELF stay in one header, and rt.h's constants (RT_TRUE,
 // RT_FAULT_OVERFLOW, ...) can be used by name.
 //
-// So far (docs/PLAN.md, steps 1-6): integers, floats, #true/#false, (),
+// So far (docs/PLAN.md, steps 1-7): integers, floats, #true/#false, (),
 // symbols, lists (cons cells bump-allocated in the process's heap, or
-// static data when quoted), strings, closures, the numeric, list and
+// static data when quoted), strings, closures, pids, the numeric, list and
 // string primitives, eq?/ne?, type predicates, cond, let, do, pprint,
-// defun, lambda, apply, and calls. Floats, strings and closures are boxes;
+// defun, lambda, apply, calls, and processes: fork, send, recv, yield, $$
+// and ^$$, with the recv rule (classify.ts) enforced here. Floats, strings and closures are boxes;
 // literals, and closures that capture nothing, are static data. The
 // top-level forms that aren't defuns are the body of slight_main.
 //
@@ -30,6 +31,7 @@
 import { CompileError } from './errors.ts';
 import { float, list, NIL, posOf, show, str, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { intWord, RESERVED_SYMBOLS, symbolWord } from './values.ts';
+import { isReceiveBody, patternNames, stateFunctions } from './classify.ts';
 
 // Lines of assembly, as a tree, so that joining pieces is cheap. flatten()
 // turns it into lines once at the end.
@@ -41,13 +43,23 @@ type Env = { readonly name: string; readonly slot: number; readonly next: Env } 
 
 // The top-level functions: an association list from name to label and arity.
 type Module = 'user' | 'prelude';
-type Fn  = { readonly name: string; readonly label: string; readonly arity: number; readonly module: Module };
+// state: it can reach a recv (classify.ts), so the recv rule applies to it.
+type Fn  = { readonly name: string; readonly label: string; readonly arity: number; readonly module: Module; readonly state: boolean };
 type Fns = { readonly fn: Fn; readonly next: Fns } | null;
 
 // Where an expression is being compiled: the functions and locals it can
 // see, the first free frame slot (anything below si belongs to someone),
-// and whether it's in tail position.
-type Cx = { readonly fns: Fns; readonly env: Env; readonly si: number; readonly tail: boolean };
+// whether it's in tail position, whether it's in a lambda's body, and, for
+// the recv that is the whole body of a receive function, that function's
+// entry and number of parameters (to start it again when a message comes).
+type Cx = {
+    readonly fns: Fns;
+    readonly env: Env;
+    readonly si: number;
+    readonly tail: boolean;
+    readonly inLambda: boolean;
+    readonly receive: { readonly entry: string; readonly params: number } | null;
+};
 
 // The symbols seen so far, newest first: an association list from name to
 // id. Ids are handed out in order, starting with the reserved symbols.
@@ -83,24 +95,25 @@ export function compileProgram(forms: Sexp, prelude: Sexp = NIL): string {
         if (!isForm(f, 'defun')) throw new CompileError(`the prelude can only define functions, not ${show(f)}`, posOf(f));
     });
     const preludeDefuns = preludeForms.map((f) => checkDefun(f as Pair));
-    const preludeFns    = preludeDefuns.reduce<Fns>((fns, d) => declare(fns, d, 'prelude'), null);
+    const preludeFns    = preludeDefuns.reduce<Fns>((fns, d) => declare(fns, d, 'prelude', false), null);
 
     const all    = toArray(forms)!;
     const defuns = all.filter((f) => isForm(f, 'defun')).map((f) => checkDefun(f as Pair));
-    const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user'), preludeFns);
+    const state  = stateFunctions(defuns.map((d) => ({ name: d.name.name, params: d.params.map((p) => p.name), body: d.body })));
+    const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user', state.includes(d.name.name)), preludeFns);
     const top    = all.filter((f) => !isForm(f, 'defun'));
     const empty: St = { labels: 0, slots: 0, symbols: null, stubs: [], data: [], consts: [], lambdas: [], closures: [] };
     const st0 = RESERVED_SYMBOLS.reduce((st, name) => symbolId(st, name)[1], empty);
 
     const compileAll = (ds: readonly Defun[], visible: Fns, module: Module, st: St): [Code, St] =>
         ds.reduce<[Code, St]>(([acc, s], d) => {
-            const [c, s1] = compileFunction(findFn(visible, d.name.name, module)!.label, d, [], visible, s);
+            const [c, s1] = compileFunction(findFn(visible, d.name.name, module)!.label, d, [], visible, 'defun', s);
             return [[acc, c], s1];
         }, [[], st]);
     const [preludeCode, st1] = compileAll(preludeDefuns, preludeFns, 'prelude', st0);
     const [code, st2]        = compileAll(defuns, fns, 'user', st1);
     const main: Defun = { name: { t: 'sym', name: 'the top level', pos: null }, params: [], body: list(...top, ...(top.length === 0 ? [NIL] : [])), pos: null };
-    const [mainCode, st3] = compileFunction('slight_main', main, [], fns, st2);
+    const [mainCode, st3] = compileFunction('slight_main', main, [], fns, 'other', st2);
 
     return flatten([
         '// generated by slightc -- do not edit',
@@ -113,12 +126,22 @@ export function compileProgram(forms: Sexp, prelude: Sexp = NIL): string {
         mainCode,
         st3.stubs,
         '',
+        // the runtime shares what's between these labels instead of copying it
         '    RODATA',
+        '    .globl slight_rodata_start',
+        'slight_rodata_start:',
         st3.data,
         symbolTable(st3.symbols),
+        '    .globl slight_rodata_end',
+        'slight_rodata_end:',
         '',
         '    CONSTDATA',
+        '    .p2align 4',
+        '    .globl slight_const_start',
+        'slight_const_start:',
         st3.consts,
+        '    .globl slight_const_end',
+        'slight_const_end:',
     ]).join('\n') + '\n';
 }
 
@@ -172,11 +195,11 @@ function checkParams(owner: string, params: Sexp, x: Pair, ownerPos: Pos | null)
 
 // A program's functions are declared on top of the prelude's, so they
 // shadow them; only a second definition in the same module is an error.
-function declare(fns: Fns, d: Defun, module: Module): Fns {
+function declare(fns: Fns, d: Defun, module: Module, state: boolean): Fns {
     const existing = lookupFn(fns, d.name.name);
     if (existing !== null && existing.module === module) throw new CompileError(`${d.name.name} is already defined`, d.name.pos);
     const label = module === 'user' ? functionLabel(d.name.name) : `pf_${functionLabel(d.name.name).slice(3)}`;
-    return { fn: { name: d.name.name, label, arity: d.params.length, module }, next: fns };
+    return { fn: { name: d.name.name, label, arity: d.params.length, module, state }, next: fns };
 }
 
 function findFn(fns: Fns, name: string, module: Module): Fn | null {
@@ -191,10 +214,15 @@ function findFn(fns: Fns, name: string, module: Module): Fn | null {
 // tail call passes through: is there room on the stack, and are this
 // process's reductions used up? (x9 is gone after rt_preempt, hence the
 // order.)
-function compileFunction(entry: string, d: Defun, free: readonly string[], fns: Fns, st: St): [Code, St] {
+// kind: only a defun can be a receive function, and a lambda's body is held
+// to the recv rule (D11).
+type Kind = 'defun' | 'lambda' | 'other';
+
+function compileFunction(entry: string, d: Defun, free: readonly string[], fns: Fns, kind: Kind, st: St): [Code, St] {
     const locals = [...d.params.map((p) => p.name), ...free];
     const env = locals.reduce<Env>((e, name, i) => ({ name, slot: i, next: e }), null);
-    const cx: Cx = { fns, env, si: locals.length, tail: true };
+    const receive = kind === 'defun' && isReceiveBody(d.body) ? { entry, params: d.params.length } : null;
+    const cx: Cx = { fns, env, si: locals.length, tail: true, inLambda: kind === 'lambda', receive };
     const [body, st1] = compileBody(d.body, cx, { ...st, slots: locals.length });
     const size = 16 * Math.ceil(st1.slots / 2);
     if (size > 4095) throw new CompileError(`${d.name.name} needs too many frame slots (${st1.slots})`, d.pos);
@@ -231,6 +259,12 @@ function compileFunction(entry: string, d: Defun, free: readonly string[], fns: 
 // first, and the call is a jump.
 function compileCall(x: Pair, fn: Fn, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     checkArity(x, fn.name, args, fn.arity);
+    if (fn.state && cx.inLambda) {
+        throw new CompileError(`a lambda can't call ${fn.name}, which waits for messages (it reaches a recv)`, x.pos);
+    }
+    if (fn.state && !cx.tail) {
+        throw new CompileError(`${fn.name} waits for messages (it reaches a recv), so it can only be called in tail position`, x.pos);
+    }
     const [code, st1] = args.reduce<[Code, St]>(([acc, s], arg, i) => {
         const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i, tail: false }, s);
         return [[acc, c, `    str  x0, ${slot(cx.si + i)}`], useSlot(s1, cx.si + i)];
@@ -285,9 +319,10 @@ function checkLet(form: Pair): [Sym, Sexp] {
     return [name, expr];
 }
 
-// Names that can't be bound or defined: #true, #false and the special forms.
+// Names that can't be bound or defined: #true, #false, $$, ^$$ and the
+// special forms.
 function checkBindable(name: Sym): void {
-    if (RESERVED_SYMBOLS.includes(name.name) || SPECIAL_FORMS.includes(name.name)) {
+    if (RESERVED_SYMBOLS.includes(name.name) || SPECIAL_FORMS.includes(name.name) || name.name === '$$' || name.name === '^$$') {
         throw new CompileError(`can't bind ${name.name}`, name.pos);
     }
 }
@@ -319,6 +354,8 @@ const CONSTANTS: Readonly<Record<string, Sexp>> = {
 };
 
 function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
+    if (x.name === '$$') return ['    ldr  x0, [x28, #RT_PROC_PID]', st];
+    if (x.name === '^$$') return ['    ldr  x0, [x28, #RT_PROC_PARENT]', st];
     if (x.name === '#true') return ['    mov  x0, #RT_TRUE', st];
     if (x.name === '#false') return ['    mov  x0, #RT_FALSE', st];
     const si = lookup(cx.env, x.name);
@@ -326,6 +363,7 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     const constant = CONSTANTS[x.name];
     if (constant !== undefined) return compileExpr(constant, cx, st);
     const fn = lookupFn(cx.fns, x.name);
+    if (fn !== null && fn.state) throw new CompileError(`${fn.name} waits for messages, so it can't be used as a value`, x.pos);
     if (fn !== null) return loadClosure(staticClosure(fn.label, fn.arity, fn.name, st));
     if (isBuiltin(x.name)) return loadClosure(builtinWrapper(x, st));
     throw new CompileError(`unknown name '${x.name}'`, x.pos);
@@ -377,6 +415,15 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             return compileQuote(x, args, cx, st);
         case 'lambda':
             return compileLambda(x, cx, st);
+        case 'recv':
+            return compileRecv(x, args, cx, st);
+        case 'fork':
+            return compileFork(x, args, cx, st);
+        case 'yield': {
+            checkArity(x, 'yield', args, 1);
+            const [code, st1] = compileExpr(args[0]!, cx, st);
+            return [['    bl   rt_yield', code], st1];
+        }
     }
     if (SPECIAL_FORMS.includes(head.name)) throw notYet(x);
     if (lookup(cx.env, head.name) !== null) return compileClosureCall(x, head, args, cx, st);
@@ -427,6 +474,137 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
 
 const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;
 
+// --- processes ----------------------------------------------------------------
+
+// (recv clause...), the whole body of a receive function. rt_recv returns
+// the next message; when there's none, it remembers this function and its
+// parameters (the first slots of the frame) and gives up the stack, and
+// the process starts this function again from the top when one comes. So
+// the stack is empty here: nothing has run yet but the prologue. Clause
+// bodies are in tail position. A message no clause matches goes to the
+// dead letters, and recv takes the next.
+function compileRecv(x: Pair, clauses: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    if (cx.receive === null) throw new CompileError('recv can only be the whole body of a defun', x.pos);
+    if (clauses.length === 0) throw new CompileError('recv needs at least one clause', x.pos);
+    const { entry, params } = cx.receive;
+    const msg = cx.si;
+    const [top, st1]  = label(st, 'recv');
+    const [site, st2] = siteLabel(st1, 'recv', x.pos);
+    const inner: Cx   = { ...cx, si: msg + 1, receive: null };
+    const [code, st3] = clauses.reduce<[Code, St]>(([acc, s], clause) => {
+        const [c, s1] = compileRecvClause(x, clause, msg, `${top}_done`, inner, s);
+        return [[acc, c], s1];
+    }, [[], useSlot(st2, msg)]);
+    return [[
+        `${top}:`,
+        '    mov  x0, sp',
+        `    mov  x1, #${params}`,
+        `    LOADADDR x2, ${entry}`,
+        '    bl   rt_recv',
+        `    str  x0, ${slot(msg)}`,
+        code,
+        `    ldr  x0, ${slot(msg)}`,
+        `    LOADADDR x1, ${site}`,
+        '    bl   rt_dead_letter',
+        `    b    ${top}`,
+        `${top}_done:`,
+    ], st3];
+}
+
+// (pattern body...). A pattern is a name (binds the whole message; _
+// binds nothing), a :keyword (matches that symbol), or (:keyword names...),
+// which matches a list of exactly that length headed by the keyword, and
+// binds the names to the rest by position.
+function compileRecvClause(x: Pair, clause: Sexp, msg: number, done: string, cx: Cx, st: St): [Code, St] {
+    if (clause.t !== 'pair' || clause.cdr.t !== 'pair') {
+        throw new CompileError(`a recv clause is (pattern body...), not ${show(clause)}`, posOf(clause) ?? x.pos);
+    }
+    const pattern = clause.car;
+    const bad = (): CompileError =>
+        new CompileError(`a recv pattern is a name, a :keyword or (:keyword names...), not ${show(pattern)}`, posOf(pattern) ?? x.pos);
+    const names = patternNames(pattern);
+    names.forEach((n, i) => {
+        if (names.indexOf(n) !== i) throw new CompileError(`${n} is in the pattern twice`, posOf(pattern));
+    });
+    const [next, st1] = label(st, 'recv_next');
+    const keyword = (p: Sexp, s: St): [Code, St] => {
+        const items = toArray(p);
+        if (!isForm(p, 'quote') || items === null || items.length !== 2 || items[1]!.t !== 'sym') throw bad();
+        const [id, s1] = symbolId(s, (items[1] as Sym).name);
+        return [[loadWord('x2', symbolWord(id)), `    cmp  ${'x1'}, x2`, `    b.ne ${next}`], s1];
+    };
+
+    let test: Code = [];
+    let st2 = st1;
+    let env = cx.env;
+    let si  = cx.si;
+    if (pattern.t === 'sym') {
+        checkBindable(pattern);
+        if (pattern.name !== '_') env = { name: pattern.name, slot: msg, next: env };
+    } else if (isForm(pattern, 'quote')) {
+        const [match, s] = keyword(pattern, st2);
+        test = [`    ldr  x1, ${slot(msg)}`, match];
+        st2  = s;
+    } else {
+        const items = toArray(pattern);
+        if (items === null || items.length === 0) throw bad();
+        const [match, s] = keyword(items[0]!, st2);
+        st2 = s;
+        const rest = items.slice(1).map((p) => {
+            if (p.t !== 'sym') throw bad();
+            checkBindable(p);
+            const bind = p.name === '_' ? [] : [`    ldur x1, [x0, #-1]`, `    str  x1, ${slot(si)}    // ${p.name}`];
+            if (p.name !== '_') {
+                env = { name: p.name, slot: si, next: env };
+                st2 = useSlot(st2, si);
+                si += 1;
+            }
+            return ['    ldur x0, [x0, #7]', IS_CONS, `    b.eq ${next}`, bind];
+        });
+        test = [
+            `    ldr  x0, ${slot(msg)}`,
+            IS_CONS,
+            `    b.eq ${next}`,
+            '    ldur x1, [x0, #-1]',
+            match,
+            rest,
+            '    ldur x0, [x0, #7]',
+            '    cmp  x0, #RT_NIL',
+            `    b.ne ${next}`,
+        ];
+    }
+    const [body, st3] = compileBody(clause.cdr, { ...cx, env, si }, st2);
+    return [[test, body, `    b    ${done}`, `${next}:`], st3];
+}
+
+// (fork expr): expr becomes the body of a function of its own, whose
+// parameters are the locals it uses; the new process starts there, with
+// those values deep-copied into its heap. The body is at the bottom of the
+// new process's stack, so it can tail-call a function that waits.
+function compileFork(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    checkArity(x, 'fork', args, 1);
+    const expr = args[0]!;
+    const free = freeVars(list(expr), [], cx.env);
+    if (free.length > MAX_ARGS) {
+        throw new CompileError(`a fork can take at most ${MAX_ARGS} locals into the new process, and this one uses ${free.length}`, x.pos);
+    }
+    const where = x.pos === null ? 'fork' : `fork at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
+    const [entry, st1] = label(st, 'fork');
+    const d: Defun = { name: sym(where, x.pos), params: free.map((n) => sym(n, x.pos)), body: list(expr), pos: x.pos };
+    const [code, st2]  = compileFunction(entry, d, [], cx.fns, 'other', st1);
+    const st3: St = { ...st2, slots: st.slots, lambdas: [st2.lambdas, code] };
+    const [site, st4]  = siteLabel(st3, 'fork', x.pos);
+    const st5 = free.length > 0 ? useSlot(st4, cx.si + free.length - 1) : st4;
+    return [[
+        free.map((name, i) => [`    ldr  x16, ${slot(lookup(cx.env, name)!)}    // ${name}`, `    str  x16, ${slot(cx.si + i)}`]),
+        `    LOADADDR x0, ${entry}`,
+        `    mov  x1, #${free.length}`,
+        addImm('x2', 'sp', 8 * cx.si, 'x5'),
+        `    LOADADDR x3, ${site}`,
+        '    bl   rt_fork',
+    ], st5];
+}
+
 // --- closures -----------------------------------------------------------------
 
 // A closure is a box: the header (how many values it captured, and the
@@ -475,14 +653,14 @@ function compileLambda(x: Pair, cx: Cx, st: St): [Code, St] {
     const where  = x.pos === null ? 'lambda' : `lambda at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
     const [entry, st1] = label(st, 'lambda');
     const d: Defun = { name: { t: 'sym', name: where, pos: x.pos }, params, body, pos: x.pos };
-    const [code, st2]  = compileFunction(entry, d, free, cx.fns, st1);
+    const [code, st2]  = compileFunction(entry, d, free, cx.fns, 'lambda', st1);
     const st3: St = { ...st2, slots: st.slots, lambdas: [st2.lambdas, code] };
     if (free.length === 0) return loadClosure(staticClosure(entry, params.length, where, st3));
 
     const [nameLabel, st4] = cString(where, st3);
-    const [full, st5]      = faultLabel(st4, 'RT_FAULT_HEAP', 'lambda', x.pos);
+    const [allocate, st5]  = alloc(32 + 8 * free.length, 'lambda', x.pos, st4);
     return [[
-        alloc(32 + 8 * free.length, full),
+        allocate,
         `    mov  x3, #${free.length} << RT_BOX_SIZE_SHIFT | RT_BOX_CLOSURE`,
         `    LOADADDR x4, ${entry}`,
         '    stp  x3, x4, [x2]',
@@ -602,7 +780,7 @@ function builtinWrapper(x: Sym, st: St): [string, St] {
     if (st.closures.includes(`${entry}_closure`)) return [`${entry}_closure`, st];
     const params = [...Array(arity).keys()].map((i) => sym(`a${i}`, x.pos));
     const d: Defun = { name: x, params, body: list(list(x, ...params)), pos: x.pos };
-    const [code, st1] = compileFunction(entry, d, [], null, st);
+    const [code, st1] = compileFunction(entry, d, [], null, 'other', st);
     return staticClosure(entry, arity, x.name, { ...st1, slots: st.slots, lambdas: [st1.lambdas, code] });
 }
 
@@ -741,6 +919,7 @@ const PREDICATES: Readonly<Record<string, readonly [Code, string]>> = {
     'int?':  [['    tst  x0, #1'], 'eq'],
     'nil?':  [['    cmp  x0, #RT_NIL'], 'eq'],
     'cons?': [IS_CONS, 'ne'],
+    'pid?':  [['    and  x1, x0, #RT_TAG_MASK', '    cmp  x1, #RT_TAG_PID'], 'eq'],
     'sym?':  [['    and  x1, x0, #RT_TAG_MASK', '    cmp  x1, #RT_TAG_SYMBOL'], 'eq'],
     // when x0 is #true, ccmp skips the second compare and sets Z (#4) itself
     'bool?': [['    cmp  x0, #RT_TRUE', '    ccmp x0, #RT_FALSE, #4, ne'], 'eq'],
@@ -788,6 +967,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'tan':            fixed('rt_tan', 1),
     'exp':            fixed('rt_exp', 1),
     'lambda?':        fixed('rt_is_lambda', 1),
+    'send':           fixed('rt_send', 2),
 };
 
 // The names a defun can't take.
@@ -913,18 +1093,31 @@ function checkArity(x: Pair, name: string, args: readonly Sexp[], n: number): vo
 
 // --- lists ------------------------------------------------------------------
 
-// Bump-allocates `bytes` from the process's heap into x2, branching to
-// `full` when there isn't room (there's no GC yet: step 9). Clobbers x3,
-// x4 and x5.
-function alloc(bytes: number, full: string): Code {
-    return [
+// Bump-allocates `bytes` from the process's heap into x2. When the chunk
+// hasn't room, an out-of-line call to rt_heap_grow makes a new one (or
+// faults, past the heap's limit) and the allocation goes again; x0 and x1
+// survive that. Clobbers x3, x4 and x5.
+function alloc(bytes: number, what: string, pos: Pos | null, st: St): [Code, St] {
+    const [again, st1] = label(st, 'alloc');
+    const [site, st2]  = siteLabel(st1, what, pos);
+    const stub = [
+        `${again}_grow:`,
+        '    stp  x0, x1, [sp, #-16]!',
+        loadWord('x0', BigInt(bytes)),
+        `    LOADADDR x1, ${site}`,
+        '    bl   rt_heap_grow',
+        '    ldp  x0, x1, [sp], #16',
+        `    b    ${again}`,
+    ];
+    return [[
+        `${again}:`,
         '    ldr  x2, [x28, #RT_PROC_HEAP_PTR]',
         '    ldr  x3, [x28, #RT_PROC_HEAP_LIMIT]',
         addImm('x4', 'x2', bytes, 'x5'),
         '    cmp  x4, x3',
-        `    b.hi ${full}`,
+        `    b.hi ${again}_grow`,
         '    str  x4, [x28, #RT_PROC_HEAP_PTR]',
-    ];
+    ], { ...st2, stubs: [st2.stubs, stub] }];
 }
 
 // dst = src + n, for any n.
@@ -937,15 +1130,15 @@ function compileCons(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St]
     checkArity(x, 'cons', args, 2);
     const [head, st1]    = compileExpr(args[0]!, cx, st);
     const [tail, st2]    = compileExpr(args[1]!, { ...cx, si: cx.si + 1 }, useSlot(st1, cx.si));
-    const [notList, st3] = faultLabel(st2, 'RT_FAULT_NOT_LIST', 'cons', x.pos);
-    const [full, st4]    = faultLabel(st3, 'RT_FAULT_HEAP', 'cons', x.pos);
+    const [notList, st3]  = faultLabel(st2, 'RT_FAULT_NOT_LIST', 'cons', x.pos);
+    const [allocate, st4] = alloc(16, 'cons', x.pos, st3);
     return [[
         head, `    str  x0, ${slot(cx.si)}`,
         tail,
         '    and  x1, x0, #RT_TAG_MASK',
         '    cmp  x1, #RT_TAG_LIST',
         `    b.ne ${notList}`,
-        alloc(16, full),
+        allocate,
         `    ldr  x1, ${slot(cx.si)}`,
         '    stp  x1, x0, [x2]',
         '    orr  x0, x2, #RT_TAG_LIST',
@@ -960,14 +1153,14 @@ function compileList(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St]
         const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i }, s);
         return [[acc, c, `    str  x0, ${slot(cx.si + i)}`], useSlot(s1, cx.si + i)];
     }, [[], st]);
-    const [full, st2] = faultLabel(st1, 'RT_FAULT_HEAP', 'list', x.pos);
+    const [allocate, st2] = alloc(16 * args.length, 'list', x.pos, st1);
     const cells = args.map((_, i) => [
         `    ldr  x5, ${slot(cx.si + i)}`,
         `    str  x5, [x2, #${16 * i}]`,
         i + 1 < args.length ? addImm('x6', 'x2', 16 * (i + 1) + RT_TAG_LIST, 'x7') : '    mov  x6, #RT_NIL',
         `    str  x6, [x2, #${16 * i + 8}]`,
     ]);
-    return [[code, alloc(16 * args.length, full), cells, '    orr  x0, x2, #RT_TAG_LIST'], st2];
+    return [[code, allocate, cells, '    orr  x0, x2, #RT_TAG_LIST'], st2];
 }
 
 // car, cdr, and c[ad]{2,4}r: the letters between c and r, applied right

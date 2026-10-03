@@ -1,5 +1,5 @@
-// rt.c -- the runtime's core: run the root process and print its result,
-// faults, the heap, printing values, and equality.
+// rt.c -- the runtime's core: faults, allocation, printing values, and
+// equality. Processes and main are in process.c.
 
 #include "rt.h"
 
@@ -8,20 +8,23 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/mman.h>
-#include <unistd.h>
 
 _Static_assert(offsetof(rt_proc_t, reductions)  == RT_PROC_REDUCTIONS,  "RT_PROC_REDUCTIONS");
 _Static_assert(offsetof(rt_proc_t, stack_limit) == RT_PROC_STACK_LIMIT, "RT_PROC_STACK_LIMIT");
 _Static_assert(offsetof(rt_proc_t, heap_ptr)    == RT_PROC_HEAP_PTR,    "RT_PROC_HEAP_PTR");
 _Static_assert(offsetof(rt_proc_t, heap_limit)  == RT_PROC_HEAP_LIMIT,  "RT_PROC_HEAP_LIMIT");
+_Static_assert(offsetof(rt_proc_t, pid)         == RT_PROC_PID,         "RT_PROC_PID");
+_Static_assert(offsetof(rt_proc_t, parent)      == RT_PROC_PARENT,      "RT_PROC_PARENT");
+_Static_assert(offsetof(rt_proc_t, code)        == RT_PROC_CODE,        "RT_PROC_CODE");
+_Static_assert(offsetof(rt_proc_t, args)        == RT_PROC_ARGS,        "RT_PROC_ARGS");
+_Static_assert(offsetof(rt_proc_t, ctx)         == RT_PROC_CTX,         "RT_PROC_CTX");
+_Static_assert(offsetof(rt_ctx_t, fp)           == RT_CTX_FP,           "RT_CTX_FP");
+_Static_assert(offsetof(rt_ctx_t, lr)           == RT_CTX_LR,           "RT_CTX_LR");
+_Static_assert(offsetof(rt_ctx_t, sp)           == RT_CTX_SP,           "RT_CTX_SP");
+_Static_assert(offsetof(rt_ctx_t, d8_d15)       == RT_CTX_D8,           "RT_CTX_D8");
+_Static_assert(sizeof(rt_ctx_t)                 == RT_CTX_SIZE,         "RT_CTX_SIZE");
 _Static_assert(RT_FALSE == (0 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_FALSE is symbol 0");
 _Static_assert(RT_TRUE  == (1 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_TRUE is symbol 1");
-
-#define QUOTA          1000             // reductions between preemptions
-#define STACK_BYTES    (8 << 20)        // the root process's stack
-#define STACK_HEADROOM (64 << 10)       // room left below the limit for one frame and a C call
-#define HEAP_BYTES     (64 << 20)       // the root process's heap; there's no GC yet
 
 rt_proc_t *rt_current;
 
@@ -131,6 +134,11 @@ void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
         render_float(b, rt_float_value(v));
         return;
     }
+    if ((v & RT_TAG_MASK) == RT_TAG_PID) {
+        snprintf(num, sizeof num, "#<pid %" PRIu64 ">", v >> RT_PID_SHIFT);
+        buf_str(b, num);
+        return;
+    }
     if (rt_is_closure(v)) {
         buf_str(b, "#<function ");
         buf_str(b, (const char *)rt_box(v)[3]);
@@ -213,6 +221,7 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
         case RT_FAULT_DIV_ZERO:   fputs("division by zero", stderr); break;
         case RT_FAULT_NOT_FUNC:   fputs("not a function: ", stderr); print_value(stderr, value); break;
         case RT_FAULT_ARITY:      fputs("wrong number of arguments for ", stderr); print_value(stderr, value); break;
+        case RT_FAULT_NOT_PID:    fputs("not a pid: ", stderr);      print_value(stderr, value); break;
         default:                  fprintf(stderr, "unknown fault %" PRIu64, fault); break;
     }
     fprintf(stderr, " (%s)\n", site);
@@ -223,7 +232,7 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
 
 void *rt_alloc(size_t bytes, const char *site) {
     bytes = (bytes + 15) & ~(size_t)15;
-    if (rt_current->heap_limit - rt_current->heap_ptr < bytes) rt_fault(RT_FAULT_HEAP, 0, site);
+    if (rt_current->heap_limit - rt_current->heap_ptr < bytes) rt_heap_grow(bytes, site);
     void *p = (void *)rt_current->heap_ptr;
     rt_current->heap_ptr += bytes;
     return p;
@@ -242,47 +251,4 @@ rt_value_t rt_new_float(double d, const char *site) {
     box[0] = (uint64_t)sizeof d << RT_BOX_SIZE_SHIFT | RT_BOX_FLOAT;
     memcpy(box + 1, &d, sizeof d);
     return (rt_value_t)box | RT_TAG_BOXED;
-}
-
-// One chunk for now, mapped lazily; collection comes in step 9.
-static void new_heap(rt_proc_t *proc, size_t bytes) {
-    char *base = mmap(NULL, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (base == MAP_FAILED) {
-        perror("rt: can't allocate a heap");
-        exit(2);
-    }
-    proc->heap_ptr   = (uintptr_t)base;
-    proc->heap_limit = (uintptr_t)(base + bytes);
-}
-
-// --- processes ----------------------------------------------------------------
-
-void rt_preempt(rt_proc_t *proc) {
-    proc->reductions = QUOTA;
-}
-
-// A stack of `bytes` with a guard page under it, so running off the end
-// crashes instead of corrupting memory. Returns its top, and sets the
-// process's limit far enough above the bottom that the function that
-// trips the check still has room to call rt_fault.
-static void *new_stack(rt_proc_t *proc, size_t bytes) {
-    size_t guard = (size_t)sysconf(_SC_PAGESIZE);
-    char  *base  = mmap(NULL, guard + bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (base == MAP_FAILED || mprotect(base, guard, PROT_NONE) != 0) {
-        perror("rt: can't allocate a stack");
-        exit(2);
-    }
-    proc->stack_limit = (uintptr_t)(base + guard + STACK_HEADROOM);
-    return base + guard + bytes;
-}
-
-int main(void) {
-    rt_proc_t root = { .reductions = QUOTA };
-    void     *top  = new_stack(&root, STACK_BYTES);
-    new_heap(&root, HEAP_BYTES);
-    rt_current = &root;
-    rt_value_t v = rt_enter(&root, slight_main, top);
-    print_value(stdout, v);
-    putchar('\n');
-    return 0;
 }

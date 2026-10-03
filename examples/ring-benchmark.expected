@@ -1,0 +1,9 @@
+INIT with 1000 actors, sending 4 pings
+READY
+START
+COMPLETED 1000 at #<pid 2>
+COMPLETED 1000 at #<pid 2>
+COMPLETED 1000 at #<pid 2>
+COMPLETED 1000 at #<pid 2>
+EXITING at #<pid 2>
+done

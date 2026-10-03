@@ -1,0 +1,2 @@
+fault: not a pid: 5 (send at t/120-send-not-a-pid.slight:1:1)
+exit: 1

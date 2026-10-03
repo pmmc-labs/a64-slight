@@ -1,0 +1,3 @@
+waiting
+deadlock: the root process is waiting for a message, and nothing else can run
+exit: 1

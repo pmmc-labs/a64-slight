@@ -1,0 +1,26 @@
+(defun server (n)
+    (recv
+        ((:add x)    (pprint (list :add x)) (server (+ n x)))
+        ((:get from) (send from (list :total n)) (server n))
+        (:stop       (pprint :stopping) n)
+        ((:pair _ b) (pprint (list :second b)) (server n))
+        (other       (pprint (list :other other)) (server n))))
+
+(defun client (s)
+    (send s (list :add 5))
+    (send s (list :add 10))
+    (send s (list :pair 1 2))
+    (send s "hello")
+    (send s (list :get $$))
+    (wait-total s))
+
+(defun wait-total (s)
+    (recv
+        ((:total t)
+            (pprint (list :got t))
+            (send s :stop)
+            :client-done)))
+
+(let s (fork (server 0)))
+(fork (client s))
+:started

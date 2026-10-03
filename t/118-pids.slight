@@ -1,0 +1,10 @@
+(pprint $$)
+(pprint (pid? $$))
+(pprint (pid? 1))
+(let child (fork (pprint (list :child $$ :parent ^$$))))
+(pprint child)
+(pprint (eq? child child))
+(pprint (eq? child $$))
+; the child runs and ends while the root yields; a message to a process
+; that has ended just disappears
+(yield (do (send child :anyone-there?) :sent-to-the-dead))

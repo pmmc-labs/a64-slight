@@ -1,0 +1,27 @@
+; million-forks, from ts-slight's examples (after
+; https://pkolaczk.github.io/memory-consumption-of-async/): a chain of a
+; million processes, each waiting for one message, which it passes on.
+; A waiting process holds no stack. Changes: (recv) in the middle of a
+; function became a receive function; if became cond; there's no time-it.
+
+(defun test-actor (next)
+    (recv
+        ((:PING n)
+            (cond
+                ((nil? next) (tty/write "ALL DONE: " n " at " $$ \n))
+                (#true       (send next (list :PING (+ n 1))))))))
+
+(defun setup (n next)
+    (cond
+        ((== n 0)
+            (tty/write "READY" \n)
+            next)
+        (#true
+            (setup (- n 1) (fork (test-actor next))))))
+
+(let actor-count 1000000)
+
+(tty/write "INIT with " actor-count " actors" \n)
+(let last (setup actor-count (fork (test-actor ()))))
+(tty/write "START" \n)
+(send last (list :PING 0))

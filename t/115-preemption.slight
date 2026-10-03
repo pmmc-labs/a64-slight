@@ -1,0 +1,10 @@
+; a busy process can't starve the others: after 1,000 calls it goes to
+; the back of the queue
+(defun spin (n)
+    (cond
+        ((== n 0) (pprint :spun))
+        (#true    (spin (- n 1)))))
+
+(fork (spin 100000))
+(fork (pprint :hello))
+:root

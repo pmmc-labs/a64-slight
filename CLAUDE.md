@@ -6,19 +6,25 @@ TypeScript for now and should self-host later.
 
 ## Status
 
-**Steps 0–6 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
+**Steps 0–7 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
 a compiler for integers, floats, `#true`/`#false`, `()`, symbols, lists
-(a 64 MB heap per process with no GC yet), strings, closures (`lambda`,
-functions and builtins as values, `apply`), arithmetic (integers inline;
-floats and mixed in C), structural `eq?`, type predicates, the string and
-math builtins (C, in `runtime/`), `cond`, `let`, `do`, `pprint`,
-`tty/write`, and top-level `defun`s with calls and tail calls (arguments in
-`x0`–`x7`; stack and reduction checks at every function entry). The
+(a heap per process of chunks, capped at 64 MB, with no GC yet), strings,
+closures (`lambda`, functions and builtins as values, `apply`), arithmetic
+(integers inline; floats and mixed in C), structural `eq?`, type
+predicates, the string and math builtins (C, in `runtime/`), `cond`,
+`let`, `do`, `pprint`, `tty/write`, and top-level `defun`s with calls and
+tail calls (arguments in `x0`–`x7`; stack and reduction checks at every
+function entry). The
 prelude (`lib/prelude.slight`) is compiled with every program;
-`lib/test.slight` is a TAP library. Five of ts-slight's examples are
-ported (`examples/`). `make test` passes under qemu on x86 Linux, and
-natively on macOS (Stevan's M2 Max, checked after step 5). **Next: step 7**
-(processes). Update this section as steps land.
+`lib/test.slight` is a TAP library. Processes: `fork`, `send`, `recv`
+(receive functions, with the `recv` rule checked by `classify.ts`), `$$`,
+`^$$`, `yield`, preemption, a FIFO run queue, and pooled stacks that a
+process waiting in `recv` gives back (`runtime/process.c`). Faults still
+end the whole program. Eight of ts-slight's examples are ported
+(`examples/`). `make test` passes under qemu on x86 Linux, and natively on
+macOS (Stevan's M2 Max, checked after step 6). **Next: step 8** (`join`,
+`monitor`, `kill`, `raise`, per-process faults). Update this section as
+steps land.
 
 ## Read first, in this order
 
@@ -110,9 +116,9 @@ works and has the runtime pieces to borrow.
 | Path | |
 |---|---|
 | `bin/slightc.ts` | The driver: read, compile, write `out.S`, link with clang |
-| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `codegen.ts`, `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
+| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts`, `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
-| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S`, `rt.c` (the core: faults, heap, printing, equality), `strings.c`, `numbers.c` |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, `main`), `strings.c`, `numbers.c` |
 | `lib/` | `prelude.slight` (compiled with every program), `test.slight` (TAP, opt-in) |
 | `examples/` | ts-slight's examples, ported; each with a `.expected` is a golden test |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`. A first line `; with: lib/test.slight` compiles that in too. |
@@ -134,9 +140,10 @@ works and has the runtime pieces to borrow.
   error. `SLIGHT_CC` overrides the C compiler command.
 
 For now the runtime prints the root process's result, followed by a
-newline, and a fault prints `fault: ...` to stderr and exits 1. The golden
-tests check stdout and stderr together, plus `exit: N` when the status
-isn't 0. Write expected output by working it out independently (by hand
-or in Python), never by copying what the compiler printed. Don't let a
-test depend on the last bit of a libm function other than `sqrt`: macOS's
-and glibc's differ (D76).
+newline, once nothing can run; a fault prints `fault: ...` to stderr and
+exits 1, and so does a deadlock (`deadlock: ...`). Dead letters go to
+stderr. The golden tests check stdout and stderr together, plus `exit: N`
+when the status isn't 0. Write expected output by working it out
+independently (by hand or in Python), never by copying what the compiler
+printed. Don't let a test depend on the last bit of a libm function other
+than `sqrt`: macOS's and glibc's differ (D76).

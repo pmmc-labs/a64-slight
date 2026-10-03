@@ -1,0 +1,5 @@
+(ping 1)
+dead letter: unexpected (recv at t/112-dead-letter.slight:2:5)
+dead letter: (ping 2 3) (recv at t/112-dead-letter.slight:2:5)
+(ping 3)
+sent

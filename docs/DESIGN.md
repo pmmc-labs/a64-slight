@@ -55,7 +55,7 @@ Same reader as ts-slight (see `reference/ts-slight/src/parser.ts` and
 | list     | cons cells and `()` |
 | string   | immutable bytes, UTF-8 by convention |
 | function | a closure, or a reference to a top-level function |
-| pid      | a process id |
+| pid      | a process id; prints as `#<pid N>`, and the root process is 1 |
 
 Booleans are the reserved symbols `#true` and `#false`.
 
@@ -106,7 +106,7 @@ from the top with the same arguments. That's exact, because the function's
 body is just the `recv`. "All state lives in the loop arguments" is literally
 true at every wait.
 
-Syntax **(open; this is the proposal)**:
+Syntax (D85):
 
 ```lisp
 (defun counter (n)
@@ -118,13 +118,19 @@ Syntax **(open; this is the proposal)**:
 ```
 
 - `(:tag a b ...)` matches a list of exactly that length whose head is the
-  symbol `:tag`, and binds the rest by position.
-- A bare symbol matches anything and binds the whole message.
+  symbol `:tag`, and binds the rest by position. `_` in a position matches
+  anything and binds nothing.
+- `:tag` on its own matches exactly that symbol.
+- A bare name matches anything and binds the whole message (`_` binds
+  nothing).
 - Clauses are tried in order. Only the **first** message in the mailbox is
   considered: there's no selective receive. If no clause matches, the
-  message goes to the **dead-letter log** and the function waits again.
-- Open details: nested patterns, literals in other positions, a rest
-  binding, `_`.
+  message goes to the **dead-letter log** (a line on stderr,
+  `dead letter: <message> (recv at file:line:col)`) and the function takes
+  the next message, or waits.
+- Not supported: nested patterns, literals other than the head keyword, a
+  rest binding. Match the outer shape, then take the rest apart with
+  `cond` in the body.
 
 Send-then-wait becomes two functions:
 
@@ -148,13 +154,13 @@ reply refs.
 
 | | |
 |---|---|
-| `(fork expr)` | The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child. `expr` runs at the base of the child's stack, so it may tail-call a state function. |
+| `(fork expr)` | The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. `expr` runs at the base of the child's stack, so it may tail-call a state function. Inside `expr`, `$$` is the child. |
 | `(connect :keypress expr)` | `fork`, plus the new process receives the source's events as messages. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
-| `$$`, `^$$` | self, parent |
+| `$$`, `^$$` | self, parent; the root's parent is `()` |
 | `(join pid)` | **Blocking** wait for `pid` to end. Returns `(:ok value)` or `(:error reason)`. Works on any pid (not just children), anywhere (including inside lambdas), and after the process has already ended. `(join $$)` is an error. |
 | `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller. There are no automatic messages to the parent. |
-| `(kill pid)` | Ends `pid` with `(:error :killed)`. **(open)** exact reason |
+| `(kill pid)` | Ends `pid` with `(:error :killed)` (D87). |
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` after `ms` milliseconds. |
 | `(raise reason)` | Ends the current process with `(:error reason)`. |
 
@@ -162,10 +168,12 @@ reply refs.
 - **Errors are values**: `(:ok v)` and `(:error e)`. There's no `catch`.
   A fault (overflow, a builtin given the wrong type, a `cond` test that
   isn't a boolean, no `cond` clause matching, an arity mismatch, the heap
-  limit) ends the process with `(:error ...)`. **(open)** The shape of a
-  fault's reason. Until there are processes and lists (steps 4 and 7), a
-  fault prints `fault: <what> (<where> at file:line:col)` to stderr and
-  exits with status 1.
+  limit) ends the process with `(:error (kind value site))` (D87): `kind` a
+  keyword such as `:overflow` or `:not-a-list`, `value` the offending value
+  (or `()`), `site` a string like `"car at file:line:col"`. `(raise r)`
+  ends it with `(:error r)`. Until step 8, a fault still prints
+  `fault: <what> (<where> at file:line:col)` to stderr and ends the whole
+  program with status 1.
 - **Preemption.** Every loop is a tail call, so a reduction counter is
   checked at each function entry and tail call. When it runs out, the
   process pauses where it is, *keeping its stack*, and goes to the back of
@@ -174,7 +182,14 @@ reply refs.
   (preempted or yielded), blocked in `join`, or blocked in a syscall holds a
   stack. A process waiting in `recv` holds none.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
-  sources, no blocked I/O) is detected and reported.
+  sources, no blocked I/O) is detected and reported. So far (step 7): if
+  the run queue empties before the root process has ended, the program
+  prints `deadlock: the root process is waiting for a message, and nothing
+  else can run` to stderr and exits 1.
+- **The program ends when nothing can run**, not when the root ends: other
+  processes keep running after the root has its value, and the root's value
+  is printed last. Processes still waiting in `recv` at that point are
+  dropped (D93).
 - **Blocking syscalls.** Since a process can block with its stack, `sleep`,
   `slurp` and `spew` block only the calling process and return a Result.
   This follows from the `join` decision, but wasn't discussed on its own.
@@ -314,7 +329,7 @@ needed: the REPL and line editing are slight code over key events.
 | `001` | list    | pointer to a 2-word cons cell, no header. `nil` is this tag with a null pointer. |
 | `011` | boxed   | pointer to a header word (type, size) and payload: string, float, closure |
 | `101` | symbol  | compile-time id, immediate |
-| `111` | pid     | immediate |
+| `111` | pid     | immediate: the process's index in the process table, `id << 3 \| 7` |
 
 - **Cons cells** are 16 bytes. The tag folds into the load offset:
   `car` is `ldur x0, [x1, #-1]` and `cdr` is `ldur x0, [x1, #7]`.
@@ -337,17 +352,24 @@ needed: the REPL and line editing are slight code over key events.
 
 ### Process heaps and GC
 
-**So far (step 4):** one 64 MB chunk per process, mapped lazily, and a
-fault when it's full. The heap pointer and limit live in the process
-struct (`[x28, #RT_PROC_HEAP_PTR]`), so C builtins that allocate can use
-them with nothing to sync (D57). Compiled code allocates inline:
+**So far (step 7):** a chain of `malloc`ed chunks per process (D89). The
+first, 4 KB, comes with the first allocation (so a process that allocates
+nothing has no heap); each new one is twice the last, up to 1 MB. Message
+chunks join the chain when received. All of a process's chunks together
+are capped at 64 MB, and past that the allocation faults. With no GC yet,
+that includes every message the process has ever received. The heap
+pointer and limit live in the process struct
+(`[x28, #RT_PROC_HEAP_PTR]`), so C builtins that allocate can use them with
+nothing to sync (D57). Compiled code allocates inline, and calls the
+runtime only to start a new chunk:
 
 ```
+Lalloc_N:
     ldr  x2, [x28, #RT_PROC_HEAP_PTR]
     ldr  x3, [x28, #RT_PROC_HEAP_LIMIT]
     add  x4, x2, #16                        // bytes
     cmp  x4, x3
-    b.hi Lfault_N                           // fault: heap exhausted
+    b.hi Lalloc_N_grow                      // out of line: rt_heap_grow, then retry
     str  x4, [x28, #RT_PROC_HEAP_PTR]       // x2 = the new cell
 ```
 
@@ -380,8 +402,9 @@ them with nothing to sync (D57). Compiled code allocates inline:
   the target's FIFO mailbox. Static data is not copied. Sharing within a
   message is duplicated (as in the BEAM); that's acceptable at this scale.
 - `recv` links the chunk into the receiver's heap. Nothing is copied twice.
-- **(open)** Bounded mailboxes. Since `send` can't block, a full mailbox
-  would mean dropping the message or faulting the sender.
+- Mailboxes are unbounded (D88). (Bounded ones would have to drop the
+  message or fault the sender, since `send` can't block.)
+- A message to a process that has ended disappears, as in Erlang (D92).
 
 ### Process lifecycle
 
@@ -391,16 +414,20 @@ them with nothing to sync (D57). Compiled code allocates inline:
   Processes blocked in `join` on it wake with a copy; later `join`s read
   the record; monitors get `(:exit pid result)`. Then the heap and the
   stack are freed.
-- **Known issue (open):** exit records accumulate. That doesn't matter at
-  hundreds or thousands of processes. A system that churns through millions
-  will need a retention policy, such as dropping the record once the parent
-  has seen it.
+- Exit records are kept forever (D88). That doesn't matter at hundreds or
+  thousands of processes. A system that churns through millions will need
+  a retention policy, such as dropping the record once the parent has seen
+  it. (So far, step 7, the whole process struct is kept, about 350 bytes;
+  step 8 shrinks that to the record.)
 
 ### Scheduler
 
-- Single core. A **FIFO run queue (open)**: the spike used deterministic
+- Single core. A **FIFO run queue** (D86): the spike used deterministic
   ticks, but a plain run queue is simpler and still deterministic on one
-  core. A **virtual clock** for tests (from ts-cpi) keeps timer tests exact.
+  core. A preempted process goes to the back of the queue, but only if
+  another process is ready; otherwise it keeps running (D91). `yield`
+  always goes to the back. A **virtual clock** for tests (from ts-cpi)
+  keeps timer tests exact.
 - **Stack pool**: a process takes a stack when it starts running and gives
   it back when it waits in `recv` or ends.
 - **Context switch**: the spike's `rt_switch`, 25 instructions (x19–x30,
@@ -541,11 +568,8 @@ line-by-line translation.
 
 Collected from above:
 
-1. Exact `recv` pattern syntax and matching details.
-2. Exit-record retention policy.
-3. Bounded mailboxes.
-4. FIFO run queue (proposed) vs. the spike's ticks.
-5. Program structure: top-level forms as the root process (built this way).
-6. `kill`'s exit reason.
-7. GC at base-of-stack tail calls outside state functions.
-8. The shape of a fault's reason.
+1. Program structure: top-level forms as the root process (built this way).
+2. GC at base-of-stack tail calls outside state functions.
+
+Settled in step 7: `recv` syntax (D85), the run queue (D86), the fault,
+`raise` and `kill` reasons (D87), exit records and mailboxes (D88).

@@ -3,26 +3,59 @@
 #include "asm.h"
 
 // ---------------------------------------------------------------------------
-// rt_value_t rt_enter(rt_proc_t *proc, rt_value_t (*fn)(void), void *stack_top)
+// void rt_switch(rt_ctx_t *from, rt_ctx_t *to)
 //
-// Calls fn on another stack, with x28 = proc. x27 and x28 are callee-saved
-// under AAPCS64, so the C caller's values are kept and put back; x27 holds
-// the C stack's sp meanwhile, which works because compiled code never
-// touches x19..x27.
+// Saves the callee-saved state of whoever is running into `from`, loads
+// `to`, and returns into it. Everything else is caller-saved under AAPCS64,
+// so the code that called rt_switch (directly, or through any runtime op)
+// has already given it up. x18 is never touched: on macOS it's the
+// platform's. From the spike, unchanged.
 // ---------------------------------------------------------------------------
 
-FUNC rt_enter
-    stp  x29, x30, [sp, #-32]!
-    mov  x29, sp
-    stp  x27, x28, [sp, #16]
-    mov  x28, x0
-    mov  x27, sp
-    mov  sp, x2
-    blr  x1
-    mov  sp, x27
-    ldp  x27, x28, [sp, #16]
-    ldp  x29, x30, [sp], #32
+FUNC rt_switch
+    stp  x19, x20, [x0, #RT_CTX_X19 +  0]
+    stp  x21, x22, [x0, #RT_CTX_X19 + 16]
+    stp  x23, x24, [x0, #RT_CTX_X19 + 32]
+    stp  x25, x26, [x0, #RT_CTX_X19 + 48]
+    stp  x27, x28, [x0, #RT_CTX_X19 + 64]
+    stp  x29, x30, [x0, #RT_CTX_FP]
+    mov  x9, sp
+    str  x9,       [x0, #RT_CTX_SP]
+    stp  d8,  d9,  [x0, #RT_CTX_D8 +  0]
+    stp  d10, d11, [x0, #RT_CTX_D8 + 16]
+    stp  d12, d13, [x0, #RT_CTX_D8 + 32]
+    stp  d14, d15, [x0, #RT_CTX_D8 + 48]
+
+    ldp  x19, x20, [x1, #RT_CTX_X19 +  0]
+    ldp  x21, x22, [x1, #RT_CTX_X19 + 16]
+    ldp  x23, x24, [x1, #RT_CTX_X19 + 32]
+    ldp  x25, x26, [x1, #RT_CTX_X19 + 48]
+    ldp  x27, x28, [x1, #RT_CTX_X19 + 64]
+    ldp  x29, x30, [x1, #RT_CTX_FP]
+    ldr  x9,       [x1, #RT_CTX_SP]
+    mov  sp, x9
+    ldp  d8,  d9,  [x1, #RT_CTX_D8 +  0]
+    ldp  d10, d11, [x1, #RT_CTX_D8 + 16]
+    ldp  d12, d13, [x1, #RT_CTX_D8 + 32]
+    ldp  d14, d15, [x1, #RT_CTX_D8 + 48]
     ret
+
+// ---------------------------------------------------------------------------
+// rt_trampoline: where a process's first switch lands, with x28 = the
+// process and sp = the top of a fresh stack. Calls proc->code with
+// proc->args in x0..x7, then ends the process with what it returned.
+// ---------------------------------------------------------------------------
+
+FUNC rt_trampoline
+    ldp  x0, x1, [x28, #RT_PROC_ARGS +  0]
+    ldp  x2, x3, [x28, #RT_PROC_ARGS + 16]
+    ldp  x4, x5, [x28, #RT_PROC_ARGS + 32]
+    ldp  x6, x7, [x28, #RT_PROC_ARGS + 48]
+    ldr  x16, [x28, #RT_PROC_CODE]
+    blr  x16
+    mov  x1, x0
+    mov  x0, x28
+    bl   rt_exit                        // doesn't return
 
 // ---------------------------------------------------------------------------
 // rt_value_t rt_apply(rt_value_t f, rt_value_t args, const char *site)

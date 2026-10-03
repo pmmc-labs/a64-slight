@@ -1,0 +1,49 @@
+; ring-benchmark, from ts-slight's examples: a chain of processes passes a
+; count along it, and the last one reports back. Changes: (recv) in the
+; middle of a function became receive functions; if became cond; the
+; (yield ...) around each loop is gone (preemption does that now); there's
+; no time-it or @ARGV, so the sizes are fixed and it reports each round.
+
+(defun test-actor (reply-to next)
+    (recv
+        ((:EXIT n)
+            (cond
+                ((nil? next) (tty/write "EXITING at " $$ \n))
+                (#true       (send next (list :EXIT 0)))))
+        ((:PING count)
+            (cond
+                ((nil? next) (send reply-to (list :COMPLETED count $$)))
+                (#true       (send next (list :PING (+ count 1)))))
+            (test-actor reply-to next))))
+
+(defun setup (n reply-to next)
+    (cond
+        ((== n 0)
+            (tty/write "READY" \n)
+            next)
+        (#true
+            (setup (- n 1) reply-to (fork (test-actor reply-to next))))))
+
+(defun send-ping (pid count)
+    (cond
+        ((>= count 0)
+            (send pid (list :PING 0))
+            (await-ping pid count))
+        (#true
+            (send pid (list :EXIT 0))
+            :done)))
+
+(defun await-ping (pid count)
+    (recv
+        ((:COMPLETED n from)
+            (tty/write "COMPLETED " n " at " from \n)
+            (send-ping pid (- count 1)))))
+
+(let self $$)
+(let actor-count 1000)
+(let ping-count 3)
+
+(tty/write "INIT with " actor-count " actors, sending " (+ ping-count 1) " pings" \n)
+(let last (setup actor-count self (fork (test-actor self ()))))
+(tty/write "START" \n)
+(send-ping last ping-count)

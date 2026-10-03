@@ -16,7 +16,8 @@
 #define RT_TAG_LIST          1    // 001    pointer to a cons cell; nil is this tag on a null pointer
 #define RT_TAG_BOXED         3    // 011    pointer to a header word and payload
 #define RT_TAG_SYMBOL        5    // 101    compile-time id
-#define RT_TAG_PID           7    // 111
+#define RT_TAG_PID           7    // 111    process id << 3
+#define RT_PID_SHIFT         3
 #define RT_SYMBOL_SHIFT      3    // a symbol is id << 3 | RT_TAG_SYMBOL
 
 // A boxed value points at a header word: the box's type in the low byte,
@@ -56,6 +57,7 @@
 #define RT_FAULT_DIV_ZERO   13    // division by zero
 #define RT_FAULT_NOT_FUNC   14    // a call to something that isn't a function
 #define RT_FAULT_ARITY      15    // a function called with the wrong number of arguments
+#define RT_FAULT_NOT_PID    16    // send to something that isn't a pid
 
 // What rt_compare is asked.
 #define RT_CMP_EQ            0
@@ -68,7 +70,19 @@
 #define RT_PROC_REDUCTIONS   0    // rt_proc_t.reductions: the reduction check at function entry
 #define RT_PROC_STACK_LIMIT  8    // rt_proc_t.stack_limit: the stack check at function entry
 #define RT_PROC_HEAP_PTR    16    // rt_proc_t.heap_ptr: where the next allocation goes
-#define RT_PROC_HEAP_LIMIT  24    // rt_proc_t.heap_limit: the end of the heap
+#define RT_PROC_HEAP_LIMIT  24    // rt_proc_t.heap_limit: the end of the current chunk
+#define RT_PROC_PID         32    // rt_proc_t.pid: $$
+#define RT_PROC_PARENT      40    // rt_proc_t.parent: ^$$
+#define RT_PROC_CODE        48    // rt_proc_t.code: what the trampoline calls...
+#define RT_PROC_ARGS        56    // rt_proc_t.args[8]: ...with these in x0..x7
+#define RT_PROC_CTX        120    // rt_proc_t.ctx: the registers, while it's switched out
+
+#define RT_CTX_X19           0    // rt_ctx_t: x19..x28, x29, x30, sp, d8..d15
+#define RT_CTX_FP           80
+#define RT_CTX_LR           88
+#define RT_CTX_SP           96
+#define RT_CTX_D8          104
+#define RT_CTX_SIZE        168
 
 #ifndef __ASSEMBLER__
 
@@ -82,11 +96,52 @@
 typedef uint64_t rt_value_t;
 
 // A process. Compiled code finds the current one in x28.
+// Compiled code, as the runtime holds it: the trampoline calls it with its
+// arguments in x0..x7, whatever its C type says.
+typedef void (*rt_code_t)(void);
+
+// The registers that survive a switch (AAPCS64's callee-saved ones).
+typedef struct rt_ctx {
+    uint64_t x19_x28[10];
+    uint64_t fp, lr, sp;
+    uint64_t d8_d15[8];
+} rt_ctx_t;
+
+// A chunk of a process's heap; the chunks are a list, newest first. A
+// message arrives as a chunk of its own, and joins the list.
+typedef struct rt_chunk {
+    struct rt_chunk *next;
+    size_t           size;      // bytes after this header
+} rt_chunk_t;
+
+typedef struct rt_msg {
+    struct rt_msg *next;
+    rt_value_t     value;
+    rt_chunk_t    *chunk;       // what value lives in; NULL if it needed none
+} rt_msg_t;
+
+typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_DONE } rt_state_t;
+
+// A process. Compiled code finds the current one in x28, and uses the
+// fields up to ctx; the rest are the runtime's.
 typedef struct rt_proc {
-    int64_t   reductions;   // calls left before rt_preempt
-    uintptr_t stack_limit;  // a function entered with sp below this faults
-    uintptr_t heap_ptr;     // bump allocation: compiled code adds to this...
-    uintptr_t heap_limit;   // ...and faults when it would pass this
+    int64_t     reductions;     // calls left before rt_preempt
+    uintptr_t   stack_limit;    // a function entered with sp below this faults
+    uintptr_t   heap_ptr;       // bump allocation: compiled code adds to this...
+    uintptr_t   heap_limit;     // ...and calls rt_heap_grow when it would pass this
+    rt_value_t  pid;            // as a value
+    rt_value_t  parent;         // as a value; () for the root
+    rt_code_t   code;           // where it starts, or restarts after waiting in recv
+    rt_value_t  args[8];
+    rt_ctx_t    ctx;
+
+    rt_state_t      state;
+    void           *stack;      // the bottom of its stack (above the guard page), or NULL
+    rt_chunk_t     *chunks;
+    size_t          heap_bytes; // in all its chunks
+    size_t          next_chunk; // the size of the next chunk it allocates in
+    rt_msg_t       *mail, *mail_last;
+    struct rt_proc *next_ready;
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -123,6 +178,20 @@ extern const uint64_t slight_symbol_count   RT_ASM(slight_symbol_count);
 extern const char     slight_symbol_names[] RT_ASM(slight_symbol_names);
 
 // --- called by compiled code --------------------------------------------------
+
+// Processes (process.c). rt_recv returns the next message, or, when there
+// is none, remembers code(args...) and gives up the stack; the process
+// starts again at code when a message comes. rt_fork starts code(values...)
+// in a new process, with the values deep-copied into its heap.
+rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
+rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
+rt_value_t rt_recv(const rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
+void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_letter);
+void       rt_yield(void) RT_ASM(rt_yield);
+
+// Makes room for `bytes` in the current process's heap: a new chunk.
+// Faults at `site` when the heap would pass its limit.
+void rt_heap_grow(uint64_t bytes, const char *site) RT_ASM(rt_heap_grow);
 
 // Something went wrong at `site` (a description and a source position);
 // `value` is the offending value, where there is one. Ends the program for
@@ -184,8 +253,8 @@ rt_value_t rt_cos(rt_value_t x, const char *site) RT_ASM(rt_cos);
 rt_value_t rt_tan(rt_value_t x, const char *site) RT_ASM(rt_tan);
 rt_value_t rt_exp(rt_value_t x, const char *site) RT_ASM(rt_exp);
 
-// Called when proc's reductions run out. For now it just refills them;
-// once there are processes, it's where a process gets preempted.
+// Called when proc's reductions run out: refills them, and lets the next
+// process run, if one is waiting to.
 void rt_preempt(rt_proc_t *proc) RT_ASM(rt_preempt);
 
 // --- the runtime itself -------------------------------------------------------
@@ -219,9 +288,27 @@ void rt_render(rt_buf_t *b, rt_value_t v, int raw);
 // The name of symbol id, or NULL.
 const char *rt_symbol_name(uint64_t id);
 
-// Runs fn on the stack that ends at stack_top, with x28 = proc, and
-// returns its result (rt_asm.S).
-rt_value_t rt_enter(rt_proc_t *proc, rt_value_t (*fn)(void), void *stack_top) RT_ASM(rt_enter);
+// Saves the callee-saved registers in `from` and loads them from `to`
+// (rt_asm.S): this is what switching processes is.
+void rt_switch(rt_ctx_t *from, rt_ctx_t *to) RT_ASM(rt_switch);
+
+// Where a process's first switch lands: calls code(args...), then rt_exit.
+void rt_trampoline(void) RT_ASM(rt_trampoline);
+
+// The end of a process, with its result. Doesn't return.
+__attribute__((noreturn))
+void rt_exit(rt_proc_t *proc, rt_value_t result) RT_ASM(rt_exit);
+
+// Static data: the compiler brackets its read-only and constant data with
+// these, so the runtime can tell values it doesn't have to copy.
+extern const char slight_rodata_start[] RT_ASM(slight_rodata_start);
+extern const char slight_rodata_end[]   RT_ASM(slight_rodata_end);
+extern const char slight_const_start[]  RT_ASM(slight_const_start);
+extern const char slight_const_end[]    RT_ASM(slight_const_end);
+
+// The process table, and the scheduler (process.c).
+rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent);
+void       rt_run(void);
 
 #endif // __ASSEMBLER__
 #endif // RT_H

@@ -1,0 +1,10 @@
+(defun only-pings ()
+    (recv
+        ((:ping n) (pprint (list :ping n)) (only-pings))))
+
+(let p (fork (only-pings)))
+(send p (list :ping 1))
+(send p :unexpected)
+(send p (list :ping 2 3))
+(send p (list :ping 3))
+:sent

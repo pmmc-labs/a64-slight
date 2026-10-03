@@ -1,0 +1,26 @@
+; 10,000 processes, each waiting for one message; a waiting process holds
+; no stack. $$ in a fork is the new process, so the root passes its own pid.
+(defun waiter (reply-to)
+    (recv
+        ((:double n) (send reply-to (list :doubled (* 2 n))))))
+
+(defun spawn (n me acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (spawn (- n 1) me (cons (fork (waiter me)) acc)))))
+
+(defun ask-all (pids n)
+    (cond
+        ((nil? pids) (collect n 0))
+        (#true       (send (car pids) (list :double n)) (ask-all (cdr pids) (+ n 1)))))
+
+(defun collect (n total)
+    (cond
+        ((== n 0) total)
+        (#true    (collect-one n total))))
+
+(defun collect-one (n total)
+    (recv
+        ((:doubled d) (collect (- n 1) (+ total d)))))
+
+(ask-all (spawn 10000 $$ ()) 0)

@@ -1,0 +1,7 @@
+(add 5)
+(add 10)
+(second 2)
+(other "hello")
+(got 15)
+stopping
+started

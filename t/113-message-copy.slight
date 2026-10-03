@@ -1,0 +1,20 @@
+; every kind of value survives the trip: messages are deep-copied
+(defun echo ()
+    (recv
+        ((:echo from value) (send from (list :echoed value)) (echo))
+        (:stop              :echo-done)))
+
+(defun ask (e values)
+    (cond
+        ((nil? values) (send e :stop) :asked)
+        (#true         (send e (list :echo $$ (car values))) (await e (cdr values)))))
+
+(defun await (e values)
+    (recv
+        ((:echoed v)
+            (pprint (cond ((lambda? v) (v 1)) (#true v)))
+            (ask e values))))
+
+(let e (fork (echo)))
+(let k 10)
+(ask e (list 42 "a string" 2.5 :sym '(quoted (list)) (list 1 (list 2 "three")) (lambda (x) (+ x k)) (range 0 5)))

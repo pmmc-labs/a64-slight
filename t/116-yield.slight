@@ -1,0 +1,8 @@
+(defun ticker (name n)
+    (cond
+        ((== n 0) (pprint (list name :done)))
+        (#true    (pprint (list name n)) (yield (ticker name (- n 1))))))
+
+(fork (ticker :a 3))
+(fork (ticker :b 3))
+:root

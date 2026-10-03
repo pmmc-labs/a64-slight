@@ -73,10 +73,10 @@ test("a program with no top-level expressions has the value ()", () => {
 });
 
 test('what isn\'t built yet is an error, with a position', () => {
-    assert.throws(() => compile('42\n  (fork 1)'), (e: unknown) =>
-        e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: (fork 1)');
-    assert.throws(() => compile('(recv)'), (e: unknown) =>
-        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (recv)');
+    assert.throws(() => compile('42\n  (connect :x 1)'), (e: unknown) =>
+        e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: (connect (quote x) 1)');
+    assert.throws(() => compile('(connect :keypress 1)'), (e: unknown) =>
+        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (connect (quote keypress) 1)');
 });
 
 const fails = (src: string, message: string): void => {
@@ -418,5 +418,67 @@ test("the prelude's functions are in their own namespace", () => {
         (e: unknown) => e instanceof CompileError && /quad is already defined/.test(e.message));
     assert.throws(() => compileWith('1', '(pprint 1)'),
         (e: unknown) => e instanceof CompileError && /the prelude can only define functions/.test(e.message));
+});
+
+// --- processes ----------------------------------------------------------------
+
+const W = '(defun w () (recv (m m))) ';
+
+test('recv can only be the whole body of a defun', () => {
+    fails('(recv (m m))', 'test.slight:1:1: recv can only be the whole body of a defun');
+    fails('(defun f () (pprint 1) (recv (m m)))', 'test.slight:1:24: recv can only be the whole body of a defun');
+    fails('(defun f () (cond (#true (recv (m m)))))', 'test.slight:1:26: recv can only be the whole body of a defun');
+    fails('(lambda () (recv (m m)))', 'test.slight:1:12: recv can only be the whole body of a defun');
+    fails('(fork (recv (m m)))', 'test.slight:1:7: recv can only be the whole body of a defun');
+    fails('(defun f () (recv (m (recv (n n)))))', 'test.slight:1:22: recv can only be the whole body of a defun');
+});
+
+test('a function that waits can only be called in tail position', () => {
+    fails(W + '(defun f () (+ 1 (w)))', 'test.slight:1:44: w waits for messages (it reaches a recv), so it can only be called in tail position');
+    fails(W + '(defun g () (w)) (pprint (g))', 'test.slight:1:52: g waits for messages (it reaches a recv), so it can only be called in tail position');
+    fails(W + '(cond ((w) 1))', 'test.slight:1:34: w waits for messages (it reaches a recv), so it can only be called in tail position');
+});
+
+test('a lambda never waits, and a function that waits is never a value', () => {
+    fails(W + '(lambda () (w))', "test.slight:1:38: a lambda can't call w, which waits for messages (it reaches a recv)");
+    fails(W + '(let f w)', "test.slight:1:34: w waits for messages, so it can't be used as a value");
+});
+
+test('a function that waits can be the body of a fork, the end of the top level, or after a yield', () => {
+    assert.doesNotThrow(() => compile(W + '(fork (w))'));
+    assert.doesNotThrow(() => compile(W + '(pprint 1) (w)'));
+    assert.doesNotThrow(() => compile(W + '(defun y () (yield (w))) (y)'));
+    assert.doesNotThrow(() => compile(W + '(lambda () (fork (w)))'));
+});
+
+test('recv clauses and patterns', () => {
+    fails('(defun f () (recv))', 'test.slight:1:13: recv needs at least one clause');
+    fails('(defun f () (recv m))', 'test.slight:1:19: a recv clause is (pattern body...), not m');
+    fails('(defun f () (recv (m)))', 'test.slight:1:19: a recv clause is (pattern body...), not (m)');
+    fails('(defun f () (recv ((5 a) 1)))', 'test.slight:1:20: a recv pattern is a name, a :keyword or (:keyword names...), not (5 a)');
+    fails('(defun f () (recv ((:a 1) 1)))', 'test.slight:1:20: a recv pattern is a name, a :keyword or (:keyword names...), not ((quote a) 1)');
+    fails('(defun f () (recv ((:a x x) 1)))', 'test.slight:1:20: x is in the pattern twice');
+    fails('(defun f () (recv (#true 1)))', "test.slight:1:20: can't bind #true");
+});
+
+test('a receive function restarts at its own entry with its parameters', () => {
+    const asm = compile('(defun loop (a b) (recv (m (loop b a))))');
+    assert.match(asm, /Lrecv_\d+:\n {4}mov {2}x0, sp\n {4}mov {2}x1, #2\n {4}LOADADDR x2, fn_loop\n {4}bl {3}rt_recv/);
+    assert.match(asm, /bl {3}rt_dead_letter\n {4}b {4}Lrecv_\d+/);
+});
+
+test('fork compiles its body as a function of its own, taking the locals it uses', () => {
+    const asm = compile('(let a 1) (let b "two") (fork (pprint (list b a)))');
+    assert.match(asm, /Lfork_\d+: {4}\/\/ fork at test\.slight:1:25/);
+    assert.match(asm, /LOADADDR x0, Lfork_\d+\n {4}mov {2}x1, #2\n {4}add {2}x2, sp, #\d+\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_fork/);
+    fails('(fork)', 'test.slight:1:1: fork takes 1 argument, not 0');
+    fails('(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (fork (list a b c d e f g h i))',
+          'test.slight:1:91: a fork can take at most 8 locals into the new process, and this one uses 9');
+});
+
+test('$$ and ^$$ are the process and its parent', () => {
+    assert.match(compile('$$'), /ldr {2}x0, \[x28, #RT_PROC_PID\]/);
+    assert.match(compile('^$$'), /ldr {2}x0, \[x28, #RT_PROC_PARENT\]/);
+    fails('(let $$ 1)', "test.slight:1:6: can't bind $$");
 });
 

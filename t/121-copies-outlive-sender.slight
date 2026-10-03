@@ -1,0 +1,22 @@
+; what a process sends, or takes into a fork, is copied: it outlives the
+; sender. maker builds a list, sends it to printer, forks a child with it,
+; and ends, which frees its heap; churn then allocates in the freed memory
+; before the other two get to run.
+(defun printer ()
+    (recv
+        ((:show xs) (pprint xs))))
+
+(defun churn (n)
+    (cond
+        ((== n 0) :churned)
+        (#true    (let junk (map (lambda (i) (concat "junk " i)) (range 0 20))) (churn (- n 1)))))
+
+(defun maker (p)
+    (let xs (map (lambda (i) (concat "item " i)) (range 0 5)))
+    (send p (list :show xs))
+    (fork (pprint (list :forked xs)))
+    :maker-done)
+
+(let p (fork (printer)))
+(fork (maker p))
+(fork (churn 2000))

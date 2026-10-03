@@ -313,7 +313,8 @@ sync. Rejected for now: keeping them in callee-saved registers (faster,
 but every C call that allocates would have to sync them). Revisit if
 profiling says so.
 
-**D58. One 64 MB heap chunk per process until GC.** *(Default.)* As PLAN
+**D58. One 64 MB heap chunk per process until GC.** *(Default; replaced
+by D89 in step 7.)* As PLAN
 step 4 said. It's mapped lazily, so unused space costs nothing, but step 7
 will want something smaller per process, or step 9's chunk chain, before a
 million processes can each have one.
@@ -469,3 +470,86 @@ all examples pass. Especially if it calls for changes to the interpreter,
 it's okay to change examples." An example that needs something slight
 doesn't have gets rewritten, or stays unported.
 
+
+## Step 7
+
+**D85. `recv` patterns.** *(User.)* A clause is `(pattern body...)`. A
+pattern is a name (matches anything and binds the whole message; `_` binds
+nothing), a `:keyword` (matches that symbol), or `(:keyword names...)`
+(matches a list of exactly that length headed by the keyword, and binds
+the rest by position; `_` skips a position). Clauses are tried in order
+against the first message only. A message no clause matches goes to the
+dead-letter log, and the function takes the next one. Rejected: nested
+patterns, literals other than the head keyword, a rest binding, and
+selective receive (each is more matching machinery, and the body's `cond`
+does the rest).
+
+**D86. A FIFO run queue.** *(User.)* Deterministic on one core, and the
+simplest thing that is. Rejected: the spike's ticks.
+
+**D87. Error reasons.** *(User; built in step 8.)* A fault ends its
+process with `(:error (kind value site))`, `(raise r)` with `(:error r)`,
+and `(kill pid)` with `(:error :killed)`. Until step 8, a fault still ends
+the whole program.
+
+**D88. Exit records are kept forever, and mailboxes are unbounded.**
+*(User.)* Both are fine at the scale slight runs at, and both policies
+can come later without changing programs. Rejected for now: dropping a
+record once the parent has seen it, and bounded mailboxes (which, since
+`send` can't block, would drop the message or fault the sender).
+
+**D89. The heap became a chunk chain in step 7, not step 9.** *(Default.)*
+Received messages join the receiver's heap as chunks of their own, so the
+heap had to be a chain anyway; and D58's one 64 MB mapping per process
+would be 64 TB of address space at a million processes. The first chunk,
+4 KB, comes with the first allocation; each later one doubles, up to 1 MB;
+a process's chunks, messages included, are capped at 64 MB in all, past
+which the allocation faults. Compiled code checks the limit inline and
+calls `rt_heap_grow` out of line. Replaces D58.
+
+**D90. Static data is found by address.** *(Default.)* The compiler
+brackets the program's read-only data and constants with
+`slight_rodata_start`/`_end` and `slight_const_start`/`_end`, and the
+copier shares anything between them instead of copying it. So literals,
+quoted lists and static closures cross processes for free. Step 9's
+collector will use the same check.
+
+**D91. Preemption switches only when another process is ready.**
+*(Default.)* A lone process that runs out of reductions just gets a new
+quota, instead of a round trip through the scheduler every 1000
+reductions. `yield` always goes to the back of the queue.
+
+**D92. A message to an ended process disappears.** *(Default, as
+Erlang.)* It isn't a dead letter: that log is for a `recv` that didn't
+understand a message, and sends that race with an exit are normal.
+Sending to something that isn't a pid faults.
+
+**D93. The program ends when nothing can run.** *(Default.)* Not when the
+root ends: ping-pong's root forks two processes and returns at once, and
+they should still run. The root's value is printed last. If the run
+queue empties before the root has ended, that's a deadlock: a line on
+stderr and exit 1. Processes still waiting in `recv` once the root has
+ended are dropped silently. (Timers and devices, step 10, will count as
+"something can run".)
+
+**D94. Pids.** *(Default.)* A pid is the process's index in the process
+table, from 1 (the root), and prints as `#<pid N>`. The root's `^$$` is
+`()`. Inside `(fork expr)`, `$$` is the child, since `expr` runs there;
+to pass the parent along, bind it first (`(let me $$)`), as ts-slight's
+`ring-benchmark` does.
+
+**D95. A fork carries at most 8 locals.** *(Default.)* They become the
+hidden entry function's parameters, and so registers (D47). More is a
+compile error; put them in a list.
+
+**D96. Process memory.** *(Default.)* Stacks are 8 MB, mapped lazily with
+a guard page below, and pooled: a process takes one when it runs and gives
+it back when it waits in `recv` or ends. The stack check (D48) keeps 64 KB
+of headroom for a frame and a C call. A process struct (about 350 bytes)
+is never freed yet; step 8 shrinks what's kept to the exit record (D88).
+
+**D97. The actor examples.** *(Default, under D84.)* `ping-pong`,
+`ring-benchmark` and `million-forks` are ported: a `(recv)` in the middle
+of a function became a receive function, the `(yield ...)` around loops is
+gone (preemption does that), and with no `join` or timing yet they print
+as they go and use fixed sizes.

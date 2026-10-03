@@ -1,0 +1,25 @@
+; a 100,000-element list goes to another process and back, and a child
+; builds a list bigger than its first heap chunk
+(defun summer ()
+    (recv
+        ((:sum from xs) (send from (list :total (sum xs) (length xs))) (summer))
+        (:stop          :summer-done)))
+
+(defun builder (me) (send me (list :built (length (range 0 200000)))))
+
+(defun ask (s me)
+    (send s (list :sum me (range 0 100000)))
+    (await-total s me))
+
+(defun await-total (s me)
+    (recv
+        ((:total t n)
+            (pprint (list t n))
+            (send s :stop)
+            (fork (builder me))
+            (await-built))))
+
+(defun await-built ()
+    (recv ((:built n) n)))
+
+(ask (fork (summer)) $$)
