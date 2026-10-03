@@ -47,6 +47,10 @@ works and has the runtime pieces to borrow.
   `docs/DESIGN.md`.
 - Keep a working compiler with passing tests at the end of every step
   (Ghuloum). Each step adds golden tests.
+- **Examples bend to the language, not the other way round.** When a
+  ts-slight example needs something the compiler or runtime doesn't do,
+  change the example, or leave it unported; don't add to the language to
+  make it pass (D84).
 - Verify a reported misbehavior against an independent implementation
   before calling it a bug.
 - When editing with scripts, assert that each replacement matched.

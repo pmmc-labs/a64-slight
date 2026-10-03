@@ -180,6 +180,10 @@ the three-stage bootstrap from DESIGN.md.
 
 ## The ts-slight examples
 
+Not every example has to be ported, and an example can change as much as
+it needs to: if one calls for a change to the compiler or runtime, change
+the example instead, or leave it out (D84).
+
 From a survey of `reference/ts-slight/examples/`. Almost all of them need
 mechanical changes: `if`/`when`/`case` become `cond`; `head`/`tail` become
 `car`/`cdr`; `sys/io/print-ln` becomes `pprint` or `tty/write`; `grep`

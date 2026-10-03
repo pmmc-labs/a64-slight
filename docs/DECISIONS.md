@@ -464,3 +464,8 @@ golden test asks for it with a first line `; with: lib/test.slight`.
 *(Default.)* Each that has a `.expected` runs in `make test`. The header
 comment of each says what changed from ts-slight's version.
 
+**D84. Examples bend to the language.** *(User.)* "You don't need to make
+all examples pass. Especially if it calls for changes to the interpreter,
+it's okay to change examples." An example that needs something slight
+doesn't have gets rewritten, or stays unported.
+
