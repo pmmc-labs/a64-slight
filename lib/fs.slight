@@ -1,0 +1,36 @@
+; Files, the whole of one at a time, on top of connect: not part of the
+; prelude, so a program that wants them compiles this in (node
+; bin/slightc.ts lib/fs.slight your-program.slight; a golden test's first
+; line is then "; with: lib/fs.slight").
+;
+;     (slurp "notes.txt")                  (:ok ("first line" "second line"))
+;     (spew "out.txt" (list "one" "two"))  (:ok ())
+;
+; Either gives (:error (name path)) if the file can't be opened, read or
+; written: (:error (enoent "notes.txt")), say.
+
+; The lines of the file at path, without their newlines.
+(defun slurp (path)
+    (join (connect :fs/read path (slurp-lines ()))))
+
+(defun slurp-lines (lines)
+    (recv
+        ((:open f)   (slurp-lines lines))
+        ((:line f s) (slurp-lines (cons s lines)))
+        ((:eof f)    (reverse lines))))
+
+; Writes lines to the file at path, each with a newline after it,
+; replacing what was there.
+(defun spew (path lines)
+    (join (connect :fs/write path (spew-lines lines))))
+
+(defun spew-lines (lines)
+    (recv
+        ((:open f) (spew-each f lines))))
+
+(defun spew-each (f lines)
+    (cond
+        ((nil? lines) (disconnect f))
+        (#true
+            (send f (list :write (car lines) \n))
+            (spew-each f (cdr lines)))))

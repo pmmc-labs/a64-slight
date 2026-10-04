@@ -1,0 +1,51 @@
+; connect :fs/write and :fs/append: the owner hears (:open f), and then
+; anyone can send f (:write x ...), which writes the xs at once, rendered
+; as tty/write renders them. :fs/write empties the file first; :fs/append
+; adds to it. After disconnect, a write goes nowhere; anything but a
+; (:write ...) is a dead letter.
+
+(defun write-all (f lines)
+    (cond
+        ((nil? lines) :written)
+        (#true
+            (send f (list :write (car lines) \n))
+            (write-all f (cdr lines)))))
+
+(defun writer (lines)
+    (recv
+        ((:open f)
+            (write-all f lines)
+            (join (fork (send f (list :write "from another process, " 42 " " :sym " " (list 1 "two") \n))))
+            (disconnect f)
+            (send f (list :write "after disconnect" \n))
+            :written)))
+
+(defun appender (lines)
+    (recv
+        ((:open f) (write-all f lines))))
+
+(defun collect (lines)
+    (recv
+        ((:open f)   (collect lines))
+        ((:line f s) (collect (cons s lines)))
+        ((:eof f)    (reverse lines))))
+
+(defun read-back (path)
+    (pprint (join (connect :fs/read path (collect ())))))
+
+(defun bad-commands ()
+    (recv
+        ((:open f)
+            (send f (list :bogus 1))
+            (send f :write)
+            :sent)))
+
+(let path "build/t/146-fs-write.txt")
+(pprint (join (connect :fs/write path (writer (list "one" "two")))))
+(read-back path)
+(pprint (join (connect :fs/append path (appender (list "three")))))
+(read-back path)
+(pprint (join (connect :fs/write path (appender (list "only this")))))
+(read-back path)
+(pprint (join (connect :fs/append path (bad-commands))))
+(read-back path)

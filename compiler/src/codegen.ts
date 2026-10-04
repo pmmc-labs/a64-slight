@@ -584,38 +584,64 @@ function compileRecvClause(x: Pair, clause: Sexp, msg: number, done: string, cx:
 // parameters are the locals it uses; the new process starts there, with
 // those values deep-copied into its heap. The body is at the bottom of the
 // new process's stack, so it can tail-call a function that waits. `form`
-// and `fn` say which: fork (rt_fork), or connect (rt_connect).
-function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: St): [Code, St] {
+// and `fn` say which: fork (rt_fork), or connect (rt_connect,
+// rt_connect_fs). `extra` is evaluated first, in the parent, and passed
+// after the site, then `flags` (assembler constants).
+function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: St,
+                     extra: readonly Sexp[] = [], flags: readonly string[] = []): [Code, St] {
     const free = freeVars(list(expr), [], cx.env);
     if (free.length > MAX_ARGS) {
         throw new CompileError(`a ${form} can take at most ${MAX_ARGS} locals into the new process, and this one uses ${free.length}`, x.pos);
     }
+    const [pre, st0] = extra.reduce<[Code, St]>(([acc, s], e, i) => {
+        const [c, s1] = compileExpr(e, { ...cx, si: cx.si + i }, s);
+        return [[acc, c, `    str  x0, ${slot(cx.si + i)}`], useSlot(s1, cx.si + i)];
+    }, [[], st]);
+    const si = cx.si + extra.length;
     const where = x.pos === null ? form : `${form} at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
-    const [entry, st1] = label(st, form);
+    const [entry, st1] = label(st0, form);
     const d: Defun = { name: sym(where, x.pos), params: free.map((n) => sym(n, x.pos)), body: list(expr), pos: x.pos };
     const [code, st2]  = compileFunction(entry, d, [], cx.fns, 'other', st1);
-    const st3: St = { ...st2, slots: st.slots, lambdas: [st2.lambdas, code] };
+    const st3: St = { ...st2, slots: st0.slots, lambdas: [st2.lambdas, code] };
     const [site, st4]  = siteLabel(st3, form, x.pos);
-    const st5 = free.length > 0 ? useSlot(st4, cx.si + free.length - 1) : st4;
+    const st5 = free.length > 0 ? useSlot(st4, si + free.length - 1) : st4;
     return [[
-        free.map((name, i) => [`    ldr  x16, ${slot(lookup(cx.env, name)!)}    // ${name}`, `    str  x16, ${slot(cx.si + i)}`]),
+        pre,
+        free.map((name, i) => [`    ldr  x16, ${slot(lookup(cx.env, name)!)}    // ${name}`, `    str  x16, ${slot(si + i)}`]),
         `    LOADADDR x0, ${entry}`,
         `    mov  x1, #${free.length}`,
-        addImm('x2', 'sp', 8 * cx.si, 'x5'),
+        addImm('x2', 'sp', 8 * si, 'x5'),
         `    LOADADDR x3, ${site}`,
+        extra.map((_, i) => `    ldr  x${4 + i}, ${slot(cx.si + i)}`),
+        flags.map((f, i) => `    mov  x${4 + extra.length + i}, #${f}`),
         `    bl   ${fn}`,
     ], st5];
 }
 
-// (connect :keypress expr): a fork whose new process also gets every key
-// typed (runtime/tty.c). :keypress is the only source there is.
+// connect's sources: :keypress (every key typed, runtime/tty.c), and a
+// file (a device, opened as the mode says).
+const FILE_SOURCES: Readonly<Record<string, string>> = {
+    'fs/read':   'RT_FS_READ',
+    'fs/write':  'RT_FS_WRITE',
+    'fs/append': 'RT_FS_APPEND',
+};
+
+// (connect :keypress expr), or (connect :fs/read path expr) and its kin:
+// a fork whose new process is connected to the source.
 function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
-    checkArity(x, 'connect', args, 2);
-    const source = args[0]!;
-    if (!(isForm(source, 'quote') && source.t === 'pair' && source.cdr.t === 'pair' && source.cdr.car.t === 'sym' && source.cdr.car.name === 'keypress')) {
-        throw new CompileError(`connect's source can only be :keypress, not ${show(source)}`, posOf(source) ?? x.pos);
+    const source = args[0];
+    const name   = source !== undefined && isForm(source, 'quote') && source.t === 'pair' && source.cdr.t === 'pair' && source.cdr.car.t === 'sym'
+        ? source.cdr.car.name : null;
+    if (name === 'keypress') {
+        checkArity(x, 'connect', args, 2);
+        return compileFork(x, 'connect', args[1]!, 'rt_connect', cx, st);
     }
-    return compileFork(x, 'connect', args[1]!, 'rt_connect', cx, st);
+    if (name !== null && name in FILE_SOURCES) {
+        checkArity(x, 'connect', args, 3);
+        return compileFork(x, 'connect', args[2]!, 'rt_connect_fs', cx, st, [args[1]!], [FILE_SOURCES[name]!]);
+    }
+    if (source === undefined) checkArity(x, 'connect', args, 2);
+    throw new CompileError(`connect's source can be :keypress, :fs/read, :fs/write or :fs/append, not ${show(source!)}`, posOf(source!) ?? x.pos);
 }
 
 // --- closures -----------------------------------------------------------------
@@ -986,6 +1012,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'kill':           fixed('rt_kill', 1),
     'raise':          fixed('rt_raise', 1),
     'after':          fixed('rt_after', 3),
+    'disconnect':     fixed('rt_disconnect', 1),
     'sleep':          fixed('rt_sleep', 1),
     'tty/screen/rows': fixed('rt_screen_rows', 0),
     'tty/screen/cols': fixed('rt_screen_cols', 0),

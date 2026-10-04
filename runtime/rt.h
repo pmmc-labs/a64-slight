@@ -110,6 +110,41 @@
 #define RT_KEY_SHIFT        29    // :shift
 #define RT_KEY_COUNT        30
 
+// A device (process.c: a file, from connect :fs/...) talks to its owner
+// with these: (:open f) first, a reader's (:line f s) and (:eof f), and
+// the (:write x ...) a writer takes. RT_DEV_x is symbol RT_SYM_DEVICE + x.
+#define RT_SYM_DEVICE       53    // RT_SYM_KEYS + RT_KEY_COUNT
+#define RT_DEV_OPEN          0    // :open
+#define RT_DEV_LINE          1    // :line
+#define RT_DEV_EOF           2    // :eof
+#define RT_DEV_WRITE         3    // :write
+#define RT_DEV_COUNT         4
+
+// Why a device failed, from errno: a device's owner ends with
+// (:error (name path)). RT_ERR_x is symbol RT_SYM_ERRS + x.
+#define RT_SYM_ERRS         57    // RT_SYM_DEVICE + RT_DEV_COUNT
+#define RT_ERR_ENOENT        0    // :enoent        no such file or directory
+#define RT_ERR_EACCES        1    // :eacces        permission denied
+#define RT_ERR_EPERM         2    // :eperm         operation not permitted
+#define RT_ERR_EEXIST        3    // :eexist
+#define RT_ERR_EISDIR        4    // :eisdir        reading a directory
+#define RT_ERR_ENOTDIR       5    // :enotdir       a path through something that isn't one
+#define RT_ERR_ENAMETOOLONG  6    // :enametoolong
+#define RT_ERR_ELOOP         7    // :eloop         too many symbolic links
+#define RT_ERR_EROFS         8    // :erofs         a read-only file system
+#define RT_ERR_ENOSPC        9    // :enospc        the disk is full
+#define RT_ERR_EFBIG        10    // :efbig
+#define RT_ERR_EMFILE       11    // :emfile        too many open files
+#define RT_ERR_ENFILE       12    // :enfile
+#define RT_ERR_EIO          13    // :eio
+#define RT_ERR_OTHER        14    // :io-error      anything else
+#define RT_ERR_COUNT        15
+
+// How connect :fs/... opens its file.
+#define RT_FS_READ           0
+#define RT_FS_WRITE          1    // creating it, or emptying it
+#define RT_FS_APPEND         2    // creating it
+
 // What rt_compare is asked.
 #define RT_CMP_EQ            0
 #define RT_CMP_NE            1
@@ -169,6 +204,7 @@ typedef struct rt_msg {
     struct rt_msg *next;
     rt_value_t     value;
     rt_chunk_t    *chunk;       // what value lives in; NULL if it needed none
+    rt_value_t     device;      // a reader's pid, if taking this means reading on; or 0
 } rt_msg_t;
 
 // READY: in the run queue. WAITING: in recv, with no stack. JOINING:
@@ -208,6 +244,7 @@ typedef struct rt_proc {
     rt_value_t      joining;    // while JOINING: whom
     rt_watch_t     *watchers;   // monitoring this one, in order
     int             keypress;   // connected to :keypress
+    struct rt_device *devices;  // the files it has open (process.c)
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -255,6 +292,14 @@ extern const char     slight_symbol_names[] RT_ASM(slight_symbol_names);
 // does the same, and sends the new process every key from :keypress.
 rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
 rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect);
+
+// Files (process.c). rt_connect_fs forks as rt_fork does, and opens path
+// (RT_FS_READ, _WRITE or _APPEND) on a device, a new pid that the runtime
+// serves; the new process owns it, and hears from it first with
+// (:open f). rt_disconnect closes a device; anything else it ignores.
+rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+                         rt_value_t path, uint64_t mode) RT_ASM(rt_connect_fs);
+rt_value_t rt_disconnect(rt_value_t pid, const char *site) RT_ASM(rt_disconnect);
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
 rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
 void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_letter);

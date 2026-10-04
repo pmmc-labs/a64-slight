@@ -70,7 +70,7 @@ Booleans are the reserved symbols `#true` and `#false`.
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
 | `(fork expr)` | Runs `expr` in a new process and returns its pid. |
-| `(connect :source expr)` | Same as `fork`, and connects the new process to an event source. `:keypress` is the only one. |
+| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`, or a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`). |
 | `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
@@ -155,7 +155,9 @@ reply refs.
 | | |
 |---|---|
 | `(fork expr)` | The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. `expr` runs at the base of the child's stack, so it may tail-call a state function. Inside `expr`, `$$` is the child. |
-| `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see Devices, under Scheduler). |
+| `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
+| `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
+| `(disconnect f)` | Closes the device `f`. Anything that isn't an open device it ignores. Returns `()`. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
 | `(join pid)` | **Blocking** wait for `pid` to end. Returns `(:ok value)` or `(:error reason)`. Works on any pid (not just children), anywhere (including inside lambdas), any number of times, and after the process has already ended. Joiners wake in the order they joined. `(join $$)` faults (`:join-self`). |
@@ -200,11 +202,12 @@ reply refs.
   has ended), not when the root ends: other processes keep running after the root has its
   value (or its error), and the root's value is printed last. Processes
   still waiting in `recv` or `join` at that point are dropped (D93).
-- **Blocking syscalls.** Since a process can block with its stack, `sleep`,
-  `slurp` and `spew` block only the calling process. Those that can fail
-  return a Result: `slurp` gives `(:ok string)` or `(:error reason)`, and
-  `spew` `(:ok ())` or `(:error reason)`; `sleep` can't, and returns `()`
-  (D111).
+- **Blocking calls.** Since a process can block with its stack, `sleep`
+  blocks only the calling process; it can't fail, and returns `()`
+  (D111). Files are devices instead (Files, under Scheduler), and `slurp`
+  and `spew` are written in slight with `connect` and `join`
+  (`lib/fs.slight`), so they block only their caller too, and give
+  Results: `(:ok lines)` and `(:ok ())`, or `(:error reason)` (D129).
 - **Timers** (D112, D114). `after` and `sleep` take an integer number of
   milliseconds; a negative one counts as 0. Timers due at the same time
   fire in the order they were set, at the scheduler's next decision (so
@@ -254,12 +257,13 @@ Keep ts-slight's names where possible
   `index-of`, `str-split`, `str-join`, `string->int`, `symbol->string`,
   `string->symbol`, `byte-at`, `bytes->string`, `format-num`. See
   Strings below for how each behaves.
-- processes: `send join monitor kill after raise`
+- processes: `send join monitor kill after raise disconnect`
 - I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols` (the terminal's
   size, asked each time; 24 and 80 when stdout isn't a terminal), `pprint`
   (prints its argument and a newline, returns `()`, as in ts-slight;
   symbols print without the colon, so `:ping` prints as `ping`),
-  `sleep`, `slurp`, `spew`
+  `sleep`. Files come through `connect`; `slurp` and `spew` are in
+  `lib/fs.slight`.
 - functions: `apply` (`(apply f xs)`, at most 8 elements; a tail call in
   tail position), `lambda?`
 
@@ -291,6 +295,13 @@ as a value. Builtins with a varying number (`list`, `concat`,
 `lib/Test.slight`: `(run-tests (list (ok test msg) (is got expected msg)
 (diag msg)))`. It isn't part of the prelude; a golden test whose first line
 is `; with: lib/test.slight` gets it compiled in.
+
+**Files in slight:** `lib/fs.slight` has `(slurp path)`, giving
+`(:ok lines)` (without their newlines), and `(spew path lines)`, which
+writes each line and a newline, replacing what was there, giving
+`(:ok ())`; either gives `(:error (name path))` when it fails. They're a
+few lines each, on `connect`. Opt-in, like `lib/test.slight`, since not
+every program needs files (D129).
 
 ### Strings
 
@@ -470,8 +481,8 @@ Lalloc_N:
   Linux alike, D113) on stdin, if a process is connected to `:keypress`,
   with the timeout set to the next timer. Timers are a binary heap. While
   processes are busy, stdin is looked at every 10 ms (D122).
-- **Devices** are runtime event sources that send messages. `:keypress`
-  (`runtime/tty.c`) sends ts-slight's key shape `(key mods...)` (D120): the
+- **`:keypress`** (`runtime/tty.c`) sends ts-slight's key shape
+  `(key mods...)` (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style
   name (`:ArrowUp`, `:Enter`, `:F1`, ..., `:Unidentified`), and the mods
   are those held, in the order `:ctrl :alt :shift`. The runtime decodes
@@ -481,7 +492,32 @@ Lalloc_N:
   (Node's, D121) is on, when it is one, while any process is connected.
   Ctrl-C puts the terminal back and exits 130 (D117). When stdin ends, the
   keys stop (D118). On the virtual clock, a key comes each time nothing
-  can run, before the clock moves (D122).
+  can run, before the clock moves (D122). Keys aren't wrapped as a file's
+  messages are: the keyboard can't fail, takes nothing, and is shared
+  (D131).
+- **Files are devices** (D124–D130). `(connect :fs/read path expr)` forks
+  `expr` as `fork` does, opens `path` on a **device** (a pid that the
+  runtime serves instead of compiled code), and makes the new process its
+  owner. The device's first message to its owner is `(:open f)`, `f`
+  being its pid. A reader then sends `(:line f s)` for each line, split
+  on `\n` and without it (a last line without one still comes), one at a
+  time: the next is read when the owner takes the last, so a file never
+  piles up in a mailbox. Then `(:eof f)`, and it closes. `:fs/write`
+  (creating the file, or emptying it) and `:fs/append` (creating it)
+  take `(:write x ...)` from anyone, render the `x`s as `tty/write` does,
+  and write them at once. Anything else sent to a device is a dead
+  letter. `(disconnect f)` closes it, and so does its owner ending; what's
+  sent after that goes nowhere. A file that can't be opened ends the owner
+  before it runs, with `(:error (name path))`, `name` being errno's
+  (`:enoent`, `:eacces`, `:eisdir`, ..., or `:io-error`); a read or a
+  write that fails ends it the same way then. A file is read when its
+  owner takes a line, so a reader is never waited for and never counts as
+  something that can still happen; one that can keep a read waiting (a
+  FIFO, a terminal) waits with the whole runtime. To `join`, `monitor`
+  and `kill`, a device is a process that ended with `(:ok ())`.
+- **The network** comes the same way, later (D132): `:tcp` and
+  `:tcp/listen` devices in the runtime, waited for in `select()`, and
+  HTTP as a slight library on top.
 - C libraries come in later as drivers exposed as processes, never as
   direct calls that could stall the runtime.
 

@@ -1,0 +1,44 @@
+; Lines longer than a read, and many of them, come through whole. And a
+; process that ends with a file open closes it: otherwise opening one
+; 25,000 times would run out of file descriptors.
+
+(defun double-up (s n)
+    (cond
+        ((== n 0) s)
+        (#true    (double-up (~ s s) (- n 1)))))
+
+(defun write-lines (f i n)
+    (cond
+        ((== i n)
+            (send f (list :write (double-up "x" 14) \n))
+            :written)
+        (#true
+            (send f (list :write "line " i \n))
+            (write-lines f (+ i 1) n))))
+
+(defun writer ()
+    (recv
+        ((:open f) (write-lines f 0 3000))))
+
+(defun measure (n total longest)
+    (recv
+        ((:open f)   (measure n total longest))
+        ((:line f s) (measure (+ n 1) (+ total (str-len s)) (max longest (str-len s))))
+        ((:eof f)    (list n total longest))))
+
+(let path "build/t/149-fs-big.txt")
+(pprint (join (connect :fs/write path (writer))))
+(pprint (join (connect :fs/read path (measure 0 0 0))))
+
+(defun opened ()
+    (recv
+        ((:open f) :ok)))
+
+(defun open-many (i n ok)
+    (cond
+        ((== i n) ok)
+        (#true
+            (let r (join (connect :fs/read "t/data/lines.txt" (opened))))
+            (open-many (+ i 1) n (cond ((eq? r (list :ok :ok)) (+ ok 1)) (#true ok))))))
+
+(open-many 0 25000 0)

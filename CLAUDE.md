@@ -6,30 +6,33 @@ TypeScript for now and should self-host later.
 
 ## Status
 
-**Steps 0–9, 10a and 10b of [`docs/PLAN.md`](docs/PLAN.md) are done**: the reader, and
-a compiler for integers, floats, `#true`/`#false`, `()`, symbols, lists
-(a heap per process of chunks, capped at 64 MB, and collected when a
-receive function waits for a message), strings, closures (`lambda`,
-functions and builtins as values, `apply`), arithmetic (integers inline;
-floats and mixed in C), structural `eq?`, type predicates, the string and
-math builtins (C, in `runtime/`), `cond`, `let`, `do`, `pprint`,
-`tty/write`, and top-level `defun`s with calls and tail calls (arguments
-in `x0`–`x7`; stack and reduction checks at every function entry). The
-prelude (`lib/prelude.slight`) is compiled with every program;
-`lib/test.slight` is a TAP library. Processes: `fork`, `send`, `recv`
-(receive functions, with the `recv` rule checked by `classify.ts`), `$$`,
-`^$$`, `yield`, preemption, a FIFO run queue, pooled stacks that a process
-waiting in `recv` gives back, and the lifecycle: `join`, `monitor`,
-`kill`, `raise`, exit records, and faults that end just their process
-with `(:error (kind value site))` (`runtime/process.c`). Timers: `after`,
-`sleep`, and a virtual clock for tests (`SLIGHT_CLOCK=virtual`). The
-terminal: `connect :keypress`, raw mode, decoded keys, the screen's size
-(`runtime/tty.c`). Fifteen of ts-slight's examples are ported
-(`examples/`; all but `ping-pong-tournament` are golden tests). `make test`
-passes under qemu on x86 Linux, and natively on macOS (Stevan runs it on
-his M2 Max after every step, and reports only failures). **Next: step
-10c** (files: `slurp` and `spew`). Stevan has ideas for doing I/O
-properly: ask him about them before building. Update this section as
+**Steps 0–9 and 10a–10c of [`docs/PLAN.md`](docs/PLAN.md) are done**: the
+reader, and a compiler for integers, floats, `#true`/`#false`, `()`,
+symbols, lists (a heap per process of chunks, capped at 64 MB, and
+collected when a receive function waits for a message), strings, closures
+(`lambda`, functions and builtins as values, `apply`), arithmetic
+(integers inline; floats and mixed in C), structural `eq?`, type
+predicates, the string and math builtins (C, in `runtime/`), `cond`,
+`let`, `do`, `pprint`, `tty/write`, and top-level `defun`s with calls and
+tail calls (arguments in `x0`–`x7`; stack and reduction checks at every
+function entry). The prelude (`lib/prelude.slight`) is compiled with every
+program; `lib/test.slight` is a TAP library. Processes: `fork`, `send`,
+`recv` (receive functions, with the `recv` rule checked by `classify.ts`),
+`$$`, `^$$`, `yield`, preemption, a FIFO run queue, pooled stacks that a
+process waiting in `recv` gives back, and the lifecycle: `join`,
+`monitor`, `kill`, `raise`, exit records, and faults that end just their
+process with `(:error (kind value site))` (`runtime/process.c`). Timers:
+`after`, `sleep`, and a virtual clock for tests (`SLIGHT_CLOCK=virtual`).
+The terminal: `connect :keypress`, raw mode, decoded keys, the screen's
+size (`runtime/tty.c`). Files: `connect :fs/read` (`:fs/write`,
+`:fs/append`) opens a file on a device, a pid the runtime serves, and
+`disconnect` closes it; `slurp` and `spew` are slight, in an opt-in
+`lib/fs.slight`. Fifteen of ts-slight's examples are ported (`examples/`;
+all but `ping-pong-tournament` are golden tests). `make test` passes under
+qemu on x86 Linux, and natively on macOS (Stevan runs it on his M2 Max
+after every step, and reports only failures). **Next: step 10d** (the
+network: TCP devices in the runtime, HTTP in slight; its open points are
+in `docs/PLAN.md`, to settle with Stevan first). Update this section as
 steps land.
 
 ## Read first, in this order
@@ -125,10 +128,10 @@ works and has the runtime pieces to borrow.
 | `bin/slightc.ts` | The driver: read, compile, write `out.S`, link with clang |
 | `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts`, `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
-| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c` |
-| `lib/` | `prelude.slight` (compiled with every program), `test.slight` (TAP, opt-in) |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c` |
+| `lib/` | `prelude.slight` (compiled with every program), `test.slight` (TAP, opt-in), `fs.slight` (`slurp` and `spew`, opt-in) |
 | `examples/` | ts-slight's examples, ported; each with a `.expected` is a golden test |
-| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`; `models/` (Python models that produced expected output). A first line `; with: lib/test.slight` compiles that in too, and a line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin. |
+| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read; tests write under `build/t/`). A first line `; with: lib/test.slight` compiles that in too, and a line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin. |
 | `build/` | Output (ignored) |
 
 ## Commands

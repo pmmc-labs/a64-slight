@@ -1,0 +1,4 @@
+first
+  second, indented
+
+last, with no newline at the end

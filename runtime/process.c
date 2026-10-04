@@ -16,10 +16,14 @@
 // sleep) or key (:keypress). The program ends when nothing can run and
 // nothing more can come: no timer is pending, and no process is connected
 // to :keypress, or stdin has ended.
+//
+// A file opened with connect :fs/... is a device: a pid that the runtime
+// serves instead of compiled code (see "files", below).
 
 #include "rt.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -38,12 +42,14 @@
 #define GC_MIN         (256 << 10)      // a heap smaller than this is never collected
 
 // A pid's entry in the table: the process while it runs, then its exit
-// record: (:ok value) or (:error value).
+// record: (:ok value) or (:error value). Or a device while it's open; to
+// join, monitor and kill, a device is a process that ended with (:ok ()).
 typedef struct {
-    rt_proc_t  *proc;                   // NULL once it has ended
-    rt_value_t  value;
-    rt_chunk_t *chunk;                  // where value lives, or NULL if it needs no space
-    int         ok;
+    rt_proc_t        *proc;             // NULL once it has ended, and for a device
+    rt_value_t        value;
+    rt_chunk_t       *chunk;            // where value lives, or NULL if it needs no space
+    int               ok;
+    struct rt_device *device;           // an open device, or NULL
 } entry_t;
 
 static entry_t    *procs;               // by pid number; the root is 1
@@ -53,6 +59,14 @@ static rt_ctx_t    scheduler;
 static void       *free_stacks;         // a list through each stack's first word
 static size_t      page;
 static int         poison;              // SLIGHT_POISON: fill what the collector frees
+
+static void *must(void *p) {
+    if (!p) {
+        perror("rt: out of memory");
+        exit(2);
+    }
+    return p;
+}
 
 // --- the run queue ------------------------------------------------------------
 
@@ -370,23 +384,19 @@ static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n) {
 
 // --- processes ----------------------------------------------------------------
 
-rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
+// A new pid, for e. Pids start at 1: the root.
+static rt_value_t new_entry(entry_t e) {
     if (nprocs + 1 >= procs_cap) {
         procs_cap = procs_cap ? procs_cap * 2 : 1024;
-        procs     = realloc(procs, procs_cap * sizeof *procs);
-        if (!procs) {
-            perror("rt: out of memory");
-            exit(2);
-        }
+        procs     = must(realloc(procs, procs_cap * sizeof *procs));
     }
-    rt_proc_t *p = calloc(1, sizeof *p);
-    if (!p) {
-        perror("rt: out of memory");
-        exit(2);
-    }
-    uint64_t id = ++nprocs;                     // pids start at 1: the root
-    procs[id]   = (entry_t){ .proc = p };
-    p->pid      = id << RT_PID_SHIFT | RT_TAG_PID;
+    procs[++nprocs] = e;
+    return nprocs << RT_PID_SHIFT | RT_TAG_PID;
+}
+
+rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
+    rt_proc_t *p = must(calloc(1, sizeof *p));
+    p->pid      = new_entry((entry_t){ .proc = p });
     p->parent   = parent;
     p->code     = code;
     p->gc_at    = GC_MIN;
@@ -416,8 +426,9 @@ static rt_msg_t *new_msg(rt_value_t msg) {
         perror("rt: out of memory");
         exit(2);
     }
-    m->next  = NULL;
-    m->chunk = copy_values(&msg, &m->value, 1);
+    m->next   = NULL;
+    m->chunk  = copy_values(&msg, &m->value, 1);
+    m->device = 0;
     return m;
 }
 
@@ -429,10 +440,15 @@ static void deliver(rt_proc_t *p, rt_msg_t *m) {
     if (p->state == RT_WAITING) enqueue(p);
 }
 
-// To a process that has ended, a message just disappears, as in Erlang.
+static void command(struct rt_device *d, rt_value_t msg);
+static void read_on(rt_value_t pid);
+
+// To a process that has ended, a message just disappears, as in Erlang. A
+// device takes it at once.
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
-    rt_proc_t *p = entry(pid, site)->proc;
-    if (p) deliver(p, new_msg(msg));
+    entry_t *e = entry(pid, site);
+    if (e->proc)        deliver(e->proc, new_msg(msg));
+    else if (e->device) command(e->device, msg);
     return RT_NIL;
 }
 
@@ -444,8 +460,9 @@ rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) {
         p->mail = m->next;
         if (!p->mail) p->mail_last = NULL;
         if (m->chunk) adopt(p, m->chunk);
-        rt_value_t v = m->value;
+        rt_value_t v = m->value, device = m->device;
         free(m);
+        if (device) read_on(device);            // which may end p, if reading fails
         return v;
     }
     p->code = code;
@@ -492,6 +509,7 @@ static void notify(rt_value_t to, rt_value_t pid, const entry_t *e) {
 // monitors hear, and its heap and mail are freed. Its stack and struct are
 // the caller's to free (retire), since p may be running on that stack.
 static void disconnect(rt_proc_t *p);
+static void close_all(rt_proc_t *p);
 
 static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     uint64_t id = p->pid >> RT_PID_SHIFT;
@@ -516,6 +534,7 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     }
     free_heap(p);
     if (p->keypress) disconnect(p);
+    close_all(p);
     p->state = RT_DONE;
 }
 
@@ -578,10 +597,8 @@ rt_value_t rt_monitor(rt_value_t pid, const char *site) {
     return RT_NIL;
 }
 
-rt_value_t rt_kill(rt_value_t pid, const char *site) {
-    rt_proc_t *p = entry(pid, site)->proc;
-    if (!p) return RT_NIL;
-    if (p == rt_current) rt_end(0, rt_symbol(RT_SYM_KILLED), 0);
+// Ends p, which isn't running, with (:error reason), wherever it is.
+static void end_other(rt_proc_t *p, rt_value_t reason) {
     if (p->state == RT_READY) unqueue(p);
     if (p->state == RT_JOINING) {
         rt_proc_t  *t    = procs[p->joining >> RT_PID_SHIFT].proc;
@@ -590,8 +607,15 @@ rt_value_t rt_kill(rt_value_t pid, const char *site) {
         *link = p->next_joiner;
     }
     // A sleeper's timer stays, and is dropped when it's due.
-    finish(p, 0, rt_symbol(RT_SYM_KILLED), 0);
+    finish(p, 0, reason, 0);
     retire(p);
+}
+
+rt_value_t rt_kill(rt_value_t pid, const char *site) {
+    rt_proc_t *p = entry(pid, site)->proc;
+    if (!p) return RT_NIL;
+    if (p == rt_current) rt_end(0, rt_symbol(RT_SYM_KILLED), 0);
+    end_other(p, rt_symbol(RT_SYM_KILLED));
     return RT_NIL;
 }
 
@@ -692,6 +716,8 @@ static void ring(void) {
         alarm_t    a = next_alarm();
         rt_proc_t *p = procs[a.pid >> RT_PID_SHIFT].proc;
         if (!p) {
+            struct rt_device *d = procs[a.pid >> RT_PID_SHIFT].device;
+            if (d && a.msg) command(d, a.msg->value);
             if (a.msg) free_msg(a.msg);
         } else if (a.msg) {
             deliver(p, a.msg);
@@ -841,6 +867,221 @@ static int idle(void) {
     return 1;
 }
 
+// --- files --------------------------------------------------------------------
+//
+// (connect :fs/read path expr), and :fs/write and :fs/append: a fork whose
+// new process owns a device, a pid that the runtime serves instead of
+// compiled code. The device's first message to its owner is (:open f), f
+// being its pid. A reader's then come one line at a time, (:line f s),
+// without the newline; the next is read only when the owner has taken the
+// last, so a long file never piles up in a mailbox; then (:eof f), and it
+// closes. A writer takes (:write x ...) from anyone, renders the xs as
+// tty/write does, and writes them at once; anything else sent to a device
+// is a dead letter. disconnect closes a device, and so does its owner
+// ending. If the file can't be opened, the owner ends before it runs,
+// with (:error (name path)), name being errno's; if a read or a write
+// fails, it ends the same way then.
+//
+// A file is read when the owner takes a line, so a reader is never waited
+// for, and never counts as something that can still happen. Reading a
+// file that can keep it waiting (a FIFO, a terminal) waits with the whole
+// runtime.
+
+typedef struct rt_device {
+    struct rt_device *next;             // the owner's next device
+    rt_value_t        pid, owner;
+    int               fd, mode;
+    const char       *site;             // the connect's, for dead letters
+    char             *path;             // as given, NUL-terminated, for errors
+    size_t            path_len;
+    char             *buf;              // a reader's bytes, read but not yet sent...
+    size_t            at, len, cap;     // ...from at to len
+    int               eof;
+} rt_device_t;
+
+static uint64_t errno_name(int err) {
+    switch (err) {
+        case ENOENT:       return RT_ERR_ENOENT;
+        case EACCES:       return RT_ERR_EACCES;
+        case EPERM:        return RT_ERR_EPERM;
+        case EEXIST:       return RT_ERR_EEXIST;
+        case EISDIR:       return RT_ERR_EISDIR;
+        case ENOTDIR:      return RT_ERR_ENOTDIR;
+        case ENAMETOOLONG: return RT_ERR_ENAMETOOLONG;
+        case ELOOP:        return RT_ERR_ELOOP;
+        case EROFS:        return RT_ERR_EROFS;
+        case ENOSPC:       return RT_ERR_ENOSPC;
+        case EFBIG:        return RT_ERR_EFBIG;
+        case EMFILE:       return RT_ERR_EMFILE;
+        case ENFILE:       return RT_ERR_ENFILE;
+        case EIO:          return RT_ERR_EIO;
+        default:           return RT_ERR_OTHER;
+    }
+}
+
+// (name path), for errno err, in cells (4 words).
+static rt_value_t io_reason(rt_value_t *cells, int err, rt_value_t path) {
+    return cons_at(cells, rt_symbol(RT_SYM_ERRS + errno_name(err)), cons_at(cells + 2, path, RT_NIL));
+}
+
+// A string box of len bytes, in space with room for it (len / 8 + 6
+// words): for a value that's copied before space goes.
+static rt_value_t string_in(uint64_t *space, const char *bytes, size_t len) {
+    uint64_t *box = (uint64_t *)(((uintptr_t)space + 15) & ~(uintptr_t)15);
+    box[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
+    memcpy(box + 1, bytes, len);
+    ((char *)(box + 1))[len] = '\0';
+    return (rt_value_t)box | RT_TAG_BOXED;
+}
+
+// Closes d, and forgets it: its pid is then like a process that has
+// ended. The owner's list is the caller's to fix.
+static void shut(rt_device_t *d) {
+    if (d->fd >= 0) close(d->fd);
+    procs[d->pid >> RT_PID_SHIFT].device = NULL;
+    free(d->buf);
+    free(d->path);
+    free(d);
+}
+
+static void close_all(rt_proc_t *p) {
+    for (rt_device_t *d = p->devices, *next; d; d = next) {
+        next = d->next;
+        shut(d);
+    }
+    p->devices = NULL;
+}
+
+static void close_device(rt_device_t *d) {
+    rt_device_t **link = &procs[d->owner >> RT_PID_SHIFT].proc->devices;
+    while (*link != d) link = &(*link)->next;
+    *link = d->next;
+    shut(d);
+}
+
+// d's owner ends with (:error (name path)), which closes d.
+static void fail(rt_device_t *d, int err) {
+    rt_proc_t *owner = procs[d->owner >> RT_PID_SHIFT].proc;
+    uint64_t   space[d->path_len / 8 + 6];
+    _Alignas(16) rt_value_t cells[4];
+    rt_value_t reason = io_reason(cells, err, string_in(space, d->path, d->path_len));
+    if (owner == rt_current) rt_end(0, reason, 0);
+    end_other(owner, reason);
+}
+
+// Sends d's owner (word f), or (word f s) if bytes isn't NULL; taking it
+// reads on, if more says so.
+static void tell(rt_device_t *d, uint64_t word, const char *bytes, size_t len, int more) {
+    uint64_t  *space = bytes ? must(malloc((len / 8 + 6) * sizeof *space)) : NULL;
+    _Alignas(16) rt_value_t cells[6];
+    rt_value_t rest = bytes ? cons_at(cells + 4, string_in(space, bytes, len), RT_NIL) : RT_NIL;
+    rt_msg_t  *m    = new_msg(cons_at(cells, rt_symbol(RT_SYM_DEVICE + word), cons_at(cells + 2, d->pid, rest)));
+    free(space);
+    m->device = more ? d->pid : 0;
+    deliver(procs[d->owner >> RT_PID_SHIFT].proc, m);
+}
+
+// The next line: 1, with it in *line and *len (good until the next call);
+// 0 at the end of the file; or -1, with errno set.
+static int next_line(rt_device_t *d, const char **line, size_t *len) {
+    for (;;) {
+        char *nl = d->len > d->at ? memchr(d->buf + d->at, '\n', d->len - d->at) : NULL;
+        if (nl || (d->eof && d->at < d->len)) {
+            size_t end = nl ? (size_t)(nl - d->buf) : d->len;
+            *line = d->buf + d->at;
+            *len  = end - d->at;
+            d->at = nl ? end + 1 : end;
+            return 1;
+        }
+        if (d->eof) return 0;
+        memmove(d->buf, d->buf + d->at, d->len - d->at);
+        d->len -= d->at;
+        d->at   = 0;
+        if (d->len == d->cap) {
+            d->cap = d->cap ? d->cap * 2 : 4096;
+            d->buf = must(realloc(d->buf, d->cap));
+        }
+        ssize_t got = read(d->fd, d->buf + d->len, d->cap - d->len);
+        if (got < 0 && errno == EINTR) continue;
+        if (got < 0) return -1;
+        if (got == 0) d->eof = 1;
+        d->len += (size_t)got;
+    }
+}
+
+// The owner has taken a message from reader pid: on to the next line.
+static void read_on(rt_value_t pid) {
+    rt_device_t *d = procs[pid >> RT_PID_SHIFT].device;
+    if (!d) return;                             // disconnected since
+    const char *line;
+    size_t      len;
+    int         got = next_line(d, &line, &len);
+    if (got > 0) {
+        tell(d, RT_DEV_LINE, line, len, 1);
+    } else if (got == 0) {
+        tell(d, RT_DEV_EOF, NULL, 0, 0);
+        close_device(d);
+    } else {
+        fail(d, errno);
+    }
+}
+
+static void command(rt_device_t *d, rt_value_t msg) {
+    if (d->mode == RT_FS_READ || !rt_is_cons(msg) || rt_car(msg) != rt_symbol(RT_SYM_DEVICE + RT_DEV_WRITE)) {
+        rt_dead_letter(msg, d->site);
+        return;
+    }
+    rt_buf_t b = { 0 };
+    for (rt_value_t x = rt_cdr(msg); rt_is_cons(x); x = rt_cdr(x)) rt_render(&b, rt_car(x), 1);
+    for (size_t at = 0; at < b.len; ) {
+        ssize_t n = write(d->fd, b.bytes + at, b.len - at);
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) {
+            int err = errno;
+            rt_buf_free(&b);
+            fail(d, err);
+            return;
+        }
+        at += (size_t)n;
+    }
+    rt_buf_free(&b);
+}
+
+rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+                         rt_value_t path, uint64_t mode) {
+    if (!rt_is_string(path)) rt_fault(RT_FAULT_NOT_STRING, path, site);
+    rt_value_t  pid   = rt_fork(code, n, values, site);
+    rt_proc_t  *p     = procs[pid >> RT_PID_SHIFT].proc;
+    const char *bytes = rt_string_bytes(path);
+    size_t      len   = rt_string_len(path);
+    int         flags = mode == RT_FS_READ ? O_RDONLY : O_WRONLY | O_CREAT | (mode == RT_FS_APPEND ? O_APPEND : O_TRUNC);
+    int         fd    = memchr(bytes, '\0', len) ? (errno = EINVAL, -1) : open(bytes, flags | O_CLOEXEC, 0666);
+    if (fd < 0) {
+        _Alignas(16) rt_value_t cells[4];
+        end_other(p, io_reason(cells, errno, path));
+        return pid;
+    }
+    rt_device_t *d = must(calloc(1, sizeof *d));
+    d->pid      = new_entry((entry_t){ .value = RT_NIL, .ok = 1, .device = d });
+    d->owner    = pid;
+    d->fd       = fd;
+    d->mode     = (int)mode;
+    d->site     = site;
+    d->path     = must(malloc(len + 1));
+    d->path_len = len;
+    memcpy(d->path, bytes, len + 1);
+    d->next     = p->devices;
+    p->devices  = d;
+    tell(d, RT_DEV_OPEN, NULL, 0, mode == RT_FS_READ);
+    return pid;
+}
+
+rt_value_t rt_disconnect(rt_value_t pid, const char *site) {
+    rt_device_t *d = entry(pid, site)->device;
+    if (d) close_device(d);
+    return RT_NIL;
+}
+
 // --- the scheduler ------------------------------------------------------------
 
 void rt_run(void) {
@@ -855,6 +1096,7 @@ void rt_run(void) {
         p->state   = RT_RUNNING;
         rt_current = p;
         rt_switch(&scheduler, &p->ctx);
+        rt_current = NULL;                      // so nothing takes the scheduler for p
         // back: it paused (and queued itself again), waits in recv, join
         // or sleep, or ended
         if (p->state == RT_WAITING)   release_stack(p);

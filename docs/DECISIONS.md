@@ -686,7 +686,8 @@ expected output would shift whenever codegen or the prelude changed).
 a Result would always be `:ok`. DESIGN's "blocking calls return a Result"
 now covers the ones that can fail: `slurp` gives `(:ok string)` or
 `(:error reason)`, and `spew` `(:ok ())` or `(:error reason)` (10c).
-Rejected: `(:ok ())` from `sleep`, for uniformity.
+Rejected: `(:ok ())` from `sleep`, for uniformity. (`slurp` and `spew`
+became slight functions in 10c, and `slurp` gives lines: D129.)
 
 **D112. A timer whose process has ended is dropped when it's due.**
 *(User.)* An `after` aimed at a process that has ended, or the wake-up of
@@ -793,3 +794,90 @@ mid-function became a receive function, and `case`/`if`/`when` became
 `cond`. `key-catcher` compared a key with the integer `1`, so its colour
 keys never worked; it compares strings now. The window managers wait for
 step 11.
+
+## Step 10c: files
+
+**D124. Files are devices, opened with `connect`.** *(User.)* Stevan's
+plan from ts-slight, where files were to use Node's events: open and close
+become `connect` and `disconnect`, and the network will work the same way.
+`(connect :fs/read path expr)` forks `expr` and opens `path` on a device:
+a pid that the runtime serves instead of compiled code. Its messages to
+the new process (its owner) carry it; anyone writes to it with `send`;
+`disconnect`, or the owner ending, closes it. Erlang's ports have the
+same shape. Rejected: `slurp` and `spew` as builtins, as planned (D111):
+blocking calls that hold a whole file in memory, and nothing for a
+stream or a socket.
+
+**D125. A device's first message is `(:open f)`.** *(User.)* So the owner
+learns the device's pid before anything else, at the cost of one clause.
+Rejected: `connect` binding a name, `(connect :fs/read path f (reader
+f))` (no extra message, but how many arguments `connect` takes would
+depend on the source).
+
+**D126. `:fs/read`, `:fs/write` and `:fs/append`.** *(User, "for
+symmetry"; Claude had proposed `:fs` for reading.)* `:fs/write` creates
+the file or empties it; `:fs/append` creates it or adds to it.
+
+**D127. A reader sends lines, one at a time.** *(User.)* `(:line f s)`,
+split on `\n` alone and without it (a `\r` stays), and a last line
+without a newline still comes; then `(:eof f)`, and the device closes.
+The next line is read when the owner takes the last (the message carries
+its device, and taking it reads on), so at most one line is ever in the
+mailbox: a reader that disconnects still gets the one already on its way
+(golden test 145). Rejected: reading the whole file into the mailbox at
+once (memory, for a big file), and raw chunks (lines are what programs
+want; chunks can come if something needs bytes).
+
+**D128. A failure ends the owner.** *(User.)* A file that can't be opened
+ends its owner before it runs, with `(:error (name path))`; a read or a
+write that fails ends it then. So a reader needs no error clause, and
+`(join (connect ...))` is a Result. `name` is errno's, as one of 14
+runtime symbols (`:enoent :eacces :eperm :eexist :eisdir :enotdir
+:enametoolong :eloop :erofs :enospc :efbig :emfile :enfile :eio`), or
+`:io-error` for anything else. A directory opens, and fails with
+`:eisdir` when its owner takes `(:open f)` (which reads the first line),
+before that clause runs. Not logged, as `raise` isn't (D100): an I/O
+error isn't a bug.
+
+**D129. `slurp` and `spew` are slight, in `lib/fs.slight`.** *(User:
+opt-in, since "not everything needs filesystem access".)* A few lines
+each, on `connect` and `join`; a golden test asks for them with
+`; with: lib/fs.slight`. `slurp` gives `(:ok lines)`, not D111's
+`(:ok string)` *(Claude, following D127: a file comes as lines, and
+ts-slight's text editor split `slurp`'s string into lines at once;
+`str-join` gives the string back)*. `spew` writes each line and a
+newline, and gives `(:ok ())`.
+
+**D130. The details of devices.** *(Default.)*
+- A write renders its arguments as `tty/write` does, and goes out at once
+  (writing a regular file doesn't wait).
+- Anything sent to a device but a writer's `(:write ...)` is a dead
+  letter, logged with the `connect`'s site. Anything sent after it has
+  closed goes nowhere, as to an ended process (D92). An `after` aimed at
+  a device works as `send` does.
+- `disconnect` ignores anything that isn't an open device (a process, a
+  closed device); something that isn't a pid faults `:not-a-pid`.
+- To `join`, `monitor` and `kill`, a device looks like a process that has
+  ended with `(:ok ())`.
+- A device's pid is the one after its owner's.
+- A file is read when its owner takes a line, so a reader is never waited
+  for in `select()`, and doesn't count as something that can still
+  happen. A file that can keep a read waiting (a FIFO, a terminal) waits
+  with the whole runtime; sockets will be waited for (D132).
+- A path with a NUL in it is `:io-error`.
+- Golden test 149 opens a file 25,000 times, which runs out of file
+  descriptors unless an owner's ending closes its files.
+
+**D131. `:keypress` stays as it is.** *(User.)* Keys aren't wrapped as a
+file's messages are: the keyboard can't fail, takes nothing, and is shared
+by every connected process (D119), so there's no device to name. "It is
+okay to look different, if looking the same would look strange."
+
+**D132. The network: TCP in the runtime, HTTP in slight.** *(User.)* For
+a later step: `:tcp` and `:tcp/listen` devices, waited for in the
+runtime's `select()`; an accepted connection is a new device, which
+`(connect conn expr)` hands to a process of its own; HTTP is a slight
+library on top. Rejected: HTTP in C, which `(connect :http url ...)` (as
+Stevan first sketched it) would need, since `connect`'s sources are the
+runtime's and a library can't add one: more C, and HTTPS would need a
+TLS library either way.

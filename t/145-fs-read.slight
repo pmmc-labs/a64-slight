@@ -1,0 +1,33 @@
+; connect :fs/read: the owner hears (:open f) first, f being the file's
+; device, then (:line f s) for each line, without its newline, and then
+; (:eof f). The next line is read only when the owner has taken the last,
+; so the root's :hello, sent just after the connect, comes after
+; (:open f), and a reader that disconnects gets just the line already on
+; its way.
+
+(defun reader (lines)
+    (recv
+        ((:open f)   (pprint (list :open f)) (reader lines))
+        ((:line f s) (pprint (list :line f s)) (reader (+ lines 1)))
+        ((:eof f)    (pprint (list :eof f)) lines)
+        (other       (pprint (list :other other)) (reader lines))))
+
+(let r (connect :fs/read "t/data/lines.txt" (reader 0)))
+(send r :hello)
+(pprint (join r))
+
+(defun first-line ()
+    (recv
+        ((:open f)   (first-line))
+        ((:line f s)
+            (disconnect f)
+            (pprint (list :got s))
+            (after 0 $$ :check)
+            (drain))))
+
+(defun drain ()
+    (recv
+        (:check :checked)
+        (msg    (pprint (list :then msg)) (drain))))
+
+(pprint (join (connect :fs/read "t/data/lines.txt" (first-line))))

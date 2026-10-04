@@ -23,6 +23,17 @@ export const KEY_NAMES: readonly string[] = [
     'Unidentified', 'ctrl', 'alt', 'shift',
 ];
 
-// The symbols the runtime makes (ending a process, faults, keys), which
-// follow the reserved ones: RT_SYM_OK and on in rt.h.
-export const RUNTIME_SYMBOLS: readonly string[] = ['ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES];
+// What a device and its owner say to each other, in RT_DEV_ order.
+export const DEVICE_WORDS: readonly string[] = ['open', 'line', 'eof', 'write'];
+
+// Why a device failed, from errno, in RT_ERR_ order.
+export const ERRNO_NAMES: readonly string[] = [
+    'enoent', 'eacces', 'eperm', 'eexist', 'eisdir', 'enotdir', 'enametoolong', 'eloop', 'erofs', 'enospc',
+    'efbig', 'emfile', 'enfile', 'eio', 'io-error',
+];
+
+// The symbols the runtime makes (ending a process, faults, keys,
+// devices), which follow the reserved ones: RT_SYM_OK and on in rt.h.
+export const RUNTIME_SYMBOLS: readonly string[] = [
+    'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES,
+];

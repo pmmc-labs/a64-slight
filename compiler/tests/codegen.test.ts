@@ -492,11 +492,12 @@ test('join, monitor, kill and raise are builtins in the runtime, and can be valu
     }
 });
 
-test('connect is a fork whose process gets the keys, from :keypress only', () => {
+test('connect is a fork whose process gets the keys, from :keypress', () => {
     assert.match(compile('(defun f (n) n) (let n 1) (connect :keypress (f n))'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_connect\n/);
     assert.match(compile('(connect :keypress 1)'), /\.asciz "connect at test\.slight:1:1"/);
-    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can only be :keypress, not (quote x)");
+    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can be :keypress, :fs/read, :fs/write or :fs/append, not (quote x)");
     fails('(connect :keypress)', 'test.slight:1:1: connect takes 2 arguments, not 1');
+    fails('(connect)', 'test.slight:1:1: connect takes 2 arguments, not 0');
     fails('(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (connect :keypress (list a b c d e f g h i))',
           'test.slight:1:91: a connect can take at most 8 locals into the new process, and this one uses 9');
 });
@@ -515,4 +516,21 @@ test('after and sleep are builtins in the runtime, and can be values', () => {
     fails('(after 10 $$)', 'test.slight:1:1: after takes 3 arguments, not 2');
     fails('(sleep)', 'test.slight:1:1: sleep takes 1 argument, not 0');
     fails('(defun sleep (ms) ms)', "test.slight:1:8: can't define sleep: it's a builtin");
+});
+
+test('connect to a file evaluates the path in the parent, and passes it and the mode', () => {
+    const asm = compile('(defun f (n) n) (let n 1) (let p "x.txt") (connect :fs/write p (f n))');
+    // the path goes in the first free slot, the fork's locals after it
+    assert.match(asm, /\/\/ p\n {4}str {2}x0, \[sp, #16\]\n {4}ldr {2}x16, \[sp, #0\] {4}\/\/ n\n {4}str {2}x16, \[sp, #24\]/);
+    assert.match(asm, /add {2}x2, sp, #24\n {4}LOADADDR x3, Lsite_\d+\n {4}ldr {2}x4, \[sp, #16\]\n {4}mov {2}x5, #RT_FS_WRITE\n {4}bl {3}rt_connect_fs\n/);
+    assert.match(compile('(connect :fs/read "a" 1)'), /mov {2}x5, #RT_FS_READ\n/);
+    assert.match(compile('(connect :fs/append "a" 1)'), /mov {2}x5, #RT_FS_APPEND\n/);
+    fails('(connect :fs/read "a")', 'test.slight:1:1: connect takes 3 arguments, not 2');
+    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :fs/read, :fs/write or :fs/append, not (quote fs)");
+});
+
+test('disconnect is a builtin in the runtime', () => {
+    assert.match(compile('(disconnect 1)'), /LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_disconnect\n/);
+    fails('(disconnect)', 'test.slight:1:1: disconnect takes 1 argument, not 0');
+    fails('(defun disconnect (x) x)', "test.slight:1:8: can't define disconnect: it's a builtin");
 });

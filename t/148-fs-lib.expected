@@ -1,0 +1,5 @@
+(ok ())
+(ok ("alpha" "beta gamma" "" "delta"))
+(ok ("first" "  second, indented" "" "last, with no newline at the end"))
+(error (enoent "build/t/148-no-such-file.txt"))
+(error (enoent "build/t/148-no-such-dir/x.txt"))

@@ -4,9 +4,9 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–9, 10a and 10b done (under qemu, and natively on
-macOS: Stevan runs `make test` on his M2 Max after every step). 10c,
-files, is next.
+**Progress:** steps 0–9 and 10a–10c done (under qemu, and natively on
+macOS: Stevan runs `make test` on his M2 Max after every step). 10d, the
+network, is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -209,13 +209,37 @@ every connected process gets every key. On the virtual clock a key comes
 each time nothing can run (D122). `key-catcher`, `divisions` and
 `tail-chase-game` are ported, with golden tests (D123).
 
-#### 10c. Files
+#### 10c. Files (done)
 
-`slurp` and `spew`. Blocking the whole runtime while they read or write
-a local file is fine for now (a regular file never waits in `select()`);
-Stevan has ideas for doing I/O properly, to discuss when 10c starts.
-Still to work out too: the shape of an I/O error's reason, say
-`(:error (enoent "path"))` after the fault reasons (D98).
+Stevan's design (D124–D129): files are devices, opened with
+`(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`), so open
+and close are `connect` and `disconnect`. A device is a pid; its first
+message to its owner is `(:open f)`; a reader sends `(:line f s)` one at
+a time, then `(:eof f)`; a writer takes `(:write x ...)` from anyone. A
+failure ends the owner with `(:error (name path))`, errno's name. `slurp`
+and `spew` are slight, in an opt-in `lib/fs.slight`, and `slurp` gives
+lines. `:keypress` stays as it is (D131).
+
+#### 10d. The network (agreed in outline)
+
+TCP in the runtime, HTTP in slight (D132). To settle when it starts:
+
+- `:tcp` (connect to a host and port) and `:tcp/listen` (a port) devices,
+  waited for in `select()` with stdin and the timers. Their messages,
+  after `(:open f)`: data (as strings, in chunks or lines?), the end of
+  the stream, an accepted connection.
+- `(connect conn expr)`: `connect` given a device instead of a source,
+  handing it to a new process of its own, so a server can give each
+  connection its own actor.
+- Writing: `(:write x ...)` as for files, but a socket can make it wait,
+  so the runtime has to queue what it can't write yet, and `send` still
+  never blocks.
+- Errors, as files' (D128), with the network's errno names
+  (`:econnrefused`, `:econnreset`, `:epipe`, ...).
+- HTTP/1.1 in slight, in a `lib/http.slight`: a client and a server,
+  without TLS. `select()` limits the runtime to about 1,000 sockets.
+- Tests: a server and a client in one program, on a port the system
+  picks.
 
 ### 11. Port the examples
 
@@ -253,6 +277,6 @@ builtin. Beyond that:
 | `window-manager`, `better-window-manager` | as above, plus `connect :keypress` and the screen size (step 10b) |
 | `meta-circular` | `join`/`yield`/`apply`; no `recv`, so likely as-is |
 | `more-oop` | local `defun`s lifted to top level; it uses `slight/eval` to look up methods, which has to go |
-| `text-editor` | local `defun`s lifted; drop the `slight/parse`/`slight/expand` feature; files |
+| `text-editor` | local `defun`s lifted; drop the `slight/parse`/`slight/expand` feature; files (`lib/fs.slight`'s `slurp` gives lines) |
 | `repl` | no `eval`, so it becomes a line-editor demo (or evaluates a tiny calculator language written in slight) |
 | `eval-string`, `hot-code-reload` | out: they exist to show `eval` and hot reload |

@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { FAULT_KINDS, intWord, KEY_NAMES, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from '../src/values.ts';
+import { DEVICE_WORDS, ERRNO_NAMES, FAULT_KINDS, intWord, KEY_NAMES, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from '../src/values.ts';
 
 const RT_H = readFileSync(new URL('../../runtime/rt.h', import.meta.url), 'utf8');
 
@@ -38,6 +38,8 @@ test("the runtime's symbols follow #true, as rt.h numbers them", () => {
     assert.equal(BigInt(id('killed')), define('RT_SYM_KILLED'));
     assert.equal(BigInt(id(FAULT_KINDS[0]!)), define('RT_SYM_FAULTS'));
     assert.equal(BigInt(id(KEY_NAMES[0]!)), define('RT_SYM_KEYS'));
+    assert.equal(BigInt(id(DEVICE_WORDS[0]!)), define('RT_SYM_DEVICE'));
+    assert.equal(BigInt(id(ERRNO_NAMES[0]!)), define('RT_SYM_ERRS'));
 });
 
 test("the fault kinds are rt.h's, in order", () => {
@@ -52,6 +54,15 @@ test("the key names are rt.h's, in order", () => {
     assert.equal(BigInt(keys.length), define('RT_KEY_COUNT'));
     assert.deepEqual(keys.map((m) => Number(m[1])), KEY_NAMES.map((_, i) => i));
     assert.deepEqual(keys.map((m) => m[2]), KEY_NAMES);
+});
+
+test("a device's words and the errno names are rt.h's, in order", () => {
+    for (const [prefix, names, count] of [['RT_DEV_', DEVICE_WORDS, 'RT_DEV_COUNT'], ['RT_ERR_', ERRNO_NAMES, 'RT_ERR_COUNT']] as const) {
+        const found = [...RT_H.matchAll(new RegExp(`^#define ${prefix}\\w+\\s+(\\d+)\\s+// :(\\S+)`, 'gm'))];
+        assert.equal(BigInt(found.length), define(count));
+        assert.deepEqual(found.map((m) => Number(m[1])), names.map((_, i) => i));
+        assert.deepEqual(found.map((m) => m[2]), names);
+    }
 });
 
 test('nil is the list tag on a null pointer', () => {

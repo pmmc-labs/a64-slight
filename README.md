@@ -47,15 +47,17 @@ for the packages.
 
 ## Status
 
-The design is settled, and implementation is through step 9 of the plan:
+The design is settled, and implementation is through step 10c of the plan:
 integers, floats, strings, booleans, symbols, lists, `cond`/`let`/`do`,
 functions with tail calls, closures, a prelude, and processes (`fork`,
 `send`, `recv`, `join`, `monitor`, `kill`, `raise`, preemption, faults
 that end just their process) compile to native binaries, which pass
 their tests on macOS and under qemu, with a per-process copying
 collector that runs only when an actor waits for a message. A million
-processes passing a message down a chain run in a few seconds. Next:
-timers, the terminal and files. See:
+processes passing a message down a chain run in a few seconds. Timers,
+the terminal (`connect :keypress`) and files (`connect :fs/read`, where a
+file is a process-like device) work too. Next: the network, with TCP in
+the runtime and HTTP written in slight. See:
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): the design
 - [`docs/PLAN.md`](docs/PLAN.md): the build order

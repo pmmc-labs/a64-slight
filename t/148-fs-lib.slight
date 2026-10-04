@@ -1,0 +1,8 @@
+; with: lib/fs.slight
+; slurp and spew, from lib/fs.slight, on top of connect.
+
+(pprint (spew "build/t/148-fs-lib.txt" (list "alpha" "beta gamma" "" "delta")))
+(pprint (slurp "build/t/148-fs-lib.txt"))
+(pprint (slurp "t/data/lines.txt"))
+(pprint (slurp "build/t/148-no-such-file.txt"))
+(spew "build/t/148-no-such-dir/x.txt" (list "a"))
