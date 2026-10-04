@@ -67,6 +67,9 @@ works and has the runtime pieces to borrow.
   (open). Give options and a recommendation. Record the outcome in
   `docs/DECISIONS.md` (who decided, why, what was rejected) and update
   `docs/DESIGN.md`.
+- When a special form or builtin is added or changes, update
+  [`docs/FROM-TS-SLIGHT.md`](docs/FROM-TS-SLIGHT.md), Stevan's notes on
+  what differs from ts-slight (no tables there).
 - Keep a working compiler with passing tests at the end of every step
   (Ghuloum). Each step adds golden tests.
 - **Examples bend to the language, not the other way round.** When a
