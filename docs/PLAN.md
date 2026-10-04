@@ -248,6 +248,55 @@ the expanded functions are named; whether more than one `recv` (a chain of
 states) makes sense; what a tail call to the actor from inside its `recv`
 means (back to the work, as now). Talk it through in depth first.
 
+**An alternative to weigh with it: split functions at `recv`.** (Claude,
+Oct 2026, after Stevan asked whether compiling to C would allow `recv`
+anywhere. It wouldn't: the rule is about runtime costs, not the target. A
+process waiting mid-function keeps its stack (8 MB of address space, at
+least a page of memory, and two mappings, so Linux's default limit of
+65,530 allows about 32,000 waiting processes), and the collector would
+have to find roots in its frames, which our own assembly could do but C
+couldn't, short of a shadow stack.) Instead the expander makes ts-slight's
+mid-function `recv` into what the rule wants: at a `(recv)` (as a body
+form, or `(let x (recv))`), it splits the function into one that does the
+work before it and tail-calls a generated receive function holding the
+rest, passing the variables the rest still needs as arguments. That's the
+rewrite done by hand in the ported examples and the editor:
+
+    (defun editor (cfg cursor lines offset msg)
+        (refresh cfg cursor lines offset msg)
+        (let key (recv))
+        (cond ...))
+
+becomes
+
+    (defun editor (cfg cursor lines offset msg)
+        (refresh cfg cursor lines offset msg)
+        (editor-after-recv cfg cursor lines offset msg))
+
+    (defun editor-after-recv (cfg cursor lines offset msg)
+        (recv
+            (key (cond ...))))
+
+(The generated name would have spaces in it, as `case`'s topic does.)
+
+- The rule becomes "`recv` can go anywhere a tail call can": a body form
+  or a `let`'s expression in any body in tail position, a `cond`
+  clause's included. Nested uses, like `even-odd-actors`'
+  `(pprint (list (recv) (recv)))`, are flattened into `let`s first.
+- No runtime cost: waiting processes still hold no stack, and the
+  collector still runs at `recv` with just the arguments as roots, so it
+  suits compiling to C as well as assembly.
+- Unchanged: a function that waits is still called only in tail
+  position; a `recv` inside a lambda (`simple-db-server`'s `db-client`,
+  called from `map`) still can't work, since `map` has work pending on
+  the stack; and more than 8 variables still needed after a split would
+  have to be bundled into a list.
+- About 100–200 lines in the expander; working out a lambda's free
+  variables, which the compiler already does, is most of the analysis.
+- `defactor` is one shape of this split; this is the general version,
+  without a new special form, and may replace it. It changes the `recv`
+  rule, so it's Stevan's decision.
+
 #### 10f. HTTP in slight
 
 `lib/http.slight`, opt-in (D140): an HTTP/1.1 client and server on `:tcp`,
