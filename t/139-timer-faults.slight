@@ -1,0 +1,10 @@
+; after and sleep take a whole number of milliseconds, and after a pid.
+; A delay of 0 or less is due at once, so sleeping for it lets the
+; processes already waiting to run go first, as yield does.
+
+(pprint (join (fork (sleep 1.5))))
+(pprint (join (fork (after "soon" $$ :x))))
+(pprint (join (fork (after 10 :someone :x))))
+(fork (pprint :other))
+(sleep -10)
+(pprint :back)

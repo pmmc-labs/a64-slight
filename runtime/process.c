@@ -11,6 +11,9 @@
 // A process that ends leaves an exit record in the table, kept for good
 // (D88), so join and monitor can ask about it at any time; everything else
 // it had is freed.
+//
+// When nothing can run, the scheduler waits for the next timer (after,
+// sleep); the program ends when nothing can run and no timer is pending.
 
 #include "rt.h"
 
@@ -19,6 +22,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/select.h>
+#include <time.h>
 #include <unistd.h>
 
 #define QUOTA          1000             // reductions between preemptions
@@ -156,6 +161,11 @@ static void free_chunks(rt_chunk_t *c) {
     }
 }
 
+static void free_msg(rt_msg_t *m) {
+    free(m->chunk);
+    free(m);
+}
+
 static void free_heap(rt_proc_t *p) {
     free_chunks(p->chunks);
     p->chunks     = NULL;
@@ -163,8 +173,7 @@ static void free_heap(rt_proc_t *p) {
     p->heap_bytes = 0;
     for (rt_msg_t *m = p->mail, *next; m; m = next) {
         next = m->next;
-        free(m->chunk);
-        free(m);
+        free_msg(m);
     }
     p->mail = p->mail_last = NULL;
 }
@@ -397,8 +406,8 @@ rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const c
     return p->pid;
 }
 
-// A copy of msg into p's mailbox; p wakes if it's waiting for one.
-static void deliver(rt_proc_t *p, rt_value_t msg) {
+// A message holding a copy of msg, in a chunk of its own.
+static rt_msg_t *new_msg(rt_value_t msg) {
     rt_msg_t *m = malloc(sizeof *m);
     if (!m) {
         perror("rt: out of memory");
@@ -406,6 +415,11 @@ static void deliver(rt_proc_t *p, rt_value_t msg) {
     }
     m->next  = NULL;
     m->chunk = copy_values(&msg, &m->value, 1);
+    return m;
+}
+
+// Into p's mailbox; p wakes if it's waiting for a message.
+static void deliver(rt_proc_t *p, rt_msg_t *m) {
     if (p->mail_last) p->mail_last->next = m;
     else              p->mail = m;
     p->mail_last = m;
@@ -415,7 +429,7 @@ static void deliver(rt_proc_t *p, rt_value_t msg) {
 // To a process that has ended, a message just disappears, as in Erlang.
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
     rt_proc_t *p = entry(pid, site)->proc;
-    if (p) deliver(p, msg);
+    if (p) deliver(p, new_msg(msg));
     return RT_NIL;
 }
 
@@ -468,7 +482,7 @@ static void notify(rt_value_t to, rt_value_t pid, const entry_t *e) {
     if (!w) return;
     _Alignas(16) rt_value_t cells[10];
     rt_value_t result = result_at(cells, e);
-    deliver(w, cons_at(cells + 4, rt_symbol(RT_SYM_EXIT), cons_at(cells + 6, pid, cons_at(cells + 8, result, RT_NIL))));
+    deliver(w, new_msg(cons_at(cells + 4, rt_symbol(RT_SYM_EXIT), cons_at(cells + 6, pid, cons_at(cells + 8, result, RT_NIL)))));
 }
 
 // p ends. Its result goes into its exit record, its joiners wake, its
@@ -569,13 +583,17 @@ rt_value_t rt_kill(rt_value_t pid, const char *site) {
         while (*link != p) link = &(*link)->next_joiner;
         *link = p->next_joiner;
     }
+    // A sleeper's timer stays, and is dropped when it's due.
     finish(p, 0, rt_symbol(RT_SYM_KILLED), 0);
     retire(p);
     return RT_NIL;
 }
 
+static void ring(void);
+
 void rt_preempt(rt_proc_t *p) {
     p->reductions = QUOTA;
+    ring();                                     // so a busy process can't hold up a timer
     if (ready_head) {
         enqueue(p);
         to_scheduler(p);
@@ -589,17 +607,141 @@ void rt_yield(void) {
     to_scheduler(p);
 }
 
+// --- timers -------------------------------------------------------------------
+//
+// after and sleep set timers, kept in a binary heap in the order they're
+// due, and then in the order they were set. after's timer holds its
+// message, copied when it was set, as send's would be; sleep's wakes the
+// sleeper. A timer whose process has ended by the time it's due is dropped
+// then, as a message to it would be (D92); until then it's something that
+// can still happen, so the program waits for it.
+//
+// The clock is the system's monotonic one, in nanoseconds; or, with
+// SLIGHT_CLOCK=virtual (t/run.sh sets it), one for tests that starts at 0
+// and moves only when nothing can run, straight to the next timer. Timer
+// tests are then exact, and take no real time.
+
+typedef struct {                        // (timer_t is POSIX's)
+    uint64_t    due, seq;
+    rt_value_t  pid;
+    rt_msg_t   *msg;                    // after's message, or NULL: sleep
+} alarm_t;
+
+static alarm_t  *alarms;                // alarms[0] is the next due
+static uint64_t  nalarms, alarms_cap, alarms_set;
+static int       virtual_clock;
+static uint64_t  virtual_now;
+
+static uint64_t now(void) {
+    if (virtual_clock) return virtual_now;
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000000 + (uint64_t)t.tv_nsec;
+}
+
+// When a timer set now for ms milliseconds is due. A negative ms counts
+// as 0; one too far off for the clock is due at its end.
+static uint64_t due_in(rt_value_t ms, const char *site) {
+    if (ms & RT_TAG_INT_MASK) rt_fault(RT_FAULT_NOT_INT, ms, site);
+    int64_t  n = rt_int_value(ms);
+    uint64_t t = now();
+    if (n <= 0) return t;
+    return (uint64_t)n > (UINT64_MAX - t) / 1000000 ? UINT64_MAX : t + (uint64_t)n * 1000000;
+}
+
+static int before(const alarm_t *a, const alarm_t *b) {
+    return a->due < b->due || (a->due == b->due && a->seq < b->seq);
+}
+
+static void set_alarm(uint64_t due, rt_value_t pid, rt_msg_t *msg) {
+    if (nalarms == alarms_cap) {
+        alarms_cap = alarms_cap ? alarms_cap * 2 : 64;
+        alarms     = realloc(alarms, alarms_cap * sizeof *alarms);
+        if (!alarms) {
+            perror("rt: out of memory");
+            exit(2);
+        }
+    }
+    alarm_t  a = { due, alarms_set++, pid, msg };
+    uint64_t i = nalarms++;
+    for (; i > 0 && before(&a, &alarms[(i - 1) / 2]); i = (i - 1) / 2) alarms[i] = alarms[(i - 1) / 2];
+    alarms[i] = a;
+}
+
+static alarm_t next_alarm(void) {
+    alarm_t  first = alarms[0], last = alarms[--nalarms];
+    uint64_t i     = 0;
+    for (uint64_t c; (c = 2 * i + 1) < nalarms; i = c) {
+        if (c + 1 < nalarms && before(&alarms[c + 1], &alarms[c])) c++;
+        if (!before(&alarms[c], &last)) break;
+        alarms[i] = alarms[c];
+    }
+    alarms[i] = last;
+    return first;
+}
+
+// Fires every timer that's due.
+static void ring(void) {
+    for (uint64_t t = nalarms ? now() : 0; nalarms && alarms[0].due <= t; ) {
+        alarm_t    a = next_alarm();
+        rt_proc_t *p = procs[a.pid >> RT_PID_SHIFT].proc;
+        if (!p) {
+            if (a.msg) free_msg(a.msg);
+        } else if (a.msg) {
+            deliver(p, a.msg);
+        } else {
+            enqueue(p);                         // asleep: only kill could have woken it
+        }
+    }
+}
+
+// Nothing can run: waits until the next timer is due.
+static void wait_for_alarm(void) {
+    uint64_t due = alarms[0].due;
+    if (virtual_clock) {
+        virtual_now = due;
+        return;
+    }
+    for (uint64_t t; (t = now()) < due; ) {
+        uint64_t us = (due - t + 999) / 1000;
+        if (us > 3600000000) us = 3600000000;  // macOS's select refuses more than 10^8 s
+        struct timeval tv = { .tv_sec = (time_t)(us / 1000000), .tv_usec = (suseconds_t)(us % 1000000) };
+        select(0, NULL, NULL, NULL, &tv);
+    }
+}
+
+rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) {
+    uint64_t due = due_in(ms, site);
+    entry(pid, site);
+    set_alarm(due, pid, new_msg(msg));
+    return RT_NIL;
+}
+
+rt_value_t rt_sleep(rt_value_t ms, const char *site) {
+    rt_proc_t *p = rt_current;
+    set_alarm(due_in(ms, site), p->pid, NULL);
+    p->state = RT_SLEEPING;
+    to_scheduler(p);                            // until ring wakes it
+    return RT_NIL;
+}
+
 // --- the scheduler ------------------------------------------------------------
 
 void rt_run(void) {
-    rt_proc_t *p;
-    while ((p = dequeue()) != NULL) {
+    for (;;) {
+        ring();
+        rt_proc_t *p = dequeue();
+        if (!p) {
+            if (!nalarms) return;
+            wait_for_alarm();
+            continue;
+        }
         if (!p->stack) start(p);
         p->state   = RT_RUNNING;
         rt_current = p;
         rt_switch(&scheduler, &p->ctx);
-        // back: it paused (and queued itself again), waits in recv or
-        // join, or ended
+        // back: it paused (and queued itself again), waits in recv, join
+        // or sleep, or ended
         if (p->state == RT_WAITING)   release_stack(p);
         else if (p->state == RT_DONE) retire(p);
     }
@@ -608,6 +750,8 @@ void rt_run(void) {
 int main(void) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     poison = getenv("SLIGHT_POISON") != NULL;
+    const char *mode = getenv("SLIGHT_CLOCK");
+    virtual_clock = mode && strcmp(mode, "virtual") == 0;
     rt_new_process((rt_code_t)slight_main, RT_NIL);
     rt_run();
     const entry_t *root = &procs[1];

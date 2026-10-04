@@ -160,8 +160,9 @@ reply refs.
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
 | `(join pid)` | **Blocking** wait for `pid` to end. Returns `(:ok value)` or `(:error reason)`. Works on any pid (not just children), anywhere (including inside lambdas), any number of times, and after the process has already ended. Joiners wake in the order they joined. `(join $$)` faults (`:join-self`). |
 | `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has. Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
-| `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, or blocked in `join`. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
-| `(after ms pid msg)` | A timer: sends `msg` to `pid` after `ms` milliseconds. |
+| `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
+| `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns `()`. |
+| `(sleep ms)` | **Blocking** wait for `ms` milliseconds, keeping the stack. Works anywhere. Returns `()`. |
 | `(raise reason)` | Ends the current process with `(:error reason)`. |
 
 - A process whose entry expression returns a value ends with `(:ok value)`.
@@ -188,18 +189,26 @@ reply refs.
   (preempted or yielded), blocked in `join`, or blocked in a syscall holds a
   stack. A process waiting in `recv` holds none.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
-  sources, no blocked I/O) is detected and reported. So far (step 8): if
-  the run queue empties before the root process has ended, the program
-  prints `deadlock: the root process is waiting for a message, and nothing
-  else can run` (or `... waiting for #<pid N> to end, ...`, in `join`) to
-  stderr and exits 1.
-- **The program ends when nothing can run**, not when the root ends: other
-  processes keep running after the root has its value (or its error), and
-  the root's value is printed last. Processes still waiting in `recv` or
-  `join` at that point are dropped (D93).
+  sources, no blocked I/O) is detected and reported. So far (step 10a): if
+  the run queue empties, no timer is pending, and the root process hasn't
+  ended, the program prints `deadlock: the root process is waiting for a
+  message, and nothing else can run` (or `... waiting for #<pid N> to end,
+  ...`, in `join`) to stderr and exits 1.
+- **The program ends when nothing can run** and no timer is pending, not
+  when the root ends: other processes keep running after the root has its
+  value (or its error), and the root's value is printed last. Processes
+  still waiting in `recv` or `join` at that point are dropped (D93).
 - **Blocking syscalls.** Since a process can block with its stack, `sleep`,
-  `slurp` and `spew` block only the calling process and return a Result.
-  This follows from the `join` decision, but wasn't discussed on its own.
+  `slurp` and `spew` block only the calling process. Those that can fail
+  return a Result: `slurp` gives `(:ok string)` or `(:error reason)`, and
+  `spew` `(:ok ())` or `(:error reason)`; `sleep` can't, and returns `()`
+  (D111).
+- **Timers** (D112, D114). `after` and `sleep` take an integer number of
+  milliseconds; a negative one counts as 0. Timers due at the same time
+  fire in the order they were set, at the scheduler's next decision (so
+  `(sleep 0)` lets the processes already waiting go first). A timer whose
+  process has ended by the time it's due is dropped then, as a message to
+  it would be.
 
 ### Program structure (open)
 
@@ -443,14 +452,20 @@ Lalloc_N:
   ticks, but a plain run queue is simpler and still deterministic on one
   core. A preempted process goes to the back of the queue, but only if
   another process is ready; otherwise it keeps running (D91). `yield`
-  always goes to the back. A **virtual clock** for tests (from ts-cpi)
-  keeps timer tests exact.
+  always goes to the back.
+- **The clock** is the system's monotonic one. With `SLIGHT_CLOCK=virtual`
+  in the environment, it's a **virtual clock** for tests (after ts-cpi's)
+  instead: it starts at 0, stands still while anything can run, and jumps
+  straight to the next timer when nothing can (D110). Timer tests are then
+  exact and take no real time; but a process that sleeps while others stay
+  busy never wakes.
 - **Stack pool**: a process takes a stack when it starts running and gives
   it back when it waits in `recv` or ends.
 - **Context switch**: the spike's `rt_switch`, 25 instructions (x19–x30,
   sp, d8–d15).
-- **Idle**: when nothing is runnable, wait in `kqueue` (macOS) or `poll`
-  (Linux) with the timeout set to the next timer. Timers are a binary heap.
+- **Idle**: when nothing is runnable, wait in `select()` (on macOS and
+  Linux alike, D113) with the timeout set to the next timer. Timers are a
+  binary heap.
 - **Devices** are runtime event sources that send messages: `:keypress`
   sends ts-slight's key shape `(key mods...)`, where the key is a string for
   printable keys and a DOM-style name symbol for named keys
@@ -579,6 +594,8 @@ line-by-line translation.
   `exit: N` when the exit status isn't 0. Like `spike/aarch64/t/run.sh`.
   Every plan step adds some.
 - **Compiler unit tests** with `node:test`, per pass.
+- **Timing uses the virtual clock** (`t/run.sh` sets `SLIGHT_CLOCK=virtual`),
+  never real time.
 - A slight-level test library in the style of ts-slight's `lib/Test.slight`
   (TAP: `ok`, `is`, `diag`) once enough of the language exists.
 
@@ -592,4 +609,6 @@ Collected from above:
 Settled in step 7: `recv` syntax (D85), the run queue (D86), the fault,
 `raise` and `kill` reasons (D87), exit records and mailboxes (D88). In
 step 8: the fault kinds (D98), and what gets logged (D99, D100). In
-step 9: collecting only at `recv` (D105).
+step 9: collecting only at `recv` (D105). In step 10a: the virtual clock
+(D110), what `after` and `sleep` return (D111), timers whose process has
+ended (D112), and waiting in `select()` (D113).

@@ -157,7 +157,8 @@ level 2 UTF-8 helpers when the editor needs them, full Unicode out.**
 
 **D28. Blocking syscalls block only their process.** *(Default; follows from
 D9 and D19, not discussed separately.)* `sleep`, `slurp` and `spew` hold
-the caller's stack and return a Result.
+the caller's stack and return a Result. (Narrowed by D111: `sleep` can't
+fail, and returns `()`.)
 
 **D29. Event sources are devices that send messages.** *(Default.)*
 `:keypress` keeps ts-slight's key shape. readline isn't needed: the REPL is
@@ -663,3 +664,61 @@ right; without it, a mutation that skipped a closure's captured values
 passed. Rejected: a builtin to read the heap's size (more language), and
 always poisoning (collection would cost the whole heap, not just what
 survives).
+
+## Step 10
+
+**D109. Step 10 comes in three parts.** *(Default.)* 10a timers, 10b the
+terminal, 10c files, each committed with its tests.
+
+**D110. The virtual clock moves only when nothing can run.** *(User.)*
+With `SLIGHT_CLOCK=virtual` in the environment (`t/run.sh` sets it), time
+starts at 0, stands still while anything can run, and jumps straight to
+the next timer when nothing can. Timer tests are exact, take no real time,
+and don't depend on how much work the compiled code does. The cost: a
+process that sleeps while others stay busy never wakes, so
+`ping-pong-tournament` (players volley until a sleeping referee stops
+them) spins forever under it, and is ported without a golden test (its
+counts depend on the machine anyway). Rejected: also moving the clock 1 ms
+per used-up quota of reductions (busy programs would see time pass, but
+expected output would shift whenever codegen or the prelude changed).
+
+**D111. `after` and `sleep` return `()`.** *(User.)* Neither can fail, so
+a Result would always be `:ok`. DESIGN's "blocking calls return a Result"
+now covers the ones that can fail: `slurp` gives `(:ok string)` or
+`(:error reason)`, and `spew` `(:ok ())` or `(:error reason)` (10c).
+Rejected: `(:ok ())` from `sleep`, for uniformity.
+
+**D112. A timer whose process has ended is dropped when it's due.**
+*(User.)* An `after` aimed at a process that has ended, or the wake-up of
+a sleeper that was killed, stays in the timer heap until it's due, and is
+dropped then, as a message to an ended process is (D92). Pids aren't
+reused, so a late timer can't reach the wrong process. Until then it
+keeps the program running, which costs no real time on the virtual clock.
+Rejected: cancelling a process's timers when it ends (the program would
+end sooner, but each process would need a list of the timers aimed at
+it, or the heap would be searched).
+
+**D113. The runtime waits with `select()`, on macOS and Linux alike.**
+*(User.)* One code path, and the only file descriptor to watch is stdin
+(10b); until then it just times out at the next timer. Rejected: `kqueue`
+on macOS and `poll` on Linux, as DESIGN had it (two code paths; and
+macOS's `poll()` doesn't support terminals).
+
+**D114. How timers behave.** *(Default.)* `(after ms pid msg)` and
+`(sleep ms)` take an integer number of milliseconds (anything else faults
+`:not-an-int`), and a negative one counts as 0. `after` copies the message
+when it's set, as `send` does, so it outlives its sender. Timers are a
+binary heap; those due at the same time fire in the order they were set.
+A due timer fires at the scheduler's next decision, which is also when a
+preempted process would give way: without that, a process running alone
+keeps going past its quota (D91), and would hold up a timer for as long
+as it ran. So `(sleep 0)` lets the processes already waiting to run go
+first, as `yield` does. A pending timer is something that can still
+happen: a root waiting for a message only a timer will send isn't
+deadlocked, and the program doesn't end while a timer is pending.
+
+**D115. `ping-pong-tournament` is ported, without a golden test.**
+*(Default, under D84.)* Receive functions instead of a `(recv)`
+mid-function; fixed sizes instead of `@ARGV`; no `time-it`; the player's
+unused `max-delay` is gone. It runs on the real clock only (D110): ten
+games of 100 ms each come to about 80,000 messages under qemu.

@@ -1,0 +1,21 @@
+; sleep waits, keeping the process's stack, and returns (). Sleepers wake
+; in the order they're due, and those due together in the order they
+; went to sleep. It works anywhere, inside a lambda too. On the virtual
+; clock that t/run.sh sets, sleeping for eleven days takes no time.
+
+(defun nap (name ms)
+    (sleep ms)
+    (pprint (list name ms))
+    name)
+
+(defun naps (name mss)
+    (map (lambda (ms) (sleep ms) (list name ms)) mss))
+
+(let a (fork (nap :a 30)))
+(let b (fork (nap :b 10)))
+(let c (fork (nap :c 30)))
+(let d (fork (naps :d (list 5 10 10))))
+(pprint (sleep 1))
+(pprint (map join (list a b c d)))
+(sleep 1000000000)
+(pprint :eleven-days-later)

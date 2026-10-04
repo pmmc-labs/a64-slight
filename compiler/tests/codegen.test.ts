@@ -497,3 +497,13 @@ test('join, monitor, kill and raise are builtins in the runtime, and can be valu
         fails(`(defun ${name} (x) x)`, `test.slight:1:8: can't define ${name}: it's a builtin`);
     }
 });
+
+test('after and sleep are builtins in the runtime, and can be values', () => {
+    assert.match(compile('(after 10 $$ :tick)'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_after\n/);
+    assert.match(compile('(sleep 10)'), /LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_sleep\n/);
+    assert.match(compile('(let f after)'), /LOADADDR x0, bi_after_closure/);
+    assert.match(compile('(let f sleep)'), /LOADADDR x0, bi_sleep_closure/);
+    fails('(after 10 $$)', 'test.slight:1:1: after takes 3 arguments, not 2');
+    fails('(sleep)', 'test.slight:1:1: sleep takes 1 argument, not 0');
+    fails('(defun sleep (ms) ms)', "test.slight:1:8: can't define sleep: it's a builtin");
+});

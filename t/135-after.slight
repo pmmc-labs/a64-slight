@@ -1,0 +1,25 @@
+; after sends a message once that many milliseconds have passed. Timers
+; fire in the order they're due, and those due together in the order they
+; were set; one due at once fires when the scheduler next looks, after
+; messages already sent. The message is copied when the timer is set, so
+; it outlives the process that set it. A negative delay counts as 0.
+
+(defun show (n)
+    (recv
+        (msg
+            (pprint msg)
+            (cond
+                ((== n 1) :done)
+                (#true    (show (- n 1)))))))
+
+(let me $$)
+(pprint (after 30 $$ :thirty))
+(after 10 $$ :ten-a)
+(after 20 $$ :twenty)
+(after 10 $$ :ten-b)
+(after -5 $$ :now)
+(send $$ :sent)
+(fork (do
+    (let squares (map (lambda (n) (* n n)) (range 1 6)))
+    (after 15 me (list :from-child squares))))
+(show 7)

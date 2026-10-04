@@ -134,8 +134,9 @@ typedef struct rt_msg {
 } rt_msg_t;
 
 // READY: in the run queue. WAITING: in recv, with no stack. JOINING:
-// blocked in join, keeping its stack. DONE: ended, about to be freed.
-typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_DONE } rt_state_t;
+// blocked in join, keeping its stack. SLEEPING: in sleep, keeping its
+// stack, until its timer wakes it. DONE: ended, about to be freed.
+typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_SLEEPING, RT_DONE } rt_state_t;
 
 // Someone to tell when a process ends: monitor's list.
 typedef struct rt_watch {
@@ -228,6 +229,12 @@ rt_value_t rt_monitor(rt_value_t pid, const char *site) RT_ASM(rt_monitor);
 rt_value_t rt_kill(rt_value_t pid, const char *site) RT_ASM(rt_kill);
 __attribute__((noreturn))
 rt_value_t rt_raise(rt_value_t reason, const char *site) RT_ASM(rt_raise);
+
+// Timers (process.c). rt_after sends msg to pid in ms milliseconds;
+// rt_sleep waits that long, keeping the stack. A negative ms counts as 0.
+// Each returns ().
+rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_after);
+rt_value_t rt_sleep(rt_value_t ms, const char *site) RT_ASM(rt_sleep);
 
 // Makes room for `bytes` in the current process's heap: a new chunk.
 // Faults at `site` when the heap would pass its limit.

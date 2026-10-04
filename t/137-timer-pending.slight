@@ -1,0 +1,22 @@
+; A pending timer is something that can still happen: a root waiting for
+; a message that only a timer will send isn't deadlocked, and the program
+; doesn't end while a timer is pending, even once the root has its value.
+; A timer whose process has ended is dropped when it's due: a killed
+; sleeper doesn't wake, and a message to it disappears.
+
+(defun late (ms)
+    (sleep ms)
+    (pprint (list :late ms)))
+
+(defun wait-for-wake ()
+    (recv
+        (:wake (pprint :woke) :root-done)))
+
+(let sleeper (fork (late 20)))
+(after 30 sleeper :hello)
+(sleep 5)
+(kill sleeper)
+(pprint (join sleeper))
+(fork (late 50))
+(after 10 $$ :wake)
+(wait-for-wake)

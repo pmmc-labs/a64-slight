@@ -1,0 +1,110 @@
+; ping-pong-tournament, from ts-slight's examples: N games of ping-pong
+; at once, each played for D milliseconds, then the volleys counted.
+;
+; How many volleys fit depends on the machine, so this example has no
+; .expected, and it can't run on the virtual clock that the golden tests
+; use: there, time moves only when nothing can run, and the players never
+; stop (D110). Run it by hand:
+;
+;     node bin/slightc.ts -o build/ping-pong-tournament examples/ping-pong-tournament.slight
+;     build/ping-pong-tournament       # qemu-aarch64 build/... on x86
+;
+; Changes: a (recv) in the middle of a function became receive functions;
+; case, if and when became cond and recv patterns; the sizes are fixed
+; (no @ARGV) and there's no timing (no time-it); a game is forked by name;
+; join gives (:ok value); the (yield ...) around each loop is gone, and so
+; is the player's unused max-delay; sys/io/print-ln became tty/write.
+
+(defun player (counter)
+    (recv
+        ((:Serve reply-to)
+            (send reply-to (list :Ping $$))
+            (player counter))
+        ((:Ping reply-to)
+            (send reply-to (list :Pong $$))
+            (player (+ counter 1)))
+        ((:Pong reply-to)
+            (send reply-to (list :Ping $$))
+            (player (+ counter 1)))
+        ((:EXIT reply-to)
+            (send reply-to (list :Final counter)))))
+
+(defun ping-pong (duration)
+    (let p1 (fork (player 0)))
+    (let p2 (fork (player 0)))
+    (ping-pong-start p1 p2 duration))
+
+; wait for the :START gate, serve, let them play for duration ms, stop
+; them, then collect the two finals, labelled in the order they arrive
+(defun ping-pong-start (p1 p2 duration)
+    (recv
+        (start
+            (send p1 (list :Serve p2))
+            (sleep duration)
+            (send p1 (list :EXIT $$))
+            (send p2 (list :EXIT $$))
+            (ping-pong-finals p1 p2 ()))))
+
+(defun ping-pong-finals (p1 p2 got)
+    (recv
+        (final
+            (cond
+                ((nil? got) (ping-pong-finals p1 p2 final))
+                (#true      (list (list p1 got) (list p2 final)))))))
+
+(defun setup-tournament (n duration)
+    (cond
+        ((== n 0) ())
+        (#true    (cons (fork (ping-pong duration)) (setup-tournament (- n 1) duration)))))
+
+(defun start-tournament (pids)
+    (map (lambda (pid) (send pid :START) pid) pids))
+
+(defun await-results (pids)
+    (map (lambda (pid) (cadr (join pid))) pids))
+
+(defun converged? (lhs rhs tolerance)
+    (<= (abs (- (cadr lhs) (cadr rhs))) tolerance))
+
+(defun check-results (results)
+    (fold/l (car results) (lambda (acc r)
+        (let acc-p1 (car  acc))
+        (let acc-p2 (cadr acc))
+        (let r-p1   (car  r))
+        (let r-p2   (cadr r))
+        (cond
+            ((and (converged? (cadr acc-p1) (cadr r-p1) 1)
+                  (converged? (cadr acc-p2) (cadr r-p2) 1))
+                acc)
+            (#true
+                (tty/write "... results diverged from " acc " to " r \n)
+                r)))
+        (cdr results)))
+
+(defun calculate-totals (results)
+    (fold/l 0 (lambda (acc r)
+        (+ acc
+            (+ (cadr (cadr (car  r)))
+               (cadr (cadr (cadr r))))))
+        results))
+
+(let num-games     10)
+(let game-duration 100)
+
+(tty/write "Running " num-games " for " game-duration \n)
+
+(tty/write "Setting up Tournament ..." \n)
+(let setup-pids (setup-tournament num-games game-duration))
+(tty/write "..." \n)
+
+(tty/write "Starting Tournament ..." \n)
+(let running-pids (start-tournament setup-pids))
+(tty/write "..." \n)
+
+(tty/write "Awaiting Tournament Results ..." \n)
+(let results (await-results running-pids))
+(tty/write "..." \n)
+
+(tty/write "Analyzing Tournament Results ..." \n)
+(tty/write " Final Results : " (check-results results) \n)
+(tty/write "Total Messages : " (calculate-totals results) \n)

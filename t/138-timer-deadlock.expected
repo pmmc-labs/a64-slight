@@ -1,0 +1,3 @@
+dead letter: wrong (recv at t/138-timer-deadlock.slight:5:5)
+deadlock: the root process is waiting for a message, and nothing else can run
+exit: 1

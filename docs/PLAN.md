@@ -4,9 +4,9 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–9 done (under qemu, and natively on macOS: Stevan
-runs `make test` on his M2 Max after every step). Step 10 is next; its
-proposals below are still to be confirmed.
+**Progress:** steps 0–9 and 10a done (under qemu, and natively on macOS:
+Stevan runs `make test` on his M2 Max after every step). 10b, the
+terminal, is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -182,41 +182,42 @@ Cheney's scan (D107). `SLIGHT_POISON` makes missed pointers fail loudly.
 
 ### 10. Devices and I/O
 
-**Proposed after step 9, not yet confirmed.** Stevan wanted to try the
-language before starting this; ask about each of these first, then
-record the outcome in `DECISIONS.md`.
+Agreed after step 9 (D109–D113): three parts, each committed with its
+tests; a virtual clock for tests, chosen by `SLIGHT_CLOCK=virtual` (which
+`t/run.sh` sets), that moves only when nothing can run; `after` and
+`sleep` return `()`, and `slurp` and `spew` Results; a timer whose process
+has ended is dropped when it's due; and the runtime waits in `select()`
+on both platforms.
 
-- **Split it into three steps**, each committed with its tests:
-    - **10a. Timers.** `(after ms pid msg)`, `(sleep ms)`, timers in a
-      binary heap, and an event loop (`kqueue` on macOS, `poll` on Linux)
-      that waits for the next timer when nothing can run.
-    - **10b. The terminal.** Raw mode, escape-sequence decoding,
-      `connect :keypress`, `tty/screen/rows`, `tty/screen/cols`.
-    - **10c. Files.** `slurp`, `spew`.
-- **A virtual clock for tests**, chosen by the environment:
-  `SLIGHT_CLOCK=virtual`, which `t/run.sh` sets (as it sets
-  `SLIGHT_POISON`). Time starts at 0 and moves only when nothing can run
-  and a timer is pending, jumping straight to it, so timer tests are exact
-  and take no real time.
-- **What they return.** `after` returns `()`. `sleep` blocks only the
-  caller, which keeps its stack, and returns `()`: DESIGN says blocking
-  calls return a Result, but `sleep` can't fail. `slurp` returns
-  `(:ok string)` or `(:error reason)`, and `spew` `(:ok ())` or
-  `(:error reason)`.
-- **Timers and deadlock.** A pending timer counts as something that can
-  still happen: a root waiting for a message a timer will send isn't
-  deadlocked, and the program doesn't end while timers are pending.
+#### 10a. Timers (done)
 
-Still to work out when each sub-step starts:
+`(after ms pid msg)` and `(sleep ms)`, timers in a binary heap, and the
+scheduler waiting for the next one when nothing can run. A pending timer
+counts as something that can still happen, for deadlock and for the end
+of the program. Due timers also fire when a process is preempted, so a
+busy process can't hold one up (D114). `ping-pong-tournament` is ported,
+without a golden test: on the virtual clock its players never stop
+(D115).
 
-- 10b: how golden tests feed keypresses. Perhaps `:keypress` reads stdin
-  whether or not it's a terminal (raw mode only when it is), so a test can
-  pipe bytes in.
-- 10c: the shape of an I/O error's reason, say `(:error (enoent "path"))`
-  after the fault reasons (D98).
-- Then port `ping-pong-tournament` (it needs `sleep`), and the device
-  examples (`key-catcher`, `divisions`, `tail-chase-game`, the window
-  managers).
+#### 10b. The terminal
+
+Raw mode, escape-sequence decoding, `connect :keypress`,
+`tty/screen/rows`, `tty/screen/cols`; stdin joins the `select()`. Still
+to work out: how golden tests feed keypresses. Perhaps `:keypress` reads
+stdin whether or not it's a terminal (raw mode only when it is, as
+ts-slight did), so a test can pipe bytes in.
+
+#### 10c. Files
+
+`slurp` and `spew`. Still to work out: the shape of an I/O error's
+reason, say `(:error (enoent "path"))` after the fault reasons (D98). Note
+that reading or writing a regular file never waits in `select()` (it's
+always "ready"), so in one thread these block the whole runtime, not just
+their process, while the disk works: fast for local files, but not what
+DESIGN's "blocking syscalls" says.
+
+Then the device examples (`key-catcher`, `divisions`, `tail-chase-game`,
+the window managers).
 
 ### 11. Port the examples
 
@@ -247,7 +248,7 @@ builtin. Beyond that:
 | `scratchpad` | nothing else (pure) |
 | `ping-pong`, `ring-benchmark`, `million-forks` | ported in step 7 (`examples/`, D97) |
 | `pub-sub`, `even-odd-actors`, `fixed-tournament` | ported in step 8 (D104) |
-| `ping-pong-tournament` | `sleep` (step 10) |
+| `ping-pong-tournament` | ported in step 10a, without a golden test (D115) |
 | `simple-db-server`, `game-of-life-actors` | `(recv)` used as an expression mid-function becomes receive functions; `simple-db-server`'s `db-client` does `(recv)` inside a lambda, so it needs restructuring |
 | `active-objects` | as above, plus drop `gensym` |
 | `key-catcher`, `divisions`, `tail-chase-game`, `window-manager`, `better-window-manager` | as above, plus devices (step 10) |

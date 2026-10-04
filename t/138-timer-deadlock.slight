@@ -1,0 +1,9 @@
+; Once the last timer has fired, a root still waiting for a message is
+; deadlocked, as before.
+
+(defun wait-for-right ()
+    (recv
+        (:right :done)))
+
+(after 10 $$ :wrong)
+(wait-for-right)

@@ -1,0 +1,9 @@
+fault in #<pid 2>: not an integer: 1.5 (sleep at t/139-timer-faults.slight:5:21)
+(error (not-an-int 1.5 "sleep at t/139-timer-faults.slight:5:21"))
+fault in #<pid 3>: not an integer: "soon" (after at t/139-timer-faults.slight:6:21)
+(error (not-an-int "soon" "after at t/139-timer-faults.slight:6:21"))
+fault in #<pid 4>: not a pid: someone (after at t/139-timer-faults.slight:7:21)
+(error (not-a-pid someone "after at t/139-timer-faults.slight:7:21"))
+other
+back
+()

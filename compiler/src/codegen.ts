@@ -972,6 +972,8 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'monitor':        fixed('rt_monitor', 1),
     'kill':           fixed('rt_kill', 1),
     'raise':          fixed('rt_raise', 1),
+    'after':          fixed('rt_after', 3),
+    'sleep':          fixed('rt_sleep', 1),
 };
 
 // The names a defun can't take.

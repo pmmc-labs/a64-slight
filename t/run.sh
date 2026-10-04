@@ -24,6 +24,9 @@ TIMEOUT=${TIMEOUT-60}
 
 # The collector poisons what it frees, so a pointer it missed fails loudly.
 export SLIGHT_POISON=1
+# Time starts at 0 and moves only when nothing can run, straight to the
+# next timer, so timer tests are exact and take no real time.
+export SLIGHT_CLOCK=virtual
 output() {
     $RUN "./$1" 2>&1 &
     pid=$!
