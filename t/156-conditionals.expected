@@ -1,0 +1,20 @@
+yes
+no
+()
+1
+2
+()
+("the symbol a" "the string b" "three" "a list" ())
+other
+#true
+#false
+#false
+#false
+#true
+#true
+(#true #false #true #false)
+done
+(ok 12)
+fault in #<pid 3>: not a boolean: 5 (cond test at t/156-conditionals.slight:50:32)
+(error (not-a-bool 5 "cond test at t/156-conditionals.slight:50:32"))
+()

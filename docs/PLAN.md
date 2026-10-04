@@ -4,8 +4,8 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–9 and 10a–10d done (under qemu, and natively on
-macOS: Stevan runs `make test` on his M2 Max after every step). 10e, HTTP
+**Progress:** steps 0–9 and 10a–10e done (under qemu, and natively on
+macOS: Stevan runs `make test` on his M2 Max after every step). 10f, HTTP
 in slight, is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
@@ -230,7 +230,24 @@ listener says which port it got, so tests can listen on 0 and run server
 and client in one program (D137); `(connect conn expr)` hands an accepted
 connection to a process of its own (D138).
 
-#### 10e. HTTP in slight
+#### 10e. Includes and the expanded forms (done)
+
+Before HTTP, two things Stevan asked for (D141–D143): `(@include
+"path")` and `(@include :name)`, expanded in place, each file once, with
+the prelude an implicit `(@include :prelude)`; and `if`, `when`, `case`,
+`and` and `or` back, made into `cond` by a new expander pass, with `and`
+and `or` short-circuiting.
+
+**To discuss before building: `defactor`.** Stevan's idea: one form for an
+actor whose body does some work and then ends in a `recv`, expanding to
+the two functions the `recv` rule needs now (one that does the work and
+tail-calls one whose body is just the `recv`; see `tail-chase-game`). The
+`recv` would have to come last. Open: in the expander or the compiler; how
+the expanded functions are named; whether more than one `recv` (a chain of
+states) makes sense; what a tail call to the actor from inside its `recv`
+means (back to the work, as now). Talk it through in depth first.
+
+#### 10f. HTTP in slight
 
 `lib/http.slight`, opt-in (D140): an HTTP/1.1 client and server on `:tcp`,
 without TLS. To settle when it starts:

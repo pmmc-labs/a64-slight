@@ -13,22 +13,12 @@
 (defun inc (n) (+ n 1))
 (defun dec (n) (- n 1))
 
-; On booleans only, and not short-circuiting: both sides are always
-; evaluated. Use cond to short-circuit.
+; On booleans only. (and and or aren't functions: the expander makes them
+; into cond, which stops at the first operand that decides.)
 (defun not (a)
     (cond
         (a      #false)
         (#true  #true)))
-
-(defun and (a b)
-    (cond
-        (a      (cond (b #true) (#true #false)))
-        (#true  (cond (b #false) (#true #false)))))
-
-(defun or (a b)
-    (cond
-        (a      (cond (b #true) (#true #true)))
-        (#true  (cond (b #true) (#true #false)))))
 
 ; --- folds --------------------------------------------------------------------
 

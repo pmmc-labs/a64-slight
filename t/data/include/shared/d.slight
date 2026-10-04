@@ -1,0 +1,3 @@
+(pprint :d-loaded)
+(defun from-d () :d)
+(defun d-fault (x) (car x))

@@ -1,4 +1,4 @@
-; with: lib/fs.slight
+(@include :fs)
 ; slurp and spew, from lib/fs.slight, on top of connect.
 
 (pprint (spew "build/t/148-fs-lib.txt" (list "alpha" "beta gamma" "" "delta")))

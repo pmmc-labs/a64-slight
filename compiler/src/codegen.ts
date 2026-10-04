@@ -82,7 +82,12 @@ type St = {
 
 const MAX_ARGS = 8;     // x0..x7
 
-const SPECIAL_FORMS: readonly string[] = ['defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'connect', 'recv', 'yield'];
+// The special forms, and those the expander turns into others (expand.ts),
+// which it leaves none of: neither kind can be a name.
+const SPECIAL_FORMS: readonly string[] = [
+    'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'connect', 'recv', 'yield',
+    'if', 'when', 'case', 'and', 'or', '@include',
+];
 
 // Takes down the frame that the prologue in compileFunction built.
 const EPILOGUE: Code = ['    mov  sp, x29', '    ldp  x29, x30, [sp], #16'];

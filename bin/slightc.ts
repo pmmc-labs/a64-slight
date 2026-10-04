@@ -16,17 +16,16 @@
 // failed toolchain step.
 
 import { spawnSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { accessSync, constants, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 
 import { compileProgram } from '../compiler/src/codegen.ts';
 import { CompileError } from '../compiler/src/errors.ts';
-import { read } from '../compiler/src/reader.ts';
-import { NIL, append, type Sexp } from '../compiler/src/sexp.ts';
+import { expandProgram, type Loader } from '../compiler/src/expand.ts';
 
 const RUNTIME_DIR = fileURLToPath(new URL('../runtime/', import.meta.url));
-const PRELUDE     = fileURLToPath(new URL('../lib/prelude.slight', import.meta.url));
+const LIB_DIR     = fileURLToPath(new URL('../lib', import.meta.url));
 const RUNTIME_SRC = ['rt.c', 'process.c', 'strings.c', 'numbers.c', 'tty.c', 'rt_asm.S'].map((f) => join(RUNTIME_DIR, f));
 const CFLAGS      = ['-O2', '-g', '-std=gnu11', '-Wall', '-Wextra', '-I', RUNTIME_DIR];
 
@@ -35,13 +34,17 @@ function usage(message: string): never {
     process.exit(2);
 }
 
-function readSource(file: string): string {
-    try {
-        return readFileSync(file, 'utf8');
-    } catch (e) {
-        usage(`couldn't read ${file}: ${(e as Error).message}`);
-    }
-}
+// Files, for the expander: a file is known by its real path.
+const loader: Loader = {
+    key: (path) => {
+        try {
+            return realpathSync(path);
+        } catch {
+            return null;
+        }
+    },
+    text: (key) => readFileSync(key, 'utf8'),
+};
 
 type Options = { readonly out: string | null; readonly asmOnly: boolean; readonly files: readonly string[] };
 
@@ -71,11 +74,18 @@ function compilerCommand(): readonly string[] {
 function main(): void {
     const opts = parseArgs(process.argv.slice(2), { out: null, asmOnly: false, files: [] });
     if (opts.files.length === 0) usage('no input files');
+    for (const file of opts.files) {
+        try {
+            accessSync(file, constants.R_OK);
+        } catch (e) {
+            usage(`couldn't read ${file}: ${(e as Error).message}`);
+        }
+    }
 
     let asm: string;
     try {
-        const forms = opts.files.reduce<Sexp>((acc, file) => append(acc, read(readSource(file), file)), NIL);
-        asm = compileProgram(forms, read(readSource(PRELUDE), 'lib/prelude.slight'));
+        const { prelude, program } = expandProgram(opts.files, LIB_DIR, loader);
+        asm = compileProgram(program, prelude);
     } catch (e) {
         if (!(e instanceof CompileError)) throw e;
         process.stderr.write(`${e.message}\n`);

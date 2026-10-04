@@ -1,0 +1,11 @@
+main-start
+d-loaded
+b-loaded
+a-loaded
+(a d)
+b
+(2 3)
+(ok ("first" "  second, indented" "" "last, with no newline at the end"))
+fault in #<pid 4>: not a cons: 5 (car at t/data/include/shared/d.slight:3:20)
+(error (not-a-cons 5 "car at t/data/include/shared/d.slight:3:20"))
+main-end

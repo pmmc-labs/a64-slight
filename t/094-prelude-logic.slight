@@ -8,5 +8,5 @@
 (pprint (or #false #true))
 (pprint (or #false #false))
 (pprint (or #true #true))
-; not short-circuiting: both sides run
+; and and or stop at the operand that decides
 (and (do (pprint 1) #false) (do (pprint 2) #true))

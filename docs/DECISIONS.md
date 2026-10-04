@@ -72,7 +72,8 @@ call graph that D8 needs. Also keeps the heap acyclic.
 
 **D12. `cond` is the only conditional.** *(User)* `if`, `when` and `case`
 are out. `and`/`or`/`not` are ordinary prelude functions (no
-short-circuit), like ts-slight's `and?`/`or?`.
+short-circuit), like ts-slight's `and?`/`or?`. (Revisited in D142: they're
+back, made into `cond` before compiling.)
 
 **D13. Booleans are the reserved symbols `#true` and `#false`.** *(User)*
 Rejected: integers 0/1.
@@ -960,3 +961,51 @@ reading from it.
 A client and a server in slight, on `:tcp`, opt-in like `lib/fs.slight`.
 Until connections can send chunks (D134), a request body that doesn't end
 in a newline can't be read.
+
+## Includes, and the expanded forms
+
+**D141. `@include`.** *(User.)* `(@include "path/file.slight")` splices in
+another file's forms where it stands, and `(@include :name)` a built-in
+subsystem, `lib/name.slight` (which may include others). Every program
+starts with an unwritten `(@include :prelude)`. Not a module system: a
+simple way to pull in what a program needs, now that files and the
+network are opt-in; modules can come with separate compilation, if it
+does. *(Default:)*
+- A path is relative to the file the `@include` is in (or absolute), and
+  positions name an included file by that path (`t/data/include/b.slight`),
+  or a built-in as `lib/name.slight`.
+- Only at the top level, where a program's definitions are.
+- A file is included once however often it's asked for, known by its real
+  path; one that's already in isn't read again. A file that includes
+  itself, directly or not, is an error that names the chain.
+- The prelude keeps its own namespace (D80): its definitions stay apart,
+  so a program can still define `range`. Other included files are part of
+  the program, as before.
+- `; with:` in golden tests is gone: a test says `(@include :test)`.
+  `slightc` still takes several files, expanded in turn, sharing what's
+  been included.
+
+**D142. `if`, `when`, `case`, `and` and `or` are back, as `cond`.** *(User;
+D12 was decided when they would have needed macros.)* The expander makes
+them into `cond` before compiling, as ts-slight's expander made them into
+`if`, so the compiler, the `recv` rule and the tail calls see only `cond`.
+`(if test then else)`, and `()` without an else; `when`, `()` when the
+test is `#false`; `case`, as ts-slight's: the topic is evaluated once and
+compared with each clause's value by `eq?`, a `#true` clause is the
+default, and without one, nothing matching gives `()`. Its topic is bound
+to a name with spaces in it, which the reader can't produce, so no
+runtime `gensym` is needed and no program can clash with it. `and` and
+`or` stop at the operand that decides *(User: "short-circuit")*.
+*(Default:)* every operand they test must be `#true` or `#false`, as any
+`cond` test must (Scheme would hand back the last operand as it is);
+`not` stays a prelude function; none of the five names can be bound or
+defined. A non-boolean test faults as `cond test at ...`, pointing at the
+test. Rejected: `unless`, and `case`'s `else` (`#true` does it).
+
+**D143. The expander is a pass of its own, after the reader.** *(Default;
+Stevan described this as the reader's job.)* `compiler/src/expand.ts`
+takes what the reader read, splices in includes (through a loader the
+driver gives it, so the pass itself does no I/O) and expands the five
+forms; the reader stays text to s-expressions. It knows just enough of
+the special forms to leave alone what isn't an expression: quoted data,
+`defun`'s and `lambda`'s parameters, and `recv`'s patterns.

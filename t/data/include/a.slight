@@ -1,0 +1,5 @@
+; included by t/155-include.slight
+(@include "b.slight")
+(@include "shared/d.slight")
+(pprint :a-loaded)
+(defun from-a () (list :a (from-d)))

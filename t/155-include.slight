@@ -1,0 +1,19 @@
+; (@include "path") splices in another file's forms where it stands; a
+; path is relative to the file it's in. A file is included once however
+; often it's asked for (d.slight is asked for twice, b.slight twice under
+; different names), and positions name the file a form came from.
+; (@include :name) is lib/name.slight: :fs twice is still once, and the
+; prelude is always in.
+
+(pprint :main-start)
+(@include "data/include/a.slight")
+(@include :fs)
+(@include :fs)
+(@include :prelude)
+(@include "./data/include/shared/../b.slight")
+(pprint (from-a))
+(pprint (from-b))
+(pprint (map inc (list 1 2)))
+(pprint (slurp "t/data/lines.txt"))
+(pprint (join (fork (d-fault 5))))
+:main-end

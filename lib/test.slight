@@ -1,8 +1,8 @@
 ; A TAP test library, after ts-slight's lib/Test.slight. Not part of the
-; prelude: compile it in when you want it (node bin/slightc.ts lib/test.slight
-; your-tests.slight). A test is a function of the counts so far, (n
-; failed), that prints its result and returns the new counts; run-tests
-; runs a list of them, prints the plan, and returns #true if all passed.
+; prelude: a program that wants it says (@include :test). A test is a
+; function of the counts so far, (n failed), that prints its result and
+; returns the new counts; run-tests runs a list of them, prints the plan,
+; and returns #true if all passed.
 ;
 ;     (run-tests (list
 ;         (ok (< 1 2) "one is less than two")

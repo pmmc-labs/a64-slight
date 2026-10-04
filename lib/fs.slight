@@ -1,7 +1,5 @@
 ; Files, the whole of one at a time, on top of connect: not part of the
-; prelude, so a program that wants them compiles this in (node
-; bin/slightc.ts lib/fs.slight your-program.slight; a golden test's first
-; line is then "; with: lib/fs.slight").
+; prelude, so a program that wants them says (@include :fs).
 ;
 ;     (slurp "notes.txt")                  (:ok ("first line" "second line"))
 ;     (spew "out.txt" (list "one" "two"))  (:ok ())

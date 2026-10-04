@@ -1,4 +1,4 @@
-; with: lib/test.slight
+(@include :test)
 (run-tests (list
     (ok (< 1 2) "one is less than two")
     (is (+ 1 1) 2 "addition")

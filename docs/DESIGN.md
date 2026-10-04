@@ -66,7 +66,7 @@ Booleans are the reserved symbols `#true` and `#false`.
 | `(defun name (params...) body...)` | Top level only. No local `defun`. |
 | `(lambda (params...) body...)` | A closure. Captures free variables **by value**. Always a *plain* function (see the `recv` rule). Can't refer to itself. |
 | `(let name expr)` | Binds `name` for the rest of the enclosing body. Only allowed directly in a body. As the last form of a body, its value is `expr`'s (as in ts-slight). |
-| `(cond (test body...) ...)` | The only conditional. `if`, `when` and `case` are gone. Each test must be `#true` or `#false`, or the process faults; so does running out of clauses. |
+| `(cond (test body...) ...)` | The conditional the others become (below). Each test must be `#true` or `#false`, or the process faults; so does running out of clauses. |
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
 | `(fork expr)` | Runs `expr` in a new process and returns its pid. |
@@ -77,8 +77,31 @@ Booleans are the reserved symbols `#true` and `#false`.
 Function bodies and clause bodies can hold several forms, as if wrapped in
 `do`.
 
-`and`, `or` and `not` are prelude functions on booleans, so `and` and `or`
-evaluate all their arguments. `cond` is the short-circuit form.
+**Expanded forms** (D142). The expander (`compiler/src/expand.ts`), after
+the reader and before the compiler, makes these into `cond`, as
+ts-slight's expander made them into `if`:
+
+| Form | Becomes |
+|------|---------|
+| `(if test then [else])` | `(cond (test then) (#true else))`; without an else, `()` |
+| `(when test body...)` | `(cond (test body...) (#true ()))` |
+| `(case topic (value body...) ...)` | the topic, once, compared with each value by `eq?`; a `#true` clause is the default, and without one, `()` when nothing matches |
+| `(and a b ...)` | `(cond (a (and b ...)) (#true #false))`; `(and)` is `#true` |
+| `(or a b ...)` | `(cond (a #true) (b #true) ... (#true #false))`; `(or)` is `#false` |
+
+`and` and `or` stop at the operand that decides, and every operand they
+test must be `#true` or `#false`, as any `cond` test must. They keep tail
+calls in tail position, to receive functions too. `not` is a prelude
+function. None of these names can be bound or defined.
+
+**Includes** (D141). `(@include "path/file.slight")` splices in another
+file's forms where it stands, the path relative to the file it's in;
+`(@include :name)` is the built-in `lib/name.slight` (`:fs`, `:test`).
+Only at the top level. A file is included once however often it's asked
+for, and a file that includes itself, directly or not, is an error. Every
+program starts with an unwritten `(@include :prelude)`, whose definitions
+the compiler keeps apart (D80). It's not a module system: everything is
+still one program, compiled whole.
 
 A function takes at most 8 parameters, one register each (see the
 register convention below). More could go on the stack later.
@@ -221,13 +244,13 @@ reply refs.
 
 ### Program structure (open)
 
-A program is one or more `.slight` files. All `defun`s are global and can
-call each other in any order. Every other top-level form, in order, becomes
-the body of the root process; a top-level `let` binds for the rest of the
-root process only, and `defun`s can't see it. The program's exit status
-follows the root process's Result. ts-slight's examples (`examples/`) are
-all written this way. Built this way in step 2; a program with no
-top-level expressions has the value `()`.
+A program is one or more `.slight` files, and whatever they include. All
+`defun`s are global and can call each other in any order. Every other
+top-level form, in order, becomes the body of the root process; a
+top-level `let` binds for the rest of the root process only, and `defun`s
+can't see it. The program's exit status follows the root process's Result.
+ts-slight's examples (`examples/`) are all written this way. Built this
+way in step 2; a program with no top-level expressions has the value `()`.
 
 ### Builtins and the prelude
 
@@ -276,7 +299,7 @@ program; it can only define functions.
 
 | | |
 |---|---|
-| numbers, booleans | `inc dec`; `not and or` (booleans only, both sides always evaluated) |
+| numbers, booleans | `inc dec`; `not` (booleans only; `and` and `or` are expanded forms) |
 | folds | `(fold/l init f xs)` with `(f acc x)`; `(fold/r init f xs)` with `(f x acc)` |
 | lists | `reverse length append sum product map`; `(filter f xs)` keeps what `f` says `#true` to, `(remove f xs)` drops it; `(take n xs)`, `(skip n xs)` stop at the end of the list; `(nth i xs)` and `(find f xs)` give `()` when there's nothing; `member?`; `(range start end)` is `start` up to but not including `end`; `(dotimes start end f)` |
 | association lists | `(assoc k v table)` adds `(k v)`; `(lookup k table)` gives the value or `:not-found` |
@@ -297,15 +320,15 @@ as a value. Builtins with a varying number (`list`, `concat`,
 
 **Tests in slight:** `lib/test.slight` is a TAP library after ts-slight's
 `lib/Test.slight`: `(run-tests (list (ok test msg) (is got expected msg)
-(diag msg)))`. It isn't part of the prelude; a golden test whose first line
-is `; with: lib/test.slight` gets it compiled in.
+(diag msg)))`. It isn't part of the prelude: a program that wants it says
+`(@include :test)`.
 
 **Files in slight:** `lib/fs.slight` has `(slurp path)`, giving
 `(:ok lines)` (without their newlines), and `(spew path lines)`, which
 writes each line and a newline, replacing what was there, giving
 `(:ok ())`; either gives `(:error (name path))` when it fails. They're a
 few lines each, on `connect`. Opt-in, like `lib/test.slight`, since not
-every program needs files (D129).
+every program needs files (D129): `(@include :fs)`.
 
 ### Strings
 
@@ -626,22 +649,24 @@ that's just a walk over every function.
 ### Passes
 
 1. **Read** text into s-expressions with source positions.
-2. **Check and expand** the 10 special forms. `let` becomes nested scopes,
+2. **Expand** (`expand.ts`): splice in what `@include` asks for, and make
+   `if`, `when`, `case`, `and` and `or` into `cond`.
+3. **Check and expand** the 10 special forms. `let` becomes nested scopes,
    `quote` becomes constants.
-3. **Resolve names** as locals, globals or builtins. Check arity on calls
+4. **Resolve names** as locals, globals or builtins. Check arity on calls
    to known functions.
-4. **Classify** functions as receive, state or plain (fixpoint over the
+5. **Classify** functions as receive, state or plain (fixpoint over the
    call graph), and enforce the `recv` rule.
-5. **Convert closures.** Each lambda's free variables become fields of its
+6. **Convert closures.** Each lambda's free variables become fields of its
    closure. Each `fork`/`connect` expression becomes a hidden entry
    function that takes its free variables as arguments.
-6. **Mark tail calls.**
-7. **Generate code**, Ghuloum-style: the accumulator is `x0`, temporaries
+7. **Mark tail calls.**
+8. **Generate code**, Ghuloum-style: the accumulator is `x0`, temporaries
    spill to the stack, no register allocation. Tagged values, a reduction
    check at entries and tail calls. Collection needs nothing from the
    compiler: `recv` already passes its function's arguments to the
    runtime, to restart it after waiting.
-8. **Emit data**: string literals, quoted constants, static closures, the
+9. **Emit data**: string literals, quoted constants, static closures, the
    symbol name table.
 
 Expect 1,500–2,500 lines for a first version.
