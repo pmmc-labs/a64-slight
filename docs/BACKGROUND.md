@@ -135,39 +135,155 @@ What survived:
 The spike predicted this: with a native stack per process, the
 asynchronous convention collapses into the platform's synchronous one.
 
-### Other targets: x86-64 and RISC-V
+### Other targets: x86-64 and RISC-V (revised Oct 2026, after 10e)
 
 What's AArch64-specific: `codegen.ts` emits AArch64 text directly (about
-140 emitting lines and 35 mnemonics, in 1,318 lines), `rt_asm.S` (126
-lines: `rt_switch`, `rt_trampoline`, `rt_apply`), `asm.h` (57), and the
-saved-register layout (`rt_ctx_t`, and `start` in `process.c`). The rest
-carries over: the reader, `classify.ts`, the code generator's structure
-(the value in an accumulator, temporaries in frame slots, the tagging),
-about 1,270 lines of C runtime including the collector, and every golden
-test. The tests are the real asset: a backend is done when the same
-outputs come out.
+170 instruction lines and 38 mnemonics, over some 25 functions, in 1,382
+lines), `rt_asm.S` (126 lines: `rt_switch`, `rt_trampoline`,
+`rt_apply`), `asm.h` (57), the saved registers (`rt_ctx_t` and
+`RT_CTX_*` in `rt.h`), and three lines of `start` in `process.c`. That's
+all. The C runtime (2,346 lines, with the collector, devices and
+sockets) compiles for x86-64 unchanged and without warnings, and the
+reader, the expander, `classify.ts`, the code generator's structure and
+every golden test carry over. The tests are the real asset: a backend is
+done when the same outputs come out, and they should, unchanged. Frames
+are the same size on both (16 bytes of linkage), reductions count
+function entries, allocations are the same sizes, and no output shows an
+address.
 
 - **First, for either target (about 1 session):** separate the code
-  generator's structure from its instruction text, behind a small target
-  interface: slot loads and stores, tag tests, compare-and-branch, calls,
-  tail calls, allocation, prologue and epilogue. Worth doing before the
-  self-hosting port anyway.
-- **x86-64 (2–3 sessions after that).** System V passes only six
-  arguments in registers, against our eight, so slight-to-slight calls
-  would use our own registers and only calls into C the System V ones.
-  Two-operand instructions; pin `r15` (say) for the process. Overflow is
-  easier (`jo`). `idiv` traps on zero, where AArch64's `sdiv` returns 0,
-  but the compiler checks first anyway. Cloud sessions run on x86-64
-  Linux, so tests would run natively, without qemu.
-- **RISC-V, RV64 (about 2 sessions).** The closest cousin: 32 registers,
-  load/store, arguments in `a0`–`a7` (exactly eight, as D47 has), and
-  `s11` could be the process register. No condition flags, so an
-  overflow check costs about three more instructions per operation; no
-  `csel` in the base ISA (branches, or the Zicond extension); 12-bit
-  immediates, so longer constant sequences. Tested with `qemu-riscv64`.
+  generator's structure from its instruction text, behind a target
+  interface at the level of code shapes: the prologue and entry checks,
+  slot loads and stores, compare to a boolean, branch unless a cons,
+  allocation, arithmetic and division, calls, tail calls and calls
+  through closures, and calling the runtime. (A virtual instruction set
+  that each target prints would be more machinery.) Two
+  assumptions in today's code don't hold on x86, and the interface has to
+  absorb them: that the accumulator is also the first argument (`x0` is
+  both, and about a dozen calls into the runtime rely on it; they become
+  one "call the runtime with these operands"), and that a two-part test
+  can leave one flag (`IS_CONS` and `bool?` use `ccmp`). The check is
+  cheap and strict: the generated `.S` of every golden test and example
+  mustn't change by a byte. Worth doing before the self-hosting port
+  anyway.
+- **x86-64 (about 2 sessions after that).** The runtime's half is about
+  half a session: `rt_switch` (`rbx`, `rbp`, `r12`–`r15`, `rsp`),
+  `start` putting the trampoline's address on the new stack (x86's `ret`
+  takes it from there, not from a link register), `rt_apply`, `asm.h`,
+  and a target option for `slightc`, `make` and `run.sh`. The code
+  generator's second target is about 300 lines, debugged against the
+  golden tests. A register map, to settle next to D47: `rax` the
+  accumulator, the result, and the closure at entry; `rdi`, `rsi`,
+  `rdx`, `rcx`, `r8`, `r9` the first six arguments (System V's, so calls
+  into C line up, and no runtime function takes more than six) and
+  `r10`, `r11` the last two; `r15` the process; `rbx` and `r12`–`r14`
+  scratch, which is safe because compiled code is only entered from
+  `rt_trampoline`, and `rt_switch` saves them. Intel syntax: clang
+  assembles it with `rt.h`'s constants in memory operands, for ELF and
+  Mach-O (checked). Easier than it looked: the entry checks need no
+  scratch register (`cmp rsp, [r15 + RT_PROC_STACK_LIMIT]`); a closure
+  is called through memory (`call qword ptr [rax + RT_CLOSURE_CODE]`);
+  `*` is `sar`, `imul`, `jo`; `idiv`'s remainder is already the tagged
+  remainder, and its trap on −2⁶³ ÷ −1 can't happen, since a tagged
+  divisor is even; `LOADADDR` is one `lea [rip + sym]` on both formats.
+  Harder: two-operand instructions, no `csel` or `ccmp`, all nine
+  caller-saved registers taken, and a 16-byte stack alignment the
+  hardware doesn't check, so a mistake crashes deep in libc. Stevan's M2
+  Max could run the x86-64 build under Rosetta 2 (`cc -arch x86_64`; not
+  tried).
+- **RISC-V, RV64 (about 2 sessions after the interface).** The closest
+  cousin: 32 registers, load/store, arguments in `a0`–`a7` (exactly
+  eight, as D47 has), and `s11` could be the process register. No
+  condition flags, so an overflow check costs about three more
+  instructions per operation; no `csel` in the base ISA (branches, or the
+  Zicond extension); 12-bit immediates, so longer constant sequences.
+  Tested with `qemu-riscv64`.
 - **A 32-bit target** (Cortex-M, RV32) is a bigger change: 31-bit
   integers, 4-byte words and 8-byte cells change the value layout and the
   runtime's offsets, not just the instruction text.
+
+**What native x86 would save the cloud sessions: little.** `make golden`
+takes 3m07s there, and about 1.2 s of each test is clang compiling the
+whole runtime at `-O2`; running under qemu takes about 20 ms a test, with
+`million-forks` (3.2 s) the exception. Building the runtime once per run
+would save most of the three minutes, and needs no new target.
+
+### Compiling to C instead (discussed Oct 2026)
+
+Stevan asked whether emitting C would be easier than a second assembly
+backend, and what it would cost in speed. The design suits it unusually
+well, for the reason it suits WebAssembly: the collector runs only at
+`recv`, where the roots are the receive function's arguments (D105), so
+it never scans a stack, and clang can keep values wherever it likes. Most
+compilers that emit C need a shadow stack for their roots.
+
+Measured by hand-writing the C a backend would emit for `fib` (the same
+tags, checks and slow paths into the runtime) and compiling it with
+clang 18 at `-O2`:
+
+- **Faster code.** `fib`'s recursive path is 33 instructions on AArch64
+  (31 on x86-64), where today's generator emits 59, and about 9 loads and
+  stores where it does 21. Clang keeps values in registers; today's
+  generator spills every temporary to a frame slot, by design (no
+  register allocation). Not timed: qemu's timings mean nothing, so that
+  needs the M2.
+- **Tail calls hold, with conditions.** `__attribute__((musttail))`
+  (clang since 13, GCC since 15) guarantees them, at `-O0` too, but only
+  between functions with the same signature, so every slight function
+  would take the same eight parameters. On RISC-V, clang 18 crashes on a
+  `musttail` call once arguments go on the stack, so the signature has
+  to fit in eight registers: the arguments only, with the process taken
+  from the runtime's `rt_current` and the closure passed beside it, in
+  the process or a global the callee reads at entry. Unused arguments
+  cost nothing: left undefined, they're whatever is in the register. On
+  x86-64 the seventh and eighth go on the stack.
+- **Static data carries over.** Quoted lists, strings and static
+  closures become C initializers, tagged pointers included
+  (`(V)&q1[2] + 1` becomes a relocation with an addend, on ELF and
+  Mach-O).
+- **Compiling is slower.** Clang takes about 4,000 lines of such C a
+  second, at `-O1` or `-O2`. A program and the prelude would be 1,500 to
+  2,000 lines (`fib` is 4,743 lines of assembly today), so about half a
+  second more per program, and a few seconds for the self-hosted
+  compiler.
+
+**What it gains:**
+
+- One backend for every 64-bit target clang has. x86-64 and RISC-V each
+  need only `rt_switch` and the trampoline (about 30 lines of assembly)
+  and the driver's settings: about half a session each.
+- A simpler code generator to port in step 12: no frame slots to count,
+  no immediates to encode (`loadWord`, `addImm`, `closureField`'s
+  ranges), no Mach-O and ELF differences, and `rt_apply` in C.
+- Readable output, and `#line` directives would let lldb and gdb step
+  through the `.slight` source.
+- A much cheaper WASI target: clang does the structured control flow,
+  and with `-mtail-call` a `musttail` call becomes `return_call`
+  (checked). Stack switching stays the hard part.
+
+**What it costs:**
+
+- The output leans on `musttail`, an extension, and on the generated C
+  staying clear of undefined behaviour: overflow checks through
+  `__builtin_add_overflow` and its siblings (which compile to `adds` and
+  `b.vs`, or `add` and `jo`), and floats read with `memcpy` or
+  `-fno-strict-aliasing`.
+- Less control of frames. The stack check still compares the frame's
+  address with the limit (D48), but clang decides how big frames are;
+  the 64 KB of headroom covers it.
+- A playground that compiles in the browser (below) would need clang in
+  the page, or a direct `.wasm` backend after all.
+- It rewrites the emitting half of `codegen.ts` (about 1,000 lines), D47
+  gives way to the one C signature, and the project stops writing its
+  own machine code: still native, but through clang.
+
+**Cost, roughly:** 2.5 to 3 sessions to reach today's state on AArch64
+(about 2 for the code generator, the rest for the runtime's side, the
+driver, and the unit tests that read assembly text), then about half a
+session each for x86-64 and RISC-V. That's about what x86-64 alone costs
+as a second assembly backend, for every target and faster code. If it
+happens, it should happen before step 12, so that the compiler isn't
+ported to slight twice.
 
 ### Multiple cores
 
@@ -348,6 +464,8 @@ flow, the inverted waiting loop, stack switching). About 1 session for
 the target interface (as above), 4–6 for a WASI target passing the
 golden tests other than sockets, and 2–3 more for a browser host with
 xterm.js.
+Compiling to C (above) would take most of the code generation off the
+WASI target.
 
 Sources: [stack switching](https://github.com/WebAssembly/stack-switching),
 [proposal phases](https://github.com/webassembly/proposals),
