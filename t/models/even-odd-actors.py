@@ -43,9 +43,8 @@ def run(p):
             p.blocked = True; p.state = 'waiting'; return
 
 def actor(me, kind, other_tag, reply):
-    # is-it-<kind>?: print, then wait, reply, loop
+    # is-it-<kind>?: wait, reply, loop
     while True:
-        out.append(f'running-is-it-{kind}?')
         msg = yield 'recv'
         out.append(show([f'is-it-{kind}?', 'got', msg]))
         if msg[0] != ('IS-EVEN?' if kind == 'even' else 'IS-ODD?'):
