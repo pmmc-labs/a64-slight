@@ -1,0 +1,7 @@
+; With no arguments, @ARGV is (), so a program can fall back to a default,
+; as ts-slight's fib did.
+
+(pprint @ARGV)
+(cond
+    ((nil? @ARGV) 27)
+    (#true        (string->int (car @ARGV))))

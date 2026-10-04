@@ -7,11 +7,12 @@
 ; stop (D110). Run it by hand:
 ;
 ;     node bin/slightc.ts -o build/ping-pong-tournament examples/ping-pong-tournament.slight
-;     build/ping-pong-tournament       # qemu-aarch64 build/... on x86
+;     build/ping-pong-tournament 10 100    # games, ms; qemu-aarch64 build/... on x86
 ;
 ; Changes: a (recv) in the middle of a function became receive functions;
-; case, if and when became cond and recv patterns; the sizes are fixed
-; (no @ARGV) and there's no timing (no time-it); a game is forked by name;
+; case, if and when became cond and recv patterns; the sizes go through
+; string->int, since @ARGV holds strings, and have defaults; there's no
+; timing (no time-it); a game is forked by name;
 ; join gives (:ok value); the (yield ...) around each loop is gone, and so
 ; is the player's unused max-delay; sys/io/print-ln became tty/write.
 
@@ -88,8 +89,8 @@
                (cadr (cadr (cadr r))))))
         results))
 
-(let num-games     10)
-(let game-duration 100)
+(let num-games     (if (nil? @ARGV) 10  (string->int (car  @ARGV))))
+(let game-duration (if (nil? @ARGV) 100 (string->int (cadr @ARGV))))
 
 (tty/write "Running " num-games " for " game-duration \n)
 

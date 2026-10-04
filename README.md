@@ -57,8 +57,8 @@ collector that runs only when an actor waits for a message. A million
 processes passing a message down a chain run in a few seconds. Timers,
 the terminal (`connect :keypress`), files (`connect :fs/read`, where a
 file is a process-like device) and TCP sockets (`connect :tcp`,
-`connect :tcp/listen`) work too, and so do `(@include ...)` and `if`,
-`when`, `case`, `and` and `or`, which an expander makes into `cond`.
+`connect :tcp/listen`) work too, and so do `(@include ...)`, `@ARGV`, and
+`if`, `when`, `case`, `and` and `or`, which an expander makes into `cond`.
 Next: HTTP, written in slight on top of TCP. See:
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): the design

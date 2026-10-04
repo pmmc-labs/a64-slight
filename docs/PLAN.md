@@ -236,7 +236,8 @@ Before HTTP, two things Stevan asked for (D141–D143): `(@include
 "path")` and `(@include :name)`, expanded in place, each file once, with
 the prelude an implicit `(@include :prelude)`; and `if`, `when`, `case`,
 `and` and `or` back, made into `cond` by a new expander pass, with `and`
-and `or` short-circuiting.
+and `or` short-circuiting. Then `@ARGV` (D144), for the text editor: the
+program's arguments, as the top level's parameter.
 
 **To discuss before building: `defactor`.** Stevan's idea: one form for an
 actor whose body does some work and then ends in a `recv`, expanding to

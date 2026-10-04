@@ -1482,13 +1482,31 @@ void rt_run(void) {
     }
 }
 
-int main(void) {
+// @ARGV: the program's arguments after its name, as a list of strings in
+// the root's heap. The root's entry, slight_main, takes it as its one
+// parameter, so only the top level sees it (D144).
+static rt_value_t arguments(rt_proc_t *root, int argc, char **argv) {
+    rt_value_t list = RT_NIL;
+    rt_current = root;
+    for (int i = argc - 1; i > 0; i--) {
+        rt_value_t  s    = rt_new_string(argv[i], strlen(argv[i]), "@ARGV");
+        rt_value_t *cell = rt_alloc(16, "@ARGV");
+        cell[0] = s;
+        cell[1] = list;
+        list    = (rt_value_t)cell | RT_TAG_LIST;
+    }
+    rt_current = NULL;
+    return list;
+}
+
+int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
     poison = getenv("SLIGHT_POISON") != NULL;
     const char *mode = getenv("SLIGHT_CLOCK");
     virtual_clock = mode && strcmp(mode, "virtual") == 0;
-    rt_new_process((rt_code_t)slight_main, RT_NIL);
+    rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);
+    p->args[0]   = arguments(p, argc, argv);
     rt_run();
     const entry_t *root = &procs[1];
     if (root->proc) {

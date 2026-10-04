@@ -1,11 +1,12 @@
-; fib, from ts-slight's examples. Changes: if became cond; there's no
-; @ARGV or time-it, so n is fixed.
+; fib, from ts-slight's examples. Changes: if became cond; @ARGV holds
+; strings, so n goes through string->int; n is 25 by default, not 27;
+; there's no time-it.
 
 (defun fib (n)
     (cond
         ((< n 2) n)
         (#true   (+ (fib (- n 1)) (fib (- n 2))))))
 
-(let n 25)
+(let n (if (nil? @ARGV) 25 (string->int (car @ARGV))))
 (tty/write "fib(" n ") = ")
 (fib n)

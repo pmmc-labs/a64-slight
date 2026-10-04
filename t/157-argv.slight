@@ -1,0 +1,15 @@
+; args: one 2 * héllo
+; @ARGV: the program's arguments after its name, as strings (D144). It's
+; the top level's parameter, so a defun gets it only as an argument, but a
+; lambda or a fork at the top level captures it as it would any local. The
+; * shows that t/run.sh doesn't glob, and héllo that bytes pass through.
+
+(defun how-many (args) (length args))
+
+(pprint @ARGV)
+(pprint (how-many @ARGV))
+(pprint (string->int (cadr @ARGV)))
+(pprint (str-len (cadddr @ARGV)))
+(pprint ((lambda () (car @ARGV))))
+(pprint (join (fork (cdr @ARGV))))
+:done

@@ -26,6 +26,12 @@ If you read nothing else, read this.
   every other top-level form, in order, is the root process's body.
   Several files can go on the command line, and together they're one
   program.
+- **`@ARGV`** is the program's arguments, as a list of strings, but only
+  the top level can see it. Internally the top-level forms are the body
+  of a function, and `@ARGV` is that function's parameter. A `defun` that
+  names it is a compile error, so pass it to the functions that need it.
+  A lambda or a `fork` at the top level captures it like any other local.
+  A number arrives as a string: `(string->int (car @ARGV))`.
 - The runtime prints the root's value and a newline once nothing else can
   run. That isn't when the root ends: other processes keep going after
   it, and the root's value comes out last.
@@ -371,8 +377,7 @@ as ts-slight's `Test.slight` was:
 
 - **Reflection and evaluation**: `gensym`, `slight/parse`, `slight/eval`
   and `slight/eval-in-top-level`. Compilation is ahead of time only.
-- **System calls**: `syscall`, `localtime`, `time-it`, `time-it/end` and
-  `@ARGV`.
+- **System calls**: `syscall`, `localtime`, `time-it` and `time-it/end`.
 - **Messages**: `msg`, and `recv` as an expression.
 - **Predicates**: `true?`, `false?`, `builtin?`, `list?`, `atom?`,
   `literal?`, `callable?` and `type-of`.

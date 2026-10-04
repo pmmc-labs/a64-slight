@@ -1,8 +1,9 @@
 ; ring-benchmark, from ts-slight's examples: a chain of processes passes a
 ; count along it, and the last one reports back. Changes: (recv) in the
 ; middle of a function became receive functions; if became cond; the
-; (yield ...) around each loop is gone (preemption does that now); there's
-; no time-it or @ARGV, so the sizes are fixed and it reports each round.
+; (yield ...) around each loop is gone (preemption does that now); the
+; sizes go through string->int, since @ARGV holds strings, and default to
+; less; there's no time-it, so it reports each round.
 
 (defun test-actor (reply-to next)
     (recv
@@ -40,8 +41,8 @@
             (send-ping pid (- count 1)))))
 
 (let self $$)
-(let actor-count 1000)
-(let ping-count 3)
+(let actor-count (if (nil? @ARGV) 1000 (string->int (car  @ARGV))))
+(let ping-count  (if (nil? @ARGV) 3    (string->int (cadr @ARGV))))
 
 (tty/write "INIT with " actor-count " actors, sending " (+ ping-count 1) " pings" \n)
 (let last (setup actor-count self (fork (test-actor self ()))))

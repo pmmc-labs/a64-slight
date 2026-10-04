@@ -43,6 +43,8 @@ Same reader as ts-slight (see `reference/ts-slight/src/parser.ts` and
 - `'x` is `(quote x)`
 - `;` starts a comment
 - `$$` (self) and `^$$` (parent)
+- `@ARGV`, the program's arguments, at the top level only (Program
+  structure, below)
 - ts-slight's bare constants `\n`, `\r`, `\t`, `\e` (strings)
 
 ### Types
@@ -253,6 +255,13 @@ top-level `let` binds for the rest of the root process only, and `defun`s
 can't see it. The program's exit status follows the root process's Result.
 ts-slight's examples (`examples/`) are all written this way. Built this
 way in step 2; a program with no top-level expressions has the value `()`.
+
+**`@ARGV`** (D144) is the program's arguments after its name, as a list of
+strings (`()` with none). The top-level forms are the body of a function,
+`slight_main`, and `@ARGV` is its one parameter: the top level sees it
+like any local (a lambda or a `fork` there captures it), and a `defun`
+doesn't, so pass it to the functions that need it. It can't be bound or
+defined. A number comes as a string: `(string->int (car @ARGV))`.
 
 ### Builtins and the prelude
 

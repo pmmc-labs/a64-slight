@@ -3,8 +3,9 @@
 ; other result prints a FAIL.
 ;
 ; Changes: a (recv) in the middle of a function became receive functions;
-; case, if and when became cond and recv patterns; the sizes are fixed
-; (no @ARGV) and there's no timing (no time-it); a game is forked by name,
+; case, if and when became cond and recv patterns; the sizes go through
+; string->int, since @ARGV holds strings, and have defaults; there's no
+; timing (no time-it); a game is forked by name,
 ; since a function that waits in recv can't be passed around as a value;
 ; join gives (:ok value); the (yield ...) around each loop is gone.
 
@@ -72,8 +73,8 @@
                 (+ failures 1))))
         results))
 
-(let num-games 100)
-(let rallies   1000)
+(let num-games (if (nil? @ARGV) 100  (string->int (car  @ARGV))))
+(let rallies   (if (nil? @ARGV) 1000 (string->int (cadr @ARGV))))
 
 (tty/write "tournament: " num-games " games x " rallies " rallies" \n)
 

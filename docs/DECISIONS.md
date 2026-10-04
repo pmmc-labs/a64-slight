@@ -721,7 +721,8 @@ deadlocked, and the program doesn't end while a timer is pending.
 
 **D115. `ping-pong-tournament` is ported, without a golden test.**
 *(Default, under D84.)* Receive functions instead of a `(recv)`
-mid-function; fixed sizes instead of `@ARGV`; no `time-it`; the player's
+mid-function; fixed sizes instead of `@ARGV` (revisited in D144: the
+sizes come from `@ARGV` again, with defaults); no `time-it`; the player's
 unused `max-delay` is gone. It runs on the real clock only (D110): ten
 games of 100 ms each come to about 80,000 messages under qemu.
 
@@ -1010,3 +1011,24 @@ driver gives it, so the pass itself does no I/O) and expands the five
 forms; the reader stays text to s-expressions. It knows just enough of
 the special forms to leave alone what isn't an expression: quoted data,
 `defun`'s and `lambda`'s parameters, and `recv`'s patterns.
+
+**D144. `@ARGV` is the top level's parameter.** *(User, after Claude
+proposed `@ARGV` readable anywhere and then this.)* The program's
+arguments after its name come as a list of strings, `()` with none. The
+top-level forms are compiled as the body of `slight_main`, so `@ARGV` is
+that function's one parameter: the runtime's `main` builds the list in
+the root's heap and starts the root with it, as `fork` starts a process
+with its copied values. Only the top level sees it; a `defun` that names
+it is a compile error saying to pass it on, as a top-level `let` isn't
+seen there either, and a lambda or a `fork` at the top level captures it
+as any local. *(Default:)* the name is ts-slight's, and the `@` keeps it
+from clashing with a program's names; it can't be bound or defined.
+Strings, not numbers: ts-slight's examples used `(car @ARGV)` as a number,
+but guessing what an argument is meant to be is the program's business
+(`string->int`). Golden tests pass arguments with a line `; args: words`.
+The ported examples that had `@ARGV` take their sizes from it again, with
+the fixed sizes as defaults. Rejected: `@ARGV` readable anywhere, like
+`$$` (a hidden global, and each read would have to build a copy in the
+reading process's heap, since nothing may point from one heap into
+another); and a `(defun main (args) ...)` the compiler looks for (a
+second shape of program, and a name treated specially).

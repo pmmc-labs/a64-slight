@@ -21,7 +21,9 @@
 // defun, lambda, apply, calls, and processes: fork, send, recv, yield, $$
 // and ^$$, with the recv rule (classify.ts) enforced here. Floats, strings and closures are boxes;
 // literals, and closures that capture nothing, are static data. The
-// top-level forms that aren't defuns are the body of slight_main.
+// top-level forms that aren't defuns are the body of slight_main, whose one
+// parameter is @ARGV, the program's arguments: so only they can see it
+// (D144).
 //
 // The prelude (lib/prelude.slight) is compiled with every program. Its
 // functions are in their own namespace: a program can define a function
@@ -117,7 +119,8 @@ export function compileProgram(forms: Sexp, prelude: Sexp = NIL): string {
         }, [[], st]);
     const [preludeCode, st1] = compileAll(preludeDefuns, preludeFns, 'prelude', st0);
     const [code, st2]        = compileAll(defuns, fns, 'user', st1);
-    const main: Defun = { name: { t: 'sym', name: 'the top level', pos: null }, params: [], body: list(...top, ...(top.length === 0 ? [NIL] : [])), pos: null };
+    const argv: Sym   = { t: 'sym', name: '@ARGV', pos: null };
+    const main: Defun = { name: { t: 'sym', name: 'the top level', pos: null }, params: [argv], body: list(...top, ...(top.length === 0 ? [NIL] : [])), pos: null };
     const [mainCode, st3] = compileFunction('slight_main', main, [], fns, 'other', st2);
 
     return flatten([
@@ -324,10 +327,10 @@ function checkLet(form: Pair): [Sym, Sexp] {
     return [name, expr];
 }
 
-// Names that can't be bound or defined: #true, #false, $$, ^$$ and the
-// special forms.
+// Names that can't be bound or defined: #true, #false, $$, ^$$, @ARGV and
+// the special forms.
 function checkBindable(name: Sym): void {
-    if (RESERVED_SYMBOLS.includes(name.name) || SPECIAL_FORMS.includes(name.name) || name.name === '$$' || name.name === '^$$') {
+    if (RESERVED_SYMBOLS.includes(name.name) || SPECIAL_FORMS.includes(name.name) || ['$$', '^$$', '@ARGV'].includes(name.name)) {
         throw new CompileError(`can't bind ${name.name}`, name.pos);
     }
 }
@@ -365,6 +368,7 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     if (x.name === '#false') return ['    mov  x0, #RT_FALSE', st];
     const si = lookup(cx.env, x.name);
     if (si !== null) return [`    ldr  x0, ${slot(si)}    // ${x.name}`, st];
+    if (x.name === '@ARGV') throw new CompileError('@ARGV is only seen at the top level: pass it to the functions that need it', x.pos);
     const constant = CONSTANTS[x.name];
     if (constant !== undefined) return compileExpr(constant, cx, st);
     const fn = lookupFn(cx.fns, x.name);

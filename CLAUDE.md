@@ -31,7 +31,8 @@ size (`runtime/tty.c`). Files: `connect :fs/read` (`:fs/write`,
 :tcp/listen port` open sockets as devices too, waited for in `select()`,
 and `(connect conn expr)` hands an accepted connection to a process.
 `(@include "path")` and `(@include :name)` splice in other files (each
-once), and `if`, `when`, `case`, `and` and `or` are made into `cond`
+once); `@ARGV`, the program's arguments, is the top level's parameter
+(D144); and `if`, `when`, `case`, `and` and `or` are made into `cond`
 (`compiler/src/expand.ts`, a pass between the reader and the compiler).
 Fifteen of ts-slight's examples are ported (`examples/`; all but
 `ping-pong-tournament` are golden tests). `make test` passes under qemu on
@@ -140,7 +141,7 @@ works and has the runtime pieces to borrow.
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c` |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`) |
 | `examples/` | ts-slight's examples, ported; each with a `.expected` is a golden test |
-| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin. |
+| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, and `; args: words` its arguments. |
 | `build/` | Output (ignored) |
 
 ## Commands

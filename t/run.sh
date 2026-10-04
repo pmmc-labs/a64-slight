@@ -5,7 +5,8 @@
 # "exit: N" if it exits with N other than 0. A line "; stdin: bytes" is
 # what the test reads from stdin (keys, say), written
 # with printf %b's escapes: \n, \r, \t, \\, and \0nnn in octal (\033 is
-# ESC); without one, stdin is empty.
+# ESC); without one, stdin is empty. A line "; args: words" gives the
+# program its arguments, split at spaces.
 # $RUN prefixes the binary: qemu-aarch64 when cross-compiling, empty when native.
 cd "$(dirname "$0")/.." || exit 2
 case "$(uname -m)" in
@@ -30,7 +31,9 @@ export SLIGHT_POISON=1
 # next timer, so timer tests are exact and take no real time.
 export SLIGHT_CLOCK=virtual
 output() {
-    $RUN "./$1" <"$2" 2>&1 &
+    set -f                                  # $3 is split into arguments, not globbed
+    $RUN "./$1" $3 <"$2" 2>&1 &
+    set +f
     pid=$!
     ( sleep "$TIMEOUT" && kill "$pid" && echo "killed after ${TIMEOUT}s" >&2 ) >/dev/null 2>&1 &
     watchdog=$!
@@ -48,7 +51,7 @@ for src in "$@"; do
     if ! node bin/slightc.ts -o "$bin" "$src"; then
         echo "FAIL $name (compile)"
         fail=1
-    elif output "$bin" "$bin.stdin" | diff -u "${src%.slight}.expected" -; then
+    elif output "$bin" "$bin.stdin" "$(sed -n 's/^; args: //p' "$src")" | diff -u "${src%.slight}.expected" -; then
         echo "ok   $name"
     else
         echo "FAIL $name"
