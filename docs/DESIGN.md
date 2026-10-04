@@ -86,12 +86,14 @@ ts-slight's expander made them into `if`:
 | `(if test then [else])` | `(cond (test then) (#true else))`; without an else, `()` |
 | `(when test body...)` | `(cond (test body...) (#true ()))` |
 | `(case topic (value body...) ...)` | the topic, once, compared with each value by `eq?`; a `#true` clause is the default, and without one, `()` when nothing matches |
-| `(and a b ...)` | `(cond (a (and b ...)) (#true #false))`; `(and)` is `#true` |
-| `(or a b ...)` | `(cond (a #true) (b #true) ... (#true #false))`; `(or)` is `#false` |
+| `(and a b ... z)` | `(cond (a (and b ... z)) (#true #false))`; `(and z)` is `z`, `(and)` is `#true` |
+| `(or a b ... z)` | `(cond (a #true) (b #true) ... (#true z))`; `(or z)` is `z`, `(or)` is `#false` |
 
-`and` and `or` stop at the operand that decides, and every operand they
-test must be `#true` or `#false`, as any `cond` test must. They keep tail
-calls in tail position, to receive functions too. `not` is a prelude
+`and` and `or` stop at the operand that decides. As in Scheme, the last
+operand isn't tested, and is what they give if they get to it
+(`(and #true 5)` is 5); the others are `cond` tests, so each must be
+`#true` or `#false`. They keep tail calls in tail position, to receive
+functions too. `not` is a prelude
 function. None of these names can be bound or defined.
 
 **Includes** (D141). `(@include "path/file.slight")` splices in another

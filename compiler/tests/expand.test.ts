@@ -47,21 +47,22 @@ test('a case topic has a name no program can write', () => {
     assert.notEqual(show(read(name, 'x')), name);
 });
 
-test('and and or become cond, stopping at the first operand that decides', () => {
+test('and and or become cond, stopping at the first operand that decides; the last is not tested', () => {
     assert.deepEqual(ex('(and)'), ['#true']);
     assert.deepEqual(ex('(or)'), ['#false']);
-    assert.deepEqual(ex('(and a)'), ['(cond (a #true) (#true #false))']);
-    assert.deepEqual(ex('(and a b c)'), ['(cond (a (cond (b (cond (c #true) (#true #false))) (#true #false))) (#true #false))']);
-    assert.deepEqual(ex('(or a b c)'), ['(cond (a #true) (b #true) (c #true) (#true #false))']);
+    assert.deepEqual(ex('(and a)'), ['a']);
+    assert.deepEqual(ex('(or a)'), ['a']);
+    assert.deepEqual(ex('(and a b c)'), ['(cond (a (cond (b c) (#true #false))) (#true #false))']);
+    assert.deepEqual(ex('(or a b c)'), ['(cond (a #true) (b #true) (#true c))']);
 });
 
 test('expansion goes all the way down, and into what an expansion makes', () => {
     assert.deepEqual(ex('(f (if (and a b) (when c d) e))'), [
-        '(f (cond ((cond (a (cond (b #true) (#true #false))) (#true #false)) (cond (c d) (#true ()))) (#true e)))',
+        '(f (cond ((cond (a b) (#true #false)) (cond (c d) (#true ()))) (#true e)))',
     ]);
     assert.deepEqual(ex('(defun f (x) (if x 1 2))'), ['(defun f (x) (cond (x 1) (#true 2)))']);
-    assert.deepEqual(ex('(lambda (x) (or x y))'), ['(lambda (x) (cond (x #true) (y #true) (#true #false)))']);
-    assert.deepEqual(ex('(cond ((and a b) (if c 1 2)))'), ['(cond ((cond (a (cond (b #true) (#true #false))) (#true #false)) (cond (c 1) (#true 2))))']);
+    assert.deepEqual(ex('(lambda (x) (or x y))'), ['(lambda (x) (cond (x #true) (#true y)))']);
+    assert.deepEqual(ex('(cond ((and a b) (if c 1 2)))'), ['(cond ((cond (a b) (#true #false)) (cond (c 1) (#true 2))))']);
     assert.deepEqual(ex('(defun s () (recv ((:m x) (if x (s) 0))))'), ['(defun s () (recv (((quote m) x) (cond (x (s)) (#true 0)))))']);
 });
 

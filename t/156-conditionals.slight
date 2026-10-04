@@ -1,7 +1,8 @@
 ; if, when, case, and and or become cond (the expander makes them so). and
-; and or stop at the first operand that decides; case compares its topic
-; with eq?, and gives () when nothing matches and there's no #true clause.
-; In tail position they keep their tail calls, to a receive function too.
+; and or stop at the first operand that decides, and, as in Scheme, give
+; the last one as it is if they get to it; case compares its topic with
+; eq?, and gives () when nothing matches and there's no #true clause. In
+; tail position they keep their tail calls, to a receive function too.
 
 (defun show (x) (pprint x) x)
 
@@ -24,6 +25,7 @@
 (pprint (and (show #true) (show #false) (show #true)))
 (pprint (or (show #false) (show #true) (show #false)))
 (pprint (list (and) (or) (and #true) (or #false)))
+(pprint (list (and #true 5) (and #false 5) (or #false "five") (or #true "five") (and :only)))
 
 ; a loop that recurs from an if: a million times, in constant stack
 (defun count-down (n) (if (== n 0) :done (count-down (- n 1))))
@@ -46,5 +48,6 @@
 (send c :stop)
 (pprint (join c))
 
-; an operand that isn't a boolean faults, as any cond test does
-(pprint (join (fork (and #true 5))))
+; an operand before the last that isn't a boolean faults, as any cond
+; test does
+(pprint (join (fork (and 5 #true))))

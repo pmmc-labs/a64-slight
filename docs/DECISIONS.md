@@ -995,11 +995,12 @@ compared with each clause's value by `eq?`, a `#true` clause is the
 default, and without one, nothing matching gives `()`. Its topic is bound
 to a name with spaces in it, which the reader can't produce, so no
 runtime `gensym` is needed and no program can clash with it. `and` and
-`or` stop at the operand that decides *(User: "short-circuit")*.
-*(Default:)* every operand they test must be `#true` or `#false`, as any
-`cond` test must (Scheme would hand back the last operand as it is);
-`not` stays a prelude function; none of the five names can be bound or
-defined. A non-boolean test faults as `cond test at ...`, pointing at the
+`or` stop at the operand that decides *(User: "short-circuit")*, and, as
+in Scheme, give the last operand as it is, untested, if they get to it
+*(User, after Claude first had every operand tested)*: `(and #true 5)` is
+5, while a non-boolean before the last faults as any `cond` test does.
+*(Default:)* `not` stays a prelude function; none of the five names can be
+bound or defined. A non-boolean test faults as `cond test at ...`, pointing at the
 test. Rejected: `unless`, and `case`'s `else` (`#true` does it).
 
 **D143. The expander is a pass of its own, after the reader.** *(Default;

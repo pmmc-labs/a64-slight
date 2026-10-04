@@ -17,13 +17,14 @@
 //       (case topic            (do (let t topic)
 //           (value body...)        (cond ((eq? t value) body...)
 //           (#true body...))             (#true body...)))
-//       (and a b ...)          (cond (a (and b ...)) (#true #false)), (and) is #true
-//       (or a b ...)           (cond (a #true) (b #true) ... (#true #false)), (or) is #false
+//       (and a b ... z)        (cond (a (and b ... z)) (#true #false)), (and z) is z, (and) is #true
+//       (or a b ... z)         (cond (a #true) (b #true) ... (#true z)), (or z) is z, (or) is #false
 //
 //     A case with no #true clause gives () when nothing matches. Its topic's
-//     name has spaces in it, so no program can write it. and and or test
-//     every operand they get to, so each must be #true or #false, as with
-//     any cond test; they stop at the first that decides.
+//     name has spaces in it, so no program can write it. and and or stop
+//     at the first operand that decides; as in Scheme, the last one isn't
+//     tested, and is what they give if they get to it. The others are cond
+//     tests, so each must be #true or #false.
 //
 // It knows just enough of the special forms to leave alone what isn't an
 // expression: quoted data, the parameters of defun and lambda, and recv's
@@ -202,15 +203,17 @@ function expandCase(x: Pair): Sexp {
 }
 
 function expandAnd(x: Pair): Sexp {
-    const operands = args(x, 'and', 0, Infinity, 'booleans');
+    const operands = args(x, 'and', 0, Infinity, 'operands');
     if (operands.length === 0) return TRUE;
     const [a, ...rest] = operands;
-    const then = rest.length === 0 ? TRUE : form(x.pos, sym('and', x.pos), ...rest);
-    return form(x.pos, sym('cond', x.pos), list(a!, then), list(TRUE, FALSE));
+    if (rest.length === 0) return a!;
+    return form(x.pos, sym('cond', x.pos), list(a!, form(x.pos, sym('and', x.pos), ...rest)), list(TRUE, FALSE));
 }
 
 function expandOr(x: Pair): Sexp {
-    const operands = args(x, 'or', 0, Infinity, 'booleans');
+    const operands = args(x, 'or', 0, Infinity, 'operands');
     if (operands.length === 0) return FALSE;
-    return form(x.pos, sym('cond', x.pos), ...operands.map((a) => list(a, TRUE)), list(TRUE, FALSE));
+    const tested = operands.slice(0, -1).map((a) => list(a, TRUE));
+    if (tested.length === 0) return operands[0]!;
+    return form(x.pos, sym('cond', x.pos), ...tested, list(TRUE, operands[operands.length - 1]!));
 }
