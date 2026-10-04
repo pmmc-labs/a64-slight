@@ -261,11 +261,23 @@ without TLS. To settle when it starts:
   with GET and bodies that end in newlines?
 - `Connection: close` (one request per connection) to begin with, or
   keep-alive?
+- Keep the API independent of what's underneath: in a browser, HTTP
+  would be a device over `fetch`, not slight on `:tcp` (BACKGROUND.md,
+  WebAssembly), so a program shouldn't see which it's using.
+
+Next session starts here, with Stevan.
 
 ### 11. Port the examples
 
 See the table below. The window manager and text editor are the real
-tests of whether the language is pleasant to use.
+tests of whether the language is pleasant to use. Stevan is rewriting
+those three (`text-editor`, `window-manager`, `better-window-manager`)
+himself. Checked for them in Oct 2026: nothing is missing now that
+`@ARGV` exists (D144), but two things may come up: the runtime always
+prints the root's value at exit, so `(ok ())` follows the editor's
+"Goodbye!"; and strings are bytes, so typing non-ASCII text puts the
+cursor in the wrong column until there are UTF-8 helpers (DESIGN.md's
+level 2 strings).
 
 ### 12. Self-host
 

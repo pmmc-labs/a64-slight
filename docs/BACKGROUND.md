@@ -248,6 +248,114 @@ processes; isolation comes from the language (no pointers, immutable
 data, copied messages), as in the BEAM. A bug in the C runtime takes
 everything down.
 
+### WebAssembly, and the browser (discussed Oct 2026, parked)
+
+Stevan asked whether slight could target WASM and run in a browser. It
+could, and the design makes it easier than for most languages; the hard
+part is processes that keep a stack while they aren't running. Parked
+until the language settles. Browser support below is as of Oct 2026.
+
+**What carries over:**
+
+- The tagged 64-bit words, bump allocation, per-process heaps and the
+  copying collector all fit WASM's linear memory, and the C runtime
+  (`rt.c`, `strings.c`, `numbers.c`, most of `process.c`) compiles to
+  wasm32 with clang.
+- **No shadow stack.** WASM's own stack can't be scanned, so most
+  garbage-collected languages keep their roots on a stack of their own in
+  linear memory. We don't need one: the collector runs only at `recv`,
+  where the stack is empty and the roots are the receive function's
+  arguments, handed to the runtime (D105).
+- Tail calls: `return_call` is standardized and in all three engines
+  (Safari last, in 18.2). Leaning Technologies has written about rough
+  edges in engines' tail calls; worth reading before relying on them.
+- Frame slots become WASM locals; the accumulator style fits the operand
+  stack. No condition flags, so overflow checks cost a few instructions
+  more, as on RISC-V.
+- A fault unwinds to the scheduler as a WASM exception (shipped
+  everywhere). `apply` is `call_indirect`, one function type per arity
+  0–8. libm's functions come from a wasm libm (or JavaScript's `Math`,
+  whose last bits differ anyway, D76).
+
+**The hard part: stacks.** Natively, `rt_switch` swaps `sp`; in WASM the
+call stack belongs to the engine, and standard WASM can't switch it yet.
+The `recv` rule means most switches don't need to: a process waiting in
+`recv` has no stack, and the scheduler resumes it with an ordinary call
+of its receive function. The cases that keep a stack are preemption in
+the middle of a call, `yield`, `join` and `sleep` (so `slurp` and `spew`
+too). The options:
+
+1. **The stack-switching proposal** (continuations: `cont.new`,
+   `resume`, `suspend`). Exactly `rt_switch`, so the port would mirror
+   the native one. Phase 3; Wasmtime has an implementation, browsers
+   don't yet. The long-term answer.
+2. **JSPI** (JavaScript Promise Integration): Chrome 137+, Safari 27
+   beta, Firefox 153 planned. Made for calling async JavaScript, but each
+   process can run in its own suspendable ("promising") call into WASM.
+   Every switch goes through JavaScript's promises, far dearer than
+   `rt_switch`, but only the stack-keeping cases pay it. Plausible;
+   needs a prototype.
+3. **Asyncify** (Binaryen) rewrites the whole program so a stack can be
+   unwound into linear memory and rewound. Works everywhere today, but
+   costs size and speed in all code, and a switch costs in proportion to
+   the stack's depth.
+4. **Change the language** so no process keeps a stack: preempt only at
+   tail calls at the bottom of the stack, and allow `join` and `sleep`
+   only as tail calls. Undoes decisions made on purpose (`join` works
+   anywhere, D101), and a deep non-tail recursion would never be
+   interrupted. Not recommended.
+
+Recommendation: make the stack strategy one small piece of the runtime
+(start, suspend and resume a process); prototype it with JSPI, keep
+Asyncify as a fallback, and move to stack switching when it ships.
+
+**The scheduler turns inside out.** A browser's main thread can't block,
+so the `select()` wait goes: the runtime runs a slice and returns, and
+JavaScript calls it again on a key, when the next timer is due
+(`setTimeout`), or when a fetch completes. The virtual clock is
+unchanged.
+
+**Devices in a browser:**
+
+- **The terminal, yes:** xterm.js renders ANSI escapes and hands over
+  keys as the bytes a terminal sends, so `tty.c`'s decoder works
+  unchanged, and the terminal examples (and the editor and window
+  managers) would run as they are, in a page.
+- **Files, as a stand-in:** an in-memory filesystem, the Origin Private
+  File System, or read-only `fetch`, behind the same device messages.
+- **TCP, no:** browsers have no raw sockets, let alone listening ones.
+  Their natural devices are `fetch` and WebSocket. **For 10f:** HTTP in
+  slight on `:tcp` works natively and under WASI, but in a browser it
+  would be a device over `fetch`; an HTTP API that doesn't care which
+  sits underneath would let a browser port keep programs unchanged.
+
+**Outside the browser, and a playground.** WASI (wasmtime, Node) has
+stdin, stdout, files, a clock, and `poll_oneoff` for waiting like
+`select()`: the natural first step, running the golden tests under
+wasmtime instead of qemu (skipping sockets). The compiler is TypeScript,
+so it already runs in a browser; what's missing is clang to link. If the
+backend wrote `.wasm` directly, and the program imported its memory,
+function table and builtins from a prebuilt `runtime.wasm`, no linker
+would be needed, and a page could compile and run slight. Self-hosted,
+the whole toolchain would live in the page.
+
+**Rejected: WasmGC** (the browser's collector). It would cost the
+per-process heaps and collecting at `recv`, integers would change (its
+unboxed integers, i31, are 31-bit), and the C runtime wouldn't apply.
+
+**Cost, roughly:** bigger than x86-64 or RISC-V (structured control
+flow, the inverted waiting loop, stack switching). About 1 session for
+the target interface (as above), 4–6 for a WASI target passing the
+golden tests other than sockets, and 2–3 more for a browser host with
+xterm.js.
+
+Sources: [stack switching](https://github.com/WebAssembly/stack-switching),
+[proposal phases](https://github.com/webassembly/proposals),
+[JSPI (V8)](https://v8.dev/blog/jspi),
+[JSPI support (OpenReplay)](https://blog.openreplay.com/jspi-javascript-wasm-bridge/),
+[state of WebAssembly 2024–2025](https://platform.uno/blog/state-of-webassembly-2024-2025/),
+[tail calls (Leaning Technologies)](https://labs.leaningtech.com/blog/extreme-webassembly-2-the-sad-state-of-webassembly-tail-calls).
+
 ## Prior art
 
 - **Abdulaziz Ghuloum, "An Incremental Approach to Compiler Construction"**

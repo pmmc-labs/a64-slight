@@ -39,8 +39,11 @@ Fifteen of ts-slight's examples are ported (`examples/`; all but
 x86 Linux, and natively on macOS (Stevan runs it on his M2 Max after every
 step, and reports only failures). **Next: step 10f** (HTTP, written in
 slight on `:tcp`; its open points are in `docs/PLAN.md`, to settle with
-Stevan first). Also to discuss with him in depth before building:
-`defactor` (`docs/PLAN.md`, under 10e). Update this section as steps land.
+Stevan first, including keeping the API independent of the transport so
+a browser port could use `fetch`). Also to discuss with him in depth
+before building: `defactor` (`docs/PLAN.md`, under 10e). Stevan is
+rewriting the text editor and window managers himself (step 11). Update
+this section as steps land.
 
 ## Read first, in this order
 
@@ -51,8 +54,8 @@ Stevan first). Also to discuss with him in depth before building:
 3. [`docs/DECISIONS.md`](docs/DECISIONS.md): why, and what was turned down.
    Check it before "improving" something; it may have been decided against.
 4. [`docs/BACKGROUND.md`](docs/BACKGROUND.md): AVM, VM3, the spike, prior
-   art, and notes on other targets, multiple cores and embedded boards.
-   Optional.
+   art, and notes on other targets, multiple cores, embedded boards and
+   WebAssembly (parked). Optional.
 
 Reference material (read-only, never built): [`reference/`](reference/README.md)
 holds ts-slight's examples and libraries (the target user surface) and the
