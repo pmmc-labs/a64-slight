@@ -1,426 +1,214 @@
 #<pid 1>
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 21 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 36 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 57 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 92 #<pid 3>))
-running-is-it-even?
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 20 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 35 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 56 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 91 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 19 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 34 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 55 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 90 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 18 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 33 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 54 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 89 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 17 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 32 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 53 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 88 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 16 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 31 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 52 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 87 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 15 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 30 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 51 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 86 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 14 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 29 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 50 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 85 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 13 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 28 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 49 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 84 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 12 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 27 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 48 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 83 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 11 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 26 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 47 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 82 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 10 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 25 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 46 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 81 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 9 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 24 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 45 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 80 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 8 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 23 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 44 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 79 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 7 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 22 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 43 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 78 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 6 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 21 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 42 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 77 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 5 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 20 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 41 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 76 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 4 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 19 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 40 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 75 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 3 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 18 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 39 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 74 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 2 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 17 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 38 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 73 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 1 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 16 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 37 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 72 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 0 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 15 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 36 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 71 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 14 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 35 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 70 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 13 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 34 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 69 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 12 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 33 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 68 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 11 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 32 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 67 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 10 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 31 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 66 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 9 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 30 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 65 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 8 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 29 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 64 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 7 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 28 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 63 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 6 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 27 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 62 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 5 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 26 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 61 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 4 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 25 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 60 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 3 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 24 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 59 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 2 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 23 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 58 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 1 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 22 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 57 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 0 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 21 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 56 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 20 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 55 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 19 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 54 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 18 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 53 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 17 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 52 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 16 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 51 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 15 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 50 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 14 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 49 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 13 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 48 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 12 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 47 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 11 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 46 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 10 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 45 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 9 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 44 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 8 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 43 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 7 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 42 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 6 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 41 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 5 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 40 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 4 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 39 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 3 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 38 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 2 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 37 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 1 #<pid 3>))
-running-is-it-even?
 (is-it-even? got (IS-EVEN? 36 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 0 #<pid 2>))
-running-is-it-odd?
 (is-it-odd? got (IS-ODD? 35 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 34 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 33 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 32 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 31 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 30 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 29 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 28 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 27 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 26 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 25 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 24 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 23 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 22 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 21 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 20 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 19 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 18 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 17 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 16 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 15 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 14 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 13 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 12 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 11 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 10 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 9 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 8 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 7 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 6 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 5 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 4 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 3 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 2 #<pid 3>))
-running-is-it-even?
 (is-it-odd? got (IS-ODD? 1 #<pid 2>))
-running-is-it-odd?
 (is-it-even? got (IS-EVEN? 0 #<pid 3>))
-running-is-it-even?
 ((IT-IS-ODD!) (IT-IS-EVEN!) (IT-IS-ODD!) (IT-IS-EVEN!))
 (is-it-even? got (STOP))
 (is-it-odd? got (STOP))

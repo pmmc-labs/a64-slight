@@ -6,40 +6,32 @@
 ; (yield ...) around each loop is gone (preemption does that).
 
 (defun is-it-even? (reply-to)
-    (pprint :running-is-it-even?)
-    (even-wait reply-to))
-
-(defun even-wait (reply-to)
     (recv
         (msg
             (pprint (list :is-it-even? :got msg))
             (cond
-                ((eq? (car msg) :IS-EVEN?) (even-reply reply-to (cadr msg) (caddr msg)))
-                (#true                     ())))))
-
-(defun even-reply (reply-to n ask-odd?)
-    (cond
-        ((== n 0) (send reply-to (list :IT-IS-EVEN!)))
-        (#true    (send ask-odd? (list :IS-ODD? (- n 1) $$))))
-    (is-it-even? reply-to))
+                ((eq? (car msg) :IS-EVEN?)
+                    (cond
+                        ((== (cadr msg) 0)
+                            (send reply-to (list :IT-IS-EVEN!)))
+                        (#true
+                            (send (caddr msg) (list :IS-ODD? (- (cadr msg) 1) $$))))
+                    (is-it-even? reply-to))
+                (#true ())))))
 
 (defun is-it-odd? (reply-to)
-    (pprint :running-is-it-odd?)
-    (odd-wait reply-to))
-
-(defun odd-wait (reply-to)
     (recv
         (msg
             (pprint (list :is-it-odd? :got msg))
             (cond
-                ((eq? (car msg) :IS-ODD?) (odd-reply reply-to (cadr msg) (caddr msg)))
-                (#true                    ())))))
-
-(defun odd-reply (reply-to n ask-even?)
-    (cond
-        ((== n 0) (send reply-to (list :IT-IS-ODD!)))
-        (#true    (send ask-even? (list :IS-EVEN? (- n 1) $$))))
-    (is-it-odd? reply-to))
+                ((eq? (car msg) :IS-ODD?)
+                    (cond
+                        ((== (cadr msg) 0)
+                            (send reply-to (list :IT-IS-ODD!)))
+                        (#true
+                            (send (caddr msg) (list :IS-EVEN? (- (cadr msg) 1) $$))))
+                    (is-it-odd? reply-to))
+                (#true ())))))
 
 ; the root: wait for n answers, print them, and stop both actors
 (defun collect (n answers is-even? is-odd?)
