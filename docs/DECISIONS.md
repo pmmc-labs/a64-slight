@@ -881,3 +881,82 @@ library on top. Rejected: HTTP in C, which `(connect :http url ...)` (as
 Stevan first sketched it) would need, since `connect`'s sources are the
 runtime's and a library can't add one: more C, and HTTPS would need a
 TLS library either way.
+
+## Step 10d: the network
+
+**D133. Sockets are devices, as files are.** *(User; D124, D132.)*
+`(connect :tcp "host:port" expr)` connects and `(connect :tcp/listen port
+expr)` listens, each on a device the new process owns. A connection's
+first message is `(:open c)`, once it has connected; then `(:line c s)`
+and `(:eof c)`, and it takes `(:write x ...)`, as a file does. A
+listener's are `(:open l port)` and `(:accept l conn)`.
+
+**D134. Lines for now.** *(User: "just lines for now, and move to chunks
+later, just like with :fs".)* A connection is read only while none of its
+lines is in its owner's mailbox, so a sender faster than its reader is
+held back by TCP itself. That isn't checked by a golden test: seeing it
+would take timers and sockets together, which don't give the same order
+every run (D139); files share the mechanism, and test 145 checks theirs.
+An HTTP request body that doesn't end in a newline will need chunks.
+
+**D135. Writes are buffered, and closing flushes.** *(User: "ideally we
+buffer the writes".)* A `(:write ...)` goes out at once if the socket
+takes it; the rest waits till it can, and `send` never blocks. Like a
+mailbox (D88), the buffer has no limit. `disconnect`, or the owner
+ending, closes a connection only once what it has is written, since a
+handler that writes its reply and ends at once is the common case; till
+then the socket keeps the program running (golden test 153 writes 5 MB
+and ends at once). Rejected: an error when the socket is full, with a
+`:ready` message to say when to write again.
+
+**D136. Errno's names, and `:enotfound`.** *(User: "standard error
+names".)* `:econnrefused :econnreset :epipe :etimedout :eaddrinuse
+:eaddrnotavail :ehostunreach :enetunreach` join the file system's
+(D128), and `:enotfound` (Node's name; a failed host lookup has no errno)
+is a host that can't be found, or an address without a colon. SIGPIPE is
+ignored, so writing to a closed connection is `:epipe`, not the end of
+the program.
+
+**D137. A listener's first message carries its port.** *(User, once
+Claude explained the question.)* A golden test can't reach any server
+outside, so it runs a server and a client in one program, talking over
+127.0.0.1; and since a fixed port can be taken, or linger after a test, it
+listens on port 0, which lets the system pick. `(:open l port)` is how the
+program learns the port.
+
+**D138. `(connect dev expr)` hands a device to a new process.** *(User.)*
+`connect` given anything but a `:keyword` takes it to be a device: the new
+process owns it from then on, and hears `(:open f)` (or `(:open l port)`)
+first. An accepted connection belongs to the listener's owner, and reads
+nothing, till it's handed over (golden test 154). *(Default:)* anything
+that isn't an open device faults `:not-a-device`, a new fault kind, and
+something that isn't a pid `:not-a-pid`; any process can hand over a
+device, not just its owner; and handing over one that's already being
+read can leave a line with the old owner, so hand a device over before
+reading from it.
+
+**D139. The details of sockets.** *(Default.)*
+- IPv4 only. A listener listens on all interfaces, with `SO_REUSEADDR`
+  (so a restarted server can have its port back at once) and a backlog of
+  128. Connections have `TCP_NODELAY`: messages are small, and waiting to
+  fill a packet only delays them.
+- Connecting doesn't stall the runtime, but looking up the host does,
+  briefly, as reading a FIFO does (D130).
+- `(:open c)` always comes from the event loop, even when `connect()`
+  has finished at once, so it comes in the same order either way.
+- After `(:eof c)` a connection stays open, and can be written to.
+- A connection's "where", in an error, is the address given, or the other
+  end's "address:port" for an accepted one; a listener's is its port.
+- Anything sent to a listener is a dead letter.
+- On the virtual clock, sockets are looked at only when nothing can run:
+  first, without waiting; then a key comes, or the clock moves; only when
+  nothing else can happen does the runtime wait for real. So a test whose
+  every step follows from a message comes out the same every run; one that
+  mixes timers with sockets may not.
+- `select()` can't watch a file descriptor of 1024 or more, so a socket
+  that would get one is refused with `:emfile`.
+
+**D140. HTTP next, as `lib/http.slight`.** *(Default plan, under D132.)*
+A client and a server in slight, on `:tcp`, opt-in like `lib/fs.slight`.
+Until connections can send chunks (D134), a request body that doesn't end
+in a newline can't be read.

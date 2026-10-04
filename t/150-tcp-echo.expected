@@ -1,0 +1,7 @@
+(listening #true #true)
+(client-got "echo: hello")
+(client-got "echo: ")
+(client-got "echo: world")
+(ok (served (ok talked)))
+(echo-opened #true)
+()

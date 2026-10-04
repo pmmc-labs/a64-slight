@@ -1,0 +1,31 @@
+; A port must be from 0 to 65535, and an address a string; connect can
+; only hand over an open device. A port that's taken, a connection that's
+; refused and an address that can't be found end the connected process
+; before it runs, with (:error (name where)). A listener takes nothing.
+
+(defun never ()
+    (recv
+        ((:open c) (pprint :not-reached) ())))
+
+(pprint (join (fork (connect :tcp/listen 70000 (never)))))
+(pprint (join (fork (connect :tcp/listen "80" (never)))))
+(pprint (join (fork (connect :tcp 80 (never)))))
+(pprint (join (fork (connect 5 (never)))))
+(pprint (join (fork (connect $$ (never)))))
+
+; (car reason) and whether its where is ours: the port is the system's
+(defun failed (r where)
+    (list (car r) (car (cadr r)) (eq? (cadr (cadr r)) where)))
+
+(defun first ()
+    (recv
+        ((:open l port)
+            (pprint (failed (join (connect :tcp/listen port (never))) port))
+            (send l (list :write "nope"))
+            (disconnect l)
+            (let where (concat "localhost:" port))
+            (failed (join (connect :tcp where (never))) where))))
+
+(pprint (join (connect :tcp/listen 0 (first))))
+(pprint (join (connect :tcp "localhost" (never))))
+(pprint (join (connect :tcp "localhost:notaport" (never))))

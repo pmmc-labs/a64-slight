@@ -1,0 +1,54 @@
+; Five clients at once, with 300 lines each: every connection has an echo
+; process of its own, and every client gets its own lines back, in order.
+
+(defun echo ()
+    (recv
+        ((:open c)   (echo))
+        ((:line c s) (send c (list :write s \n)) (echo))
+        ((:eof c)    (disconnect c))))
+
+(defun send-lines (c name i n)
+    (cond
+        ((== i n) ())
+        (#true
+            (send c (list :write name " " i \n))
+            (send-lines c name (+ i 1) n))))
+
+(defun client (name n)
+    (recv
+        ((:open c) (send-lines c name 0 n) (check c name 0 n))))
+
+(defun check (c name i n)
+    (cond
+        ((== i n) (disconnect c) (list name i))
+        (#true    (check-next c name i n))))
+
+(defun check-next (c name i n)
+    (recv
+        ((:line _ s)
+            (cond
+                ((eq? s (concat name " " i)) (check c name (+ i 1) n))
+                (#true                       (raise (list :out-of-order name i s)))))))
+
+(defun listener (names)
+    (recv
+        ((:open l port)
+            (let me $$)
+            (map (lambda (name)
+                     (fork (send me (list :done (join (connect :tcp (concat "localhost:" port) (client name 300)))))))
+                 names)
+            (serving l names (length names) ()))))
+
+(defun serving (l names n results)
+    (cond
+        ((== n 0)
+            (disconnect l)
+            (map (lambda (name) (member? (list :ok (list name 300)) results)) names))
+        (#true (serving-wait l names n results))))
+
+(defun serving-wait (l names n results)
+    (recv
+        ((:accept _ conn) (connect conn (echo)) (serving-wait l names n results))
+        ((:done r)        (serving l names (- n 1) (cons r results)))))
+
+(pprint (join (connect :tcp/listen 0 (listener (list "a" "b" "c" "d" "e")))))

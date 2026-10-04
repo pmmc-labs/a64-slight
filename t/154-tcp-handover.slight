@@ -1,0 +1,50 @@
+; An accepted connection reads nothing till (connect conn expr) hands it
+; to a process. Here the listener holds on to the first connection till a
+; second one comes, which the client makes after writing to the first;
+; the first one's echo process still gets the line.
+
+(defun echo ()
+    (recv
+        ((:open c)   (echo))
+        ((:line c s) (send c (list :write "echo: " s \n)) (echo))
+        ((:eof c)    (disconnect c))))
+
+(defun first-client (where)
+    (recv
+        ((:open c)
+            (send c (list :write "early" \n))
+            (connect :tcp where (second-client))
+            (first-reply c))))
+
+(defun first-reply (c)
+    (recv
+        ((:line _ s) (pprint (list :first-got s)) (disconnect c) :first-done)))
+
+(defun second-client ()
+    (recv
+        ((:open c) (disconnect c) :second-done)))
+
+(defun listener ()
+    (recv
+        ((:open l port)
+            (let me $$)
+            (let where (concat "localhost:" port))
+            (fork (send me (list :client (join (connect :tcp where (first-client where))))))
+            (holding l))))
+
+(defun holding (l)
+    (recv
+        ((:accept _ conn) (handing l conn))))
+
+(defun handing (l held)
+    (recv
+        ((:accept _ conn)
+            (connect held (echo))
+            (connect conn (echo))
+            (serving l))))
+
+(defun serving (l)
+    (recv
+        ((:client r) (disconnect l) r)))
+
+(pprint (join (connect :tcp/listen 0 (listener))))

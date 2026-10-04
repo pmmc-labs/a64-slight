@@ -618,30 +618,41 @@ function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: 
     ], st5];
 }
 
-// connect's sources: :keypress (every key typed, runtime/tty.c), and a
-// file (a device, opened as the mode says).
-const FILE_SOURCES: Readonly<Record<string, string>> = {
-    'fs/read':   'RT_FS_READ',
-    'fs/write':  'RT_FS_WRITE',
-    'fs/append': 'RT_FS_APPEND',
+// connect's sources, past :keypress (every key typed, runtime/tty.c):
+// each opens a device, with the runtime's function and its mode.
+const SOURCES: Readonly<Record<string, readonly [string, string]>> = {
+    'fs/read':    ['rt_connect_fs', 'RT_FS_READ'],
+    'fs/write':   ['rt_connect_fs', 'RT_FS_WRITE'],
+    'fs/append':  ['rt_connect_fs', 'RT_FS_APPEND'],
+    'tcp':        ['rt_connect_tcp', 'RT_TCP_CONNECT'],
+    'tcp/listen': ['rt_connect_tcp', 'RT_TCP_LISTEN'],
 };
 
-// (connect :keypress expr), or (connect :fs/read path expr) and its kin:
-// a fork whose new process is connected to the source.
+// (connect :keypress expr), (connect :fs/read path expr) and the other
+// sources, or (connect dev expr): a fork whose new process is connected
+// to the source, or is handed the device dev (an expression; anything
+// that isn't a :keyword is one).
 function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
-    const source = args[0];
-    const name   = source !== undefined && isForm(source, 'quote') && source.t === 'pair' && source.cdr.t === 'pair' && source.cdr.car.t === 'sym'
-        ? source.cdr.car.name : null;
+    if (args.length === 0) checkArity(x, 'connect', args, 2);
+    const source = args[0]!;
+    const quoted = isForm(source, 'quote');
+    const items  = quoted ? toArray(source) : null;
+    const name   = items !== null && items.length === 2 && items[1]!.t === 'sym' ? (items[1] as Sym).name : null;
     if (name === 'keypress') {
         checkArity(x, 'connect', args, 2);
         return compileFork(x, 'connect', args[1]!, 'rt_connect', cx, st);
     }
-    if (name !== null && name in FILE_SOURCES) {
+    if (name !== null && name in SOURCES) {
         checkArity(x, 'connect', args, 3);
-        return compileFork(x, 'connect', args[2]!, 'rt_connect_fs', cx, st, [args[1]!], [FILE_SOURCES[name]!]);
+        const [fn, mode] = SOURCES[name]!;
+        return compileFork(x, 'connect', args[2]!, fn, cx, st, [args[1]!], [mode]);
     }
-    if (source === undefined) checkArity(x, 'connect', args, 2);
-    throw new CompileError(`connect's source can be :keypress, :fs/read, :fs/write or :fs/append, not ${show(source!)}`, posOf(source!) ?? x.pos);
+    if (quoted) {
+        throw new CompileError(`connect's source can be :keypress, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not ${show(source)}`,
+                               posOf(source) ?? x.pos);
+    }
+    checkArity(x, 'connect', args, 2);
+    return compileFork(x, 'connect', args[1]!, 'rt_connect_device', cx, st, [source]);
 }
 
 // --- closures -----------------------------------------------------------------

@@ -17,19 +17,25 @@
 // nothing more can come: no timer is pending, and no process is connected
 // to :keypress, or stdin has ended.
 //
-// A file opened with connect :fs/... is a device: a pid that the runtime
-// serves instead of compiled code (see "files", below).
+// A file or a socket opened with connect is a device: a pid that the
+// runtime serves instead of compiled code (see "devices", below).
 
 #include "rt.h"
 
+#include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
+#include <netdb.h>
+#include <netinet/in.h>
+#include <netinet/tcp.h>
+#include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
 #include <sys/select.h>
+#include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -793,20 +799,32 @@ static int listening(void) {
     return nconnected && !input_ended;
 }
 
+static uint64_t nsockets;
+static void     socket_fds(fd_set *in, fd_set *out, int *max);
+static int      socket_events(fd_set *in, fd_set *out);
+
+#define IO_KEYS    1                    // what wait_for saw: stdin has something to read...
+#define IO_SOCKETS 2                    // ...or a socket did something
+
 // Waits up to us microseconds (forever, if negative) for stdin to have
-// something to read, if anyone's listening; returns whether it has.
+// something to read, if anyone's listening, or for a socket to be ready;
+// handles the sockets that are, and says what it saw.
 static int wait_for(int64_t us) {
-    int    keys = listening();
-    fd_set in;
+    int    keys = listening(), max = keys ? STDIN_FILENO : -1;
+    fd_set in, out;
     FD_ZERO(&in);
+    FD_ZERO(&out);
     if (keys) FD_SET(STDIN_FILENO, &in);
+    socket_fds(&in, &out, &max);
     struct timeval tv, *timeout = NULL;
     if (us >= 0) {
         if (us > 3600000000) us = 3600000000;  // macOS's select refuses more than 10^8 s
         tv      = (struct timeval){ .tv_sec = (time_t)(us / 1000000), .tv_usec = (suseconds_t)(us % 1000000) };
         timeout = &tv;
     }
-    return select(keys ? STDIN_FILENO + 1 : 0, &in, NULL, NULL, timeout) > 0 && keys && FD_ISSET(STDIN_FILENO, &in);
+    if (select(max + 1, &in, &out, NULL, timeout) <= 0) return 0;
+    int saw = keys && FD_ISSET(STDIN_FILENO, &in) ? IO_KEYS : 0;
+    return saw | (socket_events(&in, &out) ? IO_SOCKETS : 0);
 }
 
 // Reads what stdin has, once everything read before has been decoded.
@@ -831,91 +849,137 @@ static int next_key(void) {
 
 // At every decision the scheduler makes, and when a process is preempted:
 // fires the timers that are due, and on the real clock, every 10 ms, takes
-// the keys typed since.
+// the keys typed since and sees to the sockets.
 static void events(void) {
     ring();
-    if (virtual_clock || !listening()) return;
+    if (virtual_clock || (!listening() && !nsockets)) return;
     uint64_t t = now();
     if (t - input_seen < INPUT_EVERY) return;
     input_seen = t;
-    if (wait_for(0)) {
+    if (wait_for(0) & IO_KEYS) {
         read_input();
         while (next_key()) {}
     }
 }
 
-// Nothing can run: waits for a key or the next timer. Returns 0 if
-// neither can come.
+// Nothing can run: waits for a key, a socket or the next timer. Returns 0
+// if none of them can come. On the virtual clock, the sockets come first,
+// then a key, then the clock moves; only when nothing else can happen does
+// it wait for real.
 static int idle(void) {
-    if (!listening() && !nalarms) return 0;
+    if (!listening() && !nalarms && !nsockets) return 0;
     if (virtual_clock) {
-        if (listening() && input_at == input_len && wait_for(0)) read_input();
+        int saw = wait_for(0);
+        if ((saw & IO_KEYS) && input_at == input_len) read_input();
+        if (saw & IO_SOCKETS) return 1;
         if (listening() && next_key()) return 1;
         if (nalarms) {
             virtual_now = alarms[0].due;
             return 1;
         }
-        if (listening() && wait_for(-1)) read_input();  // only a key can come: wait for one, for real
+        // Only the world outside can do anything now: wait for it, unless
+        // stdin has just ended, and with it the last thing that could come.
+        if ((listening() || nsockets) && (wait_for(-1) & IO_KEYS)) read_input();
         return 1;
     }
     uint64_t t = now();
     if (nalarms && alarms[0].due <= t) return 1;
-    if (wait_for(nalarms ? (int64_t)((alarms[0].due - t + 999) / 1000) : -1)) {
+    if (wait_for(nalarms ? (int64_t)((alarms[0].due - t + 999) / 1000) : -1) & IO_KEYS) {
         read_input();
         while (next_key()) {}
     }
     return 1;
 }
 
-// --- files --------------------------------------------------------------------
+// --- devices: files and sockets -----------------------------------------------
 //
-// (connect :fs/read path expr), and :fs/write and :fs/append: a fork whose
-// new process owns a device, a pid that the runtime serves instead of
-// compiled code. The device's first message to its owner is (:open f), f
-// being its pid. A reader's then come one line at a time, (:line f s),
-// without the newline; the next is read only when the owner has taken the
-// last, so a long file never piles up in a mailbox; then (:eof f), and it
-// closes. A writer takes (:write x ...) from anyone, renders the xs as
-// tty/write does, and writes them at once; anything else sent to a device
-// is a dead letter. disconnect closes a device, and so does its owner
-// ending. If the file can't be opened, the owner ends before it runs,
-// with (:error (name path)), name being errno's; if a read or a write
-// fails, it ends the same way then.
+// connect opens a device: a pid that the runtime serves instead of compiled
+// code, owned by the process connect forks. The device's first message to
+// its owner is (:open f), f being its pid. disconnect closes it, and so does
+// its owner ending; anything sent to it after that goes nowhere. (connect
+// dev expr) hands a device to a new process, which hears (:open f) in turn.
+// Anything sent to a device that isn't a (:write ...) it takes is a dead
+// letter. If a device can't be opened, its owner ends before it runs, with
+// (:error (name path)), name being errno's; if a read or a write fails, it
+// ends the same way then.
 //
-// A file is read when the owner takes a line, so a reader is never waited
-// for, and never counts as something that can still happen. Reading a
-// file that can keep it waiting (a FIFO, a terminal) waits with the whole
+// A file (connect :fs/read path expr, :fs/write, :fs/append): a reader
+// sends (:line f s) one at a time, without the newline, the next read only
+// when the owner has taken the last, so a long file never piles up in a
+// mailbox; then (:eof f), and it closes. A writer takes (:write x ...) from
+// anyone, renders the xs as tty/write does, and writes them at once. A file
+// is read when its owner takes a line, so a reader is never waited for; one
+// that can keep a read waiting (a FIFO, a terminal) waits with the whole
 // runtime.
+//
+// A socket (connect :tcp "host:port" expr, connect :tcp/listen port expr)
+// is waited for in select(), with stdin and the next timer. A connection
+// sends (:open c) once it's connected, then lines as a file does (it's
+// read only while no line of its is in its owner's mailbox), and (:eof c)
+// when the other end closes; it can still be written to then. It takes
+// (:write x ...) as a file does, but keeps what the socket can't take yet,
+// and writes it when it can; closing it waits for that, and until then it
+// keeps the program running. A listener sends (:open l port), port being
+// the one it got (0 lets the system pick), then (:accept l conn) for each
+// connection; conn reads nothing until (connect conn expr) hands it to a
+// process. Open sockets count as something that can still happen. IPv4
+// only, for now.
+
+#define DEV_TCP      3                  // a device's mode, after RT_FS_READ, _WRITE and _APPEND
+#define DEV_LISTEN   4
+#define ERR_NOTFOUND (-1)               // no such host: getaddrinfo's errors aren't errno's
 
 typedef struct rt_device {
     struct rt_device *next;             // the owner's next device
     rt_value_t        pid, owner;
     int               fd, mode;
     const char       *site;             // the connect's, for dead letters
-    char             *path;             // as given, NUL-terminated, for errors
+    char             *path;             // a file's path, a connection's "host:port"; NUL-terminated
     size_t            path_len;
-    char             *buf;              // a reader's bytes, read but not yet sent...
+    int64_t           port;             // a listener's
+    char             *buf;              // what's been read, but not yet sent...
     size_t            at, len, cap;     // ...from at to len
-    int               eof;
+    int               eof;              // read has returned 0
+    int               sent;             // a line of its is in its owner's mailbox
+    struct rt_device *next_socket;      // in sockets, or graveyard
+    int               connecting;       // till connect() has finished
+    int               waiting;          // accepted, and not yet handed to a process: it reads nothing
+    int               eof_sent;
+    int               closing;          // closed, but still writing what it has; no longer its pid's
+    int               dead;             // closed: freed once the events in hand are done
+    char             *out;              // written to it, and not yet taken by the socket...
+    size_t            out_at, out_len, out_cap; // ...from out_at to out_len
 } rt_device_t;
+
+static rt_device_t *sockets;            // open sockets, and closing ones (nsockets counts them)
+static rt_device_t *graveyard;          // closed sockets
 
 static uint64_t errno_name(int err) {
     switch (err) {
-        case ENOENT:       return RT_ERR_ENOENT;
-        case EACCES:       return RT_ERR_EACCES;
-        case EPERM:        return RT_ERR_EPERM;
-        case EEXIST:       return RT_ERR_EEXIST;
-        case EISDIR:       return RT_ERR_EISDIR;
-        case ENOTDIR:      return RT_ERR_ENOTDIR;
-        case ENAMETOOLONG: return RT_ERR_ENAMETOOLONG;
-        case ELOOP:        return RT_ERR_ELOOP;
-        case EROFS:        return RT_ERR_EROFS;
-        case ENOSPC:       return RT_ERR_ENOSPC;
-        case EFBIG:        return RT_ERR_EFBIG;
-        case EMFILE:       return RT_ERR_EMFILE;
-        case ENFILE:       return RT_ERR_ENFILE;
-        case EIO:          return RT_ERR_EIO;
-        default:           return RT_ERR_OTHER;
+        case ENOENT:        return RT_ERR_ENOENT;
+        case EACCES:        return RT_ERR_EACCES;
+        case EPERM:         return RT_ERR_EPERM;
+        case EEXIST:        return RT_ERR_EEXIST;
+        case EISDIR:        return RT_ERR_EISDIR;
+        case ENOTDIR:       return RT_ERR_ENOTDIR;
+        case ENAMETOOLONG:  return RT_ERR_ENAMETOOLONG;
+        case ELOOP:         return RT_ERR_ELOOP;
+        case EROFS:         return RT_ERR_EROFS;
+        case ENOSPC:        return RT_ERR_ENOSPC;
+        case EFBIG:         return RT_ERR_EFBIG;
+        case EMFILE:        return RT_ERR_EMFILE;
+        case ENFILE:        return RT_ERR_ENFILE;
+        case EIO:           return RT_ERR_EIO;
+        case ECONNREFUSED:  return RT_ERR_ECONNREFUSED;
+        case ECONNRESET:    return RT_ERR_ECONNRESET;
+        case EPIPE:         return RT_ERR_EPIPE;
+        case ETIMEDOUT:     return RT_ERR_ETIMEDOUT;
+        case EADDRINUSE:    return RT_ERR_EADDRINUSE;
+        case EADDRNOTAVAIL: return RT_ERR_EADDRNOTAVAIL;
+        case EHOSTUNREACH:  return RT_ERR_EHOSTUNREACH;
+        case ENETUNREACH:   return RT_ERR_ENETUNREACH;
+        case ERR_NOTFOUND:  return RT_ERR_ENOTFOUND;
+        default:            return RT_ERR_OTHER;
     }
 }
 
@@ -934,14 +998,66 @@ static rt_value_t string_in(uint64_t *space, const char *bytes, size_t len) {
     return (rt_value_t)box | RT_TAG_BOXED;
 }
 
+static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site, const char *path, size_t len) {
+    rt_device_t *d = must(calloc(1, sizeof *d));
+    d->pid   = new_entry((entry_t){ .value = RT_NIL, .ok = 1, .device = d });
+    d->owner = p->pid;
+    d->fd    = fd;
+    d->mode  = mode;
+    d->site  = site;
+    if (path) {
+        d->path     = must(malloc(len + 1));
+        d->path_len = len;
+        memcpy(d->path, path, len);
+        d->path[len] = '\0';
+    }
+    d->next    = p->devices;
+    p->devices = d;
+    if (mode >= DEV_TCP) {
+        d->next_socket = sockets;
+        sockets        = d;
+        nsockets++;
+    }
+    return d;
+}
+
+// Closes d's file descriptor. A socket is freed later (bury), since an
+// event in hand may still refer to it.
+static void close_now(rt_device_t *d) {
+    close(d->fd);
+    if (d->mode < DEV_TCP) {
+        free(d->buf);
+        free(d->path);
+        free(d);
+        return;
+    }
+    rt_device_t **link = &sockets;
+    while (*link != d) link = &(*link)->next_socket;
+    *link          = d->next_socket;
+    nsockets--;
+    d->dead        = 1;
+    d->next_socket = graveyard;
+    graveyard      = d;
+}
+
+static void bury(void) {
+    while (graveyard) {
+        rt_device_t *d = graveyard;
+        graveyard = d->next_socket;
+        free(d->buf);
+        free(d->out);
+        free(d->path);
+        free(d);
+    }
+}
+
 // Closes d, and forgets it: its pid is then like a process that has
-// ended. The owner's list is the caller's to fix.
+// ended. A socket with something still to write lingers till it's
+// written. The owner's list is the caller's to fix.
 static void shut(rt_device_t *d) {
-    if (d->fd >= 0) close(d->fd);
     procs[d->pid >> RT_PID_SHIFT].device = NULL;
-    free(d->buf);
-    free(d->path);
-    free(d);
+    if (d->mode == DEV_TCP && d->out_len > d->out_at) d->closing = 1;
+    else                                              close_now(d);
 }
 
 static void close_all(rt_proc_t *p) {
@@ -952,10 +1068,14 @@ static void close_all(rt_proc_t *p) {
     p->devices = NULL;
 }
 
-static void close_device(rt_device_t *d) {
+static void unown(rt_device_t *d) {
     rt_device_t **link = &procs[d->owner >> RT_PID_SHIFT].proc->devices;
     while (*link != d) link = &(*link)->next;
     *link = d->next;
+}
+
+static void close_device(rt_device_t *d) {
+    unown(d);
     shut(d);
 }
 
@@ -964,75 +1084,148 @@ static void fail(rt_device_t *d, int err) {
     rt_proc_t *owner = procs[d->owner >> RT_PID_SHIFT].proc;
     uint64_t   space[d->path_len / 8 + 6];
     _Alignas(16) rt_value_t cells[4];
-    rt_value_t reason = io_reason(cells, err, string_in(space, d->path, d->path_len));
+    rt_value_t path   = d->path ? string_in(space, d->path, d->path_len) : rt_int(d->port);
+    rt_value_t reason = io_reason(cells, err, path);
     if (owner == rt_current) rt_end(0, reason, 0);
     end_other(owner, reason);
 }
 
-// Sends d's owner (word f), or (word f s) if bytes isn't NULL; taking it
-// reads on, if more says so.
-static void tell(rt_device_t *d, uint64_t word, const char *bytes, size_t len, int more) {
-    uint64_t  *space = bytes ? must(malloc((len / 8 + 6) * sizeof *space)) : NULL;
-    _Alignas(16) rt_value_t cells[6];
-    rt_value_t rest = bytes ? cons_at(cells + 4, string_in(space, bytes, len), RT_NIL) : RT_NIL;
-    rt_msg_t  *m    = new_msg(cons_at(cells, rt_symbol(RT_SYM_DEVICE + word), cons_at(cells + 2, d->pid, rest)));
-    free(space);
+// Sends d's owner (word f rest...); taking it reads on, if more says so.
+static void tell_list(rt_device_t *d, uint64_t word, rt_value_t rest, int more) {
+    _Alignas(16) rt_value_t cells[4];
+    rt_msg_t *m = new_msg(cons_at(cells, rt_symbol(RT_SYM_DEVICE + word), cons_at(cells + 2, d->pid, rest)));
     m->device = more ? d->pid : 0;
+    d->sent   = d->sent || more;
     deliver(procs[d->owner >> RT_PID_SHIFT].proc, m);
 }
 
-// The next line: 1, with it in *line and *len (good until the next call);
-// 0 at the end of the file; or -1, with errno set.
-static int next_line(rt_device_t *d, const char **line, size_t *len) {
-    for (;;) {
-        char *nl = d->len > d->at ? memchr(d->buf + d->at, '\n', d->len - d->at) : NULL;
-        if (nl || (d->eof && d->at < d->len)) {
-            size_t end = nl ? (size_t)(nl - d->buf) : d->len;
-            *line = d->buf + d->at;
-            *len  = end - d->at;
-            d->at = nl ? end + 1 : end;
-            return 1;
-        }
-        if (d->eof) return 0;
-        memmove(d->buf, d->buf + d->at, d->len - d->at);
-        d->len -= d->at;
-        d->at   = 0;
-        if (d->len == d->cap) {
-            d->cap = d->cap ? d->cap * 2 : 4096;
-            d->buf = must(realloc(d->buf, d->cap));
-        }
-        ssize_t got = read(d->fd, d->buf + d->len, d->cap - d->len);
-        if (got < 0 && errno == EINTR) continue;
-        if (got < 0) return -1;
-        if (got == 0) d->eof = 1;
-        d->len += (size_t)got;
+static void tell(rt_device_t *d, uint64_t word, int more) {
+    tell_list(d, word, RT_NIL, more);
+}
+
+static void tell_line(rt_device_t *d, const char *bytes, size_t len) {
+    uint64_t *space = must(malloc((len / 8 + 6) * sizeof *space));
+    _Alignas(16) rt_value_t cell[2];
+    tell_list(d, RT_DEV_LINE, cons_at(cell, string_in(space, bytes, len), RT_NIL), 1);
+    free(space);
+}
+
+// The device's first message: (:open f), or a listener's (:open l port).
+static void tell_open(rt_device_t *d) {
+    _Alignas(16) rt_value_t cell[2];
+    if (d->mode == DEV_LISTEN) tell_list(d, RT_DEV_OPEN, cons_at(cell, rt_int(d->port), RT_NIL), 0);
+    else                       tell(d, RT_DEV_OPEN, d->mode == RT_FS_READ || d->mode == DEV_TCP);
+}
+
+// The next line in what's been read: 1, with it in *line and *len (good
+// till the buffer next changes); or 0. At the end, what's left is a line.
+static int take_line(rt_device_t *d, const char **line, size_t *len) {
+    char *nl = d->len > d->at ? memchr(d->buf + d->at, '\n', d->len - d->at) : NULL;
+    if (!nl && !(d->eof && d->at < d->len)) return 0;
+    size_t end = nl ? (size_t)(nl - d->buf) : d->len;
+    *line = d->buf + d->at;
+    *len  = end - d->at;
+    d->at = nl ? end + 1 : end;
+    return 1;
+}
+
+// Reads once more: what read returned (0 at the end, which sets eof), or
+// -1 with errno set.
+static ssize_t fill(rt_device_t *d) {
+    memmove(d->buf, d->buf + d->at, d->len - d->at);
+    d->len -= d->at;
+    d->at   = 0;
+    if (d->len == d->cap) {
+        d->cap = d->cap ? d->cap * 2 : 4096;
+        d->buf = must(realloc(d->buf, d->cap));
+    }
+    ssize_t got;
+    do got = read(d->fd, d->buf + d->len, d->cap - d->len); while (got < 0 && errno == EINTR);
+    if (got == 0) d->eof = 1;
+    if (got > 0)  d->len += (size_t)got;
+    return got;
+}
+
+// A connection's next line, or (:eof c) once, if it has one to send.
+static void socket_next(rt_device_t *d) {
+    const char *line;
+    size_t      len;
+    if (take_line(d, &line, &len)) {
+        tell_line(d, line, len);
+    } else if (d->eof && !d->eof_sent) {
+        d->eof_sent = 1;
+        tell(d, RT_DEV_EOF, 0);
     }
 }
 
 // The owner has taken a message from reader pid: on to the next line.
 static void read_on(rt_value_t pid) {
     rt_device_t *d = procs[pid >> RT_PID_SHIFT].device;
-    if (!d) return;                             // disconnected since
+    if (!d) return;                             // closed since
+    d->sent = 0;
+    if (d->mode == DEV_TCP) {
+        socket_next(d);                         // or wait in select() for more
+        return;
+    }
     const char *line;
     size_t      len;
-    int         got = next_line(d, &line, &len);
-    if (got > 0) {
-        tell(d, RT_DEV_LINE, line, len, 1);
-    } else if (got == 0) {
-        tell(d, RT_DEV_EOF, NULL, 0, 0);
-        close_device(d);
-    } else {
-        fail(d, errno);
+    for (;;) {
+        if (take_line(d, &line, &len)) {
+            tell_line(d, line, len);
+            return;
+        }
+        if (d->eof) {
+            tell(d, RT_DEV_EOF, 0);
+            close_device(d);
+            return;
+        }
+        if (fill(d) < 0) {
+            fail(d, errno);
+            return;
+        }
     }
 }
 
+// Writes what a socket has, as far as it takes it: 0, or -1 with errno
+// set. (SIGPIPE is ignored, so a closed connection is EPIPE.)
+static int flush(rt_device_t *d) {
+    while (d->out_at < d->out_len) {
+        ssize_t n = write(d->fd, d->out + d->out_at, d->out_len - d->out_at);
+        if (n < 0 && errno == EINTR) continue;
+        if (n < 0) return errno == EAGAIN || errno == EWOULDBLOCK ? 0 : -1;
+        d->out_at += (size_t)n;
+    }
+    d->out_at = d->out_len = 0;
+    return 0;
+}
+
+static void queue(rt_device_t *d, const char *bytes, size_t len) {
+    if (d->out_len + len > d->out_cap) {        // out of room: first drop what's been written
+        memmove(d->out, d->out + d->out_at, d->out_len - d->out_at);
+        d->out_len -= d->out_at;
+        d->out_at   = 0;
+    }
+    if (d->out_len + len > d->out_cap) {
+        d->out_cap = (d->out_len + len) * 2;
+        d->out     = must(realloc(d->out, d->out_cap));
+    }
+    memcpy(d->out + d->out_len, bytes, len);
+    d->out_len += len;
+}
+
 static void command(rt_device_t *d, rt_value_t msg) {
-    if (d->mode == RT_FS_READ || !rt_is_cons(msg) || rt_car(msg) != rt_symbol(RT_SYM_DEVICE + RT_DEV_WRITE)) {
+    if (d->mode == RT_FS_READ || d->mode == DEV_LISTEN || !rt_is_cons(msg) || rt_car(msg) != rt_symbol(RT_SYM_DEVICE + RT_DEV_WRITE)) {
         rt_dead_letter(msg, d->site);
         return;
     }
     rt_buf_t b = { 0 };
     for (rt_value_t x = rt_cdr(msg); rt_is_cons(x); x = rt_cdr(x)) rt_render(&b, rt_car(x), 1);
+    if (d->mode == DEV_TCP) {
+        queue(d, b.bytes, b.len);
+        rt_buf_free(&b);
+        if (!d->connecting && flush(d) < 0) fail(d, errno);
+        return;
+    }
     for (size_t at = 0; at < b.len; ) {
         ssize_t n = write(d->fd, b.bytes + at, b.len - at);
         if (n < 0 && errno == EINTR) continue;
@@ -1061,18 +1254,101 @@ rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, c
         end_other(p, io_reason(cells, errno, path));
         return pid;
     }
-    rt_device_t *d = must(calloc(1, sizeof *d));
-    d->pid      = new_entry((entry_t){ .value = RT_NIL, .ok = 1, .device = d });
-    d->owner    = pid;
-    d->fd       = fd;
-    d->mode     = (int)mode;
-    d->site     = site;
-    d->path     = must(malloc(len + 1));
-    d->path_len = len;
-    memcpy(d->path, bytes, len + 1);
-    d->next     = p->devices;
-    p->devices  = d;
-    tell(d, RT_DEV_OPEN, NULL, 0, mode == RT_FS_READ);
+    tell_open(new_device(p, (int)mode, fd, site, bytes, len));
+    return pid;
+}
+
+// A socket that doesn't block, isn't inherited, and fits in select():
+// 0, or an errno.
+static int setup(int fd) {
+    int flags = fcntl(fd, F_GETFL);
+    if (fd >= FD_SETSIZE) return EMFILE;
+    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 || fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) return errno;
+    int one = 1;
+    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);  // messages are small; don't wait to fill a packet
+    return 0;
+}
+
+static int tcp_listen(rt_proc_t *p, const char *site, int64_t port) {
+    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    if (fd < 0) return errno;
+    int one = 1, err;
+    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
+    struct sockaddr_in a = { 0 };
+    a.sin_family      = AF_INET;
+    a.sin_port        = htons((uint16_t)port);
+    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    socklen_t alen    = sizeof a;
+    if ((err = setup(fd)) != 0
+        || (bind(fd, (struct sockaddr *)&a, sizeof a) < 0 && (err = errno))
+        || (listen(fd, 128) < 0 && (err = errno))
+        || (getsockname(fd, (struct sockaddr *)&a, &alen) < 0 && (err = errno))) {
+        close(fd);
+        return err;
+    }
+    rt_device_t *d = new_device(p, DEV_LISTEN, fd, site, NULL, 0);
+    d->port = ntohs(a.sin_port);
+    tell_open(d);
+    return 0;
+}
+
+// Starts connecting to "host:port" (split at the last colon).
+static int tcp_connect(rt_proc_t *p, const char *site, const char *where, size_t len) {
+    size_t colon = len;
+    while (colon > 0 && where[colon - 1] != ':') colon--;
+    if (colon == 0 || memchr(where, '\0', len)) return ERR_NOTFOUND;
+    char host[len + 1];
+    memcpy(host, where, colon - 1);
+    host[colon - 1] = '\0';
+    struct addrinfo hints = { 0 }, *res;
+    hints.ai_family   = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    int gai = getaddrinfo(host, where + colon, &hints, &res);      // waits, with the whole runtime
+    if (gai != 0) return gai == EAI_SYSTEM ? errno : ERR_NOTFOUND;
+    int fd = socket(AF_INET, SOCK_STREAM, 0), err = fd < 0 ? errno : setup(fd);
+    if (!err && connect(fd, res->ai_addr, res->ai_addrlen) < 0 && errno != EINPROGRESS) err = errno;
+    freeaddrinfo(res);
+    if (err) {
+        if (fd >= 0) close(fd);
+        return err;
+    }
+    // Even if it has connected already, (:open c) comes from the event
+    // loop, so it always comes in the same order.
+    new_device(p, DEV_TCP, fd, site, where, len)->connecting = 1;
+    return 0;
+}
+
+rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+                          rt_value_t where, uint64_t mode) {
+    if (mode == RT_TCP_LISTEN) {
+        if (where & RT_TAG_INT_MASK) rt_fault(RT_FAULT_NOT_INT, where, site);
+        if (rt_int_value(where) < 0 || rt_int_value(where) > 65535) rt_fault(RT_FAULT_RANGE, where, site);
+    } else if (!rt_is_string(where)) {
+        rt_fault(RT_FAULT_NOT_STRING, where, site);
+    }
+    rt_value_t pid = rt_fork(code, n, values, site);
+    rt_proc_t *p   = procs[pid >> RT_PID_SHIFT].proc;
+    int        err = mode == RT_TCP_LISTEN ? tcp_listen(p, site, rt_int_value(where))
+                                           : tcp_connect(p, site, rt_string_bytes(where), rt_string_len(where));
+    if (err) {
+        _Alignas(16) rt_value_t cells[4];
+        end_other(p, io_reason(cells, err, where));
+    }
+    return pid;
+}
+
+rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+                             rt_value_t dev) {
+    rt_device_t *d = entry(dev, site)->device;
+    if (!d) rt_fault(RT_FAULT_NOT_DEVICE, dev, site);
+    rt_value_t pid = rt_fork(code, n, values, site);
+    rt_proc_t *p   = procs[pid >> RT_PID_SHIFT].proc;
+    unown(d);
+    d->owner   = pid;
+    d->next    = p->devices;
+    p->devices = d;
+    d->waiting = 0;
+    if (!d->connecting) tell_open(d);           // a connection that's still connecting says so when it has
     return pid;
 }
 
@@ -1080,6 +1356,108 @@ rt_value_t rt_disconnect(rt_value_t pid, const char *site) {
     rt_device_t *d = entry(pid, site)->device;
     if (d) close_device(d);
     return RT_NIL;
+}
+
+// A listener has connections to accept: each becomes a device of the
+// listener's owner, which hears (:accept l conn).
+static void accept_all(rt_device_t *l) {
+    rt_proc_t *owner = procs[l->owner >> RT_PID_SHIFT].proc;
+    for (;;) {
+        struct sockaddr_in a;
+        socklen_t          alen = sizeof a;
+        int                fd   = accept(l->fd, (struct sockaddr *)&a, &alen);
+        if (fd < 0 && errno == EINTR) continue;
+        if (fd < 0) return;                     // none left, or none to be had for now
+        if (setup(fd) != 0) {
+            close(fd);
+            continue;
+        }
+        char where[INET_ADDRSTRLEN + 8];
+        inet_ntop(AF_INET, &a.sin_addr, where, INET_ADDRSTRLEN);
+        snprintf(where + strlen(where), 8, ":%d", ntohs(a.sin_port));
+        rt_device_t *c = new_device(owner, DEV_TCP, fd, l->site, where, strlen(where));
+        c->waiting = 1;
+        _Alignas(16) rt_value_t cell[2];
+        tell_list(l, RT_DEV_ACCEPT, cons_at(cell, c->pid, RT_NIL), 0);
+    }
+}
+
+// Adds to the sets the sockets that are waiting to read or write, and
+// raises *max to their highest file descriptor.
+static void socket_fds(fd_set *in, fd_set *out, int *max) {
+    bury();
+    for (rt_device_t *d = sockets; d; d = d->next_socket) {
+        int r = d->mode == DEV_LISTEN || (!d->connecting && !d->waiting && !d->sent && !d->eof && !d->closing);
+        int w = d->connecting || d->out_len > d->out_at;
+        if (r) FD_SET(d->fd, in);
+        if (w) FD_SET(d->fd, out);
+        if ((r || w) && d->fd > *max) *max = d->fd;
+    }
+}
+
+static void socket_event(rt_device_t *d, int r, int w) {
+    if (d->mode == DEV_LISTEN) {
+        accept_all(d);
+        return;
+    }
+    if (d->connecting && w) {
+        int       err = 0;
+        socklen_t len = sizeof err;
+        if (getsockopt(d->fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) err = errno;
+        if (err) {
+            if (d->closing) close_now(d);
+            else            fail(d, err);
+            return;
+        }
+        d->connecting = 0;
+        if (!d->closing) tell_open(d);
+    }
+    if (w && !d->connecting && d->out_len > d->out_at) {
+        if (flush(d) < 0) {
+            if (d->closing) close_now(d);
+            else            fail(d, errno);
+            return;
+        }
+        if (d->closing && d->out_len == 0) {
+            close_now(d);
+            return;
+        }
+    }
+    if (r && !d->closing) {
+        if (fill(d) < 0 && errno != EAGAIN && errno != EWOULDBLOCK) {
+            fail(d, errno);
+            return;
+        }
+        socket_next(d);
+    }
+}
+
+typedef struct {
+    rt_device_t *d;
+    int          r, w;
+} ready_t;
+
+static int by_pid(const void *a, const void *b) {
+    rt_value_t x = ((const ready_t *)a)->d->pid, y = ((const ready_t *)b)->d->pid;
+    return x < y ? -1 : x > y;
+}
+
+// Handles the sockets select() says are ready, in the order of their
+// pids; returns whether there were any.
+static int socket_events(fd_set *in, fd_set *out) {
+    ready_t *ready = must(malloc((nsockets + 1) * sizeof *ready));
+    uint64_t n     = 0;
+    for (rt_device_t *d = sockets; d; d = d->next_socket) {
+        int r = FD_ISSET(d->fd, in), w = FD_ISSET(d->fd, out);
+        if (r || w) ready[n++] = (ready_t){ d, r, w };
+    }
+    qsort(ready, n, sizeof *ready, by_pid);
+    for (uint64_t i = 0; i < n; i++) {
+        if (!ready[i].d->dead) socket_event(ready[i].d, ready[i].r, ready[i].w);
+    }
+    free(ready);
+    bury();
+    return n > 0;
 }
 
 // --- the scheduler ------------------------------------------------------------
@@ -1106,6 +1484,7 @@ void rt_run(void) {
 
 int main(void) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
+    signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
     poison = getenv("SLIGHT_POISON") != NULL;
     const char *mode = getenv("SLIGHT_CLOCK");
     virtual_clock = mode && strcmp(mode, "virtual") == 0;

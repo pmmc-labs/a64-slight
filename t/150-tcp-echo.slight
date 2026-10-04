@@ -1,0 +1,39 @@
+; connect :tcp/listen and :tcp. A listener hears (:open l port), port
+; being the one the system picked for 0, then (:accept l conn) for each
+; connection, which (connect conn expr) hands to a process of its own. A
+; connection hears (:open c) once it's connected, then (:line c s) one at
+; a time, and (:eof c) when the other end closes. The program runs till
+; its last socket is closed.
+
+; it says at the end whether it heard (:open c) first
+(defun echo (opened)
+    (recv
+        ((:open c)   (echo #true))
+        ((:line c s) (send c (list :write "echo: " s \n)) (echo opened))
+        ((:eof c)    (disconnect c) (pprint (list :echo-opened opened)))))
+
+(defun talker (lines n)
+    (recv
+        ((:open c)
+            (map (lambda (s) (send c (list :write s \n))) lines)
+            (talker lines n))
+        ((:line c s)
+            (pprint (list :client-got s))
+            (cond
+                ((== n 1) (disconnect c) :talked)
+                (#true    (talker lines (- n 1)))))))
+
+(defun listener ()
+    (recv
+        ((:open l port)
+            (pprint (list :listening (int? port) (> port 0)))
+            (let me $$)
+            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (talker (list "hello" "" "world") 3))))))
+            (serving l))))
+
+(defun serving (l)
+    (recv
+        ((:accept _ conn) (connect conn (echo #false)) (serving l))
+        ((:client r)      (disconnect l) (list :served r))))
+
+(pprint (join (connect :tcp/listen 0 (listener))))

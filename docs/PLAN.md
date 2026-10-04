@@ -4,9 +4,9 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–9 and 10a–10c done (under qemu, and natively on
-macOS: Stevan runs `make test` on his M2 Max after every step). 10d, the
-network, is next.
+**Progress:** steps 0–9 and 10a–10d done (under qemu, and natively on
+macOS: Stevan runs `make test` on his M2 Max after every step). 10e, HTTP
+in slight, is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -220,26 +220,29 @@ failure ends the owner with `(:error (name path))`, errno's name. `slurp`
 and `spew` are slight, in an opt-in `lib/fs.slight`, and `slurp` gives
 lines. `:keypress` stays as it is (D131).
 
-#### 10d. The network (agreed in outline)
+#### 10d. The network (done)
 
-TCP in the runtime, HTTP in slight (D132). To settle when it starts:
+TCP in the runtime (D132–D139): `(connect :tcp "host:port" expr)` and
+`(connect :tcp/listen port expr)` open sockets as devices, waited for in
+`select()`. Lines for now, one at a time (D134); writes are buffered, and
+closing waits for them (D135); errno's names plus `:enotfound` (D136); a
+listener says which port it got, so tests can listen on 0 and run server
+and client in one program (D137); `(connect conn expr)` hands an accepted
+connection to a process of its own (D138).
 
-- `:tcp` (connect to a host and port) and `:tcp/listen` (a port) devices,
-  waited for in `select()` with stdin and the timers. Their messages,
-  after `(:open f)`: data (as strings, in chunks or lines?), the end of
-  the stream, an accepted connection.
-- `(connect conn expr)`: `connect` given a device instead of a source,
-  handing it to a new process of its own, so a server can give each
-  connection its own actor.
-- Writing: `(:write x ...)` as for files, but a socket can make it wait,
-  so the runtime has to queue what it can't write yet, and `send` still
-  never blocks.
-- Errors, as files' (D128), with the network's errno names
-  (`:econnrefused`, `:econnreset`, `:epipe`, ...).
-- HTTP/1.1 in slight, in a `lib/http.slight`: a client and a server,
-  without TLS. `select()` limits the runtime to about 1,000 sockets.
-- Tests: a server and a client in one program, on a port the system
-  picks.
+#### 10e. HTTP in slight
+
+`lib/http.slight`, opt-in (D140): an HTTP/1.1 client and server on `:tcp`,
+without TLS. To settle when it starts:
+
+- What the library looks like to a program: a server as a function of a
+  request that returns a response? A client as a call that gives
+  `(:ok response)` or `(:error reason)`?
+- Request bodies: a body that doesn't end in a newline can't be read
+  until connections can send chunks (D134). Add chunks first, or start
+  with GET and bodies that end in newlines?
+- `Connection: close` (one request per connection) to begin with, or
+  keep-alive?
 
 ### 11. Port the examples
 

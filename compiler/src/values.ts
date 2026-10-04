@@ -13,7 +13,7 @@ export const RESERVED_SYMBOLS: readonly string[] = ['#false', '#true'];
 export const FAULT_KINDS: readonly string[] = [
     'not-an-int', 'overflow', 'not-a-bool', 'no-clause', 'stack', 'not-a-cons', 'not-a-list', 'heap',
     'not-a-string', 'not-a-symbol', 'out-of-range', 'not-a-number', 'div-by-zero', 'not-a-function',
-    'arity', 'not-a-pid', 'join-self',
+    'arity', 'not-a-pid', 'join-self', 'not-a-device',
 ];
 
 // The names of keys from :keypress, then the modifiers, in RT_KEY_ order.
@@ -24,12 +24,13 @@ export const KEY_NAMES: readonly string[] = [
 ];
 
 // What a device and its owner say to each other, in RT_DEV_ order.
-export const DEVICE_WORDS: readonly string[] = ['open', 'line', 'eof', 'write'];
+export const DEVICE_WORDS: readonly string[] = ['open', 'line', 'eof', 'write', 'accept'];
 
 // Why a device failed, from errno, in RT_ERR_ order.
 export const ERRNO_NAMES: readonly string[] = [
     'enoent', 'eacces', 'eperm', 'eexist', 'eisdir', 'enotdir', 'enametoolong', 'eloop', 'erofs', 'enospc',
-    'efbig', 'emfile', 'enfile', 'eio', 'io-error',
+    'efbig', 'emfile', 'enfile', 'eio', 'econnrefused', 'econnreset', 'epipe', 'etimedout', 'eaddrinuse',
+    'eaddrnotavail', 'ehostunreach', 'enetunreach', 'enotfound', 'io-error',
 ];
 
 // The symbols the runtime makes (ending a process, faults, keys,

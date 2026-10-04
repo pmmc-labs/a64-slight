@@ -70,7 +70,7 @@ Booleans are the reserved symbols `#true` and `#false`.
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
 | `(fork expr)` | Runs `expr` in a new process and returns its pid. |
-| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`, or a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`). |
+| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); or a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`. `(connect dev expr)` hands the device `dev` to the new process. |
 | `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
@@ -157,6 +157,8 @@ reply refs.
 | `(fork expr)` | The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. `expr` runs at the base of the child's stack, so it may tail-call a state function. Inside `expr`, `$$` is the child. |
 | `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
 | `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
+| `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
+| `(connect dev expr)` | `fork`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
 | `(disconnect f)` | Closes the device `f`. Anything that isn't an open device it ignores. Returns `()`. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
@@ -191,16 +193,18 @@ reply refs.
   (preempted or yielded), blocked in `join`, or blocked in a syscall holds a
   stack. A process waiting in `recv` holds none.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
-  sources, no blocked I/O) is detected and reported. So far (step 10b): if
+  sources, no blocked I/O) is detected and reported. So far (step 10d): if
   the run queue empties, no timer is pending, no process is connected to
-  `:keypress` with stdin still open, and the root process hasn't ended,
+  `:keypress` with stdin still open, no socket is open, and the root
+  process hasn't ended,
   the program prints `deadlock: the root process is waiting for a
   message, and nothing else can run` (or `... waiting for #<pid N> to end,
   ...`, in `join`) to stderr and exits 1.
 - **The program ends when nothing can run** and nothing more can come (no
-  timer is pending, and no process is connected to `:keypress` or stdin
-  has ended), not when the root ends: other processes keep running after the root has its
-  value (or its error), and the root's value is printed last. Processes
+  timer is pending, no socket is open, and no process is connected to
+  `:keypress` or stdin has ended), not when the root ends: other
+  processes keep running after the root has its value (or its error), and
+  the root's value is printed last. Processes
   still waiting in `recv` or `join` at that point are dropped (D93).
 - **Blocking calls.** Since a process can block with its stack, `sleep`
   blocks only the calling process; it can't fail, and returns `()`
@@ -479,8 +483,12 @@ Lalloc_N:
   sp, d8–d15).
 - **Idle**: when nothing is runnable, wait in `select()` (on macOS and
   Linux alike, D113) on stdin, if a process is connected to `:keypress`,
-  with the timeout set to the next timer. Timers are a binary heap. While
-  processes are busy, stdin is looked at every 10 ms (D122).
+  and on the sockets, with the timeout set to the next timer. Timers are a
+  binary heap. While processes are busy, stdin and the sockets are looked
+  at every 10 ms (D122). On the virtual clock they're looked at only when
+  nothing can run: the sockets first, then a key, then the clock moves to
+  the next timer; only when nothing else can happen does it wait for real
+  (D139).
 - **`:keypress`** (`runtime/tty.c`) sends ts-slight's key shape
   `(key mods...)` (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style
@@ -515,9 +523,28 @@ Lalloc_N:
   something that can still happen; one that can keep a read waiting (a
   FIFO, a terminal) waits with the whole runtime. To `join`, `monitor`
   and `kill`, a device is a process that ended with `(:ok ())`.
-- **The network** comes the same way, later (D132): `:tcp` and
-  `:tcp/listen` devices in the runtime, waited for in `select()`, and
-  HTTP as a slight library on top.
+- **Sockets are devices too** (D133–D139). `(connect :tcp "host:port"
+  expr)` connects, without stalling the runtime (looking up the host does
+  stall it, briefly); the connection's first message is `(:open c)`, once
+  it's connected, or the owner ends with `(:error (econnrefused
+  "host:port"))` and the like. It then sends lines as a file does, one at a
+  time (it's read only while none of its lines is in its owner's mailbox,
+  so a fast sender is held back by TCP itself), and `(:eof c)` when the
+  other end closes; it can still be written to then. It takes `(:write x
+  ...)` as a file does, and keeps what the socket can't take yet, writing
+  it when it can, so `send` still never blocks; closing it waits till
+  that's written, and meanwhile it keeps the program running.
+  `(connect :tcp/listen port expr)` listens on all interfaces; its first
+  message is `(:open l port)`, port being the one it got (0 lets the
+  system pick, which tests use, with server and client in one program),
+  then `(:accept l conn)` for each connection. `conn` belongs to the
+  listener's owner and reads nothing till `(connect conn expr)` hands it to
+  a process of its own. Open sockets keep the program running. The error
+  names are errno's (`:econnrefused`, `:econnreset`, `:epipe`,
+  `:eaddrinuse`, ...), and `:enotfound` (Node's) for a host that can't be
+  found; SIGPIPE is ignored, so writing to a closed connection is
+  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. HTTP will
+  be a slight library on top (D132, D140).
 - C libraries come in later as drivers exposed as processes, never as
   direct calls that could stall the runtime.
 

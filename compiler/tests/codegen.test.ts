@@ -495,7 +495,7 @@ test('join, monitor, kill and raise are builtins in the runtime, and can be valu
 test('connect is a fork whose process gets the keys, from :keypress', () => {
     assert.match(compile('(defun f (n) n) (let n 1) (connect :keypress (f n))'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_connect\n/);
     assert.match(compile('(connect :keypress 1)'), /\.asciz "connect at test\.slight:1:1"/);
-    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can be :keypress, :fs/read, :fs/write or :fs/append, not (quote x)");
+    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can be :keypress, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not (quote x)");
     fails('(connect :keypress)', 'test.slight:1:1: connect takes 2 arguments, not 1');
     fails('(connect)', 'test.slight:1:1: connect takes 2 arguments, not 0');
     fails('(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (connect :keypress (list a b c d e f g h i))',
@@ -526,11 +526,25 @@ test('connect to a file evaluates the path in the parent, and passes it and the 
     assert.match(compile('(connect :fs/read "a" 1)'), /mov {2}x5, #RT_FS_READ\n/);
     assert.match(compile('(connect :fs/append "a" 1)'), /mov {2}x5, #RT_FS_APPEND\n/);
     fails('(connect :fs/read "a")', 'test.slight:1:1: connect takes 3 arguments, not 2');
-    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :fs/read, :fs/write or :fs/append, not (quote fs)");
+    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not (quote fs)");
 });
 
 test('disconnect is a builtin in the runtime', () => {
     assert.match(compile('(disconnect 1)'), /LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_disconnect\n/);
     fails('(disconnect)', 'test.slight:1:1: disconnect takes 1 argument, not 0');
     fails('(defun disconnect (x) x)', "test.slight:1:8: can't define disconnect: it's a builtin");
+});
+
+test('connect over TCP passes the address or the port, and the mode', () => {
+    assert.match(compile('(connect :tcp "localhost:80" 1)'), /ldr {2}x4, \[sp, #\d+\]\n {4}mov {2}x5, #RT_TCP_CONNECT\n {4}bl {3}rt_connect_tcp\n/);
+    assert.match(compile('(connect :tcp/listen 0 1)'), /mov {2}x5, #RT_TCP_LISTEN\n {4}bl {3}rt_connect_tcp\n/);
+    fails('(connect :tcp/listen 0)', 'test.slight:1:1: connect takes 3 arguments, not 2');
+});
+
+test('connect given anything but a :keyword hands that device to the new process', () => {
+    const asm = compile('(let c 5) (connect c (pprint 1))');
+    assert.match(asm, /\/\/ c\n {4}str {2}x0, \[sp, #8\]\n/);
+    assert.match(asm, /LOADADDR x3, Lsite_\d+\n {4}ldr {2}x4, \[sp, #8\]\n {4}bl {3}rt_connect_device\n/);
+    fails('(let c 5) (connect c)', 'test.slight:1:11: connect takes 2 arguments, not 1');
+    fails('(let c 5) (connect c 1 2)', 'test.slight:1:11: connect takes 2 arguments, not 3');
 });

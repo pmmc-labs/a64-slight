@@ -61,7 +61,8 @@
 #define RT_FAULT_ARITY      15    // :arity           a function called with the wrong number of arguments
 #define RT_FAULT_NOT_PID    16    // :not-a-pid       a process operation was given something else
 #define RT_FAULT_JOIN_SELF  17    // :join-self       (join $$), which would wait forever
-#define RT_FAULT_COUNT      17
+#define RT_FAULT_NOT_DEVICE 18    // :not-a-device    connect was handed something that isn't an open device
+#define RT_FAULT_COUNT      18
 
 // Symbols the runtime makes: every program has them, after #false and
 // #true, in this order (values.ts, RUNTIME_SYMBOLS). The fault kinds
@@ -77,7 +78,7 @@
 // in the order :ctrl :alt :shift. Their symbols follow the fault kinds:
 // RT_KEY_x is symbol RT_SYM_KEYS + x. compiler/tests/values.test.ts reads
 // the names from here.
-#define RT_SYM_KEYS         23    // RT_SYM_FAULTS + RT_FAULT_COUNT
+#define RT_SYM_KEYS         24    // RT_SYM_FAULTS + RT_FAULT_COUNT
 #define RT_KEY_UP            0    // :ArrowUp       the arrows are in the order of
 #define RT_KEY_DOWN          1    // :ArrowDown     their escape sequences, ESC [ A
 #define RT_KEY_RIGHT         2    // :ArrowRight    to ESC [ D
@@ -110,19 +111,22 @@
 #define RT_KEY_SHIFT        29    // :shift
 #define RT_KEY_COUNT        30
 
-// A device (process.c: a file, from connect :fs/...) talks to its owner
-// with these: (:open f) first, a reader's (:line f s) and (:eof f), and
+// A device (process.c: a file or a socket, from connect) talks to its
+// owner with these: (:open f) first (a listener's is (:open l port)), a
+// reader's (:line f s) and (:eof f), a listener's (:accept l conn), and
 // the (:write x ...) a writer takes. RT_DEV_x is symbol RT_SYM_DEVICE + x.
-#define RT_SYM_DEVICE       53    // RT_SYM_KEYS + RT_KEY_COUNT
+#define RT_SYM_DEVICE       54    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
 #define RT_DEV_LINE          1    // :line
 #define RT_DEV_EOF           2    // :eof
 #define RT_DEV_WRITE         3    // :write
-#define RT_DEV_COUNT         4
+#define RT_DEV_ACCEPT        4    // :accept
+#define RT_DEV_COUNT         5
 
 // Why a device failed, from errno: a device's owner ends with
-// (:error (name path)). RT_ERR_x is symbol RT_SYM_ERRS + x.
-#define RT_SYM_ERRS         57    // RT_SYM_DEVICE + RT_DEV_COUNT
+// (:error (name path)), path being the file's, or the socket's "host:port"
+// (a listener's port). RT_ERR_x is symbol RT_SYM_ERRS + x.
+#define RT_SYM_ERRS         59    // RT_SYM_DEVICE + RT_DEV_COUNT
 #define RT_ERR_ENOENT        0    // :enoent        no such file or directory
 #define RT_ERR_EACCES        1    // :eacces        permission denied
 #define RT_ERR_EPERM         2    // :eperm         operation not permitted
@@ -137,13 +141,24 @@
 #define RT_ERR_EMFILE       11    // :emfile        too many open files
 #define RT_ERR_ENFILE       12    // :enfile
 #define RT_ERR_EIO          13    // :eio
-#define RT_ERR_OTHER        14    // :io-error      anything else
-#define RT_ERR_COUNT        15
+#define RT_ERR_ECONNREFUSED 14    // :econnrefused  nothing is listening there
+#define RT_ERR_ECONNRESET   15    // :econnreset    the other end went away
+#define RT_ERR_EPIPE        16    // :epipe         writing to a connection the other end has closed
+#define RT_ERR_ETIMEDOUT    17    // :etimedout
+#define RT_ERR_EADDRINUSE   18    // :eaddrinuse    listening on a port that's taken
+#define RT_ERR_EADDRNOTAVAIL 19   // :eaddrnotavail
+#define RT_ERR_EHOSTUNREACH 20    // :ehostunreach
+#define RT_ERR_ENETUNREACH  21    // :enetunreach
+#define RT_ERR_ENOTFOUND    22    // :enotfound     no such host (Node's name: it isn't an errno)
+#define RT_ERR_OTHER        23    // :io-error      anything else
+#define RT_ERR_COUNT        24
 
-// How connect :fs/... opens its file.
+// How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it
 #define RT_FS_APPEND         2    // creating it
+#define RT_TCP_CONNECT       0    // to "host:port"
+#define RT_TCP_LISTEN        1    // on a port, 0 for one the system picks
 
 // What rt_compare is asked.
 #define RT_CMP_EQ            0
@@ -299,6 +314,15 @@ rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, cons
 // (:open f). rt_disconnect closes a device; anything else it ignores.
 rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                          rt_value_t path, uint64_t mode) RT_ASM(rt_connect_fs);
+
+// Sockets (process.c). rt_connect_tcp forks, and connects to "host:port"
+// (RT_TCP_CONNECT) or listens on a port (RT_TCP_LISTEN) on a device the
+// new process owns. rt_connect_device forks, and hands the new process
+// the device dev.
+rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+                          rt_value_t where, uint64_t mode) RT_ASM(rt_connect_tcp);
+rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+                             rt_value_t dev) RT_ASM(rt_connect_device);
 rt_value_t rt_disconnect(rt_value_t pid, const char *site) RT_ASM(rt_disconnect);
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
 rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);

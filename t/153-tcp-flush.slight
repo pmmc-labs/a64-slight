@@ -1,0 +1,34 @@
+; A connection keeps what the socket can't take yet, and closing it waits
+; till that's been written: here the server writes 50,000 lines, about
+; 5 MB, and ends at once, and the client still gets every line.
+
+(defun write-lines (c i n pad)
+    (cond
+        ((== i n) :written)
+        (#true
+            (send c (list :write "line " i " " pad \n))
+            (write-lines c (+ i 1) n pad))))
+
+(defun blurt (n)
+    (recv
+        ((:open c) (write-lines c 0 n (str-repeat "x" 90)))))
+
+(defun tally (n total)
+    (recv
+        ((:open c)   (tally n total))
+        ((:line c s) (tally (+ n 1) (+ total (str-len s))))
+        ((:eof c)    (disconnect c) (list n total))))
+
+(defun listener ()
+    (recv
+        ((:open l port)
+            (let me $$)
+            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (tally 0 0))))))
+            (serving l))))
+
+(defun serving (l)
+    (recv
+        ((:accept _ conn) (connect conn (blurt 50000)) (serving l))
+        ((:client r)      (disconnect l) r)))
+
+(pprint (join (connect :tcp/listen 0 (listener))))
