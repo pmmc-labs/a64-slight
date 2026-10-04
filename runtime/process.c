@@ -13,10 +13,13 @@
 // it had is freed.
 //
 // When nothing can run, the scheduler waits for the next timer (after,
-// sleep); the program ends when nothing can run and no timer is pending.
+// sleep) or key (:keypress). The program ends when nothing can run and
+// nothing more can come: no timer is pending, and no process is connected
+// to :keypress, or stdin has ended.
 
 #include "rt.h"
 
+#include <errno.h>
 #include <inttypes.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -488,6 +491,8 @@ static void notify(rt_value_t to, rt_value_t pid, const entry_t *e) {
 // p ends. Its result goes into its exit record, its joiners wake, its
 // monitors hear, and its heap and mail are freed. Its stack and struct are
 // the caller's to free (retire), since p may be running on that stack.
+static void disconnect(rt_proc_t *p);
+
 static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     uint64_t id = p->pid >> RT_PID_SHIFT;
     entry_t *e  = &procs[id];
@@ -510,6 +515,7 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
         free(w);
     }
     free_heap(p);
+    if (p->keypress) disconnect(p);
     p->state = RT_DONE;
 }
 
@@ -589,11 +595,11 @@ rt_value_t rt_kill(rt_value_t pid, const char *site) {
     return RT_NIL;
 }
 
-static void ring(void);
+static void events(void);
 
 void rt_preempt(rt_proc_t *p) {
     p->reductions = QUOTA;
-    ring();                                     // so a busy process can't hold up a timer
+    events();                                   // so a busy process can't hold up a timer or a key
     if (ready_head) {
         enqueue(p);
         to_scheduler(p);
@@ -695,21 +701,6 @@ static void ring(void) {
     }
 }
 
-// Nothing can run: waits until the next timer is due.
-static void wait_for_alarm(void) {
-    uint64_t due = alarms[0].due;
-    if (virtual_clock) {
-        virtual_now = due;
-        return;
-    }
-    for (uint64_t t; (t = now()) < due; ) {
-        uint64_t us = (due - t + 999) / 1000;
-        if (us > 3600000000) us = 3600000000;  // macOS's select refuses more than 10^8 s
-        struct timeval tv = { .tv_sec = (time_t)(us / 1000000), .tv_usec = (suseconds_t)(us % 1000000) };
-        select(0, NULL, NULL, NULL, &tv);
-    }
-}
-
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) {
     uint64_t due = due_in(ms, site);
     entry(pid, site);
@@ -725,15 +716,139 @@ rt_value_t rt_sleep(rt_value_t ms, const char *site) {
     return RT_NIL;
 }
 
+// --- the keyboard -------------------------------------------------------------
+//
+// Every process connected to :keypress gets every key as a message, in
+// the order they connected. stdin is read whether or not it's a terminal,
+// so a test can pipe keys in; raw mode is on (if it is one) while any
+// process is connected. When stdin ends, the keys just stop.
+//
+// When nothing can run, the scheduler waits in select() for a key or the
+// next timer, whichever comes first; while processes are busy, it looks
+// at stdin every 10 ms. On the virtual clock, keys come only when nothing
+// can run, one at a time, before the clock moves: as if typed by someone
+// who waits for the program to settle before each key.
+
+#define INPUT_EVERY 10000000            // ns between looks at stdin while busy
+
+static rt_proc_t     **connected;
+static uint64_t        nconnected, connected_cap;
+static unsigned char   input[4096];     // read from stdin...
+static size_t          input_at, input_len; // ...and decoded up to input_at
+static int             input_ended;
+static uint64_t        input_seen;      // when stdin was last looked at while busy
+
+rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
+    rt_value_t pid = rt_fork(code, n, values, site);
+    if (nconnected == connected_cap) {
+        connected_cap = connected_cap ? connected_cap * 2 : 8;
+        connected     = realloc(connected, connected_cap * sizeof *connected);
+        if (!connected) {
+            perror("rt: out of memory");
+            exit(2);
+        }
+    }
+    rt_proc_t *p = procs[pid >> RT_PID_SHIFT].proc;
+    p->keypress  = 1;
+    connected[nconnected++] = p;
+    rt_tty_raw(1);
+    return pid;
+}
+
+static void disconnect(rt_proc_t *p) {
+    uint64_t i = 0;
+    while (connected[i] != p) i++;
+    nconnected--;
+    memmove(&connected[i], &connected[i + 1], (nconnected - i) * sizeof *connected);
+    if (!nconnected) rt_tty_raw(0);
+}
+
+static int listening(void) {
+    return nconnected && !input_ended;
+}
+
+// Waits up to us microseconds (forever, if negative) for stdin to have
+// something to read, if anyone's listening; returns whether it has.
+static int wait_for(int64_t us) {
+    int    keys = listening();
+    fd_set in;
+    FD_ZERO(&in);
+    if (keys) FD_SET(STDIN_FILENO, &in);
+    struct timeval tv, *timeout = NULL;
+    if (us >= 0) {
+        if (us > 3600000000) us = 3600000000;  // macOS's select refuses more than 10^8 s
+        tv      = (struct timeval){ .tv_sec = (time_t)(us / 1000000), .tv_usec = (suseconds_t)(us % 1000000) };
+        timeout = &tv;
+    }
+    return select(keys ? STDIN_FILENO + 1 : 0, &in, NULL, NULL, timeout) > 0 && keys && FD_ISSET(STDIN_FILENO, &in);
+}
+
+// Reads what stdin has, once everything read before has been decoded.
+static void read_input(void) {
+    if (input_at < input_len) return;
+    ssize_t got = read(STDIN_FILENO, input, sizeof input);
+    if (got == 0 || (got < 0 && errno != EINTR && errno != EAGAIN)) input_ended = 1;
+    input_at  = 0;
+    input_len = got > 0 ? (size_t)got : 0;
+}
+
+static void send_key(rt_value_t key) {
+    for (uint64_t i = 0; i < nconnected; i++) deliver(connected[i], new_msg(key));
+}
+
+// Sends the next key that has been read, if there is one.
+static int next_key(void) {
+    if (input_at == input_len) return 0;
+    input_at += rt_key(input + input_at, input_len - input_at, send_key);
+    return 1;
+}
+
+// At every decision the scheduler makes, and when a process is preempted:
+// fires the timers that are due, and on the real clock, every 10 ms, takes
+// the keys typed since.
+static void events(void) {
+    ring();
+    if (virtual_clock || !listening()) return;
+    uint64_t t = now();
+    if (t - input_seen < INPUT_EVERY) return;
+    input_seen = t;
+    if (wait_for(0)) {
+        read_input();
+        while (next_key()) {}
+    }
+}
+
+// Nothing can run: waits for a key or the next timer. Returns 0 if
+// neither can come.
+static int idle(void) {
+    if (!listening() && !nalarms) return 0;
+    if (virtual_clock) {
+        if (listening() && input_at == input_len && wait_for(0)) read_input();
+        if (listening() && next_key()) return 1;
+        if (nalarms) {
+            virtual_now = alarms[0].due;
+            return 1;
+        }
+        if (listening() && wait_for(-1)) read_input();  // only a key can come: wait for one, for real
+        return 1;
+    }
+    uint64_t t = now();
+    if (nalarms && alarms[0].due <= t) return 1;
+    if (wait_for(nalarms ? (int64_t)((alarms[0].due - t + 999) / 1000) : -1)) {
+        read_input();
+        while (next_key()) {}
+    }
+    return 1;
+}
+
 // --- the scheduler ------------------------------------------------------------
 
 void rt_run(void) {
     for (;;) {
-        ring();
+        events();
         rt_proc_t *p = dequeue();
         if (!p) {
-            if (!nalarms) return;
-            wait_for_alarm();
+            if (!idle()) return;
             continue;
         }
         if (!p->stack) start(p);

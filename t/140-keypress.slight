@@ -1,0 +1,19 @@
+; stdin: a Z\033[A\033[1;5C\033[3~\033OP\033[24;2~\033x\005\r\n\t\0177é\033[Z\033\033[B\034q
+; :keypress sends each key to the connected process as (key mods...): a
+; string for a printable key, or a name for the others, then the
+; modifiers held, in the order ctrl, alt, shift. An upper-case letter
+; comes with shift; ESC before a key means alt, and so does xterm's
+; modifier parameter (ESC [ 1 ; 5 C is ctrl and the right arrow). Both \r
+; and \n are Enter. tty/screen/rows and tty/screen/cols are 24 and 80
+; when stdout isn't a terminal.
+
+(defun show-keys ()
+    (recv
+        (key
+            (pprint key)
+            (cond
+                ((eq? (car key) "q") :quit)
+                (#true               (show-keys))))))
+
+(pprint (list (tty/screen/rows) (tty/screen/cols)))
+(pprint (join (connect :keypress (show-keys))))

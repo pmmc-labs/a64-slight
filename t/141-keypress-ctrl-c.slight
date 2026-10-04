@@ -1,0 +1,12 @@
+; stdin: ab\003c
+; Ctrl-C ends the program at once, with exit status 130. On the virtual
+; clock a key comes each time nothing can run, so the keys before it have
+; been handled; the program never sees Ctrl-C, or what comes after it.
+
+(defun show-keys ()
+    (recv
+        (key
+            (pprint key)
+            (show-keys))))
+
+(join (connect :keypress (show-keys)))

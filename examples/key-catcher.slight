@@ -1,0 +1,37 @@
+; stdin: \033[1;2C3\033[1;2C\033[1;2B\033[D\033[1;3D\033x\003
+; key-catcher, from ts-slight's examples: the arrows move the cursor;
+; with shift, an arrow paints the cell it leaves (an upper-case letter
+; paints too); with alt, it clears it. The digits 1 to 7 pick the paint's
+; colour. There's no quit key: Ctrl-C ends it.
+;
+; Changes: a (recv) in the middle of a function became a receive
+; function; case and when became cond; the (yield ...) around the loop is
+; gone. The colour keys are matched as strings ("1" rather than 1), which
+; is what a key is, so they now work.
+
+(defun keyboard (color)
+    (recv
+        (key
+            (let mods (cdr key))
+            (cond
+                ((nil? mods)              ())
+                ((eq? (car mods) :shift) (tty/write \e "[" color "m " \e "[D"))
+                ((eq? (car mods) :alt)   (tty/write \e "[49m " \e "[D"))
+                (#true                    ()))
+            (cond
+                ((eq? (car key) :ArrowUp)    (tty/write \e "[A"))
+                ((eq? (car key) :ArrowDown)  (tty/write \e "[B"))
+                ((eq? (car key) :ArrowRight) (tty/write \e "[C"))
+                ((eq? (car key) :ArrowLeft)  (tty/write \e "[D"))
+                (#true                       ()))
+            (keyboard (pick-color (car key) color)))))
+
+; a digit from 1 to 7 picks a colour (41 to 47); any other key keeps it
+(defun pick-color (key color)
+    (let digit (cond ((str? key) (string->int key)) (#true #false)))
+    (cond
+        ((not (int? digit))               color)
+        ((and (>= digit 1) (<= digit 7)) (+ 40 digit))
+        (#true                            color)))
+
+(join (connect :keypress (keyboard 47)))

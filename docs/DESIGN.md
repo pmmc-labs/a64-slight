@@ -70,7 +70,7 @@ Booleans are the reserved symbols `#true` and `#false`.
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
 | `(fork expr)` | Runs `expr` in a new process and returns its pid. |
-| `(connect :source expr)` | Same as `fork`, and connects the new process to an event source (`:keypress`). |
+| `(connect :source expr)` | Same as `fork`, and connects the new process to an event source. `:keypress` is the only one. |
 | `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
@@ -155,7 +155,7 @@ reply refs.
 | | |
 |---|---|
 | `(fork expr)` | The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. `expr` runs at the base of the child's stack, so it may tail-call a state function. Inside `expr`, `$$` is the child. |
-| `(connect :keypress expr)` | `fork`, plus the new process receives the source's events as messages. |
+| `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see Devices, under Scheduler). |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
 | `(join pid)` | **Blocking** wait for `pid` to end. Returns `(:ok value)` or `(:error reason)`. Works on any pid (not just children), anywhere (including inside lambdas), any number of times, and after the process has already ended. Joiners wake in the order they joined. `(join $$)` faults (`:join-self`). |
@@ -189,13 +189,15 @@ reply refs.
   (preempted or yielded), blocked in `join`, or blocked in a syscall holds a
   stack. A process waiting in `recv` holds none.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
-  sources, no blocked I/O) is detected and reported. So far (step 10a): if
-  the run queue empties, no timer is pending, and the root process hasn't
-  ended, the program prints `deadlock: the root process is waiting for a
+  sources, no blocked I/O) is detected and reported. So far (step 10b): if
+  the run queue empties, no timer is pending, no process is connected to
+  `:keypress` with stdin still open, and the root process hasn't ended,
+  the program prints `deadlock: the root process is waiting for a
   message, and nothing else can run` (or `... waiting for #<pid N> to end,
   ...`, in `join`) to stderr and exits 1.
-- **The program ends when nothing can run** and no timer is pending, not
-  when the root ends: other processes keep running after the root has its
+- **The program ends when nothing can run** and nothing more can come (no
+  timer is pending, and no process is connected to `:keypress` or stdin
+  has ended), not when the root ends: other processes keep running after the root has its
   value (or its error), and the root's value is printed last. Processes
   still waiting in `recv` or `join` at that point are dropped (D93).
 - **Blocking syscalls.** Since a process can block with its stack, `sleep`,
@@ -253,7 +255,8 @@ Keep ts-slight's names where possible
   `string->symbol`, `byte-at`, `bytes->string`, `format-num`. See
   Strings below for how each behaves.
 - processes: `send join monitor kill after raise`
-- I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols`, `pprint`
+- I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols` (the terminal's
+  size, asked each time; 24 and 80 when stdout isn't a terminal), `pprint`
   (prints its argument and a newline, returns `()`, as in ts-slight;
   symbols print without the colon, so `:ping` prints as `ping`),
   `sleep`, `slurp`, `spew`
@@ -464,13 +467,21 @@ Lalloc_N:
 - **Context switch**: the spike's `rt_switch`, 25 instructions (x19–x30,
   sp, d8–d15).
 - **Idle**: when nothing is runnable, wait in `select()` (on macOS and
-  Linux alike, D113) with the timeout set to the next timer. Timers are a
-  binary heap.
-- **Devices** are runtime event sources that send messages: `:keypress`
-  sends ts-slight's key shape `(key mods...)`, where the key is a string for
-  printable keys and a DOM-style name symbol for named keys
-  (`reference/ts-slight/src/extensions.ts`, `KEY_NAMES`). The runtime
-  decodes the terminal's escape sequences.
+  Linux alike, D113) on stdin, if a process is connected to `:keypress`,
+  with the timeout set to the next timer. Timers are a binary heap. While
+  processes are busy, stdin is looked at every 10 ms (D122).
+- **Devices** are runtime event sources that send messages. `:keypress`
+  (`runtime/tty.c`) sends ts-slight's key shape `(key mods...)` (D120): the
+  key is a string for a printable key (one UTF-8 character) or a DOM-style
+  name (`:ArrowUp`, `:Enter`, `:F1`, ..., `:Unidentified`), and the mods
+  are those held, in the order `:ctrl :alt :shift`. The runtime decodes
+  the terminal's escape sequences (an ESC at the end of a read is the
+  Escape key). Every connected process gets every key (D119). stdin is
+  read whether or not it's a terminal, so tests can pipe keys in; raw mode
+  (Node's, D121) is on, when it is one, while any process is connected.
+  Ctrl-C puts the terminal back and exits 130 (D117). When stdin ends, the
+  keys stop (D118). On the virtual clock, a key comes each time nothing
+  can run, before the clock moves (D122).
 - C libraries come in later as drivers exposed as processes, never as
   direct calls that could stall the runtime.
 
@@ -596,6 +607,8 @@ line-by-line translation.
 - **Compiler unit tests** with `node:test`, per pass.
 - **Timing uses the virtual clock** (`t/run.sh` sets `SLIGHT_CLOCK=virtual`),
   never real time.
+- **Keys** come from a `; stdin:` line in the test (D116), in printf `%b`'s
+  escapes; without one, stdin is empty.
 - A slight-level test library in the style of ts-slight's `lib/Test.slight`
   (TAP: `ok`, `is`, `diag`) once enough of the language exists.
 
@@ -611,4 +624,6 @@ Settled in step 7: `recv` syntax (D85), the run queue (D86), the fault,
 step 8: the fault kinds (D98), and what gets logged (D99, D100). In
 step 9: collecting only at `recv` (D105). In step 10a: the virtual clock
 (D110), what `after` and `sleep` return (D111), timers whose process has
-ended (D112), and waiting in `select()` (D113).
+ended (D112), and waiting in `select()` (D113). In step 10b: feeding tests
+keys (D116), Ctrl-C (D117), the end of stdin (D118), and several
+connected processes (D119).

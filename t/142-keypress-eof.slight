@@ -1,0 +1,12 @@
+; stdin: xy\033
+; When stdin ends, the keys just stop: a root still waiting for its
+; keyboard process to end is then deadlocked. An ESC at the end of the
+; input is the Escape key.
+
+(defun show-keys ()
+    (recv
+        (key
+            (pprint key)
+            (show-keys))))
+
+(join (connect :keypress (show-keys)))

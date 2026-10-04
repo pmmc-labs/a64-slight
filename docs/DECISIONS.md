@@ -722,3 +722,74 @@ deadlocked, and the program doesn't end while a timer is pending.
 mid-function; fixed sizes instead of `@ARGV`; no `time-it`; the player's
 unused `max-delay` is gone. It runs on the real clock only (D110): ten
 games of 100 ms each come to about 80,000 messages under qemu.
+
+**D116. Golden tests feed keys with a `; stdin:` line.** *(User.)*
+`:keypress` reads stdin whether or not it's a terminal (raw mode only
+when it is, as ts-slight did), so a test can give it bytes. A line
+`; stdin: bytes` in the test, written with printf `%b`'s escapes (`\033`
+is ESC), is written to a file that `t/run.sh` gives the test as stdin;
+without one, stdin is empty. Rejected: a `.input` file of raw bytes next to
+the `.expected` (exact, but the bytes don't show in diffs or editors).
+
+**D117. Ctrl-C ends the program, with exit status 130.** *(User.)* As
+ts-slight did, and whether stdin is a terminal or not, so a test can check
+it. The terminal is put back first, and programs never see the key. Raw
+mode turns signals off, so without this `key-catcher` (no quit key)
+couldn't be stopped. Rejected: delivering it as `("c" :ctrl)` like any
+key (quitting would be every program's job), and leaving signals on in
+raw mode (Ctrl-Z and Ctrl-\ would act too, and no test could check it).
+
+**D118. When stdin ends, the keys just stop.** *(User.)* Connected
+processes get no more keys, and stdin stops counting as something that
+can still happen; if nothing else can, a root still waiting is
+deadlocked, as usual. A terminal never ends (Ctrl-D is a key); only a
+pipe or a file does. Rejected: sending each connected process `(:eof)`
+(a new message that only piped input would ever produce).
+
+**D119. Every process connected to `:keypress` gets every key.**
+*(User.)* In the order they connected, as in ts-slight, where each
+`connect` added a listener. Raw mode is on while any of them is alive.
+Rejected: the newest connection taking the keyboard from the others (more
+state, and the order processes connect in starts to matter).
+
+**D120. Keys.** *(Default, after ts-slight.)* A key is `(key mods...)`.
+`key` is a string for a printable key (one UTF-8 character), or a name:
+`:ArrowUp` `:ArrowDown` `:ArrowRight` `:ArrowLeft` `:Home` `:End` `:Insert`
+`:Delete` `:PageUp` `:PageDown` `:Enter` `:Escape` `:Backspace` `:Tab`
+`:F1`–`:F12`, or `:Unidentified`. The modifiers come in the order `:ctrl
+:alt :shift`. Ctrl and a letter is the letter with `:ctrl`; an upper-case
+letter comes with `:shift`, as readline gave it; ESC before a key means
+`:alt`, and so do xterm's modifier parameters (`ESC [ 1 ; 5 C` is
+`(:ArrowRight :ctrl)`). `\r` and `\n` are both `:Enter` (ts-slight made a
+piped `\n` `:Unidentified`). An escape sequence has to arrive in one read,
+as terminals send them, so an ESC at the end of what has been read is the
+Escape key. The runtime decodes keys in C (`runtime/tty.c`); the names are
+runtime symbols, so every program has 30 more.
+
+**D121. Raw mode is Node's.** *(Default.)* As libuv sets it: no echo, no
+line buffering, no signals, but output is still processed, so `\n` still
+starts a new line and `pprint` works as before. The terminal is put back
+when the last connected process ends, and at exit (not if the program is
+killed by a signal). `tty/screen/rows` and `tty/screen/cols` ask the
+terminal each time, and give 24 and 80 when stdout isn't one.
+
+**D122. When keys are read.** *(Default.)* When nothing can run, the
+scheduler waits in `select()` on stdin and the next timer; while processes
+are busy, it looks at stdin every 10 ms, at a scheduling decision or a
+preemption, so a busy process can't hold keys up. On the virtual clock,
+keys come only when nothing can run, one at a time, before the clock
+moves: as if typed by someone who waits for the program to settle before
+each key. (Proposed as "all the input at once, the first time nothing can
+run"; changed while building, since then a test's keys would all be in
+the mailbox before any was handled, and a Ctrl-C at the end would end the
+program before any of them ran.) The program ends when nothing can run,
+no timer is pending, and no process is connected to `:keypress` or stdin
+has ended.
+
+**D123. The device examples.** *(Default, under D84.)* `key-catcher`,
+`divisions` and `tail-chase-game` are ported, with golden tests whose
+expected output comes from small models in `t/models/`. A `(recv)`
+mid-function became a receive function, and `case`/`if`/`when` became
+`cond`. `key-catcher` compared a key with the integer `1`, so its colour
+keys never worked; it compares strings now. The window managers wait for
+step 11.

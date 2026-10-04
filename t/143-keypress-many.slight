@@ -1,0 +1,17 @@
+; stdin: abq
+; Every process connected to :keypress gets every key, in the order they
+; connected. On the virtual clock, a key comes each time nothing can run,
+; before the clock moves: every key is handled before a 1 ms sleep ends.
+
+(defun listener (name)
+    (recv
+        (key
+            (pprint (list name (car key)))
+            (cond
+                ((eq? (car key) "q") name)
+                (#true               (listener name))))))
+
+(fork (do (sleep 1) (pprint :slept)))
+(let one (connect :keypress (listener :one)))
+(let two (connect :keypress (listener :two)))
+(pprint (map join (list one two)))

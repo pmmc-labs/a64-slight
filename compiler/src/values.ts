@@ -16,6 +16,13 @@ export const FAULT_KINDS: readonly string[] = [
     'arity', 'not-a-pid', 'join-self',
 ];
 
-// The symbols the runtime makes (ending a process, faults), which follow
-// the reserved ones: RT_SYM_OK and on in rt.h.
-export const RUNTIME_SYMBOLS: readonly string[] = ['ok', 'error', 'exit', 'killed', ...FAULT_KINDS];
+// The names of keys from :keypress, then the modifiers, in RT_KEY_ order.
+export const KEY_NAMES: readonly string[] = [
+    'ArrowUp', 'ArrowDown', 'ArrowRight', 'ArrowLeft', 'Home', 'End', 'Insert', 'Delete', 'PageUp', 'PageDown',
+    'Enter', 'Escape', 'Backspace', 'Tab', 'F1', 'F2', 'F3', 'F4', 'F5', 'F6', 'F7', 'F8', 'F9', 'F10', 'F11', 'F12',
+    'Unidentified', 'ctrl', 'alt', 'shift',
+];
+
+// The symbols the runtime makes (ending a process, faults, keys), which
+// follow the reserved ones: RT_SYM_OK and on in rt.h.
+export const RUNTIME_SYMBOLS: readonly string[] = ['ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES];

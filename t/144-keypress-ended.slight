@@ -1,0 +1,14 @@
+; stdin: k
+; A process that has ended gets no keys (here, one that was killed). Once
+; stdin has ended, a process still connected is no reason to wait: the
+; program ends, as it does with processes left waiting in recv.
+
+(defun show-keys (name)
+    (recv
+        (key
+            (pprint (list name key))
+            (show-keys name))))
+
+(kill (connect :keypress (show-keys :killed)))
+(connect :keypress (show-keys :kept))
+:done

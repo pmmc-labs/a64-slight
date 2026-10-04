@@ -3,7 +3,10 @@
 # that has a .expected next to it (or the files given), run it, and diff
 # what it prints against the .expected: stdout and stderr together, then
 # "exit: N" if it exits with N other than 0. A first line "; with: files"
-# compiles those files in first (lib/test.slight, say).
+# compiles those files in first (lib/test.slight, say). A line
+# "; stdin: bytes" is what the test reads from stdin (keys, say), written
+# with printf %b's escapes: \n, \r, \t, \\, and \0nnn in octal (\033 is
+# ESC); without one, stdin is empty.
 # $RUN prefixes the binary: qemu-aarch64 when cross-compiling, empty when native.
 cd "$(dirname "$0")/.." || exit 2
 case "$(uname -m)" in
@@ -28,7 +31,7 @@ export SLIGHT_POISON=1
 # next timer, so timer tests are exact and take no real time.
 export SLIGHT_CLOCK=virtual
 output() {
-    $RUN "./$1" 2>&1 &
+    $RUN "./$1" <"$2" 2>&1 &
     pid=$!
     ( sleep "$TIMEOUT" && kill "$pid" && echo "killed after ${TIMEOUT}s" >&2 ) >/dev/null 2>&1 &
     watchdog=$!
@@ -43,10 +46,11 @@ for src in "$@"; do
     name=$(basename "$src" .slight)
     bin=build/t/$name
     with=$(sed -n '1s/^; with: *//p' "$src")
+    printf '%b' "$(sed -n 's/^; stdin: //p' "$src")" >"$bin.stdin"
     if ! node bin/slightc.ts -o "$bin" $with "$src"; then
         echo "FAIL $name (compile)"
         fail=1
-    elif output "$bin" | diff -u "${src%.slight}.expected" -; then
+    elif output "$bin" "$bin.stdin" | diff -u "${src%.slight}.expected" -; then
         echo "ok   $name"
     else
         echo "FAIL $name"

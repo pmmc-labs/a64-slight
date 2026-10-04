@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { FAULT_KINDS, intWord, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from '../src/values.ts';
+import { FAULT_KINDS, intWord, KEY_NAMES, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from '../src/values.ts';
 
 const RT_H = readFileSync(new URL('../../runtime/rt.h', import.meta.url), 'utf8');
 
@@ -37,6 +37,7 @@ test("the runtime's symbols follow #true, as rt.h numbers them", () => {
     assert.equal(BigInt(id('exit')), define('RT_SYM_EXIT'));
     assert.equal(BigInt(id('killed')), define('RT_SYM_KILLED'));
     assert.equal(BigInt(id(FAULT_KINDS[0]!)), define('RT_SYM_FAULTS'));
+    assert.equal(BigInt(id(KEY_NAMES[0]!)), define('RT_SYM_KEYS'));
 });
 
 test("the fault kinds are rt.h's, in order", () => {
@@ -44,6 +45,13 @@ test("the fault kinds are rt.h's, in order", () => {
     assert.equal(BigInt(faults.length), define('RT_FAULT_COUNT'));
     assert.deepEqual(faults.map((m) => Number(m[1])), FAULT_KINDS.map((_, i) => i + 1));
     assert.deepEqual(faults.map((m) => m[2]), FAULT_KINDS);
+});
+
+test("the key names are rt.h's, in order", () => {
+    const keys = [...RT_H.matchAll(/^#define RT_KEY_\w+\s+(\d+)\s+\/\/ :(\S+)/gm)];
+    assert.equal(BigInt(keys.length), define('RT_KEY_COUNT'));
+    assert.deepEqual(keys.map((m) => Number(m[1])), KEY_NAMES.map((_, i) => i));
+    assert.deepEqual(keys.map((m) => m[2]), KEY_NAMES);
 });
 
 test('nil is the list tag on a null pointer', () => {

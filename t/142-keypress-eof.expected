@@ -1,0 +1,5 @@
+("x")
+("y")
+(Escape)
+deadlock: the root process is waiting for #<pid 2> to end, and nothing else can run
+exit: 1

@@ -1,0 +1,51 @@
+; stdin: \033[C\033[C\033[Bq
+; tail-chase-game, from ts-slight's examples: the arrows move an @ around,
+; and each square it leaves fades: to * after a second, to . two seconds
+; later, and to blank three seconds after that. q (or any key but an
+; arrow) ends it.
+;
+; Changes: a (recv) in the middle of a function became a receive function
+; (tail-chaser-wait); case, if and when became cond.
+
+(defun tail-chaser (h w x y count to-clear)
+    (tty/write \e "[" x ";" y "H" "@")
+    (tty/write \e "[" (inc h) ";" 0 "H" "steps: " count \r)
+    (tty/write \e "[" (+ h 2) ";" 0 "H" "tails: " (* count 3) \r)
+    (cond
+        ((nil? to-clear) ())
+        (#true
+            (let coord (car to-clear))
+            (fork (do
+                (sleep 1000)
+                (tty/write \e "[" (car coord) ";" (cadr coord) "H" "*")
+                (tty/write \e "[" (+ h 3) ";" 0 "H" "fade1: " count \r)
+                (sleep 2000)
+                (tty/write \e "[" (car coord) ";" (cadr coord) "H" ".")
+                (tty/write \e "[" (+ h 4) ";" 0 "H" "fade2: " count \r)
+                (sleep 3000)
+                (tty/write \e "[" (car coord) ";" (cadr coord) "H" " ")
+                (tty/write \e "[" (+ h 5) ";" 0 "H" "fade3: " count \r)))))
+    (tail-chaser-wait h w x y count to-clear))
+
+(defun tail-chaser-wait (h w x y count to-clear)
+    (recv
+        (key
+            (let tail (trail x y to-clear))
+            (cond
+                ((eq? (car key) :ArrowUp)    (tail-chaser h w (cond ((== x 0) x) (#true (dec x))) y (inc count) tail))
+                ((eq? (car key) :ArrowDown)  (tail-chaser h w (cond ((== x h) x) (#true (inc x))) y (inc count) tail))
+                ((eq? (car key) :ArrowLeft)  (tail-chaser h w x (cond ((== y 0) y) (#true (dec y))) (inc count) tail))
+                ((eq? (car key) :ArrowRight) (tail-chaser h w x (cond ((== y w) y) (#true (inc y))) (inc count) tail))
+                (#true                       ())))))
+
+(defun trail (x y to-clear)
+    (cond
+        ((nil? to-clear) (list (list x y)))
+        (#true           (cons (list x y) (cdr to-clear)))))
+
+(tty/write \e "[?25l")
+(join (connect :keypress (tail-chaser
+    40 40
+    10 20
+    0
+    ())))

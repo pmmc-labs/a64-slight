@@ -73,12 +73,6 @@ test("a program with no top-level expressions has the value ()", () => {
     assert.match(compile('(defun f () 1)'), /FUNC slight_main[^]*mov {2}x0, #RT_NIL/);
 });
 
-test('what isn\'t built yet is an error, with a position', () => {
-    assert.throws(() => compile('42\n  (connect :x 1)'), (e: unknown) =>
-        e instanceof CompileError && e.message === 'test.slight:2:3: not supported yet: (connect (quote x) 1)');
-    assert.throws(() => compile('(connect :keypress 1)'), (e: unknown) =>
-        e instanceof CompileError && e.message === 'test.slight:1:1: not supported yet: (connect (quote keypress) 1)');
-});
 
 const fails = (src: string, message: string): void => {
     assert.throws(() => compile(src), (e: unknown) => e instanceof CompileError && e.message === message);
@@ -496,6 +490,21 @@ test('join, monitor, kill and raise are builtins in the runtime, and can be valu
         fails(`(${name})`, `test.slight:1:1: ${name} takes 1 argument, not 0`);
         fails(`(defun ${name} (x) x)`, `test.slight:1:8: can't define ${name}: it's a builtin`);
     }
+});
+
+test('connect is a fork whose process gets the keys, from :keypress only', () => {
+    assert.match(compile('(defun f (n) n) (let n 1) (connect :keypress (f n))'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_connect\n/);
+    assert.match(compile('(connect :keypress 1)'), /\.asciz "connect at test\.slight:1:1"/);
+    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can only be :keypress, not (quote x)");
+    fails('(connect :keypress)', 'test.slight:1:1: connect takes 2 arguments, not 1');
+    fails('(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (connect :keypress (list a b c d e f g h i))',
+          'test.slight:1:91: a connect can take at most 8 locals into the new process, and this one uses 9');
+});
+
+test('tty/screen/rows and tty/screen/cols are builtins in the runtime', () => {
+    assert.match(compile('(tty/screen/rows)'), /LOADADDR x0, Lsite_\d+\n {4}bl {3}rt_screen_rows\n/);
+    assert.match(compile('(tty/screen/cols)'), /LOADADDR x0, Lsite_\d+\n {4}bl {3}rt_screen_cols\n/);
+    fails('(tty/screen/rows 1)', 'test.slight:1:1: tty/screen/rows takes 0 arguments, not 1');
 });
 
 test('after and sleep are builtins in the runtime, and can be values', () => {

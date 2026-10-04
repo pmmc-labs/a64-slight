@@ -418,7 +418,10 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
         case 'recv':
             return compileRecv(x, args, cx, st);
         case 'fork':
-            return compileFork(x, args, cx, st);
+            checkArity(x, 'fork', args, 1);
+            return compileFork(x, 'fork', args[0]!, 'rt_fork', cx, st);
+        case 'connect':
+            return compileConnect(x, args, cx, st);
         case 'yield': {
             checkArity(x, 'yield', args, 1);
             const [code, st1] = compileExpr(args[0]!, cx, st);
@@ -580,20 +583,19 @@ function compileRecvClause(x: Pair, clause: Sexp, msg: number, done: string, cx:
 // (fork expr): expr becomes the body of a function of its own, whose
 // parameters are the locals it uses; the new process starts there, with
 // those values deep-copied into its heap. The body is at the bottom of the
-// new process's stack, so it can tail-call a function that waits.
-function compileFork(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
-    checkArity(x, 'fork', args, 1);
-    const expr = args[0]!;
+// new process's stack, so it can tail-call a function that waits. `form`
+// and `fn` say which: fork (rt_fork), or connect (rt_connect).
+function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: St): [Code, St] {
     const free = freeVars(list(expr), [], cx.env);
     if (free.length > MAX_ARGS) {
-        throw new CompileError(`a fork can take at most ${MAX_ARGS} locals into the new process, and this one uses ${free.length}`, x.pos);
+        throw new CompileError(`a ${form} can take at most ${MAX_ARGS} locals into the new process, and this one uses ${free.length}`, x.pos);
     }
-    const where = x.pos === null ? 'fork' : `fork at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
-    const [entry, st1] = label(st, 'fork');
+    const where = x.pos === null ? form : `${form} at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
+    const [entry, st1] = label(st, form);
     const d: Defun = { name: sym(where, x.pos), params: free.map((n) => sym(n, x.pos)), body: list(expr), pos: x.pos };
     const [code, st2]  = compileFunction(entry, d, [], cx.fns, 'other', st1);
     const st3: St = { ...st2, slots: st.slots, lambdas: [st2.lambdas, code] };
-    const [site, st4]  = siteLabel(st3, 'fork', x.pos);
+    const [site, st4]  = siteLabel(st3, form, x.pos);
     const st5 = free.length > 0 ? useSlot(st4, cx.si + free.length - 1) : st4;
     return [[
         free.map((name, i) => [`    ldr  x16, ${slot(lookup(cx.env, name)!)}    // ${name}`, `    str  x16, ${slot(cx.si + i)}`]),
@@ -601,8 +603,19 @@ function compileFork(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St]
         `    mov  x1, #${free.length}`,
         addImm('x2', 'sp', 8 * cx.si, 'x5'),
         `    LOADADDR x3, ${site}`,
-        '    bl   rt_fork',
+        `    bl   ${fn}`,
     ], st5];
+}
+
+// (connect :keypress expr): a fork whose new process also gets every key
+// typed (runtime/tty.c). :keypress is the only source there is.
+function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    checkArity(x, 'connect', args, 2);
+    const source = args[0]!;
+    if (!(isForm(source, 'quote') && source.t === 'pair' && source.cdr.t === 'pair' && source.cdr.car.t === 'sym' && source.cdr.car.name === 'keypress')) {
+        throw new CompileError(`connect's source can only be :keypress, not ${show(source)}`, posOf(source) ?? x.pos);
+    }
+    return compileFork(x, 'connect', args[1]!, 'rt_connect', cx, st);
 }
 
 // --- closures -----------------------------------------------------------------
@@ -974,6 +987,8 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'raise':          fixed('rt_raise', 1),
     'after':          fixed('rt_after', 3),
     'sleep':          fixed('rt_sleep', 1),
+    'tty/screen/rows': fixed('rt_screen_rows', 0),
+    'tty/screen/cols': fixed('rt_screen_cols', 0),
 };
 
 // The names a defun can't take.

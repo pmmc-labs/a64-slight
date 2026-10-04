@@ -4,9 +4,9 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–9 and 10a done (under qemu, and natively on macOS:
-Stevan runs `make test` on his M2 Max after every step). 10b, the
-terminal, is next.
+**Progress:** steps 0–9, 10a and 10b done (under qemu, and natively on
+macOS: Stevan runs `make test` on his M2 Max after every step). 10c,
+files, is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -199,25 +199,23 @@ busy process can't hold one up (D114). `ping-pong-tournament` is ported,
 without a golden test: on the virtual clock its players never stop
 (D115).
 
-#### 10b. The terminal
+#### 10b. The terminal (done)
 
-Raw mode, escape-sequence decoding, `connect :keypress`,
-`tty/screen/rows`, `tty/screen/cols`; stdin joins the `select()`. Still
-to work out: how golden tests feed keypresses. Perhaps `:keypress` reads
-stdin whether or not it's a terminal (raw mode only when it is, as
-ts-slight did), so a test can pipe bytes in.
+`connect :keypress`, raw mode, decoding keys (`runtime/tty.c`),
+`tty/screen/rows` and `tty/screen/cols`; stdin joins the `select()`.
+Agreed (D116–D119): a test gives its keys on a `; stdin:` line; Ctrl-C
+puts the terminal back and exits 130; when stdin ends, the keys stop; and
+every connected process gets every key. On the virtual clock a key comes
+each time nothing can run (D122). `key-catcher`, `divisions` and
+`tail-chase-game` are ported, with golden tests (D123).
 
 #### 10c. Files
 
-`slurp` and `spew`. Still to work out: the shape of an I/O error's
-reason, say `(:error (enoent "path"))` after the fault reasons (D98). Note
-that reading or writing a regular file never waits in `select()` (it's
-always "ready"), so in one thread these block the whole runtime, not just
-their process, while the disk works: fast for local files, but not what
-DESIGN's "blocking syscalls" says.
-
-Then the device examples (`key-catcher`, `divisions`, `tail-chase-game`,
-the window managers).
+`slurp` and `spew`. Blocking the whole runtime while they read or write
+a local file is fine for now (a regular file never waits in `select()`);
+Stevan has ideas for doing I/O properly, to discuss when 10c starts.
+Still to work out too: the shape of an I/O error's reason, say
+`(:error (enoent "path"))` after the fault reasons (D98).
 
 ### 11. Port the examples
 
@@ -251,7 +249,8 @@ builtin. Beyond that:
 | `ping-pong-tournament` | ported in step 10a, without a golden test (D115) |
 | `simple-db-server`, `game-of-life-actors` | `(recv)` used as an expression mid-function becomes receive functions; `simple-db-server`'s `db-client` does `(recv)` inside a lambda, so it needs restructuring |
 | `active-objects` | as above, plus drop `gensym` |
-| `key-catcher`, `divisions`, `tail-chase-game`, `window-manager`, `better-window-manager` | as above, plus devices (step 10) |
+| `key-catcher`, `divisions`, `tail-chase-game` | ported in step 10b (D123) |
+| `window-manager`, `better-window-manager` | as above, plus `connect :keypress` and the screen size (step 10b) |
 | `meta-circular` | `join`/`yield`/`apply`; no `recv`, so likely as-is |
 | `more-oop` | local `defun`s lifted to top level; it uses `slight/eval` to look up methods, which has to go |
 | `text-editor` | local `defun`s lifted; drop the `slight/parse`/`slight/expand` feature; files |

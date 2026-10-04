@@ -27,7 +27,7 @@ import { NIL, append, type Sexp } from '../compiler/src/sexp.ts';
 
 const RUNTIME_DIR = fileURLToPath(new URL('../runtime/', import.meta.url));
 const PRELUDE     = fileURLToPath(new URL('../lib/prelude.slight', import.meta.url));
-const RUNTIME_SRC = ['rt.c', 'process.c', 'strings.c', 'numbers.c', 'rt_asm.S'].map((f) => join(RUNTIME_DIR, f));
+const RUNTIME_SRC = ['rt.c', 'process.c', 'strings.c', 'numbers.c', 'tty.c', 'rt_asm.S'].map((f) => join(RUNTIME_DIR, f));
 const CFLAGS      = ['-O2', '-g', '-std=gnu11', '-Wall', '-Wextra', '-I', RUNTIME_DIR];
 
 function usage(message: string): never {

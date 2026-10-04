@@ -72,6 +72,44 @@
 #define RT_SYM_KILLED        5
 #define RT_SYM_FAULTS        6
 
+// A key from :keypress is (key mods...) (tty.c): key is a string for a
+// printable key, or one of these names, and mods are the modifiers held,
+// in the order :ctrl :alt :shift. Their symbols follow the fault kinds:
+// RT_KEY_x is symbol RT_SYM_KEYS + x. compiler/tests/values.test.ts reads
+// the names from here.
+#define RT_SYM_KEYS         23    // RT_SYM_FAULTS + RT_FAULT_COUNT
+#define RT_KEY_UP            0    // :ArrowUp       the arrows are in the order of
+#define RT_KEY_DOWN          1    // :ArrowDown     their escape sequences, ESC [ A
+#define RT_KEY_RIGHT         2    // :ArrowRight    to ESC [ D
+#define RT_KEY_LEFT          3    // :ArrowLeft
+#define RT_KEY_HOME          4    // :Home
+#define RT_KEY_END           5    // :End
+#define RT_KEY_INSERT        6    // :Insert
+#define RT_KEY_DELETE        7    // :Delete
+#define RT_KEY_PAGE_UP       8    // :PageUp
+#define RT_KEY_PAGE_DOWN     9    // :PageDown
+#define RT_KEY_ENTER        10    // :Enter
+#define RT_KEY_ESCAPE       11    // :Escape
+#define RT_KEY_BACKSPACE    12    // :Backspace
+#define RT_KEY_TAB          13    // :Tab
+#define RT_KEY_F1           14    // :F1            F1 to F12 in order
+#define RT_KEY_F2           15    // :F2
+#define RT_KEY_F3           16    // :F3
+#define RT_KEY_F4           17    // :F4
+#define RT_KEY_F5           18    // :F5
+#define RT_KEY_F6           19    // :F6
+#define RT_KEY_F7           20    // :F7
+#define RT_KEY_F8           21    // :F8
+#define RT_KEY_F9           22    // :F9
+#define RT_KEY_F10          23    // :F10
+#define RT_KEY_F11          24    // :F11
+#define RT_KEY_F12          25    // :F12
+#define RT_KEY_UNIDENTIFIED 26    // :Unidentified  a key it can't name
+#define RT_KEY_CTRL         27    // :ctrl          the modifiers
+#define RT_KEY_ALT          28    // :alt
+#define RT_KEY_SHIFT        29    // :shift
+#define RT_KEY_COUNT        30
+
 // What rt_compare is asked.
 #define RT_CMP_EQ            0
 #define RT_CMP_NE            1
@@ -169,6 +207,7 @@ typedef struct rt_proc {
     struct rt_proc *next_joiner;
     rt_value_t      joining;    // while JOINING: whom
     rt_watch_t     *watchers;   // monitoring this one, in order
+    int             keypress;   // connected to :keypress
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -212,8 +251,10 @@ extern const char     slight_symbol_names[] RT_ASM(slight_symbol_names);
 // starts again at code when a message comes. First, it may collect
 // garbage, with args (the receive function's, in its frame) as the roots,
 // which it updates. rt_fork starts code(values...)
-// in a new process, with the values deep-copied into its heap.
+// in a new process, with the values deep-copied into its heap; rt_connect
+// does the same, and sends the new process every key from :keypress.
 rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
+rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect);
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
 rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
 void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_letter);
@@ -271,6 +312,11 @@ rt_value_t rt_byte_at(rt_value_t s, rt_value_t i, const char *site) RT_ASM(rt_by
 rt_value_t rt_bytes_to_string(rt_value_t xs, const char *site) RT_ASM(rt_bytes_to_string);
 rt_value_t rt_format_num(rt_value_t n, rt_value_t width, rt_value_t fill, const char *site) RT_ASM(rt_format_num);
 rt_value_t rt_tty_write(rt_value_t args, const char *site) RT_ASM(rt_tty_write);
+
+// The terminal (tty.c). The screen's size, or 24 by 80 when stdout isn't
+// a terminal.
+rt_value_t rt_screen_rows(const char *site) RT_ASM(rt_screen_rows);
+rt_value_t rt_screen_cols(const char *site) RT_ASM(rt_screen_cols);
 
 // Functions. rt_apply calls f with the elements of args as its arguments,
 // by jumping to it, so f returns straight to apply's caller (rt_asm.S).
@@ -362,6 +408,14 @@ extern const char slight_const_end[]    RT_ASM(slight_const_end);
 // The process table, and the scheduler (process.c).
 rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent);
 void       rt_run(void);
+
+// The terminal (tty.c). rt_tty_raw puts it in raw mode, or takes it out;
+// it does nothing when stdin isn't a terminal, and the terminal is put
+// back at exit. rt_key decodes the key at the start of the n > 0 bytes at
+// in, calls emit with it, and returns how many bytes it took; Ctrl-C ends
+// the program, with exit status 130, instead.
+void   rt_tty_raw(int on);
+size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key));
 
 #endif // __ASSEMBLER__
 #endif // RT_H
