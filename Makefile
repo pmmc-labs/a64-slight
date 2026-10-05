@@ -14,6 +14,9 @@ else
   CC := clang --target=aarch64-linux-gnu
 endif
 
+sketch:
+	node bin/slightc.ts -o "./sketch" "author/sketch.slight"
+
 test: unit headers golden
 
 unit:
@@ -31,5 +34,9 @@ check:
 
 clean:
 	rm -rf build
+	@if [ -f "./sketch" ]; then \
+		rm "./sketch";   \
+		rm "./sketch.S"; \
+    fi
 
 .PHONY: test unit golden headers check clean
