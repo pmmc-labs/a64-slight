@@ -1,0 +1,104 @@
+
+(defun Coords     (x y) (lambda (m) (case m (:x x) (:y y))))
+(defun Dimensions (h w) (lambda (m) (case m (:h h) (:w w))))
+
+(defun Logger (dims coords logs)
+    (recv
+        (:init
+            (tty/write
+                    \e "[s" \e "[" (inc (coords :x)) ";" (inc (coords :y)) "H"
+                    \e "[37;42m LOG " (str-repeat " " (- (dims :w) 13)) $$ " "
+                    \e "[0m"
+                    \e "[u")
+            (Logger dims coords logs))
+        ((:log from level line)
+            (tty/write \e "[s" \e "[" (+ (coords :x) (+ (length logs) 2)) ";" (inc (coords :y)) "H")
+            (tty/write
+                \e "[4"
+                    (case level
+                        (:INFO  6)
+                        (:ALERT 5)
+                        (:DEBUG 3)
+                        (:ERROR 1)
+                    ) "m▕"
+                \e "[32;47;4m" (pad-end line (dims :w) " ")
+                \e "[0m"
+                \e "[u")
+            (Logger dims coords (cons line logs)))
+        (:EXIT ())
+        (unknown
+            (raise (list :WTF unknown)))))
+
+(defun Window (name dims coords contents logger)
+    (recv
+        (:refresh
+            (tty/write \e "[s" \e "[" (+ (coords :x) 1) ";" (+ (coords :y) 1) "H")
+            (tty/write \e "[37;46m " name (str-repeat " " (- (dims :w) (+ (str-len name) 6))) $$ " " \e "[0m")
+            (tty/write \e "[" (+ (coords :x) 2) ";" (+ (coords :y) 1) "H")
+            (dotimes 0 (dims :h)
+                (lambda (i)
+                    (tty/write \e "[36;47m" "▏" (format-num i 2 "0") "▕" \e "[4m" (str-repeat " " (dims :w)) \e "[0m")
+                    (tty/write \e "[" (+ (coords :x) (+ i 2)) ";" (+ (coords :y) 1) "H")
+                ))
+            (tty/write \e "[0m" \e "[u")
+            (send logger (list :log $$ :INFO (concat "-> window[" $$ "](" name ") got refresh")))
+            (yield (Window name dims coords contents logger))
+        )
+        (:EXIT
+            (send logger (list :log $$ :ALERT (concat "... exiting window[" $$ "]"))))))
+
+
+(defun WindowManager ( rows cols windows logger )
+    (recv
+        ((:newWindow name dims coords)
+            (send logger (list :log $$ :ALERT (concat "+ new Window(" name ")")))
+            (let win (fork (Window name dims coords () logger)))
+            (send win :refresh)
+            (yield (WindowManager rows cols (cons win windows) logger))
+        )
+        (:EXIT
+            (send logger (list :log $$ :ALERT "... exiting window-manager"))
+            (when (cons? windows)
+                (map (lambda (w) (send w :EXIT)) windows)))))
+
+(defun Keyboard (window-manager logger)
+    (recv
+        (key
+            (cond
+                ((eq? (car key) "q")
+                    (send window-manager :EXIT)
+                    (send logger         :EXIT)
+                    (join window-manager)
+                    (join logger))
+                (#true
+                    (Keyboard window-manager logger))))))
+
+(tty/write \e "[1J")
+
+(let screen-rows (- (tty/screen/rows) 10))
+(let screen-cols (- (tty/screen/cols) 1))
+
+(let logger (fork (Logger (Dimensions screen-rows 50) (Coords 1 (- screen-cols 52)) ())))
+(send logger :init)
+(send logger (list :log $$ :DEBUG "... Logger Initialized"))
+
+(let wm (fork (WindowManager screen-rows screen-cols () logger)))
+(let kb (connect :keypress (Keyboard wm logger)))
+
+(send wm (list
+    :newWindow
+        "Window One"
+        (Dimensions 20 (- screen-cols 59))
+        (Coords      1  1)))
+
+(send wm (list
+    :newWindow
+        "Window Two"
+        (Dimensions 20 (- screen-cols 59))
+        (Coords     22  1)))
+
+(join kb)
+
+(tty/write \e "[" (+ screen-rows 5) ";0H")
+
+
