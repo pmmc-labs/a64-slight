@@ -1,0 +1,76 @@
+
+
+(defun tokenize-atom (chars tokens acc)
+    (if (nil? chars)
+        (tokenizer chars (cons acc tokens))
+        (case (car chars)
+            (" "   (tokenizer (cdr chars) (cons acc tokens)))
+            ("("   (tokenizer chars (cons acc tokens)))
+            (")"   (tokenizer chars (cons acc tokens)))
+            (#true (tokenize-atom (cdr chars) tokens (~ acc (car chars))))
+        )
+    )
+)
+
+(defun tokenizer (chars tokens)
+    (if (nil? chars) (reverse tokens)
+        (case (car chars)
+            (" "   (tokenizer (cdr chars) tokens))
+            ("("   (tokenizer (cdr chars) (cons :OPEN  tokens)))
+            (")"   (tokenizer (cdr chars) (cons :CLOSE tokens)))
+            (#true (tokenize-atom (cdr chars) tokens (car chars)))
+        )
+    )
+)
+
+(defun lexer (tokens acc)
+    (if (nil? tokens) (reverse acc)
+        (do
+            (let token (car tokens))
+            (if (sym? token)
+                (lexer (cdr tokens) (cons token acc))
+                (if (int? (string->int token))
+                    (lexer (cdr tokens) (cons (list :INT (string->int token)) acc))
+                    (lexer (cdr tokens) (cons (list :SYM token)               acc))
+                )
+            )
+        )
+    )
+)
+
+(defun close-expression (stack acc)
+    (if (nil? stack) acc
+        (do
+            (let next (car stack))
+            (if (and (sym? next) (eq? next :MARK))
+                (cons acc (cdr stack))
+                (close-expression (cdr stack) (cons next acc))
+            )
+        )
+    )
+)
+
+(defun parser (lexed acc)
+    (if (nil? lexed) acc
+        (do
+            (let next (car lexed))
+            (cond
+                ((sym? next)
+                    (case next
+                        (:OPEN  (parser (cdr lexed) (cons :MARK acc)))
+                        (:CLOSE (parser (cdr lexed) (close-expression acc ())))))
+                (#true (parser (cdr lexed) (cons next acc)))
+            )
+        )
+    )
+)
+
+(pprint
+    (parser
+        (lexer
+            (tokenizer
+                (str-split "(+ 10 (+ (* 2 10) 30))" "")
+            ())
+        ())
+    ())
+)

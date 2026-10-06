@@ -1,0 +1,25 @@
+
+
+(defun Calculator ()
+    (recv
+        ((:add x y $f) (send $f (+ x y)) (Calculator))
+        ((:sub x y $f) (send $f (- x y)) (Calculator))
+        ((:mul x y $f) (send $f (* x y)) (Calculator))
+        ((:div x y $f) (send $f (/ x y)) (Calculator))
+        (other
+            (raise (list :WTF other)))))
+
+(defun Future () (recv (msg (yield msg))))
+
+(defun ask? ($to @msg)
+    (let $f (fork (Future)))
+    (send $to (append @msg (list $f)))
+    (let result (join $f))
+    (case (car result)
+        (:ok    (cadr result))
+        (:error (raise (cadr result)))))
+
+(let calc (fork (Calculator)))
+
+(pprint (ask? calc (list :add 10 (ask? calc (list :mul 2 10)))))
+
