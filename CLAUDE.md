@@ -36,7 +36,10 @@ once); `@ARGV`, the program's arguments, is the top level's parameter
 (`compiler/src/expand.ts`, a pass between the reader and the compiler).
 A second target, x86-64: the code generator emits through a target
 interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
-`slightc --target x86_64` builds for it (D145, D146).
+`slightc --target x86_64` builds for it (D145, D146). Strings are bytes;
+beside the byte builtins, the `utf8/` ones count characters (a bad byte
+is a character of its own, as in Go), with `ord` and `chr` in the
+prelude, and `string->float` (D148).
 Fifteen of ts-slight's examples are ported (`examples/`; all but
 `ping-pong-tournament` are golden tests). `make test` passes on x86 Linux
 (AArch64 under qemu, x86-64 natively), and natively on macOS (Stevan runs

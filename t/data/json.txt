@@ -1,0 +1,12 @@
+{"name":"slight","version":1,"tags":["lisp","actors"],"native":true,"gc":null}
+[1, -2, 3.5, -0.25, 1e3, 2.5E-3, 0, -0, -0.0, 1.0, -12345678901234]
+[1.5e300, 1e-300, 123456.789, 0.1, 1e21, 1e-7]
+"héllo, 日本語 😀"
+"escapes: \" \\ \/ \b \f \n \r \t"
+"\u00e9 \u65E5 \ud83d\ude00 \u0000 \u001f \u007f"
+{"empty":{},"list":[],"nested":[[[]],{"a":[{"b":null}]}]}
+  [ 1 , { "k" : "v" } ,	"x" ]  
+{"emoji":"😀🎉","ascii":"~","latin":"ÀÉÎõü","greek":"αβγ"}
+["\ud834\udd1e", "𝄞", "\u2028\u2029"]
+true
+null

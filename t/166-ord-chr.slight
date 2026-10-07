@@ -1,0 +1,34 @@
+; ord and chr, the prelude's names for utf8/code and utf8/char (D148), at
+; the ends of each length of UTF-8 sequence. Each line is a code point,
+; the length in bytes of its character, ord of that, and its bytes.
+
+(defun round-trip (n)
+    (let c (chr n))
+    (list n (str-len c) (ord c) (bytes c)))
+
+(map (lambda (n) (pprint (round-trip n))) (list 0 127 128 2047 2048 55295 57344 65533 65535 65536 1114111))
+
+(pprint (ord "日本"))
+(pprint (map ord (utf8/chars "slight")))
+(pprint (str-join "" (map chr (list 26085 26412 35486))))
+(pprint (list (eq? (chr 233) "é") (eq? (chr 233) "\u{e9}")))
+(pprint (list (utf8/code "😀") (utf8/char 955)))
+; they're all functions, to pass around
+(pprint (map chr (map ord (list "a" "é" "😀"))))
+(pprint (apply utf8/char (list 955)))
+(pprint (fold/l 0 (lambda (acc c) (+ acc (ord c))) (utf8/chars "abc")))
+
+; a code point with no character, an empty string, or the wrong type faults
+(defun kind (pid) (car (cadr (join pid))))
+(pprint (kind (fork (utf8/code ""))))
+(pprint (kind (fork (utf8/char -1))))
+(pprint (kind (fork (utf8/char 55296))))
+(pprint (kind (fork (utf8/char 57343))))
+(pprint (kind (fork (utf8/char 1114112))))
+(pprint (kind (fork (utf8/char "a"))))
+(pprint (kind (fork (utf8/code 97))))
+(pprint (kind (fork (utf8/len 5))))
+(pprint (kind (fork (utf8/substring "abc" 0 "x"))))
+(pprint (kind (fork (utf8/index-of "abc" 'a))))
+(pprint (kind (fork (utf8/chars ()))))
+(kind (fork (utf8/valid? 1.5)))

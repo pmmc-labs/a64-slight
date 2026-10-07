@@ -1,0 +1,211 @@
+(@include :fs)
+; A JSON parser and printer in slight, on the utf8/ builtins and
+; string->float (D148): each JSON text in t/data/json.txt, parsed and
+; printed back, as is and with everything past ASCII escaped. The expected
+; output is from Python's json module (t/models/json.py).
+;
+; JSON in slight: null is :null, true and false are #true and #false,
+; numbers are integers or floats, strings are strings, an array is a list,
+; and an object is (:object (key value) ...).
+
+; --- parsing: each step takes the characters left, and gives (value rest)
+
+(defun json/parse (text)
+    (let r (parse-value (skip-ws (utf8/chars text))))
+    (cond
+        ((nil? (skip-ws (cadr r))) (car r))
+        (#true                     (raise (list :json "text after the value")))))
+
+; The next character, or "" at the end.
+(defun peek (cs)
+    (cond
+        ((nil? cs) "")
+        (#true     (car cs))))
+
+(defun one-of? (c chars) (member? c (utf8/chars chars)))
+
+(defun skip-ws (cs)
+    (cond
+        ((one-of? (peek cs) " \t\n\r") (skip-ws (cdr cs)))
+        (#true                         cs)))
+
+(defun parse-value (cs)
+    (let c (peek cs))
+    (cond
+        ((eq? c "{")  (parse-object (skip-ws (cdr cs)) ()))
+        ((eq? c "[")  (parse-array (skip-ws (cdr cs)) ()))
+        ((eq? c "\"") (parse-string (cdr cs) ()))
+        ((eq? c "t")  (literal "true" #true cs))
+        ((eq? c "f")  (literal "false" #false cs))
+        ((eq? c "n")  (literal "null" :null cs))
+        (#true        (parse-number cs ()))))
+
+(defun literal (word value cs)
+    (cond
+        ((eq? (str-join "" (take (utf8/len word) cs)) word) (list value (skip (utf8/len word) cs)))
+        (#true                                              (raise (list :json "not a value")))))
+
+; After the [ and any space, with the elements so far in reverse.
+(defun parse-array (cs acc)
+    (cond
+        ((and (nil? acc) (eq? (peek cs) "]")) (list () (cdr cs)))
+        (#true                                (array-rest (parse-value cs) acc))))
+
+(defun array-rest (r acc)
+    (let cs (skip-ws (cadr r)))
+    (let xs (cons (car r) acc))
+    (cond
+        ((eq? (peek cs) ",") (parse-array (skip-ws (cdr cs)) xs))
+        ((eq? (peek cs) "]") (list (reverse xs) (cdr cs)))
+        (#true               (raise (list :json "expected , or ]")))))
+
+; After the { and any space, with the members so far in reverse.
+(defun parse-object (cs acc)
+    (cond
+        ((and (nil? acc) (eq? (peek cs) "}")) (list (list :object) (cdr cs)))
+        ((eq? (peek cs) "\"")                 (object-colon (parse-string (cdr cs) ()) acc))
+        (#true                                (raise (list :json "expected a key")))))
+
+(defun object-colon (r acc)
+    (let cs (skip-ws (cadr r)))
+    (cond
+        ((eq? (peek cs) ":") (object-rest (car r) (parse-value (skip-ws (cdr cs))) acc))
+        (#true               (raise (list :json "expected :")))))
+
+(defun object-rest (key r acc)
+    (let cs (skip-ws (cadr r)))
+    (let ms (cons (list key (car r)) acc))
+    (cond
+        ((eq? (peek cs) ",") (parse-object (skip-ws (cdr cs)) ms))
+        ((eq? (peek cs) "}") (list (cons :object (reverse ms)) (cdr cs)))
+        (#true               (raise (list :json "expected , or }")))))
+
+; After the opening ", with the characters so far in reverse.
+(defun parse-string (cs acc)
+    (let c (peek cs))
+    (cond
+        ((eq? c "\"")   (list (str-join "" (reverse acc)) (cdr cs)))
+        ((eq? c "\\")   (parse-escape (cdr cs) acc))
+        ((eq? c "")     (raise (list :json "no closing quote")))
+        ((< (ord c) 32) (raise (list :json "a control character in a string")))
+        (#true          (parse-string (cdr cs) (cons c acc)))))
+
+(defun parse-escape (cs acc)
+    (let c (peek cs))
+    (cond
+        ((eq? c "u")          (parse-unicode (hex4 (cdr cs)) acc))
+        ((one-of? c "\"\\/")  (parse-string (cdr cs) (cons c acc)))
+        ((one-of? c "bfnrt")  (parse-string (cdr cs) (cons (control c) acc)))
+        (#true                (raise (list :json "a bad escape")))))
+
+(defun control (c)
+    (cond
+        ((eq? c "b") (chr 8))
+        ((eq? c "f") (chr 12))
+        ((eq? c "n") "\n")
+        ((eq? c "r") "\r")
+        (#true       "\t")))
+
+; The four hex digits at the start of cs: (n rest).
+(defun hex4 (cs)
+    (let ds (map (lambda (c) (index-of "0123456789abcdef" (lc c))) (take 4 cs)))
+    (cond
+        ((or (< (length ds) 4) (member? -1 ds)) (raise (list :json "a bad \\u escape")))
+        (#true                                  (list (fold/l 0 (lambda (n d) (+ (* n 16) d)) ds) (skip 4 cs)))))
+
+; A \u escape's code point, joined with the next one when the two make a
+; surrogate pair. A lone surrogate has no UTF-8, so it becomes U+FFFD.
+(defun parse-unicode (r acc)
+    (let n  (car r))
+    (let cs (cadr r))
+    (cond
+        ((and (high? n) (eq? (str-join "" (take 2 cs)) "\\u")) (surrogate-pair n (hex4 (skip 2 cs)) cs acc))
+        ((or (high? n) (low? n))                               (parse-string cs (cons (chr 65533) acc)))
+        (#true                                                 (parse-string cs (cons (chr n) acc)))))
+
+(defun high? (n) (and (>= n 55296) (<= n 56319)))
+(defun low? (n) (and (>= n 56320) (<= n 57343)))
+
+(defun surrogate-pair (hi r cs acc)
+    (let lo (car r))
+    (cond
+        ((low? lo) (parse-string (cadr r) (cons (chr (+ 65536 (+ (* (- hi 55296) 1024) (- lo 56320)))) acc)))
+        (#true     (parse-string cs (cons (chr 65533) acc)))))
+
+; The characters a number can have: an integer if they make one that fits
+; in 63 bits, else a float.
+(defun parse-number (cs acc)
+    (cond
+        ((one-of? (peek cs) "0123456789+-.eE") (parse-number (cdr cs) (cons (car cs) acc)))
+        ((nil? acc)                            (raise (list :json "not a value")))
+        (#true                                 (list (number (str-join "" (reverse acc))) cs))))
+
+(defun number (text)
+    (let n (string->int text))
+    (let x (string->float text))
+    (cond
+        ((int? n)   n)
+        ((float? x) x)
+        (#true      (raise (list :json "a bad number" text)))))
+
+; --- printing: compact, as Python's json.dumps(v, separators=(",", ":"));
+; with ascii, everything past ~ is a \u escape, as with ensure_ascii
+
+(defun json/print (v ascii)
+    (cond
+        ((eq? v :null)  "null")
+        ((eq? v #true)  "true")
+        ((eq? v #false) "false")
+        ((num? v)       (concat v))
+        ((str? v)       (quote-string v ascii))
+        ((and (cons? v) (eq? (car v) :object))
+            (concat "{" (str-join "," (map (lambda (m) (concat (quote-string (car m) ascii) ":" (json/print (cadr m) ascii))) (cdr v))) "}"))
+        (#true
+            (concat "[" (str-join "," (map (lambda (x) (json/print x ascii)) v)) "]"))))
+
+(defun quote-string (s ascii)
+    (concat "\"" (str-join "" (map (lambda (c) (escape c ascii)) (utf8/chars s))) "\""))
+
+(defun escape (c ascii)
+    (let n (ord c))
+    (cond
+        ((eq? c "\"")          "\\\"")
+        ((eq? c "\\")          "\\\\")
+        ((== n 8)              "\\b")
+        ((== n 12)             "\\f")
+        ((== n 10)             "\\n")
+        ((== n 13)             "\\r")
+        ((== n 9)              "\\t")
+        ((< n 32)              (u-escape n))
+        ((and ascii (> n 65535))
+            (let m (- n 65536))
+            (~ (u-escape (+ 55296 (div m 1024))) (u-escape (+ 56320 (% m 1024)))))
+        ((and ascii (> n 126)) (u-escape n))
+        (#true                 c)))
+
+(defun u-escape (n) (~ "\\u" (pad-start (hex n) 4 "0")))
+
+(defun hex (n)
+    (let digit (utf8/substring "0123456789abcdef" (% n 16) (+ (% n 16) 1)))
+    (cond
+        ((< n 16) digit)
+        (#true    (~ (hex (div n 16)) digit))))
+
+; --- the texts
+
+(defun show (text)
+    (let v (json/parse text))
+    (tty/write (json/print v #false) "\n" (json/print v #true) "\n"))
+
+(map show (cadr (slurp "t/data/json.txt")))
+
+; what a parsed value looks like in slight
+(pprint (json/parse "{\"a\": [1, 2.5, \"\\u00e9\"], \"b\": {\"c\": null, \"d\": false}}"))
+(pprint (json/parse "\n{\n    \"spaced\" :\n        [ true ]\n}\n"))
+
+; and what a bad text does
+(defun try (text) (join (fork (json/parse text))))
+(pprint (try "[1, 2,]"))
+(pprint (try "{\"a\" 1}"))
+(pprint (try "\"\\ud83d\""))
+(try "[1] 2")

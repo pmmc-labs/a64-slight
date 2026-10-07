@@ -1,0 +1,30 @@
+{"name":"slight","version":1,"tags":["lisp","actors"],"native":true,"gc":null}
+{"name":"slight","version":1,"tags":["lisp","actors"],"native":true,"gc":null}
+[1,-2,3.5,-0.25,1000.0,0.0025,0,0,-0.0,1.0,-12345678901234]
+[1,-2,3.5,-0.25,1000.0,0.0025,0,0,-0.0,1.0,-12345678901234]
+[1.5e+300,1e-300,123456.789,0.1,1e+21,1e-7]
+[1.5e+300,1e-300,123456.789,0.1,1e+21,1e-7]
+"héllo, 日本語 😀"
+"h\u00e9llo, \u65e5\u672c\u8a9e \ud83d\ude00"
+"escapes: \" \\ / \b \f \n \r \t"
+"escapes: \" \\ / \b \f \n \r \t"
+"é 日 😀 \u0000 \u001f "
+"\u00e9 \u65e5 \ud83d\ude00 \u0000 \u001f \u007f"
+{"empty":{},"list":[],"nested":[[[]],{"a":[{"b":null}]}]}
+{"empty":{},"list":[],"nested":[[[]],{"a":[{"b":null}]}]}
+[1,{"k":"v"},"x"]
+[1,{"k":"v"},"x"]
+{"emoji":"😀🎉","ascii":"~","latin":"ÀÉÎõü","greek":"αβγ"}
+{"emoji":"\ud83d\ude00\ud83c\udf89","ascii":"~\u007f","latin":"\u00c0\u00c9\u00ce\u00f5\u00fc","greek":"\u03b1\u03b2\u03b3"}
+["𝄞","𝄞","  "]
+["\ud834\udd1e","\ud834\udd1e","\u2028\u2029"]
+true
+true
+null
+null
+(object ("a" (1 2.5 "é")) ("b" (object ("c" null) ("d" #false))))
+(object ("spaced" (#true)))
+(error (json "not a value"))
+(error (json "expected :"))
+(ok "�")
+(error (json "text after the value"))

@@ -1,0 +1,16 @@
+; string->float (D148): a decimal number, -?D+(.D+)?([eE][+-]?D+)?, as the
+; nearest float, or #false. It rounds as the reader does, so it gives the
+; same float as the literal.
+
+(pprint (map string->float (list "1.5" "-0.25" "42" "-0" "1e3" "2.5E-3" "1.5e+300" "007.50")))
+(pprint (list (eq? (string->float "0.1") 0.1) (eq? (string->float "3.141592653589793") 3.141592653589793)))
+; the largest double, the smallest normal one and the smallest of all;
+; then two too small for any, which come out as zero
+(pprint (map string->float (list "1.7976931348623157e308" "2.2250738585072014e-308" "5e-324" "1e-400" "-1e-400")))
+; too big for a double
+(pprint (map string->float (list "1e309" "-1e309" "1.8e308")))
+; not decimal numbers
+(pprint (map string->float (list "" "-" "+1" ".5" "1." "1e" "1e+" "1.5x" " 1" "1 " "0x10" "inf" "nan" "1,5" "--1")))
+; an integer is string->int's, but string->float takes one too
+(pprint (list (string->int "12") (string->float "12") (string->int "1.5")))
+(string->float 12)

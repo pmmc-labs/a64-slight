@@ -51,7 +51,8 @@ targets.
 ## Status
 
 The design is settled, and implementation is through step 10e of the plan:
-integers, floats, strings, booleans, symbols, lists, `cond`/`let`/`do`,
+integers, floats, strings (UTF-8, with builtins that count bytes and ones
+that count characters), booleans, symbols, lists, `cond`/`let`/`do`,
 functions with tail calls, closures, a prelude, and processes (`fork`,
 `send`, `recv`, `join`, `monitor`, `kill`, `raise`, preemption, faults
 that end just their process) compile to native binaries, which pass

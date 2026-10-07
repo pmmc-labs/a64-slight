@@ -97,6 +97,8 @@ test('bad escapes are errors', () => {
     fails('"\\u41"', /invalid unicode escape/);
     fails('"\\u{41"', /unterminated unicode escape/);
     fails('"\\u{110000}"', /invalid unicode escape/);
+    fails('"\\u{D800}"', /invalid unicode escape/);
+    fails('"\\u{dfff}"', /invalid unicode escape/);
     fails('"\\u{}"', /invalid unicode escape/);
     fails('"\\u{zz}"', /invalid unicode escape/);
 });

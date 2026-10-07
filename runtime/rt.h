@@ -54,7 +54,7 @@
 #define RT_FAULT_HEAP        8    // :heap            the heap is full
 #define RT_FAULT_NOT_STRING  9    // :not-a-string    a string operation was given something else
 #define RT_FAULT_NOT_SYMBOL 10    // :not-a-symbol    a symbol operation was given something else
-#define RT_FAULT_RANGE      11    // :out-of-range    an index, a byte, or a rounded float out of range
+#define RT_FAULT_RANGE      11    // :out-of-range    an index, a byte, a code point, or a rounded float out of range
 #define RT_FAULT_NOT_NUMBER 12    // :not-a-number    arithmetic on something that isn't a number
 #define RT_FAULT_DIV_ZERO   13    // :div-by-zero     division by zero
 #define RT_FAULT_NOT_FUNC   14    // :not-a-function  a call to something that isn't a function
@@ -396,12 +396,22 @@ rt_value_t rt_index_of(rt_value_t s, rt_value_t m, const char *site) RT_ASM(rt_i
 rt_value_t rt_str_split(rt_value_t s, rt_value_t sep, const char *site) RT_ASM(rt_str_split);
 rt_value_t rt_str_join(rt_value_t sep, rt_value_t xs, const char *site) RT_ASM(rt_str_join);
 rt_value_t rt_string_to_int(rt_value_t s, const char *site) RT_ASM(rt_string_to_int);
+rt_value_t rt_string_to_float(rt_value_t s, const char *site) RT_ASM(rt_string_to_float);
 rt_value_t rt_symbol_to_string(rt_value_t sym, const char *site) RT_ASM(rt_symbol_to_string);
 rt_value_t rt_string_to_symbol(rt_value_t s, const char *site) RT_ASM(rt_string_to_symbol);
 rt_value_t rt_byte_at(rt_value_t s, rt_value_t i, const char *site) RT_ASM(rt_byte_at);
 rt_value_t rt_bytes_to_string(rt_value_t xs, const char *site) RT_ASM(rt_bytes_to_string);
 rt_value_t rt_format_num(rt_value_t n, rt_value_t width, rt_value_t fill, const char *site) RT_ASM(rt_format_num);
 rt_value_t rt_tty_write(rt_value_t args, const char *site) RT_ASM(rt_tty_write);
+
+// The utf8/ builtins (strings.c), which count characters (D148).
+rt_value_t rt_utf8_len(rt_value_t s, const char *site) RT_ASM(rt_utf8_len);
+rt_value_t rt_utf8_substring(rt_value_t s, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_utf8_substring);
+rt_value_t rt_utf8_index_of(rt_value_t s, rt_value_t m, const char *site) RT_ASM(rt_utf8_index_of);
+rt_value_t rt_utf8_chars(rt_value_t s, const char *site) RT_ASM(rt_utf8_chars);
+rt_value_t rt_utf8_code(rt_value_t s, const char *site) RT_ASM(rt_utf8_code);
+rt_value_t rt_utf8_char(rt_value_t n, const char *site) RT_ASM(rt_utf8_char);
+rt_value_t rt_utf8_valid(rt_value_t s, const char *site) RT_ASM(rt_utf8_valid);
 
 // The terminal (tty.c). The screen's size, or 24 by 80 when stdout isn't
 // a terminal.

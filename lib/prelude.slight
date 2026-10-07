@@ -159,3 +159,9 @@
     (cond
         ((< i 0) acc)
         (#true   (bytes-loop s (- i 1) (cons (byte-at s i) acc)))))
+
+; Perl's ord and chr (D148): the code point of a string's first character,
+; and the one-character string for a code point. They're utf8/code and
+; utf8/char, under the names Perl gives them.
+(defun ord (s) (utf8/code s))
+(defun chr (n) (utf8/char n))

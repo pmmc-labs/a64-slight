@@ -1112,3 +1112,59 @@ itself); a fixed limit on nesting, counted in levels, with a fault of its
 own (the same on every target, but a rule of the language about what can
 be sent, in a language where sending is everything; Erlang's runtime has
 no such limit either).
+
+**D148. UTF-8: a second set of string builtins, counting characters.**
+*(User asked for enough to write a JSON parser and printer, with byte and
+UTF-8 builtins side by side; the names `ord` and `chr`, calling the
+`utf8/` builtins, are the user's too.)* Part of D27's level 2, without display
+width. The byte builtins don't change. New, in C: `(utf8/len s)`,
+`(utf8/substring s start end)` (clamped and swapped as `substring` is),
+`(utf8/index-of s m)`, `(utf8/chars s)` (one-character strings, which
+`str-join` puts back together), `(utf8/code s)` (the first character's
+code point), `(utf8/char n)` and `(utf8/valid? s)`; and in the prelude,
+`ord` and `chr`, which call `utf8/code` and `utf8/char`, as Perl's do.
+Nothing else needed to change: output writes a string's bytes as they
+are, string literals were already UTF-8, and the byte builtins that don't
+count (`concat`, `~`, `str-join`, `eq?`, `starts-with?`, `ends-with?`,
+and `str-split` on a separator that isn't empty) are right for UTF-8 as
+they are, since a well-formed sequence can't match in the middle of a
+character.
+
+A byte that doesn't start a well-formed sequence (Unicode's table 3-7:
+shortest form, no surrogates, nothing past U+10FFFF) is a character of
+its own, as in Go: it counts 1, `utf8/chars` keeps it as it was, and its
+code point is U+FFFD. So nothing faults on bad input, nothing is lost, and
+a parser that must reject bad input asks `utf8/valid?`. `utf8/index-of`
+finds only a match that starts a character, which matters only when `m`
+starts with a stray byte. `utf8/code` faults with `:out-of-range` on `""`
+(Perl's `ord` gives 0, a real character), and `utf8/char` on a surrogate
+or past U+10FFFF, which have no UTF-8; the reader now refuses
+`\u{D800}`–`\u{DFFF}` too, which it used to turn into U+FFFD without a
+word.
+
+JSON's numbers needed `(string->float s)`: `-?D+(.D+)?([eE][+-]?D+)?` as
+the nearest float, or `#false` (also for a number too big for a double;
+one too small for any comes out as 0, as the reader's literals do).
+`strtod` rounds correctly on glibc and macOS alike, so it gives the same
+float as the literal, which a float built from its digits in slight
+couldn't promise, `pow` least of all (D76). An integer stays
+`string->int`'s.
+
+Checked against Go's `unicode/utf8` on 3,200 random strings mixing every
+kind of bad byte, on both targets; of a dozen mutations of the decoder,
+the two that went unnoticed change nothing it does (one reads the NUL
+after the string, which is never a continuation byte). `t/168-json.slight` is a JSON parser and
+printer in slight, on these builtins, checked against Python's `json`
+module (`t/models/json-round-trip.py`). The cost to know about:
+`utf8/chars` takes 32 bytes a character (a string and a cell), and the
+root never collects, so a parse there runs out of heap at about a 2 MB
+text. Sharing static strings for the ASCII characters would halve that;
+left until it matters.
+Rejected: renaming the byte builtins `bytes/...` to match (it churns every
+program, for no gain); U+FFFD in place of a bad byte in `utf8/chars`
+(loses the byte); faulting on bad bytes (harsh on a file you didn't
+write); WHATWG's rule of one U+FFFD for a whole cut-short sequence (it
+differs only on bad input, and needs more machinery); a `string->number`
+giving an integer or a float (`string->int` already does the one);
+display width, case mapping beyond ASCII and normalization (not needed
+for JSON; `pad-start`, `pad-end` and `format-num` still count bytes).

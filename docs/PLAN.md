@@ -5,8 +5,9 @@ the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
 **Progress:** steps 0–9 and 10a–10e done (under qemu, and natively on
-macOS: Stevan runs `make test` on his M2 Max after every step), and a
-second target, x86-64 (below, after 10f). 10f, HTTP in slight, is next.
+macOS: Stevan runs `make test` on his M2 Max after every step), a
+second target, x86-64, and UTF-8 builtins (both below, after 10f). 10f,
+HTTP in slight, is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -341,6 +342,17 @@ down a list's cars, so a value nested some 50,000 deep in its cars
 crashed the whole program, at a depth that differed between targets. They
 now keep a work stack, as the collector does (D147, 162).
 
+#### UTF-8, enough for JSON (done, Oct 2026)
+
+At Stevan's request, part of DESIGN.md's level 2 strings (D148): a second
+set of builtins beside the byte ones, counting characters (`utf8/len`,
+`utf8/substring`, `utf8/index-of`, `utf8/chars`, `utf8/code`,
+`utf8/char`, `utf8/valid?`), `ord` and `chr` in the prelude, and
+`string->float` for JSON's numbers. A bad byte is a character of its
+own, as in Go. Tests 164–168; 168 is a JSON parser and printer in
+slight, checked against Python's `json` module, which could become
+`lib/json.slight` when 10f wants one. Display width is still to come.
+
 ### 11. Port the examples
 
 See the table below. The window manager and text editor are the real
@@ -349,9 +361,10 @@ those three (`text-editor`, `window-manager`, `better-window-manager`)
 himself. Checked for them in Oct 2026: nothing is missing now that
 `@ARGV` exists (D144), but two things may come up: the runtime always
 prints the root's value at exit, so `(ok ())` follows the editor's
-"Goodbye!"; and strings are bytes, so typing non-ASCII text puts the
-cursor in the wrong column until there are UTF-8 helpers (DESIGN.md's
-level 2 strings).
+"Goodbye!"; and strings are bytes, so the editor should count a line
+with `utf8/len` (D148), not `str-len`. Even then a wide character (CJK,
+most emoji) takes two columns and counts one, until there's a display
+width (the rest of DESIGN.md's level 2 strings).
 
 ### 12. Self-host
 

@@ -292,6 +292,8 @@ deal only in lines (no chunks yet), and sockets are IPv4 only.
 
 Strings are now bytes (UTF-8 by convention) rather than JavaScript
 strings, so lengths and indexes count bytes: `(str-len "héllo")` is 6.
+A second set of builtins, the `utf8/` ones, counts characters instead:
+`(utf8/len "héllo")` is 5.
 
 - **`str-len substring index-of`**: by byte.
 - **`concat`**: no change. Non-strings are rendered as `pprint` shows
@@ -304,12 +306,28 @@ strings, so lengths and indexes count bytes: `(str-len "héllo")` is 6.
 - **`uc lc`**: ASCII only. They're in the prelude now.
 - **`pad-start pad-end str-repeat format-num`**: no change.
 - **`string->int`** (new): gives the integer, or `#false`.
+- **`string->float`** (new): gives the float, or `#false`. It reads
+  `1.5`, `-2`, `1e3` and `2.5E-3`, but not `.5`, `1.` or `inf`.
 - **`symbol->string`, `string->symbol`** (new): `string->symbol` gives
   `#false` unless the program mentions that symbol somewhere, because
   symbols are made at compile time.
 - **`byte-at`, `bytes->string`** (new): a byte as an integer, and a list
   of bytes back to a string.
 - **`\n \r \t \e`**: no change.
+- **`utf8/len utf8/substring utf8/index-of`** (new): count characters
+  rather than bytes, as ts-slight's `str-len`, `substring` and
+  `index-of` did, nearly: JavaScript counted UTF-16 units, so 😀 was 2
+  there, and is 1 here.
+- **`utf8/chars`** (new): the characters, as one-character strings.
+  It's what `(str-split s "")` did in ts-slight, except that JavaScript
+  split 😀 in two.
+- **`ord chr`** (new): as in Perl. `(ord "é")` is 233 and `(chr 233)`
+  is `"é"`. They're in the prelude, and call `utf8/code` and
+  `utf8/char`. `ord` of `""` faults, where Perl gives 0, and so does
+  `chr` of a surrogate or of anything past U+10FFFF (1114111).
+- **`utf8/valid?`** (new): whether a string is all good UTF-8. A bad
+  byte is never a fault: the `utf8/` builtins count it as a character
+  of its own, and `ord` gives 65533 (U+FFFD) for it.
 - **Gone**: `last-index-of`, `str-split-at` and `str-splice-at`.
 
 ### Output

@@ -40,7 +40,7 @@ Same reader as ts-slight (see `reference/ts-slight/src/parser.ts` and
 - `( ... )` lists; `()` is nil
 - integers (`42`, `-7`) and floats (`3.14`)
 - strings in double quotes, with escapes: `\"` `\\` `\n` `\t` `\r` `\e`
-  `\u{hex}`
+  `\u{hex}` (a code point up to U+10FFFF that isn't a surrogate)
 - symbols. `:name` is a keyword, a symbol that evaluates to itself.
   `#true`/`#false` are the booleans.
 - `'x` is `(quote x)`
@@ -295,9 +295,11 @@ Keep ts-slight's names where possible
   proper (both as in ts-slight). Inside a quoted list, `:a` reads as
   `(quote a)`, as it did in ts-slight; write `'(a b)`, not `'(:a :b)`.
 - strings: `str?`, `str-len` (bytes), `substring`, `concat`/`~`,
-  `index-of`, `str-split`, `str-join`, `string->int`, `symbol->string`,
-  `string->symbol`, `byte-at`, `bytes->string`, `format-num`. See
-  Strings below for how each behaves.
+  `index-of`, `str-split`, `str-join`, `string->int`, `string->float`,
+  `symbol->string`, `string->symbol`, `byte-at`, `bytes->string`,
+  `format-num`; and counting characters, `utf8/len`, `utf8/substring`,
+  `utf8/index-of`, `utf8/chars`, `utf8/code`, `utf8/char`, `utf8/valid?`.
+  See Strings below for how each behaves.
 - processes: `send join monitor kill after raise disconnect`
 - I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols` (the terminal's
   size, asked each time; 24 and 80 when stdout isn't a terminal), `pprint`
@@ -317,7 +319,7 @@ program; it can only define functions.
 | folds | `(fold/l init f xs)` with `(f acc x)`; `(fold/r init f xs)` with `(f x acc)` |
 | lists | `reverse length append sum product map`; `(filter f xs)` keeps what `f` says `#true` to, `(remove f xs)` drops it; `(take n xs)`, `(skip n xs)` stop at the end of the list; `(nth i xs)` and `(find f xs)` give `()` when there's nothing; `member?`; `(range start end)` is `start` up to but not including `end`; `(dotimes start end f)` |
 | association lists | `(assoc k v table)` adds `(k v)`; `(lookup k table)` gives the value or `:not-found` |
-| strings | `uc lc` (ASCII), `(pad-start s n fill)`, `(pad-end s n fill)`, `(str-repeat s n)`, `starts-with?`, `ends-with?` |
+| strings | `uc lc` (ASCII), `(pad-start s n fill)`, `(pad-end s n fill)`, `(str-repeat s n)`, `starts-with?`, `ends-with?`, `(bytes s)` (a list of its bytes), `ord` and `chr` (`utf8/code` and `utf8/char`, under Perl's names) |
 
 These are ts-slight's, adjusted where they were confusing (D78): its
 `filter` dropped what matched and `grep` kept it; its `range` took a step
@@ -346,10 +348,11 @@ every program needs files (D129): `(@include :fs)`.
 
 ### Strings
 
-- **Level 1, now:** immutable byte strings. Indexing is by byte; case
-  mapping is ASCII only.
-- **Level 2, when the editor needs it:** UTF-8 helpers (decode, count and
-  walk code points, display width).
+- **Level 1:** immutable byte strings. The byte builtins index by byte;
+  case mapping is ASCII only.
+- **Level 2, in part (D148):** a second set of builtins, `utf8/`, that
+  count characters, enough for a JSON parser and printer. Display width
+  is still to come, when the editor needs it.
 - Full Unicode is out. If it's ever needed, a C library comes in as a
   driver.
 - There's no character type. A character is an integer or a one-character
@@ -373,6 +376,7 @@ JavaScript's) differs from what you might guess, it wins (D62):
 | `(str-split s sep)` | the pieces between the `sep`s; `""` gives `()`; an empty `sep` splits into bytes |
 | `(str-join sep xs)` | `xs` rendered as `concat` does, with `sep` between |
 | `(string->int s)` | a decimal integer that fits in 63 bits, or `#false` |
+| `(string->float s)` | a decimal number, `-?D+(.D+)?([eE][+-]?D+)?`, as the nearest float (as the reader rounds a literal), or `#false`, also when it's too big for a double |
 | `(symbol->string sym)`, `(string->symbol s)` | the latter is `#false` unless the program mentions that symbol (D14) |
 | `(byte-at s i)` | a byte as an integer; an index out of range faults |
 | `(bytes->string xs)` | integers 0–255 to a string |
@@ -381,6 +385,27 @@ JavaScript's) differs from what you might guess, it wins (D62):
 
 `pprint` shows a string in double quotes with nothing escaped inside, as
 ts-slight did. `eq?` compares strings byte by byte.
+
+**Counting characters (D148).** A character is a well-formed UTF-8
+sequence or, failing that, a stray byte on its own, whose code point is
+U+FFFD, as in Go. So nothing faults on bad bytes, `utf8/chars` loses
+nothing, and `utf8/valid?` says whether a string has any.
+
+| Builtin | |
+|---|---|
+| `(utf8/len s)` | length in characters |
+| `(utf8/substring s start end)` | characters `[start, end)`, clamped and swapped as `substring` does |
+| `(utf8/index-of s m)` | character index of the first `m` that starts a character, or -1; an empty `m` is at 0 |
+| `(utf8/chars s)` | the characters, as one-character strings; `(str-join "" (utf8/chars s))` is `s` |
+| `(utf8/code s)` | the code point of the first character; `""` faults (`:out-of-range`) |
+| `(utf8/char n)` | the one-character string for code point `n`; a surrogate or anything past U+10FFFF faults (`:out-of-range`) |
+| `(utf8/valid? s)` | `#true` if `s` is all well-formed sequences |
+
+The byte builtins that don't count are right for UTF-8 as they are:
+`concat`, `~`, `str-join`, `eq?`, `starts-with?`, `ends-with?`, and
+`str-split` on a separator that isn't empty. Output writes a string's
+bytes as they are. `utf8/chars` takes 32 bytes a character, and the root
+never collects, so a text split there tops out at about 2 MB.
 
 ### Not in the language
 

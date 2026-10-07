@@ -112,7 +112,8 @@ function readUnicodeEscape(c: Cursor, escPos: Pos): [string, Cursor] {
     const hex   = c.src.slice(c.i + 1, end.i);
     const isHex = (ch: string): boolean => isDigit(ch) || (ch.toLowerCase() >= 'a' && ch.toLowerCase() <= 'f');
     const n     = hex !== '' && hex.length <= 6 && [...hex].every(isHex) ? parseInt(hex, 16) : NaN;
-    if (!(n <= 0x10ffff)) throw new CompileError(`invalid unicode escape '\\u{${hex}}'`, escPos);
+    // a surrogate has no UTF-8 (D148)
+    if (!(n <= 0x10ffff) || (n >= 0xd800 && n <= 0xdfff)) throw new CompileError(`invalid unicode escape '\\u{${hex}}'`, escPos);
     return [String.fromCodePoint(n), step(end)];
 }
 
