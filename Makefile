@@ -35,8 +35,9 @@ check:
 clean:
 	rm -rf build
 	@if [ -f "./sketch" ]; then \
-		rm "./sketch";   \
-		rm "./sketch.S"; \
+		rm "./sketch";      \
+		rm "./sketch.S";    \
+		rm "./sketch.dSYM"; \
     fi
 
 .PHONY: test unit golden headers check clean
