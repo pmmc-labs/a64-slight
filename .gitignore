@@ -3,3 +3,5 @@ node_modules/
 *.S.out
 /build/
 .DS_Store
+sketch
+sketch.*
