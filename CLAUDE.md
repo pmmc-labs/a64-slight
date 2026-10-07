@@ -132,6 +132,10 @@ works and has the runtime pieces to borrow.
   it): clang finds the cross toolchain without it, and with it lld can't
   link `-lm`, because the sysroot's `libm.a` is a linker script with
   absolute paths.
+- **Other hosts** aren't set up for. On arm64 Linux, the x86-64 target
+  needs the x86-64 cross libc (`gcc-x86-64-linux-gnu`) and `qemu-user`. An
+  Intel Mac, or `make` run under Rosetta, can only build x86-64
+  (`TARGETS=x86_64`).
 - Check the setup with `make -C spike/aarch64 test`. It should print five
   `ok` lines.
 - Use clang's integrated assembler, not GNU `as` (it rejects some of the

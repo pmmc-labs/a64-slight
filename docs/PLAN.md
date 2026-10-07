@@ -329,6 +329,20 @@ with the same expected output. A third target (RISC-V, say) is now a
 target file and its runtime assembly. Untested so far: macOS x86-64
 (Rosetta 2), which `make golden TARGETS=x86_64` would run on the M2.
 
+The adversarial review that followed (differential tests of some 400
+programs on both targets, the ABI shape by shape, the interface's
+contract) found no difference in the x86-64 code. It found some older
+bugs, fixed with tests: a name ending in a backslash, written into an
+assembly comment, made the preprocessor swallow the next instruction
+(160); `min` and `max` compared two integers as doubles (161); a lambda's
+stack fault named its position twice. **Open, for Stevan:** printing,
+copying (a message, or a fork's values) and `eq?` recurse in C down a
+list's cars, so a value nested some 50,000 deep in its cars crashes the
+whole program instead of faulting its process, at a depth that differs
+between targets. The collector already avoids this with a work stack
+(D107). Options: the same for the three of them, or a check of the C
+stack against the process's limit that faults with `:stack`.
+
 ### 11. Port the examples
 
 See the table below. The window manager and text editor are the real

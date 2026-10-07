@@ -7,8 +7,9 @@
 // nothing lives in a register across a call.
 //
 // Functions take up to eight arguments in registers and return their result
-// in the accumulator, as the platform's C calling convention does, so
-// compiled functions and the runtime's C functions are called the same way.
+// in the accumulator. The registers are the platform C calling convention's
+// (on x86-64, its six, then two of ours), so compiled functions and the
+// runtime's C functions are called the same way.
 // A call in tail position takes down the caller's frame and jumps, so loops
 // run in constant stack.
 //
@@ -219,10 +220,12 @@ function findFn(fns: Fns, name: string, module: Module): Fn | null {
 // call and every tail call passes through: is there room on the stack, and
 // are this process's reductions used up?
 // kind: only a defun can be a receive function, and a lambda's body is held
-// to the recv rule (D11).
+// to the recv rule (D11). at: where the stack fault says it happened, which
+// a lambda or fork leaves out, since its name already says.
 type Kind = 'defun' | 'lambda' | 'other';
 
-function compileFunction(entry: string, d: Defun, free: readonly string[], fns: Fns, kind: Kind, st: St): [Code, St] {
+function compileFunction(entry: string, d: Defun, free: readonly string[], fns: Fns, kind: Kind, st: St,
+                         at: Pos | null = d.pos): [Code, St] {
     const locals = [...d.params.map((p) => p.name), ...free];
     const env = locals.reduce<Env>((e, name, i) => ({ name, slot: i, next: e }), null);
     const receive = kind === 'defun' && isReceiveBody(d.body) ? { entry, params: d.params.length } : null;
@@ -230,7 +233,7 @@ function compileFunction(entry: string, d: Defun, free: readonly string[], fns: 
     const [body, st1] = compileBody(d.body, cx, { ...st, slots: locals.length });
     const size = 16 * Math.ceil(st1.slots / 2);
     if (size > 4095) throw new CompileError(`${d.name.name} needs too many frame slots (${st1.slots})`, d.pos);
-    const [overflow, st2] = faultLabel(st1, 'RT_FAULT_STACK', d.name.name, d.pos);
+    const [overflow, st2] = faultLabel(st1, 'RT_FAULT_STACK', d.name.name, at);
     const [preempt, st3]  = label(st2, 'preempt');
     const t    = st.t;
     const stub = [`${preempt}:`, t.call('rt_preempt', [PROC], false), t.jump(`${preempt}_done`)];
@@ -583,7 +586,7 @@ function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: 
     const where = x.pos === null ? form : `${form} at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
     const [entry, st1] = label(st0, form);
     const d: Defun = { name: sym(where, x.pos), params: free.map((n) => sym(n, x.pos)), body: list(expr), pos: x.pos };
-    const [code, st2]  = compileFunction(entry, d, [], cx.fns, 'other', st1);
+    const [code, st2]  = compileFunction(entry, d, [], cx.fns, 'other', st1, null);
     const st3: St = { ...st2, slots: st0.slots, lambdas: [st2.lambdas, code] };
     const [site, st4]  = siteLabel(st3, form, x.pos);
     const st5 = free.length > 0 ? useSlot(st4, si + free.length - 1) : st4;
@@ -675,7 +678,7 @@ function compileLambda(x: Pair, cx: Cx, st: St): [Code, St] {
     const where  = x.pos === null ? 'lambda' : `lambda at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
     const [entry, st1] = label(st, 'lambda');
     const d: Defun = { name: { t: 'sym', name: where, pos: x.pos }, params, body, pos: x.pos };
-    const [code, st2]  = compileFunction(entry, d, free, cx.fns, 'lambda', st1);
+    const [code, st2]  = compileFunction(entry, d, free, cx.fns, 'lambda', st1, null);
     const st3: St = { ...st2, slots: st.slots, lambdas: [st2.lambdas, code] };
     if (free.length === 0) return loadClosure(staticClosure(entry, params.length, where, st3));
 

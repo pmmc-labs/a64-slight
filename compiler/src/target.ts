@@ -13,6 +13,20 @@
 // Lines of assembly, as a tree, so that joining pieces is cheap.
 export type Code = string | readonly Code[];
 
+// A comment for the end of a line, holding text from the program: a name,
+// or a literal. The .S file goes through the C preprocessor, which joins a
+// line ending in a backslash to the next before it drops comments, so a
+// name like y\ would take the next instruction with it. A backslash, and
+// anything unprintable, is written as an octal escape, as in asmString.
+export function comment(text: string | undefined): string {
+    if (text === undefined) return '';
+    const esc = (ch: string): string => {
+        const c = ch.charCodeAt(0);
+        return ch === '\\' || c < 0x20 || c === 0x7f ? `\\${c.toString(8).padStart(3, '0')}` : ch;
+    };
+    return `    // ${[...text].map(esc).join('')}`;
+}
+
 // The conditions a comparison can ask for, of left against the accumulator.
 export type Cond = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge';
 
@@ -86,7 +100,10 @@ export type Target = {
     // unless the accumulator and the left operand are both integers; unless
     // a list (a cons or ()); unless a cons; unless (); unless the left
     // operand is this word; if the left operand and the accumulator are the
-    // same word.
+    // same word. The three that read the left operand also keep it, both
+    // ways, since what follows them reads it again (the slow arithmetic
+    // path, rt_equal, the next step of a recv pattern); the others may
+    // overwrite it, as AArch64's do.
     readonly testBool: (ifFalse: string, notBool: string) => Code;
     readonly branchUnlessInt: (label: string) => Code;
     readonly branchUnlessInts: (label: string) => Code;
@@ -136,8 +153,9 @@ export type Target = {
 // The moves that put a call's arguments in the argument registers, in an
 // order that never overwrites a register before it's read: moves from one
 // register to another first, saving a register that's in a cycle to the
-// first argument register no pending move uses; then the rest in order.
-// `register` says which register an operand is in, if it's in one.
+// first argument register that holds no operand and that no pending move
+// writes; then the rest in order. `register` says which register an
+// operand is in, if it's in one.
 export function placeArgs(args: readonly Operand[], regs: readonly string[],
                           register: (op: Operand) => string | null,
                           move: (dst: string, op: Operand) => Code,
@@ -156,7 +174,8 @@ export function placeArgs(args: readonly Operand[], regs: readonly string[],
             continue;
         }
         const first = pending[0]!;
-        const temp  = regs.find((r) => !pending.some((m) => m.src === r || m.dst === r))!;
+        const busy  = [...args.map(register), ...pending.map((m) => m.src)];
+        const temp  = regs.find((r) => !busy.includes(r) && !pending.some((m) => m.dst === r))!;
         out.push(regMove(temp, first.dst));
         pending = pending.map((m) => (m.src === first.dst ? { dst: m.dst, src: temp } : m));
     }

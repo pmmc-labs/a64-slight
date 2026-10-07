@@ -71,7 +71,7 @@ function parseArgs(args: readonly string[], opts: Options): Options {
     if (arg === '-S') return parseArgs(rest, { ...opts, asmOnly: true });
     if (arg === '--target') {
         const [arch, ...more] = rest;
-        if (arch === undefined || !(arch in ARCHES)) usage(`--target takes ${Object.keys(ARCHES).join(' or ')}`);
+        if (arch === undefined || !Object.hasOwn(ARCHES, arch)) usage(`--target takes ${Object.keys(ARCHES).join(' or ')}`);
         return parseArgs(more, { ...opts, arch });
     }
     if (arg === '-o') {

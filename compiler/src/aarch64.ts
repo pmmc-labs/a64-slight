@@ -5,7 +5,7 @@
 // D47).
 // Frame slots are addressed up from sp, under x29/x30.
 
-import { placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
+import { comment, placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
 
 const ARGS = ['x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'];
 
@@ -120,7 +120,7 @@ export const AARCH64: Target = {
     name: 'aarch64',
 
     fileStart: ['#include "asm_aarch64.h"', '', '    .text'],
-    functionStart: (entry, name) => (entry === 'slight_main' ? 'FUNC slight_main' : ['    .p2align 2', `${entry}:    // ${name}`]),
+    functionStart: (entry, name) => (entry === 'slight_main' ? 'FUNC slight_main' : ['    .p2align 2', `${entry}:${comment(name)}`]),
 
     // x29/x30 on top, then the slots. The captured values come from the
     // closure in x9 after the parameters are stored (x9 is gone after
@@ -132,10 +132,10 @@ export const AARCH64: Target = {
         '    ldr  x16, [x28, #RT_PROC_STACK_LIMIT]',
         '    cmp  sp, x16',
         `    b.lo ${overflow}`,
-        params.map((p, i) => `    str  x${i}, ${slot(i)}    // ${p}`),
+        params.map((p, i) => `    str  x${i}, ${slot(i)}${comment(p)}`),
         free.map((name, i) => [
             closureField('x16', 'x9', `RT_CLOSURE_FREE + ${8 * i}`, 29 + 8 * i),
-            `    str  x16, ${slot(params.length + i)}    // ${name}`,
+            `    str  x16, ${slot(params.length + i)}${comment(name)}`,
         ]),
         '    ldr  x16, [x28, #RT_PROC_REDUCTIONS]',
         '    subs x16, x16, #1',
@@ -171,14 +171,14 @@ export const AARCH64: Target = {
 
     loadWord: (word, note) => {
         const [first, ...rest] = loadWord('x0', word);
-        return [`${first}    // ${note}`, rest];
+        return [`${first}${comment(note)}`, rest];
     },
     loadConst: (name) => `    mov  x0, #${name}`,
     loadTagged: (label, tag) => [`    LOADADDR x0, ${label}`, `    orr  x0, x0, #${tag}`],
     loadProc: (field) => `    ldr  x0, [x28, #${field}]`,
-    loadSlot: (si, note) => `    ldr  x0, ${slot(si)}${note === undefined ? '' : `    // ${note}`}`,
-    storeSlot: (si, note) => `    str  x0, ${slot(si)}${note === undefined ? '' : `    // ${note}`}`,
-    copySlot: (from, to, note) => [`    ldr  x16, ${slot(from)}    // ${note}`, `    str  x16, ${slot(to)}`],
+    loadSlot: (si, note) => `    ldr  x0, ${slot(si)}${comment(note)}`,
+    storeSlot: (si, note) => `    str  x0, ${slot(si)}${comment(note)}`,
+    copySlot: (from, to, note) => [`    ldr  x16, ${slot(from)}${comment(note)}`, `    str  x16, ${slot(to)}`],
     loadLeft: (si) => `    ldr  x1, ${slot(si)}`,
 
     testBool: (ifFalse, notBool) => [
@@ -208,7 +208,7 @@ export const AARCH64: Target = {
     cxr: (step) => (step === 'a' ? '    ldur x0, [x0, #-1]    // car' : '    ldur x0, [x0, #7]     // cdr'),
     leftFromCar: '    ldur x1, [x0, #-1]',
     accFromCdr: '    ldur x0, [x0, #7]',
-    storeCar: (si, note) => ['    ldur x1, [x0, #-1]', `    str  x1, ${slot(si)}    // ${note}`],
+    storeCar: (si, note) => ['    ldur x1, [x0, #-1]', `    str  x1, ${slot(si)}${comment(note)}`],
 
     // Bump-allocates into x2. When the chunk hasn't room, rt_heap_grow makes
     // a new one (or faults, past the heap's limit) and the allocation goes
@@ -253,7 +253,7 @@ export const AARCH64: Target = {
         `    mov  x3, #${arity}`,
         `    LOADADDR x4, ${name}`,
         '    stp  x3, x4, [x2, #16]',
-        free.map(([si, note], i) => [`    ldr  x3, ${slot(si)}    // ${note}`, `    str  x3, [x2, #${32 + 8 * i}]`]),
+        free.map(([si, note], i) => [`    ldr  x3, ${slot(si)}${comment(note)}`, `    str  x3, [x2, #${32 + 8 * i}]`]),
         '    orr  x0, x2, #RT_TAG_BOXED',
     ],
 };

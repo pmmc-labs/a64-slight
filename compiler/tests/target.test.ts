@@ -46,6 +46,17 @@ test('placeArgs breaks a cycle through the first register no move uses', () => {
     assert.deepEqual(state, { a: 'left', b: 'acc', c: 'OP', d: 'site' });
 });
 
+test('placeArgs never saves a cycle into a register holding an operand already in place', () => {
+    // as above, but with the process in c, where its argument goes
+    const moves = flat(placeArgs(
+        [LEFT, ACC, PROC], ['a', 'b', 'c', 'd'],
+        (op) => (op.t === 'acc' ? 'a' : op.t === 'left' ? 'b' : op.t === 'proc' ? 'c' : null),
+        () => [], (dst, src) => `${dst} <- ${src}`,
+    ));
+    assert.deepEqual(moves, ['d <- a', 'a <- b', 'b <- d']);
+    assert.deepEqual(run(moves, { a: 'acc', b: 'left', c: 'proc', d: '?' }), { a: 'left', b: 'acc', c: 'proc', d: 'acc' });
+});
+
 const x86 = (src: string): string => compileProgram(read(src, 'test.slight'), NIL, X86_64);
 
 test('x86-64: a program includes its header, and a frame keeps rsp 16-aligned', () => {

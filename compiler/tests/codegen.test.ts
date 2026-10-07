@@ -159,6 +159,13 @@ test('calls are checked against the function', () => {
     assert.match(compile('(defun f () 1) f'), /LOADADDR x0, fn_f_closure/);
 });
 
+test("a lambda's or a fork's stack fault says where it is once", () => {
+    const asm = compile('(let f (lambda (x) x)) (fork (pprint 1))');
+    assert.match(asm, /\.asciz "lambda at test\.slight:1:8"/);
+    assert.match(asm, /\.asciz "fork at test\.slight:1:24"/);
+    assert.doesNotMatch(asm, / at test\.slight:\d+:\d+ at /);
+});
+
 test("a defun can't see the top level's lets", () => {
     fails('(let x 1) (defun f () x) (f)', "test.slight:1:23: unknown name 'x'");
 });
@@ -301,7 +308,8 @@ test('a string literal is a box in the read-only data', () => {
 
 test("ts-slight's control-character names are strings, unless shadowed", () => {
     assert.match(compile('\\e'), /\.quad 1 << RT_BOX_SIZE_SHIFT \| RT_BOX_STRING\n {4}\.asciz "\\033"/);
-    assert.match(compile('(let \\n 5) \\n'), /ldr {2}x0, \[sp, #8\] {4}\/\/ \\n/);    // after @ARGV
+    // after @ARGV; a backslash in a comment is escaped (160-backslash-names)
+    assert.match(compile('(let \\n 5) \\n'), /ldr {2}x0, \[sp, #8\] {4}\/\/ \\134n/);
 });
 
 test('C builtins get their site after their arguments', () => {

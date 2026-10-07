@@ -118,11 +118,15 @@ rt_value_t rt_abs(rt_value_t x, const char *site) {
 }
 
 // The smaller (larger) argument, as it was given; the first one on a tie.
+// Two integers compare as integers: as doubles, those near 2^62 that
+// round to the same one would tie.
 rt_value_t rt_min(rt_value_t a, rt_value_t b, const char *site) {
+    if (is_int(a) && is_int(b)) return (int64_t)b < (int64_t)a ? b : a;
     return as_double(b, site) < as_double(a, site) ? b : a;
 }
 
 rt_value_t rt_max(rt_value_t a, rt_value_t b, const char *site) {
+    if (is_int(a) && is_int(b)) return (int64_t)b > (int64_t)a ? b : a;
     return as_double(b, site) > as_double(a, site) ? b : a;
 }
 

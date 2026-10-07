@@ -11,12 +11,11 @@
 // addressed up from rsp, so rsp is 16-aligned for every call, as System V
 // requires: nothing checks it, and a mistake crashes deep in libc.
 
-import { placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
+import { comment, placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
 
 const ARGS = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9', 'r10', 'r11'];
 
 const slot = (si: number): string => `qword ptr [rsp + ${8 * si}]`;
-const note = (text: string | undefined): string => (text === undefined ? '' : `    // ${text}`);
 
 // Takes down the frame that the prologue built.
 const EPILOGUE: Code = ['    mov  rsp, rbp', '    pop  rbp'];
@@ -106,7 +105,7 @@ export const X86_64: Target = {
     name: 'x86_64',
 
     fileStart: ['#include "asm_x86_64.h"', '', '    .text'],
-    functionStart: (entry, name) => (entry === 'slight_main' ? 'FUNC slight_main' : ['    .p2align 4', `${entry}:    // ${name}`]),
+    functionStart: (entry, name) => (entry === 'slight_main' ? 'FUNC slight_main' : ['    .p2align 4', `${entry}:${comment(name)}`]),
 
     // The return address and rbp on top, then the slots. The captured
     // values come from the closure in rax after the parameters are stored,
@@ -117,10 +116,10 @@ export const X86_64: Target = {
         size > 0 ? `    sub  rsp, ${size}` : [],
         '    cmp  rsp, qword ptr [r15 + RT_PROC_STACK_LIMIT]',
         `    jb   ${overflow}`,
-        params.map((p, i) => `    mov  ${slot(i)}, ${ARGS[i]}    // ${p}`),
+        params.map((p, i) => `    mov  ${slot(i)}, ${ARGS[i]}${comment(p)}`),
         free.map((name, i) => [
             `    mov  r11, qword ptr [rax + RT_CLOSURE_FREE + ${8 * i}]`,
-            `    mov  ${slot(params.length + i)}, r11    // ${name}`,
+            `    mov  ${slot(params.length + i)}, r11${comment(name)}`,
         ]),
         '    sub  qword ptr [r15 + RT_PROC_REDUCTIONS], 1',
         `    jle  ${preempt}`,
@@ -128,10 +127,18 @@ export const X86_64: Target = {
     ],
     ret: [EPILOGUE, '    ret'],
 
-    call: (fn, args, tail) => [
-        placeArgs(args, ARGS, register, move, regMove),
-        tail ? [EPILOGUE, `    jmp  ${fn}    // tail call`] : `    call ${fn}`,
-    ],
+    // C takes a seventh and eighth argument on the stack, not in r10 and r11,
+    // so the runtime's functions take at most six (rt_apply, in assembly,
+    // spreads into all eight).
+    call: (fn, args, tail) => {
+        if (fn.startsWith('rt_') && fn !== 'rt_apply' && args.length > 6) {
+            throw new Error(`x86_64: ${fn} would need its arguments 7 and 8 on the stack`);
+        }
+        return [
+            placeArgs(args, ARGS, register, move, regMove),
+            tail ? [EPILOGUE, `    jmp  ${fn}    // tail call`] : `    call ${fn}`,
+        ];
+    },
     // The closure stays in rax for its code to find its captured values;
     // the checks use r11 before the arguments are loaded.
     closureCall: (fnSlot, argSlots, notFn, arity, tail) => [
@@ -153,13 +160,13 @@ export const X86_64: Target = {
     ],
     jump: (label) => `    jmp  ${label}`,
 
-    loadWord: (word, text) => `${loadWord('rax', word)}${note(text)}`,
+    loadWord: (word, text) => `${loadWord('rax', word)}${comment(text)}`,
     loadConst: (name) => `    mov  rax, ${name}`,
     loadTagged: (label, tag) => [`    lea  rax, [rip + ${label}]`, `    or   rax, ${tag}`],
     loadProc: (field) => `    mov  rax, qword ptr [r15 + ${field}]`,
-    loadSlot: (si, text) => `    mov  rax, ${slot(si)}${note(text)}`,
-    storeSlot: (si, text) => `    mov  ${slot(si)}, rax${note(text)}`,
-    copySlot: (from, to, text) => [`    mov  r11, ${slot(from)}${note(text)}`, `    mov  ${slot(to)}, r11`],
+    loadSlot: (si, text) => `    mov  rax, ${slot(si)}${comment(text)}`,
+    storeSlot: (si, text) => `    mov  ${slot(si)}, rax${comment(text)}`,
+    copySlot: (from, to, text) => [`    mov  r11, ${slot(from)}${comment(text)}`, `    mov  ${slot(to)}, r11`],
     loadLeft: (si) => `    mov  rcx, ${slot(si)}`,
 
     testBool: (ifFalse, notBool) => [
@@ -193,7 +200,7 @@ export const X86_64: Target = {
     cxr: (step) => (step === 'a' ? '    mov  rax, qword ptr [rax - 1]    // car' : '    mov  rax, qword ptr [rax + 7]    // cdr'),
     leftFromCar: '    mov  rcx, qword ptr [rax - 1]',
     accFromCdr: '    mov  rax, qword ptr [rax + 7]',
-    storeCar: (si, text) => ['    mov  rcx, qword ptr [rax - 1]', `    mov  ${slot(si)}, rcx    // ${text}`],
+    storeCar: (si, text) => ['    mov  rcx, qword ptr [rax - 1]', `    mov  ${slot(si)}, rcx${comment(text)}`],
 
     // Bump-allocates into rdx, with rsi for the new heap pointer. When the
     // chunk hasn't room, rt_heap_grow makes a new one (or faults) and the
@@ -245,7 +252,7 @@ export const X86_64: Target = {
         `    mov  qword ptr [rdx + 16], ${arity}`,
         `    lea  rsi, [rip + ${name}]`,
         '    mov  qword ptr [rdx + 24], rsi',
-        free.map(([si, text], i) => [`    mov  rsi, ${slot(si)}    // ${text}`, `    mov  qword ptr [rdx + ${32 + 8 * i}], rsi`]),
+        free.map(([si, text], i) => [`    mov  rsi, ${slot(si)}${comment(text)}`, `    mov  qword ptr [rdx + ${32 + 8 * i}], rsi`]),
         '    lea  rax, [rdx + RT_TAG_BOXED]',
     ],
 };

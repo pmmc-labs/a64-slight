@@ -1,0 +1,9 @@
+; A name may end in a backslash. The generated assembly carries names in
+; comments, and the C preprocessor that reads it joins a line ending in a
+; backslash to the next, which took the instruction after such a name with
+; it (on both targets). Comments now write the backslash as an escape.
+
+(defun f (x\) (let y\ (+ x\ 1)) (pprint y\) (* y\ 2))
+(pprint 'a\)
+(pprint 'b)
+(f 20)
