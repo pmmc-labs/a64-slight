@@ -1,0 +1,36 @@
+; The quantum is exactly 1000 reductions, one per function entry: a
+; process starts with 1000, and the entry that uses the last one is where
+; it's preempted, if another process is ready (D91). The counter's
+; (count i ...) is its entry i + 2, the fork's own entry function being
+; entry 1, so (count 998 ...) is entry 1000. A witness forked after the
+; counter gets to run first only if the counter is preempted: counting to
+; 997 the counter finishes first, and to 998 the witness gets in. Every
+; target must agree to the reduction.
+
+(defun count (i k to)
+    (cond
+        ((== i k) (send to (list :done k)))
+        (#true    (count (+ i 1) k to))))
+
+(defun race (k)
+    (let me $$)
+    (fork (count 0 k me))
+    (fork (send me :saw))
+    (first k))
+
+; the first message to arrive says who won
+(defun first (k)
+    (recv
+        ((:done _) (pprint (list k :done)) (second k))
+        (:saw      (pprint (list k :saw)) (second k))))
+
+(defun second (k)
+    (recv
+        (_ (next k))))
+
+(defun next (k)
+    (cond
+        ((== k 997) (race 998))
+        (#true      :finished)))
+
+(race 997)
