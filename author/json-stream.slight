@@ -1,0 +1,46 @@
+
+(defun char-buffer ($s)
+    (recv
+        ((:open f)
+            (send $s :SOD)
+            (char-buffer $s))
+        ((:line f s)
+            (map (lambda (c) (send $s c)) (str-split s ""))
+            (char-buffer $s))
+        ((:eof f)
+            (send $s :EOD))))
+
+(defun flush-buffer ($s buffer)
+    (when (> (str-len buffer) 0)
+        (send $s (list :ATOM buffer)))
+    "")
+
+(defun tokenize ($s buffer)
+    (recv
+        (:SOD (send $s :SOD) (tokenize $s ""))
+        (:EOD (send $s :EOD))
+        (char
+            (case char
+                ("{"   (send $s :OBJECT/OPEN ) (tokenize $s (flush-buffer $s buffer)))
+                ("}"   (send $s :OBJECT/CLOSE) (tokenize $s (flush-buffer $s buffer)))
+                ("["   (send $s :ARRAY/OPEN  ) (tokenize $s (flush-buffer $s buffer)))
+                ("]"   (send $s :ARRAY/CLOSE ) (tokenize $s (flush-buffer $s buffer)))
+                (":"   (send $s :COLON       ) (tokenize $s (flush-buffer $s buffer)))
+                (","   (send $s :COMMA       ) (tokenize $s (flush-buffer $s buffer)))
+                ("\""  (tokenize $s (flush-buffer $s buffer)))
+                (" "   (tokenize $s (flush-buffer $s buffer)))
+                (#true
+                    (tokenize $s (~ buffer char)))))))
+
+(defun DEBUG ()
+    (recv
+        (:EOD (pprint :EOD))
+        (msg
+            (pprint msg)
+            (DEBUG))))
+
+(let debugger (fork (DEBUG)))
+(let tokens   (fork (tokenize debugger "")))
+(let chars    (connect :fs/read "tsconfig.json" (char-buffer tokens)))
+
+(pprint (join debugger))
