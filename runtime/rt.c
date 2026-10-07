@@ -61,6 +61,23 @@ void rt_buf_free(rt_buf_t *b) {
     *b = (rt_buf_t){ 0 };
 }
 
+void rt_work_grow(rt_work_t *w) {
+    size_t      cap   = 2 * w->cap;
+    rt_value_t *items = malloc(cap * sizeof *items);
+    if (!items) {
+        perror("rt: out of memory");
+        exit(2);
+    }
+    memcpy(items, w->items, w->n * sizeof *items);
+    rt_work_free(w);
+    w->items = items;
+    w->cap   = cap;
+}
+
+void rt_work_free(rt_work_t *w) {
+    if (w->items != w->local) free(w->items);
+}
+
 const char *rt_symbol_name(uint64_t id) {
     if (id >= slight_symbol_count) return NULL;
     const char *name = slight_symbol_names;
@@ -119,7 +136,8 @@ static void render_float(rt_buf_t *b, double d) {
     }
 }
 
-void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
+// Anything but a cons.
+static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
     char num[32];
     if ((v & RT_TAG_INT_MASK) == 0) {
         snprintf(num, sizeof num, "%" PRId64, rt_int_value(v));
@@ -128,17 +146,6 @@ void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
     }
     if (v == RT_NIL) {
         buf_str(b, "()");
-        return;
-    }
-    if (rt_is_cons(v)) {
-        buf_str(b, "(");
-        for (;;) {
-            rt_render(b, rt_car(v), 0);
-            v = rt_cdr(v);
-            if (v == RT_NIL) break;
-            buf_str(b, " ");
-        }
-        buf_str(b, ")");
         return;
     }
     if (rt_is_float(v)) {
@@ -173,6 +180,42 @@ void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
     buf_str(b, num);
 }
 
+// A list's items go on the work stack in pairs, a kind and a value: a
+// value still to print, or the rest of a list whose earlier elements have
+// been printed, which owes a space and its next element, or its ")".
+#define RENDER_VALUE 0
+#define RENDER_REST  1
+
+void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
+    if (!rt_is_cons(v)) {
+        render_atom(b, v, raw);
+        return;
+    }
+    rt_work_t w;
+    rt_work_init(&w);
+    rt_work_push(&w, v);
+    rt_work_push(&w, RENDER_VALUE);
+    while (w.n) {
+        rt_value_t kind = rt_work_pop(&w);
+        v = rt_work_pop(&w);
+        if (kind == RENDER_REST && v == RT_NIL) {
+            buf_str(b, ")");
+            continue;
+        }
+        if (kind == RENDER_REST)  buf_str(b, " ");
+        else if (rt_is_cons(v))   buf_str(b, "(");
+        else {
+            render_atom(b, v, 0);               // only the outermost value is raw
+            continue;
+        }
+        rt_work_push(&w, rt_cdr(v));
+        rt_work_push(&w, RENDER_REST);
+        rt_work_push(&w, rt_car(v));
+        rt_work_push(&w, RENDER_VALUE);
+    }
+    rt_work_free(&w);
+}
+
 static void print_value(FILE *out, rt_value_t v) {
     rt_buf_t b = { 0 };
     rt_render(&b, v, 0);
@@ -188,19 +231,51 @@ rt_value_t rt_pprint(rt_value_t v) {
 
 // --- equality -----------------------------------------------------------------
 
-// Structural: recursive down the cars, a loop along the cdrs.
-static int equal(rt_value_t a, rt_value_t b) {
-    for (;;) {
-        if (a == b) return 1;
-        if (rt_is_float(a) && rt_is_float(b)) return rt_float_value(a) == rt_float_value(b);
-        if (rt_is_string(a) && rt_is_string(b)) {
-            return rt_string_len(a) == rt_string_len(b)
-                && memcmp(rt_string_bytes(a), rt_string_bytes(b), rt_string_len(a)) == 0;
-        }
-        if (!rt_is_cons(a) || !rt_is_cons(b) || !equal(rt_car(a), rt_car(b))) return 0;
-        a = rt_cdr(a);
-        b = rt_cdr(b);
+// Two values that aren't both conses.
+static int equal_atoms(rt_value_t a, rt_value_t b) {
+    if (a == b) return 1;
+    if (rt_is_float(a) && rt_is_float(b)) return rt_float_value(a) == rt_float_value(b);
+    if (rt_is_string(a) && rt_is_string(b)) {
+        return rt_string_len(a) == rt_string_len(b)
+            && memcmp(rt_string_bytes(a), rt_string_bytes(b), rt_string_len(a)) == 0;
     }
+    return 0;
+}
+
+// Structural: a loop along the cdrs, and down the cars when both are
+// lists, with the rest of the lists on the work stack, so the stack grows
+// only as deep as the values nest in their cars.
+static int equal(rt_value_t a, rt_value_t b) {
+    rt_work_t w;
+    rt_work_init(&w);
+    int same = 1;
+    for (;;) {
+        if (a != b && rt_is_cons(a) && rt_is_cons(b)) {
+            rt_value_t x = rt_car(a), y = rt_car(b);
+            if (x != y && rt_is_cons(x) && rt_is_cons(y)) {
+                rt_work_push(&w, rt_cdr(a));
+                rt_work_push(&w, rt_cdr(b));
+            } else if (equal_atoms(x, y)) {
+                x = rt_cdr(a);
+                y = rt_cdr(b);
+            } else {
+                same = 0;
+                break;
+            }
+            a = x;
+            b = y;
+            continue;
+        }
+        if (!equal_atoms(a, b)) {
+            same = 0;
+            break;
+        }
+        if (!w.n) break;
+        b = rt_work_pop(&w);
+        a = rt_work_pop(&w);
+    }
+    rt_work_free(&w);
+    return same;
 }
 
 rt_value_t rt_equal(rt_value_t a, rt_value_t b) {

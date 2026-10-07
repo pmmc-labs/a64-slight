@@ -1,0 +1,45 @@
+; Values nested 200,000 deep: printing (here through concat, to keep the
+; output short), copying (a fork's values, a message, a result through
+; join), and eq? (a million deep, in a process of its own for the heap)
+; walk them with work stacks, not C recursion, so a value can nest as deep
+; as the heap allows (D147). Recursing in C, each of these crashed the
+; whole program, at a depth that differed between targets: printing past
+; about 50,000 levels, eq? somewhere under a million. The closures nest
+; too: each captures the one before it.
+
+(defun nest (n acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (nest (- n 1) (list acc)))))
+
+; how deep v nests in its cars, counted in constant stack
+(defun depth (v n)
+    (cond
+        ((cons? v) (depth (car v) (+ n 1)))
+        (#true     n)))
+
+; a closure that calls the one before it, n deep
+(defun chain (k n)
+    (cond
+        ((== n 0) k)
+        (#true    (chain (lambda () (k)) (- n 1)))))
+
+(defun echo ()
+    (recv
+        ((:echo from v) (send from v))))
+
+(defun echoed ()
+    (recv
+        (v (depth v 0))))
+
+(let deep (nest 200000 1))
+(pprint (str-len (concat deep)))
+(pprint (join (fork (depth deep 0))))
+(pprint (depth (cadr (join (fork (nest 200000 :x)))) 0))
+(pprint (join (fork (eq? (nest 1000000 1) (nest 1000000 1)))))
+(pprint (join (fork (eq? (nest 1000000 1) (nest 1000000 2)))))
+(let k (chain (lambda () :bottom) 200000))
+(pprint (join (fork (k))))
+(let e (fork (echo)))
+(send e (list :echo $$ deep))
+(echoed)

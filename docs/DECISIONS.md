@@ -1082,3 +1082,28 @@ assembly is named per architecture: `asm_aarch64.h` and
 warns and makes the stack executable (lld, used for the cross-compiles,
 didn't need it). Rejected: defaulting to the machine's architecture (an
 x86-64 machine would quietly stop testing AArch64).
+
+**D147. No walk over a value recurses in C.** *(User, choosing it over a
+limit.)* Printing, copying (a message, a fork's values, a result through
+`join` or a monitor) and `eq?` recursed down a list's cars, so a value
+nested some 50,000 deep crashed the whole program with a segfault, not a
+fault that ends its process, at a depth that depended on the size of a C
+frame: about 52,000 levels for printing on x86-64 and 58,000 on AArch64,
+and the other way round for copying. Deep values aren't common, but
+they're easy to make (a left fold of `(list acc x)`, a degenerate tree,
+a chain of closures each capturing the last) and, once HTTP lands, to be
+sent from outside. Now each keeps a work stack, `rt_work_t`, as the
+collector already did (D107), which it now shares: its first 32 words are
+in the struct, on the C stack, so a shallow walk never calls `malloc`.
+Each walk goes down the cars and along the cdrs, and keeps on the stack
+only what it has to come back to, so the stack grows with nesting, not
+length. A value can nest as deep as the heap allows, the same on every
+target; `eq?` is a little faster than before, and sending no slower.
+Rejected: checking the C stack against the process's limit and faulting
+with `:stack` (cheaper, but the limit would still depend on the target,
+on the compiler, and on how deep the program's own stack was, and a fault
+in the middle of printing or copying would have to clean up after
+itself); a fixed limit on nesting, counted in levels, with a fault of its
+own (the same on every target, but a rule of the language about what can
+be sent, in a language where sending is everything; Erlang's runtime has
+no such limit either).

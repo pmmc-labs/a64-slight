@@ -472,6 +472,12 @@ Lalloc_N:
   a runtime check of `sp`, or more from the compiler. Left out for now.
 - `SLIGHT_POISON=1` in the environment fills what the collector frees with
   garbage, so a pointer it missed fails at once; `t/run.sh` sets it.
+- **No walk over a value recurses in C** (D147): the collector, printing,
+  copying (a message, a fork's values, a result) and `eq?` keep a work
+  stack (`rt_work_t`) instead, which grows only as deep as the value nests
+  in its cars. So a value can nest as deep as the heap allows, and
+  nothing about it depends on the size of a C frame on one target or
+  another.
 
 ### Messages
 

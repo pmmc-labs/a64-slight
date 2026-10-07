@@ -238,41 +238,74 @@ static size_t box_bytes(rt_value_t v) {
     }
 }
 
+// Copying a value is two walks over it, each with a work stack (D147):
+// one adds up the bytes, so that one chunk can hold the copy, and one
+// copies. Each goes down the cars first and keeps the cdrs, and a
+// closure's captured values, on the stack, so the stack grows only as deep
+// as the value nests. Sharing isn't kept: a DAG is copied as a tree.
+
 static size_t copy_size(rt_value_t v) {
+    rt_work_t w;
+    rt_work_init(&w);
     size_t n = 0;
-    for (; is_pointer(v) && rt_is_cons(v); v = rt_cdr(v)) n += 16 + copy_size(rt_car(v));
-    if (!is_pointer(v)) return n;
-    n += box_bytes(v);
-    if (rt_is_closure(v)) {
-        for (uint64_t i = 0; i < rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; i++) n += copy_size(rt_box(v)[4 + i]);
+    for (;;) {
+        if (is_pointer(v) && rt_is_cons(v)) {
+            n += 16;
+            rt_work_push(&w, rt_cdr(v));
+            v = rt_car(v);
+            continue;
+        }
+        if (is_pointer(v)) {
+            n += box_bytes(v);
+            if (rt_is_closure(v)) {
+                for (uint64_t i = 0; i < rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; i++) rt_work_push(&w, rt_box(v)[4 + i]);
+            }
+        }
+        if (!w.n) break;
+        v = rt_work_pop(&w);
     }
+    rt_work_free(&w);
     return n;
 }
 
-// Copies v to *to, moving *to past it.
+// Copies v to *to, moving *to past it. The work stack holds pairs: where
+// a copy goes, and the value to copy there.
 static rt_value_t copy(rt_value_t v, char **to) {
-    if (!is_pointer(v)) return v;
-    if (rt_is_cons(v)) {
-        rt_value_t  head;
-        rt_value_t *link = &head;
-        for (; is_pointer(v) && rt_is_cons(v); v = rt_cdr(v)) {
+    rt_work_t   w;
+    rt_value_t  out;
+    rt_value_t *dst = &out;
+    rt_work_init(&w);
+    for (;;) {
+        if (!is_pointer(v)) {
+            *dst = v;                           // an immediate, (), or static data
+        } else if (rt_is_cons(v)) {
             rt_value_t *cell = (rt_value_t *)*to;
-            *to    += 16;
-            *link   = (rt_value_t)cell | RT_TAG_LIST;
-            cell[0] = copy(rt_car(v), to);
-            link    = &cell[1];
+            *to += 16;
+            *dst = (rt_value_t)cell | RT_TAG_LIST;
+            rt_work_push(&w, (rt_value_t)&cell[1]);
+            rt_work_push(&w, rt_cdr(v));
+            dst = &cell[0];
+            v   = rt_car(v);
+            continue;
+        } else {
+            size_t    bytes = box_bytes(v);
+            uint64_t *box   = (uint64_t *)*to;
+            *to += bytes;
+            memcpy(box, rt_box(v), bytes);
+            *dst = (rt_value_t)box | RT_TAG_BOXED;
+            if (rt_is_closure(v)) {
+                for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) {
+                    rt_work_push(&w, (rt_value_t)&box[4 + i]);
+                    rt_work_push(&w, box[4 + i]);
+                }
+            }
         }
-        *link = copy(v, to);                    // (), or a static tail
-        return head;
+        if (!w.n) break;
+        v   = rt_work_pop(&w);
+        dst = (rt_value_t *)rt_work_pop(&w);
     }
-    size_t    bytes = box_bytes(v);
-    uint64_t *box   = (uint64_t *)*to;
-    *to += bytes;
-    memcpy(box, rt_box(v), bytes);
-    if (rt_is_closure(v)) {
-        for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) box[4 + i] = copy(box[4 + i], to);
-    }
-    return (rt_value_t)box | RT_TAG_BOXED;
+    rt_work_free(&w);
+    return out;
 }
 
 // Copies n values into one new chunk (NULL if they need none).
@@ -313,8 +346,7 @@ typedef struct {
     rt_chunk_t *chunks;                 // to-space, newest first
     uintptr_t   ptr, limit;
     size_t      bytes, live, size;      // to-space's capacity, what's in it, the size of a new chunk
-    rt_value_t *todo;                   // copied, with fields still to forward
-    size_t      ntodo, todo_cap;
+    rt_work_t   todo;                   // copied, with fields still to forward
 } gc_t;
 
 static void *gc_alloc(gc_t *g, size_t bytes) {
@@ -333,18 +365,6 @@ static void *gc_alloc(gc_t *g, size_t bytes) {
     return at;
 }
 
-static void gc_todo(gc_t *g, rt_value_t v) {
-    if (g->ntodo == g->todo_cap) {
-        g->todo_cap = g->todo_cap ? g->todo_cap * 2 : 256;
-        g->todo     = realloc(g->todo, g->todo_cap * sizeof *g->todo);
-        if (!g->todo) {
-            perror("rt: out of memory");
-            exit(2);
-        }
-    }
-    g->todo[g->ntodo++] = v;
-}
-
 // Where v lives now, copying it there if it hasn't been yet.
 static rt_value_t forward(gc_t *g, rt_value_t v) {
     if (!is_pointer(v)) return v;
@@ -356,7 +376,7 @@ static rt_value_t forward(gc_t *g, rt_value_t v) {
         new[1] = old[1];
         old[0] = GC_MOVED_CONS;
         old[1] = (rt_value_t)new | RT_TAG_LIST;
-        gc_todo(g, old[1]);
+        rt_work_push(&g->todo, old[1]);
         return old[1];
     }
     uint64_t *old = (uint64_t *)(v - RT_TAG_BOXED);
@@ -366,15 +386,16 @@ static rt_value_t forward(gc_t *g, rt_value_t v) {
     memcpy(new, old, bytes);
     old[0] = GC_MOVED_BOX;
     old[1] = (rt_value_t)new | RT_TAG_BOXED;
-    if ((new[0] & RT_BOX_TYPE_MASK) == RT_BOX_CLOSURE) gc_todo(g, old[1]);
+    if ((new[0] & RT_BOX_TYPE_MASK) == RT_BOX_CLOSURE) rt_work_push(&g->todo, old[1]);
     return old[1];
 }
 
 static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n) {
     gc_t g = { .size = p->heap_bytes < CHUNK_MAX ? p->heap_bytes : CHUNK_MAX };
+    rt_work_init(&g.todo);
     for (uint64_t i = 0; i < n; i++) roots[i] = forward(&g, roots[i]);
-    while (g.ntodo) {
-        rt_value_t v = g.todo[--g.ntodo];
+    while (g.todo.n) {
+        rt_value_t v = rt_work_pop(&g.todo);
         if (rt_is_cons(v)) {
             rt_value_t *cell = (rt_value_t *)(v - RT_TAG_LIST);
             cell[1] = forward(&g, cell[1]);
@@ -384,7 +405,7 @@ static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n) {
             for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) box[4 + i] = forward(&g, box[4 + i]);
         }
     }
-    free(g.todo);
+    rt_work_free(&g.todo);
     // With SLIGHT_POISON set (t/run.sh sets it), a pointer the collector
     // missed finds garbage at once instead of memory that looks fine
     // until it's reused: 0xabab... is a boxed pointer to nowhere.

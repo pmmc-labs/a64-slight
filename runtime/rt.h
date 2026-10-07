@@ -465,6 +465,36 @@ typedef struct rt_buf {
 void rt_buf_add(rt_buf_t *b, const char *bytes, size_t len);
 void rt_buf_free(rt_buf_t *b);
 
+// A work stack of words, which the walks over values (printing, eq?,
+// copying, the collector) keep instead of recursing in C, so a value can
+// be nested as deep as the heap allows (D147). The first RT_WORK_LOCAL
+// words are in the struct, on the walker's stack, so a shallow walk never
+// calls malloc. rt_work_init before use, rt_work_free after.
+#define RT_WORK_LOCAL 32
+typedef struct rt_work {
+    rt_value_t *items;
+    size_t      n, cap;
+    rt_value_t  local[RT_WORK_LOCAL];
+} rt_work_t;
+
+void rt_work_grow(rt_work_t *w);
+void rt_work_free(rt_work_t *w);
+
+static inline void rt_work_init(rt_work_t *w) {
+    w->items = w->local;
+    w->n     = 0;
+    w->cap   = RT_WORK_LOCAL;
+}
+
+static inline void rt_work_push(rt_work_t *w, rt_value_t v) {
+    if (w->n == w->cap) rt_work_grow(w);
+    w->items[w->n++] = v;
+}
+
+static inline rt_value_t rt_work_pop(rt_work_t *w) {
+    return w->items[--w->n];
+}
+
 // Appends v as pprint shows it. With raw, a string is its bytes, without
 // quotes (concat and tty/write); strings inside lists are always quoted.
 void rt_render(rt_buf_t *b, rt_value_t v, int raw);

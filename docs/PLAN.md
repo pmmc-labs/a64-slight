@@ -335,13 +335,11 @@ contract) found no difference in the x86-64 code. It found some older
 bugs, fixed with tests: a name ending in a backslash, written into an
 assembly comment, made the preprocessor swallow the next instruction
 (160); `min` and `max` compared two integers as doubles (161); a lambda's
-stack fault named its position twice. **Open, for Stevan:** printing,
-copying (a message, or a fork's values) and `eq?` recurse in C down a
-list's cars, so a value nested some 50,000 deep in its cars crashes the
-whole program instead of faulting its process, at a depth that differs
-between targets. The collector already avoids this with a work stack
-(D107). Options: the same for the three of them, or a check of the C
-stack against the process's limit that faults with `:stack`.
+stack fault named its position twice. And one older than all of it:
+printing, copying (a message, or a fork's values) and `eq?` recursed in C
+down a list's cars, so a value nested some 50,000 deep in its cars
+crashed the whole program, at a depth that differed between targets. They
+now keep a work stack, as the collector does (D147, 162).
 
 ### 11. Port the examples
 
