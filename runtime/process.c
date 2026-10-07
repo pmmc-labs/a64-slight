@@ -240,9 +240,17 @@ static size_t box_bytes(rt_value_t v) {
 
 // Copying a value is two walks over it, each with a work stack (D147):
 // one adds up the bytes, so that one chunk can hold the copy, and one
-// copies. Each goes down the cars first and keeps the cdrs, and a
-// closure's captured values, on the stack, so the stack grows only as deep
-// as the value nests. Sharing isn't kept: a DAG is copied as a tree.
+// copies. Each goes along a list's cdrs, dealing with an element that's an
+// atom, a string or a float on the spot, and goes down into an element
+// that's a list or a closure, keeping the rest of the list (and a
+// closure's captured values) on the stack. So the stack grows only as deep
+// as the value nests, and a flat list never touches it. Sharing isn't
+// kept: a DAG is copied as a tree.
+
+// A string or a float: a box with nothing in it to copy.
+static int is_leaf_box(rt_value_t v) {
+    return is_pointer(v) && !rt_is_cons(v) && !rt_is_closure(v);
+}
 
 static size_t copy_size(rt_value_t v) {
     rt_work_t w;
@@ -250,9 +258,15 @@ static size_t copy_size(rt_value_t v) {
     size_t n = 0;
     for (;;) {
         if (is_pointer(v) && rt_is_cons(v)) {
+            rt_value_t x = rt_car(v);
             n += 16;
-            rt_work_push(&w, rt_cdr(v));
-            v = rt_car(v);
+            if (is_pointer(x) && !is_leaf_box(x)) {
+                rt_work_push(&w, rt_cdr(v));
+                v = x;
+                continue;
+            }
+            if (is_leaf_box(x)) n += box_bytes(x);
+            v = rt_cdr(v);
             continue;
         }
         if (is_pointer(v)) {
@@ -268,6 +282,15 @@ static size_t copy_size(rt_value_t v) {
     return n;
 }
 
+// A copy of the box v at *to, moving *to past it.
+static rt_value_t copy_box(rt_value_t v, char **to) {
+    size_t    bytes = box_bytes(v);
+    uint64_t *box   = (uint64_t *)*to;
+    *to += bytes;
+    memcpy(box, rt_box(v), bytes);
+    return (rt_value_t)box | RT_TAG_BOXED;
+}
+
 // Copies v to *to, moving *to past it. The work stack holds pairs: where
 // a copy goes, and the value to copy there.
 static rt_value_t copy(rt_value_t v, char **to) {
@@ -280,19 +303,23 @@ static rt_value_t copy(rt_value_t v, char **to) {
             *dst = v;                           // an immediate, (), or static data
         } else if (rt_is_cons(v)) {
             rt_value_t *cell = (rt_value_t *)*to;
+            rt_value_t  x    = rt_car(v);
             *to += 16;
             *dst = (rt_value_t)cell | RT_TAG_LIST;
-            rt_work_push(&w, (rt_value_t)&cell[1]);
-            rt_work_push(&w, rt_cdr(v));
-            dst = &cell[0];
-            v   = rt_car(v);
+            dst  = &cell[1];
+            if (is_pointer(x) && !is_leaf_box(x)) {
+                rt_work_push(&w, (rt_value_t)dst);
+                rt_work_push(&w, rt_cdr(v));
+                dst = &cell[0];
+                v   = x;
+                continue;
+            }
+            cell[0] = is_leaf_box(x) ? copy_box(x, to) : x;
+            v       = rt_cdr(v);
             continue;
         } else {
-            size_t    bytes = box_bytes(v);
-            uint64_t *box   = (uint64_t *)*to;
-            *to += bytes;
-            memcpy(box, rt_box(v), bytes);
-            *dst = (rt_value_t)box | RT_TAG_BOXED;
+            uint64_t *box = (uint64_t *)*to;
+            *dst = copy_box(v, to);
             if (rt_is_closure(v)) {
                 for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) {
                     rt_work_push(&w, (rt_value_t)&box[4 + i]);
@@ -1023,7 +1050,7 @@ static rt_value_t io_reason(rt_value_t *cells, int err, rt_value_t path) {
 static rt_value_t string_in(uint64_t *space, const char *bytes, size_t len) {
     uint64_t *box = (uint64_t *)(((uintptr_t)space + 15) & ~(uintptr_t)15);
     box[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
-    memcpy(box + 1, bytes, len);
+    if (len) memcpy(box + 1, bytes, len);
     ((char *)(box + 1))[len] = '\0';
     return (rt_value_t)box | RT_TAG_BOXED;
 }
@@ -1162,7 +1189,7 @@ static int take_line(rt_device_t *d, const char **line, size_t *len) {
 // Reads once more: what read returned (0 at the end, which sets eof), or
 // -1 with errno set.
 static ssize_t fill(rt_device_t *d) {
-    memmove(d->buf, d->buf + d->at, d->len - d->at);
+    if (d->at) memmove(d->buf, d->buf + d->at, d->len - d->at);
     d->len -= d->at;
     d->at   = 0;
     if (d->len == d->cap) {
@@ -1231,7 +1258,7 @@ static int flush(rt_device_t *d) {
 
 static void queue(rt_device_t *d, const char *bytes, size_t len) {
     if (d->out_len + len > d->out_cap) {        // out of room: first drop what's been written
-        memmove(d->out, d->out + d->out_at, d->out_len - d->out_at);
+        if (d->out_at) memmove(d->out, d->out + d->out_at, d->out_len - d->out_at);
         d->out_len -= d->out_at;
         d->out_at   = 0;
     }
@@ -1239,7 +1266,7 @@ static void queue(rt_device_t *d, const char *bytes, size_t len) {
         d->out_cap = (d->out_len + len) * 2;
         d->out     = must(realloc(d->out, d->out_cap));
     }
-    memcpy(d->out + d->out_len, bytes, len);
+    if (len) memcpy(d->out + d->out_len, bytes, len);
     d->out_len += len;
 }
 
@@ -1554,5 +1581,6 @@ int main(int argc, char **argv) {
     rt_render(&b, root->value, 0);
     fwrite(b.bytes, 1, b.len, stdout);
     putchar('\n');
+    rt_buf_free(&b);
     return 0;
 }

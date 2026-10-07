@@ -42,6 +42,7 @@ rt_proc_t *rt_current;
 // --- text ---------------------------------------------------------------------
 
 void rt_buf_add(rt_buf_t *b, const char *bytes, size_t len) {
+    if (!len) return;                           // so an empty buffer's NULL is never copied to
     if (b->len + len > b->cap) {
         b->cap   = (b->len + len) * 2 + 64;
         b->bytes = realloc(b->bytes, b->cap);
@@ -180,40 +181,38 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
     buf_str(b, num);
 }
 
-// A list's items go on the work stack in pairs, a kind and a value: a
-// value still to print, or the rest of a list whose earlier elements have
-// been printed, which owes a space and its next element, or its ")".
-#define RENDER_VALUE 0
-#define RENDER_REST  1
-
-void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
-    if (!rt_is_cons(v)) {
-        render_atom(b, v, raw);
-        return;
-    }
+// A list, along its cdrs, going down into an element that's a list with
+// the rest of the outer list on the work stack: the stack holds the rests
+// of the lists open around the one being printed. Elements are never raw.
+static void render_list(rt_buf_t *b, rt_value_t v) {
     rt_work_t w;
     rt_work_init(&w);
-    rt_work_push(&w, v);
-    rt_work_push(&w, RENDER_VALUE);
-    while (w.n) {
-        rt_value_t kind = rt_work_pop(&w);
-        v = rt_work_pop(&w);
-        if (kind == RENDER_REST && v == RT_NIL) {
+    buf_str(b, "(");
+    for (;;) {
+        rt_value_t x = rt_car(v);
+        if (rt_is_cons(x)) {
+            rt_work_push(&w, rt_cdr(v));
+            buf_str(b, "(");
+            v = x;
+            continue;
+        }
+        render_atom(b, x, 0);
+        v = rt_cdr(v);
+        while (v == RT_NIL) {                   // the end of this list, and of any it ends
             buf_str(b, ")");
-            continue;
+            if (!w.n) {
+                rt_work_free(&w);
+                return;
+            }
+            v = rt_work_pop(&w);
         }
-        if (kind == RENDER_REST)  buf_str(b, " ");
-        else if (rt_is_cons(v))   buf_str(b, "(");
-        else {
-            render_atom(b, v, 0);               // only the outermost value is raw
-            continue;
-        }
-        rt_work_push(&w, rt_cdr(v));
-        rt_work_push(&w, RENDER_REST);
-        rt_work_push(&w, rt_car(v));
-        rt_work_push(&w, RENDER_VALUE);
+        buf_str(b, " ");
     }
-    rt_work_free(&w);
+}
+
+void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
+    if (rt_is_cons(v)) render_list(b, v);
+    else               render_atom(b, v, raw);
 }
 
 static void print_value(FILE *out, rt_value_t v) {
@@ -355,7 +354,7 @@ void *rt_alloc(size_t bytes, const char *site) {
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site) {
     uint64_t *box = rt_alloc(8 + len + 1, site);
     box[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
-    memcpy(box + 1, bytes, len);
+    if (len) memcpy(box + 1, bytes, len);       // bytes may be an empty buffer's NULL
     ((char *)(box + 1))[len] = '\0';
     return (rt_value_t)box | RT_TAG_BOXED;
 }

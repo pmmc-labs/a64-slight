@@ -414,6 +414,9 @@ needed: the REPL and line editing are slight code over key events.
   copies its captured values from the closure (in `x9`) into its frame, so
   inside, they're ordinary locals (D79). A lambda that captures nothing,
   and every `defun` used as a value, is a static closure.
+- **Every heap object is a multiple of 16 bytes**, padded at the end: a
+  closure with an odd number of captured values, and most strings. Copying
+  and the collector copy whole 16-byte units.
 - **Static data**: string literals, quoted constants, and the static
   closures for top-level functions live in the binary. Every process shares
   them. They're never collected and are sent without copying. The collector

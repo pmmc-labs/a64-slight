@@ -93,6 +93,10 @@ test('x86-64: words that fit 32 bits are one mov, others movabs', () => {
     assert.match(x86('4611686018427387903'), /movabs rax, 0x7ffffffffffffffe {4}\/\/ 4611686018427387903/);
 });
 
+test('x86-64: a closure takes a multiple of 16 bytes, as on AArch64', () => {
+    assert.match(x86('(let a 1) (lambda () a)'), /lea {2}rsi, \[rdx \+ 48\]\n/);
+});
+
 test('x86-64: heap growth keeps the accumulator and left operand, two pushes deep', () => {
     const asm = x86('(cons 1 (list 2))');
     assert.match(asm, /_grow:\n {4}push rax\n {4}push rcx\n {4}mov {2}rdi, 16\n {4}lea {2}rsi, \[rip \+ Lsite_\d+\]\n {4}call rt_heap_grow\n {4}pop {2}rcx\n {4}pop {2}rax\n/);

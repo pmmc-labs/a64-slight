@@ -1095,10 +1095,15 @@ a chain of closures each capturing the last) and, once HTTP lands, to be
 sent from outside. Now each keeps a work stack, `rt_work_t`, as the
 collector already did (D107), which it now shares: its first 32 words are
 in the struct, on the C stack, so a shallow walk never calls `malloc`.
-Each walk goes down the cars and along the cdrs, and keeps on the stack
-only what it has to come back to, so the stack grows with nesting, not
-length. A value can nest as deep as the heap allows, the same on every
-target; `eq?` is a little faster than before, and sending no slower.
+Each walk goes along a list's cdrs, deals with an element that's an atom
+(or, copying, a string or a float) on the spot, and pushes the rest of the
+list only to go down into a nested list or closure, so the stack grows
+with nesting, not length, and a flat list never touches it. A value can
+nest as deep as the heap allows, the same on every target. Sending a list
+of 10 to 60 elements is 13–32% faster than before, since the old copier
+recursed for every element, and printing and `eq?` are as fast as before.
+(The first version pushed for every element, and was 20–33% slower at
+sending; the review that followed caught it.)
 Rejected: checking the C stack against the process's limit and faulting
 with `:stack` (cheaper, but the limit would still depend on the target,
 on the compiler, and on how deep the program's own stack was, and a fault

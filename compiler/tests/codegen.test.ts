@@ -393,6 +393,12 @@ test('a lambda that captures is allocated, with its values in order of first use
     assert.match(asm, /ldur x16, \[x9, #RT_CLOSURE_FREE \+ 8\]\n {4}str {2}x16, \[sp, #8\] {4}\/\/ a/);
 });
 
+test('a closure takes a multiple of 16 bytes, as every heap object does', () => {
+    // 32 bytes of header, code, arity and name, then 8 per captured value
+    assert.match(compile('(let a 1) (lambda () a)'), /add {2}x4, x2, #48\n/);
+    assert.match(compile('(let a 1) (let b 2) (lambda () (+ a b))'), /add {2}x4, x2, #48\n/);
+});
+
 test('a nested lambda makes its outer lambda capture too', () => {
     const asm = compile('(let k 1) (lambda (a) (lambda (b) (+ a (+ b k))))');
     assert.match(asm, /mov {2}x3, #1 << RT_BOX_SIZE_SHIFT \| RT_BOX_CLOSURE/);    // the outer captures k

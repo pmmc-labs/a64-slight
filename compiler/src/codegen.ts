@@ -682,8 +682,10 @@ function compileLambda(x: Pair, cx: Cx, st: St): [Code, St] {
     const st3: St = { ...st2, slots: st.slots, lambdas: [st2.lambdas, code] };
     if (free.length === 0) return loadClosure(staticClosure(entry, params.length, where, st3));
 
+    // Every heap object is a multiple of 16 bytes, as rt_alloc makes them and
+    // as copying and the collector take them to be (box_bytes in process.c).
     const [nameLabel, st4] = cString(where, st3);
-    const [allocate, st5]  = alloc(32 + 8 * free.length, 'lambda', x.pos, st4);
+    const [allocate, st5]  = alloc(16 * Math.ceil((32 + 8 * free.length) / 16), 'lambda', x.pos, st4);
     const captured = free.map((name) => [lookup(cx.env, name)!, name] as const);
     return [[allocate, st.t.makeClosure(entry, params.length, nameLabel, captured)], st5];
 }
