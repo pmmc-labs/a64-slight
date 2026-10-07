@@ -5,7 +5,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { asmString, compileProgram, functionLabel, loadWord } from '../src/codegen.ts';
+import { asmString, compileProgram, functionLabel } from '../src/codegen.ts';
+import { loadWord } from '../src/aarch64.ts';
 import { CompileError } from '../src/errors.ts';
 import { read } from '../src/reader.ts';
 import { RESERVED_SYMBOLS, RUNTIME_SYMBOLS } from '../src/values.ts';
