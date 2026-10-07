@@ -1,0 +1,15 @@
+; eq? goes down a nested list and comes back for the rest of the outer
+; one (D147): lists that differ only after a nested element aren't equal,
+; at any depth, on either side, whether they're built or quoted.
+
+(pprint (eq? (list (list 1) 2) (list (list 1) 3)))
+(pprint (eq? (list (list 1) 2) (list (list 1) 2)))
+(pprint (eq? (list (list 1) 2) (list (list 1))))
+(pprint (eq? (list (list 1)) (list (list 1) 2)))
+(pprint (eq? (list (list (list 1) 2) 3) (list (list (list 1) 2) 4)))
+(pprint (eq? (list (list (list 1) 2) 3) (list (list (list 1) 5) 3)))
+(pprint (eq? (list (list (list 1) 2) 3) (list (list (list 1) 2) 3)))
+(pprint (eq? (list (list "a") "b" 1.5) (list (list "a") "b" 1.5)))
+(pprint (eq? (list (list "a") "b" 1.5) (list (list "a") "c" 1.5)))
+(pprint (eq? '((1) 2) '((1) 2)))
+(ne? '((1) 2) '((1) 3))
