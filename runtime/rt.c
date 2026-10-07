@@ -18,10 +18,20 @@ _Static_assert(offsetof(rt_proc_t, parent)      == RT_PROC_PARENT,      "RT_PROC
 _Static_assert(offsetof(rt_proc_t, code)        == RT_PROC_CODE,        "RT_PROC_CODE");
 _Static_assert(offsetof(rt_proc_t, args)        == RT_PROC_ARGS,        "RT_PROC_ARGS");
 _Static_assert(offsetof(rt_proc_t, ctx)         == RT_PROC_CTX,         "RT_PROC_CTX");
+#if defined(__x86_64__)
+_Static_assert(offsetof(rt_ctx_t, rbx)          == RT_CTX_RBX,          "RT_CTX_RBX");
+_Static_assert(offsetof(rt_ctx_t, rbp)          == RT_CTX_RBP,          "RT_CTX_RBP");
+_Static_assert(offsetof(rt_ctx_t, r12)          == RT_CTX_R12,          "RT_CTX_R12");
+_Static_assert(offsetof(rt_ctx_t, r13)          == RT_CTX_R13,          "RT_CTX_R13");
+_Static_assert(offsetof(rt_ctx_t, r14)          == RT_CTX_R14,          "RT_CTX_R14");
+_Static_assert(offsetof(rt_ctx_t, r15)          == RT_CTX_R15,          "RT_CTX_R15");
+_Static_assert(offsetof(rt_ctx_t, rsp)          == RT_CTX_RSP,          "RT_CTX_RSP");
+#else
 _Static_assert(offsetof(rt_ctx_t, fp)           == RT_CTX_FP,           "RT_CTX_FP");
 _Static_assert(offsetof(rt_ctx_t, lr)           == RT_CTX_LR,           "RT_CTX_LR");
 _Static_assert(offsetof(rt_ctx_t, sp)           == RT_CTX_SP,           "RT_CTX_SP");
 _Static_assert(offsetof(rt_ctx_t, d8_d15)       == RT_CTX_D8,           "RT_CTX_D8");
+#endif
 _Static_assert(sizeof(rt_ctx_t)                 == RT_CTX_SIZE,         "RT_CTX_SIZE");
 _Static_assert(RT_FALSE == (0 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_FALSE is symbol 0");
 _Static_assert(RT_TRUE  == (1 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_TRUE is symbol 1");

@@ -175,15 +175,29 @@
 #define RT_PROC_PID         32    // rt_proc_t.pid: $$
 #define RT_PROC_PARENT      40    // rt_proc_t.parent: ^$$
 #define RT_PROC_CODE        48    // rt_proc_t.code: what the trampoline calls...
-#define RT_PROC_ARGS        56    // rt_proc_t.args[8]: ...with these in x0..x7
+#define RT_PROC_ARGS        56    // rt_proc_t.args[8]: ...with these in the argument registers
 #define RT_PROC_CTX        120    // rt_proc_t.ctx: the registers, while it's switched out
 
-#define RT_CTX_X19           0    // rt_ctx_t: x19..x28, x29, x30, sp, d8..d15
+// rt_ctx_t: the callee-saved registers, which are all rt_switch keeps.
+#if defined(__x86_64__)
+#define RT_CTX_RBX           0    // rbx, rbp, r12..r15, rsp
+#define RT_CTX_RBP           8
+#define RT_CTX_R12          16
+#define RT_CTX_R13          24
+#define RT_CTX_R14          32
+#define RT_CTX_R15          40
+#define RT_CTX_RSP          48
+#define RT_CTX_SIZE         56
+#elif defined(__aarch64__)
+#define RT_CTX_X19           0    // x19..x28, x29, x30, sp, d8..d15
 #define RT_CTX_FP           80
 #define RT_CTX_LR           88
 #define RT_CTX_SP           96
 #define RT_CTX_D8          104
 #define RT_CTX_SIZE        168
+#else
+#error "the runtime is for AArch64 and x86-64"
+#endif
 
 #ifndef __ASSEMBLER__
 
@@ -196,17 +210,24 @@
 
 typedef uint64_t rt_value_t;
 
-// A process. Compiled code finds the current one in x28.
 // Compiled code, as the runtime holds it: the trampoline calls it with its
-// arguments in x0..x7, whatever its C type says.
+// arguments in the eight argument registers (x0..x7; rdi, rsi, rdx, rcx,
+// r8, r9, r10, r11 on x86-64), whatever its C type says.
 typedef void (*rt_code_t)(void);
 
-// The registers that survive a switch (AAPCS64's callee-saved ones).
+// The registers that survive a switch: the ABI's callee-saved ones. On
+// x86-64 the return address is on the stack, so rsp is all there is of it.
+#if defined(__x86_64__)
+typedef struct rt_ctx {
+    uint64_t rbx, rbp, r12, r13, r14, r15, rsp;
+} rt_ctx_t;
+#else
 typedef struct rt_ctx {
     uint64_t x19_x28[10];
     uint64_t fp, lr, sp;
     uint64_t d8_d15[8];
 } rt_ctx_t;
+#endif
 
 // A chunk of a process's heap; the chunks are a list, newest first. A
 // message arrives as a chunk of its own, and joins the list.
@@ -233,8 +254,8 @@ typedef struct rt_watch {
     rt_value_t       pid;
 } rt_watch_t;
 
-// A process. Compiled code finds the current one in x28, and uses the
-// fields up to ctx; the rest are the runtime's.
+// A process. Compiled code finds the current one in x28 (r15 on x86-64),
+// and uses the fields up to ctx; the rest are the runtime's.
 typedef struct rt_proc {
     int64_t     reductions;     // calls left before rt_preempt
     uintptr_t   stack_limit;    // a function entered with sp below this faults
@@ -388,7 +409,8 @@ rt_value_t rt_screen_rows(const char *site) RT_ASM(rt_screen_rows);
 rt_value_t rt_screen_cols(const char *site) RT_ASM(rt_screen_cols);
 
 // Functions. rt_apply calls f with the elements of args as its arguments,
-// by jumping to it, so f returns straight to apply's caller (rt_asm.S).
+// by jumping to it, so f returns straight to apply's caller
+// (rt_asm_aarch64.S, rt_asm_x86_64.S).
 rt_value_t rt_apply(rt_value_t f, rt_value_t args, const char *site) RT_ASM(rt_apply);
 rt_value_t rt_is_lambda(rt_value_t v) RT_ASM(rt_is_lambda);
 
@@ -451,7 +473,7 @@ void rt_render(rt_buf_t *b, rt_value_t v, int raw);
 const char *rt_symbol_name(uint64_t id);
 
 // Saves the callee-saved registers in `from` and loads them from `to`
-// (rt_asm.S): this is what switching processes is.
+// (rt_asm_aarch64.S, rt_asm_x86_64.S): this is what switching processes is.
 void rt_switch(rt_ctx_t *from, rt_ctx_t *to) RT_ASM(rt_switch);
 
 // Where a process's first switch lands: calls code(args...), then rt_exit.

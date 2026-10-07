@@ -1032,3 +1032,53 @@ the fixed sizes as defaults. Rejected: `@ARGV` readable anywhere, like
 reading process's heap, since nothing may point from one heap into
 another); and a `(defun main (args) ...)` the compiler looks for (a
 second shape of program, and a name treated specially).
+
+**D145. x86-64 is a second target, behind an interface of code shapes.**
+*(User asked for the x86-64 backend; the shape is the plan in
+BACKGROUND.md, "Other targets".)* `codegen.ts` keeps the structure (what
+to emit, and where values live: the accumulator, a binary operation's
+left operand, frame slots) and asks a target (`target.ts`) for the
+instructions of each shape of code: the prologue and its checks, a call
+with its operands, loads and stores, tests that branch, booleans,
+arithmetic, allocation, and filling a cell or a closure. `placeArgs`
+orders a call's moves into argument registers so none is overwritten
+before it's read, breaking a cycle through a free register; on AArch64
+the accumulator is the first argument register and on x86-64 it isn't,
+and this is what absorbs that. `aarch64.ts` holds the AArch64
+instructions the generator used to emit inline: the generated assembly
+of every golden test, example and sketch (150 programs) came out the same
+byte for byte. `x86_64.ts` is about 250 lines, in Intel syntax (whose
+operand order matches AArch64's), with the register map settled next to
+D47: `rax` the accumulator, the result and the closure at entry; `rcx`
+the left operand; `rdx` what was just allocated; `rdi`, `rsi`, `rdx`,
+`rcx`, `r8`, `r9` (System V's) then `r10`, `r11` the arguments; `r15` the
+process; `rbx` and `r12`–`r14` unused. The runtime's half is
+`rt_asm_x86_64.S` (`rt_switch` keeps `rbx`, `rbp`, `r12`–`r15` and `rsp`;
+`start` puts `rt_trampoline`'s address on the new stack for `ret`;
+`rt_apply` checks the whole list before spreading it, since the spread
+takes every caller-saved register) and `rt_ctx_t` per architecture. The
+language is the same on both, limits included (8 arguments, a frame's
+4,095 bytes), and so is every golden test's expected output. *(Default:)*
+Rejected: a virtual instruction set that each target prints (more
+machinery than the shapes, for no gain with two targets); compiling to C
+(BACKGROUND.md, "Compiling to C instead": it would replace the emitting
+half rather than add a target, and is still possible before step 12);
+AT&T syntax (its operand order is the reverse of AArch64's, so the two
+targets would read backwards side by side).
+
+**D146. Choosing a target, and testing both.** *(Default.)* `slightc
+--target aarch64|x86_64`, AArch64 by default on every machine: it's the
+project's target, and the M2 is where slight is used. It links natively
+when the target is the machine's architecture; otherwise it
+cross-compiles, with `cc -arch` on macOS (an x86-64 binary runs under
+Rosetta 2) and for Linux with clang and lld elsewhere. `t/run.sh` takes
+`TARGET`, and `make test` runs the golden tests for `TARGETS`: both on an
+x86-64 machine (x86-64 natively, AArch64 under qemu), AArch64 on arm64
+(`make golden TARGETS=x86_64` runs x86-64 under Rosetta). The runtime's
+assembly is named per architecture: `asm_aarch64.h` and
+`rt_asm_aarch64.S` (were `asm.h` and `rt_asm.S`), `asm_x86_64.h` and
+`rt_asm_x86_64.S`. Both headers mark the stack non-executable on ELF
+(`.note.GNU-stack`): a native Linux link uses GNU ld, which otherwise
+warns and makes the stack executable (lld, used for the cross-compiles,
+didn't need it). Rejected: defaulting to the machine's architecture (an
+x86-64 machine would quietly stop testing AArch64).

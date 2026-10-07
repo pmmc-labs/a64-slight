@@ -7,11 +7,15 @@
 # with printf %b's escapes: \n, \r, \t, \\, and \0nnn in octal (\033 is
 # ESC); without one, stdin is empty. A line "; args: words" gives the
 # program its arguments, split at spaces.
-# $RUN prefixes the binary: qemu-aarch64 when cross-compiling, empty when native.
+# $TARGET is the architecture to compile for: aarch64 (the default) or
+# x86_64. $RUN prefixes the binary: qemu when it isn't the machine's own
+# architecture, empty when it is (or on macOS, where Rosetta 2 runs x86-64).
 cd "$(dirname "$0")/.." || exit 2
-case "$(uname -m)" in
-    arm64|aarch64) RUN=${RUN-} ;;
-    *)             RUN=${RUN-qemu-aarch64} ;;
+TARGET=${TARGET-aarch64}
+case "$TARGET-$(uname -m)" in
+    aarch64-arm64|aarch64-aarch64|x86_64-x86_64) RUN=${RUN-} ;;
+    x86_64-arm64)                                RUN=${RUN-} ;;
+    *)                                           RUN=${RUN-qemu-$TARGET} ;;
 esac
 if [ $# -eq 0 ]; then
     set --
@@ -19,7 +23,7 @@ if [ $# -eq 0 ]; then
         [ -f "${src%.slight}.expected" ] && set -- "$@" "$src"
     done
 fi
-mkdir -p build/t
+mkdir -p "build/t/$TARGET"
 
 # A test that runs longer than $TIMEOUT seconds is killed, and fails.
 # (macOS has no timeout(1), hence the watchdog.)
@@ -46,9 +50,9 @@ output() {
 fail=0
 for src in "$@"; do
     name=$(basename "$src" .slight)
-    bin=build/t/$name
+    bin=build/t/$TARGET/$name
     printf '%b' "$(sed -n 's/^; stdin: //p' "$src")" >"$bin.stdin"
-    if ! node bin/slightc.ts -o "$bin" "$src"; then
+    if ! node bin/slightc.ts --target "$TARGET" -o "$bin" "$src"; then
         echo "FAIL $name (compile)"
         fail=1
     elif output "$bin" "$bin.stdin" "$(sed -n 's/^; args: //p' "$src")" | diff -u "${src%.slight}.expected" -; then

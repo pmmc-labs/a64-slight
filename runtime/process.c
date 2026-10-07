@@ -135,15 +135,24 @@ static void release_stack(rt_proc_t *p) {
 }
 
 // A stack, and registers that make the first switch land in rt_trampoline
-// with x28 = p, which calls p->code with p->args.
+// with x28 (r15) = p, which calls p->code with p->args.
 static void start(rt_proc_t *p) {
     p->stack       = get_stack();
     p->stack_limit = (uintptr_t)p->stack + STACK_HEADROOM;
     p->reductions  = QUOTA;
     memset(&p->ctx, 0, sizeof p->ctx);
+#if defined(__x86_64__)
+    // x86's ret takes its address from the stack, not a link register: the
+    // trampoline's goes in the top word, and popping it leaves rsp 16-aligned.
+    uint64_t *top = (uint64_t *)((char *)p->stack + STACK_BYTES) - 1;
+    *top       = (uint64_t)rt_trampoline;
+    p->ctx.rsp = (uint64_t)top;
+    p->ctx.r15 = (uint64_t)p;
+#else
     p->ctx.sp         = (uint64_t)p->stack + STACK_BYTES;
     p->ctx.lr         = (uint64_t)rt_trampoline;
     p->ctx.x19_x28[9] = (uint64_t)p;
+#endif
 }
 
 // --- heaps --------------------------------------------------------------------

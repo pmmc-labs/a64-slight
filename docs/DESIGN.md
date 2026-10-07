@@ -23,7 +23,10 @@ bring it up before baking it in further.
 - **The user surface of ts-slight** (see `reference/ts-slight/examples/`) is
   what we keep. The internals of ts-slight and ts-cpi are not.
 - **Native AArch64.** macOS on Apple Silicon first, AArch64 Linux from the
-  same code. Development on x86 uses a clang cross-compile plus qemu-aarch64.
+  same code. x86-64 (Linux, and macOS under Rosetta 2) is a second target,
+  from the same compiler through a target interface (D145). Development on
+  x86 runs x86-64 natively and AArch64 with a clang cross-compile plus
+  qemu-aarch64.
 - **Ahead-of-time compilation only.** No `eval`, no `slight/parse`, no code
   loading at runtime, no hot reload.
 
@@ -588,7 +591,8 @@ Arithmetic and comparisons on two integers are inline: one `orr` and one
 `tst` check both tag bits, and anything else branches out of line to the
 runtime (`rt_add`, `rt_compare`, ...), which promotes to float or faults.
 
-A builtin written in C is an ordinary AAPCS64 function. The compiler
+A builtin written in C is an ordinary C function (AAPCS64, or System V
+on x86-64). The compiler
 passes the call's site (`"str-len at t/x.slight:2:1"`) in the register
 after the arguments, so faults raised inside C still say where in the
 program they happened (D63). A variadic builtin (`concat`, `tty/write`)
@@ -598,7 +602,7 @@ bumps the heap pointer of `rt_current`, the running process.
 ### Register convention
 
 Carried over from the spike (`spike/aarch64/actor.h`, `rt.h`), with
-AAPCS64's argument registers (D47):
+AAPCS64's argument registers (D47). x86-64's is after AArch64's.
 
 | Register | Role |
 |---|---|
@@ -645,6 +649,30 @@ refills it, and in step 7 it is where a process gets preempted. The
 parameters are saved before the reduction check because `rt_preempt` is
 a C call and may clobber `x0`–`x7`.
 
+**On x86-64** (D145; `compiler/src/x86_64.ts`, `runtime/asm_x86_64.h`),
+in Intel syntax:
+
+| Register | Role |
+|---|---|
+| `rax` | the accumulator and the result, and the closure at a lambda's entry (AArch64's `x9`) |
+| `rdi`, `rsi`, `rdx`, `rcx`, `r8`, `r9`, `r10`, `r11` | a function's arguments, in order. The first six are System V's, so calls into C line up; the last two are ours (no runtime function takes more than six). |
+| `rcx` | a binary operation's left operand (AArch64's `x1`) |
+| `rdx` | what was just allocated (AArch64's `x2`) |
+| `r15` | the current process (AArch64's `x28`). Never written by compiled code. |
+| `rbp` | the frame pointer |
+| `rbx`, `r12`–`r14` | never used. Nothing would notice if they were: C enters compiled code only through `rt_trampoline`, and `rt_switch` keeps them per process. |
+
+`rdx`, `rsi` and `r11` are scratch wherever nothing is in them. A frame is
+`push rbp; mov rbp, rsp; sub rsp, size` with the size a multiple of 16,
+so with the return address it's 16 bytes of linkage, as on AArch64, and
+`rsp` is 16-aligned at every call, as System V requires (nothing checks
+it; a mistake crashes deep in libc). The entry checks are
+`cmp rsp, [r15 + RT_PROC_STACK_LIMIT]` and
+`sub qword ptr [r15 + RT_PROC_REDUCTIONS], 1`, each with its branch. The
+runtime's out-of-line paths keep the alignment: heap growth pushes two
+registers, and `rt_apply`, entered with `rsp` 8 off, realigns before
+calling `rt_fault`.
+
 ## Compiler
 
 TypeScript, run directly by Node (type stripping is on by default from
@@ -672,8 +700,12 @@ that's just a walk over every function.
    closure. Each `fork`/`connect` expression becomes a hidden entry
    function that takes its free variables as arguments.
 7. **Mark tail calls.**
-8. **Generate code**, Ghuloum-style: the accumulator is `x0`, temporaries
-   spill to the stack, no register allocation. Tagged values, a reduction
+8. **Generate code**, Ghuloum-style: every expression leaves its value
+   in the accumulator, temporaries spill to the stack, no register
+   allocation. `codegen.ts` decides what to emit and where values live,
+   and asks a target (`target.ts`: `aarch64.ts`, `x86_64.ts`) for the
+   instructions of each shape of code: the prologue, a call with its
+   operands, a test that branches, filling a cons cell (D145). Tagged values, a reduction
    check at entries and tail calls. Collection needs nothing from the
    compiler: `recv` already passes its function's arguments to the
    runtime, to restart it after waiting.
@@ -699,10 +731,11 @@ line-by-line translation.
 
 ## Testing
 
-- **Golden tests**: compile a `.slight` file, run it (under qemu on x86),
-  diff its stdout and stderr against a `.expected` file, with a last line
-  `exit: N` when the exit status isn't 0. Like `spike/aarch64/t/run.sh`.
-  Every plan step adds some.
+- **Golden tests**: compile a `.slight` file, run it (natively, or under
+  qemu when it's for another architecture), diff its stdout and stderr
+  against a `.expected` file, with a last line `exit: N` when the exit
+  status isn't 0. Like `spike/aarch64/t/run.sh`. Every plan step adds
+  some. The same tests and expected output serve both targets (D146).
 - **Compiler unit tests** with `node:test`, per pass.
 - **Timing uses the virtual clock** (`t/run.sh` sets `SLIGHT_CLOCK=virtual`),
   never real time.

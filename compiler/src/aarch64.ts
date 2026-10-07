@@ -1,7 +1,8 @@
 // The AArch64 target (AAPCS64, on macOS and Linux). The accumulator is x0,
 // a binary operation's left operand is x1, the arguments go in x0..x7 and
 // the result comes back in x0, x28 is the current process, x9 carries the
-// closure into a lambda's code, and x16 is scratch (runtime/asm.h, D47).
+// closure into a lambda's code, and x16 is scratch (runtime/asm_aarch64.h,
+// D47).
 // Frame slots are addressed up from sp, under x29/x30.
 
 import { placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
@@ -118,7 +119,7 @@ const regMove = (dst: string, src: string): Code => `    mov  ${dst}, ${src}`;
 export const AARCH64: Target = {
     name: 'aarch64',
 
-    fileStart: ['#include "asm.h"', '', '    .text'],
+    fileStart: ['#include "asm_aarch64.h"', '', '    .text'],
     functionStart: (entry, name) => (entry === 'slight_main' ? 'FUNC slight_main' : ['    .p2align 2', `${entry}:    // ${name}`]),
 
     // x29/x30 on top, then the slots. The captured values come from the

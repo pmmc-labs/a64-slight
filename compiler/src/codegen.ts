@@ -13,7 +13,7 @@
 // run in constant stack.
 //
 // The output is a .S file that includes the target's header in runtime/
-// (asm.h, asm_x86_64.h), so the differences between Mach-O and ELF stay
+// (asm_aarch64.h, asm_x86_64.h), so the differences between Mach-O and ELF stay
 // there, and rt.h's constants (RT_TRUE, RT_FAULT_OVERFLOW, ...) can be used
 // by name.
 //

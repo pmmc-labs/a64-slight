@@ -57,7 +57,7 @@ const compile = (src: string): string => compileProgram(read(src, 'test.slight')
 
 test('a program is the function slight_main', () => {
     const asm = compile('42');
-    assert.match(asm, /#include "asm.h"/);
+    assert.match(asm, /#include "asm_aarch64.h"/);
     assert.match(asm, /^FUNC slight_main$/m);
     assert.match(asm, /movz x0, #0x54, lsl #0 {4}\/\/ 42/);
     assert.match(asm, /^ {4}ret$/m);

@@ -1,6 +1,7 @@
-// rt_asm.S -- the parts of the runtime that have to be assembly.
+// rt_asm_aarch64.S -- the parts of the runtime that have to be assembly,
+// for AArch64 (rt_asm_x86_64.S has the x86-64 ones).
 
-#include "asm.h"
+#include "asm_aarch64.h"
 
 // ---------------------------------------------------------------------------
 // void rt_switch(rt_ctx_t *from, rt_ctx_t *to)

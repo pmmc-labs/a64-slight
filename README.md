@@ -1,6 +1,6 @@
 # a64-slight
 
-slight, compiled ahead of time to native AArch64.
+slight, compiled ahead of time to native AArch64 (and x86-64).
 
 slight is a small, fully immutable Lisp built on actors: `fork`, `send`,
 `recv`, `join`. Mutable state lives in "data structure" actors that keep it
@@ -9,7 +9,7 @@ surface of [ts-slight](https://github.com/pmmc-labs/ts-slight) and replaces
 everything underneath with:
 
 - **an AOT compiler** (TypeScript for now; self-hosting later) that turns a
-  whole program into one AArch64 assembly file;
+  whole program into one assembly file, for AArch64 or x86-64;
 - **a small actor runtime** in C and assembly: per-process heaps, a run
   queue, preemption by reduction counting, and stacks that processes hold
   only while they are running.
@@ -32,7 +32,8 @@ where the roots are those arguments.
 (send c (list :get $$))
 ```
 
-Targets macOS on Apple Silicon first, and AArch64 Linux from the same code.
+Targets macOS on Apple Silicon first, and AArch64 Linux from the same code;
+x86-64 Linux (and macOS, under Rosetta 2) is a second target.
 
 ## Building
 
@@ -42,8 +43,10 @@ make test            # unit tests, runtime header check, golden tests
 node bin/slightc.ts -o hello t/000-int.slight && ./hello
 ```
 
-On an x86 machine it cross-compiles and runs under qemu; see `CLAUDE.md`
-for the packages.
+It compiles for AArch64 unless told `--target x86_64`. On an x86 machine
+an AArch64 binary is cross-compiled and runs under qemu (see `CLAUDE.md`
+for the packages), and `make test` runs the golden tests for both
+targets.
 
 ## Status
 
@@ -59,7 +62,8 @@ the terminal (`connect :keypress`), files (`connect :fs/read`, where a
 file is a process-like device) and TCP sockets (`connect :tcp`,
 `connect :tcp/listen`) work too, and so do `(@include ...)`, `@ARGV`, and
 `if`, `when`, `case`, `and` and `or`, which an expander makes into `cond`.
-Next: HTTP, written in slight on top of TCP. See:
+x86-64 is a second target, from the same code generator through a small
+target interface. Next: HTTP, written in slight on top of TCP. See:
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): the design
 - [`docs/PLAN.md`](docs/PLAN.md): the build order

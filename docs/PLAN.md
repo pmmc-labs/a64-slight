@@ -5,8 +5,8 @@ the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
 **Progress:** steps 0–9 and 10a–10e done (under qemu, and natively on
-macOS: Stevan runs `make test` on his M2 Max after every step). 10f, HTTP
-in slight, is next.
+macOS: Stevan runs `make test` on his M2 Max after every step), and a
+second target, x86-64 (below, after 10f). 10f, HTTP in slight, is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -315,6 +315,19 @@ without TLS. To settle when it starts:
   WebAssembly), so a program shouldn't see which it's using.
 
 Next session starts here, with Stevan.
+
+#### A second target: x86-64 (done, Oct 2026)
+
+Taken out of order, at Stevan's request, as BACKGROUND.md ("Other
+targets") planned it (D145, D146). First the code generator was put
+behind a target interface (`target.ts`), checked by the generated
+assembly of all 150 programs coming out the same byte for byte; then
+`x86_64.ts` and the runtime's x86-64 half (`rt_asm_x86_64.S`, `rt_ctx_t`
+and `start` per architecture), and `--target` in the driver, `t/run.sh`
+and the Makefile. Every golden test passes on both, natively on x86-64,
+with the same expected output. A third target (RISC-V, say) is now a
+target file and its runtime assembly. Untested so far: macOS x86-64
+(Rosetta 2), which `make golden TARGETS=x86_64` would run on the M2.
 
 ### 11. Port the examples
 

@@ -1,8 +1,8 @@
 # a64-slight
 
 slight (an immutable, actor-based Lisp) compiled ahead of time to native
-AArch64, on a small actor runtime in C and assembly. The compiler is
-TypeScript for now and should self-host later.
+AArch64, and x86-64 as a second target, on a small actor runtime in C and
+assembly. The compiler is TypeScript for now and should self-host later.
 
 ## Status
 
@@ -34,16 +34,19 @@ and `(connect conn expr)` hands an accepted connection to a process.
 once); `@ARGV`, the program's arguments, is the top level's parameter
 (D144); and `if`, `when`, `case`, `and` and `or` are made into `cond`
 (`compiler/src/expand.ts`, a pass between the reader and the compiler).
+A second target, x86-64: the code generator emits through a target
+interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
+`slightc --target x86_64` builds for it (D145, D146).
 Fifteen of ts-slight's examples are ported (`examples/`; all but
-`ping-pong-tournament` are golden tests). `make test` passes under qemu on
-x86 Linux, and natively on macOS (Stevan runs it on his M2 Max after every
-step, and reports only failures). **Next: step 10f** (HTTP, written in
-slight on `:tcp`; its open points are in `docs/PLAN.md`, to settle with
-Stevan first, including keeping the API independent of the transport so
-a browser port could use `fetch`). Also to discuss with him in depth
-before building: `defactor` (`docs/PLAN.md`, under 10e). Stevan is
-rewriting the text editor and window managers himself (step 11). Update
-this section as steps land.
+`ping-pong-tournament` are golden tests). `make test` passes on x86 Linux
+(AArch64 under qemu, x86-64 natively), and natively on macOS (Stevan runs
+it on his M2 Max after every step, and reports only failures). **Next:
+step 10f** (HTTP, written in slight on `:tcp`; its open points are in
+`docs/PLAN.md`, to settle with Stevan first, including keeping the API
+independent of the transport so a browser port could use `fetch`). Also
+to discuss with him in depth before building: `defactor` (`docs/PLAN.md`,
+under 10e). Stevan is rewriting the text editor and window managers
+himself (step 11). Update this section as steps land.
 
 ## Read first, in this order
 
@@ -112,9 +115,11 @@ works and has the runtime pieces to borrow.
 ## Toolchain
 
 - **macOS on Apple Silicon:** Xcode's clang, Node ≥ 22.18. Everything runs
-  natively.
-- **x86-64 Linux (this is how cloud sessions develop):** cross-compile with
-  clang and run under qemu:
+  natively; the x86-64 target runs under Rosetta 2
+  (`make golden TARGETS=x86_64`).
+- **x86-64 Linux (this is how cloud sessions develop):** the x86-64 target
+  builds and runs natively. For AArch64, cross-compile with clang and run
+  under qemu:
 
   ```
   apt-get install -y gcc-aarch64-linux-gnu qemu-user   # sysroot + qemu-aarch64
@@ -139,9 +144,9 @@ works and has the runtime pieces to borrow.
 | Path | |
 |---|---|
 | `bin/slightc.ts` | The driver: read and expand (with the files it includes), compile, write `out.S`, link with clang |
-| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts`, `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
+| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
-| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm.h` (assembler macros, included by generated code), `rt_asm.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c` |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c` |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`) |
 | `examples/` | ts-slight's examples, ported; each with a `.expected` is a golden test |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, and `; args: words` its arguments. |
@@ -150,15 +155,19 @@ works and has the runtime pieces to borrow.
 ## Commands
 
 - `npm install` once, for `typescript` (used only by `make check`).
-- `make test`: unit tests, the runtime header check, then the golden tests.
+- `make test`: unit tests, the runtime header check, then the golden tests
+  for each of `TARGETS` (aarch64 and x86_64 on an x86-64 machine, aarch64
+  on arm64).
 - `make unit`, `make golden`, `make headers`: one at a time.
-  `t/run.sh t/003-int-max.slight` runs one golden test. A golden test
+  `t/run.sh t/003-int-max.slight` runs one golden test, for `TARGET`
+  (`aarch64` unless set: `TARGET=x86_64 t/run.sh ...`). A golden test
   that runs longer than `TIMEOUT` seconds (default 60) is killed and
   fails.
 - `make check`: `tsc --noEmit`.
 - `node bin/slightc.ts -o out file.slight ...`: compile and link. It writes
-  `out.S` next to `out`. `-S` writes only the assembly. On x86, run the
-  result with `qemu-aarch64 ./out`.
+  `out.S` next to `out`. `-S` writes only the assembly. `--target x86_64`
+  compiles for x86-64 (the default is `aarch64`). On x86, run an AArch64
+  result with `qemu-aarch64 ./out`, and an x86-64 one directly.
 - Exit codes from `slightc`: 0 ok, 1 compile error, 2 usage or toolchain
   error. `SLIGHT_CC` overrides the C compiler command.
 - `SLIGHT_POISON=1` when running a compiled program makes the collector

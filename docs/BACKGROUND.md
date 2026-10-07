@@ -137,6 +137,21 @@ asynchronous convention collapses into the platform's synchronous one.
 
 ### Other targets: x86-64 and RISC-V (revised Oct 2026, after 10e)
 
+**x86-64 was built in Oct 2026** (D145, D146; PLAN.md, after 10f), as
+planned below: first the interface (`compiler/src/target.ts`), checked by
+the assembly of all 150 programs coming out the same byte for byte, then
+`x86_64.ts` (about 250 lines) to the register map below, which passed
+every golden test natively on its first full run. What the plan didn't
+foresee: a native Linux link uses GNU ld, which wants `.note.GNU-stack`
+or makes the stack executable (both assembler headers now carry it);
+`rt_apply`'s spread takes every caller-saved register, so it checks the
+list in one pass and spreads it in a second; and the dozen calls that
+relied on the accumulator being the first argument all go through one
+`placeArgs`, which orders the moves. The plan as it was written follows;
+RISC-V's part still stands, with the interface done. The runtime's files
+are now `asm_aarch64.h` and `rt_asm_aarch64.S` (were `asm.h` and
+`rt_asm.S`).
+
 What's AArch64-specific: `codegen.ts` emits AArch64 text directly (about
 170 instruction lines and 38 mnemonics, over some 25 functions, in 1,382
 lines), `rt_asm.S` (126 lines: `rt_switch`, `rt_trampoline`,
@@ -206,7 +221,9 @@ address.
 takes 3m07s there, and about 1.2 s of each test is clang compiling the
 whole runtime at `-O2`; running under qemu takes about 20 ms a test, with
 `million-forks` (3.2 s) the exception. Building the runtime once per run
-would save most of the three minutes, and needs no new target.
+would save most of the three minutes, and needs no new target. (Now that
+`make golden` runs both targets on x86-64, it takes about twice as long,
+so building the runtime once per target and run is worth more.)
 
 ### Compiling to C instead (discussed Oct 2026)
 
