@@ -37,7 +37,7 @@ clean:
 	@if [ -f "./sketch" ]; then \
 		rm "./sketch";      \
 		rm "./sketch.S";    \
-		rm "./sketch.dSYM"; \
+		rm -rf "./sketch.dSYM"; \
     fi
 
 .PHONY: test unit golden headers check clean
