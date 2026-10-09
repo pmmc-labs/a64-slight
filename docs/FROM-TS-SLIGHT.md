@@ -412,3 +412,9 @@ as ts-slight's `Test.slight` was:
 HTTP (step 14 of the plan, in slight, on `:tcp`), and where `recv` can
 go (`defactor`, or splitting functions at `recv`), which we still need
 to talk through.
+
+Planned for step 12a: JSON and s-expressions parsed in C, with
+`json/parse`, `json/print`, `sexp/parse` and `sexp/print`, and files and
+sockets that hand you whole JSON values or forms rather than lines.
+`sexp/parse` is the nearest thing to ts-slight's `slight/parse`, but it
+reads data, and nothing evaluates it.

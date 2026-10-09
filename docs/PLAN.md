@@ -8,8 +8,9 @@ be a session or two each.
 macOS: Stevan runs `make test` on his M2 Max after every step), a
 second target, x86-64 (which passes on the M2 too, under Rosetta 2), and
 UTF-8 builtins (both below, after 10e), and tooling (11). Next (D149):
-the groundwork HTTP needs (12), where `recv` can go (13), then HTTP
-(14).
+the groundwork HTTP needs (12: ways to read a device, collecting outside
+`recv`, C libraries and TLS, looking up names), where `recv` can go
+(13), then HTTP (14).
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -279,8 +280,8 @@ set of builtins beside the byte ones, counting characters (`utf8/len`,
 `string->float` for JSON's numbers. A bad byte is a character of its
 own, as in Go. Tests 164–168; 168 is a JSON parser and printer in
 slight, checked against Python's `json` module, which could become
-`lib/json.slight` when HTTP (14) wants one. Display width is still to
-come (15).
+`lib/json.slight` when HTTP (14) wants one; since then, JSON's parser is
+to be C (D154). Display width is still to come (15).
 
 ### 11. Tooling (done, Oct 2026)
 
@@ -302,13 +303,23 @@ Left for when it gets in the way: better compile errors, say.
 
 What HTTP needs underneath it, from the things left "for now" so far.
 
-#### 12a. Chunks
+#### 12a. Ways to read a device: chunks, JSON and s-expressions
 
 Files and sockets deal only in lines (D134: "just lines for now, and
 move to chunks later, just like with :fs"). An HTTP body is read by its
-length, not by lines, and binary data has none. To settle: what a chunk
-message looks like, how a reader asks for a number of bytes, and how one
-connection gives lines and then chunks (headers are lines; a body isn't).
+length, not by lines, and binary data has none. So a device that
+delivers bytes will choose how to cut them into messages: lines, chunks,
+JSON values or s-expression forms (D154, D155), the last two parsed in C
+by push parsers of our own, with the builtins `json/parse`, `json/print`,
+`sexp/parse` and `sexp/print` for text already in hand. Decided: one
+message per top-level value, and a JSON "items" mode; the same
+backpressure as lines; JSON's shape in slight (`t/168`'s); symbols the program
+doesn't mention read as `(:symbol "name")`; `sexp/print` reads back.
+To settle: what a chunk message looks like, how a reader asks for a
+number of bytes, how a connection switches from one way to another
+(headers are lines; a body isn't), and the names of it all. Tests:
+JSONTestSuite, Python's `json` as a model, and inputs cut at random
+places.
 
 #### 12b. Collecting outside `recv`
 
@@ -324,20 +335,28 @@ maps D24 kept out).
 
 #### 12c. C libraries, and TLS
 
-C libraries come in as drivers exposed as processes, never as direct
-calls that could stall the runtime (D30), but none has been written yet.
-First a discussion of what belongs in C, and how:
+Discussed in Oct 2026 (D151, D152; BACKGROUND.md has what Odin does):
 
-- Certainly C: TLS, which HTTPS needs (D132), and hashing and crypto.
-- To decide: JSON (`t/168-json.slight` shows slight can do it; C would
-  be faster and easier on the heap), database drivers, and parts of
-  HTTP's mechanics (D132 put HTTP in slight, and turned down HTTP in C).
-- How: a driver as a device, as files and sockets are, or a plain
-  builtin for a pure function like a hash, which can't stall anything;
-  how a program asks for a library (opt-in, as `(@include :fs)` is); and
-  what the runtime carries and what it doesn't.
+- A pure function bounded by its input (a hash) may be a builtin; a
+  library with state or I/O (TLS, a database) is a device. Nothing
+  blocks, and no slight value holds a C pointer.
+- Vendored as source under `vendor/`, each at a pinned version with its
+  licence and a `VENDOR` file; `slightc` compiles one as it does the
+  runtime, and links it statically into the programs that use it.
+- In C: TLS, hashing and crypto, JSON and s-expressions (12a). Database
+  drivers when they're wanted; one that can only block (SQLite) would
+  need the runtime's first thread, which isn't decided.
 
-Then TLS, the first of them.
+Then TLS, the first vendored library: a `:tls` socket device, on mbedTLS
+unless something better turns up. To settle: confirming mbedTLS, where a
+client finds its CA certificates (macOS keeps them in the Keychain), and
+how a server is given its certificate and key.
+
+#### 12d. Looking up host names
+
+`getaddrinfo` blocks the whole runtime. As Odin's `core:net` does, the
+runtime will read `/etc/hosts`, query the servers in `/etc/resolv.conf`
+itself over UDP, and wait for the answer in `select()` (D153).
 
 ### 13. Where `recv` can go
 
@@ -416,8 +435,7 @@ server on `:tcp`, and HTTPS on 12c's TLS. To settle when it starts:
 - Keep the API independent of what's underneath: in a browser, HTTP
   would be a device over `fetch`, not slight on `:tcp` (BACKGROUND.md,
   WebAssembly), so a program shouldn't see which it's using.
-- JSON: `lib/json.slight`, from `t/168-json.slight`'s parser and
-  printer, or C (12c).
+- JSON: in C, as builtins and as a way to read the body (12a).
 
 ### 15. As needed
 

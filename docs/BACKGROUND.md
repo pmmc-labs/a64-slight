@@ -495,6 +495,53 @@ Sources: [stack switching](https://github.com/WebAssembly/stack-switching),
 [state of WebAssembly 2024–2025](https://platform.uno/blog/state-of-webassembly-2024-2025/),
 [tail calls (Leaning Technologies)](https://labs.leaningtech.com/blog/extreme-webassembly-2-the-sad-state-of-webassembly-tail-calls).
 
+## C libraries (looked at Oct 2026)
+
+What led to D151–D155, for when it comes up again.
+
+**What Odin does** (its repository, Oct 2026). Two collections: `core:`,
+written in Odin and part of the language, and `vendor:`, bindings to
+third-party C libraries shipped with the compiler and curated by its
+team, each with its upstream licence. A vendored library arrives in one
+of three ways, chosen per library and per OS: as source with a build
+script (stb, miniaudio, cgltf: `build_stb.sh` makes `lib/*.a` on Linux,
+`lib/darwin/*.a` for both architectures through `lipo` on macOS, and
+`.o` files for WASM, and the binding `#panic`s until it has been run);
+as prebuilt binaries in the repository (Windows `.lib`s for nearly
+everything, box2d's macOS `.a`s); or as the system's library
+(`system:curl` and `system:z` on macOS and Linux). A binding names its
+file with `foreign import`, relative to the binding or `system:`, chosen
+with `when ODIN_OS == ...`; bindings are written by hand, since Odin
+doesn't read C headers. Much that might have been C is Odin: all of
+`core:crypto` (AES, ChaCha20-Poly1305, SHA-2 and SHA-3, X25519, Ed25519,
+ECDSA, RSA, ML-KEM, ...; its README says it hasn't had a third-party
+review), `core:encoding/json`, and DNS (`core:net` reads `/etc/hosts`
+and `/etc/resolv.conf` and asks the servers itself, so it never blocks
+in `getaddrinfo`). TLS isn't there: the maintainers see a native one as
+a long job, and talked of an interface for plugging one in. And
+`vendor:libc-shim` is a small libc written in Odin, so that vendored C
+compiles to WASM without Emscripten.
+
+**What we took, and didn't.** The split (our `lib/` and `vendor/`),
+vendoring a small pinned set, and DNS done by the runtime. Not crypto in
+the language: Odin is about as fast as C and has fixed-width integers and
+bit operations, and slight has neither. Not build scripts: `slightc`
+drives clang, so it compiles a vendored library itself. For WASM
+(parked), a `libc-shim` of our own would be how vendored C gets there.
+
+**JSON parsers.** simdjson parses at gigabytes a second, but it's C++17,
+its single-header form is 13.7 MB, it wants the whole document in memory
+with padding after it, and it can't be fed bytes as they arrive
+(`iterate_many` streams a sequence of documents, with a thread); its
+"On Demand" mode, touching only the fields read, doesn't fit values that
+are built whole and copied between processes. yyjson (C, MIT, 760 KB of
+source) is fast and has a writer, but its incremental reader only
+resumes as bytes arrive, with the document whole in one buffer at the
+end. YAJL streams, but hasn't been maintained for about ten years. So
+D154 writes its own push parsers. JSONTestSuite ("Parsing JSON is a
+Minefield") is the conformance test: its `y_` files must parse, its
+`n_` files must not, and its `i_` files may go either way.
+
 ## Prior art
 
 - **Abdulaziz Ghuloum, "An Incremental Approach to Compiler Construction"**

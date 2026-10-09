@@ -407,6 +407,31 @@ The byte builtins that don't count are right for UTF-8 as they are:
 bytes as they are. `utf8/chars` takes 32 bytes a character, and the root
 never collects, so a text split there tops out at about 2 MB.
 
+### JSON and s-expressions (planned, step 12a)
+
+Parsed in C, as builtins for text already in hand and as ways a device
+can cut its bytes into messages (D154, D155):
+
+- **Builtins:** `(json/parse s)`, `(json/print v)`, `(sexp/parse s)`,
+  `(sexp/print v)`.
+- **Devices:** a file or socket gives lines (now), chunks, JSON values
+  `(:json f v)`, or s-expression forms `(:sexp f v)`, one top-level value
+  a message; JSON also has an "items" mode, a message for each element of
+  a top-level array. The next value is parsed only once the last has left
+  the owner's mailbox, as with lines, so a big input goes through a
+  bounded heap.
+- **JSON in slight:** `:null`, `#true`, `#false`, integers (floats past 63
+  bits), floats, strings, lists for arrays, and `(:object (key value)
+  ...)` for objects, keys as strings, in order, duplicates kept.
+  `json/print` faults on what JSON can't hold.
+- **S-expressions as data:** lists, numbers, strings, symbols, `#true`,
+  `#false`, `'x`, comments. A symbol the program mentions reads as itself,
+  any other as `(:symbol "name")` (D14 holds: no symbols are made at run
+  time); `:a` and `a` are the same symbol (D52). `sexp/print` prints what
+  `sexp/parse` reads back, strings escaped and `(:symbol "name")` as
+  `name`, and faults on pids, closures, `nan` and `inf`; `pprint` stays
+  unescaped.
+
 ### Not in the language
 
 `eval`, `slight/parse`, hot reload, macros, `catch`, `gensym`, local
@@ -597,7 +622,8 @@ Lalloc_N:
   and `kill`, a device is a process that ended with `(:ok ())`.
 - **Sockets are devices too** (D133–D139). `(connect :tcp "host:port"
   expr)` connects, without stalling the runtime (looking up the host does
-  stall it, briefly); the connection's first message is `(:open c)`, once
+  stall it, briefly, until the runtime looks names up itself: D153); the
+  connection's first message is `(:open c)`, once
   it's connected, or the owner ends with `(:error (econnrefused
   "host:port"))` and the like. It then sends lines as a file does, one at a
   time (it's read only while none of its lines is in its owner's mailbox,
@@ -617,8 +643,14 @@ Lalloc_N:
   found; SIGPIPE is ignored, so writing to a closed connection is
   `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. HTTP will
   be a slight library on top (D132, D140).
-- C libraries come in later as drivers exposed as processes, never as
-  direct calls that could stall the runtime.
+- **C libraries** (D151, D152; planned, step 12c). A pure function bounded
+  by its input may be a builtin, called on the process's stack; anything
+  with state or I/O is a device, its state in the runtime behind a pid,
+  serviced in `select()` through a non-blocking API. Nothing blocks, and
+  no slight value holds a C pointer. They're vendored as source under
+  `vendor/` (as Odin's are), compiled by `slightc` once per target as the
+  runtime is, and linked statically into the programs that use them. TLS
+  is to be a `:tls` socket device.
 
 ### Builtins in C
 
@@ -787,6 +819,8 @@ Collected from above:
 
 1. Collecting anywhere but `recv` (see "Process heaps and GC"; plan
    step 12b).
+2. A worker thread for a C library that can only block, such as SQLite
+   (D151): the runtime's first thread, if it comes.
 
 Settled in step 2: program structure, the top-level forms as the root
 process (with its arguments as `@ARGV` since D144). In step 7: `recv`

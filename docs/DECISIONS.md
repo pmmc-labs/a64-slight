@@ -167,6 +167,7 @@ slight code over key events. *(User asked whether readline could be used.)*
 
 **D30. C libraries come in as drivers exposed as processes.** *(Default.)*
 Erlang's lesson: direct calls can crash or stall the whole runtime.
+(Refined in D151: a pure function bounded by its input may be a builtin.)
 
 **D31. Platforms: macOS on Apple Silicon first, Linux AArch64 from the same
 code.** *(User is on an M2 Max; Linux is how this container develops.)*
@@ -1217,3 +1218,111 @@ error. Rejected: a prebuilt archive made by `make` (it can go stale, and
 `slightc` alone, outside `make`, wouldn't use it); running the targets'
 tests at the same time too (the file tests share names across targets,
 and the CPUs are already busy).
+
+## Step 12: what goes in C
+
+**D151. A C library comes in one of two shapes, by what it does.** *(User
+agreed, Oct 2026; refines D30.)* A pure function whose time is bounded by
+its input (a hash, a parser given a whole text) may be a plain builtin,
+called on the process's stack as `strings.c`'s are: it can't stall
+anything as long as it never blocks. Anything with state or I/O (TLS, a
+database connection) is a device, as files and sockets are: its state
+lives in the runtime behind a pid, it works inside `select()` through a
+non-blocking API, it ends with `disconnect` or its owner, and it runs on
+the scheduler's stack. Either way, values cross by copying, and a slight
+value never holds a C pointer (the collector moves values, and a
+message's copy would carry the pointer to another process); C's own
+memory is outside the 64 MB limit, so a call frees what it allocates; a
+C error is a fault or a Result, but a crash in C ends the whole program.
+A builtin has only the 64 KB that the check at function entry keeps
+below the stack's limit (`STACK_HEADROOM`), so one that needs more must
+run on the scheduler's stack. Not decided: a worker thread for a library
+that can only block (SQLite), which would be the runtime's first thread.
+
+**D152. C libraries are vendored as source, as Odin's are, and linked
+statically.** *(User, Oct 2026, after a look at Odin's `vendor:`
+collection; BACKGROUND.md.)* `lib/` holds the libraries written in
+slight, our `core:`; `vendor/` will hold the C ones, each its upstream
+source at a pinned version, with its licence and a `VENDOR` file saying
+where and when it came from. Odin's rule: slight where that's practical,
+C where it isn't (crypto isn't, in slight: no fixed-width integers, no
+bit operations, no constant time). `slightc` compiles a vendored library
+as it compiles the runtime (D150), once per target and version, kept
+under `build/`, and links it only into a program that uses one of its
+builtins or devices, which the compiler knows: no new syntax, no build
+step, and the same code under qemu and Rosetta as natively. (Odin needs
+build scripts, and a `#panic` when they haven't been run, because it
+doesn't drive a C compiler; `slightc` does.) Static, so a binary is one
+file (a Raspberry Pi takes it as it is), with the same library on every
+machine and the same test output; the cost is a rebuild for a library's
+security fix, which for TLS means bumping the vendored copy. TLS is to be
+a `:tls` socket device, so encrypted bytes never reach slight and HTTP
+treats `:tcp` and `:tls` alike; mbedTLS (Apache-2.0, TLS 1.3,
+non-blocking, made for small machines) is the proposal, to confirm in
+12c with where a client finds its CA certificates (macOS keeps them in
+the Keychain). Rejected: system libraries (macOS has no OpenSSL to build
+against, versions differ between machines, and testing under qemu would
+need each target's copy); prebuilt binaries in the repository; loading
+libraries with `dlopen`; a package manager.
+
+**D153. The runtime looks up host names itself.** *(User, Oct 2026, after
+Odin's `core:net`.)* `getaddrinfo` blocks, and every process with it
+(D136). As Odin does, the runtime will read `/etc/hosts`, send its own
+query over UDP to the servers in `/etc/resolv.conf`, and wait for the
+answer in `select()` like any socket. That also takes away the main
+reason for a worker thread. Caveat: macOS generates `/etc/resolv.conf`,
+and it can miss per-interface and VPN settings.
+
+**D154. Parsing in C: JSON and s-expressions, as builtins and as ways to
+read a device.** *(User, Oct 2026: "most common parsing cases get done in
+C instead of slight".)* A device that delivers bytes (a file, a socket,
+later TLS) chooses how to cut them into messages: lines (now), chunks
+(12a), JSON values, or s-expression forms. With the last two, the bytes
+go from the file descriptor through a parser in C to finished values,
+each top-level value a message, `(:json f v)` or `(:sexp f v)`, and JSON
+has an "items" mode as well, a message for each element of a top-level
+array, the usual big file. As with lines (D134), the device parses the
+next value only once its last one has left the owner's mailbox, so an
+owner that collects at each `recv` gets through any size of input in a
+bounded heap. For text already in hand there are builtins: `json/parse`,
+`json/print`, `sexp/parse` and `sexp/print`. One push parser for each
+grammar serves both, written for slight in C (about 500 lines for JSON,
+and 300 more for s-expressions, which share strings, numbers, UTF-8 and
+building values straight into a message's chunk). It's tested against
+JSONTestSuite (its `y_` files must parse and its `n_` files must not),
+against Python's `json` as `t/168` is, and with inputs cut at random
+places, escapes and UTF-8 sequences included. JSON in slight is as
+`t/168` has it: `:null`, `#true` and `#false`, integers (floats past 63
+bits, as in JavaScript), strings, lists for arrays, and `(:object (key
+value) ...)` for objects, keys as strings, in order, duplicates kept.
+`json/print` faults on what JSON can't hold: another symbol, a pid, a
+closure, `nan`, `inf`. Rejected: simdjson (C++17, 13.7 MB of
+single-header source, a whole padded document in memory and no feeding
+it bytes as they come, and its speed would go on building slight values
+anyway); yyjson for streaming (its incremental reader only resumes as
+bytes arrive: the whole document still lands in one buffer and comes out
+at the end; it stays the fallback for `json/parse` if ours is slow);
+YAJL (a streaming parser, but unmaintained for some ten years); raw
+parse events as messages (many more messages, and slight would rebuild
+the values anyway).
+
+**D155. S-expressions as data: symbols as D14 has them, and a printer
+that reads back.** *(User.)* The data reader takes lists, integers and
+floats, strings with the reader's escapes, symbols and keywords, `#true`
+and `#false`, `'x` as `(quote x)`, and comments; no positions and no
+`@include`. A symbol the program mentions reads as itself; one it
+doesn't reads as `(:symbol "name")`. That keeps D14 (symbols are
+compile-time ids), keeps the name, and fills no table, and a program can
+only compare or match symbols it mentions anyway. `:a` and `a` read as
+the same symbol (D52), not as `:a` in a quoted list reads to the
+compiler. `sexp/print` is the printer that reads back: strings escaped
+as the reader takes them, floats in the shortest form that reads back
+the same, `(:symbol "name")` as `name`, and a fault for what isn't data
+(a pid, a closure, `nan`, `inf`). `pprint` stays as it is, unescaped as
+in ts-slight. So two slight programs can talk over TCP in printed forms.
+Later, the self-hosted compiler could read its source with this reader,
+keeping positions and giving every symbol as a record (D37). Rejected:
+interning symbols at run time (it reopens D14, and the table only grows:
+Erlang's atom table, filled by untrusted input, brings down the whole
+node); an error on an unknown symbol (it would fail on well-formed
+text).

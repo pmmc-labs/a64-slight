@@ -48,11 +48,13 @@ parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
 x86-64 natively), and on macOS (Stevan runs it on his M2 Max after every
 step, and reports only failures; x86-64 passes there too, under Rosetta
 2, with `make golden TARGETS=x86_64`). **Next: step 12**, the groundwork
-HTTP needs (chunks, collecting outside `recv`, and a discussion of what
-goes in C, then TLS), then where `recv` can go (13: `defactor`, or
-splitting functions at `recv`), and HTTP in slight (14). Each has points
-to settle with Stevan first (`docs/PLAN.md`); 12b, 12c and 13 need a
-discussion in depth before building. Self-hosting waits till the
+HTTP needs: 12a, ways to read a device (chunks, and JSON and
+s-expressions parsed in C, D154, D155); 12b, collecting outside `recv`;
+12c, C libraries vendored as source (D151, D152), then TLS; 12d, looking
+up host names in the runtime (D153). Then where `recv` can go (13:
+`defactor`, or splitting functions at `recv`), and HTTP in slight (14).
+Each has points to settle with Stevan first (`docs/PLAN.md`); 12b and 13
+need a discussion in depth before building. Self-hosting waits till the
 language settles (16). Update this section as steps land.
 
 ## Read first, in this order
