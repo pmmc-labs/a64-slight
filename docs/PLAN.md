@@ -282,7 +282,7 @@ set of builtins beside the byte ones, counting characters (`utf8/len`,
 own, as in Go. Tests 164–168; 168 is a JSON parser and printer in
 slight, checked against Python's `json` module, which could become
 `lib/json.slight` when HTTP (14) wants one; since then, JSON's parser is
-to be C (D154). Display width is still to come (15).
+to be C (D154). Display width is still to come (16).
 
 #### Data structures as processes (done, Oct 2026)
 
@@ -450,7 +450,42 @@ server on `:tcp`, and HTTPS on 12c's TLS. To settle when it starts:
   WebAssembly), so a program shouldn't see which it's using.
 - JSON: in C, as builtins and as a way to read the body (12a).
 
-### 15. As needed
+### 15. Agents
+
+Stevan's aim for slight (Oct 2026), once HTTP (14) and JSON (12a) are
+in: chat, person to agent and agent to agent, written as actors.
+
+- An agent is an actor whose state is its context: the conversation so
+  far, its tools, its model's settings. A turn comes in as a message,
+  and the answer goes out as one, streamed if the model streams.
+- A tool call is a message to an actor, answered with `reply`
+  (`lib/ds.slight`'s `ask`), so a tool is a process like any other, and
+  one that fails ends alone.
+- Agents talk to each other in messages, and between machines in
+  printed s-expressions over TCP (D155).
+- Models run outside slight, behind HTTP: a local server such as ollama
+  for generative models (it streams JSON lines, which 12a's way of
+  reading JSON makes one message each), a hosted API over HTTPS (12c),
+  and a Jev-compatible server for small "System One" models, which give
+  a decision (yes or no, a choice, a score) with its probability rather
+  than text. JevOS, an open one, runs a 1B model on the CPU in 25-110 ms
+  a decision. Not in the runtime, even a small one: inference is CPU
+  work that would hold up every process without a thread of its own
+  (DESIGN.md's open question 2), the libraries are large and in C++, and
+  a crash in one would end every actor. A local server costs an HTTP
+  request on top, a fraction of a millisecond against the model's tens.
+- `:exec`, a device for running commands, for tools: `(connect :exec
+  (list "ls" "-l") expr)` runs the command, its owner gets the output as
+  other devices give theirs, then `(:exit p status)`. A command is a
+  list of arguments, with no shell unless asked for (`(list "sh" "-c"
+  cmd)`), so nothing is quoted wrongly.
+
+To settle when it starts: what a turn and an answer look like as
+messages; how a tool says what it takes; how streamed output arrives;
+how `:exec` gives stderr and takes stdin, and when the child is
+reaped; and what limits a tool runs under.
+
+### 16. As needed
 
 Left "for now" by earlier decisions, and taken on when something needs
 them:
@@ -466,7 +501,7 @@ them:
   register (D57), captured values read from the closure (D79), denser
   lists (CDR-coding, VLists: D23), reference counting with reuse (D24).
 
-### 16. Self-host
+### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written
 slight-shaped for this), then the three-stage bootstrap from DESIGN.md.

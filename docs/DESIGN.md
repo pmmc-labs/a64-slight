@@ -798,7 +798,7 @@ Pure functions over immutable s-expressions, recursion instead of loops
 environments, no classes. Then porting the compiler to slight is a near
 line-by-line translation.
 
-### Bootstrap (plan step 16)
+### Bootstrap (plan step 17)
 
 1. The TypeScript compiler (stage 0) compiles the slight port of the
    compiler into a native binary (stage 1).

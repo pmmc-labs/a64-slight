@@ -52,13 +52,14 @@ step, and reports only failures; x86-64 passes there too, under Rosetta
 2, with `make golden TARGETS=x86_64`). **Next: step 12**, the groundwork
 HTTP needs: 12a, ways to read a device (chunks, and JSON and
 s-expressions parsed in C, D154, D155) and inline docs after Perl's POD
-(D156); 12b, collecting outside `recv`;
-12c, C libraries vendored as source (D151, D152), then TLS; 12d, looking
-up host names in the runtime (D153). Then where `recv` can go (13:
-`defactor`, or splitting functions at `recv`), and HTTP in slight (14).
-Each has points to settle with Stevan first (`docs/PLAN.md`); 12b and 13
-need a discussion in depth before building. Self-hosting waits till the
-language settles (16). Update this section as steps land.
+(D156); 12b, collecting outside `recv`; 12c, C libraries vendored as
+source (D151, D152), then TLS; 12d, looking up host names in the runtime
+(D153). Then where `recv` can go (13: `defactor`, or splitting functions
+at `recv`), HTTP in slight (14), and agents (15: chat as actors, tools as
+messages, `:exec`, models over HTTP). Each has points to settle with
+Stevan first (`docs/PLAN.md`); 12b and 13 need a discussion in depth
+before building. Self-hosting waits till the language settles (17).
+Update this section as steps land.
 
 ## Read first, in this order
 

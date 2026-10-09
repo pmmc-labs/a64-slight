@@ -288,7 +288,7 @@ clang 18 at `-O2`:
 - One backend for every 64-bit target clang has. x86-64 and RISC-V each
   need only `rt_switch` and the trampoline (about 30 lines of assembly)
   and the driver's settings: about half a session each.
-- A simpler code generator to port when self-hosting (step 16): no
+- A simpler code generator to port when self-hosting (step 17): no
   frame slots to count, no immediates to encode (`loadWord`, `addImm`,
   `closureField`'s ranges), no Mach-O and ELF differences, and
   `rt_apply` in C.
@@ -319,7 +319,7 @@ clang 18 at `-O2`:
 driver, and the unit tests that read assembly text), then about half a
 session each for x86-64 and RISC-V. That's about what x86-64 alone costs
 as a second assembly backend, for every target and faster code. If it
-happens, it should happen before self-hosting (step 16), so that the
+happens, it should happen before self-hosting (step 17), so that the
 compiler isn't ported to slight twice.
 
 ### Multiple cores
