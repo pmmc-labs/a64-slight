@@ -10,7 +10,7 @@
 // `to`, and returns into it. Everything else is caller-saved under AAPCS64,
 // so the code that called rt_switch (directly, or through any runtime op)
 // has already given it up. x18 is never touched: on macOS it's the
-// platform's. From the spike, unchanged.
+// platform's.
 // ---------------------------------------------------------------------------
 
 FUNC rt_switch
