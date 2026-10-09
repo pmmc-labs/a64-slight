@@ -137,7 +137,7 @@ asynchronous convention collapses into the platform's synchronous one.
 
 ### Other targets: x86-64 and RISC-V (revised Oct 2026, after 10e)
 
-**x86-64 was built in Oct 2026** (D145, D146; PLAN.md, after 10f), as
+**x86-64 was built in Oct 2026** (D145, D146; PLAN.md, after 10e), as
 planned below: first the interface (`compiler/src/target.ts`), checked by
 the assembly of all 150 programs coming out the same byte for byte, then
 `x86_64.ts` (about 250 lines) to the register map below, which passed
@@ -269,9 +269,10 @@ clang 18 at `-O2`:
 - One backend for every 64-bit target clang has. x86-64 and RISC-V each
   need only `rt_switch` and the trampoline (about 30 lines of assembly)
   and the driver's settings: about half a session each.
-- A simpler code generator to port in step 12: no frame slots to count,
-  no immediates to encode (`loadWord`, `addImm`, `closureField`'s
-  ranges), no Mach-O and ELF differences, and `rt_apply` in C.
+- A simpler code generator to port when self-hosting (step 16): no
+  frame slots to count, no immediates to encode (`loadWord`, `addImm`,
+  `closureField`'s ranges), no Mach-O and ELF differences, and
+  `rt_apply` in C.
 - Readable output, and `#line` directives would let lldb and gdb step
   through the `.slight` source.
 - A much cheaper WASI target: clang does the structured control flow,
@@ -299,8 +300,8 @@ clang 18 at `-O2`:
 driver, and the unit tests that read assembly text), then about half a
 session each for x86-64 and RISC-V. That's about what x86-64 alone costs
 as a second assembly backend, for every target and faster code. If it
-happens, it should happen before step 12, so that the compiler isn't
-ported to slight twice.
+happens, it should happen before self-hosting (step 16), so that the
+compiler isn't ported to slight twice.
 
 ### Multiple cores
 
@@ -457,10 +458,11 @@ unchanged.
 - **Files, as a stand-in:** an in-memory filesystem, the Origin Private
   File System, or read-only `fetch`, behind the same device messages.
 - **TCP, no:** browsers have no raw sockets, let alone listening ones.
-  Their natural devices are `fetch` and WebSocket. **For 10f:** HTTP in
-  slight on `:tcp` works natively and under WASI, but in a browser it
-  would be a device over `fetch`; an HTTP API that doesn't care which
-  sits underneath would let a browser port keep programs unchanged.
+  Their natural devices are `fetch` and WebSocket. **For HTTP (step
+  14):** HTTP in slight on `:tcp` works natively and under WASI, but in a
+  browser it would be a device over `fetch`; an HTTP API that doesn't
+  care which sits underneath would let a browser port keep programs
+  unchanged.
 
 **Outside the browser, and a playground.** WASI (wasmtime, Node) has
 stdin, stdout, files, a clock, and `poll_oneoff` for waiting like

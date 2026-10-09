@@ -409,5 +409,6 @@ as ts-slight's `Test.slight` was:
 
 ## Not here yet
 
-HTTP (step 10f, in slight, on `:tcp`), and `defactor`, which we still
-need to talk through.
+HTTP (step 14 of the plan, in slight, on `:tcp`), and where `recv` can
+go (`defactor`, or splitting functions at `recv`), which we still need
+to talk through.

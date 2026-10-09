@@ -757,7 +757,7 @@ Pure functions over immutable s-expressions, recursion instead of loops
 environments, no classes. Then porting the compiler to slight is a near
 line-by-line translation.
 
-### Bootstrap (plan step 12)
+### Bootstrap (plan step 16)
 
 1. The TypeScript compiler (stage 0) compiles the slight port of the
    compiler into a native binary (stage 1).
@@ -785,7 +785,8 @@ line-by-line translation.
 
 Collected from above:
 
-1. Collecting anywhere but `recv` (see "Process heaps and GC").
+1. Collecting anywhere but `recv` (see "Process heaps and GC"; plan
+   step 12b).
 
 Settled in step 2: program structure, the top-level forms as the root
 process (with its arguments as `@ARGV` since D144). In step 7: `recv`

@@ -64,7 +64,9 @@ file is a process-like device) and TCP sockets (`connect :tcp`,
 `connect :tcp/listen`) work too, and so do `(@include ...)`, `@ARGV`, and
 `if`, `when`, `case`, `and` and `or`, which an expander makes into `cond`.
 x86-64 is a second target, from the same code generator through a small
-target interface. Next: HTTP, written in slight on top of TCP. See:
+target interface. Next: tooling, then what HTTP needs underneath it
+(chunks, collecting outside `recv`, C libraries and TLS), then HTTP,
+written in slight on top of TCP. See:
 
 - [`docs/DESIGN.md`](docs/DESIGN.md): the design
 - [`docs/PLAN.md`](docs/PLAN.md): the build order

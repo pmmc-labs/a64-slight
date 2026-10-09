@@ -41,16 +41,19 @@ beside the byte builtins, the `utf8/` ones count characters (a bad byte
 is a character of its own, as in Go), with `ord` and `chr` in the
 prelude, and `string->float` (D148).
 Fifteen of ts-slight's examples are ported (`examples/`; all but
-`ping-pong-tournament` are golden tests). `make test` passes on x86 Linux
-(AArch64 under qemu, x86-64 natively), and on macOS (Stevan runs it on his
-M2 Max after every step, and reports only failures; x86-64 passes there
-too, under Rosetta 2, with `make golden TARGETS=x86_64`). **Next:
-step 10f** (HTTP, written in slight on `:tcp`; its open points are in
-`docs/PLAN.md`, to settle with Stevan first, including keeping the API
-independent of the transport so a browser port could use `fetch`). Also
-to discuss with him in depth before building: `defactor` (`docs/PLAN.md`,
-under 10e). Stevan is rewriting the text editor and window managers
-himself (step 11). Update this section as steps land.
+`ping-pong-tournament` are golden tests); porting has stopped, and new
+examples are written for this version (D149). `make test` passes on x86
+Linux (AArch64 under qemu, x86-64 natively), and on macOS (Stevan runs it
+on his M2 Max after every step, and reports only failures; x86-64 passes
+there too, under Rosetta 2, with `make golden TARGETS=x86_64`). **Next:
+step 11, tooling** (the runtime built once per run, golden tests in
+parallel, the compiler's recursion on long bodies), then the groundwork
+HTTP needs (12: chunks, collecting outside `recv`, and a discussion of
+what goes in C, then TLS), where `recv` can go (13: `defactor`, or
+splitting functions at `recv`), and HTTP in slight (14). Each has points
+to settle with Stevan first (`docs/PLAN.md`); 12b, 12c and 13 need a
+discussion in depth before building. Self-hosting waits till the
+language settles (16). Update this section as steps land.
 
 ## Read first, in this order
 

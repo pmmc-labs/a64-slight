@@ -1169,3 +1169,20 @@ differs only on bad input, and needs more machinery); a `string->number`
 giving an integer or a float (`string->int` already does the one);
 display width, case mapping beyond ASCII and normalization (not needed
 for JSON; `pad-start`, `pad-end` and `format-num` still count bytes).
+
+**D149. The plan after 10e: porting stops, and HTTP's groundwork comes
+first.** *(User, Oct 2026.)* Fifteen of ts-slight's examples are ported,
+enough to have tried the language on; new examples are written for this
+version, and the text editor and window managers leave the plan (their
+display width stays, under 15). Next is tooling (11), so that every step
+after it gets a quicker loop; then what HTTP needs underneath it (12):
+chunks, collecting outside `recv` ("it will bite in HTTP"), and C
+libraries, starting with a discussion of what belongs in C (TLS, hashing
+and crypto for certain; JSON, database drivers and parts of HTTP to
+decide), then TLS; then where `recv` can go (13), since HTTP will be the
+biggest library yet in slight; then HTTP (14, was 10f). The other things
+left "for now" wait until something needs them (15). Self-hosting moves
+to the end (16, was 12), once the language has settled. WebAssembly,
+compiling to C, RISC-V, 32-bit microcontrollers and multiple cores stay
+parked, in three groups that later ideas can join: new compilation
+targets, new platforms, and parallelism.

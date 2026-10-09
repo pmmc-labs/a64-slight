@@ -7,7 +7,8 @@ be a session or two each.
 **Progress:** steps 0–9 and 10a–10e done (under qemu, and natively on
 macOS: Stevan runs `make test` on his M2 Max after every step), a
 second target, x86-64 (which passes on the M2 too, under Rosetta 2), and
-UTF-8 builtins (both below, after 10f). 10f, HTTP in slight, is next.
+UTF-8 builtins (both below, after 10e). Next (D149): tooling (11), the
+groundwork HTTP needs (12), where `recv` can go (13), then HTTP (14).
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -242,11 +243,109 @@ the prelude an implicit `(@include :prelude)`; and `if`, `when`, `case`,
 and `or` short-circuiting. Then `@ARGV` (D144), for the text editor: the
 program's arguments, as the top level's parameter.
 
-**To discuss before building: `defactor`.** Stevan's idea: one form for an
-actor whose body does some work and then ends in a `recv`, expanding to
-the two functions the `recv` rule needs now (one that does the work and
-tail-calls one whose body is just the `recv`; see `tail-chase-game`). The
-`recv` would have to come last. Open: in the expander or the compiler; how
+#### A second target: x86-64 (done, Oct 2026)
+
+Taken out of order, at Stevan's request, as BACKGROUND.md ("Other
+targets") planned it (D145, D146). First the code generator was put
+behind a target interface (`target.ts`), checked by the generated
+assembly of all 150 programs coming out the same byte for byte; then
+`x86_64.ts` and the runtime's x86-64 half (`rt_asm_x86_64.S`, `rt_ctx_t`
+and `start` per architecture), and `--target` in the driver, `t/run.sh`
+and the Makefile. Every golden test passes on both, natively on x86-64,
+with the same expected output. A third target (RISC-V, say) is now a
+target file and its runtime assembly. Both targets pass on Stevan's M2
+too (Oct 2026): AArch64 natively, and x86-64 under Rosetta 2, with
+`make golden TARGETS=x86_64`.
+
+The adversarial review that followed (differential tests of some 400
+programs on both targets, the ABI shape by shape, the interface's
+contract) found no difference in the x86-64 code. It found some older
+bugs, fixed with tests: a name ending in a backslash, written into an
+assembly comment, made the preprocessor swallow the next instruction
+(160); `min` and `max` compared two integers as doubles (161); a lambda's
+stack fault named its position twice. And one older than all of it:
+printing, copying (a message, or a fork's values) and `eq?` recursed in C
+down a list's cars, so a value nested some 50,000 deep in its cars
+crashed the whole program, at a depth that differed between targets. They
+now keep a work stack, as the collector does (D147, 162).
+
+#### UTF-8, enough for JSON (done, Oct 2026)
+
+At Stevan's request, part of DESIGN.md's level 2 strings (D148): a second
+set of builtins beside the byte ones, counting characters (`utf8/len`,
+`utf8/substring`, `utf8/index-of`, `utf8/chars`, `utf8/code`,
+`utf8/char`, `utf8/valid?`), `ord` and `chr` in the prelude, and
+`string->float` for JSON's numbers. A bad byte is a character of its
+own, as in Go. Tests 164–168; 168 is a JSON parser and printer in
+slight, checked against Python's `json` module, which could become
+`lib/json.slight` when HTTP (14) wants one. Display width is still to
+come (15).
+
+### 11. Tooling
+
+First, so that every step after it gets a quicker loop:
+
+- Build the runtime once per target and test run, not with every
+  program (D38 said to revisit that if it got slow): most of `make
+  test`'s 7.5 minutes is clang compiling the runtime again for each
+  test. Step 0 foresaw a prebuilt archive.
+- Run the golden tests in parallel.
+- The compiler recurses once per form of a body (`compileBody`), so a
+  body of about 1,000 `let`s overflows Node's stack. Make it a loop
+  (D39), before self-hosting copies it.
+- Whatever else gets in the way day to day (compile errors, say).
+
+### 12. Groundwork for HTTP
+
+What HTTP needs underneath it, from the things left "for now" so far.
+
+#### 12a. Chunks
+
+Files and sockets deal only in lines (D134: "just lines for now, and
+move to chunks later, just like with :fs"). An HTTP body is read by its
+length, not by lines, and binary data has none. To settle: what a chunk
+message looks like, how a reader asks for a number of bytes, and how one
+connection gives lines and then chunks (headers are lines; a body isn't).
+
+#### 12b. Collecting outside `recv`
+
+DESIGN.md's last open question (D105). Only a receive function collects,
+when it waits for a message, so the root (unless it ends in one) and a
+process that works without waiting never collect, and stop at 64 MB.
+HTTP will meet it: a handler that parses a large request in one go, a
+client that reads a big response in the root (a JSON text split there
+tops out at about 2 MB, D148). To talk through: collecting at tail calls
+between state functions, at tail calls from the bottom of the stack (a
+runtime check of `sp`), or anywhere, with the compiler's help (the stack
+maps D24 kept out).
+
+#### 12c. C libraries, and TLS
+
+C libraries come in as drivers exposed as processes, never as direct
+calls that could stall the runtime (D30), but none has been written yet.
+First a discussion of what belongs in C, and how:
+
+- Certainly C: TLS, which HTTPS needs (D132), and hashing and crypto.
+- To decide: JSON (`t/168-json.slight` shows slight can do it; C would
+  be faster and easier on the heap), database drivers, and parts of
+  HTTP's mechanics (D132 put HTTP in slight, and turned down HTTP in C).
+- How: a driver as a device, as files and sockets are, or a plain
+  builtin for a pure function like a hash, which can't stall anything;
+  how a program asks for a library (opt-in, as `(@include :fs)` is); and
+  what the runtime carries and what it doesn't.
+
+Then TLS, the first of them.
+
+### 13. Where `recv` can go
+
+Before HTTP, the biggest library yet in slight, since how it's written
+depends on this.
+
+**`defactor`.** Stevan's idea: one form for an actor whose body does some
+work and then ends in a `recv`, expanding to the two functions the `recv`
+rule needs now (one that does the work and tail-calls one whose body is
+just the `recv`; see `tail-chase-game`). The `recv` would have to come
+last. Open: in the expander or the compiler; how
 the expanded functions are named; whether more than one `recv` (a chain of
 states) makes sense; what a tail call to the actor from inside its `recv`
 means (back to the work, as now). Talk it through in depth first.
@@ -300,81 +399,77 @@ becomes
   without a new special form, and may replace it. It changes the `recv`
   rule, so it's Stevan's decision.
 
-#### 10f. HTTP in slight
+### 14. HTTP in slight
 
-`lib/http.slight`, opt-in (D140): an HTTP/1.1 client and server on `:tcp`,
-without TLS. To settle when it starts:
+Was 10f. `lib/http.slight`, opt-in (D140): an HTTP/1.1 client and
+server on `:tcp`, and HTTPS on 12c's TLS. To settle when it starts:
 
 - What the library looks like to a program: a server as a function of a
   request that returns a response? A client as a call that gives
   `(:ok response)` or `(:error reason)`?
-- Request bodies: a body that doesn't end in a newline can't be read
-  until connections can send chunks (D134). Add chunks first, or start
-  with GET and bodies that end in newlines?
+- Bodies are read by their length, with 12a's chunks.
 - `Connection: close` (one request per connection) to begin with, or
   keep-alive?
 - Keep the API independent of what's underneath: in a browser, HTTP
   would be a device over `fetch`, not slight on `:tcp` (BACKGROUND.md,
   WebAssembly), so a program shouldn't see which it's using.
+- JSON: `lib/json.slight`, from `t/168-json.slight`'s parser and
+  printer, or C (12c).
 
-Next session starts here, with Stevan.
+### 15. As needed
 
-#### A second target: x86-64 (done, Oct 2026)
+Left "for now" by earlier decisions, and taken on when something needs
+them:
 
-Taken out of order, at Stevan's request, as BACKGROUND.md ("Other
-targets") planned it (D145, D146). First the code generator was put
-behind a target interface (`target.ts`), checked by the generated
-assembly of all 150 programs coming out the same byte for byte; then
-`x86_64.ts` and the runtime's x86-64 half (`rt_asm_x86_64.S`, `rt_ctx_t`
-and `start` per architecture), and `--target` in the driver, `t/run.sh`
-and the Makefile. Every golden test passes on both, natively on x86-64,
-with the same expected output. A third target (RISC-V, say) is now a
-target file and its runtime assembly. Both targets pass on Stevan's M2
-too (Oct 2026): AArch64 natively, and x86-64 under Rosetta 2, with
-`make golden TARGETS=x86_64`.
+- **Display width** (the rest of DESIGN.md's level 2 strings): a wide
+  character (CJK, most emoji) takes two columns of a terminal and counts
+  one, so a terminal UI can't line up such text yet.
+- More than 8 arguments to a function, on the stack (DESIGN.md).
+- Sockets: IPv6, and more than the 1,000 or so that `select()` holds
+  (D113), with `poll`, `kqueue` or `epoll`.
+- Dropping exit records, and bounded mailboxes (D88).
+- Optimizations, when profiling asks for them: the heap pointer in a
+  register (D57), captured values read from the closure (D79), denser
+  lists (CDR-coding, VLists: D23), reference counting with reuse (D24).
 
-The adversarial review that followed (differential tests of some 400
-programs on both targets, the ABI shape by shape, the interface's
-contract) found no difference in the x86-64 code. It found some older
-bugs, fixed with tests: a name ending in a backslash, written into an
-assembly comment, made the preprocessor swallow the next instruction
-(160); `min` and `max` compared two integers as doubles (161); a lambda's
-stack fault named its position twice. And one older than all of it:
-printing, copying (a message, or a fork's values) and `eq?` recursed in C
-down a list's cars, so a value nested some 50,000 deep in its cars
-crashed the whole program, at a depth that differed between targets. They
-now keep a work stack, as the collector does (D147, 162).
+### 16. Self-host
 
-#### UTF-8, enough for JSON (done, Oct 2026)
+Once the language has settled. Port the compiler to slight (it's written
+slight-shaped for this), then the three-stage bootstrap from DESIGN.md.
+If compiling to C (below) ever happens, it comes first, so that the
+compiler isn't ported twice.
 
-At Stevan's request, part of DESIGN.md's level 2 strings (D148): a second
-set of builtins beside the byte ones, counting characters (`utf8/len`,
-`utf8/substring`, `utf8/index-of`, `utf8/chars`, `utf8/code`,
-`utf8/char`, `utf8/valid?`), `ord` and `chr` in the prelude, and
-`string->float` for JSON's numbers. A bad byte is a character of its
-own, as in Go. Tests 164–168; 168 is a JSON parser and printer in
-slight, checked against Python's `json` module, which could become
-`lib/json.slight` when 10f wants one. Display width is still to come.
+## Parked
 
-### 11. Port the examples
+Discussed, but neither planned nor ruled out: each needs more talk
+first. Grouped so that related ideas can join them as the language
+grows. BACKGROUND.md has the discussions so far.
 
-See the table below. The window manager and text editor are the real
-tests of whether the language is pleasant to use. Stevan is rewriting
-those three (`text-editor`, `window-manager`, `better-window-manager`)
-himself. Checked for them in Oct 2026: nothing is missing now that
-`@ARGV` exists (D144), but two things may come up: the runtime always
-prints the root's value at exit, so `(ok ())` follows the editor's
-"Goodbye!"; and strings are bytes, so the editor should count a line
-with `utf8/len` (D148), not `str-len`. Even then a wide character (CJK,
-most emoji) takes two columns and counts one, until there's a display
-width (the rest of DESIGN.md's level 2 strings).
+### New compilation targets
 
-### 12. Self-host
+- WebAssembly, and the browser ("WebAssembly, and the browser"): 4–6
+  sessions for WASI, and 2–3 more for a browser host.
+- Compiling to C instead of assembly ("Compiling to C instead"): 2.5–3
+  sessions.
+- RISC-V, RV64 ("Other targets"): about 2 sessions.
 
-Port the compiler to slight (it's written slight-shaped for this), then
-the three-stage bootstrap from DESIGN.md.
+### New platforms
+
+- 32-bit microcontrollers (RP2040, STM32, ESP32, ...): a 32-bit value
+  layout, and budgets of a few hundred KB ("Embedded boards", "Other
+  targets"). AArch64 Linux boards, a Raspberry Pi say, run slight's
+  static binaries already.
+
+### Parallelism
+
+- Multiple cores: a scheduler thread per core, with run queues that
+  steal from each other ("Multiple cores").
 
 ## The ts-slight examples
+
+Porting stopped in Oct 2026 (D149): fifteen are ported (`examples/`),
+enough to have tried the language on, and new examples are written for
+this version. The survey below is kept as a record.
 
 Not every example has to be ported, and an example can change as much as
 it needs to: if one calls for a change to the compiler or runtime, change
