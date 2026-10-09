@@ -223,7 +223,9 @@ whole runtime at `-O2`; running under qemu takes about 20 ms a test, with
 `million-forks` (3.2 s) the exception. Building the runtime once per run
 would save most of the three minutes, and needs no new target. (Now that
 `make golden` runs both targets on x86-64, it takes about twice as long,
-so building the runtime once per target and run is worth more.)
+so building the runtime once per target and run is worth more.) Done in
+step 11 (D150): the runtime is compiled once and kept, and the tests run
+in parallel, so `make test` takes 46 seconds.
 
 ### Compiling to C instead (discussed Oct 2026)
 

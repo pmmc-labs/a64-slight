@@ -156,3 +156,9 @@ test('relative paths take their . and .. steps', () => {
     assert.equal(relative('t/main.slight', '/abs/x.slight'), '/abs/x.slight');
     assert.equal(relative('/lib/a.slight', 'b.slight'), '/lib/b.slight');
 });
+
+test('a long list expands: mapList is a loop, not a recursion that runs Node out of stack', () => {
+    const items = Array.from({ length: 100000 }, (_, i) => `${i}`).join(' ');
+    const [x] = ex(`(list ${items})`);
+    assert.ok(x!.startsWith('(list 0 1 2 ') && x!.endsWith(' 99998 99999)'));
+});

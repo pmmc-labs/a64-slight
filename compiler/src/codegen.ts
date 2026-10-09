@@ -280,23 +280,28 @@ export function functionLabel(name: string): string {
 // accumulator.
 // (let name expr) binds name for the rest of the body; as the last form,
 // its value is expr's, as in ts-slight. Only the last form can be in tail
-// position.
+// position. A loop over the forms, where slight would tail-recurse (D39),
+// so that a long body doesn't run Node out of stack.
 function compileBody(forms: Sexp, cx: Cx, st: St): [Code, St] {
-    if (forms.t !== 'pair') return [[], st];
-    const last = forms.cdr.t === 'nil';
-    const here: Cx = { ...cx, tail: cx.tail && last };
-    const form = forms.car;
-    if (isForm(form, 'let')) {
+    const code: Code[] = [];
+    for (; forms.t === 'pair'; forms = forms.cdr) {
+        const last = forms.cdr.t === 'nil';
+        const here: Cx = { ...cx, tail: cx.tail && last };
+        const form = forms.car;
+        if (!isForm(form, 'let')) {
+            const [c, st1] = compileExpr(form, here, st);
+            code.push(c);
+            st = st1;
+            continue;
+        }
         const [name, expr] = checkLet(form as Pair);
-        const [code, st1] = compileExpr(expr, here, st);
-        if (last) return [code, st1];
-        const inner: Cx = { ...cx, env: { name: name.name, slot: cx.si, next: cx.env }, si: cx.si + 1 };
-        const [rest, st2] = compileBody(forms.cdr, inner, useSlot(st1, cx.si));
-        return [[code, st.t.storeSlot(cx.si, name.name), rest], st2];
+        const [c, st1] = compileExpr(expr, here, st);
+        if (last) return [[...code, c], st1];
+        code.push(c, st.t.storeSlot(cx.si, name.name));
+        st = useSlot(st1, cx.si);
+        cx = { ...cx, env: { name: name.name, slot: cx.si, next: cx.env }, si: cx.si + 1 };
     }
-    const [code, st1] = compileExpr(form, here, st);
-    const [rest, st2] = compileBody(forms.cdr, cx, st1);
-    return [[code, rest], st2];
+    return [code, st];
 }
 
 function checkLet(form: Pair): [Sym, Sexp] {

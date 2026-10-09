@@ -575,3 +575,15 @@ test('connect given anything but a :keyword hands that device to the new process
     fails('(let c 5) (connect c)', 'test.slight:1:11: connect takes 2 arguments, not 1');
     fails('(let c 5) (connect c 1 2)', 'test.slight:1:11: connect takes 2 arguments, not 3');
 });
+
+test('a long body compiles: its forms are a loop, not a recursion that runs Node out of stack', () => {
+    const forms = Array.from({ length: 50000 }, (_, i) => `(pprint ${i})`).join(' ');
+    assert.match(compile(forms), / {4}\/\/ 49999\n/);
+    assert.match(compile(`(defun f () ${forms} 0) (f)`), /^fn_f:/m);
+});
+
+test('a function with more locals than its frame can hold is a compile error', () => {
+    const lets = (n: number): string => Array.from({ length: n }, (_, i) => `(let x${i} ${i})`).join(' ');
+    assert.match(compile(`${lets(500)} x0`), /sub {2}sp, sp, #4016\n/);
+    assert.throws(() => compile(`${lets(600)} x0`), /the top level needs too many frame slots \(601\)/);
+});

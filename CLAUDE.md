@@ -6,7 +6,7 @@ assembly. The compiler is TypeScript for now and should self-host later.
 
 ## Status
 
-**Steps 0–9 and 10a–10e of [`docs/PLAN.md`](docs/PLAN.md) are done**: the
+**Steps 0–9, 10a–10e and 11 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the
 reader, and a compiler for integers, floats, `#true`/`#false`, `()`,
 symbols, lists (a heap per process of chunks, capped at 64 MB, and
 collected when a receive function waits for a message), strings, closures
@@ -42,14 +42,14 @@ is a character of its own, as in Go), with `ord` and `chr` in the
 prelude, and `string->float` (D148).
 Fifteen of ts-slight's examples are ported (`examples/`; all but
 `ping-pong-tournament` are golden tests); porting has stopped, and new
-examples are written for this version (D149). `make test` passes on x86
-Linux (AArch64 under qemu, x86-64 natively), and on macOS (Stevan runs it
-on his M2 Max after every step, and reports only failures; x86-64 passes
-there too, under Rosetta 2, with `make golden TARGETS=x86_64`). **Next:
-step 11, tooling** (the runtime built once per run, golden tests in
-parallel, the compiler's recursion on long bodies), then the groundwork
-HTTP needs (12: chunks, collecting outside `recv`, and a discussion of
-what goes in C, then TLS), where `recv` can go (13: `defactor`, or
+examples are written for this version (D149). Step 11, tooling, is done:
+the runtime is compiled once and kept, and the golden tests run in
+parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
+x86-64 natively), and on macOS (Stevan runs it on his M2 Max after every
+step, and reports only failures; x86-64 passes there too, under Rosetta
+2, with `make golden TARGETS=x86_64`). **Next: step 12**, the groundwork
+HTTP needs (chunks, collecting outside `recv`, and a discussion of what
+goes in C, then TLS), then where `recv` can go (13: `defactor`, or
 splitting functions at `recv`), and HTTP in slight (14). Each has points
 to settle with Stevan first (`docs/PLAN.md`); 12b, 12c and 13 need a
 discussion in depth before building. Self-hosting waits till the
@@ -161,24 +161,29 @@ works and has the runtime pieces to borrow.
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`) |
 | `examples/` | ts-slight's examples, ported; each with a `.expected` is a golden test |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, and `; args: words` its arguments. |
-| `build/` | Output (ignored) |
+| `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
 ## Commands
 
 - `npm install` once, for `typescript` (used only by `make check`).
 - `make test`: unit tests, the runtime header check, then the golden tests
   for each of `TARGETS` (aarch64 and x86_64 on an x86-64 machine, aarch64
-  on arm64).
+  on arm64). Under a minute on a cloud session.
 - `make unit`, `make golden`, `make headers`: one at a time.
   `t/run.sh t/003-int-max.slight` runs one golden test, for `TARGET`
-  (`aarch64` unless set: `TARGET=x86_64 t/run.sh ...`). A golden test
-  that runs longer than `TIMEOUT` seconds (default 60) is killed and
-  fails.
+  (`aarch64` unless set: `TARGET=x86_64 t/run.sh ...`). The golden tests
+  run `JOBS` at a time (one per CPU unless set; `JOBS=1` for one at a
+  time): each says `ok` or `FAIL` as it finishes, and the failures' diffs
+  come at the end. A golden test that runs longer than `TIMEOUT` seconds
+  (default 60) is killed and fails.
 - `make check`: `tsc --noEmit`.
 - `node bin/slightc.ts -o out file.slight ...`: compile and link. It writes
   `out.S` next to `out`. `-S` writes only the assembly. `--target x86_64`
   compiles for x86-64 (the default is `aarch64`). On x86, run an AArch64
-  result with `qemu-aarch64 ./out`, and an x86-64 one directly.
+  result with `qemu-aarch64 ./out`, and an x86-64 one directly. The
+  runtime is compiled the first time it's needed, for each target, and
+  kept in `build/runtime/` until a runtime file changes (D150);
+  `--runtime` only builds it.
 - Exit codes from `slightc`: 0 ok, 1 compile error, 2 usage or toolchain
   error. `SLIGHT_CC` overrides the C compiler command.
 - `SLIGHT_POISON=1` when running a compiled program makes the collector

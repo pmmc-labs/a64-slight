@@ -212,7 +212,7 @@ changes:
 
 **D38. `slightc` compiles the runtime sources with every program.** *(Default.)*
 Simplest possible build: no runtime build step, no stale archive. Revisit
-if it gets slow.
+if it gets slow. (Revisited in D150: it's compiled once, and kept.)
 
 **D39. "Slight-shaped" allows loops where slight would tail-recurse.**
 *(Default.)* Node has no tail calls, and a recursive tokenizer would
@@ -1186,3 +1186,34 @@ to the end (16, was 12), once the language has settled. WebAssembly,
 compiling to C, RISC-V, 32-bit microcontrollers and multiple cores stay
 parked, in three groups that later ideas can join: new compilation
 targets, new platforms, and parallelism.
+
+## Step 11: tooling
+
+**D150. The runtime is compiled once and kept; the golden tests run in
+parallel.** *(Default, in step 11, which Stevan put first, D149.)*
+`make test` took 7.5 minutes, nearly all of it clang compiling the
+runtime again for each of the 154 programs on each target (D38).
+`slightc` now compiles it once into `build/runtime/`, in a directory
+named for a hash of the compiler command, the flags and every file in
+`runtime/`, and links each program against those objects. So an edit to
+the runtime, or another compiler, gets a build of its own, and nothing
+goes stale, which was D38's worry about an archive. Compiles that start
+at once each build in a directory of their own and rename it into
+place, the first rename winning; `slightc --runtime` builds it alone,
+which `t/run.sh` does before starting the tests. Old builds stay until
+`make clean` (about 300 KB each). `t/run.sh` runs `JOBS` tests at once
+(one per CPU unless set), with `xargs -P`: each says `ok` or `FAIL` as
+it finishes, and what each failure printed comes after, in order, with a
+count; a test the watchdog kills now says so in its diff. The tests
+needed nothing for it: each writes files of its own, and listens on port
+0. `make test` now takes 46 seconds here, building the runtime included.
+The same step made two recursions over a list into loops (D39), since a
+long body ran Node out of stack at about 1,000 `let`s: `compileBody`,
+over a body's forms, and the expander's `mapList`. Every program
+compiles to the same assembly as before, byte for byte. A function is
+still limited to about 500 locals, by its frame (4,095 bytes, the most
+AArch64's `sub` takes in one instruction), and says so in a compile
+error. Rejected: a prebuilt archive made by `make` (it can go stale, and
+`slightc` alone, outside `make`, wouldn't use it); running the targets'
+tests at the same time too (the file tests share names across targets,
+and the CPUs are already busy).

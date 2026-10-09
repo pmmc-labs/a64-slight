@@ -134,10 +134,13 @@ function form(pos: Pos | null, ...items: readonly Sexp[]): Sexp {
     return xs.t === 'pair' ? cons(xs.car, xs.cdr, pos) : xs;
 }
 
-// f over the elements of a list, keeping its positions.
+// f over the elements of a list, in order, keeping its positions. A loop
+// (D39), so that a long list doesn't run Node out of stack.
 function mapList(xs: Sexp, f: (x: Sexp) => Sexp): Sexp {
-    if (xs.t !== 'pair') return xs;
-    return cons(f(xs.car), mapList(xs.cdr, f), xs.pos);
+    const cells: Pair[] = [];
+    for (; xs.t === 'pair'; xs = xs.cdr) cells.push(xs);
+    const items = cells.map((cell) => f(cell.car));
+    return cells.reduceRight<Sexp>((tail, cell, i) => cons(items[i]!, tail, cell.pos), xs);
 }
 
 // The first n elements as they are, and the rest expanded.

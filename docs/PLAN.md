@@ -7,8 +7,9 @@ be a session or two each.
 **Progress:** steps 0–9 and 10a–10e done (under qemu, and natively on
 macOS: Stevan runs `make test` on his M2 Max after every step), a
 second target, x86-64 (which passes on the M2 too, under Rosetta 2), and
-UTF-8 builtins (both below, after 10e). Next (D149): tooling (11), the
-groundwork HTTP needs (12), where `recv` can go (13), then HTTP (14).
+UTF-8 builtins (both below, after 10e), and tooling (11). Next (D149):
+the groundwork HTTP needs (12), where `recv` can go (13), then HTTP
+(14).
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -281,19 +282,21 @@ slight, checked against Python's `json` module, which could become
 `lib/json.slight` when HTTP (14) wants one. Display width is still to
 come (15).
 
-### 11. Tooling
+### 11. Tooling (done, Oct 2026)
 
-First, so that every step after it gets a quicker loop:
+First, so that every step after it gets a quicker loop (D150). `make
+test` went from 7.5 minutes to 46 seconds on a cloud session:
 
-- Build the runtime once per target and test run, not with every
-  program (D38 said to revisit that if it got slow): most of `make
-  test`'s 7.5 minutes is clang compiling the runtime again for each
-  test. Step 0 foresaw a prebuilt archive.
-- Run the golden tests in parallel.
-- The compiler recurses once per form of a body (`compileBody`), so a
-  body of about 1,000 `let`s overflows Node's stack. Make it a loop
-  (D39), before self-hosting copies it.
-- Whatever else gets in the way day to day (compile errors, say).
+- `slightc` compiles the runtime once per target, into `build/runtime/`,
+  under a hash of the compiler, the flags and the runtime's files, and
+  links programs against it; `--runtime` builds it alone.
+- `t/run.sh` runs the golden tests in parallel, `JOBS` at a time, with
+  the failures' diffs at the end; a test the watchdog kills says so.
+- `compileBody` and the expander's `mapList` loop over a list rather than
+  recursing (D39), so a long body no longer runs Node out of stack; the
+  assembly of every program came out the same.
+
+Left for when it gets in the way: better compile errors, say.
 
 ### 12. Groundwork for HTTP
 

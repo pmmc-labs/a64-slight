@@ -7,7 +7,7 @@
 # `make golden TARGETS=x86_64` runs them under Rosetta 2. A target that
 # isn't the machine's own is cross-compiled with clang for Linux and run
 # under qemu (needs clang, lld, gcc-aarch64-linux-gnu for the sysroot, and
-# qemu-user).
+# qemu-user). The golden tests run JOBS at a time (one per CPU by default).
 
 ARCH := $(shell uname -m)
 
