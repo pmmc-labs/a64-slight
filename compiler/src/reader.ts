@@ -1,6 +1,6 @@
 // The reader: source text to s-expressions with positions.
 //
-// Ported from ts-cpi's reader (reference/ts-cpi/src/reader.ts), with
+// Ported from ts-cpi's reader, with
 // slight's differences:
 //   - `#true` and `#false` read as symbols (booleans are reserved symbols)
 //   - integers are 63-bit

@@ -1,4 +1,4 @@
-// Tests for the reader. Ported from ts-cpi's (reference/ts-cpi/tests/reader.test.ts),
+// Tests for the reader. Ported from ts-cpi's,
 // adjusted for slight: booleans are symbols, integers are 63-bit, strings
 // also take \r and \e, and there is no quasiquote.
 

@@ -1,3 +1,0 @@
-say: 3
-fault: <1:/wrongtag>: SEND ^/multiplier:mul to <2:/adder>: the tag belongs to /multiplier
-done: 2 processes, 3 ticks, 1 faults

@@ -20,8 +20,8 @@ bring it up before baking it in further.
   are not automatically the right ones here.
 - **Aggressively simple.** Anything that adds complexity gets cut or changed.
   Practical beats pure.
-- **The user surface of ts-slight** (see `reference/ts-slight/examples/`) is
-  what we keep. The internals of ts-slight and ts-cpi are not.
+- **The user surface of ts-slight** is what we keep. The internals of
+  ts-slight and ts-cpi are not.
 - **Native AArch64.** macOS on Apple Silicon first, AArch64 Linux from the
   same code. x86-64 (Linux, and macOS under Rosetta 2) is a second target,
   from the same compiler through a target interface (D145). Development on
@@ -34,8 +34,7 @@ bring it up before baking it in further.
 
 ### Syntax
 
-Same reader as ts-slight (see `reference/ts-slight/src/parser.ts` and
-`reference/ts-cpi/src/reader.ts`):
+Same reader as ts-slight's (ported from ts-cpi's):
 
 - `( ... )` lists; `()` is nil
 - integers (`42`, `-7`) and floats (`3.14`)
@@ -273,9 +272,7 @@ defined. A number comes as a string: `(string->int (car @ARGV))`.
 
 ### Builtins and the prelude
 
-Keep ts-slight's names where possible
-(`reference/ts-slight/docs/NOTES-language.md`, `lib/Builtins.slight`,
-`lib/Prelude.slight`).
+Keep ts-slight's names where possible.
 
 **In C (or assembly):**
 - arithmetic: `+ - *` on any two numbers; an integer and a float give a
@@ -677,7 +674,7 @@ bumps the heap pointer of `rt_current`, the running process.
 
 ### Register convention
 
-Carried over from the spike (`spike/aarch64/actor.h`, `rt.h`), with
+Carried over from the spike (BACKGROUND.md), with
 AAPCS64's argument registers (D47). x86-64's is after AArch64's.
 
 | Register | Role |
@@ -811,7 +808,7 @@ line-by-line translation.
 - **Golden tests**: compile a `.slight` file, run it (natively, or under
   qemu when it's for another architecture), diff its stdout and stderr
   against a `.expected` file, with a last line `exit: N` when the exit
-  status isn't 0. Like `spike/aarch64/t/run.sh`. Every plan step adds
+  status isn't 0. Every plan step adds
   some. The same tests and expected output serve both targets (D146).
 - **Compiler unit tests** with `node:test`, per pass.
 - **Timing uses the virtual clock** (`t/run.sh` sets `SLIGHT_CLOCK=virtual`),

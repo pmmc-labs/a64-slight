@@ -72,6 +72,3 @@ written in slight on top of TCP. See:
 - [`docs/PLAN.md`](docs/PLAN.md): the build order
 - [`docs/DECISIONS.md`](docs/DECISIONS.md): decisions and their reasons
 - [`docs/BACKGROUND.md`](docs/BACKGROUND.md): history and prior art
-- [`spike/aarch64/`](spike/aarch64/): the native spike that proved the
-  runtime model (232 ns message round trips on an M2 Max)
-- [`reference/`](reference/README.md): files from ts-slight and ts-cpi

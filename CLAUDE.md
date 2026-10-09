@@ -70,10 +70,9 @@ language settles (16). Update this section as steps land.
    art, and notes on other targets, compiling to C, multiple cores,
    embedded boards and WebAssembly (parked). Optional.
 
-Reference material (read-only, never built): [`reference/`](reference/README.md)
-holds ts-slight's examples and libraries (the target user surface) and the
-ts-cpi reader to port. [`spike/`](spike/) holds the AArch64 spike, which
-works and has the runtime pieces to borrow.
+The ts-slight and ts-cpi files this started from, and the AArch64 spike,
+were removed in Oct 2026; BACKGROUND.md says what came from them and how
+to get them back from git (`3fd71e0`).
 
 ## Working rules
 
@@ -120,7 +119,7 @@ works and has the runtime pieces to borrow.
   has no regexes.
 - In C headers shared with assembly, prefix every name `RT_`/`rt_` (macOS's
   `<stdlib.h>` pulls in `<sys/wait.h>`, which has a `P_PID`).
-- Comments explain why, not what. Match the density of the spike's code.
+- Comments explain why, not what. Match the density of the runtime's code.
 
 ## Toolchain
 
@@ -138,16 +137,16 @@ works and has the runtime pieces to borrow.
 
   `slightc` uses `clang --target=aarch64-linux-gnu -fuse-ld=lld -static`,
   and binaries run with `qemu-aarch64`. Timings under qemu are meaningless.
-  Don't add `--sysroot=/usr/aarch64-linux-gnu` (the spike's Makefile has
-  it): clang finds the cross toolchain without it, and with it lld can't
+  Don't add `--sysroot=/usr/aarch64-linux-gnu`: clang finds the cross
+  toolchain without it, and with it lld can't
   link `-lm`, because the sysroot's `libm.a` is a linker script with
   absolute paths.
 - **Other hosts** aren't set up for. On arm64 Linux, the x86-64 target
   needs the x86-64 cross libc (`gcc-x86-64-linux-gnu`) and `qemu-user`. An
   Intel Mac, or `make` run under Rosetta, can only build x86-64
   (`TARGETS=x86_64`).
-- Check the setup with `make -C spike/aarch64 test`. It should print five
-  `ok` lines.
+- Check the setup with `t/run.sh t/000-int.slight` and `TARGET=x86_64
+  t/run.sh t/000-int.slight`. Each should end `1 tests, 0 failed`.
 - Use clang's integrated assembler, not GNU `as` (it rejects some of the
   macros).
 - Don't use `-Werror`; a different Apple clang version shouldn't break the

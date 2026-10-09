@@ -1,3 +1,0 @@
-say: the multiplier died
-dead letter: ^/multiplier:product(999) from <1:/main> to <2:/multiplier>
-done: 12 processes, 23 ticks, 0 faults

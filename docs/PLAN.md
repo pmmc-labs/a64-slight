@@ -31,7 +31,7 @@ examples/        ported ts-slight examples
 Makefile         native on arm64; clang cross-compile + qemu elsewhere
 ```
 
-Borrow from `spike/aarch64/`: the Makefile's cross-compile logic,
+Borrow from the spike (BACKGROUND.md): the Makefile's cross-compile logic,
 `t/run.sh`, `t/headers.c` (the macOS `P_PID` lesson: prefix everything in
 headers with `rt_`/`RT_`), `rt_switch`, the `LOADADDR` macro (Apple's
 `@PAGE`/`@PAGEOFF` vs ELF's `:lo12:`), and the `RT_ASM()` symbol-naming
@@ -50,8 +50,8 @@ become a prebuilt archive.
 - `package.json`, `tsconfig.json` (copy ts-cpi's: strict,
   `erasableSyntaxOnly`, `allowImportingTsExtensions`), `node --test`
   script.
-- The reader: port `reference/ts-cpi/src/reader.ts` (it has source
-  positions), with its tests (`reference/ts-cpi/tests/reader.test.ts`).
+- The reader: port ts-cpi's (it has source positions), with its
+  tests.
 - `bin/slightc.ts file.slight -o out`: read, emit `.S`, call clang to
   link with the runtime.
 - A minimal runtime: `main` sets up `x28` with a process struct whose
@@ -132,7 +132,7 @@ shortest form that reads back the same; `(== 1 1.0)` is `#true` and
   static closures for `defun`s used as values.
 - `lib/prelude.slight`: `map filter fold/l fold/r reverse append length
   nth range member? find assoc lookup ...`, `and or not`, string helpers.
-- A TAP-style test library in slight, after `reference/ts-slight/lib/Test.slight`.
+- A TAP-style test library in slight, after ts-slight's `Test.slight`.
 - Port the pure examples as golden tests: `fib`, `fold-konts`,
   `closure-objects` (minus `gensym`), `simple-crappy-adts`,
   `game-of-life` (the non-actor one).
@@ -501,7 +501,7 @@ Not every example has to be ported, and an example can change as much as
 it needs to: if one calls for a change to the compiler or runtime, change
 the example instead, or leave it out (D84).
 
-From a survey of `reference/ts-slight/examples/`. Almost all of them need
+From a survey of ts-slight's 27 examples. Almost all of them need
 mechanical changes: `if`/`when`/`case` become `cond`; `head`/`tail` become
 `car`/`cdr`; `sys/io/print-ln` becomes `pprint` or `tty/write`; `grep`
 becomes `filter`, and `(range a b 1)` becomes `(range a (+ b 1))` (D78);

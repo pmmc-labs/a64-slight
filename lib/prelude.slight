@@ -1,7 +1,7 @@
 ; The prelude: compiled with every program. It can only define functions.
 ;
-; The names and argument orders are ts-slight's (reference/ts-slight/lib/
-; Prelude.slight), except where they were confusing (D78): filter keeps
+; The names and argument orders are ts-slight's (its Prelude.slight),
+; except where they were confusing (D78): filter keeps
 ; what matches and remove drops it (ts-slight's filter dropped, and grep
 ; kept); range is (range start end), from start up to but not including
 ; end; take and skip stop at the end of the list; starts-with? and

@@ -9,8 +9,8 @@ Open questions are listed at the end of [`DESIGN.md`](DESIGN.md).
 
 **D1. Resurrect the async calling convention, natively.** *(User)*
 VM3's docs described an assembly-level actor system. The AArch64 spike
-(`spike/aarch64/`) showed it works as real machine code: 232 ns per round
-trip and ~16.8 KB per idle process on an M2 Max. See
+(in git at `3fd71e0`) showed it works as real machine code: 232 ns per
+round trip and ~16.8 KB per idle process on an M2 Max. See
 [`BACKGROUND.md`](BACKGROUND.md).
 
 **D2. Build a stripped-down slight on it, keeping ts-slight's user surface.**

@@ -10,12 +10,28 @@ looks the way it does.
 |---|---|---|
 | **AVM** (stevan/AVM) | Aug 19–22, 2024 (8 commits) | An actor VM in Perl. It works: a tick loop, a message bus, spawn/send/recv, yield/stop, reaping, emulated multi-core. Its best trick was that a process's stack survives a yield, and a RECV on an empty mailbox resumes at the RECV itself. So every RECV is an await point with locals intact, which is how its recursive multiplier waits mid-handler. |
 | **VM3** (stevan/VM3) | Aug 26 – Sep 11, 2024 | The second attempt, in Perl: docs first (an async calling convention, an assembly language for actors), then an assembler, CALL/RETURN frames, locals and int widths. It got no actor opcodes. About a week went into a TimerWheel that nothing used ("I will stop hyper focusing on this for now"), and the project stalled. |
-| **ts-slight** (pmmc-labs/ts-slight) | Jul 6 – Sep 24, 2026 (190 commits) | slight in TypeScript: a Lisp with fork/send/recv/join/yield, a fuel-driven scheduler, and the examples in `reference/ts-slight/examples/`. **Its user surface is what a64-slight keeps.** |
+| **ts-slight** (pmmc-labs/ts-slight) | Jul 6 – Sep 24, 2026 (190 commits) | slight in TypeScript: a Lisp with fork/send/recv/join/yield, a fuel-driven scheduler, and 27 examples. **Its user surface is what a64-slight kept.** |
 | **ts-cpi** (pmmc-labs/ts-cpi) | Sep 25, 2026 – (71 commits by Oct 3) | ts-slight's successor: a "control plane interpreter" with errors as values, checkpoints, exit notifications with reasons, reply addresses answered at most once, a deterministic tick scheduler and a virtual clock. Much bigger (roles, grants, TUI, HTTP). a64-slight takes the virtual clock, the reader, and some ideas; not the CPI. |
+
+**Removed from the repository in Oct 2026.** Until then `reference/` held
+read-only copies of the parts of ts-slight and ts-cpi this project
+started from (copied on 2026-10-03 from `pmmc-labs/ts-slight` at
+`c0842ff` and `pmmc-labs/ts-cpi` at `a756ab9`), and `spike/` held the
+AArch64 spike and its calling-conventions doc. Everything taken from
+them now lives in the tree: ts-cpi's reader and its tests
+(`compiler/src/reader.ts`, `compiler/tests/reader.test.ts`), ts-slight's
+prelude names and TAP library (`lib/`), fifteen of its examples
+(`examples/`), its key events (`runtime/tty.c`), and the spike's
+`rt_switch`, register convention, header check and cross-compiling
+(`runtime/`, `t/headers.c`, the Makefile). The last commit with both
+directories is `3fd71e0`: `git show 3fd71e0:spike/aarch64/README.md`,
+or `git checkout 3fd71e0 -- spike reference` to have them back for a
+while. Their originals are still in those repositories.
 
 ## The calling convention (VM3, revised Oct 2026)
 
-`spike/CALLING_CONVENTIONS.md` is the October 2026 revision of VM3's doc.
+The spike's `CALLING_CONVENTIONS.md` (in git at `3fd71e0`) was the
+October 2026 revision of VM3's doc.
 It fixed the holes in the 2024 design:
 
 - **A stray message could be taken as a reply.** In AVM's multiplier test, an
@@ -58,11 +74,12 @@ run-to-completion boundary (no stack), while preemption, `yield`, `join`
 and blocking syscalls use the stackful mechanism (keep the stack). That is
 "option A" (D9).
 
-## The AArch64 spike (`spike/aarch64/`)
+## The AArch64 spike (in git at `3fd71e0`)
 
 Hand-written AArch64 actors on a small C runtime, implementing the
 calling-conventions doc: the multiplier (with the forged reply), dying
-adders, a wrong-tag fault, preemption, deadlock detection. Its README has
+adders, a wrong-tag fault, preemption, deadlock detection. Its README (in
+git at `3fd71e0`) has
 the details. Results on an M2 Max, natively:
 
 - **232 ns per REQUEST/AWAIT round trip** (deterministic tick mode; every
