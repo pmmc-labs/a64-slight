@@ -24,13 +24,13 @@ export const KEY_NAMES: readonly string[] = [
 ];
 
 // What a device and its owner say to each other, in RT_DEV_ order.
-export const DEVICE_WORDS: readonly string[] = ['open', 'line', 'eof', 'write', 'accept'];
+export const DEVICE_WORDS: readonly string[] = ['open', 'line', 'eof', 'write', 'accept', 'read', 'lines', 'chunks', 'chunk'];
 
 // Why a device failed, from errno, in RT_ERR_ order.
 export const ERRNO_NAMES: readonly string[] = [
     'enoent', 'eacces', 'eperm', 'eexist', 'eisdir', 'enotdir', 'enametoolong', 'eloop', 'erofs', 'enospc',
     'efbig', 'emfile', 'enfile', 'eio', 'econnrefused', 'econnreset', 'epipe', 'etimedout', 'eaddrinuse',
-    'eaddrnotavail', 'ehostunreach', 'enetunreach', 'enotfound', 'io-error',
+    'eaddrnotavail', 'ehostunreach', 'enetunreach', 'enotfound', 'too-big', 'io-error',
 ];
 
 // The symbols the runtime makes (ending a process, faults, keys,

@@ -83,11 +83,12 @@ the program's arguments. Every test passes on both targets, on Linux and
 on macOS. A million processes passing a message down a chain take a few
 seconds.
 
-Next is the groundwork HTTP needs (step 12): reading a device in chunks,
-JSON and s-expressions parsed in C, inline documentation, collecting
-outside `recv`, C libraries and TLS, and looking up host names. Then
-where `recv` can go (13), and HTTP, written in slight on top of TCP
-(14). Self-hosting waits until the language settles.
+Next is the rest of the groundwork HTTP needs (step 12; reading a
+device in chunks and by length is done): JSON and s-expressions parsed
+in C, inline documentation, collecting outside `recv`, C libraries and
+TLS, and looking up host names. Then where `recv` can go (13), and
+HTTP, written in slight on top of TCP (14). Self-hosting waits until
+the language settles.
 
 ## Documents
 

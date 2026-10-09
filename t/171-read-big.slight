@@ -1,0 +1,55 @@
+; Reading big inputs (D159, D160). A chunk is what's been read, and
+; never more than 64 KB; a count can be bigger, and comes whole. A line
+; or a count of 64 MB or more, too big for a process's heap, ends the
+; owner with (:error (:too-big where)), so an endless line can't use up
+; the runtime's memory.
+
+(defun write-lines (f n)
+    (cond
+        ((== n 0) (disconnect f))
+        (#true    (send f (list :write "0123456789" \n)) (write-lines f (- n 1)))))
+
+(defun writer (n)
+    (recv
+        ((:open f) (write-lines f n))))
+
+; The lines a reader gets, and the sizes of its chunks, in order, having
+; sent (:read how) for each how in first while it handles (:open f).
+(defun measure (first seen)
+    (recv
+        ((:open f)    (map (lambda (how) (send f (list :read how))) first) (measure first seen))
+        ((:line f s)  (measure first (cons s seen)))
+        ((:chunk f s) (measure first (cons (str-len s) seen)))
+        ((:eof f)     (reverse seen))))
+
+; 10,000 lines of 11 bytes: 110,000 bytes
+(let path "build/t/171-read-big.txt")
+(join (connect :fs/write path (writer 10000)))
+
+; a read is a chunk, of 64 KB at most
+(pprint (join (connect :fs/read path (measure (list :chunks) ()))))
+
+; after a line, the first chunk is what the reader had read past it (its
+; first read, while it read lines, was 4 KB), then a chunk for each read
+(defun line-then-chunks (seen)
+    (recv
+        ((:open f)    (line-then-chunks seen))
+        ((:line f s)  (send f (list :read :chunks)) (line-then-chunks (cons s seen)))
+        ((:chunk f s) (line-then-chunks (cons (str-len s) seen)))
+        ((:eof f)     (reverse seen))))
+
+(pprint (join (connect :fs/read path (line-then-chunks ()))))
+
+; a count of 100,000 bytes comes whole: 9,090 lines and the first ten
+; bytes of the next, whose newline then comes as a line, before the last
+; 909 lines
+(let counted (cadr (join (connect :fs/read path (measure (list 100000) ())))))
+(pprint (list (take 3 counted) (length counted)))
+
+; /dev/zero is one endless line
+(pprint (join (connect :fs/read "/dev/zero" (measure () ()))))
+
+; a count of 64 MB is too big before anything is read; one less isn't,
+; and gives what there is
+(pprint (join (connect :fs/read "t/data/lines.txt" (measure (list 67108864) ()))))
+(pprint (join (connect :fs/read "t/data/lines.txt" (measure (list 67108863) ()))))

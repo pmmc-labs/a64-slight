@@ -504,7 +504,7 @@ static void deliver(rt_proc_t *p, rt_msg_t *m) {
 }
 
 static void command(struct rt_device *d, rt_value_t msg);
-static void read_on(rt_value_t pid);
+static void read_on(rt_proc_t *p, rt_value_t pid);
 
 // To a process that has ended, a message just disappears, as in Erlang. A
 // device takes it at once.
@@ -515,17 +515,25 @@ rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
     return RT_NIL;
 }
 
+// A device's message is cut only now, when its owner waits again after
+// taking the last one, so whatever the owner did with that one, (:read
+// how) or disconnect, applies to the next (D158).
 rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) {
     rt_proc_t *p = rt_current;
+    if (p->reading) {
+        rt_value_t device = p->reading;
+        p->reading = 0;
+        read_on(p, device);                     // which may end p, if reading fails
+    }
     if (p->heap_bytes - (p->heap_limit - p->heap_ptr) >= p->gc_at) collect(p, args, n);
     rt_msg_t  *m = p->mail;
     if (m) {
         p->mail = m->next;
         if (!p->mail) p->mail_last = NULL;
         if (m->chunk) adopt(p, m->chunk);
-        rt_value_t v = m->value, device = m->device;
+        rt_value_t v = m->value;
+        p->reading = m->device;
         free(m);
-        if (device) read_on(device);            // which may end p, if reading fails
         return v;
     }
     p->code = code;
@@ -960,20 +968,30 @@ static int idle(void) {
 // (:error (name path)), name being errno's; if a read or a write fails, it
 // ends the same way then.
 //
-// A file (connect :fs/read path expr, :fs/write, :fs/append): a reader
-// sends (:line f s) one at a time, without the newline, the next read only
-// when the owner has taken the last, so a long file never piles up in a
-// mailbox; then (:eof f), and it closes. A writer takes (:write x ...) from
-// anyone, renders the xs as tty/write does, and writes them at once. A file
-// is read when its owner takes a line, so a reader is never waited for; one
-// that can keep a read waiting (a FIFO, a terminal) waits with the whole
+// A reader (a file from :fs/read, or a connection) sends its owner one
+// message at a time: it cuts the next when the owner next waits in recv
+// after taking the last (rt_recv), so a long file never piles up in a
+// mailbox, and whatever the owner does with a message applies to the next
+// (D158). It cuts what it reads as (:read how) says, how being :lines,
+// the first way, (:line f s) without the newline; :chunks, (:chunk f s) of
+// what's been read, up to 64 KB; or a count, one (:chunk f s) of that many
+// bytes, fewer if the input ends first, for the next message alone. Then
+// (:eof f), and nothing more. A line or count of 64 MB or more, too big
+// for a heap, ends the owner with (:error (:too-big where)).
+//
+// A file (connect :fs/read path expr, :fs/write, :fs/append) closes after
+// (:eof f). A writer takes (:write x ...) from anyone, renders the xs as
+// tty/write does, and writes them at once. A file is read when its owner
+// waits for its next message, so a reader is never waited for; one that
+// can keep a read waiting (a FIFO, a terminal) waits with the whole
 // runtime.
 //
 // A socket (connect :tcp "host:port" expr, connect :tcp/listen port expr)
 // is waited for in select(), with stdin and the next timer. A connection
-// sends (:open c) once it's connected, then lines as a file does (it's
-// read only while no line of its is in its owner's mailbox), and (:eof c)
-// when the other end closes; it can still be written to then. It takes
+// sends (:open c) once it's connected, then reads as a file does (but
+// only while its owner waits for what it has, so a fast sender is held
+// back by TCP), and (:eof c) when the other end closes; it can still be
+// written to then. It takes
 // (:write x ...) as a file does, but keeps what the socket can't take yet,
 // and writes it when it can; closing it waits for that, and until then it
 // keeps the program running. A listener sends (:open l port), port being
@@ -985,6 +1003,8 @@ static int idle(void) {
 #define DEV_TCP      3                  // a device's mode, after RT_FS_READ, _WRITE and _APPEND
 #define DEV_LISTEN   4
 #define ERR_NOTFOUND (-1)               // no such host: getaddrinfo's errors aren't errno's
+#define ERR_TOOBIG   (-2)               // a line or count of HEAP_MAX or more
+#define READ_CHUNK   (64 << 10)         // the most a chunk holds
 
 typedef struct rt_device {
     struct rt_device *next;             // the owner's next device
@@ -996,8 +1016,10 @@ typedef struct rt_device {
     int64_t           port;             // a listener's
     char             *buf;              // what's been read, but not yet sent...
     size_t            at, len, cap;     // ...from at to len
+    uint64_t          how;              // how it cuts: RT_DEV_LINES or RT_DEV_CHUNKS
+    int64_t           count;            // bytes for its next message alone, or -1
     int               eof;              // read has returned 0
-    int               sent;             // a line of its is in its owner's mailbox
+    int               sent;             // its owner has its last message, and hasn't waited since
     struct rt_device *next_socket;      // in sockets, or graveyard
     int               connecting;       // till connect() has finished
     int               waiting;          // accepted, and not yet handed to a process: it reads nothing
@@ -1036,6 +1058,7 @@ static uint64_t errno_name(int err) {
         case EHOSTUNREACH:  return RT_ERR_EHOSTUNREACH;
         case ENETUNREACH:   return RT_ERR_ENETUNREACH;
         case ERR_NOTFOUND:  return RT_ERR_ENOTFOUND;
+        case ERR_TOOBIG:    return RT_ERR_TOOBIG;
         default:            return RT_ERR_OTHER;
     }
 }
@@ -1062,6 +1085,8 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
     d->fd    = fd;
     d->mode  = mode;
     d->site  = site;
+    d->how   = RT_DEV_LINES;
+    d->count = -1;
     if (path) {
         d->path     = must(malloc(len + 1));
         d->path_len = len;
@@ -1160,10 +1185,11 @@ static void tell(rt_device_t *d, uint64_t word, int more) {
     tell_list(d, word, RT_NIL, more);
 }
 
-static void tell_line(rt_device_t *d, const char *bytes, size_t len) {
+// (word f s): a line or a chunk.
+static void tell_string(rt_device_t *d, uint64_t word, const char *bytes, size_t len) {
     uint64_t *space = must(malloc((len / 8 + 6) * sizeof *space));
     _Alignas(16) rt_value_t cell[2];
-    tell_list(d, RT_DEV_LINE, cons_at(cell, string_in(space, bytes, len), RT_NIL), 1);
+    tell_list(d, word, cons_at(cell, string_in(space, bytes, len), RT_NIL), 1);
     free(space);
 }
 
@@ -1187,14 +1213,21 @@ static int take_line(rt_device_t *d, const char **line, size_t *len) {
 }
 
 // Reads once more: what read returned (0 at the end, which sets eof), or
-// -1 with errno set.
+// -1 with errno set. The buffer doubles till it has room for a chunk, or
+// what's left of a count if that's less, or a byte more of a line; so it
+// grows with what comes, and a count of 60 MB takes no memory until 60 MB
+// does.
 static ssize_t fill(rt_device_t *d) {
     if (d->at) memmove(d->buf, d->buf + d->at, d->len - d->at);
     d->len -= d->at;
     d->at   = 0;
-    if (d->len == d->cap) {
-        d->cap = d->cap ? d->cap * 2 : 4096;
-        d->buf = must(realloc(d->buf, d->cap));
+    size_t left = d->count > (int64_t)d->len ? (size_t)d->count - d->len : 0;
+    size_t room = left ? (left < READ_CHUNK ? left : READ_CHUNK) : d->how == RT_DEV_CHUNKS ? READ_CHUNK : 1;
+    size_t cap  = d->cap ? d->cap : 4096;
+    while (cap - d->len < room) cap *= 2;
+    if (cap != d->cap) {
+        d->cap = cap;
+        d->buf = must(realloc(d->buf, cap));
     }
     ssize_t got;
     do got = read(d->fd, d->buf + d->len, d->cap - d->len); while (got < 0 && errno == EINTR);
@@ -1203,44 +1236,71 @@ static ssize_t fill(rt_device_t *d) {
     return got;
 }
 
-// A connection's next line, or (:eof c) once, if it has one to send.
-static void socket_next(rt_device_t *d) {
+// Sends d's next message, if what's been read makes one: 1 if it did, or
+// has nothing more to send (and d may be gone); 0 if it needs more bytes.
+static int cut(rt_device_t *d) {
+    size_t      have = d->len - d->at, n;
     const char *line;
-    size_t      len;
-    if (take_line(d, &line, &len)) {
-        tell_line(d, line, len);
-    } else if (d->eof && !d->eof_sent) {
+    if (d->eof_sent) return 1;
+    if (d->count >= HEAP_MAX) {
+        fail(d, ERR_TOOBIG);
+        return 1;
+    }
+    if (d->count >= 0) {
+        if (have < (size_t)d->count && !d->eof) return 0;
+        n        = have < (size_t)d->count ? have : (size_t)d->count;
+        d->count = -1;
+        tell_string(d, RT_DEV_CHUNK, d->buf + d->at, n);
+        d->at   += n;
+        return 1;
+    }
+    if (d->how == RT_DEV_LINES && take_line(d, &line, &n)) {
+        tell_string(d, RT_DEV_LINE, line, n);
+        return 1;
+    }
+    if (d->how == RT_DEV_CHUNKS && have) {
+        n      = have < READ_CHUNK ? have : READ_CHUNK;
+        tell_string(d, RT_DEV_CHUNK, d->buf + d->at, n);
+        d->at += n;
+        return 1;
+    }
+    if (d->eof) {
         d->eof_sent = 1;
         tell(d, RT_DEV_EOF, 0);
+        if (d->mode != DEV_TCP) close_device(d);
+        return 1;
     }
+    if (have >= HEAP_MAX) {                     // a line with no end in sight
+        fail(d, ERR_TOOBIG);
+        return 1;
+    }
+    return 0;
 }
 
-// The owner has taken a message from reader pid: on to the next line.
-static void read_on(rt_value_t pid) {
+// p, waiting again, took reader pid's message last: on to its next. A
+// file reads till it has one; a connection waits in select() for more.
+static void read_on(rt_proc_t *p, rt_value_t pid) {
     rt_device_t *d = procs[pid >> RT_PID_SHIFT].device;
-    if (!d) return;                             // closed since
+    if (!d || d->owner != p->pid) return;       // closed since, or handed over
     d->sent = 0;
-    if (d->mode == DEV_TCP) {
-        socket_next(d);                         // or wait in select() for more
-        return;
-    }
-    const char *line;
-    size_t      len;
-    for (;;) {
-        if (take_line(d, &line, &len)) {
-            tell_line(d, line, len);
-            return;
-        }
-        if (d->eof) {
-            tell(d, RT_DEV_EOF, 0);
-            close_device(d);
-            return;
-        }
+    while (!cut(d) && d->mode != DEV_TCP) {
         if (fill(d) < 0) {
             fail(d, errno);
             return;
         }
     }
+}
+
+// (:read how), to reader d: 0 if how isn't one it knows.
+static int read_as(rt_device_t *d, rt_value_t args) {
+    rt_value_t how = rt_is_cons(args) && rt_cdr(args) == RT_NIL ? rt_car(args) : RT_NIL;
+    if (how == rt_symbol(RT_SYM_DEVICE + RT_DEV_LINES))          d->how   = RT_DEV_LINES;
+    else if (how == rt_symbol(RT_SYM_DEVICE + RT_DEV_CHUNKS))    d->how   = RT_DEV_CHUNKS;
+    else if (!(how & RT_TAG_INT_MASK) && rt_int_value(how) >= 0) d->count = rt_int_value(how);
+    else                                                         return 0;
+    // A connection waiting in select() may have enough for the new way.
+    if (d->mode == DEV_TCP && !d->sent && !d->connecting && !d->waiting) cut(d);
+    return 1;
 }
 
 // Writes what a socket has, as far as it takes it: 0, or -1 with errno
@@ -1271,7 +1331,10 @@ static void queue(rt_device_t *d, const char *bytes, size_t len) {
 }
 
 static void command(rt_device_t *d, rt_value_t msg) {
-    if (d->mode == RT_FS_READ || d->mode == DEV_LISTEN || !rt_is_cons(msg) || rt_car(msg) != rt_symbol(RT_SYM_DEVICE + RT_DEV_WRITE)) {
+    rt_value_t word   = rt_is_cons(msg) ? rt_car(msg) : RT_NIL;
+    int        reader = d->mode == RT_FS_READ || d->mode == DEV_TCP;
+    if (reader && word == rt_symbol(RT_SYM_DEVICE + RT_DEV_READ) && read_as(d, rt_cdr(msg))) return;
+    if (d->mode == RT_FS_READ || d->mode == DEV_LISTEN || word != rt_symbol(RT_SYM_DEVICE + RT_DEV_WRITE)) {
         rt_dead_letter(msg, d->site);
         return;
     }
@@ -1485,7 +1548,7 @@ static void socket_event(rt_device_t *d, int r, int w) {
             fail(d, errno);
             return;
         }
-        socket_next(d);
+        cut(d);
     }
 }
 

@@ -1,0 +1,76 @@
+; An HTTP-shaped exchange over a socket (D158, D159). A request is lines
+; up to a blank one, then a body of Content-Length bytes: the server
+; sends (:read n) while it handles the blank line, so the body comes whole
+; as one (:chunk c s), and none of it is cut as lines, even what looks
+; like the end of the headers. The client sends three requests at once,
+; so the later ones are already read when the first body is cut, and
+; reads the answers the same way. The expected output is from a model in
+; Python (t/models/http-shaped.py).
+
+; The Content-Length among the header lines hs, or 0. A line keeps the
+; \r before its \n.
+(defun content-length (hs)
+    (cond
+        ((nil? hs) 0)
+        ((starts-with? (car hs) "Content-Length: ")
+            (string->int (substring (car hs) 16 (- (str-len (car hs)) 1))))
+        (#true (content-length (cdr hs)))))
+
+; --- the server: for each request, its request line and what its body was
+
+(defun request (c hs)
+    (recv
+        ((:open c)   (request c hs))
+        ((:line c s)
+            (cond
+                ((eq? s "\r") (send c (list :read (content-length hs))) (body c (car (reverse hs))))
+                (#true        (request c (cons s hs)))))
+        ((:eof c)    (disconnect c))))
+
+(defun body (c line)
+    (recv
+        ((:chunk c s)
+            (let text (concat (substring line 0 (- (str-len line) 1)) " got " (str-len s) " bytes: " s))
+            (send c (list :write "HTTP/1.1 200 OK\r\nContent-Length: " (str-len text) "\r\n\r\n" text))
+            (request c ()))))
+
+; --- the client: the n answers' bodies, with \r and \n shown as such
+
+(defun client (n)
+    (recv
+        ((:open c)
+            (send c (list :write
+                "POST /one HTTP/1.1\r\nContent-Length: 11\r\n\r\nhello\nworld"
+                "POST /two HTTP/1.1\r\nHost: localhost\r\nContent-Length: 6\r\n\r\na\r\n\r\nb"
+                "GET /three HTTP/1.1\r\n\r\n"))
+            (response n () ()))))
+
+(defun response (n hs seen)
+    (recv
+        ((:line c s)
+            (cond
+                ((eq? s "\r") (send c (list :read (content-length hs))) (answer n seen))
+                (#true        (response n (cons s hs) seen))))))
+
+(defun answer (n seen)
+    (recv
+        ((:chunk c s)
+            (cond
+                ((== n 1) (disconnect c) (reverse (cons (show s) seen)))
+                (#true    (response (- n 1) () (cons (show s) seen)))))))
+
+(defun show (s) (str-join "\\n" (str-split (str-join "\\r" (str-split s "\r")) "\n")))
+
+(defun listener ()
+    (recv
+        ((:open l port)
+            (let me $$)
+            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (client 3))))))
+            (serving l))))
+
+(defun serving (l)
+    (recv
+        ((:accept _ conn) (connect conn (request conn ())) (serving l))
+        ((:client r)      (disconnect l) r)))
+
+(pprint (join (connect :tcp/listen 0 (listener))))

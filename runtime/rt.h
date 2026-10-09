@@ -113,20 +113,25 @@
 
 // A device (process.c: a file or a socket, from connect) talks to its
 // owner with these: (:open f) first (a listener's is (:open l port)), a
-// reader's (:line f s) and (:eof f), a listener's (:accept l conn), and
-// the (:write x ...) a writer takes. RT_DEV_x is symbol RT_SYM_DEVICE + x.
+// reader's (:line f s), (:chunk f s) and (:eof f), a listener's (:accept l
+// conn); and it takes a writer's (:write x ...), and a reader's (:read how),
+// how being :lines, :chunks or a count. RT_DEV_x is symbol RT_SYM_DEVICE + x.
 #define RT_SYM_DEVICE       54    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
 #define RT_DEV_LINE          1    // :line
 #define RT_DEV_EOF           2    // :eof
 #define RT_DEV_WRITE         3    // :write
 #define RT_DEV_ACCEPT        4    // :accept
-#define RT_DEV_COUNT         5
+#define RT_DEV_READ          5    // :read
+#define RT_DEV_LINES         6    // :lines
+#define RT_DEV_CHUNKS        7    // :chunks
+#define RT_DEV_CHUNK         8    // :chunk
+#define RT_DEV_COUNT         9
 
 // Why a device failed, from errno: a device's owner ends with
 // (:error (name path)), path being the file's, or the socket's "host:port"
 // (a listener's port). RT_ERR_x is symbol RT_SYM_ERRS + x.
-#define RT_SYM_ERRS         59    // RT_SYM_DEVICE + RT_DEV_COUNT
+#define RT_SYM_ERRS         63    // RT_SYM_DEVICE + RT_DEV_COUNT
 #define RT_ERR_ENOENT        0    // :enoent        no such file or directory
 #define RT_ERR_EACCES        1    // :eacces        permission denied
 #define RT_ERR_EPERM         2    // :eperm         operation not permitted
@@ -150,8 +155,9 @@
 #define RT_ERR_EHOSTUNREACH 20    // :ehostunreach
 #define RT_ERR_ENETUNREACH  21    // :enetunreach
 #define RT_ERR_ENOTFOUND    22    // :enotfound     no such host (Node's name: it isn't an errno)
-#define RT_ERR_OTHER        23    // :io-error      anything else
-#define RT_ERR_COUNT        24
+#define RT_ERR_TOOBIG       23    // :too-big       a line or count of 64 MB or more (nor is this)
+#define RT_ERR_OTHER        24    // :io-error      anything else
+#define RT_ERR_COUNT        25
 
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
@@ -240,7 +246,7 @@ typedef struct rt_msg {
     struct rt_msg *next;
     rt_value_t     value;
     rt_chunk_t    *chunk;       // what value lives in; NULL if it needed none
-    rt_value_t     device;      // a reader's pid, if taking this means reading on; or 0
+    rt_value_t     device;      // a reader's pid, if it's to read on at the taker's next recv; or 0
 } rt_msg_t;
 
 // READY: in the run queue. WAITING: in recv, with no stack. JOINING:
@@ -281,6 +287,7 @@ typedef struct rt_proc {
     rt_watch_t     *watchers;   // monitoring this one, in order
     int             keypress;   // connected to :keypress
     struct rt_device *devices;  // the files it has open (process.c)
+    rt_value_t      reading;    // the reader whose message it took last, to read on at its next recv; or 0
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,

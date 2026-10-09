@@ -829,7 +829,9 @@ its device, and taking it reads on), so at most one line is ever in the
 mailbox: a reader that disconnects still gets the one already on its way
 (golden test 145). Rejected: reading the whole file into the mailbox at
 once (memory, for a big file), and raw chunks (lines are what programs
-want; chunks can come if something needs bytes).
+want; chunks can come if something needs bytes). (Changed by D158: the
+next line is cut at the owner's next `recv`, so a reader that disconnects
+gets nothing more; and D159 adds chunks.)
 
 **D128. A failure ends the owner.** *(User.)* A file that can't be opened
 ends its owner before it runs, with `(:error (name path))`; a read or a
@@ -840,7 +842,8 @@ runtime symbols (`:enoent :eacces :eperm :eexist :eisdir :enotdir
 `:io-error` for anything else. A directory opens, and fails with
 `:eisdir` when its owner takes `(:open f)` (which reads the first line),
 before that clause runs. Not logged, as `raise` isn't (D100): an I/O
-error isn't a bug.
+error isn't a bug. (Since D158, a directory fails at the owner's first
+`recv` after `(:open f)`, so that clause runs.)
 
 **D129. `slurp` and `spew` are slight, in `lib/fs.slight`.** *(User:
 opt-in, since "not everything needs filesystem access".)* A few lines
@@ -901,6 +904,7 @@ held back by TCP itself. That isn't checked by a golden test: seeing it
 would take timers and sockets together, which don't give the same order
 every run (D139); files share the mechanism, and test 145 checks theirs.
 An HTTP request body that doesn't end in a newline will need chunks.
+(They came in D159; D158 keeps this backpressure.)
 
 **D135. Writes are buffered, and closing flushes.** *(User: "ideally we
 buffer the writes".)* A `(:write ...)` goes out at once if the socket
@@ -936,7 +940,7 @@ that isn't an open device faults `:not-a-device`, a new fault kind, and
 something that isn't a pid `:not-a-pid`; any process can hand over a
 device, not just its owner; and handing over one that's already being
 read can leave a line with the old owner, so hand a device over before
-reading from it.
+reading from it. (No longer needed since D158: nothing is cut ahead.)
 
 **D139. The details of sockets.** *(Default.)*
 - IPv4 only. A listener listens on all interfaces, with `SO_REUSEADDR`
@@ -1374,3 +1378,85 @@ structure, so a read-modify-write is atomic. Rejected for now: a reply
 box in the runtime (a fork per question is cheap enough until a program
 says otherwise); a faster dictionary (a balanced tree in slight, or a
 table in C behind a device, D151, when one is needed).
+
+## Step 12a: ways to read a device
+
+**D158. A device cuts its next message when its owner next waits.**
+*(User chose this, "B", over a device that sends one message per
+request.)* Until now, taking a device's message read on at once, so the
+next line was cut before the owner's clause ran: an HTTP server that
+learned from the blank line after the headers that the body was 512
+bytes would find the body's start already cut as a line. Now a reader
+keeps a way of reading (lines, at first), and the runtime cuts its next
+message when the owner next calls `recv` after taking the last one. So
+whatever the owner does while it handles a message, `(:open f)`
+included, applies to the next one: changing the way of reading,
+disconnecting, handing the device over. Line readers don't change, and
+D134's backpressure stays: at most one of a device's messages is in its
+owner's mailbox or being handled. This is Erlang's `{active, once}`,
+re-armed by each `recv` instead of by a call. What it changes:
+- A message another process sends while the owner is busy now comes
+  before the device's next one, not after. Nothing promised that order.
+- A reader that disconnects gets nothing more; D127's line "already on
+  its way" no longer is (golden test 145).
+- A directory opened for reading fails at the owner's first `recv` after
+  `(:open f)`, so that clause now runs (D128; golden test 147).
+- D138's warning, to hand a device over before reading from it, no
+  longer applies, since nothing is cut ahead.
+
+A process takes one message at each `recv`, so it has at most one device
+to read on, and a device read on by a process that no longer owns it
+(it was handed over) is left alone. Rejected: a device that sends
+nothing till it's asked, one message per `(:read how)` (exact, but every
+line loop, `lib/fs.slight` included, would need a send per line);
+parsing HTTP in C, as Erlang's `{packet, http}` does (D132 put HTTP in
+slight); chunks alone, with lines and lengths left to slight (it would
+undo D154).
+
+**D159. `(:read how)` changes how a reader cuts its bytes.** *(User: a
+count is a one-off, and the names are as proposed.)* Any process may
+send it to a reading file or connection, as with `(:write ...)`; to a
+writer or a listener it's a dead letter, and so is a `how` it doesn't
+know. `how` is one of:
+- `:lines`, the default: `(:line f s)` (D127).
+- `:chunks`: `(:chunk f s)`, what one `read` gives (or what's been read
+  and not yet sent, if there is some), up to 64 KB and never empty.
+- A count, an integer `n` from 0: one `(:chunk f s)` of the next `n`
+  bytes, then back to the way of reading before. A one-off, since a
+  count is nearly always a payload inside a line protocol (an HTTP body,
+  a piece of chunked encoding, a Redis bulk string), and one message per
+  payload beats two. If the input ends first, `s` is shorter, and
+  `(:eof f)` follows.
+- `:json`, `:json/items`, `:sexp` and `:source`, to come (D154, D156):
+  `(:json f v)` for each top-level value, so that NDJSON and JSON texts
+  one after another both work; with `:json/items`, `(:json f v)` for each
+  element of a top-level array (any other top-level value comes as one
+  message); `(:sexp f v)`; and `(:form f form line)` and `(:doc f text
+  line)`. A form's raw text, D156's option, is left out till a pretty
+  printer or a doc tool needs it.
+
+*(Default:)* a count always gives exactly one chunk (empty at the very
+end, and `(:read 0)` gives `""`, so a `Content-Length: 0` needs no
+special case), and a reader checks its length. A count is for the next
+message alone, whatever the way of reading, which applies after it
+whichever was sent first; a second count before the first is used
+replaces it. Nothing comes after `(:eof f)`. The same `(:chunk f s)`
+serves chunks and counts.
+
+**D160. Bad input, and a cap on what's read.** *(User: as proposed.)*
+- `json/parse` and `sexp/parse` give `(:ok v)`, or `(:error (:bad-json
+  at))` (`:bad-sexp` for s-expressions), `at` being the byte offset where
+  the text went wrong. Not `#false`, as `string->int` gives, since
+  `false` is JSON; and not a fault, since bad input is an outcome, not a
+  bug.
+- A stream can't recover from a syntax error, so on a device bad JSON
+  ends the owner, as a failed read does (D128): `(:error (:bad-json
+  where))`, `where` being the path or "host:port" (`:bad-sexp` the same).
+- A line, a count or a value of 64 MB or more, too big for a process's
+  heap, ends the owner with `(:error (:too-big where))`. Until now a line
+  with no newline grew the device's buffer without limit, so one endless
+  header line could use up a server's memory.
+
+**D161. `json/print` writes compact JSON, on one line.** *(User.)*
+`{"a":1,"b":[1,2]}`, so what it prints is NDJSON as it is. Indenting can
+come when something wants it.

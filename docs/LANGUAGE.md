@@ -554,14 +554,40 @@ compiled code. The new process owns it.
 - The device's first message to its owner is `(:open f)`, `f` being the
   device's pid.
 - A reader then sends each line as `(:line f s)`, without its `\n` (a
-  last line without one still comes; a `\r` before it stays). The next
-  line is read only when the owner takes the last one, so a big file
-  never piles up in the mailbox. Then `(:eof f)`, and the device closes.
+  last line without one still comes; a `\r` before it stays), and then
+  `(:eof f)`, after which it closes. One message at a time: the next is
+  cut only when the owner, having taken the last, waits in `recv` again.
+  So a big file never piles up in the mailbox, and whatever the owner
+  does while it handles a message (changing how it reads, disconnecting,
+  handing the file over) applies from the next one on.
 - A writer (`:fs/write` empties the file, or creates it; `:fs/append`
   adds to it, or creates it) takes `(:write x ...)` from any process,
   and writes the `x`s at once, rendered as `tty/write` renders them.
 
-Anything else sent to a device is a dead letter.
+`(send f (list :read how))`, from any process, changes how a reader
+cuts what it reads into messages, from the next message on. `how` is
+one of:
+
+- `:lines`, the way it starts: `(:line f s)`.
+- `:chunks`: `(:chunk f s)`, what one read gives (or what's been read
+  and not yet sent), never more than 64 KB, and never empty.
+- A count, an integer `n` from 0: one `(:chunk f s)` of the next `n`
+  bytes, and then back to the way before. If the input ends first, `s`
+  is shorter, and `(:eof f)` comes next. A count is for the next message
+  alone, whatever the way: sent with `:chunks`, say, it comes first,
+  whichever was sent first.
+
+Nothing comes after `(:eof f)`. Anything else sent to a device, `:read`
+to a writer or a `how` it doesn't know included, is a dead letter.
+
+    (defun size (n)
+        (recv
+            ((:open f)    (send f (list :read :chunks)) (size n))
+            ((:chunk f s) (size (+ n (str-len s))))
+            ((:eof f)     n)))
+
+    (join (connect :fs/read "photo.jpg" (size 0)))
+    ; (:ok 1048576)
 
 `(disconnect f)` closes the device `f`, and returns `()`. A pid that
 isn't an open device it ignores. A device also closes when its owner
@@ -570,7 +596,9 @@ ends, and messages to a closed device go nowhere.
 If the file can't be opened, the owner ends before it runs, with
 `(:error (name path))`, `name` being errno's: `:enoent`, `:eacces`,
 `:eisdir`, `:enotdir`, `:enospc`, and so on, or `:io-error`. A read or a
-write that fails ends it the same way, when it happens.
+write that fails ends it the same way, when it happens; and so does a
+line or a count of 64 MB or more, too big for a process's heap, with
+`(:error (:too-big path))`.
 
     (defun reader (lines)
         (recv
@@ -593,11 +621,11 @@ TCP, IPv4 only, and about 1,000 sockets at once (the limit of
 up a host name does, briefly, for now (D153).
 
 A connection's first message is `(:open c)`, once it's connected. Then
-lines, as a file sends them (`(:line c s)`, one at a time), and
-`(:eof c)` when the other end closes; it can still be written to after
-that. It takes `(:write x ...)` as a file does, and keeps what the
-socket can't take yet, so `send` still never blocks. Closing it waits
-until that's written.
+it reads as a file does: lines at first, one message at a time, and
+`(:read how)` changes the way; and `(:eof c)` when the other end closes.
+It can still be written to after that. It takes `(:write x ...)` as a
+file does, and keeps what the socket can't take yet, so `send` still
+never blocks. Closing it waits until that's written.
 
 A listener (on all interfaces) first sends `(:open l port)`, `port`
 being the one it got: port 0 lets the system pick. Then
@@ -626,6 +654,21 @@ that can't be found. Open sockets keep the program running.
             ((:accept l c)  (connect c (echo)) (server))))
 
     (connect :tcp/listen 7000 (server))
+
+An HTTP request is lines up to a blank one, then a body of
+Content-Length bytes. The server asks for the body while it handles the
+blank line, so none of the body is cut as lines:
+
+    (defun headers (c hs)
+        (recv
+            ((:line c s)
+                (cond
+                    ((eq? s "\r") (send c (list :read (content-length hs))) (body c hs))
+                    (#true        (headers c (cons s hs)))))))
+
+    (defun body (c hs)
+        (recv
+            ((:chunk c s) (respond c hs s) (headers c ()))))
 
 To `join`, `monitor` and `kill`, a device is a process that has ended
 with `(:ok ())`.
@@ -941,10 +984,11 @@ timer keeps the program running.
 
 ## Planned
 
-Step 12 of PLAN.md (D154–D156): JSON and s-expressions parsed in C, with
+Step 12 of PLAN.md (D154–D161): JSON and s-expressions parsed in C, with
 `json/parse`, `json/print`, `sexp/parse` and `sexp/print` for text in
-hand, and files and sockets that hand over chunks of bytes, or whole
-JSON values or forms, rather than lines; inline documentation, a line
+hand, and more ways to read a file or socket, `(:read :json)`,
+`(:read :json/items)` and `(:read :sexp)`, for whole JSON values or
+forms; inline documentation, a line
 `=doc` between top-level forms starting a block of Markdown that runs to
 a line `=cut`, which the compiler skips; and a `:source` way to read a
 file that gives its forms and its doc blocks, in order. DESIGN.md has

@@ -1,0 +1,66 @@
+; (:read how) changes how a reader cuts what it reads (D159): :lines, the
+; first way, (:line f s); :chunks, (:chunk f s) of what's been read, up to
+; 64 KB; or a count, one (:chunk f s) of the next n bytes, then back to
+; the way before. A reader cuts its next message only when its owner
+; waits again (D158), so a (:read how) sent while it handles a message,
+; (:open f) included, applies to the next one.
+;
+; t/data/lines.txt is "first\n  second, indented\n\nlast, with no newline
+; at the end": 58 bytes, and no newline at the end.
+
+; The messages a reader of path gets, as show has them. table says what
+; to send the file after a message: ((message how) ...), how being one
+; (:read how), or a list of them, sent in order.
+(defun read-all (path table)
+    (cadr (join (connect :fs/read path (reading table ())))))
+
+(defun reading (table seen)
+    (recv
+        ((:eof f) (reverse (cons (list :eof) seen)))
+        (msg
+            (let how (lookup (show msg) table))
+            (cond
+                ((eq? how :not-found) ())
+                ((cons? how)          (map (lambda (h) (send (cadr msg) (list :read h))) how))
+                (#true                (send (cadr msg) (list :read how))))
+            (reading table (cons (show msg) seen)))))
+
+; A message without its pid, with a newline in it shown as \n.
+(defun show (msg)
+    (cons (car msg) (map (lambda (s) (str-join "\\n" (str-split s "\n"))) (cddr msg))))
+
+(let lines "t/data/lines.txt")
+
+; the first message's way: lines, as before; or chunks, here one, as the
+; file is less than 64 KB
+(pprint (read-all lines ()))
+(pprint (read-all lines '(((open) chunks))))
+
+; a count is for one message, and then it's lines again, from where the
+; count ended
+(pprint (read-all lines '(((open) 6) ((line "  second, indented") 5))))
+
+; a count past the end gives what there is, then (:eof f); and a count of
+; 0 gives ""
+(pprint (read-all lines '(((line "first") 100))))
+(pprint (read-all lines '(((open) 0))))
+
+; a count comes first, whichever was sent first; and a second count
+; before the first is used replaces it
+(pprint (read-all lines '(((open) (3 chunks)))))
+(pprint (read-all lines '(((open) (chunks 3)))))
+(pprint (read-all lines '(((open) (3 6)))))
+
+; from chunks back to lines
+(pprint (read-all lines '(((open) (chunks 9)) ((chunk "first\\n  s") lines))))
+
+; a reader takes (:read how) with a how it knows, and nothing else; a
+; writer doesn't take it
+(pprint (read-all lines '(((open) (words -1 2.5)))))
+
+(defun poke (msgs)
+    (recv
+        ((:open f) (map (lambda (m) (send f m)) msgs) (disconnect f) :poked)))
+
+(pprint (join (connect :fs/read lines (poke (list (list :read) (list :read 1 2) :read)))))
+(pprint (join (connect :fs/write "build/t/170-read-chunks.txt" (poke (list (list :read :lines))))))

@@ -31,7 +31,11 @@ size (`runtime/tty.c`). Files: `connect :fs/read` (`:fs/write`,
 queue, a channel, and `ask`) are in `lib/ds.slight` (D157). Sockets:
 `connect :tcp "host:port"` and `connect :tcp/listen port` open sockets
 as devices too, waited for in `select()`, and `(connect conn expr)`
-hands an accepted connection to a process.
+hands an accepted connection to a process. A reader (a file or a
+connection) cuts its next message when its owner next waits in `recv`
+(D158), and `(:read how)` switches it between lines, chunks of up to 64
+KB, and a count of bytes for the next message alone (D159); a line or
+count of 64 MB or more ends the owner with `:too-big` (D160).
 `(@include "path")` and `(@include :name)` splice in other files (each
 once); `@ARGV`, the program's arguments, is the top level's parameter
 (D144); and `if`, `when`, `case`, `and` and `or` are made into `cond`
@@ -49,10 +53,12 @@ the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
 x86-64 natively), and on macOS (Stevan runs it on his M2 Max after every
 step, and reports only failures; x86-64 passes there too, under Rosetta
-2, with `make golden TARGETS=x86_64`). **Next: step 12**, the groundwork
-HTTP needs: 12a, ways to read a device (chunks, and JSON and
-s-expressions parsed in C, D154, D155) and inline docs after Perl's POD
-(D156); 12b, collecting outside `recv`; 12c, C libraries vendored as
+2, with `make golden TARGETS=x86_64`). **Next: the rest of step 12**,
+the groundwork HTTP needs: 12a, ways to read a device, settled in
+D158–D161 and built in four pieces, of which the first (chunks, counts
+and switching) is done; next JSON parsed in C (D154, D160, D161), then
+s-expressions (D155), then inline docs after Perl's POD (D156); 12b,
+collecting outside `recv`; 12c, C libraries vendored as
 source (D151, D152), then TLS; 12d, looking up host names in the runtime
 (D153). Then where `recv` can go (13: `defactor`, or splitting functions
 at `recv`), HTTP in slight (14), and agents (15: chat as actors, tools as

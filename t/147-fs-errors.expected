@@ -1,10 +1,11 @@
 (error (enoent "t/data/no-such-file"))
+opened
 (error (eisdir "t/data"))
 (error (enoent "build/t/no-such-dir/x"))
-dead letter: (write "no") (connect at t/147-fs-errors.slight:19:15)
+dead letter: (write "no") (connect at t/147-fs-errors.slight:21:15)
 (ok poked)
-fault in #<pid 8>: not a pid: 5 (disconnect at t/147-fs-errors.slight:20:21)
-(error (not-a-pid 5 "disconnect at t/147-fs-errors.slight:20:21"))
+fault in #<pid 8>: not a pid: 5 (disconnect at t/147-fs-errors.slight:22:21)
+(error (not-a-pid 5 "disconnect at t/147-fs-errors.slight:22:21"))
 ()
-fault: not a string: 42 (connect at t/147-fs-errors.slight:22:1)
+fault: not a string: 42 (connect at t/147-fs-errors.slight:24:1)
 exit: 1

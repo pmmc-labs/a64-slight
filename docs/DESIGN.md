@@ -418,14 +418,17 @@ never collects, so a text split there tops out at about 2 MB.
 Parsed in C, as builtins for text already in hand and as ways a device
 can cut its bytes into messages (D154–D156):
 
-- **Builtins:** `(json/parse s)`, `(json/print v)`, `(sexp/parse s)`,
-  `(sexp/print v)`.
-- **Devices:** a file or socket gives lines (now), chunks, JSON values
-  `(:json f v)`, or s-expression forms `(:sexp f v)`, one top-level value
-  a message; JSON also has an "items" mode, a message for each element of
-  a top-level array. The next value is parsed only once the last has left
-  the owner's mailbox, as with lines, so a big input goes through a
-  bounded heap.
+- **Builtins:** `(json/parse s)` and `(sexp/parse s)` give `(:ok v)`, or
+  `(:error (:bad-json at))` (`:bad-sexp`), `at` being a byte offset
+  (D160); `(json/print v)` gives compact JSON on one line, so NDJSON as
+  it is (D161); and `(sexp/print v)`.
+- **Devices:** more ways to read (D159): `(:read :json)` gives `(:json f
+  v)` for each top-level value, `(:read :json/items)` one for each
+  element of a top-level array, and `(:read :sexp)` `(:sexp f v)` for
+  each form. The next value is parsed only when the owner waits again, as
+  with lines (D158), so a big input goes through a bounded heap. Bad text
+  ends the owner with `(:error (:bad-json where))` (`:bad-sexp`), and a
+  value of 64 MB or more with `:too-big` (D160).
 - **JSON in slight:** `:null`, `#true`, `#false`, integers (floats past 63
   bits), floats, strings, lists for arrays, and `(:object (key value)
   ...)` for objects, keys as strings, in order, duplicates kept.
@@ -439,8 +442,8 @@ can cut its bytes into messages (D154–D156):
   unescaped.
 - **Source:** where `:sexp` skips doc blocks, `:source` gives a file's
   forms and doc blocks in order, `(:form f form line)` and `(:doc f text
-  line)`, a doc block as its raw text; a form's raw text instead is an
-  option (D156).
+  line)`, a doc block as its raw text. A form's raw text instead, D156's
+  option, is left out till something needs it (D159).
 
 ### Not in the language
 
@@ -615,8 +618,15 @@ Lalloc_N:
   owner. The device's first message to its owner is `(:open f)`, `f`
   being its pid. A reader then sends `(:line f s)` for each line, split
   on `\n` and without it (a last line without one still comes), one at a
-  time: the next is read when the owner takes the last, so a file never
-  piles up in a mailbox. Then `(:eof f)`, and it closes. `:fs/write`
+  time: the next is cut when the owner, having taken the last, next
+  waits in `recv` (D158), so a file never piles up in a mailbox, and
+  whatever the owner does with one message applies to the next.
+  `(:read how)`, from anyone, changes how it cuts (D159): `:lines`;
+  `:chunks`, `(:chunk f s)` of what one read gives, up to 64 KB; or a
+  count `n`, one `(:chunk f s)` of the next `n` bytes (fewer at the end),
+  and then the way before. Then `(:eof f)`, and it closes; nothing comes
+  after it. A line or a count of 64 MB or more ends the owner with
+  `(:error (:too-big path))` (D160). `:fs/write`
   (creating the file, or emptying it) and `:fs/append` (creating it)
   take `(:write x ...)` from anyone, render the `x`s as `tty/write` does,
   and write them at once. Anything else sent to a device is a dead
@@ -625,18 +635,19 @@ Lalloc_N:
   before it runs, with `(:error (name path))`, `name` being errno's
   (`:enoent`, `:eacces`, `:eisdir`, ..., or `:io-error`); a read or a
   write that fails ends it the same way then. A file is read when its
-  owner takes a line, so a reader is never waited for and never counts as
-  something that can still happen; one that can keep a read waiting (a
-  FIFO, a terminal) waits with the whole runtime. To `join`, `monitor`
-  and `kill`, a device is a process that ended with `(:ok ())`.
+  owner waits for its next message, so a reader is never waited for, and
+  never counts as something that can still happen; one that can keep a
+  read waiting (a FIFO, a terminal) waits with the whole runtime. To
+  `join`, `monitor` and `kill`, a device is a process that ended with
+  `(:ok ())`.
 - **Sockets are devices too** (D133–D139). `(connect :tcp "host:port"
   expr)` connects, without stalling the runtime (looking up the host does
   stall it, briefly, until the runtime looks names up itself: D153); the
   connection's first message is `(:open c)`, once
   it's connected, or the owner ends with `(:error (econnrefused
-  "host:port"))` and the like. It then sends lines as a file does, one at a
-  time (it's read only while none of its lines is in its owner's mailbox,
-  so a fast sender is held back by TCP itself), and `(:eof c)` when the
+  "host:port"))` and the like. It then reads as a file does, one message
+  at a time (it's read only while its owner waits for its next one, so a
+  fast sender is held back by TCP itself), and `(:eof c)` when the
   other end closes; it can still be written to then. It takes `(:write x
   ...)` as a file does, and keeps what the socket can't take yet, writing
   it when it can, so `send` still never blocks; closing it waits till

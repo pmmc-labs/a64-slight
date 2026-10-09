@@ -327,12 +327,26 @@ Also inline documentation, after Perl's POD (D156): `=doc` ... `=cut`
 blocks of Markdown between top-level forms, which the compiler's reader
 (TypeScript) and the C reader both skip, and a `:source` way to read a
 file that gives its forms and doc blocks in order, with line numbers.
-To settle: what a chunk message looks like, how a reader asks for a
-number of bytes, how a connection switches from one way to another
-(headers are lines; a body isn't), and the names of it all. Tests:
-JSONTestSuite, Python's `json` as a model, and inputs cut at random
-places; doc blocks in golden tests, which must compile as if they
-weren't there.
+Settled with Stevan (D158–D161): a device cuts its next message when
+its owner next calls `recv`, not when it takes the last, so whatever the
+owner does while handling a message applies to the next one; `(:read
+how)` changes the way of reading, `how` being `:lines`, `:chunks`,
+`:json`, `:json/items`, `:sexp`, `:source`, or a count of bytes for the
+next message alone, and `(:chunk f s)` is what chunks and counts send;
+`json/parse` and `sexp/parse` give Results; bad JSON on a device ends
+its owner with `(:error (:bad-json where))`; anything 64 MB or more ends
+it with `(:error (:too-big where))`; `json/print` is compact, on one
+line. In four pieces, each with golden tests:
+
+1. Chunks, counts and switching: the runtime only. Done (Oct 2026):
+   golden tests 170–174; and 145 and 147 changed, as D158 says.
+2. JSON: the push parser, `json/parse`, `json/print`, `:json` and
+   `:json/items`. JSONTestSuite's files under `t/data/` with their
+   licence, Python's `json` as the model, and inputs cut at every point
+   (not at random ones, so the tests stay the same every run).
+3. S-expressions: `sexp/parse`, `sexp/print` and `:sexp`.
+4. Doc blocks in both readers (golden tests that must compile as if they
+   weren't there), and `:source`.
 
 #### 12b. Collecting outside `recv`
 

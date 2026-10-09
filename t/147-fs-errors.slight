@@ -1,7 +1,9 @@
 ; A file that can't be opened ends the connected process before it runs,
-; with (:error (name path)); one that fails partway (reading a directory)
-; ends it then. Anything sent to a reader is a dead letter. The path must
-; be a string, which connect checks in the caller.
+; with (:error (name path)); one that fails partway ends it then: a
+; directory opens, and fails at the first read, at the recv after
+; (:open f). A reader takes nothing but (:read how): anything else is a
+; dead letter. The path must be a string, which connect checks in the
+; caller.
 
 (defun reader ()
     (recv

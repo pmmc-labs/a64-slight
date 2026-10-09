@@ -1,0 +1,25 @@
+; Handing a reader over after reading from it (D158). Nothing is cut
+; ahead, so the new owner gets the rest of the file, and a (:read how) it
+; sends while it handles (:open f) applies to the first message it takes;
+; the old owner, waiting again, reads nothing on for it.
+
+(defun first-owner ()
+    (recv
+        ((:open f) (first-owner))
+        ((:line f s)
+            (let me $$)
+            (connect f (second-owner me ()))
+            (first-waits s))))
+
+(defun first-waits (s)
+    (recv
+        ((:rest xs) (list s xs))))
+
+(defun second-owner (first seen)
+    (recv
+        ((:open f)    (send f (list :read 3)) (second-owner first (cons (list :open) seen)))
+        ((:eof f)     (send first (list :rest (reverse (cons (list :eof) seen)))))
+        ((:line f s)  (second-owner first (cons (list :line s) seen)))
+        ((:chunk f s) (second-owner first (cons (list :chunk s) seen)))))
+
+(pprint (join (connect :fs/read "t/data/lines.txt" (first-owner))))

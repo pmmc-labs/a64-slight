@@ -1,0 +1,90 @@
+; A connection waiting for bytes (D158, D159). The server greets with
+; "abc" and no newline, so the client's first line can't be cut; a
+; (:read :chunks) from a timer gets it as a chunk, whether it comes before
+; those bytes are read or after. Then a request that asks to be told to
+; go on before it sends its body (HTTP's "Expect: 100-continue"): the
+; server's count for the body waits in select() before any of it is
+; sent, and gets it, written in two pieces, once the client has heard to
+; go on. (This server always says to go on.) Then the server answers and
+; closes, and after (:eof c) nothing more comes, whatever the client asks
+; for.
+
+; The Content-Length among the header lines hs, or 0.
+(defun content-length (hs)
+    (cond
+        ((nil? hs) 0)
+        ((starts-with? (car hs) "Content-Length: ")
+            (string->int (substring (car hs) 16 (- (str-len (car hs)) 1))))
+        (#true (content-length (cdr hs)))))
+
+(defun greet (c)
+    (recv
+        ((:open c) (send c (list :write "abc")) (request c ()))))
+
+(defun request (c hs)
+    (recv
+        ((:line c s)
+            (cond
+                ((eq? s "\r")
+                    (send c (list :write "HTTP/1.1 100 Continue\r\n\r\n"))
+                    (send c (list :read (content-length hs)))
+                    (body c))
+                (#true (request c (cons s hs)))))
+        ((:eof c) (disconnect c))))
+
+(defun body (c)
+    (recv
+        ((:chunk c s) (send c (list :write "got " (str-len s) " bytes: " s \n)) (disconnect c))))
+
+; The client gives what it heard, \r taken off a line's end.
+(defun client ()
+    (recv
+        ((:open c) (after 10 c (list :read :chunks)) (greeting))))
+
+(defun greeting ()
+    (recv
+        ((:chunk c s)
+            (send c (list :read :lines))
+            (send c (list :write "POST / HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 10\r\n\r\n"))
+            (going-on (list s)))))
+
+(defun going-on (seen)
+    (recv
+        ((:line c s)
+            (cond
+                ((eq? s "\r")
+                    (send c (list :write "01234"))
+                    (send c (list :write "56789"))
+                    (reply seen))
+                (#true (going-on (cons (substring s 0 (- (str-len s) 1)) seen)))))))
+
+(defun reply (seen)
+    (recv
+        ((:line c s) (closing (cons s seen)))))
+
+(defun closing (seen)
+    (recv
+        ((:eof c)
+            (send c (list :read 5))
+            (send c (list :read :chunks))
+            (after 10 $$ :quiet)
+            (quiet c (cons :eof seen)))))
+
+(defun quiet (c seen)
+    (recv
+        (:quiet (disconnect c) (reverse seen))
+        (other  (quiet c (cons other seen)))))
+
+(defun listener ()
+    (recv
+        ((:open l port)
+            (let me $$)
+            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (client))))))
+            (serving l))))
+
+(defun serving (l)
+    (recv
+        ((:accept _ conn) (connect conn (greet conn)) (serving l))
+        ((:client r)      (disconnect l) r)))
+
+(pprint (join (connect :tcp/listen 0 (listener))))
