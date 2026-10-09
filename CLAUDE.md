@@ -42,8 +42,9 @@ is a character of its own, as in Go), with `ord` and `chr` in the
 prelude, and `string->float` (D148).
 Fifteen of ts-slight's examples are ported (`examples/`; all but
 `ping-pong-tournament` are golden tests). `make test` passes on x86 Linux
-(AArch64 under qemu, x86-64 natively), and natively on macOS (Stevan runs
-it on his M2 Max after every step, and reports only failures). **Next:
+(AArch64 under qemu, x86-64 natively), and on macOS (Stevan runs it on his
+M2 Max after every step, and reports only failures; x86-64 passes there
+too, under Rosetta 2, with `make golden TARGETS=x86_64`). **Next:
 step 10f** (HTTP, written in slight on `:tcp`; its open points are in
 `docs/PLAN.md`, to settle with Stevan first, including keeping the API
 independent of the transport so a browser port could use `fetch`). Also

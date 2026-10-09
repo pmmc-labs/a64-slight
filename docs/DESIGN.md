@@ -249,7 +249,7 @@ reply refs.
   process has ended by the time it's due is dropped then, as a message to
   it would be.
 
-### Program structure (open)
+### Program structure
 
 A program is one or more `.slight` files, and whatever they include. All
 `defun`s are global and can call each other in any order. Every other
@@ -409,8 +409,9 @@ never collects, so a text split there tops out at about 2 MB.
 
 ### Not in the language
 
-`eval`, `slight/parse`, hot reload, macros, `if`/`when`/`case`, `catch`,
-`gensym`, local `defun`, selective receive, mutable anything. readline isn't
+`eval`, `slight/parse`, hot reload, macros, `catch`, `gensym`, local
+`defun`, selective receive, mutable anything. (`if`, `when` and `case`
+are back, as forms the expander makes into `cond`: D142.) readline isn't
 needed: the REPL and line editing are slight code over key events.
 
 ## Runtime
@@ -678,10 +679,11 @@ than catch a guard-page `SIGSEGV` on an alternate signal stack (D48). The
 limit sits 64 KB above the bottom, which leaves room for the frame that
 tripped it and a call to `rt_fault`; a guard page under the stack still
 catches anything that slips past. The root process runs on its own 8 MB
-`mmap`ed stack. The quota is 1,000 reductions; for now `rt_preempt` just
-refills it, and in step 7 it is where a process gets preempted. The
-parameters are saved before the reduction check because `rt_preempt` is
-a C call and may clobber `x0`–`x7`.
+`mmap`ed stack. The quota is 1,000 reductions; when it's used up,
+`rt_preempt` refills it, and sends the process to the back of the run
+queue if another is ready (D91). The parameters are saved before the
+reduction check because `rt_preempt` is a C call and may clobber
+`x0`–`x7`.
 
 **On x86-64** (D145; `compiler/src/x86_64.ts`, `runtime/asm_x86_64.h`),
 in Intel syntax:
@@ -775,18 +777,20 @@ line-by-line translation.
   never real time.
 - **Keys** come from a `; stdin:` line in the test (D116), in printf `%b`'s
   escapes; without one, stdin is empty.
-- A slight-level test library in the style of ts-slight's `lib/Test.slight`
-  (TAP: `ok`, `is`, `diag`) once enough of the language exists.
+- `lib/test.slight`, a slight-level test library in the style of
+  ts-slight's `lib/Test.slight` (TAP: `ok`, `is`, `diag`), for programs
+  that want one: `(@include :test)`.
 
 ## Open questions
 
 Collected from above:
 
-1. Program structure: top-level forms as the root process (built this way).
-2. Collecting anywhere but `recv` (see "Process heaps and GC").
+1. Collecting anywhere but `recv` (see "Process heaps and GC").
 
-Settled in step 7: `recv` syntax (D85), the run queue (D86), the fault,
-`raise` and `kill` reasons (D87), exit records and mailboxes (D88). In
+Settled in step 2: program structure, the top-level forms as the root
+process (with its arguments as `@ARGV` since D144). In step 7: `recv`
+syntax (D85), the run queue (D86), the fault, `raise` and `kill`
+reasons (D87), exit records and mailboxes (D88). In
 step 8: the fault kinds (D98), and what gets logged (D99, D100). In
 step 9: collecting only at `recv` (D105). In step 10a: the virtual clock
 (D110), what `after` and `sleep` return (D111), timers whose process has

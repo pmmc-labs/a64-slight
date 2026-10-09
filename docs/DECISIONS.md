@@ -1080,8 +1080,9 @@ assembly is named per architecture: `asm_aarch64.h` and
 `rt_asm_x86_64.S`. Both headers mark the stack non-executable on ELF
 (`.note.GNU-stack`): a native Linux link uses GNU ld, which otherwise
 warns and makes the stack executable (lld, used for the cross-compiles,
-didn't need it). Rejected: defaulting to the machine's architecture (an
-x86-64 machine would quietly stop testing AArch64).
+didn't need it). Both targets pass on the M2 (Stevan, Oct 2026),
+x86-64 under Rosetta 2. Rejected: defaulting to the machine's
+architecture (an x86-64 machine would quietly stop testing AArch64).
 
 **D147. No walk over a value recurses in C.** *(User, choosing it over a
 limit.)* Printing, copying (a message, a fork's values, a result through

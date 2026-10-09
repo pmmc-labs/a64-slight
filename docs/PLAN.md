@@ -6,13 +6,15 @@ be a session or two each.
 
 **Progress:** steps 0–9 and 10a–10e done (under qemu, and natively on
 macOS: Stevan runs `make test` on his M2 Max after every step), a
-second target, x86-64, and UTF-8 builtins (both below, after 10f). 10f,
-HTTP in slight, is next.
+second target, x86-64 (which passes on the M2 too, under Rosetta 2), and
+UTF-8 builtins (both below, after 10f). 10f, HTTP in slight, is next.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
 
 ## Proposed layout
+
+As planned at the start; `CLAUDE.md` has the layout as built.
 
 ```
 compiler/        the TypeScript compiler
@@ -76,8 +78,8 @@ non-tail recursion faults cleanly. The 10⁸-iteration loop is golden test
 
 - `defun`, calls, arity checks at compile time.
 - Tail calls as jumps; a loop of 10⁸ iterations runs in constant stack.
-- Settle the calling convention for compiled functions **(open)**: the
-  proposal is args in `x1`–`x7`, closure in `x0`, result in `x0`.
+- The calling convention for compiled functions: settled as D47,
+  arguments in `x0`–`x7`, the result in `x0`, and a closure in `x9`.
 - The reduction check at entries and tail calls. Until step 7 the
   preempt handler just resets the counter.
 
@@ -115,7 +117,7 @@ shortest form that reads back the same; `(== 1 1.0)` is `#true` and
 - Boxed objects with headers. String literals in static data.
 - The string builtins in C (see DESIGN.md), `concat`/`~`, `tty/write`.
 - Floats: literals, arithmetic with promotion, `/` gives a float, `div`
-  and `%` **(open: names)**, rounding to integers, libm wrappers.
+  and `%` (D68), rounding to integers, libm wrappers.
 
 ### 6. Closures and the prelude (done)
 
@@ -327,8 +329,9 @@ assembly of all 150 programs coming out the same byte for byte; then
 and `start` per architecture), and `--target` in the driver, `t/run.sh`
 and the Makefile. Every golden test passes on both, natively on x86-64,
 with the same expected output. A third target (RISC-V, say) is now a
-target file and its runtime assembly. Untested so far: macOS x86-64
-(Rosetta 2), which `make golden TARGETS=x86_64` would run on the M2.
+target file and its runtime assembly. Both targets pass on Stevan's M2
+too (Oct 2026): AArch64 natively, and x86-64 under Rosetta 2, with
+`make golden TARGETS=x86_64`.
 
 The adversarial review that followed (differential tests of some 400
 programs on both targets, the ABI shape by shape, the interface's

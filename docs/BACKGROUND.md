@@ -204,8 +204,8 @@ address.
   Harder: two-operand instructions, no `csel` or `ccmp`, all nine
   caller-saved registers taken, and a 16-byte stack alignment the
   hardware doesn't check, so a mistake crashes deep in libc. Stevan's M2
-  Max could run the x86-64 build under Rosetta 2 (`cc -arch x86_64`; not
-  tried).
+  Max could run the x86-64 build under Rosetta 2 (`cc -arch x86_64`),
+  and does: the golden tests pass there (Oct 2026).
 - **RISC-V, RV64 (about 2 sessions after the interface).** The closest
   cousin: 32 registers, load/store, arguments in `a0`–`a7` (exactly
   eight, as D47 has), and `s11` could be the process register. No
