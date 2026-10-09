@@ -889,6 +889,55 @@ only its caller.
 Either gives `(:error (name path))` if the file can't be opened, read or
 written: `(:error (enoent "notes.txt"))`, say.
 
+### (@include :ds)
+
+`lib/ds.slight`: data structures as processes, state that changes made
+of values that don't. Each structure is a process holding its state in
+the arguments of its receive function, so it takes one message at a
+time: no races, and an update is atomic. Writes are sends, and return
+at once; reads wait for the answer. Everything goes across by copying,
+so ask for pieces, not the whole of something big. A structure lasts
+until it's killed.
+
+    (@include :ds)
+
+    (let d (dict/new))
+    (dict/put d "name" "slight")
+    (dict/update d "count" inc 0)
+    (dict/get d "count")                 1
+
+- A cell, one value: `(cell/new v)`, `(cell/get c)`, `(cell/set c v)`,
+  `(cell/update c f)` (the value becomes `(f value)`, in the cell, so if
+  `f` faults the cell ends), and `(cell/swap c f)`, which updates and
+  gives the new value.
+- A dictionary, keys compared with `eq?`: `(dict/new)`, `(dict/put d k
+  v)`, `(dict/get d k)` (or `:not-found`), `(dict/delete d k)`,
+  `(dict/update d k f default)` (`(f default)` when `k` has no value
+  yet), `(dict/keys d)` (most recently put first), `(dict/size d)`. It's
+  an association list, so a lookup costs the number of keys.
+- A queue: `(queue/new)`, `(queue/push q x)`, `(queue/pop q)` (the oldest
+  item, or `:empty`), `(queue/size q)`.
+- A channel: `(channel/new)`, `(channel/put ch x)`, and `(channel/take
+  ch)`, which waits until there's an item.
+
+For structures of one's own: `(ask pid msg)` sends `msg` with a box for
+the answer added at the end, and waits for the answer; the structure
+answers with `(reply to v)`, `to` being that box.
+
+    (defun counter (n)
+        (recv
+            (:inc      (counter (+ n 1)))
+            ((:get to) (reply to n) (counter n))))
+
+    (let k (fork (counter 0)))
+    (send k :inc)
+    (ask k (list :get))                  1
+
+If the structure ends before it answers, `ask` raises `(:ended pid
+result)`. `(ask-within ms pid msg)` raises `(:timeout pid)` too, if no
+answer comes in time; its timer stays pending till then, and a pending
+timer keeps the program running.
+
 
 ## Planned
 

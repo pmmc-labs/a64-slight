@@ -1,0 +1,164 @@
+; Data structures as processes: state that changes, made of values that
+; don't. Not part of the prelude, so a program that wants them says
+; (@include :ds).
+;
+;     (let c (cell/new 0))
+;     (cell/update c inc)
+;     (cell/get c)                         1
+;
+;     (let d (dict/new))
+;     (dict/put d "name" "slight")
+;     (dict/get d "name")                  "slight"
+;
+; Each structure is a process, and its state is the argument its receive
+; function passes itself, so it takes one message at a time: no races,
+; and an update is atomic. Writes are sends, and return at once; reads
+; ask, and wait for the answer. Everything goes across by copying, so
+; ask for pieces, not the whole of something big. A structure lasts
+; until it's killed, (kill d), and is collected at each message like
+; any process waiting in recv.
+
+; --- asking ------------------------------------------------------------
+
+; Sends msg to pid with a box for the answer added at the end, and waits
+; for the answer. The box also watches pid, so if pid ends first, ask
+; raises (:ended pid result) instead of waiting for ever. A box is a
+; process of its own, so an answer can't be mistaken for anything else
+; the caller is sent.
+(defun ask (pid msg) (ask/via (fork (ask/box pid)) pid msg))
+
+; As ask, but raises (:timeout pid) if no answer comes within ms
+; milliseconds. (The timer stays pending until then, and a pending timer
+; keeps a program running.)
+(defun ask-within (ms pid msg)
+    (let box (fork (ask/box pid)))
+    (after ms box :timeout)
+    (ask/via box pid msg))
+
+; How a structure answers an ask: to is the box at the end of the
+; message.
+(defun reply (to v) (send to (list :reply v)))
+
+(defun ask/via (box pid msg)
+    (send pid (append msg (list box)))
+    (ask/answer pid (cadr (join box))))
+
+; The box: watches pid, and ends with the first thing it hears.
+(defun ask/box (pid) (monitor pid) (ask/wait))
+
+(defun ask/wait ()
+    (recv
+        ((:reply v)       (list :reply v))
+        ((:exit p result) (list :ended result))
+        (:timeout         (list :timeout))))
+
+(defun ask/answer (pid heard)
+    (cond
+        ((eq? (car heard) :reply) (cadr heard))
+        ((eq? (car heard) :ended) (raise (list :ended pid (cadr heard))))
+        (#true                    (raise (list :timeout pid)))))
+
+; --- cell: one value ---------------------------------------------------
+
+(defun cell/new (v) (fork (cell/loop v)))
+(defun cell/get (c) (ask c (list :get)))
+(defun cell/set (c v) (send c (list :set v)))
+
+; Replaces the value v with (f v), atomically: f runs in the cell, so if
+; it faults, the cell ends.
+(defun cell/update (c f) (send c (list :update f)))
+
+; As cell/update, and gives the new value.
+(defun cell/swap (c f) (ask c (list :swap f)))
+
+(defun cell/loop (v)
+    (recv
+        ((:get to)    (reply to v) (cell/loop v))
+        ((:set new)   (cell/loop new))
+        ((:update f)  (cell/loop (f v)))
+        ((:swap f to)
+            (let new (f v))
+            (reply to new)
+            (cell/loop new))))
+
+; --- dict: values by key -----------------------------------------------
+
+; Keys are compared with eq?, so any value can be one. The table is an
+; association list, most recently put first, so a lookup costs the
+; number of keys.
+(defun dict/new () (fork (dict/loop ())))
+(defun dict/put (d k v) (send d (list :put k v)))
+(defun dict/delete (d k) (send d (list :delete k)))
+
+; The value for k, or :not-found.
+(defun dict/get (d k) (ask d (list :get k)))
+
+; Replaces the value v for k with (f v), atomically; (f default) if
+; there's none yet.
+(defun dict/update (d k f default) (send d (list :update k f default)))
+
+(defun dict/keys (d) (ask d (list :keys)))
+(defun dict/size (d) (ask d (list :size)))
+
+(defun dict/loop (table)
+    (recv
+        ((:put k v)    (dict/loop (assoc k v (dict/without k table))))
+        ((:delete k)   (dict/loop (dict/without k table)))
+        ((:get k to)   (reply to (lookup k table)) (dict/loop table))
+        ((:update k f default)
+            (dict/loop (assoc k (f (dict/value k table default)) (dict/without k table))))
+        ((:keys to)    (reply to (map car table)) (dict/loop table))
+        ((:size to)    (reply to (length table)) (dict/loop table))))
+
+(defun dict/without (k table) (remove (lambda (kv) (eq? (car kv) k)) table))
+
+(defun dict/value (k table default)
+    (let v (lookup k table))
+    (cond
+        ((eq? v :not-found) default)
+        (#true              v)))
+
+; --- queue: first in, first out ----------------------------------------
+
+(defun queue/new () (fork (queue/loop () ())))
+(defun queue/push (q x) (send q (list :push x)))
+
+; The oldest item, taken off, or :empty.
+(defun queue/pop (q) (ask q (list :pop)))
+(defun queue/size (q) (ask q (list :size)))
+
+; Items go onto the back list and come off the front one; when the front
+; runs out, the back one, reversed, takes its place. So each item moves
+; once, and a push or a pop costs the same however long the queue is.
+(defun queue/loop (front back)
+    (recv
+        ((:push x)  (queue/loop front (cons x back)))
+        ((:pop to)  (queue/pop-from front back to))
+        ((:size to) (reply to (+ (length front) (length back))) (queue/loop front back))))
+
+(defun queue/pop-from (front back to)
+    (cond
+        ((cons? front) (reply to (car front)) (queue/loop (cdr front) back))
+        ((cons? back)  (queue/pop-from (reverse back) () to))
+        (#true         (reply to :empty) (queue/loop () ()))))
+
+; --- channel: take waits for an item -----------------------------------
+
+(defun channel/new () (fork (channel/loop () ())))
+(defun channel/put (ch x) (send ch (list :put x)))
+
+; The oldest item, taken off; waits until there is one. Don't take with
+; ask-within: an item put after the taker has stopped waiting is lost.
+(defun channel/take (ch) (ask ch (list :take)))
+
+; Items waiting to be taken, or takers waiting for items: never both.
+(defun channel/loop (items takers)
+    (recv
+        ((:put x)
+            (cond
+                ((nil? takers) (channel/loop (append items (list x)) ()))
+                (#true         (reply (car takers) x) (channel/loop items (cdr takers)))))
+        ((:take to)
+            (cond
+                ((nil? items)  (channel/loop () (append takers (list to))))
+                (#true         (reply to (car items)) (channel/loop (cdr items) takers))))))

@@ -1353,3 +1353,24 @@ docs, and the prelude could document itself. Rejected: Lisp docstrings
 (a string first in a `defun` documents a function, not a file, and isn't
 structured); `#| ... |#` block comments (a stream can't pick them out
 without reading the code around them, where POD's markers are lines).
+
+**D157. Data structures as processes: `lib/ds.slight`.** *(User asked for
+the library; its conventions are defaults.)* DESIGN.md's first goal,
+mutability from actors that keep their state in a loop's arguments, as
+a library in slight, with no change to the language: a cell, a
+dictionary, a queue and a channel, each a process, plus `ask` and
+`reply` for structures of one's own. Writes are sends, and return at
+once; reads ask. `ask` forks a box for the answer, which monitors the
+structure, and `join`s it: `join` keeps the caller's stack, so `ask`
+works anywhere, and each question has an address of its own, so a late
+or stray answer can't be taken for it. `ask` gives the answer, and
+raises `(:ended pid result)` if the structure ends first, or
+`(:timeout pid)` from `ask-within`; as Stevan's sketch `ask?` did, it
+raises rather than giving a Result, since a structure going away is a
+bug, not an outcome to handle. A structure answers with `(reply to v)`,
+which sends `(:reply v)`, so an answer can't be mistaken for the box's
+`(:exit ...)` notice. Updates take a function, which runs in the
+structure, so a read-modify-write is atomic. Rejected for now: a reply
+box in the runtime (a fork per question is cheap enough until a program
+says otherwise); a faster dictionary (a balanced tree in slight, or a
+table in C behind a device, D151, when one is needed).

@@ -27,9 +27,11 @@ The terminal: `connect :keypress`, raw mode, decoded keys, the screen's
 size (`runtime/tty.c`). Files: `connect :fs/read` (`:fs/write`,
 `:fs/append`) opens a file on a device, a pid the runtime serves, and
 `disconnect` closes it; `slurp` and `spew` are slight, in an opt-in
-`lib/fs.slight`. Sockets: `connect :tcp "host:port"` and `connect
-:tcp/listen port` open sockets as devices too, waited for in `select()`,
-and `(connect conn expr)` hands an accepted connection to a process.
+`lib/fs.slight`; data structures as processes (a cell, a dictionary, a
+queue, a channel, and `ask`) are in `lib/ds.slight` (D157). Sockets:
+`connect :tcp "host:port"` and `connect :tcp/listen port` open sockets
+as devices too, waited for in `select()`, and `(connect conn expr)`
+hands an accepted connection to a process.
 `(@include "path")` and `(@include :name)` splice in other files (each
 once); `@ARGV`, the program's arguments, is the top level's parameter
 (D144); and `if`, `when`, `case`, `and` and `or` are made into `cond`
@@ -161,7 +163,7 @@ to get them back from git (`3fd71e0`).
 | `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c` |
-| `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`) |
+| `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, and `; args: words` its arguments. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |

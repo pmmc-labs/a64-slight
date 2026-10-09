@@ -346,6 +346,13 @@ writes each line and a newline, replacing what was there, giving
 few lines each, on `connect`. Opt-in, like `lib/test.slight`, since not
 every program needs files (D129): `(@include :fs)`.
 
+**Data structures in slight:** `lib/ds.slight` (D157) has the goal's
+"data structure" actors: a cell, a dictionary, a queue and a channel,
+each a process, and `ask` and `reply` for one's own. Writes are sends;
+`ask` forks a box for the answer, which watches the structure, and joins
+it, raising `(:ended pid result)` if the structure ends first. Opt-in:
+`(@include :ds)`.
+
 ### Strings
 
 - **Level 1:** immutable byte strings. The byte builtins index by byte;

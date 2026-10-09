@@ -284,6 +284,13 @@ slight, checked against Python's `json` module, which could become
 `lib/json.slight` when HTTP (14) wants one; since then, JSON's parser is
 to be C (D154). Display width is still to come (15).
 
+#### Data structures as processes (done, Oct 2026)
+
+At Stevan's request, DESIGN.md's first goal as a library in slight
+(D157): `lib/ds.slight`, with a cell, a dictionary, a queue and a
+channel, each a process, and `ask` and `reply` for structures of one's
+own. No change to the language. Test 169.
+
 ### 11. Tooling (done, Oct 2026)
 
 First, so that every step after it gets a quicker loop (D150). `make
