@@ -60,13 +60,15 @@ language settles (16). Update this section as steps land.
 
 ## Read first, in this order
 
-1. [`docs/DESIGN.md`](docs/DESIGN.md): the language, runtime and compiler
+1. [`docs/LANGUAGE.md`](docs/LANGUAGE.md): slight as it is, every form
+   and builtin, for someone writing programs in it.
+2. [`docs/DESIGN.md`](docs/DESIGN.md): the language, runtime and compiler
    as agreed. **(open)** marks proposals that haven't been confirmed.
-2. [`docs/PLAN.md`](docs/PLAN.md): the build order and the example-port
+3. [`docs/PLAN.md`](docs/PLAN.md): the build order and the example-port
    table.
-3. [`docs/DECISIONS.md`](docs/DECISIONS.md): why, and what was turned down.
+4. [`docs/DECISIONS.md`](docs/DECISIONS.md): why, and what was turned down.
    Check it before "improving" something; it may have been decided against.
-4. [`docs/BACKGROUND.md`](docs/BACKGROUND.md): AVM, VM3, the spike, prior
+5. [`docs/BACKGROUND.md`](docs/BACKGROUND.md): AVM, VM3, the spike, prior
    art, and notes on other targets, compiling to C, multiple cores,
    embedded boards and WebAssembly (parked). Optional.
 
@@ -84,8 +86,7 @@ to get them back from git (`3fd71e0`).
   `docs/DECISIONS.md` (who decided, why, what was rejected) and update
   `docs/DESIGN.md`.
 - When a special form or builtin is added or changes, update
-  [`docs/FROM-TS-SLIGHT.md`](docs/FROM-TS-SLIGHT.md), Stevan's notes on
-  what differs from ts-slight (no tables there).
+  [`docs/LANGUAGE.md`](docs/LANGUAGE.md) (no tables there).
 - Keep a working compiler with passing tests at the end of every step
   (Ghuloum). Each step adds golden tests.
 - **Examples bend to the language, not the other way round.** When a
