@@ -1,7 +1,7 @@
-; fold-konts, from ts-slight's examples, which timed different ways of
-; folding a 1,440-element list. There's no time-it, so this checks that
-; they agree instead. Changes: if became cond, head and tail became car and
-; cdr, and the list is built rather than written out.
+; fold-konts: four ways to map over a 1,440-element list, which must
+; agree: a foldr written by hand, a recursive map, the prelude's map,
+; and fold/r. The first two aren't tail-recursive, so they take as much
+; stack as the list is long.
 
 (defun hand-written-foldr (init f seq)
     (cond

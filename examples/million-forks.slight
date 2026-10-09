@@ -1,8 +1,8 @@
-; million-forks, from ts-slight's examples (after
+; million-forks (after
 ; https://pkolaczk.github.io/memory-consumption-of-async/): a chain of a
 ; million processes, each waiting for one message, which it passes on.
-; A waiting process holds no stack. Changes: (recv) in the middle of a
-; function became a receive function; if became cond; there's no time-it.
+; A waiting process holds no stack, just its function, its arguments and
+; its mailbox, which is what lets a million of them wait at once.
 
 (defun test-actor (next)
     (recv

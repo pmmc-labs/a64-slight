@@ -1,7 +1,7 @@
 // tty.c -- the terminal: raw mode, decoding keys, and the screen's size.
 //
 // The scheduler (process.c) reads stdin, terminal or not, and hands the
-// bytes here a key at a time. A key becomes ts-slight's (key mods...): a
+// bytes here a key at a time. A key becomes (key mods...) (D120): a
 // string for a printable key (one UTF-8 character), or a name such as
 // :ArrowUp (rt.h, RT_KEY_...), then the modifiers held, in the order :ctrl
 // :alt :shift. As in readline, an upper-case letter comes with :shift, and
@@ -138,7 +138,7 @@ static rt_value_t cons_at(rt_value_t *cell, rt_value_t car, rt_value_t cdr) {
 size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key)) {
     keypress_t k    = { .name = RT_KEY_UNIDENTIFIED };
     size_t     used = decode(in, n, &k);
-    if (k.ctrl && k.len == 1 && k.text[0] == 'c') exit(130);   // as ts-slight did
+    if (k.ctrl && k.len == 1 && k.text[0] == 'c') exit(130);   // 128 + SIGINT (D117)
     // (key mods...), on the C stack: emit copies it
     _Alignas(16) uint64_t   text[2];    // a string box: the header, then up to 7 bytes and a NUL
     _Alignas(16) rt_value_t cells[8];

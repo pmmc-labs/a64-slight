@@ -1,4 +1,4 @@
-; pprint shows strings in quotes, as ts-slight did
+; pprint shows strings in quotes, with nothing inside escaped (D64)
 (pprint "hello")
 (pprint "")
 (pprint "tab\there")

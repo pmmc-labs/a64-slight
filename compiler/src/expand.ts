@@ -8,8 +8,8 @@
 //     directly or not, is an error. Every program starts with an unwritten
 //     (@include :prelude), whose forms the compiler keeps apart (D80).
 //
-//   - if, when, case, and and or become cond, as ts-slight's expander made
-//     them into if:
+//   - if, when, case, and and or become cond, so the compiler, the recv
+//     rule and the tail calls see only cond (D142):
 //
 //       (if test then else)    (cond (test then) (#true else))
 //       (if test then)         (cond (test then) (#true ()))

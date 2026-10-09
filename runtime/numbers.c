@@ -94,7 +94,7 @@ static rt_value_t rounded(rt_value_t x, double (*f)(double), const char *site) {
     return to_int(f(as_double(x, site)), x, site);
 }
 
-// Halves go up, as JavaScript's Math.round (and so ts-slight's round) does:
+// Halves go up, as JavaScript's Math.round does (D72):
 // (round 2.5) is 3 and (round -2.5) is -2.
 static double round_half_up(double d) {
     double r = floor(d);

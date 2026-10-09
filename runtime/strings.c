@@ -1,7 +1,7 @@
 // strings.c -- the string builtins. Strings are immutable bytes, UTF-8 by
 // convention; lengths and indexes count bytes, except in the utf8/
 // builtins at the end, which count characters. Where a builtin's behavior
-// isn't obvious, it follows ts-slight's (which followed JavaScript's).
+// isn't obvious, it follows JavaScript's string methods (D62).
 
 #include "rt.h"
 

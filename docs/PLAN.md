@@ -110,9 +110,10 @@ and neither side is a literal immediate.
 ### 5. Strings and floats (done)
 
 Strings landed first, as 5a; floats are 5b. The string builtins are in
-`runtime/strings.c`, the numeric ones in `runtime/numbers.c`. The ASCII case mapping and the padding and searching
-helpers (`uc lc pad-start pad-end str-repeat starts-with ends-with`) wait
-for the prelude in step 6. Agreed for floats: `div` and `%` truncate
+`runtime/strings.c`, the numeric ones in `runtime/numbers.c`. The ASCII
+case mapping and the padding and searching helpers (`uc lc pad-start
+pad-end str-repeat starts-with ends-with`) wait for the prelude in
+step 6. Agreed for floats: `div` and `%` truncate
 toward zero, and dividing by zero faults; floats print as `3.0`, or the
 shortest form that reads back the same; `(== 1 1.0)` is `#true` and
 `(eq? 1 1.0)` is `#false` (D68–D70).
@@ -313,8 +314,8 @@ JSON values or s-expression forms (D154, D155), the last two parsed in C
 by push parsers of our own, with the builtins `json/parse`, `json/print`,
 `sexp/parse` and `sexp/print` for text already in hand. Decided: one
 message per top-level value, and a JSON "items" mode; the same
-backpressure as lines; JSON's shape in slight (`t/168`'s); symbols the program
-doesn't mention read as `(:symbol "name")`; `sexp/print` reads back.
+backpressure as lines; JSON's shape in slight (`t/168`'s); symbols the
+program doesn't mention read as `(:symbol "name")`; `sexp/print` reads back.
 Also inline documentation, after Perl's POD (D156): `=doc` ... `=cut`
 blocks of Markdown between top-level forms, which the compiler's reader
 (TypeScript) and the C reader both skip, and a `:source` way to read a
@@ -384,7 +385,7 @@ process waiting mid-function keeps its stack (8 MB of address space, at
 least a page of memory, and two mappings, so Linux's default limit of
 65,530 allows about 32,000 waiting processes), and the collector would
 have to find roots in its frames, which our own assembly could do but C
-couldn't, short of a shadow stack.) Instead the expander makes ts-slight's
+couldn't, short of a shadow stack.) Instead the expander makes a
 mid-function `recv` into what the rule wants: at a `(recv)` (as a body
 form, or `(let x (recv))`), it splits the function into one that does the
 work before it and tail-calls a generated receive function holding the

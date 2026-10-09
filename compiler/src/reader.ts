@@ -1,14 +1,15 @@
-// The reader: source text to s-expressions with positions.
+// The reader: source text to s-expressions with positions (D37).
 //
-// Ported from ts-cpi's reader, with
-// slight's differences:
-//   - `#true` and `#false` read as symbols (booleans are reserved symbols)
-//   - integers are 63-bit
-//   - strings also accept \r and \e (ESC), for terminal escape sequences
-//   - quasiquote and unquote (` , ,@) are not part of slight
+//   - `#true` and `#false` read as symbols (booleans are reserved symbols),
+//     and no other `#` word is allowed
+//   - integers are 63-bit, and a literal out of range is an error
+//   - strings take \" \\ \n \t \r \e (ESC, for terminal escape sequences)
+//     and \u{hex}
+//   - quasiquote and unquote (` , ,@), and dotted pairs, are not part of
+//     slight
 //
-// `:name` reads as (quote name), positioned at the colon, as in ts-slight
-// and ts-cpi; `'x` reads as (quote x).
+// `:name` reads as (quote name), positioned at the colon; `'x` reads as
+// (quote x). Every atom carries its position, not just lists.
 
 import { CompileError } from './errors.ts';
 import { NIL, cons, float, fitsInt, int, reverse, str, sym, INT_MAX, INT_MIN, type Pos, type Sexp } from './sexp.ts';
@@ -118,7 +119,8 @@ function readUnicodeEscape(c: Cursor, escPos: Pos): [string, Cursor] {
 }
 
 // -?D+ is an int. -?D+.D+ is a float, with an optional exponent e[+-]?D+:
-// both sides of the point need digits, as in ts-cpi. Anything else is null.
+// both sides of the point need digits, so `1.` and `.5` are names, and so
+// is `1e3`. Anything else is null.
 function numberKind(text: string): 'int' | 'float' | null {
     const pastDigits = (i: number): number => isDigit(text[i] ?? '') ? pastDigits(i + 1) : i;
     const end = (i: number, kind: 'int' | 'float'): 'int' | 'float' | null => i === text.length ? kind : null;

@@ -18,23 +18,23 @@ bring it up before baking it in further.
   thousands of processes cooperating like an operating system. A million
   processes should work, but nothing is optimized for it. Erlang's choices
   are not automatically the right ones here.
-- **Aggressively simple.** Anything that adds complexity gets cut or changed.
-  Practical beats pure.
-- **The user surface of ts-slight** is what we keep. The internals of
-  ts-slight and ts-cpi are not.
+- **Aggressively simple.** Anything that adds complexity gets cut or
+  changed. Practical beats pure.
+- **The user surface is kept; the internals are new** (D2).
+  [`LANGUAGE.md`](LANGUAGE.md) describes the surface.
 - **Native AArch64.** macOS on Apple Silicon first, AArch64 Linux from the
   same code. x86-64 (Linux, and macOS under Rosetta 2) is a second target,
   from the same compiler through a target interface (D145). Development on
   x86 runs x86-64 natively and AArch64 with a clang cross-compile plus
   qemu-aarch64.
-- **Ahead-of-time compilation only.** No `eval`, no `slight/parse`, no code
-  loading at runtime, no hot reload.
+- **Ahead-of-time compilation only.** No `eval`, no code loading at
+  runtime, no hot reload.
 
 ## Language
 
 ### Syntax
 
-Same reader as ts-slight's (ported from ts-cpi's):
+The reader (`compiler/src/reader.ts`, D37) reads:
 
 - `( ... )` lists; `()` is nil
 - integers (`42`, `-7`) and floats (`3.14`)
@@ -52,7 +52,8 @@ Same reader as ts-slight's (ported from ts-cpi's):
 - `$$` (self) and `^$$` (parent)
 - `@ARGV`, the program's arguments, at the top level only (Program
   structure, below)
-- ts-slight's bare constants `\n`, `\r`, `\t`, `\e` (strings)
+- the names `\n`, `\r`, `\t` and `\e`, constants for those one-character
+  strings, and `PI`
 
 ### Types
 
@@ -74,7 +75,7 @@ Booleans are the reserved symbols `#true` and `#false`.
 |------|---------|
 | `(defun name (params...) body...)` | Top level only. No local `defun`. |
 | `(lambda (params...) body...)` | A closure. Captures free variables **by value**. Always a *plain* function (see the `recv` rule). Can't refer to itself. |
-| `(let name expr)` | Binds `name` for the rest of the enclosing body. Only allowed directly in a body. As the last form of a body, its value is `expr`'s (as in ts-slight). |
+| `(let name expr)` | Binds `name` for the rest of the enclosing body. Only allowed directly in a body. As the last form of a body, its value is `expr`'s (D42). |
 | `(cond (test body...) ...)` | The conditional the others become (below). Each test must be `#true` or `#false`, or the process faults; so does running out of clauses. |
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
@@ -87,8 +88,7 @@ Function bodies and clause bodies can hold several forms, as if wrapped in
 `do`.
 
 **Expanded forms** (D142). The expander (`compiler/src/expand.ts`), after
-the reader and before the compiler, makes these into `cond`, as
-ts-slight's expander made them into `if`:
+the reader and before the compiler, makes these into `cond`:
 
 | Form | Becomes |
 |------|---------|
@@ -137,8 +137,8 @@ The result: **the stack is empty at every `recv`.** A process waiting for a
 message is fully described by (function, arguments, mailbox). Its stack goes
 back to a pool. When a message arrives, the runtime calls the function again
 from the top with the same arguments. That's exact, because the function's
-body is just the `recv`. "All state lives in the loop arguments" is literally
-true at every wait.
+body is just the `recv`. "All state lives in the loop arguments" is
+literally true at every wait.
 
 Syntax (D85):
 
@@ -260,7 +260,7 @@ A program is one or more `.slight` files, and whatever they include. All
 top-level form, in order, becomes the body of the root process; a
 top-level `let` binds for the rest of the root process only, and `defun`s
 can't see it. The program's exit status follows the root process's Result.
-ts-slight's examples (`examples/`) are all written this way. Built this
+The examples (`examples/`) are all written this way. Built this
 way in step 2; a program with no top-level expressions has the value `()`.
 
 **`@ARGV`** (D144) is the program's arguments after its name, as a list of
@@ -272,7 +272,7 @@ defined. A number comes as a string: `(string->int (car @ARGV))`.
 
 ### Builtins and the prelude
 
-Keep ts-slight's names where possible.
+[`LANGUAGE.md`](LANGUAGE.md) describes each one as a program sees it.
 
 **In C (or assembly):**
 - arithmetic: `+ - *` on any two numbers; an integer and a float give a
@@ -280,8 +280,8 @@ Keep ts-slight's names where possible.
   always returns a float. `div` and `%` take integers only and truncate
   toward zero (`(% -7 2)` is -1). Dividing by zero faults, with `/` too.
   `ceil`, `floor`, `round` and `trunc` return integers (`round` sends
-  halves up, as ts-slight's did: `(round -2.5)` is -2), and fault if the
-  result doesn't fit. `sqrt pow sin cos tan exp` always return floats.
+  halves up, D72, so `(round -2.5)` is -2), and fault if the result
+  doesn't fit. `sqrt pow sin cos tan exp` always return floats.
   `abs`, `min` and `max` keep their argument's type. `PI` is a float.
   `float?` and `num?` alongside `int?`. Floats print in the shortest form
   that reads back as the same double, laid out as JavaScript does, but
@@ -289,13 +289,13 @@ Keep ts-slight's names where possible.
 - comparison: `== != < <= > >=` on any two numbers (`(== 1 1.0)` is
   `#true`), structural `eq?`/`ne?` on any values (`(eq? 1 1.0)` is
   `#false`)
-- type predicates: `nil? cons? sym? str? num? int? float? lambda? pid? bool?`
-  (`sym?` is true for `#true` and `#false`: they're symbols)
+- type predicates: `nil? cons? sym? str? num? int? float? lambda? pid?
+  bool?` (`sym?` is true for `#true` and `#false`: they're symbols)
 - lists: `cons car cdr list`, and `c[ad]r` with up to four letters
   (`cadr`, `cddr`, `caddr`, ...). `car`/`cdr` of anything but a cons
   faults, and so does `cons` onto anything but a list, so every list is
-  proper (both as in ts-slight). Inside a quoted list, `:a` reads as
-  `(quote a)`, as it did in ts-slight; write `'(a b)`, not `'(:a :b)`.
+  proper. Inside a quoted list, `:a` reads as `(quote a)`, as it does
+  everywhere; write `'(a b)`, not `'(:a :b)`.
 - strings: `str?`, `str-len` (bytes), `substring`, `concat`/`~`,
   `index-of`, `str-split`, `str-join`, `string->int`, `string->float`,
   `symbol->string`, `string->symbol`, `byte-at`, `bytes->string`,
@@ -305,7 +305,7 @@ Keep ts-slight's names where possible.
 - processes: `send join monitor kill after raise disconnect`
 - I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols` (the terminal's
   size, asked each time; 24 and 80 when stdout isn't a terminal), `pprint`
-  (prints its argument and a newline, returns `()`, as in ts-slight;
+  (prints its argument and a newline, and returns `()`: D43;
   symbols print without the colon, so `:ping` prints as `ping`),
   `sleep`. Files come through `connect`; `slurp` and `spew` are in
   `lib/fs.slight`.
@@ -323,10 +323,8 @@ program; it can only define functions.
 | association lists | `(assoc k v table)` adds `(k v)`; `(lookup k table)` gives the value or `:not-found` |
 | strings | `uc lc` (ASCII), `(pad-start s n fill)`, `(pad-end s n fill)`, `(str-repeat s n)`, `starts-with?`, `ends-with?`, `(bytes s)` (a list of its bytes), `ord` and `chr` (`utf8/code` and `utf8/char`, under Perl's names) |
 
-These are ts-slight's, adjusted where they were confusing (D78): its
-`filter` dropped what matched and `grep` kept it; its `range` took a step
-and always ended with `end`; its `take` faulted past the end of the list;
-`starts-with`/`ends-with` had no `?`; `concat-list` was `str-join`.
+D78 has why `filter`, `remove`, `range`, `take`, `skip`,
+`starts-with?` and `ends-with?` work as they do.
 
 A program can define a function with a prelude name. Its own code then
 uses its definition, and the prelude keeps using the prelude's (D80).
@@ -336,9 +334,9 @@ fixed number of arguments (`(map car xs)`, `(fold/l 0 + xs)`) can be used
 as a value. Builtins with a varying number (`list`, `concat`,
 `format-num`) can't.
 
-**Tests in slight:** `lib/test.slight` is a TAP library after ts-slight's
-`lib/Test.slight`: `(run-tests (list (ok test msg) (is got expected msg)
-(diag msg)))`. It isn't part of the prelude: a program that wants it says
+**Tests in slight:** `lib/test.slight` is a TAP library: `(run-tests
+(list (ok test msg) (is got expected msg) (diag msg)))`. It isn't part
+of the prelude: a program that wants it says
 `(@include :test)`.
 
 **Files in slight:** `lib/fs.slight` has `(slurp path)`, giving
@@ -360,12 +358,11 @@ every program needs files (D129): `(@include :fs)`.
 - There's no character type. A character is an integer or a one-character
   string.
 - Build strings by collecting pieces in a list and joining them.
-- `\n`, `\r`, `\t` and `\e` are names for one-character strings, as in
-  ts-slight; string literals also take those escapes, plus `\"`, `\\` and
-  `\u{hex}`.
+- `\n`, `\r`, `\t` and `\e` are names for one-character strings; string
+  literals also take those escapes, plus `\"`, `\\` and `\u{hex}`.
 
-**The builtins (step 5a).** Where ts-slight's behaviour (which was
-JavaScript's) differs from what you might guess, it wins (D62):
+**The builtins (step 5a).** Where an edge case could go either way,
+they do what JavaScript's string methods do (D62):
 
 | Builtin | |
 |---|---|
@@ -385,8 +382,8 @@ JavaScript's) differs from what you might guess, it wins (D62):
 | `(format-num n width [fill])` | `n` padded at the start to `width`, with `fill` (default `" "`) repeated as JavaScript's `padStart` does |
 | `(tty/write x ...)` | writes its arguments, rendered as `concat` does, and flushes; returns `()` |
 
-`pprint` shows a string in double quotes with nothing escaped inside, as
-ts-slight did. `eq?` compares strings byte by byte.
+`pprint` shows a string in double quotes with nothing escaped inside
+(D64). `eq?` compares strings byte by byte.
 
 **Counting characters (D148).** A character is a well-formed UTF-8
 sequence or, failing that, a stray byte on its own, whose code point is
@@ -440,10 +437,10 @@ can cut its bytes into messages (D154–D156):
 
 ### Not in the language
 
-`eval`, `slight/parse`, hot reload, macros, `catch`, `gensym`, local
-`defun`, selective receive, mutable anything. (`if`, `when` and `case`
-are back, as forms the expander makes into `cond`: D142.) readline isn't
-needed: the REPL and line editing are slight code over key events.
+`eval`, hot reload, macros, `catch`, `gensym`, local `defun`, selective
+receive, mutable anything. (`if`, `when` and `case` aren't macros, but
+forms the expander makes into `cond`: D142.) readline isn't needed: the
+REPL and line editing are slight code over key events.
 
 ## Runtime
 
@@ -569,20 +566,19 @@ Lalloc_N:
 
 ### Scheduler
 
-- Single core. A **FIFO run queue** (D86): the spike used deterministic
-  ticks, but a plain run queue is simpler and still deterministic on one
-  core. A preempted process goes to the back of the queue, but only if
-  another process is ready; otherwise it keeps running (D91). `yield`
+- Single core. A **FIFO run queue** (D86): simple, and deterministic on
+  one core. A preempted process goes to the back of the queue, but only
+  if another process is ready; otherwise it keeps running (D91). `yield`
   always goes to the back.
 - **The clock** is the system's monotonic one. With `SLIGHT_CLOCK=virtual`
-  in the environment, it's a **virtual clock** for tests (after ts-cpi's)
-  instead: it starts at 0, stands still while anything can run, and jumps
+  in the environment, it's a **virtual clock** for tests instead: it
+  starts at 0, stands still while anything can run, and jumps
   straight to the next timer when nothing can (D110). Timer tests are then
   exact and take no real time; but a process that sleeps while others stay
   busy never wakes.
 - **Stack pool**: a process takes a stack when it starts running and gives
   it back when it waits in `recv` or ends.
-- **Context switch**: the spike's `rt_switch`, 25 instructions (x19–x30,
+- **Context switch**: `rt_switch`, 25 instructions on AArch64 (x19–x30,
   sp, d8–d15).
 - **Idle**: when nothing is runnable, wait in `select()` (on macOS and
   Linux alike, D113) on stdin, if a process is connected to `:keypress`,
@@ -592,8 +588,8 @@ Lalloc_N:
   nothing can run: the sockets first, then a key, then the clock moves to
   the next timer; only when nothing else can happen does it wait for real
   (D139).
-- **`:keypress`** (`runtime/tty.c`) sends ts-slight's key shape
-  `(key mods...)` (D120): the
+- **`:keypress`** (`runtime/tty.c`) sends each key as `(key mods...)`
+  (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style
   name (`:ArrowUp`, `:Enter`, `:F1`, ..., `:Unidentified`), and the mods
   are those held, in the order `:ctrl :alt :shift`. The runtime decodes
@@ -674,8 +670,9 @@ bumps the heap pointer of `rt_current`, the running process.
 
 ### Register convention
 
-Carried over from the spike (BACKGROUND.md), with
-AAPCS64's argument registers (D47). x86-64's is after AArch64's.
+AAPCS64's argument registers carry the arguments (D47), so compiled
+functions and the runtime's C are called alike. x86-64's is after
+AArch64's.
 
 | Register | Role |
 |---|---|
@@ -750,9 +747,8 @@ calling `rt_fault`.
 ## Compiler
 
 TypeScript, run directly by Node (type stripping is on by default from
-Node 22.18; this container has 22.22), as ts-cpi does. Same setup as ts-cpi:
-`node --test` for tests, and `typescript` as the only dev dependency, for
-`tsc --noEmit` type checks. No runtime npm dependencies.
+Node 22.18). `node --test` for tests, and `typescript` as the only dev
+dependency, for `tsc --noEmit` type checks. No runtime npm dependencies.
 
 It compiles the whole program at once: the prelude plus the program's
 files go to one `.S` file, which clang assembles and links with the
@@ -779,10 +775,10 @@ that's just a walk over every function.
    allocation. `codegen.ts` decides what to emit and where values live,
    and asks a target (`target.ts`: `aarch64.ts`, `x86_64.ts`) for the
    instructions of each shape of code: the prologue, a call with its
-   operands, a test that branches, filling a cons cell (D145). Tagged values, a reduction
-   check at entries and tail calls. Collection needs nothing from the
-   compiler: `recv` already passes its function's arguments to the
-   runtime, to restart it after waiting.
+   operands, a test that branches, filling a cons cell (D145). Tagged
+   values, a reduction check at entries and tail calls. Collection needs
+   nothing from the compiler: `recv` already passes its function's
+   arguments to the runtime, to restart it after waiting.
 9. **Emit data**: string literals, quoted constants, static closures, the
    symbol name table.
 
@@ -811,13 +807,12 @@ line-by-line translation.
   status isn't 0. Every plan step adds
   some. The same tests and expected output serve both targets (D146).
 - **Compiler unit tests** with `node:test`, per pass.
-- **Timing uses the virtual clock** (`t/run.sh` sets `SLIGHT_CLOCK=virtual`),
-  never real time.
+- **Timing uses the virtual clock** (`t/run.sh` sets
+  `SLIGHT_CLOCK=virtual`), never real time.
 - **Keys** come from a `; stdin:` line in the test (D116), in printf `%b`'s
   escapes; without one, stdin is empty.
-- `lib/test.slight`, a slight-level test library in the style of
-  ts-slight's `lib/Test.slight` (TAP: `ok`, `is`, `diag`), for programs
-  that want one: `(@include :test)`.
+- `lib/test.slight`, a slight-level test library (TAP: `ok`, `is`,
+  `diag`), for programs that want one: `(@include :test)`.
 
 ## Open questions
 

@@ -6,8 +6,8 @@ assembly. The compiler is TypeScript for now and should self-host later.
 
 ## Status
 
-**Steps 0–9, 10a–10e and 11 of [`docs/PLAN.md`](docs/PLAN.md) are done**: the
-reader, and a compiler for integers, floats, `#true`/`#false`, `()`,
+**Steps 0–9, 10a–10e and 11 of [`docs/PLAN.md`](docs/PLAN.md) are done**:
+the reader, and a compiler for integers, floats, `#true`/`#false`, `()`,
 symbols, lists (a heap per process of chunks, capped at 64 MB, and
 collected when a receive function waits for a message), strings, closures
 (`lambda`, functions and builtins as values, `apply`), arithmetic
@@ -40,9 +40,9 @@ interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 beside the byte builtins, the `utf8/` ones count characters (a bad byte
 is a character of its own, as in Go), with `ord` and `chr` in the
 prelude, and `string->float` (D148).
-Fifteen of ts-slight's examples are ported (`examples/`; all but
-`ping-pong-tournament` are golden tests); porting has stopped, and new
-examples are written for this version (D149). Step 11, tooling, is done:
+`examples/` has fifteen example programs (all but `ping-pong-tournament`
+are golden tests); new ones are written when they're wanted (D149).
+Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
 x86-64 natively), and on macOS (Stevan runs it on his M2 Max after every
@@ -89,10 +89,10 @@ to get them back from git (`3fd71e0`).
   [`docs/LANGUAGE.md`](docs/LANGUAGE.md) (no tables there).
 - Keep a working compiler with passing tests at the end of every step
   (Ghuloum). Each step adds golden tests.
-- **Examples bend to the language, not the other way round.** When a
-  ts-slight example needs something the compiler or runtime doesn't do,
-  change the example, or leave it unported; don't add to the language to
-  make it pass (D84).
+- **Examples bend to the language, not the other way round.** When an
+  example needs something the compiler or runtime doesn't do, change the
+  example, or leave it out; don't add to the language to make it pass
+  (D84).
 - Verify a reported misbehavior against an independent implementation
   before calling it a bug.
 - When editing with scripts, assert that each replacement matched.
@@ -162,7 +162,7 @@ to get them back from git (`3fd71e0`).
 | `compiler/tests/` | Unit tests, `node:test` |
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c` |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`) |
-| `examples/` | ts-slight's examples, ported; each with a `.expected` is a golden test |
+| `examples/` | Example programs; each with a `.expected` is a golden test |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, and `; args: words` its arguments. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
@@ -197,10 +197,11 @@ to get them back from git (`3fd71e0`).
   run, straight to the next timer. `t/run.sh` sets it too.
 
 The runtime prints the root process's value, followed by a newline, once
-nothing can run and no timer is pending. Faults are logged to stderr as they happen (`fault: ...`
-in the root, `fault in #<pid N>: ...` elsewhere), and so are dead letters
-and an error that ends the root (`error: ...`). The program exits 1 if
-the root ended with an error or never ended (`deadlock: ...`).
+nothing can run and no timer is pending. Faults are logged to stderr as
+they happen (`fault: ...` in the root, `fault in #<pid N>: ...`
+elsewhere), and so are dead letters and an error that ends the root
+(`error: ...`). The program exits 1 if the root ended with an error or
+never ended (`deadlock: ...`).
 
 The golden tests check stdout and stderr together, plus `exit: N` when the
 status isn't 0. Write expected output by working it out independently (by

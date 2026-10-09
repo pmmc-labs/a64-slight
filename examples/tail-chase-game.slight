@@ -1,11 +1,11 @@
 ; stdin: \033[C\033[C\033[Bq
-; tail-chase-game, from ts-slight's examples: the arrows move an @ around,
-; and each square it leaves fades: to * after a second, to . two seconds
-; later, and to blank three seconds after that. q (or any key but an
-; arrow) ends it.
+; tail-chase-game: the arrows move an @ around, and each square it leaves
+; fades: to * after a second, to . two seconds later, and to blank three
+; seconds after that. q (or any key but an arrow) ends it.
 ;
-; Changes: a (recv) in the middle of a function became a receive function
-; (tail-chaser-wait); case, if and when became cond.
+; tail-chaser draws, and forks a process for the fading, which sleeps
+; between its steps; then it tail-calls tail-chaser-wait, the receive
+; function that takes the next key.
 
 (defun tail-chaser (h w x y count to-clear)
     (tty/write \e "[" x ";" y "H" "@")

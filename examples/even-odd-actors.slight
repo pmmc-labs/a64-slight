@@ -1,9 +1,9 @@
-; even-odd-actors, from ts-slight's examples: two processes decide whether
-; a number is even by passing it back and forth, counting down. Changes:
-; a (recv) in the middle of a function became a receive function, so each
-; actor is three functions (print, wait, reply); the root collects the
-; four answers in a receive function too; when and if became cond; the
-; (yield ...) around each loop is gone (preemption does that).
+; even-odd-actors: two processes decide whether a number is even by
+; passing it back and forth, counting down, until one of them reaches 0
+; and tells the root. Each is a receive function that prints what it got
+; and passes the count on; anything else (:STOP) ends it. The root waits
+; for the four answers in a receive function of its own (collect-wait),
+; then stops both.
 
 (defun is-it-even? (reply-to)
     (recv

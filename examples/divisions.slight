@@ -1,9 +1,9 @@
 ; stdin: 25q
-; divisions, from ts-slight's examples: the keys 1 to 5 divide the screen
-; into that many coloured boxes, and q quits.
+; divisions: the keys 1 to 5 divide the screen into that many coloured
+; boxes, and q quits.
 ;
-; Changes: a (recv) in the middle of a function became a receive
-; function; case became cond.
+; The keyboard is a receive function connected to :keypress; any other
+; key leaves the screen as it is.
 
 (let screen-rows (- (tty/screen/rows) 10))
 (let screen-cols (- (tty/screen/cols) 1))

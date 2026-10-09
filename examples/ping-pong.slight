@@ -1,6 +1,6 @@
-; ping-pong, from ts-slight's examples. Changes: a (recv) in the middle of
-; a function became a receive function (pinger-wait), so send-then-wait is
-; two functions; if became cond; join gives (:ok value).
+; ping-pong: a pinger and a ponger play 30 rounds. Sending and then
+; waiting is two functions: pinger sends, and tail-calls pinger-wait,
+; whose whole body is the recv. The root joins both.
 
 (defun ponger ()
     (recv

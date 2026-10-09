@@ -1,4 +1,4 @@
-; symbols print without the colon, as in ts-slight
+; symbols print without the colon (D52)
 (pprint :ping)
 (pprint (quote pong))
 (pprint 'pang)

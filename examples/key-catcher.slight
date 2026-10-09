@@ -1,13 +1,13 @@
 ; stdin: \033[1;2C3\033[1;2C\033[1;2B\033[D\033[1;3D\033x\003
-; key-catcher, from ts-slight's examples: the arrows move the cursor;
-; with shift, an arrow paints the cell it leaves (an upper-case letter
-; paints too); with alt, it clears it. The digits 1 to 7 pick the paint's
-; colour. There's no quit key: Ctrl-C ends it.
+; key-catcher: the arrows move the cursor; with shift, an arrow paints
+; the cell it leaves (an upper-case letter paints too); with alt, it
+; clears it. The digits 1 to 7 pick the paint's colour. There's no quit
+; key: Ctrl-C ends it.
 ;
-; Changes: a (recv) in the middle of a function became a receive
-; function; case and when became cond; the (yield ...) around the loop is
-; gone. The colour keys are matched as strings ("1" rather than 1), which
-; is what a key is, so they now work.
+; The keyboard is one receive function, connected to :keypress, with the
+; colour as its state. A key is (key mods...): the arrows are names such
+; as :ArrowUp, and the digits are one-character strings ("1" rather than
+; 1), so pick-color reads them with string->int.
 
 (defun keyboard (color)
     (recv

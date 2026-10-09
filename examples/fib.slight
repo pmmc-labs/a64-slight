@@ -1,6 +1,6 @@
-; fib, from ts-slight's examples. Changes: if became cond; @ARGV holds
-; strings, so n goes through string->int; n is 25 by default, not 27;
-; there's no time-it.
+; fib: the doubly recursive Fibonacci, of the program's argument, or of
+; 25 without one. @ARGV holds strings, so n goes through string->int.
+; Neither recursive call is a tail call, so it exercises the stack.
 
 (defun fib (n)
     (cond

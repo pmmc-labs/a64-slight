@@ -1,8 +1,8 @@
-; game-of-life (the one without actors), from ts-slight's examples. A grid
-; is (shape board): shape is (rows cols), and board is a list of rows of
-; cells, each (x y state). Changes: if and case became cond; a glider
-; instead of a random start (there's no rand); the grid wraps around
-; correctly (the original's wrap-around was one off); there's no time-it.
+; game-of-life, without actors: a grid is (shape board), shape being
+; (rows cols) and board a list of rows of cells, each (x y state). It
+; starts with a glider on a 6 by 8 grid that wraps around at its edges,
+; and prints four generations, each computed from the last by the usual
+; rules, with lists and the prelude's map and fold/l.
 
 (defun init-grid (h w init-cell)
     (list

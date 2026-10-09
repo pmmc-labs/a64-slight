@@ -1,7 +1,7 @@
-; pub-sub, from ts-slight's examples: a broker passes each published item
-; to its subscribers, then stops them. Changes: a (recv) in the middle of
-; a function became a receive function; if became cond; join gives
-; (:ok value).
+; pub-sub: a broker passes each published item to its subscribers, and
+; on any other message stops them and ends. The broker and each
+; subscriber are receive functions; the root publishes two items, stops
+; the broker, and joins all three.
 
 (defun notify-all (subs item)
     (cond

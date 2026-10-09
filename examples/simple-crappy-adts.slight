@@ -1,5 +1,5 @@
-; simple-crappy-adts, from ts-slight's examples: unchanged except for this
-; comment and the indentation.
+; simple-crappy-adts: a binary tree as tagged lists, (:Branch left right)
+; and (:Leaf value), with predicates for each, and a printer.
 
 (defun Branch? (t) (eq? (car t) :Branch))
 (defun Leaf?   (t) (eq? (car t) :Leaf))

@@ -1,5 +1,5 @@
 ; With no arguments, @ARGV is (), so a program can fall back to a default,
-; as ts-slight's fib did.
+; as examples/fib.slight does.
 
 (pprint @ARGV)
 (cond

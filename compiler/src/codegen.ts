@@ -279,7 +279,7 @@ export function functionLabel(name: string): string {
 // A body: forms evaluated in order, leaving the last one's value in the
 // accumulator.
 // (let name expr) binds name for the rest of the body; as the last form,
-// its value is expr's, as in ts-slight. Only the last form can be in tail
+// its value is expr's (D42). Only the last form can be in tail
 // position. A loop over the forms, where slight would tail-recurse (D39),
 // so that a long body doesn't run Node out of stack.
 function compileBody(forms: Sexp, cx: Cx, st: St): [Code, St] {
@@ -342,7 +342,8 @@ function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
     }
 }
 
-// Names for constants, from ts-slight: control characters, and PI.
+// Names for constants: control characters, and PI. A local of the same
+// name hides them.
 const CONSTANTS: Readonly<Record<string, Sexp>> = {
     '\\n': str('\n'), '\\r': str('\r'), '\\t': str('\t'), '\\e': str('\x1b'), 'PI': float(Math.PI),
 };

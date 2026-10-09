@@ -1,4 +1,4 @@
-; ceil, floor, round and trunc give integers; round sends halves up, as ts-slight did
+; ceil, floor, round and trunc give integers; round sends halves up (D72)
 (pprint (ceil 1.2))
 (pprint (ceil -1.5))
 (pprint (floor -1.5))

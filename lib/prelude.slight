@@ -1,12 +1,12 @@
 ; The prelude: compiled with every program. It can only define functions.
 ;
-; The names and argument orders are ts-slight's (its Prelude.slight),
-; except where they were confusing (D78): filter keeps
-; what matches and remove drops it (ts-slight's filter dropped, and grep
-; kept); range is (range start end), from start up to but not including
-; end; take and skip stop at the end of the list; starts-with? and
-; ends-with? end in ? like the other predicates; concat-list is gone (it
-; was str-join). Every loop is a tail call, so long lists are fine.
+; A program can define a function with a prelude name: its own code then
+; uses its own, and the prelude keeps using these (D80). D78 says why
+; filter keeps what matches and remove drops it; why range is (range
+; start end), from start up to but not including end; and why take and
+; skip stop at the end of the list rather than faulting. Predicates end
+; in ?, starts-with? and ends-with? among them. Every loop is a tail
+; call, so long lists are fine.
 
 ; --- numbers and booleans ---------------------------------------------------
 

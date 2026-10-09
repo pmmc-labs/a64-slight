@@ -306,7 +306,7 @@ test('a string literal is a box in the read-only data', () => {
     assert.ok(asm.indexOf('Lstring_0:') > asm.indexOf('RODATA'));
 });
 
-test("ts-slight's control-character names are strings, unless shadowed", () => {
+test('the control-character names are strings, unless shadowed', () => {
     assert.match(compile('\\e'), /\.quad 1 << RT_BOX_SIZE_SHIFT \| RT_BOX_STRING\n {4}\.asciz "\\033"/);
     // after @ARGV; a backslash in a comment is escaped (160-backslash-names)
     assert.match(compile('(let \\n 5) \\n'), /ldr {2}x0, \[sp, #8\] {4}\/\/ \\134n/);

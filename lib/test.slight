@@ -1,4 +1,4 @@
-; A TAP test library, after ts-slight's lib/Test.slight. Not part of the
+; A test library printing TAP (Test Anything Protocol). Not part of the
 ; prelude: a program that wants it says (@include :test). A test is a
 ; function of the counts so far, (n failed), that prints its result and
 ; returns the new counts; run-tests runs a list of them, prints the plan,

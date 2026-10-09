@@ -1,7 +1,7 @@
-; closure-objects, from ts-slight's examples: objects are closures over
-; their fields, answering messages. Changes: case became cond; there's no
-; gensym, so an object is given its id; there's no raise yet, so an unknown
-; message answers (method-not-found m).
+; closure-objects: objects are closures over their fields, answering
+; messages. A Point hands what it doesn't know to its Object, its super;
+; each object is given its id when it's made; and a message no object
+; knows is answered with (method-not-found m).
 
 (defun Object (oid)
     (lambda (m)

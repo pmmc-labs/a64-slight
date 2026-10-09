@@ -1,5 +1,5 @@
-; ping-pong-tournament, from ts-slight's examples: N games of ping-pong
-; at once, each played for D milliseconds, then the volleys counted.
+; ping-pong-tournament: N games of ping-pong at once, each played for D
+; milliseconds, then the volleys counted.
 ;
 ; How many volleys fit depends on the machine, so this example has no
 ; .expected, and it can't run on the virtual clock that the golden tests
@@ -9,12 +9,12 @@
 ;     node bin/slightc.ts -o build/ping-pong-tournament examples/ping-pong-tournament.slight
 ;     build/ping-pong-tournament 10 100    # games, ms; qemu-aarch64 build/... on x86
 ;
-; Changes: a (recv) in the middle of a function became receive functions;
-; case, if and when became cond and recv patterns; the sizes go through
-; string->int, since @ARGV holds strings, and have defaults; there's no
-; timing (no time-it); a game is forked by name;
-; join gives (:ok value); the (yield ...) around each loop is gone, and so
-; is the player's unused max-delay; sys/io/print-ln became tty/write.
+; Each game is a process that forks its two players, waits for the
+; :START gate, serves, sleeps for D ms, stops them, and collects their
+; counts. The root starts the games, joins them all, says where a game's
+; counts differ from the one before by more than one, and adds them up.
+; N and D come from @ARGV, through string->int, and default to 10 and
+; 100. A game is forked by name: a function that waits isn't a value.
 
 (defun player (counter)
     (recv

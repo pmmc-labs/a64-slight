@@ -1,9 +1,9 @@
-; ring-benchmark, from ts-slight's examples: a chain of processes passes a
-; count along it, and the last one reports back. Changes: (recv) in the
-; middle of a function became receive functions; if became cond; the
-; (yield ...) around each loop is gone (preemption does that now); the
-; sizes go through string->int, since @ARGV holds strings, and default to
-; less; there's no time-it, so it reports each round.
+; ring-benchmark: a chain of processes passes a count along it, and the
+; last one reports back to the root, once for each ping; then an :EXIT
+; goes down the chain, and each process ends as it passes it on. The
+; chain's length and the number of pings after the first come from
+; @ARGV, through string->int, and default to 1000 and 3. Each round is
+; reported as it completes.
 
 (defun test-actor (reply-to next)
     (recv

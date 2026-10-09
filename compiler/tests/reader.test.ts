@@ -1,6 +1,5 @@
-// Tests for the reader. Ported from ts-cpi's,
-// adjusted for slight: booleans are symbols, integers are 63-bit, strings
-// also take \r and \e, and there is no quasiquote.
+// Tests for the reader: booleans are symbols, integers are 63-bit, strings
+// take \r and \e among their escapes, and there is no quasiquote.
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
@@ -68,7 +67,7 @@ test('symbols', () => {
     assert.equal(shows('name list/map IO::print a-b $$ ^$$ eq? str->int'), 'name list/map IO::print a-b $$ ^$$ eq? str->int');
 });
 
-test("ts-slight's bare constants read as symbols", () => {
+test('the control-character names read as symbols', () => {
     const xs = forms('\\e \\n \\r \\t');
     assert.deepEqual(xs.map((x) => x.t === 'sym' && x.name), ['\\e', '\\n', '\\r', '\\t']);
 });
