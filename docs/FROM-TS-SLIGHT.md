@@ -418,3 +418,8 @@ Planned for step 12a: JSON and s-expressions parsed in C, with
 sockets that hand you whole JSON values or forms rather than lines.
 `sexp/parse` is the nearest thing to ts-slight's `slight/parse`, but it
 reads data, and nothing evaluates it.
+
+Also planned there: inline docs, after Perl's POD. A line `=doc` between
+top-level forms starts a block of Markdown, and `=cut` ends it; the
+compiler skips it, and a file read as `:source` gives its forms and its
+doc blocks in order.

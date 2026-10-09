@@ -303,7 +303,7 @@ Left for when it gets in the way: better compile errors, say.
 
 What HTTP needs underneath it, from the things left "for now" so far.
 
-#### 12a. Ways to read a device: chunks, JSON and s-expressions
+#### 12a. Ways to read a device: chunks, JSON, s-expressions, source
 
 Files and sockets deal only in lines (D134: "just lines for now, and
 move to chunks later, just like with :fs"). An HTTP body is read by its
@@ -315,11 +315,16 @@ by push parsers of our own, with the builtins `json/parse`, `json/print`,
 message per top-level value, and a JSON "items" mode; the same
 backpressure as lines; JSON's shape in slight (`t/168`'s); symbols the program
 doesn't mention read as `(:symbol "name")`; `sexp/print` reads back.
+Also inline documentation, after Perl's POD (D156): `=doc` ... `=cut`
+blocks of Markdown between top-level forms, which the compiler's reader
+(TypeScript) and the C reader both skip, and a `:source` way to read a
+file that gives its forms and doc blocks in order, with line numbers.
 To settle: what a chunk message looks like, how a reader asks for a
 number of bytes, how a connection switches from one way to another
 (headers are lines; a body isn't), and the names of it all. Tests:
 JSONTestSuite, Python's `json` as a model, and inputs cut at random
-places.
+places; doc blocks in golden tests, which must compile as if they
+weren't there.
 
 #### 12b. Collecting outside `recv`
 

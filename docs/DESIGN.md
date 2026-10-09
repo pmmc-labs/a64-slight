@@ -45,6 +45,11 @@ Same reader as ts-slight (see `reference/ts-slight/src/parser.ts` and
   `#true`/`#false` are the booleans.
 - `'x` is `(quote x)`
 - `;` starts a comment
+- planned (D156): a line starting with `=` and a letter, between
+  top-level forms, begins a doc block, which runs to a line `=cut`. The
+  compiler skips it. `=doc` holds Markdown (a subset: headings,
+  paragraphs, emphasis, code, fenced blocks, lists, links); other
+  `=word`s are kept for later.
 - `$$` (self) and `^$$` (parent)
 - `@ARGV`, the program's arguments, at the top level only (Program
   structure, below)
@@ -407,10 +412,10 @@ The byte builtins that don't count are right for UTF-8 as they are:
 bytes as they are. `utf8/chars` takes 32 bytes a character, and the root
 never collects, so a text split there tops out at about 2 MB.
 
-### JSON and s-expressions (planned, step 12a)
+### JSON, s-expressions and source (planned, step 12a)
 
 Parsed in C, as builtins for text already in hand and as ways a device
-can cut its bytes into messages (D154, D155):
+can cut its bytes into messages (D154–D156):
 
 - **Builtins:** `(json/parse s)`, `(json/print v)`, `(sexp/parse s)`,
   `(sexp/print v)`.
@@ -431,6 +436,10 @@ can cut its bytes into messages (D154, D155):
   `sexp/parse` reads back, strings escaped and `(:symbol "name")` as
   `name`, and faults on pids, closures, `nan` and `inf`; `pprint` stays
   unescaped.
+- **Source:** where `:sexp` skips doc blocks, `:source` gives a file's
+  forms and doc blocks in order, `(:form f form line)` and `(:doc f text
+  line)`, a doc block as its raw text; a form's raw text instead is an
+  option (D156).
 
 ### Not in the language
 

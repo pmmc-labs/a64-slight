@@ -544,6 +544,9 @@ Minefield") is the conformance test: its `y_` files must parse, its
 
 ## Prior art
 
+- **Perl's POD**: documentation in the source, in blocks the compiler
+  skips (`=head1` ... `=cut`), which a stream can pick out by lines. D156
+  takes the markers, with Markdown inside.
 - **Abdulaziz Ghuloum, "An Incremental Approach to Compiler Construction"**
   (2006): the build plan.
 - **Nanopass** (Sarkar, Waddell, Dybvig; Keep): many small passes.

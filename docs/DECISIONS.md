@@ -1326,3 +1326,30 @@ interning symbols at run time (it reopens D14, and the table only grows:
 Erlang's atom table, filled by untrusted input, brings down the whole
 node); an error on an unknown symbol (it would fail on well-formed
 text).
+
+**D156. Documentation inline, as Perl's POD: doc blocks, and a `:source`
+device.** *(User, Oct 2026: "a specified and structured format that can
+be ignored by the compiler, but read as a stream".)* A line that starts
+with `=` and a letter, between top-level forms, begins a doc block, and
+a line `=cut` ends it (or the end of the file does, as in POD); the
+compiler skips it, so docs never change what a program means. Only
+between top-level forms, so nothing inside a form is ever taken for one,
+and only `=` and a letter, so a bare `==` isn't. `=doc` is the one kind
+for now; any other `=word` is kept for later kinds, such as `=example`
+blocks that could run as tests (as Python's doctests do). Inside, a
+subset of Markdown that reads well as plain text: headings (`#`, `##`,
+`###`), paragraphs, `*emphasis*` and `**strong**`, `` `code` ``, fenced
+code blocks, lists (`-` and `1.`), and `[links](url)`; no HTML and no
+tables. A doc block comes out as its raw text at first; parsing the
+Markdown into s-expressions, for a renderer, can come later (md4c, which
+is C, MIT, CommonMark-compliant and reports what it meets as it goes,
+would be the one to vendor). `:source` is one more way to read a file
+(D154): where `:sexp` skips doc blocks as the compiler does, `:source`
+gives everything in file order, `(:form f form line)` and `(:doc f text
+line)`, with the line each starts on; forms follow D155, and a form's
+raw text instead is an option, for a pretty printer or a doc tool that
+shows code. So a `slightdoc` written in slight could render `lib/`'s
+docs, and the prelude could document itself. Rejected: Lisp docstrings
+(a string first in a `defun` documents a function, not a file, and isn't
+structured); `#| ... |#` block comments (a stream can't pick them out
+without reading the code around them, where POD's markers are lines).
