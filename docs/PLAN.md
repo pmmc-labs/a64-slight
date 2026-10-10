@@ -416,7 +416,9 @@ process waiting mid-function keeps its stack (8 MB of address space, at
 least a page of memory, and two mappings, so Linux's default limit of
 65,530 allows about 32,000 waiting processes), and the collector would
 have to find roots in its frames, which our own assembly could do but C
-couldn't, short of a shadow stack.) Instead the expander makes a
+couldn't, short of a shadow stack. Since step 12b the collector does read
+frames, at a function's entry (D166), so of those two costs the stack is
+what's left.) Instead the expander makes a
 mid-function `recv` into what the rule wants: at a `(recv)` (as a body
 form, or `(let x (recv))`), it splits the function into one that does the
 work before it and tail-calls a generated receive function holding the
@@ -445,8 +447,11 @@ becomes
   clause's included. Nested uses, like `even-odd-actors`'
   `(pprint (list (recv) (recv)))`, are flattened into `let`s first.
 - No runtime cost: waiting processes still hold no stack, and the
-  collector still runs at `recv` with just the arguments as roots, so it
-  suits compiling to C as well as assembly.
+  collector still runs at `recv` with just the arguments as roots. That
+  no longer makes it easier to compile to C than a `recv` mid-function:
+  since step 12b a C target needs a shadow stack either way, or has to
+  give up collecting at a function's entry and collect only at `recv`,
+  where the split would still spare it one (D166).
 - Unchanged: a function that waits is still called only in tail
   position; a `recv` inside a lambda (`simple-db-server`'s `db-client`,
   called from `map`) still can't work, since `map` has work pending on
