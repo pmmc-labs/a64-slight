@@ -42,8 +42,8 @@ One rule keeps the runtime small: `recv` can only be the whole body of a
 top-level function, and a function that can reach one can only be
 tail-called. So a process waiting for a message has nothing on its
 stack. It's just a function, its arguments and a mailbox; it gives its
-stack back while it waits, and that's when its heap is collected, with
-the arguments as the only roots.
+stack back while it waits. A heap is collected then, or at any
+function's entry, once it has grown enough.
 
 The compiler is TypeScript, run directly by Node, and is written to be
 ported to slight later. The runtime schedules processes on one core, with
@@ -85,8 +85,8 @@ seconds.
 
 Next is the rest of the groundwork HTTP needs (step 12; reading a
 device in chunks, by length, and as JSON, s-expressions or source is
-done, and so are JSON and s-expressions in C, doc blocks, and looking up
-host names without stalling the runtime): collecting outside `recv`, and
+done, and so are JSON and s-expressions in C, doc blocks, collecting
+outside `recv`, and looking up host names without stalling the runtime):
 C libraries and TLS. Then where
 `recv` can go (13), and HTTP, written in slight on top of TCP (14).
 Self-hosting waits until the language settles.

@@ -101,7 +101,17 @@ function closureField(reg: string, base: string, name: string, offset: number): 
     return offset <= 255 ? `    ldur ${reg}, [${base}, #${name}]` : [`    add  ${reg}, ${base}, #${offset}`, `    ldr  ${reg}, [${reg}]`];
 }
 
-const register = (op: Operand): string | null => (op.t === 'acc' ? 'x0' : op.t === 'left' ? 'x1' : op.t === 'proc' ? 'x28' : null);
+const register = (op: Operand): string | null =>
+    op.t === 'acc' ? 'x0' : op.t === 'left' ? 'x1' : op.t === 'proc' ? 'x28' : op.t === 'fp' ? 'x29' : null;
+
+// Slots from..to-1 = 0, two at a time while stp's offset reaches.
+function zeroSlots(from: number, to: number): Code {
+    const out: string[] = [];
+    for (let i = from; i < to; i += i + 1 < to && 8 * i <= 504 ? 2 : 1) {
+        out.push(i + 1 < to && 8 * i <= 504 ? `    stp  xzr, xzr, ${slot(i)}` : `    str  xzr, ${slot(i)}`);
+    }
+    return out;
+}
 
 function move(dst: string, op: Operand): Code {
     switch (op.t) {
@@ -125,7 +135,7 @@ export const AARCH64: Target = {
     // x29/x30 on top, then the slots. The captured values come from the
     // closure in x9 after the parameters are stored (x9 is gone after
     // rt_preempt, hence the order).
-    prologue: (size, overflow, params, free, preempt) => [
+    prologue: (size, overflow, params, free, preempt, zero) => [
         '    stp  x29, x30, [sp, #-16]!',
         '    mov  x29, sp',
         size > 0 ? `    sub  sp, sp, #${size}` : [],
@@ -137,6 +147,7 @@ export const AARCH64: Target = {
             closureField('x16', 'x9', `RT_CLOSURE_FREE + ${8 * i}`, 29 + 8 * i),
             `    str  x16, ${slot(params.length + i)}${comment(name)}`,
         ]),
+        zero ? zeroSlots(params.length + free.length, size / 8) : [],
         '    ldr  x16, [x28, #RT_PROC_REDUCTIONS]',
         '    subs x16, x16, #1',
         '    str  x16, [x28, #RT_PROC_REDUCTIONS]',

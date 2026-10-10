@@ -141,7 +141,9 @@ barrier, no rooting API. Considered: "Cheney on the MTA" (Baker, Chicken
 Scheme). The copying algorithm and bump allocation apply; the CPS-in-C
 trick doesn't, because we already have native tail calls and process
 suspension. Also considered: Perceus-style reference counting with reuse
-(Lean 4, Koka). Kept open by keeping the heap acyclic; not now.
+(Lean 4, Koka). Kept open by keeping the heap acyclic; not now. (Since
+step 12b a collection can also start with frames on the stack, read as
+they are, with no stack maps: D166.)
 
 **D25. `send` deep-copies; `recv` adopts the chunk.** *(Default.)*
 
@@ -633,7 +635,7 @@ Rejected for now: also collecting at tail calls between state functions
 tail calls from the bottom of the stack in plain loops (a runtime `sp`
 check). So the root, unless it ends in a receive function, and a process
 that never waits for a message, never collect, and the 64 MB limit is
-what stops them.
+what stops them. (Changed in step 12b: D166.)
 
 **D106. When to collect, and the limit.** *(User.)* Once the heap in use
 (all its chunks, less what's free in the current one) reaches twice what
@@ -1614,3 +1616,70 @@ agreed.)* `runtime/dns.c`, about 350 lines.
   reading what macOS's `scutil --dns` shows, per interface (D153's
   caveat), since `/etc/resolv.conf` has the default servers, which is
   enough for now.
+
+**D166. Collecting at a function's entry, with the frames as roots.**
+*(User, Oct 2026, for step 12b: collecting at any function's entry,
+over collecting at tail calls between state functions, at tail calls
+from the bottom of the stack, or anywhere, C included; slots zeroed for
+now; the trigger through preemption; and the stress mode a documented
+variable.)*
+- **Where:** at a function's entry, in `rt_preempt`, as well as when a
+  receive function waits (D105). Every loop is a tail call, so every long
+  computation passes through function entries: the root and a process
+  that never waits collect too, and the 64 MB limit (D106) is on what's
+  live, not on what's been allocated. Collecting at tail calls between
+  state functions would have helped only actors, which reach `recv`
+  soon anyway; at tail calls from the bottom of the stack, not the root,
+  whose own frame is under any loop it calls; and anywhere, C included,
+  needs handles and a rooting API in C, which D24 turned down.
+- **The roots are the frames,** read as they are. The code generator made
+  that cheap: nothing lives in a register across a call; a slot only ever
+  holds a value; C never calls compiled code (`apply` jumps, and `fork`
+  starts a new process), so no C frame comes between compiled ones, and C
+  code still never sees anything move (D24); and frames are linked by
+  `x29`/`rbp`, laid out the same on both targets. At its entry a function
+  has stored its parameters and captured values and nothing else, so
+  `rt_preempt` is given those; each frame below holds its slots between
+  the linkage of the one above and its own; the first frame's saved frame
+  pointer is 0, from the zeroed context a process starts with.
+- **Stale slots:** a slot not yet written holds whatever was on the stack
+  before, an old return address or a pointer to what an earlier
+  collection freed, and the collector would follow it. So a function that
+  calls compiled code other than in tail position (a call, a call through
+  a closure, or `apply`) zeroes its slots past its parameters at entry:
+  an `stp xzr, xzr` for two slots on AArch64, a `mov` for each on
+  x86-64. A function that only tail-calls, as most loops do, is never
+  under a collection, and pays nothing. Not now: a table of the live
+  slots at each call site, which costs nothing at run time and keeps less
+  alive, but takes more of the compiler; it's the next step if the
+  zeroing shows in measurements. Measured on x86-64, at four placements
+  of the code (which alone moved times by up to 15%): `fib 37`, which
+  zeroes three slots a call, took 0.237–0.252 s against 0.211–0.275 s
+  before, about 3% more on the mean; a loop of tail calls, the same code
+  as before, the same times.
+- **When:** at the end of every slice of 1,000 calls (D86), and sooner:
+  when `rt_heap_grow` finds the heap in use past the point of collecting
+  (D106), it cuts the slice short, so the next call's entry goes to
+  `rt_preempt`, and keeps the rest of the slice (`slice_rest`) for after.
+  So collecting never changes when a process is preempted, and output
+  that depends on scheduling comes out the same (`t/190`). Turned down: a
+  check of its own at every entry.
+- **What a frame keeps:** everything in its slots, until it returns, so a
+  `let` in the root's body lives till the program ends, and a value left
+  in a slot can outlive its use until the slot is used again.
+- **`SLIGHT_GC_STRESS=n`** collects at every nth call's entry (n up to
+  1,000, a slice: past that, at every slice's end), and at every `recv`,
+  with the slices unchanged. With 1, every golden test gave the same
+  output on both targets, but for those that then take too long (much
+  live data, or 200,000 frames deep); with 101 so did those, but for five
+  under qemu, and with 1,000 three of those; the other two fill 64 MB
+  with live data, which takes too long under qemu even so, and they did
+  on x86-64.
+  `t/189` sets it itself: with it, a function that didn't zero its slots
+  finds a freed pointer in them at once, on both targets.
+- **The cost to the parked targets:** compiling to C, or to WebAssembly,
+  suited the design because the collector never scanned a stack
+  (BACKGROUND.md). Now it reads the frames, so either would keep its
+  slots where the collector can read them (a shadow stack: frames in
+  memory of the runtime's own, which is what slots are already), or
+  collect only at `recv` there, as before.

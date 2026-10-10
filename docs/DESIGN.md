@@ -410,8 +410,8 @@ nothing, and `utf8/valid?` says whether a string has any.
 The byte builtins that don't count are right for UTF-8 as they are:
 `concat`, `~`, `str-join`, `eq?`, `starts-with?`, `ends-with?`, and
 `str-split` on a separator that isn't empty. Output writes a string's
-bytes as they are. `utf8/chars` takes 32 bytes a character, and the root
-never collects, so a text split there tops out at about 2 MB.
+bytes as they are. `utf8/chars` takes 32 bytes a character, so a text
+split into one list tops out at about 2 MB, all of it live.
 
 ### JSON, s-expressions and source (step 12a, done)
 
@@ -517,34 +517,42 @@ Lalloc_N:
     str  x4, [x28, #RT_PROC_HEAP_PTR]       // x2 = the new cell
 ```
 
-**Collection** (step 9):
+**Collection** (step 9, and step 12b):
 
-- **It runs only when a receive function asks for its next message**
-  (D105), in `rt_recv`, before it takes one. The `recv` rule means the
-  stack is empty then, so the roots are just the receive function's
-  arguments, in its frame. Nothing else in the frame is live, and nothing
-  outside the process's heap points into it.
+- **It runs when a receive function asks for its next message** (D105),
+  in `rt_recv`, before it takes one. The `recv` rule means the stack is
+  empty then, so the roots are just the receive function's arguments, in
+  its frame. Nothing outside the process's heap points into it.
+- **And at a function's entry** (D166), in `rt_preempt`, so the root and
+  a process that never waits collect too, and the 64 MB limit is on
+  what's live. The roots are the frames: the function's parameters and
+  captured values, all it has stored yet, and every slot of each frame
+  below, found by the frame pointers (the first frame's saved one is 0).
+  That works because nothing lives in a register across a call, a slot
+  only ever holds a value, and C never calls compiled code, so no C frame
+  comes between. A function that calls another other than in tail
+  position zeroes its slots at entry, so none holds a stale word; one
+  that only tail-calls is never under a collection, and doesn't.
 - It runs once the heap in use (its chunks, less what's free in the
   current one) reaches twice what survived the last collection, and never
   below 256 KB, so a short-lived or small process never collects (D106).
+  `rt_preempt` checks that at the end of each slice; and when
+  `rt_heap_grow` finds it so, it cuts the slice short, so the next call's
+  entry goes to `rt_preempt`, keeping the rest of the slice for after:
+  collecting never changes when a process is preempted.
 - The live data is copied into fresh chunks (of up to 1 MB each), and the
   old ones are freed. Copying leaves a forwarding pointer, so sharing is
   kept: a DAG stays a DAG. Cons cells have no header, so to-space can't be
   scanned in order as in Cheney's algorithm; a stack of copied objects
   whose fields still need forwarding takes its place (D107).
-- In the middle of a handler, the heap only grows.
 - **C builtins never see an object move.** No handles, no rooting API, no
   stack maps, no write barrier.
-- **The gotcha:** a process that allocates without waiting for a message
-  never collects: an allocation-heavy loop inside a handler, the root
-  (unless it ends in a receive function), or a process that never calls
-  `recv`. The 64 MB limit turns that into a fault instead of exhausting
-  memory. Split long work across messages.
-- Collecting at other places where the stack is empty (a plain loop that
-  is a `fork` body, say, or tail calls between state functions) would need
-  a runtime check of `sp`, or more from the compiler. Left out for now.
+- **A frame keeps everything in its slots** until it returns, so a `let`
+  in the root's body lives till the program ends.
 - `SLIGHT_POISON=1` in the environment fills what the collector frees with
   garbage, so a pointer it missed fails at once; `t/run.sh` sets it.
+  `SLIGHT_GC_STRESS=n` collects at every nth call's entry (n up to
+  1,000) and every `recv`, without changing when processes are preempted.
 - **No walk over a value recurses in C** (D147): the collector, printing,
   copying (a message, a fork's values, a result) and `eq?` keep a work
   stack (`rt_work_t`) instead, which grows only as deep as the value nests
@@ -848,9 +856,7 @@ line-by-line translation.
 
 Collected from above:
 
-1. Collecting anywhere but `recv` (see "Process heaps and GC"; plan
-   step 12b).
-2. A worker thread for a C library that can only block, such as SQLite
+1. A worker thread for a C library that can only block, such as SQLite
    (D151): the runtime's first thread, if it comes.
 
 Settled in step 2: program structure, the top-level forms as the root
@@ -862,4 +868,5 @@ step 9: collecting only at `recv` (D105). In step 10a: the virtual clock
 (D110), what `after` and `sleep` return (D111), timers whose process has
 ended (D112), and waiting in `select()` (D113). In step 10b: feeding tests
 keys (D116), Ctrl-C (D117), the end of stdin (D118), and several
-connected processes (D119).
+connected processes (D119). In step 12b: collecting at a function's
+entry, with the frames as roots (D166).

@@ -1,6 +1,8 @@
-; Collection only happens when a receive function waits for its next
-; message. Three rounds of 24 MB of garbage, one per message, are fine;
-; a round of 80 MB within one message hits the 64 MB limit, garbage or not.
+; A receive function collects when it waits for its next message (D105),
+; and since step 12b any function's entry can (D166). Three rounds of 24
+; MB of garbage, one per message, and then a round of 80 MB within one
+; message, which used to hit the 64 MB limit; the limit is on what's live
+; now, not on what's been allocated.
 
 (defun make-list (n acc)
     (cond

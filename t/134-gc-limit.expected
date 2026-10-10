@@ -1,5 +1,5 @@
 (round 1 done)
 (round 2 done)
 (round 3 done)
-fault in #<pid 2>: heap exhausted (cons at t/134-gc-limit.slight:8:38)
-(error (heap () "cons at t/134-gc-limit.slight:8:38"))
+(round 4 done)
+(ok 5)

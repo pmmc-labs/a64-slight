@@ -9,7 +9,8 @@ assembly. The compiler is TypeScript for now and should self-host later.
 **Steps 0–9, 10a–10e and 11 of [`docs/PLAN.md`](docs/PLAN.md) are done**:
 the reader, and a compiler for integers, floats, `#true`/`#false`, `()`,
 symbols, lists (a heap per process of chunks, capped at 64 MB, and
-collected when a receive function waits for a message), strings, closures
+collected when a receive function waits for a message, or at a
+function's entry, with the frames as roots: D166), strings, closures
 (`lambda`, functions and builtins as values, `apply`), arithmetic
 (integers inline; floats and mixed in C), structural `eq?`, type
 predicates, the string and math builtins (C, in `runtime/`), `cond`,
@@ -67,14 +68,14 @@ parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
 x86-64 natively), and on macOS (Stevan runs it on his M2 Max after every
 step, and reports only failures; x86-64 passes there too, under Rosetta
 2, with `make golden TARGETS=x86_64`). Step 12a, ways to read a device
-(D158–D164), is done, and so is 12d, looking up host names in the
-runtime (D153, D165). **Next: the rest of step 12**, the groundwork HTTP
-needs: 12b, collecting outside `recv`; 12c, C libraries vendored as
-source (D151, D152), then TLS. Then where `recv` can go (13: `defactor`, or splitting
+(D158–D164), is done, and so are 12b, collecting outside `recv` (D166),
+and 12d, looking up host names in the runtime (D153, D165). **Next: the
+rest of step 12**, the groundwork HTTP needs: 12c, C libraries vendored
+as source (D151, D152), then TLS. Then where `recv` can go (13: `defactor`, or splitting
 functions at `recv`), HTTP in slight (14), and agents (15: chat as
 actors, tools as messages, `:exec`, models over HTTP). Each has points
-to settle with Stevan first (`docs/PLAN.md`); 12b and 13 need a
-discussion in depth before building. Self-hosting waits till the
+to settle with Stevan first (`docs/PLAN.md`); 13 needs a discussion in
+depth before building. Self-hosting waits till the
 language settles (17). Update this section as steps land.
 
 ## Read first, in this order
@@ -211,6 +212,11 @@ to get them back from git (`3fd71e0`).
 - `SLIGHT_POISON=1` when running a compiled program makes the collector
   fill what it frees with garbage, so a pointer it missed fails at once.
   `t/run.sh` sets it.
+- `SLIGHT_GC_STRESS=n` when running a compiled program collects at the
+  entry of every nth function called (n from 1 to 1,000), and at every
+  `recv`, without changing when processes are preempted (D166). `SLIGHT_GC_STRESS=1
+  make golden` checks the collector against every golden test; a few
+  then take too long and are killed, and pass with a larger n.
 - `SLIGHT_CLOCK=virtual` when running a compiled program swaps the real
   clock for a virtual one: it starts at 0 and moves only when nothing can
   run, straight to the next timer. `t/run.sh` sets it too.

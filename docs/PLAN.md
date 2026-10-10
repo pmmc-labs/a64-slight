@@ -8,9 +8,10 @@ be a session or two each.
 macOS: Stevan runs `make test` on his M2 Max after every step), a
 second target, x86-64 (which passes on the M2 too, under Rosetta 2), and
 UTF-8 builtins (both below, after 10e), tooling (11), and of the
-groundwork HTTP needs (12), ways to read a device (12a) and looking up
-host names (12d). Next (D149): the rest of 12 (collecting outside `recv`,
-C libraries and TLS), where `recv` can go (13), then HTTP (14).
+groundwork HTTP needs (12), ways to read a device (12a), collecting
+outside `recv` (12b) and looking up host names (12d). Next (D149): the
+rest of 12 (C libraries and TLS), where `recv` can go (13), then HTTP
+(14).
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -352,7 +353,7 @@ line. In four pieces, each with golden tests:
    weren't there), and `:source`. Done (Oct 2026, D164): golden tests
    184 and 185, and the reader's unit tests. 12a is done.
 
-#### 12b. Collecting outside `recv`
+#### 12b. Collecting outside `recv` (done)
 
 DESIGN.md's last open question (D105). Only a receive function collects,
 when it waits for a message, so the root (unless it ends in one) and a
@@ -362,7 +363,10 @@ client that reads a big response in the root (a JSON text split there
 tops out at about 2 MB, D148). To talk through: collecting at tail calls
 between state functions, at tail calls from the bottom of the stack (a
 runtime check of `sp`), or anywhere, with the compiler's help (the stack
-maps D24 kept out).
+maps D24 kept out). Done (Oct 2026, D166): at any function's entry, with
+the frames as roots, read as they are, and the slots of a function that
+calls another zeroed at its entry; golden tests 187–190, and 134
+changed.
 
 #### 12c. C libraries, and TLS
 

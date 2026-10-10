@@ -1,0 +1,46 @@
+; Collecting with frames on the stack (D166). Each level of (nest n)
+; keeps values of every kind in its frame (a list, a string, a float,
+; and a closure that captures the list), then calls itself, not in tail
+; position, so at the bottom 200 frames hold them. Every level makes
+; 800 KB of garbage on its way down, 160 MB in all, so collections
+; happen with frames below at every depth; on the way back each level
+; sums its list three ways (directly, through the closure, and through
+; apply) and checks the rest. The answer is (the sums, the levels whose
+; values were all intact): (2010000 200), since the lists hold 100 n's.
+
+; n copies of x, in front of acc.
+(defun fill (n x acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (fill (- n 1) x (cons x acc)))))
+
+(defun total (xs acc)
+    (cond
+        ((nil? xs) acc)
+        (#true     (total (cdr xs) (+ acc (car xs))))))
+
+; n lists of 1,000 cells, each garbage at once.
+(defun churn (n)
+    (cond
+        ((== n 0) :done)
+        (#true    (fill 1000 n ()) (churn (- n 1)))))
+
+(defun nest (n)
+    (cond
+        ((== n 0) (list 0 0))
+        (#true
+            (let mine  (fill 100 n ()))
+            (let tag   (concat "level " n))
+            (let half  (/ n 2))
+            (let count (lambda () (total mine 0)))
+            (churn 50)
+            (let below (nest (- n 1)))
+            (let sum   (total mine 0))
+            (let ok    (and (== sum (* 100 n))
+                            (== (count) sum)
+                            (== (apply total (list mine 0)) sum)
+                            (eq? tag (concat "level " n))
+                            (eq? half (/ n 2))))
+            (list (+ (car below) sum) (+ (cadr below) (cond (ok 1) (#true 0)))))))
+
+(nest 200)

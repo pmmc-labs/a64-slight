@@ -251,7 +251,10 @@ backend, and what it would cost in speed. The design suits it unusually
 well, for the reason it suits WebAssembly: the collector runs only at
 `recv`, where the roots are the receive function's arguments (D105), so
 it never scans a stack, and clang can keep values wherever it likes. Most
-compilers that emit C need a shadow stack for their roots.
+compilers that emit C need a shadow stack for their roots. (Since step
+12b the collector also runs at a function's entry and reads the frames,
+D166, so a C target would need one too, or would collect only at `recv`,
+as before.)
 
 Measured by hand-writing the C a backend would emit for `fib` (the same
 tags, checks and slow paths into the runtime) and compiling it with
@@ -416,9 +419,11 @@ until the language settles. Browser support below is as of Oct 2026.
   wasm32 with clang.
 - **No shadow stack.** WASM's own stack can't be scanned, so most
   garbage-collected languages keep their roots on a stack of their own in
-  linear memory. We don't need one: the collector runs only at `recv`,
+  linear memory. We didn't need one: the collector ran only at `recv`,
   where the stack is empty and the roots are the receive function's
-  arguments, handed to the runtime (D105).
+  arguments, handed to the runtime (D105). Since step 12b it also runs at
+  a function's entry and reads the frames (D166), so a WASM target would
+  keep its slots in linear memory, or collect only at `recv` there.
 - Tail calls: `return_call` is standardized and in all three engines
   (Safari last, in 18.2). Leaning Technologies has written about rough
   edges in engines' tail calls; worth reading before relying on them.

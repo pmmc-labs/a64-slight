@@ -123,6 +123,22 @@ test('a slot is reused once the value in it is dead', () => {
     assert.equal(frame('(let a 1) (let b 2) (+ a b)'), '32'); // and a, b, and +'s left operand
 });
 
+test('only a function that calls another, not in tail position, zeroes its slots', () => {
+    // A frame a collection may read from above has to hold no stale word
+    // (D166); a loop's frame comes down at each tail call, so it never is one.
+    const body = (src: string, fn: string): string => compile(src).split(`${fn}:`)[1]!.split('    ret')[0]!;
+    const zeroes = (src: string, fn: string): boolean => /xzr/.test(body(src, fn));
+    const loop = '(defun loop (n acc) (cond ((== n 0) acc) (#true (loop (- n 1) (+ acc n)))))';
+    assert.equal(zeroes(`${loop} (loop 3 0)`, 'fn_loop'), false);
+    assert.equal(zeroes(`${loop} (defun g (n) (+ 1 (loop n 0))) (g 3)`, 'fn_g'), true);
+    assert.equal(zeroes('(defun g (f n) (+ 1 (f n))) (g car 3)', 'fn_g'), true);
+    assert.equal(zeroes('(defun g (f n) (+ 1 (apply f (list n)))) (g car 3)', 'fn_g'), true);
+    assert.equal(zeroes('(defun g (f n) (f n)) (g car 3)', 'fn_g'), false);
+    assert.equal(zeroes('(defun g (n) (+ 1 (str-len n))) (g "abc")', 'fn_g'), false);
+    // A lambda's calls are its own, not its enclosing function's.
+    assert.equal(zeroes(`${loop} (defun g (n) (lambda () (+ 1 (loop n 0)))) (g 3)`, 'fn_g'), false);
+});
+
 test('strings in the assembly are escaped byte by byte', () => {
     assert.equal(asmString('t/a.slight:1:2'), '"t/a.slight:1:2"');
     assert.equal(asmString('say "hi"\\'), '"say \\042hi\\042\\134"');

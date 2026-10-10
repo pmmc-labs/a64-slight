@@ -1,0 +1,74 @@
+; env: SLIGHT_GC_STRESS=1
+; Why a function that calls another zeroes its slots first (D166). With
+; SLIGHT_GC_STRESS=1, every function's entry collects. (r) fills its
+; frame with lists, and returns; (f #false), called next from the same
+; place, gets a frame the same size in the same place, and in that
+; branch writes only its first two slots before it calls churn. The
+; collection at f's entry frees r's lists (and SLIGHT_POISON fills them
+; with garbage); the one at churn's entry reads f's frame. Had f's other
+; slots not been zeroed, it would find r's pointers there, to what was
+; freed. Then the same for g, which calls churn through a closure, and h,
+; through apply; their other branches call nothing, so that call alone
+; is why they zero their slots.
+
+(defun fill (n x acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (fill (- n 1) x (cons x acc)))))
+
+(defun churn (n)
+    (cond
+        ((== n 0) :done)
+        (#true    (fill 1000 n ()) (churn (- n 1)))))
+
+(defun r ()
+    (let a (fill 3 :a ()))
+    (let b (fill 3 :b ()))
+    (let c (fill 3 :c ()))
+    (let d (fill 3 :d ()))
+    (let e (fill 3 :e ()))
+    (list a b c d e))
+
+(defun f (flag)
+    (cond
+        (flag
+            (let a (fill 3 1 ()))
+            (let b (fill 3 2 ()))
+            (let c (fill 3 3 ()))
+            (let d (fill 3 4 ()))
+            (list a b c d))
+        (#true
+            (churn 1)
+            :survived)))
+
+(defun g (flag fn)
+    (cond
+        (flag
+            (let a (list 1 1 1))
+            (let b (list 2 2 2))
+            (let c (list 3 3 3))
+            (let d (list 4 4 4))
+            (list a b c d))
+        (#true
+            (fn 1)
+            :survived)))
+
+(defun h (flag fn)
+    (cond
+        (flag
+            (let a (list 1 1 1))
+            (let b (list 2 2 2))
+            (let c (list 3 3 3))
+            (let d (list 4 4 4))
+            (list a b c d))
+        (#true
+            (apply fn (list 1))
+            :survived)))
+
+(r)
+(let x (f #false))
+(r)
+(let y (g #false churn))
+(r)
+(let z (h #false churn))
+(list x y z)

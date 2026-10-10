@@ -64,6 +64,7 @@ static rt_ctx_t    scheduler;
 static void       *free_stacks;         // a list through each stack's first word
 static size_t      page;
 static int         poison;              // SLIGHT_POISON: fill what the collector frees
+static int64_t     gc_stress;           // SLIGHT_GC_STRESS=n: collect at every nth call (n <= QUOTA), and every recv
 
 static void *must(void *p) {
     if (!p) {
@@ -133,12 +134,21 @@ static void release_stack(rt_proc_t *p) {
     p->stack    = NULL;
 }
 
+// A new slice of QUOTA calls, the last of which calls rt_preempt. With
+// SLIGHT_GC_STRESS=n, every nth one does, to collect, and the slice goes on
+// (slice_rest) till its end, so a process is preempted after the same
+// calls as without it.
+static void refill(rt_proc_t *p) {
+    p->reductions = gc_stress ? gc_stress : QUOTA;
+    p->slice_rest = QUOTA - p->reductions;
+}
+
 // A stack, and registers that make the first switch land in rt_trampoline
 // with x28 (r15) = p, which calls p->code with p->args.
 static void start(rt_proc_t *p) {
     p->stack       = get_stack();
     p->stack_limit = (uintptr_t)p->stack + STACK_HEADROOM;
-    p->reductions  = QUOTA;
+    refill(p);
     memset(&p->ctx, 0, sizeof p->ctx);
 #if defined(__x86_64__)
     // x86's ret takes its address from the stack, not a link register: the
@@ -167,6 +177,11 @@ static rt_chunk_t *new_chunk(size_t bytes) {
     return c;
 }
 
+// The bytes p's heap has used: its chunks, less what's left in the last.
+static size_t in_use(const rt_proc_t *p) {
+    return p->heap_bytes - (p->heap_limit - p->heap_ptr);
+}
+
 static void adopt(rt_proc_t *p, rt_chunk_t *c) {
     c->next        = p->chunks;
     p->chunks      = c;
@@ -183,6 +198,13 @@ void rt_heap_grow(uint64_t bytes, const char *site) {
     adopt(p, c);
     p->heap_ptr   = (uintptr_t)(c + 1);
     p->heap_limit = p->heap_ptr + size;
+    // Time to collect: at the next call's entry, in rt_preempt, where every
+    // live value is in a frame. The rest of the slice is kept for after, so
+    // collecting doesn't change when the process is preempted.
+    if (p->reductions > 1 && in_use(p) >= p->gc_at) {
+        p->slice_rest += p->reductions - 1;
+        p->reductions  = 1;
+    }
 }
 
 static void free_chunks(rt_chunk_t *c) {
@@ -354,10 +376,19 @@ static rt_value_t copy_here(rt_value_t v) {
 
 // --- garbage collection -------------------------------------------------------
 //
-// Only when a receive function asks for its next message (D105). The recv
-// rule means the stack is empty then, so the roots are just its arguments,
-// in its frame. The live data is copied into fresh chunks and the old ones
-// freed; C code never sees anything move.
+// When a receive function asks for its next message (D105), and at the
+// entry of a compiled function, in rt_preempt (D166). The roots are in
+// frames: compiled code keeps nothing in a register across a call, a slot
+// only ever holds a value, and a function that calls another (not in tail
+// position) zeroes its slots first, so that none holds a stale word. At a
+// function's entry its parameters and captured values are in its first
+// slots, and each frame below holds its slots between the linkage of the
+// one above (frame pointer and return address) and its own; the frame
+// pointer saved by the first is 0. No C frame comes between them, since C
+// never calls compiled code (apply jumps), so C code never sees anything
+// move. At recv, the recv rule means the stack is empty.
+//
+// The live data is copied into fresh chunks and the old ones freed.
 //
 // Copying leaves a forwarding pointer behind, so sharing is kept: a DAG
 // stays a DAG. Cons cells have no header, so to-space can't be scanned in
@@ -416,10 +447,15 @@ static rt_value_t forward(gc_t *g, rt_value_t v) {
     return old[1];
 }
 
-static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n) {
+// With roots[0..n), and the frames below fp, if it's given.
+static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+    if (!p->chunks) return;
     gc_t g = { .size = p->heap_bytes < CHUNK_MAX ? p->heap_bytes : CHUNK_MAX };
     rt_work_init(&g.todo);
     for (uint64_t i = 0; i < n; i++) roots[i] = forward(&g, roots[i]);
+    for (; fp && fp[0]; fp = (const uintptr_t *)fp[0]) {
+        for (rt_value_t *s = (rt_value_t *)(fp + 2); s < (rt_value_t *)fp[0]; s++) *s = forward(&g, *s);
+    }
     while (g.todo.n) {
         rt_value_t v = rt_work_pop(&g.todo);
         if (rt_is_cons(v)) {
@@ -524,7 +560,7 @@ rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) {
         p->reading = 0;
         read_on(p, device);                     // which may end p, if reading fails
     }
-    if (p->heap_bytes - (p->heap_limit - p->heap_ptr) >= p->gc_at) collect(p, args, n);
+    if (gc_stress || in_use(p) >= p->gc_at) collect(p, args, n, NULL);
     rt_msg_t  *m = p->mail;
     if (m) {
         p->mail = m->next;
@@ -691,8 +727,14 @@ rt_value_t rt_kill(rt_value_t pid, const char *site) {
 
 static void events(void);
 
-void rt_preempt(rt_proc_t *p) {
-    p->reductions = QUOTA;
+void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp) {
+    if (gc_stress || in_use(p) >= p->gc_at) collect(p, frame, n, fp);
+    if (p->slice_rest > 0) {                    // here before the slice's end, to collect
+        p->reductions  = gc_stress && gc_stress < p->slice_rest ? gc_stress : p->slice_rest;
+        p->slice_rest -= p->reductions;
+        return;
+    }
+    refill(p);
     events();                                   // so a busy process can't hold up a timer or a key
     if (ready_head) {
         enqueue(p);
@@ -702,7 +744,7 @@ void rt_preempt(rt_proc_t *p) {
 
 void rt_yield(void) {
     rt_proc_t *p = rt_current;
-    p->reductions = QUOTA;
+    refill(p);
     enqueue(p);
     to_scheduler(p);
 }
@@ -1891,6 +1933,8 @@ int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
     poison = getenv("SLIGHT_POISON") != NULL;
+    const char *stress = getenv("SLIGHT_GC_STRESS");
+    gc_stress = !stress ? 0 : atoll(stress) < 1 ? 1 : atoll(stress) > QUOTA ? QUOTA : atoll(stress);
     const char *mode = getenv("SLIGHT_CLOCK");
     virtual_clock = mode && strcmp(mode, "virtual") == 0;
     rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);

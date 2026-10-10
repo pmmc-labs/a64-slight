@@ -66,10 +66,14 @@ These also go to stderr, as they happen:
 A compile error is `prog.slight:line:col: message`, and `slightc` exits
 1 without writing a program.
 
-Two environment variables matter when running a program, mainly for
+Some environment variables matter when running a program, mainly for
 tests: `SLIGHT_CLOCK=virtual` swaps the real clock for one that starts at
-0 and moves only when nothing can run, straight to the next timer; and
-`SLIGHT_POISON=1` makes the collector fill what it frees with garbage.
+0 and moves only when nothing can run, straight to the next timer;
+`SLIGHT_POISON=1` makes the collector fill what it frees with garbage;
+and `SLIGHT_GC_STRESS=n` makes it collect at the entry of every nth
+function called (n from 1, every call, which is slow, to 1,000), and at
+every `recv`.
+`SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` are in "Sockets".
 
 ### @ARGV
 
@@ -434,7 +438,8 @@ call it.
 
 So when a process waits, there's nothing on its stack: it's just the
 receive function, its arguments and the mailbox. A waiting process holds
-no stack at all, and that's when its heap is collected (D8, D105).
+no stack at all (D8), and its heap is collected then if it's grown
+enough (D105).
 
 The cost is that you can't wait in the middle of a function. To send a
 request and wait for the answer, split the function in two:
@@ -534,15 +539,16 @@ Every loop is a tail call, so no process can hold up the rest.
 
 ### The heap
 
-Each process's heap holds up to 64 MB; past that, an allocation faults
-(`:heap`). It's collected only when a receive function asks for its next
-message, and only once the heap in use is at least 256 KB and twice
-what survived the last collection.
+Each process's heap holds up to 64 MB of live data; past that, an
+allocation faults (`:heap`). It's collected once the heap in use is at
+least 256 KB and twice what survived the last collection: when a receive
+function asks for its next message, or at the entry of the next function
+called (D166). Every loop is a call, so any process collects, the root
+included, whether it waits for messages or not.
 
-So a process that allocates without waiting for messages never collects:
-a long loop inside one handler, a process that never calls `recv`, or
-the root (unless it ends in a receive function). Each can run into the
-limit. Split long work across messages.
+What's live is what the process can still reach, and that includes
+whatever a function that hasn't returned has bound with `let`, until it
+returns: a `let` at the top level keeps its value till the program ends.
 
 
 ## Devices

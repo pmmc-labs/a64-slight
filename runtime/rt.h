@@ -315,6 +315,7 @@ typedef struct rt_proc {
     int             keypress;   // connected to :keypress
     struct rt_device *devices;  // the files it has open (process.c)
     rt_value_t      reading;    // the reader whose message it took last, to read on at its next recv; or 0
+    int64_t         slice_rest; // calls left in its slice after reductions run out (process.c)
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -489,9 +490,12 @@ rt_value_t rt_cos(rt_value_t x, const char *site) RT_ASM(rt_cos);
 rt_value_t rt_tan(rt_value_t x, const char *site) RT_ASM(rt_tan);
 rt_value_t rt_exp(rt_value_t x, const char *site) RT_ASM(rt_exp);
 
-// Called when proc's reductions run out: refills them, and lets the next
-// process run, if one is waiting to.
-void rt_preempt(rt_proc_t *proc) RT_ASM(rt_preempt);
+// Called at a function's entry when proc's reductions run out, with the
+// function's first n slots (from frame: its parameters and captured
+// values, all it has stored yet) and its frame pointer, from which the
+// frames below can be found: collects, if it's time to, and then refills
+// the reductions, and lets the next process run, if one is waiting to.
+void rt_preempt(rt_proc_t *proc, rt_value_t *frame, uint64_t n, const uintptr_t *fp) RT_ASM(rt_preempt);
 
 // --- the runtime itself -------------------------------------------------------
 

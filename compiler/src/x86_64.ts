@@ -86,7 +86,8 @@ const DIVISION: Readonly<Record<'div' | '%', (zero: string, overflow: string) =>
     ],
 };
 
-const register = (op: Operand): string | null => (op.t === 'acc' ? 'rax' : op.t === 'left' ? 'rcx' : op.t === 'proc' ? 'r15' : null);
+const register = (op: Operand): string | null =>
+    op.t === 'acc' ? 'rax' : op.t === 'left' ? 'rcx' : op.t === 'proc' ? 'r15' : op.t === 'fp' ? 'rbp' : null;
 
 function move(dst: string, op: Operand): Code {
     switch (op.t) {
@@ -110,7 +111,7 @@ export const X86_64: Target = {
     // The return address and rbp on top, then the slots. The captured
     // values come from the closure in rax after the parameters are stored,
     // so r11 (the eighth parameter) is free by then.
-    prologue: (size, overflow, params, free, preempt) => [
+    prologue: (size, overflow, params, free, preempt, zero) => [
         '    push rbp',
         '    mov  rbp, rsp',
         size > 0 ? `    sub  rsp, ${size}` : [],
@@ -121,6 +122,7 @@ export const X86_64: Target = {
             `    mov  r11, qword ptr [rax + RT_CLOSURE_FREE + ${8 * i}]`,
             `    mov  ${slot(params.length + i)}, r11${comment(name)}`,
         ]),
+        zero ? [...Array(size / 8).keys()].slice(params.length + free.length).map((i) => `    mov  ${slot(i)}, 0`) : [],
         '    sub  qword ptr [r15 + RT_PROC_REDUCTIONS], 1',
         `    jle  ${preempt}`,
         `${preempt}_done:`,

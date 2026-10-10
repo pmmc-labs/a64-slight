@@ -1,0 +1,24 @@
+; Collecting doesn't change when a process is preempted (D166). a and b
+; each write a letter on each of 3,000 calls; b also makes 64 KB of
+; garbage each time, with a single call to concat, so it collects about
+; every fourth call, at the next function's entry, before the end of its
+; slice of 1,000 calls (D86). The slice goes on after that, so a and b
+; still take turns every 1,000 calls (t/models/gc-schedule.py).
+
+(defun a-loop (i)
+    (cond
+        ((== i 3000) :a-done)
+        (#true       (tty/write "a") (a-loop (+ i 1)))))
+
+(defun b-loop (i big)
+    (cond
+        ((== i 3000) :b-done)
+        (#true       (concat big big) (tty/write "b") (b-loop (+ i 1) big))))
+
+(let big (str-repeat "x" 32768))
+(let a (fork (a-loop 0)))
+(let b (fork (b-loop 0 big)))
+(join a)
+(let done (join b))
+(tty/write "\n")
+done

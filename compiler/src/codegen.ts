@@ -39,7 +39,7 @@ import { float, list, NIL, posOf, show, str, sym, toArray, type Pair, type Pos, 
 import { intWord, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from './values.ts';
 import { isReceiveBody, patternNames, stateFunctions } from './classify.ts';
 import { AARCH64 } from './aarch64.ts';
-import { ACC, addr, FRAME, imm, inSlot, LEFT, PROC, slotAddr, type Code, type Cond, type Operand, type Target } from './target.ts';
+import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, type Code, type Cond, type Operand, type Target } from './target.ts';
 
 // The locals in scope, innermost first: an association list from name to
 // frame slot.
@@ -70,14 +70,17 @@ type Cx = {
 type Syms = { readonly name: string; readonly id: number; readonly next: Syms } | null;
 
 // What compiling accumulates: how many labels have been made, how many
-// frame slots the current function needs, the symbols, the out-of-line
-// code (fault calls, preemption) to emit after all the functions, and the
-// read-only data: strings (data) and quoted lists (consts). It also carries
-// the target, which never changes.
+// frame slots the current function needs, whether it calls a compiled
+// function other than in tail position (so a collection can start above
+// its frame, which then has to hold nothing stale), the symbols, the
+// out-of-line code (fault calls, preemption) to emit after all the
+// functions, and the read-only data: strings (data) and quoted lists
+// (consts). It also carries the target, which never changes.
 type St = {
     readonly t: Target;
     readonly labels: number;
     readonly slots: number;
+    readonly calls: boolean;
     readonly symbols: Syms;
     readonly stubs: Code;
     readonly data: Code;
@@ -110,7 +113,7 @@ export function compileProgram(forms: Sexp, prelude: Sexp = NIL, t: Target = AAR
     const state  = stateFunctions(defuns.map((d) => ({ name: d.name.name, params: d.params.map((p) => p.name), body: d.body })));
     const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user', state.includes(d.name.name)), preludeFns);
     const top    = all.filter((f) => !isForm(f, 'defun'));
-    const empty: St = { t, labels: 0, slots: 0, symbols: null, stubs: [], data: [], consts: [], lambdas: [], closures: [] };
+    const empty: St = { t, labels: 0, slots: 0, calls: false, symbols: null, stubs: [], data: [], consts: [], lambdas: [], closures: [] };
     const st0 = [...RESERVED_SYMBOLS, ...RUNTIME_SYMBOLS].reduce((st, name) => symbolId(st, name)[1], empty);
 
     const compileAll = (ds: readonly Defun[], visible: Fns, module: Module, st: St): [Code, St] =>
@@ -218,7 +221,10 @@ function findFn(fns: Fns, name: string, module: Module): Fn | null {
 // first slots straight away, then a closure's captured values (`free`), so
 // inside the body they're all just locals. Then two checks, which every
 // call and every tail call passes through: is there room on the stack, and
-// are this process's reductions used up?
+// are this process's reductions used up? rt_preempt may collect (D166):
+// its roots are the locals so far, and the frames below. A function that
+// calls another, not in tail position, can be one of those, so it zeroes
+// the rest of its slots first.
 // kind: only a defun can be a receive function, and a lambda's body is held
 // to the recv rule (D11). at: where the stack fault says it happened, which
 // a lambda or fork leaves out, since its name already says.
@@ -230,20 +236,20 @@ function compileFunction(entry: string, d: Defun, free: readonly string[], fns: 
     const env = locals.reduce<Env>((e, name, i) => ({ name, slot: i, next: e }), null);
     const receive = kind === 'defun' && isReceiveBody(d.body) ? { entry, params: d.params.length } : null;
     const cx: Cx = { fns, env, si: locals.length, tail: true, inLambda: kind === 'lambda', receive };
-    const [body, st1] = compileBody(d.body, cx, { ...st, slots: locals.length });
+    const [body, st1] = compileBody(d.body, cx, { ...st, slots: locals.length, calls: false });
     const size = 16 * Math.ceil(st1.slots / 2);
     if (size > 4095) throw new CompileError(`${d.name.name} needs too many frame slots (${st1.slots})`, d.pos);
     const [overflow, st2] = faultLabel(st1, 'RT_FAULT_STACK', d.name.name, at);
     const [preempt, st3]  = label(st2, 'preempt');
     const t    = st.t;
-    const stub = [`${preempt}:`, t.call('rt_preempt', [PROC], false), t.jump(`${preempt}_done`)];
+    const stub = [`${preempt}:`, t.call('rt_preempt', [PROC, FRAME, imm(locals.length), FP], false), t.jump(`${preempt}_done`)];
     return [[
         '',
         t.functionStart(entry, d.name.name),
-        t.prologue(size, overflow, d.params.map((p) => p.name), free, preempt),
+        t.prologue(size, overflow, d.params.map((p) => p.name), free, preempt, st1.calls),
         body,
         t.ret,
-    ], { ...st3, stubs: [st3.stubs, stub] }];
+    ], { ...st3, calls: st.calls, stubs: [st3.stubs, stub] }];
 }
 
 // A call: each argument waits in a slot while the rest are computed, then
@@ -261,7 +267,7 @@ function compileCall(x: Pair, fn: Fn, args: readonly Sexp[], cx: Cx, st: St): [C
         const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i, tail: false }, s);
         return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
     }, [[], st]);
-    return [[code, st.t.call(fn.label, args.map((_, i) => inSlot(cx.si + i)), cx.tail)], st1];
+    return [[code, st.t.call(fn.label, args.map((_, i) => inSlot(cx.si + i)), cx.tail)], called(st1, cx)];
 }
 
 // The assembler label for a function: fn_ and the name, with anything but
@@ -761,7 +767,7 @@ function compileClosureCall(x: Pair, head: Sexp, args: readonly Sexp[], cx: Cx, 
         fn, st.t.storeSlot(cx.si),
         code,
         st.t.closureCall(cx.si, args.map((_, i) => cx.si + 1 + i), notFn, arity, cx.tail),
-    ], st4];
+    ], called(st4, cx)];
 }
 
 // (apply f xs): rt_apply spreads xs into the argument registers and jumps
@@ -775,7 +781,7 @@ function compileApply(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St
         f, st.t.storeSlot(cx.si),
         xs,
         st.t.call('rt_apply', [inSlot(cx.si), ACC, addr(site)], cx.tail),
-    ], st3];
+    ], called(st3, cx)];
 }
 
 // A builtin used as a value, like (map car xs): a small function that
@@ -1153,6 +1159,10 @@ function compileClause(x: Pair, clause: Sexp, end: string, cx: Cx, st: St): [Cod
 // --- helpers ------------------------------------------------------------------
 
 const useSlot = (st: St, si: number): St => (si < st.slots ? st : { ...st, slots: si + 1 });
+
+// After a call to compiled code: one not in tail position comes back to
+// this frame.
+const called = (st: St, cx: Cx): St => (cx.tail || st.calls ? st : { ...st, calls: true });
 
 function lookup(env: Env, name: string): number | null {
     for (; env !== null; env = env.next) if (env.name === name) return env.slot;

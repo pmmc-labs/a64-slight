@@ -1,0 +1,29 @@
+; Collecting outside recv (D166). The root never waits in recv, so
+; before step 12b it never collected, and stopped at 64 MB, garbage or
+; not. Now a function's entry collects once the heap has grown enough.
+; The root makes 1,000 lists of 10,000 cells (160 MB of garbage, at 16
+; bytes a cell) and keeps only their sums, while a list it made before
+; them stays live in its frame. Then a worker that never waits in recv
+; does the same.
+
+; (1 2 ... n), in front of acc.
+(defun upto (n acc)
+    (cond
+        ((== n 0) acc)
+        (#true    (upto (- n 1) (cons n acc)))))
+
+(defun total (xs acc)
+    (cond
+        ((nil? xs) acc)
+        (#true     (total (cdr xs) (+ acc (car xs))))))
+
+; Each round's list is garbage once it's summed.
+(defun churn (rounds acc)
+    (cond
+        ((== rounds 0) acc)
+        (#true         (churn (- rounds 1) (+ acc (total (upto 10000 ()) 0))))))
+
+(let keep (upto 100000 ()))
+(pprint (churn 1000 0))
+(pprint (total keep 0))
+(join (fork (churn 1000 0)))

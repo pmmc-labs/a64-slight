@@ -33,7 +33,8 @@ export type Cond = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge';
 // What a call passes, in order: the accumulator, the left operand, the
 // current process, a frame slot, an assembler constant (a number or an
 // rt.h name), the address of a label, the frame's slots (a receive
-// function's arguments, for rt_recv), or the address of slot si.
+// function's arguments, for rt_recv), the address of slot si, or the frame
+// pointer (for rt_preempt, to find the frames below).
 export type Operand =
     | { readonly t: 'acc' }
     | { readonly t: 'left' }
@@ -42,12 +43,14 @@ export type Operand =
     | { readonly t: 'imm'; readonly v: string }
     | { readonly t: 'addr'; readonly label: string }
     | { readonly t: 'frame' }
-    | { readonly t: 'slotAddr'; readonly si: number };
+    | { readonly t: 'slotAddr'; readonly si: number }
+    | { readonly t: 'fp' };
 
 export const ACC: Operand   = { t: 'acc' };
 export const LEFT: Operand  = { t: 'left' };
 export const PROC: Operand  = { t: 'proc' };
 export const FRAME: Operand = { t: 'frame' };
+export const FP: Operand    = { t: 'fp' };
 export const inSlot   = (si: number): Operand => ({ t: 'slot', si });
 export const imm      = (v: string | number): Operand => ({ t: 'imm', v: `${v}` });
 export const addr     = (label: string): Operand => ({ t: 'addr', label });
@@ -63,11 +66,12 @@ export type Target = {
     // A function's entry: build a frame of `size` bytes (a multiple of 16),
     // branch to `overflow` if the stack is nearly full, store the
     // parameters and then a closure's captured values (`free`) in the first
-    // slots, count a reduction and branch to `preempt` when they're used
-    // up, and end with the label `${preempt}_done`, where the preemption
-    // comes back to.
+    // slots, and if `zero`, zero the rest of the frame (the collector reads
+    // every slot of a frame below the one it starts from); count a
+    // reduction and branch to `preempt` when they're used up, and end with
+    // the label `${preempt}_done`, where the preemption comes back to.
     readonly prologue: (size: number, overflow: string, params: readonly string[],
-                        free: readonly string[], preempt: string) => Code;
+                        free: readonly string[], preempt: string, zero: boolean) => Code;
     // Take down the frame and return the accumulator.
     readonly ret: Code;
 
