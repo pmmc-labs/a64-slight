@@ -44,9 +44,8 @@
     (ask/answer pid (cadr (join box))))
 
 ; The box: watches pid, and ends with the first thing it hears.
-(defun ask/box (pid) (monitor pid) (ask/wait))
-
-(defun ask/wait ()
+(defun ask/box (pid)
+    (monitor pid)
     (recv
         ((:reply v)       (list :reply v))
         ((:exit p result) (list :ended result))
