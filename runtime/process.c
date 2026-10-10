@@ -893,6 +893,7 @@ static int      socket_events(fd_set *in, fd_set *out);
 
 #define IO_KEYS    1                    // what wait_for saw: stdin has something to read...
 #define IO_SOCKETS 2                    // ...or a socket did something
+#define SETTLE_US  200000               // how long the virtual clock waits for a lookup's answer, for real
 
 // Waits up to us microseconds (forever, if negative) for stdin to have
 // something to read, if anyone's listening, or for a socket to be ready;
@@ -961,6 +962,15 @@ static int idle(void) {
         if ((saw & IO_KEYS) && input_at == input_len) read_input();
         if (saw & IO_SOCKETS) return 1;
         if (listening() && next_key()) return 1;
+        // A lookup's timer is the runtime's, not the program's, so it
+        // mustn't beat an answer on its way: from a name server in the same
+        // program, say, which on macOS's loopback arrives a moment after
+        // it's sent, not by the time select() looks. So before the clock
+        // moves to one, the sockets are waited for, for real, a little.
+        if (nalarms && !alarms[0].msg && procs[alarms[0].pid >> RT_PID_SHIFT].device && (saw = wait_for(SETTLE_US))) {
+            if ((saw & IO_KEYS) && input_at == input_len) read_input();
+            return 1;
+        }
         if (nalarms) {
             virtual_now = alarms[0].due;
             return 1;

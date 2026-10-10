@@ -604,7 +604,8 @@ Lalloc_N:
   at every 10 ms (D122). On the virtual clock they're looked at only when
   nothing can run: the sockets first, then a key, then the clock moves to
   the next timer; only when nothing else can happen does it wait for real
-  (D139).
+  (D139). But before it moves to a lookup's timer, it waits for real, up
+  to 200 ms, for the sockets (D165).
 - **`:keypress`** (`runtime/tty.c`) sends each key as `(key mods...)`
   (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style

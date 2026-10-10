@@ -959,7 +959,8 @@ reading from it. (No longer needed since D158: nothing is cut ahead.)
   first, without waiting; then a key comes, or the clock moves; only when
   nothing else can happen does the runtime wait for real. So a test whose
   every step follows from a message comes out the same every run; one that
-  mixes timers with sockets may not.
+  mixes timers with sockets may not. (A lookup's own timer is waited
+  out differently: D165.)
 - `select()` can't watch a file descriptor of 1024 or more, so a socket
   that would get one is refused with `:emfile`.
 
@@ -1580,6 +1581,17 @@ agreed.)* `runtime/dns.c`, about 350 lines.
   running, and the virtual clock covers it in tests. The connection is a
   device from the start: what's written to it while its host is looked up
   is kept, and `disconnect` gives up the lookup.
+- **On the virtual clock**, before the clock moves to a lookup's timer,
+  the runtime waits for real, up to 200 ms, for a socket to do something.
+  That timer is the runtime's, not the program's, so a program that only
+  connects hasn't mixed timers with sockets (D139), and it mustn't beat
+  an answer on its way. It did on macOS, where loopback delivers a
+  moment after a send, too late for a `select()` that doesn't wait:
+  `t/186` failed there, every query timing out before its server saw it.
+  Linux delivers on loopback within the send, so there it shows only
+  with a server outside the program that answers late, which was tried
+  by hand (a 30 ms delay: `:etimedout` before, the answer after). A
+  lookup that really times out costs a test 200 ms of real time.
 - **Errors:** `:enotfound` when every name tried doesn't exist, has no
   IPv4 address, or can't be one (an empty label, or a label over 63
   bytes); `:etimedout` when no server would answer for a name, which
