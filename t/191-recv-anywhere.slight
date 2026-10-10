@@ -1,0 +1,69 @@
+; args: one two
+; recv anywhere a tail call could go (D167): in the root, which can now
+; wait for messages itself; in the middle of a function; inside a call,
+; taken out in the order things are evaluated; in a cond's test; in a
+; recv clause; and in a fork's body. With a clause whose pattern hides a
+; name the rest still needs, more than 8 locals carried across, a dead
+; letter, and @ARGV.
+
+(defun adder ()
+    (recv
+        ((:add a b from) (send from (list :sum (+ a b))) (adder))
+        (:stop           :stopped)))
+
+; Each clause body's value goes on into the rest.
+(defun yes-or-no (then)
+    (cond
+        ((eq? (recv) :yes) (pprint (list then :yes)) (pair-up))
+        (#true             (pprint (list then :no)) (pair-up))))
+
+(defun pair-up ()
+    (recv
+        ((:first a) (list a (recv ((:second b) b))))))
+
+; send is evaluated before the recv, so the recv gets what it sent
+(pprint (list (send $$ :first) (recv)))
+
+(let a (fork (adder)))
+(send a (list :add 1 2 $$))
+(let s1 (recv ((:sum s) s)))
+(send a (list :add s1 10 $$))
+(pprint (list s1 (recv ((:sum s) s))))
+
+; a pattern's x hides the root's only in its own clause: not in the
+; other clause, nor in what comes after
+(let x :outer)
+(send $$ (list :a 5))
+(send $$ (list :b 6))
+(let y (recv ((:a x) (list :a x)) ((:b w) (list :b w x))))
+(let y2 (recv ((:a x) (list :a x)) ((:b w) (list :b w x))))
+(pprint (list x y y2))
+(send $$ (list :c 7))
+(let v (recv ((:c x) x)))
+(pprint (list x v))
+
+; what no clause matches is a dead letter, and the next message is taken
+(send $$ :junk)
+(send $$ (list :ok 1))
+(pprint (recv ((:ok n) n)))
+
+; a do with no lets in it, and @ARGV, carried across under another name
+(let z (do (send $$ :z) (recv)))
+(do (send $$ :d) (pprint (recv)))
+(pprint (list z @ARGV))
+
+; a fork's body waits in the new process
+(let child (fork (do (let m (recv)) (send ^$$ (list :child-got m)))))
+(send child :ping)
+(pprint (recv ((:child-got m) m)))
+
+; nine locals, carried across as a list
+(let l1 1) (let l2 2) (let l3 3) (let l4 4) (let l5 5) (let l6 6) (let l7 7) (let l8 8) (let l9 9)
+(send $$ 10)
+(pprint (list l1 l2 l3 l4 l5 l6 l7 l8 l9 (recv)))
+
+(send a :stop)
+(send $$ :no)
+(send $$ (list :first 1))
+(send $$ (list :second 2))
+(yes-or-no :asked)

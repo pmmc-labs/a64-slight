@@ -38,6 +38,7 @@ import { CompileError } from './errors.ts';
 import { float, list, NIL, posOf, show, str, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { intWord, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from './values.ts';
 import { isReceiveBody, patternNames, stateFunctions } from './classify.ts';
+import { splitProgram } from './split.ts';
 import { AARCH64 } from './aarch64.ts';
 import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, type Code, type Cond, type Operand, type Target } from './target.ts';
 
@@ -108,7 +109,7 @@ export function compileProgram(forms: Sexp, prelude: Sexp = NIL, t: Target = AAR
     const preludeDefuns = preludeForms.map((f) => checkDefun(f as Pair));
     const preludeFns    = preludeDefuns.reduce<Fns>((fns, d) => declare(fns, d, 'prelude', false), null);
 
-    const all    = toArray(forms)!;
+    const all    = toArray(splitProgram(forms))!;     // every recv the whole body of a receive function (D167)
     const defuns = all.filter((f) => isForm(f, 'defun')).map((f) => checkDefun(f as Pair));
     const state  = stateFunctions(defuns.map((d) => ({ name: d.name.name, params: d.params.map((p) => p.name), body: d.body })));
     const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user', state.includes(d.name.name)), preludeFns);

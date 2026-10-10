@@ -38,12 +38,13 @@ process it happens in.
 
 This prints `3`: the value of the program's last form.
 
-One rule keeps the runtime small: `recv` can only be the whole body of a
-top-level function, and a function that can reach one can only be
-tail-called. So a process waiting for a message has nothing on its
-stack. It's just a function, its arguments and a mailbox; it gives its
-stack back while it waits. A heap is collected then, or at any
-function's entry, once it has grown enough.
+One rule keeps the runtime small: `recv` can go only where a tail call
+could, and a function that can reach one can only be tail-called. The
+compiler splits a function at each `recv`, so every wait is the whole
+body of a function of its own, and a process waiting for a message has
+nothing on its stack. It's just a function, its arguments and a mailbox;
+it gives its stack back while it waits. A heap is collected then, or at
+any function's entry, once it has grown enough.
 
 The compiler is TypeScript, run directly by Node, and is written to be
 ported to slight later. The runtime schedules processes on one core, with
@@ -87,8 +88,8 @@ Next is the rest of the groundwork HTTP needs (step 12; reading a
 device in chunks, by length, and as JSON, s-expressions or source is
 done, and so are JSON and s-expressions in C, doc blocks, collecting
 outside `recv`, and looking up host names without stalling the runtime):
-C libraries and TLS. Then where
-`recv` can go (13), and HTTP, written in slight on top of TCP (14).
+C libraries and TLS. `recv` can go anywhere a tail call could (13).
+Then HTTP, written in slight on top of TCP (14).
 Self-hosting waits until the language settles.
 
 ## Documents

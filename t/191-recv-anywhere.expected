@@ -1,0 +1,12 @@
+(() first)
+(3 13)
+(outer (a 5) (b 6 outer))
+(outer 7)
+dead letter: junk (recv at t/191-recv-anywhere.slight:48:9)
+1
+d
+(z ("one" "two"))
+ping
+(1 2 3 4 5 6 7 8 9 10)
+(asked no)
+(1 2)

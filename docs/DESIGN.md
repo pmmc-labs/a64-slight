@@ -122,10 +122,15 @@ register convention below). More could go on the stack later.
 This rule is what makes the runtime simple, so it gets its own section.
 
 - A **receive function** is a top-level `defun` whose body is a single
-  `recv` form. `recv` appears nowhere else.
+  `recv` form. In the code the compiler generates, `recv` appears nowhere
+  else. In a program it can go anywhere a tail call could (D167), and the
+  compiler splits the function there (`compiler/src/split.ts`): the `recv`
+  and what follows it become a receive function of their own, which the
+  function tail-calls with the locals that are still needed. See below.
 - A **state function** is a receive function, or any function that
-  tail-calls a state function. The compiler computes this as a fixpoint over
-  the call graph.
+  tail-calls a state function (so, after the split, any function with a
+  `recv` in it). The compiler computes this as a fixpoint over the call
+  graph.
 - State functions may only be called **in tail position**, or as the body of
   `fork`/`connect`.
 - Every other function is **plain**. Plain functions can be called anywhere,
@@ -166,18 +171,35 @@ Syntax (D85):
   rest binding. Match the outer shape, then take the rest apart with
   `cond` in the body.
 
-Send-then-wait becomes two functions:
+Send-then-wait is written in one function, and becomes two:
 
 ```lisp
 (defun pinger (target n)
     (cond
         ((== n 0) (send target (list :stop $$)) :ping-done)
-        (#true    (send target (list :ping $$)) (pinger-wait target n))))
-
-(defun pinger-wait (target n)
-    (recv
-        ((:pong from) (pprint (list :round n)) (pinger target (- n 1)))))
+        (#true
+            (send target (list :ping $$))
+            (recv ((:pong from) (pprint (list :round n))))
+            (pinger target (- n 1)))))
 ```
+
+Where a `recv` can go (D167): a form of a body in tail position (a
+function's, a `cond` or `recv` clause's, or that of a `do` or `yield` in
+tail position), or a `let`'s value there; or inside a call there, or a
+`do` with no `let`s, which is flattened first, in the order things are
+evaluated, so what comes before the `recv` still happens first; or a
+`cond`'s test, when the `cond` is in tail position. As an expression,
+`recv` gives the value of the clause that matched, and `(recv)` takes any
+message. Not in a lambda, and not in a `cond`, `do` (with `let`s) or
+`yield` that isn't in tail position. A `recv` with several clauses and
+something after it gets a generated function for what's after, rather
+than a copy of it in each clause; more than 8 locals go across as one
+list. Generated names have spaces in them, which a program can't write,
+and say where the `recv` is (`ask (recv at f.slight:3:12)`).
+
+A function that waits still can't give a value back to a function that
+called it: that's a process and `join` (as `ask` in `lib/ds.slight` does,
+and `(join (connect :tcp ...))`), which works anywhere, a lambda included.
 
 Request/reply is correlated by the actor's own state: put a counter or the
 request's details in the arguments and match the reply when it arrives

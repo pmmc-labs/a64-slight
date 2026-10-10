@@ -51,7 +51,9 @@ stray-reply bug (AVM's `1003`), and call-cycle deadlocks between handlers.
 Cost: send-then-wait is two functions, and request/reply is correlated by
 the actor's own state (run-to-completion style). Rejected: selective
 receive plus Erlang-style `call`/`reply` written in slight (my earlier
-proposal).
+proposal). (Since step 13 a program writes send-then-wait in one function,
+and the compiler makes it two: D167. The rule holds for what it
+generates.)
 
 **D9. Stacks only while running (option A).** *(User)* A process holds a
 native stack only while running, paused, or blocked mid-computation; at
@@ -1683,3 +1685,55 @@ variable.)*
   slots where the collector can read them (a shadow stack: frames in
   memory of the runtime's own, which is what slots are already), or
   collect only at `recv` there, as before.
+
+**D167. `recv` anywhere a tail call could go, by splitting functions
+there.** *(User, Oct 2026, step 13: splitting at `recv`, over `defactor`,
+over waiting in the middle of a function with the stack kept, and over
+converting functions that wait to continuation-passing style; and every
+recommendation that came with it.)*
+- **Where:** a form of a body in tail position (a function's, the top
+  level's, a `fork`'s or `connect`'s, a `cond` or `recv` clause's, a `do`'s
+  or `yield`'s in tail position), or a `let`'s value there; inside a call
+  there, or inside a `do` with no `let`s, flattened first in the order
+  things are evaluated, so what comes before the `recv` (but names,
+  constants, quoted data and lambdas, which come out the same whenever
+  they're evaluated) is taken into `let`s first; and a `cond`'s test in
+  tail position, whose clauses from there go into a `cond` of their own.
+  Not in a lambda, which can't wait; nor in a `cond`, `yield` or `do` with
+  `let`s that isn't in tail position, each an error that says to take the
+  message first. (Copying what follows into each branch would do it.)
+- **What it gives:** the value of the clause that matched. `(recv)` takes
+  any message, and gives it. A message no clause matches is a dead letter
+  and the next is taken, as before.
+- **How:** a pass, `compiler/src/split.ts`, that `compileProgram` runs
+  before the `recv` rule's classification. A `recv` and the rest of its
+  body become a receive function of their own, which the body tail-calls
+  with the locals the rest still uses. A `recv` with more than one clause
+  and something after it gets a second function for what's after, which
+  each clause tail-calls with its value, rather than a copy in each. A
+  name a pattern binds that the rest needs from before comes across
+  under another name, and is bound again where it's wanted. More than 8
+  locals go across as one list, made with `cons` and taken apart with
+  `car` and `cdr`, so then none of them may be named one of those (an
+  error). `@ARGV`, which can't be a parameter, is renamed. Generated names
+  have spaces in them, so no program can write one, and say where the
+  `recv` is (`ask (recv at f.slight:3:12)`, `ask (after recv at ...)`);
+  faults and dead letters say `recv at ...`, as before.
+- **Unchanged:** the code generator, the `recv` rule's classification,
+  and the runtime see only receive functions, so a waiting process holds
+  no stack (D8, D9), and `million-forks` still waits with a million. A
+  function with a `recv` in it waits, so, like one that tail-calls a
+  receive function, it can only be tail-called; lambdas still can't wait.
+  A program that doesn't use the new places compiles as it did: every
+  golden test and example gave the same assembly, byte for byte.
+- **`defactor` dropped:** it was one shape of this.
+- **Turned down:** waiting in the middle of a function with the stack
+  kept, possible since D166, but a waiting process's stack would then be
+  a cost the code doesn't show (about 32,000 of them at most, on Linux),
+  and with no selective receive, a helper's `recv` would take messages
+  meant for its caller; continuation-passing style for functions that
+  wait, a large change that allocates at every call to one, after which a
+  lambda still couldn't wait. A wait that gives a value back to a caller
+  stays a process and `join` (`ask`, `(join (connect :tcp ...))`), which
+  works anywhere. To look at again after HTTP (step 14), if its code needs
+  helpers that wait inside one process.

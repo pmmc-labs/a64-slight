@@ -18,7 +18,9 @@ predicates, the string and math builtins (C, in `runtime/`), `cond`,
 tail calls (arguments in `x0`–`x7`; stack and reduction checks at every
 function entry). The prelude (`lib/prelude.slight`) is compiled with every
 program; `lib/test.slight` is a TAP library. Processes: `fork`, `send`,
-`recv` (receive functions, with the `recv` rule checked by `classify.ts`),
+`recv` (anywhere a tail call could go: `split.ts` splits a function at
+each one into receive functions, D167, and `classify.ts` checks the
+`recv` rule),
 `$$`, `^$$`, `yield`, preemption, a FIFO run queue, pooled stacks that a
 process waiting in `recv` gives back, and the lifecycle: `join`,
 `monitor`, `kill`, `raise`, exit records, and faults that end just their
@@ -69,13 +71,12 @@ x86-64 natively), and on macOS (Stevan runs it on his M2 Max after every
 step, and reports only failures; x86-64 passes there too, under Rosetta
 2, with `make golden TARGETS=x86_64`). Step 12a, ways to read a device
 (D158–D164), is done, and so are 12b, collecting outside `recv` (D166),
-and 12d, looking up host names in the runtime (D153, D165). **Next: the
-rest of step 12**, the groundwork HTTP needs: 12c, C libraries vendored
-as source (D151, D152), then TLS. Then where `recv` can go (13: `defactor`, or splitting
-functions at `recv`), HTTP in slight (14), and agents (15: chat as
-actors, tools as messages, `:exec`, models over HTTP). Each has points
-to settle with Stevan first (`docs/PLAN.md`); 13 needs a discussion in
-depth before building. Self-hosting waits till the
+and 12d, looking up host names in the runtime (D153, D165); and step 13,
+where `recv` can go (D167). **Next: the rest of step 12**, the
+groundwork HTTP needs: 12c, C libraries vendored as source (D151, D152),
+then TLS. Then HTTP in slight (14), and agents (15: chat as actors,
+tools as messages, `:exec`, models over HTTP). Each has points to settle
+with Stevan first (`docs/PLAN.md`). Self-hosting waits till the
 language settles (17). Update this section as steps land.
 
 ## Read first, in this order
@@ -178,7 +179,7 @@ to get them back from git (`3fd71e0`).
 | Path | |
 |---|---|
 | `bin/slightc.ts` | The driver: read and expand (with the files it includes), compile, write `out.S`, link with clang |
-| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
+| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `split.ts` (a `recv` anywhere a tail call could go, made the whole body of a generated receive function), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names) |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes) |

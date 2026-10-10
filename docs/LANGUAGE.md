@@ -309,9 +309,11 @@ See Devices.
     (recv
         (pattern body...)
         ...)
+    (recv)
 
-Takes the next message. `recv` can only be the whole body of a `defun`.
-See Processes.
+Takes the next message, and gives the value of the clause that matched;
+`(recv)` gives the message itself. A `recv` can go anywhere a tail call
+could, and inside a call there. See Processes.
 
 ### yield
 
@@ -418,9 +420,11 @@ the clauses in order:
 - A bare name matches any message, and binds it. `_` matches any message
   and binds nothing.
 
-The matching clause's body runs, in tail position. To keep receiving,
-tail-call the function again, with the new state as its arguments. When
-it returns instead, that's the value the call gives back.
+The matching clause's body runs, in tail position when the `recv` is the
+last thing the function does, and its value is the `recv`'s. To keep
+receiving, tail-call the function again, with the new state as its
+arguments. When it returns instead, that's the value the call gives
+back.
 
 Only the first message is ever looked at; there's no selective receive.
 If no clause matches it, it's dropped and logged as a dead letter
@@ -430,30 +434,40 @@ literal: match the outer shape, and take the rest apart in the body.
 
 ### The recv rule
 
-A **state function** is a receive function, or any function that
-tail-calls one. The compiler works out which functions they are, and a
-state function can only be called in tail position, or as the body of a
-`fork` or `connect`. It can't be used as a value, and a lambda can't
-call it.
+A `recv` can go anywhere a tail call could (D167): as a form of a body
+in tail position (a function's, the top level's, a `fork`'s, or a `cond`
+or `recv` clause's), or as a `let`'s value there:
+
+    (defun ask (c)
+        (send c (list :get $$))
+        (let n (recv ((:count n) n)))
+        (pprint (list :count n)))
+
+It can go inside a call there too, and what's evaluated before it still
+comes first: in `(list (send $$ :hi) (recv))` the `send` is done before
+the `recv`, which gets `:hi`. And in a `cond`'s test, when the `cond` is
+in tail position. Not in a lambda, nor in a `cond`, `yield` or `do` (one
+with `let`s) that isn't in tail position: take the message first, with
+`(let m (recv))`.
+
+The compiler splits the function at each `recv`: the `recv` and the rest
+become a receive function of their own, which the function tail-calls
+with the locals the rest uses. So a function with a `recv` in it is a
+**state function**, as is any function that tail-calls one. The compiler
+works out which functions they are, and a state function can only be
+called in tail position, or as the body of a `fork` or `connect`. It
+can't be used as a value, and a lambda can't call it.
 
 So when a process waits, there's nothing on its stack: it's just the
 receive function, its arguments and the mailbox. A waiting process holds
 no stack at all (D8), and its heap is collected then if it's grown
 enough (D105).
 
-The cost is that you can't wait in the middle of a function. To send a
-request and wait for the answer, split the function in two:
-
-    (defun ask (c)
-        (send c (list :get $$))
-        (answer))
-
-    (defun answer ()
-        (recv
-            ((:count n) n)))
-
-and since `ask` tail-calls `answer`, it's a state function too: it can
-only be called in tail position.
+The cost is that a function that waits can't give a value back to the
+function that called it. For that, use a process: `join` waits for one
+to end and gives its result, from anywhere, a lambda included, and
+`ask` (in `lib/ds.slight`) sends a request and waits for the answer that
+way.
 
 ### How processes end
 

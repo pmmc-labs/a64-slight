@@ -9,9 +9,9 @@ macOS: Stevan runs `make test` on his M2 Max after every step), a
 second target, x86-64 (which passes on the M2 too, under Rosetta 2), and
 UTF-8 builtins (both below, after 10e), tooling (11), and of the
 groundwork HTTP needs (12), ways to read a device (12a), collecting
-outside `recv` (12b) and looking up host names (12d). Next (D149): the
-rest of 12 (C libraries and TLS), where `recv` can go (13), then HTTP
-(14).
+outside `recv` (12b) and looking up host names (12d), and where `recv`
+can go (13). Next (D149): the rest of 12 (C libraries and TLS), then
+HTTP (14).
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -395,7 +395,11 @@ itself over UDP, and wait for the answer in `select()` (D153). Done (Oct
 2026, D165): `runtime/dns.c`, and golden test 186, with a name server
 written in slight.
 
-### 13. Where `recv` can go
+### 13. Where `recv` can go (done)
+
+Done (Oct 2026, D167): Stevan chose splitting functions at `recv`, below,
+over `defactor`, which it covers. `compiler/src/split.ts`, its unit tests,
+and golden test 191. What follows is the discussion as it was.
 
 Before HTTP, the biggest library yet in slight, since how it's written
 depends on this.

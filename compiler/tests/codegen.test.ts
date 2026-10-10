@@ -467,13 +467,28 @@ test("the prelude's functions are in their own namespace", () => {
 
 const W = '(defun w () (recv (m m))) ';
 
-test('recv can only be the whole body of a defun', () => {
-    fails('(recv (m m))', 'test.slight:1:1: recv can only be the whole body of a defun');
-    fails('(defun f () (pprint 1) (recv (m m)))', 'test.slight:1:24: recv can only be the whole body of a defun');
-    fails('(defun f () (cond (#true (recv (m m)))))', 'test.slight:1:26: recv can only be the whole body of a defun');
-    fails('(lambda () (recv (m m)))', 'test.slight:1:12: recv can only be the whole body of a defun');
-    fails('(fork (recv (m m)))', 'test.slight:1:7: recv can only be the whole body of a defun');
-    fails('(defun f () (recv (m (recv (n n)))))', 'test.slight:1:22: recv can only be the whole body of a defun');
+test('recv goes anywhere a tail call could (D167), but not in a lambda', () => {
+    assert.doesNotThrow(() => compile('(recv (m m))'));
+    assert.doesNotThrow(() => compile('(defun f () (pprint 1) (recv (m m))) (f)'));
+    assert.doesNotThrow(() => compile('(defun f () (cond (#true (recv (m m))))) (f)'));
+    assert.doesNotThrow(() => compile('(fork (recv (m m)))'));
+    assert.doesNotThrow(() => compile('(defun f () (recv (m (recv (n n))))) (f)'));
+    assert.doesNotThrow(() => compile('(defun f () (recv)) (f)'));
+    assert.doesNotThrow(() => compile('(pprint (list (recv) (recv)))'));
+    fails('(lambda () (recv (m m)))', "test.slight:1:12: recv can't be in a lambda: a lambda can't wait for messages");
+    fails('(lambda () (fork 1) (pprint (recv)))', "test.slight:1:29: recv can't be in a lambda: a lambda can't wait for messages");
+    fails('(defun f () (cond ((recv) 1)) 2) (f)',
+        "test.slight:1:13: a recv can only be in a cond that's in tail position; take the message first, with (let m (recv ...))");
+    fails('(defun f () (pprint (cond (#true (recv))))) (f)',
+        "test.slight:1:21: a recv can only be in a cond that's in tail position; take the message first, with (let m (recv ...))");
+    fails('(defun f () (do (let x (recv)) x) 2) (f)',
+        "test.slight:1:13: a recv can only be in a do that's in tail position, or one with no lets; take the message first, with (let m (recv ...))");
+    fails('(defun f () (yield (recv)) 2) (f)',
+        "test.slight:1:13: a recv can only be in a yield that's in tail position; take the message first, with (let m (recv ...))");
+});
+
+test('a function with a recv in it waits, so it can only be called in tail position', () => {
+    fails('(defun f () (let m (recv)) m) (pprint (f))', 'test.slight:1:39: f waits for messages (it reaches a recv), so it can only be called in tail position');
 });
 
 test('a function that waits can only be called in tail position', () => {
@@ -495,8 +510,8 @@ test('a function that waits can be the body of a fork, the end of the top level,
 });
 
 test('recv clauses and patterns', () => {
-    fails('(defun f () (recv))', 'test.slight:1:13: recv needs at least one clause');
     fails('(defun f () (recv m))', 'test.slight:1:19: a recv clause is (pattern body...), not m');
+    fails('(defun f () (pprint 1) (recv m))', 'test.slight:1:30: a recv clause is (pattern body...), not m');
     fails('(defun f () (recv (m)))', 'test.slight:1:19: a recv clause is (pattern body...), not (m)');
     fails('(defun f () (recv ((5 a) 1)))', 'test.slight:1:20: a recv pattern is a name, a :keyword or (:keyword names...), not (5 a)');
     fails('(defun f () (recv ((:a 1) 1)))', 'test.slight:1:20: a recv pattern is a name, a :keyword or (:keyword names...), not ((quote a) 1)');
