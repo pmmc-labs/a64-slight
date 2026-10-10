@@ -461,6 +461,7 @@ The fault kinds:
 - `:join-self`: `(join $$)`, which would wait forever
 - `:not-a-device`: `connect` handed something that isn't an open device
 - `:not-json`: `json/print` given something JSON can't hold
+- `:not-sexp`: `sexp/print` given something that isn't data
 
 ### Waiting for a process
 
@@ -579,6 +580,8 @@ one of:
 - `:json/items`: as `:json`, but a top-level array comes an element at
   a time, a `(:json f v)` for each, so an array too big to hold can be
   read through.
+- `:sexp`: `(:sexp f v)` for each top-level datum, `v` as `sexp/parse`
+  makes it (under Builtins, S-expressions), past space and comments.
 - A count, an integer `n` from 0: one `(:chunk f s)` of the next `n`
   bytes, and then back to the way before. If the input ends first, `s`
   is shorter, and `(:eof f)` comes next. A count is for the next message
@@ -588,7 +591,7 @@ one of:
 Nothing comes after `(:eof f)`. Anything else sent to a device, `:read`
 to a writer or a `how` it doesn't know included, is a dead letter. Bad
 JSON ends the owner with `(:error (:bad-json path))`, after the values
-before it.
+before it, and a bad s-expression with `(:error (:bad-sexp path))`.
 
     (defun size (n)
         (recv
@@ -607,8 +610,8 @@ If the file can't be opened, the owner ends before it runs, with
 `(:error (name path))`, `name` being errno's: `:enoent`, `:eacces`,
 `:eisdir`, `:enotdir`, `:enospc`, and so on, or `:io-error`. A read or a
 write that fails ends it the same way, when it happens; and so does a
-line, a count or a JSON value of 64 MB or more, too big for a process's
-heap, with `(:error (:too-big path))`.
+line, a count, a JSON value or a datum of 64 MB or more, too big for a
+process's heap, with `(:error (:too-big path))`.
 
     (defun reader (lines)
         (recv
@@ -844,6 +847,35 @@ order, duplicates kept. `{"a": [1, 2.5], "b": null}` is
 
 A file or socket can be read as JSON too: `(:read :json)`, under Files.
 
+### S-expressions
+
+Data written as slight is written, so two programs can talk in printed
+forms, and a program can read slight's own source:
+
+- `(sexp/parse s)`: `(:ok datum)` for the text `s`, or
+  `(:error (:bad-sexp at))`, `at` being where it went wrong, as for
+  `json/parse`. The text is what the compiler reads: lists, integers and
+  floats, strings with the same escapes, symbols and keywords, `#true`
+  and `#false`, `'x` as `(quote x)`, and comments. But `:a` reads as
+  the symbol `a`, as `a` does; a symbol the program mentions (as `:name`
+  or `'name`) reads as itself, and any other as `(:symbol "name")`,
+  since symbols are made only by the compiler. An integer past 63 bits
+  reads as a float.
+
+      (sexp/parse "(alpha :beta 'zebra 1.5)")
+      ; (:ok (alpha beta (quote (symbol "zebra")) 1.5)), if the
+      ; program mentions alpha and beta but not zebra
+
+- `(sexp/print v)`: `v` as `sexp/parse` reads it back, on one line.
+  A string escapes `"`, `\` and the control characters; a float always
+  has digits on both sides of its point (`1.0e+21`); a symbol is its
+  name, without a colon; `(:symbol "name")` is `name`. Anything that
+  isn't data faults (`:not-sexp`): a pid, a function, `nan` or `inf`.
+  `pprint` stays as it is, its strings unescaped.
+
+A file or socket can be read as s-expressions too: `(:read :sexp)`,
+under Files.
+
 ### Output
 
 - `(pprint x)`: writes `x` as the program shows values (strings in
@@ -1020,10 +1052,7 @@ timer keeps the program running.
 
 ## Planned
 
-Step 12 of PLAN.md (D155, D156): s-expressions parsed in C, with
-`sexp/parse` and `sexp/print` for text in hand, and `(:read :sexp)` for
-reading forms from a file or socket; inline documentation, a line
-`=doc` between top-level forms starting a block of Markdown that runs to
-a line `=cut`, which the compiler skips; and a `:source` way to read a
-file that gives its forms and its doc blocks, in order. DESIGN.md has
-the details.
+Step 12 of PLAN.md (D156): inline documentation, a line `=doc` between
+top-level forms starting a block of Markdown that runs to a line `=cut`,
+which the compiler skips; and a `:source` way to read a file that gives
+its forms and its doc blocks, in order. DESIGN.md has the details.

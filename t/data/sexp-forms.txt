@@ -1,0 +1,6 @@
+; a few forms, as a program might keep its data
+(config (name "slight") (version 1))
+(alpha beta) 'gamma "a string"
+42 -0.5 #true
+:okapi   ; a keyword, and a name nothing mentions
+(nested (deeper (deepest)))

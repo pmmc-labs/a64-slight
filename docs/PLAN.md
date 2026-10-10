@@ -346,7 +346,8 @@ line. In four pieces, each with golden tests:
    (not at random ones, so the tests stay the same every run). Done (Oct
    2026), as a validator and a builder (D162): `runtime/json.c`, golden
    tests 175–179, and 168 checks its parser in slight against the C one.
-3. S-expressions: `sexp/parse`, `sexp/print` and `:sexp`.
+3. S-expressions: `sexp/parse`, `sexp/print` and `:sexp`. Done (Oct
+   2026), as JSON was (D163): `runtime/sexp.c`, golden tests 180–183.
 4. Doc blocks in both readers (golden tests that must compile as if they
    weren't there), and `:source`.
 

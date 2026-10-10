@@ -1329,7 +1329,7 @@ keeping positions and giving every symbol as a record (D37). Rejected:
 interning symbols at run time (it reopens D14, and the table only grows:
 Erlang's atom table, filled by untrusted input, brings down the whole
 node); an error on an unknown symbol (it would fail on well-formed
-text).
+text). (How it was built: D163.)
 
 **D156. Documentation inline, as Perl's POD: doc blocks, and a `:source`
 device.** *(User, Oct 2026: "a specified and structured format that can
@@ -1495,3 +1495,31 @@ D160 as agreed.)*
   between them; changing the way of reading inside the array forgets it.
   A value that would take 64 MB or more as slight values, however short
   its text, is `:too-big`.
+
+**D163. How s-expressions are read and printed.** *(Default; D155 and
+D160 as agreed.)*
+- **As JSON is** (D162): a validator that takes text a piece at a time,
+  and a builder for text it has passed (`runtime/sexp.c`), with the same
+  rule for where bad text went wrong. A token's fate is known only at its
+  end, so an error in one is at the first byte that rules it out (`#fo`
+  at the `o`) or at the delimiter after it (`:12 `, `. `).
+- **The text** is the compiler's reader's, without positions: the same
+  delimiters, `#true` and `#false` and no other `#` word, no `.`, `` ` ``
+  or `,`, the same escapes (`\"`, `\\`, `\n`, `\t`, `\r`, `\e`,
+  `\u{hex}`), a string may run over lines, and a keyword can't be a
+  number or start with `#` or `:`. But `:a` reads as the symbol `a`
+  (D155), and numbers read as JSON's do: an integer past 63 bits is the
+  nearest float, a float too big is `inf`, where the compiler gives up.
+- **`sexp/print`** writes one line: strings escape `"`, `\`, `\n`, `\t`,
+  `\r` and `\e`, and the other control characters and DEL as `\u{hex}`;
+  anything else, bytes that aren't UTF-8 included, goes as it is. A float
+  has digits on both sides of its point (`1.0e+21`), as the reader wants.
+  A symbol is its name, without a colon (D52); `(:symbol "name")` is
+  `name` when that reads back as a name, and otherwise stays the list
+  `(symbol "name")`, which reads back as itself. `(quote x)` stays as it
+  is, not `'x`. What isn't data faults with `:not-sexp`, a new fault kind
+  ("not data" in the log).
+- `quote` and `symbol` are runtime symbols, so every program mentions
+  them. Finding a symbol by name, which the reader does for every name,
+  goes through a table made the first time it's wanted (`string->symbol`
+  uses it too).

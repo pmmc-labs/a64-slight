@@ -1,0 +1,62 @@
+(@include :fs)
+; sexp/parse (D155, D160): (:ok datum), or (:error (:bad-sexp at)), at
+; being where the text went wrong, as for JSON (D162): the first byte no
+; valid text could have there, or the end of one that stops too soon. The
+; text is what the compiler's reader takes, but :a reads as the symbol a,
+; and a symbol the program mentions reads as itself, any other as
+; (:symbol "name").
+
+(let known '(alpha beta gamma))                 ; the program mentions these
+
+(defun show (text) (pprint (sexp/parse text)))
+
+(show "(alpha :beta 'gamma #true #false () \"s\")")
+(show "(zebra :okapi 'zebra)")
+(show "; before\n(alpha ; inside\n    beta)   ; after")
+(show "''alpha")
+(show "'(alpha 'beta)")
+(show "  \"top\"  ")
+(show "((()) (() ()))")
+
+; numbers: 63-bit integers, and past them floats, as JSON's are; floats
+; need digits on both sides of the point, so 1e3, .5 and 1. are names
+(show "(1 -2 -0 4611686018427387903 -4611686018427387904 4611686018427387904)")
+(show "(1.0 -0.0 1.5e3 2.0E-8 3.25e+2 1.0e400)")
+(show "(1e3 .5 1. - -x a.b x:y)")
+
+; strings, as their code points: the reader's escapes, \e among them, and
+; \u{hex}; a string can run over lines
+(defun codes (text) (map ord (utf8/chars (cadr (sexp/parse text)))))
+
+(pprint (codes "\"\\\"\\\\\\n\\t\\r\\e\""))
+(pprint (codes "\"\\u{41}\\u{e9}\\u{20AC}\\u{1F600}\\u{0}\""))
+(pprint (codes "\"two\nlines\""))
+
+; bytes that aren't UTF-8 pass through
+(let raw (cadr (sexp/parse (~ "\"" (~ (bytes->string (list 255 128 65)) "\"")))))
+(pprint (map (lambda (i) (byte-at raw i)) (range 0 (str-len raw))))
+
+; nested as deep as the heap allows
+(defun depth (v n)
+    (cond
+        ((nil? v) n)
+        (#true    (depth (car v) (+ n 1)))))
+
+(defun double-up (s n)
+    (cond
+        ((== n 0) s)
+        (#true    (double-up (~ s s) (- n 1)))))
+
+(let opening (double-up "(" 17))                ; 131,072 of them
+(let deep (~ opening (double-up ")" 17)))
+(let parsed (cadr (sexp/parse deep)))
+(pprint (list (depth parsed 0) (eq? (sexp/print parsed) deep)))
+(show opening)
+
+; bad texts, from t/data/sexp-bad.txt, one a line
+(map show (cadr (slurp "t/data/sexp-bad.txt")))
+
+; a NUL is no delimiter, so it can't end #true
+(show (~ "#true" (bytes->string (list 0))))
+
+(pprint (join (fork (sexp/parse 5))))

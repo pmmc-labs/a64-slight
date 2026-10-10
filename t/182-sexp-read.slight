@@ -1,0 +1,59 @@
+; Reading s-expressions from a file (D155, D159, D160): with (:read :sexp)
+; a reader sends (:sexp f v) for each top-level datum, past space and
+; comments. A symbol the program mentions reads as itself, any other as
+; (:symbol "name"). Bad text ends the owner with (:error (:bad-sexp
+; path)), after the data before it; a datum of 64 MB or more, too big for
+; a heap, with (:error (:too-big path)).
+
+(let known '(config name version alpha beta gamma nested deeper deepest defun))
+
+; The data a reader of path gets, each printed as it comes; then how many.
+(defun read-all (path) (join (connect :fs/read path (reading 0))))
+
+(defun reading (n)
+    (recv
+        ((:open f)   (send f (list :read :sexp)) (reading n))
+        ((:sexp f v) (pprint v) (reading (+ n 1)))
+        ((:eof f)    (list :data n))))
+
+(pprint (read-all "t/data/sexp-forms.txt"))
+
+; slight's own source, as data: the forms of lib/fs.slight, its defuns'
+; names not ones this program mentions
+(defun forms (seen)
+    (recv
+        ((:open f)   (send f (list :read :sexp)) (forms seen))
+        ((:sexp f v) (forms (cons v seen)))
+        ((:eof f)    (reverse seen))))
+
+(let fs (cadr (join (connect :fs/read "lib/fs.slight" (forms ())))))
+(pprint (map car fs))
+(pprint (map cadr fs))
+
+; files the test writes
+(defun writer (texts)
+    (recv
+        ((:open f) (map (lambda (t) (send f (list :write t))) texts) (disconnect f))))
+
+(defun write-file (path texts) (join (connect :fs/write path (writer texts))))
+
+; a list not closed, after a good datum; a ) with none open; a datum that
+; runs into the next; a quote with nothing after it
+(write-file "build/t/182-open.sexp" (list "(alpha) (beta"))
+(pprint (read-all "build/t/182-open.sexp"))
+(write-file "build/t/182-close.sexp" (list "(alpha) )"))
+(pprint (read-all "build/t/182-close.sexp"))
+(write-file "build/t/182-hash.sexp" (list "alpha #truebeta"))
+(pprint (read-all "build/t/182-hash.sexp"))
+(write-file "build/t/182-quote.sexp" (list "(alpha) '  ; quoting nothing\n"))
+(pprint (read-all "build/t/182-quote.sexp"))
+
+; 4,194,305 zeros in a list take 64 MB of cells, more than a heap holds
+(defun double-up (s n)
+    (cond
+        ((== n 0) s)
+        (#true    (double-up (~ s s) (- n 1)))))
+
+(let zeros (double-up "0 " 21))
+(write-file "build/t/182-huge.sexp" (list "(" zeros zeros "0)"))
+(pprint (read-all "build/t/182-huge.sexp"))

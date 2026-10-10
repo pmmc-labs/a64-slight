@@ -63,7 +63,8 @@
 #define RT_FAULT_JOIN_SELF  17    // :join-self       (join $$), which would wait forever
 #define RT_FAULT_NOT_DEVICE 18    // :not-a-device    connect was handed something that isn't an open device
 #define RT_FAULT_NOT_JSON   19    // :not-json        json/print was given something JSON can't hold
-#define RT_FAULT_COUNT      19
+#define RT_FAULT_NOT_SEXP   20    // :not-sexp        sexp/print was given something that isn't data
+#define RT_FAULT_COUNT      20
 
 // Symbols the runtime makes: every program has them, after #false and
 // #true, in this order (values.ts, RUNTIME_SYMBOLS). The fault kinds
@@ -79,7 +80,7 @@
 // in the order :ctrl :alt :shift. Their symbols follow the fault kinds:
 // RT_KEY_x is symbol RT_SYM_KEYS + x. compiler/tests/values.test.ts reads
 // the names from here.
-#define RT_SYM_KEYS         25    // RT_SYM_FAULTS + RT_FAULT_COUNT
+#define RT_SYM_KEYS         26    // RT_SYM_FAULTS + RT_FAULT_COUNT
 #define RT_KEY_UP            0    // :ArrowUp       the arrows are in the order of
 #define RT_KEY_DOWN          1    // :ArrowDown     their escape sequences, ESC [ A
 #define RT_KEY_RIGHT         2    // :ArrowRight    to ESC [ D
@@ -116,9 +117,10 @@
 // owner with these: (:open f) first (a listener's is (:open l port)), a
 // reader's (:line f s), (:chunk f s) and (:eof f), a listener's (:accept l
 // conn); and it takes a writer's (:write x ...), and a reader's (:read how),
-// how being :lines, :chunks, :json, :json/items or a count; a reader of JSON
-// sends (:json f v). RT_DEV_x is symbol RT_SYM_DEVICE + x.
-#define RT_SYM_DEVICE       55    // RT_SYM_KEYS + RT_KEY_COUNT
+// how being :lines, :chunks, :json, :json/items, :sexp or a count; a reader
+// of JSON sends (:json f v), and of s-expressions (:sexp f v). RT_DEV_x is
+// symbol RT_SYM_DEVICE + x.
+#define RT_SYM_DEVICE       56    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
 #define RT_DEV_LINE          1    // :line
 #define RT_DEV_EOF           2    // :eof
@@ -130,12 +132,13 @@
 #define RT_DEV_CHUNK         8    // :chunk
 #define RT_DEV_JSON          9    // :json
 #define RT_DEV_JSON_ITEMS   10    // :json/items
-#define RT_DEV_COUNT        11
+#define RT_DEV_SEXP         11    // :sexp
+#define RT_DEV_COUNT        12
 
 // Why a device failed, from errno: a device's owner ends with
 // (:error (name path)), path being the file's, or the socket's "host:port"
 // (a listener's port). RT_ERR_x is symbol RT_SYM_ERRS + x.
-#define RT_SYM_ERRS         66    // RT_SYM_DEVICE + RT_DEV_COUNT
+#define RT_SYM_ERRS         68    // RT_SYM_DEVICE + RT_DEV_COUNT
 #define RT_ERR_ENOENT        0    // :enoent        no such file or directory
 #define RT_ERR_EACCES        1    // :eacces        permission denied
 #define RT_ERR_EPERM         2    // :eperm         operation not permitted
@@ -161,15 +164,23 @@
 #define RT_ERR_ENOTFOUND    22    // :enotfound     no such host (Node's name: it isn't an errno)
 #define RT_ERR_TOOBIG       23    // :too-big       a line, count or value of 64 MB or more (nor is this)
 #define RT_ERR_BADJSON      24    // :bad-json      what was read isn't JSON (nor this)
-#define RT_ERR_OTHER        25    // :io-error      anything else
-#define RT_ERR_COUNT        26
+#define RT_ERR_BADSEXP      25    // :bad-sexp      what was read isn't an s-expression (nor this)
+#define RT_ERR_OTHER        26    // :io-error      anything else
+#define RT_ERR_COUNT        27
 
 // The symbols JSON's values need beyond #true and #false (json.c):
 // RT_JSON_x is symbol RT_SYM_JSON + x.
-#define RT_SYM_JSON         92    // RT_SYM_ERRS + RT_ERR_COUNT
+#define RT_SYM_JSON         95    // RT_SYM_ERRS + RT_ERR_COUNT
 #define RT_JSON_NULL         0    // :null
 #define RT_JSON_OBJECT       1    // :object        (:object (key value) ...)
 #define RT_JSON_COUNT        2
+
+// And those the s-expression reader makes (sexp.c): RT_SEXP_x is symbol
+// RT_SYM_SEXP + x.
+#define RT_SYM_SEXP         97    // RT_SYM_JSON + RT_JSON_COUNT
+#define RT_SEXP_SYMBOL       0    // :symbol        (:symbol "name"), a name the program doesn't mention
+#define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
+#define RT_SEXP_COUNT        2
 
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
@@ -436,6 +447,10 @@ rt_value_t rt_utf8_valid(rt_value_t s, const char *site) RT_ASM(rt_utf8_valid);
 rt_value_t rt_json_parse(rt_value_t s, const char *site) RT_ASM(rt_json_parse);
 rt_value_t rt_json_print(rt_value_t v, const char *site) RT_ASM(rt_json_print);
 
+// S-expressions as data (sexp.c, D155).
+rt_value_t rt_sexp_parse(rt_value_t s, const char *site) RT_ASM(rt_sexp_parse);
+rt_value_t rt_sexp_print(rt_value_t v, const char *site) RT_ASM(rt_sexp_print);
+
 // The terminal (tty.c). The screen's size, or 24 by 80 when stdout isn't
 // a terminal.
 rt_value_t rt_screen_rows(const char *site) RT_ASM(rt_screen_rows);
@@ -532,8 +547,11 @@ static inline rt_value_t rt_work_pop(rt_work_t *w) {
 // quotes (concat and tty/write); strings inside lists are always quoted.
 void rt_render(rt_buf_t *b, rt_value_t v, int raw);
 
-// The name of symbol id, or NULL.
+// The name of symbol id, or NULL; the id of the symbol named by len
+// bytes, or -1 if the program has none (symbols are made only by the
+// compiler, D14).
 const char *rt_symbol_name(uint64_t id);
+int64_t     rt_symbol_find(const char *bytes, size_t len);
 
 // Saves the callee-saved registers in `from` and loads them from `to`
 // (rt_asm_aarch64.S, rt_asm_x86_64.S): this is what switching processes is.
@@ -571,19 +589,20 @@ void       rt_run(void);
 void   rt_tty_raw(int on);
 size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key));
 
-// And what a device reads JSON with. rt_json_scan checks the bytes it's
-// given, after the ones it was given before: RT_JSON_MORE if they're good
-// and the value isn't over; RT_JSON_DONE when it is, with *used the bytes up
-// to its end; RT_JSON_BAD with *used where the text went wrong, a byte no
-// valid text could have there; or, at the end of the input (eof), with no
-// value begun, RT_JSON_NONE. A zeroed rt_json_t is ready; after
-// RT_JSON_DONE, rt_json_reset it for the next value. rt_json_build makes
-// the value of len bytes the scan passed, allocating with alloc (which
-// can give out, returning NULL, when it returns -1); 0 otherwise.
-#define RT_JSON_MORE 0
-#define RT_JSON_DONE 1
-#define RT_JSON_BAD  2
-#define RT_JSON_NONE 3
+// And what a device reads JSON and s-expressions with. rt_json_scan
+// checks the bytes it's given, after the ones it was given before:
+// RT_SCAN_MORE if they're good and the value isn't over; RT_SCAN_DONE when
+// it is, with *used the bytes up to its end; RT_SCAN_BAD with *used where
+// the text went wrong, a byte no valid text could have there; or, at the
+// end of the input (eof), with no value begun, RT_SCAN_NONE. A zeroed
+// rt_json_t is ready; after RT_SCAN_DONE, rt_json_reset it for the next
+// value. rt_json_build makes the value of len bytes the scan passed,
+// allocating with alloc (which can give out, returning NULL, when it
+// returns -1); 0 otherwise.
+#define RT_SCAN_MORE 0
+#define RT_SCAN_DONE 1
+#define RT_SCAN_BAD  2
+#define RT_SCAN_NONE 3
 
 typedef struct rt_json {
     unsigned char *open;        // the containers open, '[' or '{', innermost last
@@ -592,12 +611,26 @@ typedef struct rt_json {
     const char    *word;        // what's left of true, false or null
 } rt_json_t;
 
-typedef void *(*rt_json_alloc_t)(void *cx, size_t bytes);
+typedef void *(*rt_build_alloc_t)(void *cx, size_t bytes);
 
 int  rt_json_scan(rt_json_t *j, const char *bytes, size_t len, int eof, size_t *used);
 void rt_json_reset(rt_json_t *j);
 void rt_json_free(rt_json_t *j);
-int  rt_json_build(const char *text, size_t len, rt_json_alloc_t alloc, void *cx, rt_value_t *out);
+int  rt_json_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx, rt_value_t *out);
+
+// The same for s-expressions: rt_sexp_scan, rt_sexp_reset and so on.
+typedef struct rt_sexp {
+    unsigned char *quoted;      // for each list open, and the top level: whether a ' waits there
+    size_t         depth, cap;
+    int            state, num, hex;
+    uint32_t       code;        // a \u{...} escape's, so far
+    const char    *word;        // what's left of #true or #false
+} rt_sexp_t;
+
+int  rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *used);
+void rt_sexp_reset(rt_sexp_t *s);
+void rt_sexp_free(rt_sexp_t *s);
+int  rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx, rt_value_t *out);
 
 #endif // __ASSEMBLER__
 #endif // RT_H

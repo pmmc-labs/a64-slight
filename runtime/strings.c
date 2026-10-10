@@ -195,13 +195,8 @@ rt_value_t rt_symbol_to_string(rt_value_t sym, const char *site) {
 // are only made by the compiler. Otherwise #false.
 rt_value_t rt_string_to_symbol(rt_value_t s, const char *site) {
     need_string(s, site);
-    for (uint64_t id = 0; id < slight_symbol_count; id++) {
-        const char *name = rt_symbol_name(id);
-        if (strlen(name) == rt_string_len(s) && memcmp(name, rt_string_bytes(s), rt_string_len(s)) == 0) {
-            return (rt_value_t)(id << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL);
-        }
-    }
-    return RT_FALSE;
+    int64_t id = rt_symbol_find(rt_string_bytes(s), rt_string_len(s));
+    return id < 0 ? RT_FALSE : rt_symbol((uint64_t)id);
 }
 
 rt_value_t rt_byte_at(rt_value_t s, rt_value_t i, const char *site) {

@@ -920,6 +920,8 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'utf8/valid?':    fixed('rt_utf8_valid', 1),
     'json/parse':     fixed('rt_json_parse', 1),
     'json/print':     fixed('rt_json_print', 1),
+    'sexp/parse':     fixed('rt_sexp_parse', 1),
+    'sexp/print':     fixed('rt_sexp_print', 1),
     '/':              fixed('rt_divide', 2),
     'float?':         fixed('rt_is_flt', 1),
     'num?':           fixed('rt_is_num', 1),

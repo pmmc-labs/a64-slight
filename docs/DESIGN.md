@@ -413,7 +413,7 @@ The byte builtins that don't count are right for UTF-8 as they are:
 bytes as they are. `utf8/chars` takes 32 bytes a character, and the root
 never collects, so a text split there tops out at about 2 MB.
 
-### JSON, s-expressions and source (step 12a; JSON done)
+### JSON, s-expressions and source (step 12a; JSON and s-expressions done)
 
 Parsed in C, as builtins for text already in hand and as ways a device
 can cut its bytes into messages (D154–D156):
@@ -433,16 +433,16 @@ can cut its bytes into messages (D154–D156):
   when the owner waits again (D158), so a big input goes through a
   bounded heap. Bad text ends the owner with `(:error (:bad-json
   where))`, and a value of 64 MB or more with `:too-big` (D160).
-- **S-expressions** (planned): `(sexp/parse s)`, the same Results with
-  `:bad-sexp`; `(sexp/print v)`; and `(:read :sexp)`, `(:sexp f v)` for
-  each form.
-- **S-expressions as data:** lists, numbers, strings, symbols, `#true`,
-  `#false`, `'x`, comments. A symbol the program mentions reads as itself,
-  any other as `(:symbol "name")` (D14 holds: no symbols are made at run
-  time); `:a` and `a` are the same symbol (D52). `sexp/print` prints what
-  `sexp/parse` reads back, strings escaped and `(:symbol "name")` as
-  `name`, and faults on pids, closures, `nan` and `inf`; `pprint` stays
-  unescaped.
+- **S-expressions** (`runtime/sexp.c`, D163), as JSON is: `(sexp/parse
+  s)` gives `(:ok datum)` or `(:error (:bad-sexp at))`; `(sexp/print v)`
+  prints what `sexp/parse` reads back, on one line, and faults
+  (`:not-sexp`) on pids, closures, `nan` and `inf`; `pprint` stays
+  unescaped. A device reads them with `(:read :sexp)`, `(:sexp f v)` for
+  each top-level datum. The text is the compiler's reader's: lists,
+  numbers, strings, symbols, keywords, `#true`, `#false`, `'x`,
+  comments. A symbol the program mentions reads as itself, any other as
+  `(:symbol "name")` (D14 holds: no symbols are made at run time); `:a`
+  and `a` are the same symbol (D52).
 - **Source:** where `:sexp` skips doc blocks, `:source` gives a file's
   forms and doc blocks in order, `(:form f form line)` and `(:doc f text
   line)`, a doc block as its raw text. A form's raw text instead, D156's
@@ -627,10 +627,10 @@ Lalloc_N:
   `(:read how)`, from anyone, changes how it cuts (D159): `:lines`;
   `:chunks`, `(:chunk f s)` of what one read gives, up to 64 KB; or a
   count `n`, one `(:chunk f s)` of the next `n` bytes (fewer at the end),
-  and then the way before; or `:json` and `:json/items` (under JSON,
-  above). Then `(:eof f)`, and it closes; nothing comes after it. A
-  line, count or JSON value of 64 MB or more ends the owner with
-  `(:error (:too-big path))` (D160). `:fs/write`
+  and then the way before; or `:json`, `:json/items` and `:sexp` (under
+  JSON, s-expressions and source, above). Then `(:eof f)`, and it
+  closes; nothing comes after it. A line, count, value or datum of 64 MB
+  or more ends the owner with `(:error (:too-big path))` (D160). `:fs/write`
   (creating the file, or emptying it) and `:fs/append` (creating it)
   take `(:write x ...)` from anyone, render the `x`s as `tty/write` does,
   and write them at once. Anything else sent to a device is a dead

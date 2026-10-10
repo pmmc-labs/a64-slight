@@ -141,7 +141,7 @@ int rt_json_scan(rt_json_t *j, const char *bytes, size_t len, int eof, size_t *u
             else if ((c == 'e' || c == 'E') && j->state != J_EXP) j->state = J_E;
             else if (j->depth == 0) {                // the number ended before byte i
                 *used = i;
-                return RT_JSON_DONE;
+                return RT_SCAN_DONE;
             } else {
                 j->state = J_AFTER;
                 i--;                                 // byte i is the container's again
@@ -168,25 +168,25 @@ int rt_json_scan(rt_json_t *j, const char *bytes, size_t len, int eof, size_t *u
         if (ended) {
             if (j->depth == 0) {
                 *used = i + 1;
-                return RT_JSON_DONE;
+                return RT_SCAN_DONE;
             }
             j->state = J_AFTER;
         }
     }
-    if (!eof) return RT_JSON_MORE;
+    if (!eof) return RT_SCAN_MORE;
     if (j->depth == 0 && (j->state == J_ZERO || j->state == J_INT || j->state == J_FRAC || j->state == J_EXP)) {
         *used = len;
-        return RT_JSON_DONE;
+        return RT_SCAN_DONE;
     }
-    if (j->depth == 0 && j->state == J_VALUE) return RT_JSON_NONE;
+    if (j->depth == 0 && j->state == J_VALUE) return RT_SCAN_NONE;
 bad:
     *used = i;
-    return RT_JSON_BAD;
+    return RT_SCAN_BAD;
 }
 
 // --- the builder --------------------------------------------------------------
 
-static rt_value_t *cell(rt_json_alloc_t alloc, void *cx, rt_value_t car) {
+static rt_value_t *cell(rt_build_alloc_t alloc, void *cx, rt_value_t car) {
     rt_value_t *c = alloc(cx, 16);
     if (c) {
         c[0] = car;
@@ -245,7 +245,7 @@ static size_t decode(const char *p, char *out, const char **end) {
     return n;
 }
 
-static rt_value_t string(const char **p, rt_json_alloc_t alloc, void *cx) {
+static rt_value_t string(const char **p, rt_build_alloc_t alloc, void *cx) {
     const char *end;
     size_t      n   = decode(*p + 1, NULL, &end);
     uint64_t   *box = alloc(cx, 8 + n + 1);
@@ -261,7 +261,7 @@ static rt_value_t string(const char **p, rt_json_alloc_t alloc, void *cx) {
 // nearest double, as strtod rounds (inf if it's too big for one, as in
 // JavaScript and Python). 0 if alloc gave out. A number is the one value
 // that can end the text, so it's the one that has to look for the end.
-static int number(const char **p, const char *end, rt_json_alloc_t alloc, void *cx, rt_value_t *out) {
+static int number(const char **p, const char *end, rt_build_alloc_t alloc, void *cx, rt_value_t *out) {
     const char *s = *p, *q = s + (*s == '-');
     int         integral = 1;
     for (; q < end && (is_digit(*q) || *q == '.' || *q == 'e' || *q == 'E' || *q == '+' || *q == '-'); q++) {
@@ -305,7 +305,7 @@ typedef struct {
     int         object;
 } frame_t;
 
-int rt_json_build(const char *text, size_t len, rt_json_alloc_t alloc, void *cx, rt_value_t *out) {
+int rt_json_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx, rt_value_t *out) {
     frame_t    *frames = NULL;
     size_t      depth = 0, cap = 0;
     const char *p = text;
@@ -383,14 +383,14 @@ rt_value_t rt_json_parse(rt_value_t s, const char *site) {
     rt_json_t   j    = { 0 };
     int         r    = rt_json_scan(&j, text, len, 1, &used);
     rt_json_free(&j);
-    if (r == RT_JSON_DONE) {
+    if (r == RT_SCAN_DONE) {
         size_t rest = used;
         while (rest < len && is_space((unsigned char)text[rest])) rest++;
-        if (rest < len) r = RT_JSON_BAD, used = rest;
+        if (rest < len) r = RT_SCAN_BAD, used = rest;
     }
-    if (r == RT_JSON_NONE) r = RT_JSON_BAD, used = len;
+    if (r == RT_SCAN_NONE) r = RT_SCAN_BAD, used = len;
     rt_value_t *outer = rt_alloc(32, site), v;
-    if (r == RT_JSON_DONE) {
+    if (r == RT_SCAN_DONE) {
         rt_json_build(text, used, heap_alloc, (void *)site, &v);     // the heap faults before it gives out
         outer[0] = rt_symbol(RT_SYM_OK);
     } else {

@@ -34,11 +34,14 @@ as devices too, waited for in `select()`, and `(connect conn expr)`
 hands an accepted connection to a process. A reader (a file or a
 connection) cuts its next message when its owner next waits in `recv`
 (D158), and `(:read how)` switches it between lines, chunks of up to 64
-KB, a count of bytes for the next message alone, and JSON values,
-`:json` or `:json/items` (D159); a line, count or value of 64 MB or more
-ends the owner with `:too-big` (D160). JSON in C (`runtime/json.c`,
+KB, a count of bytes for the next message alone, JSON values (`:json`,
+`:json/items`) and s-expressions (`:sexp`) (D159); a line, count or
+value of 64 MB or more ends the owner with `:too-big` (D160). JSON in C (`runtime/json.c`,
 D162): `json/parse` gives a Result, `json/print` compact JSON, and the
-same validator reads it from a device as the bytes come.
+same validator reads it from a device as the bytes come. S-expressions
+as data the same way (`runtime/sexp.c`, D155, D163): `sexp/parse`,
+`sexp/print`, and `:sexp` on a device; a name the program doesn't
+mention reads as `(:symbol "name")`.
 `(@include "path")` and `(@include :name)` splice in other files (each
 once); `@ARGV`, the program's arguments, is the top level's parameter
 (D144); and `if`, `when`, `case`, `and` and `or` are made into `cond`
@@ -58,9 +61,9 @@ x86-64 natively), and on macOS (Stevan runs it on his M2 Max after every
 step, and reports only failures; x86-64 passes there too, under Rosetta
 2, with `make golden TARGETS=x86_64`). **Next: the rest of step 12**,
 the groundwork HTTP needs: 12a, ways to read a device, settled in
-D158–D161 and built in four pieces, of which two (chunks, counts and
-switching; JSON) are done; next s-expressions parsed in C (D155), then
-inline docs after Perl's POD (D156); 12b, collecting outside `recv`;
+D158–D161 and built in four pieces, of which three (chunks, counts and
+switching; JSON; s-expressions) are done; next inline docs after Perl's
+POD, and `:source` (D156); 12b, collecting outside `recv`;
 12c, C libraries vendored as source (D151, D152), then TLS; 12d,
 looking up host names in the runtime (D153). Then where `recv` can go
 (13: `defactor`, or splitting functions at `recv`), HTTP in slight
@@ -172,7 +175,7 @@ to get them back from git (`3fd71e0`).
 | `bin/slightc.ts` | The driver: read and expand (with the files it includes), compile, write `out.S`, link with clang |
 | `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
-| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `json.c` |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `json.c`, `sexp.c` |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include, JSONTestSuite's among them; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, and `; args: words` its arguments. |

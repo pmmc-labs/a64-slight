@@ -1,0 +1,38 @@
+
+   
+(
+)
+(alpha beta
+(alpha))
+alpha beta
+"abc
+"a\qb"
+"\u41"
+"\u{}"
+"\u{110000}"
+"\u{d800}"
+"\u{0000041}"
+"\u{12x}"
+#t
+#fo
+#truex
+#
+#x
+:
+: alpha
+:12
+:1.5 
+:#alpha
+::alpha
+.
+(alpha . beta)
+`alpha
+(alpha ,beta)
+'
+(alpha ')
+; just a comment
+(alpha ; comment
+alpha)
+"s"x
+(alpha)(beta)
+'  ; nothing quoted

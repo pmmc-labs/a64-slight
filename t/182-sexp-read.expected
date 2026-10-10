@@ -1,0 +1,22 @@
+(config (name "slight") (version 1))
+(alpha beta)
+(quote gamma)
+"a string"
+42
+-0.5
+#true
+(symbol "okapi")
+(nested (deeper (deepest)))
+(ok (data 9))
+(defun defun defun defun defun)
+((symbol "slurp") (symbol "slurp-lines") (symbol "spew") (symbol "spew-lines") (symbol "spew-each"))
+(alpha)
+(error (bad-sexp "build/t/182-open.sexp"))
+(alpha)
+(error (bad-sexp "build/t/182-close.sexp"))
+alpha
+(error (bad-sexp "build/t/182-hash.sexp"))
+(alpha)
+(error (bad-sexp "build/t/182-quote.sexp"))
+(error (too-big "build/t/182-huge.sexp"))
+()

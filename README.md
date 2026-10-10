@@ -84,9 +84,9 @@ on macOS. A million processes passing a message down a chain take a few
 seconds.
 
 Next is the rest of the groundwork HTTP needs (step 12; reading a
-device in chunks, by length and as JSON is done, and so is JSON in C):
-s-expressions parsed in C, inline documentation, collecting outside
-`recv`, C libraries and TLS, and looking up host names. Then where
+device in chunks, by length, and as JSON or s-expressions is done, and
+so are JSON and s-expressions in C): inline documentation, collecting
+outside `recv`, C libraries and TLS, and looking up host names. Then where
 `recv` can go (13), and HTTP, written in slight on top of TCP (14).
 Self-hosting waits until the language settles.
 

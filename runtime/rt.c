@@ -79,11 +79,46 @@ void rt_work_free(rt_work_t *w) {
     if (w->items != w->local) free(w->items);
 }
 
+// The symbols' names, by id, and a table from names to ids (open
+// addressing, ids + 1, 0 for an empty slot), made the first time either is
+// wanted: the names are packed one after another in the program's data.
+static const char **symbol_names;
+static uint64_t    *symbol_table;
+static uint64_t     symbol_slots;
+
+static uint64_t name_hash(const char *bytes, size_t len) {
+    uint64_t h = 14695981039346656037u;         // FNV-1a
+    for (size_t i = 0; i < len; i++) h = (h ^ (unsigned char)bytes[i]) * 1099511628211u;
+    return h;
+}
+
+static void index_symbols(void) {
+    symbol_names = malloc((slight_symbol_count + 1) * sizeof *symbol_names);
+    for (symbol_slots = 16; symbol_slots < 2 * slight_symbol_count; symbol_slots *= 2) {}
+    symbol_table = calloc(symbol_slots, sizeof *symbol_table);
+    if (!symbol_names || !symbol_table) abort();
+    const char *name = slight_symbol_names;
+    for (uint64_t id = 0; id < slight_symbol_count; id++, name += strlen(name) + 1) {
+        symbol_names[id] = name;
+        uint64_t slot = name_hash(name, strlen(name)) & (symbol_slots - 1);
+        while (symbol_table[slot]) slot = (slot + 1) & (symbol_slots - 1);
+        symbol_table[slot] = id + 1;
+    }
+}
+
 const char *rt_symbol_name(uint64_t id) {
     if (id >= slight_symbol_count) return NULL;
-    const char *name = slight_symbol_names;
-    for (uint64_t i = 0; i < id; i++) name += strlen(name) + 1;
-    return name;
+    if (!symbol_names) index_symbols();
+    return symbol_names[id];
+}
+
+int64_t rt_symbol_find(const char *bytes, size_t len) {
+    if (!symbol_names) index_symbols();
+    for (uint64_t slot = name_hash(bytes, len) & (symbol_slots - 1); symbol_table[slot]; slot = (slot + 1) & (symbol_slots - 1)) {
+        const char *name = symbol_names[symbol_table[slot] - 1];
+        if (strlen(name) == len && memcmp(name, bytes, len) == 0) return (int64_t)symbol_table[slot] - 1;
+    }
+    return -1;
 }
 
 // The shortest text that reads back as the same double, laid out as
@@ -311,6 +346,7 @@ static const struct {
     [RT_FAULT_JOIN_SELF]  = { "a process can't join itself: ", 1 },
     [RT_FAULT_NOT_DEVICE] = { "not a device: ", 1 },
     [RT_FAULT_NOT_JSON]   = { "not JSON: ", 1 },
+    [RT_FAULT_NOT_SEXP]   = { "not data: ", 1 },
 };
 
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {

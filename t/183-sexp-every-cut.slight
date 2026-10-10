@@ -1,0 +1,55 @@
+; Two slight programs talking in printed forms (D155), through a socket a
+; byte at a time: the server writes what sexp/print makes of some data,
+; one byte to a timer's tick, so the reader takes each byte in a read of
+; its own and every place the text can be cut is one where it was. Then
+; a text with what printed data never has: comments, a keyword and a
+; quote. The reader, with (:read :sexp), must get the data back, and what
+; sexp/parse gets from the text; the last datum ends only with the input.
+
+(let data (list
+    (list :alpha (list 1 -2 4611686018427387903) () #true #false)
+    (list 0.1 -0.0 1.0e21 1.5e-7 5.0e-324)
+    (concat "q\"b\\" (bytes->string (list 10 9 27 1 127)) "é😀")
+    (list (list :symbol "zebra") (list :symbol "two words") (list :quote :beta))))
+
+(let text "; a comment\n(alpha :beta 'gamma) ; and another\n\"s\\u{e9}\"#false 12 -0.5")
+
+(let wire (concat (str-join "\n" (map sexp/print data)) text))
+
+(defun dripper (text)
+    (recv
+        ((:open c) (drip c text 0))))
+
+(defun drip (c text i)
+    (cond
+        ((== i (str-len text)) (disconnect c))
+        (#true
+            (send c (list :write (substring text i (+ i 1))))
+            (after 1 $$ :next)
+            (drip-wait c text (+ i 1)))))
+
+(defun drip-wait (c text i)
+    (recv
+        (:next (drip c text i))))
+
+(defun reader (seen)
+    (recv
+        ((:open c)   (send c (list :read :sexp)) (reader seen))
+        ((:sexp c v) (reader (cons v seen)))
+        ((:eof c)    (disconnect c) (reverse seen))))
+
+(defun listener (text)
+    (recv
+        ((:open l port)
+            (let me $$)
+            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (reader ()))))))
+            (serving l text))))
+
+(defun serving (l text)
+    (recv
+        ((:accept _ conn) (connect conn (dripper text)) (serving l text))
+        ((:client r)      (disconnect l) (cadr r))))
+
+(let got (cadr (join (connect :tcp/listen 0 (listener wire)))))
+(tty/write (sexp/print got) "\n")
+(pprint (eq? got (append data (map (lambda (t) (cadr (sexp/parse t))) (list "(alpha :beta 'gamma)" "\"s\\u{e9}\"" "#false" "12" "-0.5")))))
