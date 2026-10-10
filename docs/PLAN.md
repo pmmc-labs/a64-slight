@@ -311,7 +311,7 @@ Left for when it gets in the way: better compile errors, say.
 
 What HTTP needs underneath it, from the things left "for now" so far.
 
-#### 12a. Ways to read a device: chunks, JSON, s-expressions, source
+#### 12a. Ways to read a device: chunks, JSON, s-expressions, source (done)
 
 Files and sockets deal only in lines (D134: "just lines for now, and
 move to chunks later, just like with :fs"). An HTTP body is read by its
@@ -349,7 +349,8 @@ line. In four pieces, each with golden tests:
 3. S-expressions: `sexp/parse`, `sexp/print` and `:sexp`. Done (Oct
    2026), as JSON was (D163): `runtime/sexp.c`, golden tests 180–183.
 4. Doc blocks in both readers (golden tests that must compile as if they
-   weren't there), and `:source`.
+   weren't there), and `:source`. Done (Oct 2026, D164): golden tests
+   184 and 185, and the reader's unit tests. 12a is done.
 
 #### 12b. Collecting outside `recv`
 

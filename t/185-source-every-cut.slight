@@ -1,0 +1,83 @@
+; (:read :source) a byte at a time (D156, D164): a server writes the text
+; one byte to a timer's tick, so every place it can be cut, in a doc
+; block's first line, its body, its =cut, a form, a comment, is one where
+; it was. Each message is printed with sexp/print, so it stays on a line.
+; The same text read from a file comes the same; and read first a line with
+; :lines, then with :source, its lines still count from the top; and
+; whether a line's start is where a doc block can begin carries over too.
+
+(let known '(alpha beta gamma line))
+
+(let text (concat
+    "; leading comment\n"
+    "=doc\nIntro, *with* `code`.\n=cut\n"
+    "(alpha 1) (beta\n    2)\n"
+    "=doc   \ntwo\n=cutting\n=cut   \n"
+    "'gamma \"a \\\"s\\\"\" ; end\n"
+    "=doc\n=cut\n"
+    "#true\n"
+    "=doc\nlast, to the end"))
+
+(defun dripper (text)
+    (recv
+        ((:open c) (drip c text 0))))
+
+(defun drip (c text i)
+    (cond
+        ((== i (str-len text)) (disconnect c))
+        (#true
+            (send c (list :write (substring text i (+ i 1))))
+            (after 1 $$ :next)
+            (drip-wait c text (+ i 1)))))
+
+(defun drip-wait (c text i)
+    (recv
+        (:next (drip c text i))))
+
+; first (:read how), then what comes, as lists, till the end
+(defun reader (how seen)
+    (recv
+        ((:open c)          (send c (list :read how)) (reader how seen))
+        ((:line c s)        (send c (list :read :source)) (reader how (cons (list :line s) seen)))
+        ((:form c v line)   (reader how (cons (list :form v line) seen)))
+        ((:doc c text line) (reader how (cons (list :doc text line) seen)))
+        ((:eof c)           (disconnect c) (reverse seen))))
+
+(defun listener (text)
+    (recv
+        ((:open l port)
+            (let me $$)
+            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (reader :source ()))))))
+            (serving l text))))
+
+(defun serving (l text)
+    (recv
+        ((:accept _ conn) (connect conn (dripper text)) (serving l text))
+        ((:client r)      (disconnect l) (cadr r))))
+
+(let dripped (cadr (join (connect :tcp/listen 0 (listener text)))))
+(map (lambda (m) (tty/write (sexp/print m) "\n")) dripped)
+
+(defun writer (text)
+    (recv
+        ((:open f) (send f (list :write text)) (disconnect f))))
+
+(join (connect :fs/write "build/t/185-source.txt" (writer text)))
+(pprint (eq? (cadr (join (connect :fs/read "build/t/185-source.txt" (reader :source ())))) dripped))
+
+(let after-a-line (cadr (join (connect :fs/read "build/t/185-source.txt" (reader :lines ())))))
+(pprint (car after-a-line))
+(pprint (eq? (cdr after-a-line) dripped))
+
+; a form, then what's left of its line as a line, then source again
+(defun back-and-forth (seen)
+    (recv
+        ((:open c)          (send c (list :read :source)) (back-and-forth seen))
+        ((:form c v line)   (send c (list :read :lines)) (back-and-forth (cons (list :form v line) seen)))
+        ((:line c s)        (send c (list :read :source)) (back-and-forth (cons (list :line s) seen)))
+        ((:doc c text line) (back-and-forth (cons (list :doc text line) seen)))
+        ((:eof c)           (reverse seen))))
+
+(join (connect :fs/write "build/t/185-switch.txt" (writer "(alpha) \n=doc\ntext\n=cut\n(beta)\n")))
+(let switched (cadr (join (connect :fs/read "build/t/185-switch.txt" (back-and-forth ())))))
+(tty/write (str-join "\n" (map sexp/print switched)) "\n")

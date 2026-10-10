@@ -1357,6 +1357,7 @@ docs, and the prelude could document itself. Rejected: Lisp docstrings
 (a string first in a `defun` documents a function, not a file, and isn't
 structured); `#| ... |#` block comments (a stream can't pick them out
 without reading the code around them, where POD's markers are lines).
+(The details: D164.)
 
 **D157. Data structures as processes: `lib/ds.slight`.** *(User asked for
 the library; its conventions are defaults.)* DESIGN.md's first goal,
@@ -1523,3 +1524,27 @@ D160 as agreed.)*
   them. Finding a symbol by name, which the reader does for every name,
   goes through a table made the first time it's wanted (`string->symbol`
   uses it too).
+
+**D164. The details of doc blocks and `:source`.** *(Default; D156 as
+agreed.)*
+- **Where one begins:** at the start of a line, between top-level forms:
+  not inside a list, and not after a `'` still waiting for what it
+  quotes. Anywhere else `=doc` is a name, as `==` always is.
+- **Its lines:** the first is `=doc` alone, and a line `=cut` ends the
+  block, each with spaces allowed after it; a line like `=cutting` is
+  part of the block. The end of the file ends one too, as in POD.
+- **Other kinds:** D156 keeps any other `=word` for later kinds, so for
+  now one is an error, a stray `=cut` among them: a file can't come to
+  depend on what an unknown kind does, and a later kind can't change the
+  meaning of a file that already has one. The compiler says so (`unknown
+  doc block '=example'`); the data reader, where the text stops being
+  valid (D162), at the first letter that isn't `doc`'s.
+- **In the readers:** the compiler's reader skips a block in its
+  tokenizer, which counts parentheses for it. The data reader treats one
+  as space, as it does a comment, so `sexp/parse` and `:sexp` skip it;
+  with `:source` it's a message of its own.
+- **`(:doc f text line)`:** `text` is the lines between `=doc` and
+  `=cut`, newlines and all, and `line` the line of `=doc`. A form's
+  `line` is that of its first byte, a quote's if it has one. A device counts
+  lines through every way of reading, so after a line read with `:lines`
+  the next form's line is still the file's.

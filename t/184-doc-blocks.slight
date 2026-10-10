@@ -1,0 +1,55 @@
+=doc
+# Doc blocks
+
+A line that starts with `=` and a letter, between top-level forms, begins
+a doc block, and a line `=cut` ends it (D156, D164). The compiler skips
+it, so this file compiles as if it weren't there.
+=cut
+
+; This file reads itself: with (:read :source) it gets its forms and doc
+; blocks in order, each with the line it starts on; with (:read :sexp),
+; just its forms.
+
+(let known '(defun let pprint map doc))
+
+=doc
+## What it prints
+
+For a doc block, its line and its first line of text; for a form, its
+line and its head.
+=cut
+
+(defun outline (seen)
+    (recv
+        ((:open f)          (send f (list :read :source)) (outline seen))
+        ((:form f v line)   (outline (cons (list line (car v)) seen)))
+        ((:doc f text line) (outline (cons (list line :doc (car (str-split text "\n"))) seen)))
+        ((:eof f)           (reverse seen))))
+
+(defun forms (heads)
+    (recv
+        ((:open f)   (send f (list :read :sexp)) (forms heads))
+        ((:sexp f v) (forms (cons (car v) heads)))
+        ((:eof f)    (reverse heads))))
+
+(map pprint (cadr (join (connect :fs/read "t/184-doc-blocks.slight" (outline ())))))
+(pprint (join (connect :fs/read "t/184-doc-blocks.slight" (forms ()))))
+
+; inside a form, a line =doc is a name like any other
+(pprint '(before
+=doc
+after))
+
+; sexp/parse skips doc blocks as space, but not after a quote, which
+; waits for its datum; and says where a bad one goes wrong: an unknown
+; kind, a =cut with no block, more after =doc
+(pprint (sexp/parse "=doc\nabout it\n=cut\n(data)\n=doc\nafter it"))
+(pprint (sexp/parse "'\n=doc\n"))
+(pprint (sexp/parse "=example\n(+ 1 2)\n=cut\n"))
+(pprint (sexp/parse "(data)\n=cut\n"))
+(pprint (sexp/parse "=doc Title\n=cut\n(data)"))
+(pprint (sexp/parse "=dog\n=cut\n(data)"))
+(pprint (sexp/parse "(data) =doc"))
+
+=doc
+The last block has no =cut: the end of the file ends it.

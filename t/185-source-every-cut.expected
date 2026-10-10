@@ -1,0 +1,18 @@
+(doc "Intro, *with* `code`.\n" 2)
+(form (alpha 1) 5)
+(form (beta 2) 5)
+(doc "two\n=cutting\n" 7)
+(form (quote gamma) 11)
+(form "a \"s\"" 11)
+(doc "" 12)
+(form #true 14)
+(doc "last, to the end" 15)
+#true
+(line "; leading comment")
+#true
+(form (alpha) 1)
+(line " ")
+(doc "text\n" 2)
+(form (beta) 5)
+(line "")
+()

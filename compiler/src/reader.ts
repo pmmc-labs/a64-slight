@@ -10,6 +10,11 @@
 //
 // `:name` reads as (quote name), positioned at the colon; `'x` reads as
 // (quote x). Every atom carries its position, not just lists.
+//
+// Documentation (D156, D164): between top-level forms, a line that starts
+// with `=` and a letter begins a doc block, and a line `=cut` ends it, or
+// the end of the file does. The reader skips it. `=doc` is the one kind for
+// now; any other `=word` is kept for later kinds, and is an error.
 
 import { CompileError } from './errors.ts';
 import { NIL, cons, float, fitsInt, int, reverse, str, sym, INT_MAX, INT_MIN, type Pos, type Sexp } from './sexp.ts';
@@ -43,12 +48,51 @@ function skipWhile(c: Cursor, pred: (ch: string) => boolean): Cursor {
 function tokenize(src: string, file: string): readonly Token[] {
     const tokens: Token[] = [];
     let c: Cursor = { src, file, i: 0, line: 1, col: 1 };
+    let depth = 0;
     while (!atEnd(c)) {
+        // between top-level forms: not in a list, and not after a ' that's
+        // still waiting for what it quotes
+        if (c.col === 1 && depth === 0 && tokens.at(-1)?.kind !== 'quote' && peek(c) === '=' && isLetter(c.src[c.i + 1] ?? '')) {
+            c = skipDoc(c);
+            continue;
+        }
         const [token, next] = nextToken(c);
         if (token !== null) tokens.push(token);
+        if (token?.kind === 'open') depth++;
+        if (token?.kind === 'close') depth--;
         c = next;
     }
     return tokens;
+}
+
+const isLetter = (ch: string): boolean => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+const isBlank  = (ch: string): boolean => ch === ' ' || ch === '\t' || ch === '\r';
+
+// The rest of the line at c, and the cursor at its newline (or the end).
+function restOfLine(c: Cursor): [string, Cursor] {
+    const end = skipWhile(c, (x) => x !== '\n');
+    return [c.src.slice(c.i, end.i), end];
+}
+
+// Where the letters in s from k end.
+const pastLetters = (s: string, k: number): number => isLetter(s[k] ?? '') ? pastLetters(s, k + 1) : k;
+
+// A doc block, from its first line (c is at the `=`) to the line after its
+// `=cut`, or to the end of the file.
+function skipDoc(c: Cursor): Cursor {
+    const pos          = posOf(c);
+    const [first, eol] = restOfLine(c);
+    const word         = first.slice(1, pastLetters(first, 1));
+    if (word === 'cut') throw new CompileError('=cut without a doc block before it', pos);
+    if (word !== 'doc') throw new CompileError(`unknown doc block '=${word}' (only =doc, for now)`, pos);
+    if (![...first.slice(4)].every(isBlank)) throw new CompileError("a doc block's first line is =doc alone", pos);
+    let end = eol;
+    while (!atEnd(end)) {
+        const [line, next] = restOfLine(step(end));
+        end = next;
+        if (line.startsWith('=cut') && [...line.slice(4)].every(isBlank)) return atEnd(end) ? end : step(end);
+    }
+    return end;
 }
 
 // The token starting at c (null for whitespace and comments), and the cursor after it.

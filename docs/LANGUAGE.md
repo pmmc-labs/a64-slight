@@ -125,6 +125,7 @@ is compiled at once (D141).
 - `#true` and `#false` are the booleans. No other `#` word is allowed.
 - `'x` is `(quote x)`.
 - `;` starts a comment, to the end of the line.
+- A doc block, between top-level forms: see Documentation, below.
 
 Not in slight: dotted pairs (`(a . b)`), and quasiquote and unquote
 (the backquote, `,` and `,@`).
@@ -142,6 +143,38 @@ reserved words: a local of the same name hides them.
 These names can't be bound or defined: `#true`, `#false`, `$$`, `^$$`,
 `@ARGV`, `@include`, the special forms, and the forms that become
 `cond`.
+
+### Documentation
+
+Between top-level forms, a line `=doc` begins a doc block, and a line
+`=cut` ends it, as in Perl's POD; so does the end of the file. The
+compiler skips it, so a doc block never changes what a program means.
+
+    =doc
+    # Counters
+
+    A counter is a process that holds a number. *Inc* adds one.
+    =cut
+
+    (defun counter (n)
+        (recv
+            ((:inc) (counter (+ n 1)))))
+
+Inside, write Markdown that reads well as plain text: headings (`#`,
+`##`, `###`), paragraphs, `*emphasis*` and `**strong**`, `` `code` ``,
+fenced code blocks, lists (`-` and `1.`), and `[links](url)`.
+
+- Only at the start of a line between top-level forms, so nothing inside
+  a form (a quoted list, say) is ever taken for one: there, and anywhere
+  else, `=doc` is a name.
+- `=doc` is alone on its line, and so is `=cut`, but for spaces after
+  them; a line like `=cutting` is part of the block.
+- `=doc` is the one kind for now. Any other line that starts with `=`
+  and a letter there, a stray `=cut` among them, is an error: other
+  kinds, such as `=example`, are kept for later.
+
+Reading a file with `(:read :source)` gives its doc blocks and its
+forms in order (Files).
 
 
 ## Values
@@ -581,7 +614,13 @@ one of:
   a time, a `(:json f v)` for each, so an array too big to hold can be
   read through.
 - `:sexp`: `(:sexp f v)` for each top-level datum, `v` as `sexp/parse`
-  makes it (under Builtins, S-expressions), past space and comments.
+  makes it (under Builtins, S-expressions), past space, comments and doc
+  blocks.
+- `:source`: slight's source as it is, in order: `(:form f form line)`
+  for each top-level form, as `:sexp` reads it, and `(:doc f text line)`
+  for each doc block, `text` being the lines between `=doc` and `=cut`.
+  `line` is the line each begins on, counting from the top of the file
+  whatever was read before.
 - A count, an integer `n` from 0: one `(:chunk f s)` of the next `n`
   bytes, and then back to the way before. If the input ends first, `s`
   is shorter, and `(:eof f)` comes next. A count is for the next message
@@ -856,7 +895,8 @@ forms, and a program can read slight's own source:
   `(:error (:bad-sexp at))`, `at` being where it went wrong, as for
   `json/parse`. The text is what the compiler reads: lists, integers and
   floats, strings with the same escapes, symbols and keywords, `#true`
-  and `#false`, `'x` as `(quote x)`, and comments. But `:a` reads as
+  and `#false`, `'x` as `(quote x)`, comments, and doc blocks, which it
+  skips. But `:a` reads as
   the symbol `a`, as `a` does; a symbol the program mentions (as `:name`
   or `'name`) reads as itself, and any other as `(:symbol "name")`,
   since symbols are made only by the compiler. An integer past 63 bits
@@ -1048,11 +1088,3 @@ If the structure ends before it answers, `ask` raises `(:ended pid
 result)`. `(ask-within ms pid msg)` raises `(:timeout pid)` too, if no
 answer comes in time; its timer stays pending till then, and a pending
 timer keeps the program running.
-
-
-## Planned
-
-Step 12 of PLAN.md (D156): inline documentation, a line `=doc` between
-top-level forms starting a block of Markdown that runs to a line `=cut`,
-which the compiler skips; and a `:source` way to read a file that gives
-its forms and its doc blocks, in order. DESIGN.md has the details.

@@ -980,9 +980,11 @@ static int idle(void) {
 // for a heap, ends the owner with (:error (:too-big where)). With :json, it
 // sends (:json f v) for each top-level value; with :json/items, for each
 // element of a top-level array, and any other value whole; with :sexp,
-// (:sexp f v) for each top-level datum. Bad text ends the owner with
-// (:error (:bad-json where)) or (:bad-sexp where); a value of 64 MB or
-// more, :too-big.
+// (:sexp f v) for each top-level datum; with :source, (:form f form line)
+// for each and (:doc f text line) for each doc block between them, line
+// being the one each starts on. Bad text ends the owner with (:error
+// (:bad-json where)) or (:bad-sexp where); a value of 64 MB or more,
+// :too-big.
 //
 // A file (connect :fs/read path expr, :fs/write, :fs/append) closes after
 // (:eof f). A writer takes (:write x ...) from anyone, renders the xs as
@@ -1025,6 +1027,8 @@ typedef struct rt_device {
     size_t            at, len, cap;     // ...from at to len
     uint64_t          how;              // how it cuts: RT_DEV_LINES, _CHUNKS, _JSON, _JSON_ITEMS or _SEXP
     int64_t           count;            // bytes for its next message alone, or -1
+    int64_t           line;             // the line at is on, from 1...
+    int               mid_line;         // ...and whether it's after the line's start
     rt_json_t         json;             // the JSON value being read...
     rt_sexp_t         sexp;             // ...or datum...
     size_t            scanned;          // ...as far as from at
@@ -1100,6 +1104,7 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
     d->site  = site;
     d->how   = RT_DEV_LINES;
     d->count = -1;
+    d->line  = 1;
     if (path) {
         d->path     = must(malloc(len + 1));
         d->path_len = len;
@@ -1217,6 +1222,17 @@ static void tell_open(rt_device_t *d) {
     else                       tell(d, RT_DEV_OPEN, d->mode == RT_FS_READ || d->mode == DEV_TCP);
 }
 
+// Takes n bytes of what's been read, counting the lines they end.
+static void consume(rt_device_t *d, size_t n) {
+    const char *p = d->buf + d->at, *end = p + n;
+    while (p < end && (p = memchr(p, '\n', (size_t)(end - p))) != NULL) {
+        d->line++;
+        p++;
+    }
+    if (n) d->mid_line = d->buf[d->at + n - 1] != '\n';
+    d->at += n;
+}
+
 // The next line in what's been read: 1, with it in *line and *len (good
 // till the buffer next changes); or 0. At the end, what's left is a line.
 static int take_line(rt_device_t *d, const char **line, size_t *len) {
@@ -1225,7 +1241,7 @@ static int take_line(rt_device_t *d, const char **line, size_t *len) {
     size_t end = nl ? (size_t)(nl - d->buf) : d->len;
     *line = d->buf + d->at;
     *len  = end - d->at;
-    d->at = nl ? end + 1 : end;
+    consume(d, (nl ? end + 1 : end) - d->at);
     return 1;
 }
 
@@ -1283,21 +1299,33 @@ static void *arena_alloc(void *cx, size_t bytes) {
 // element; or at an element.
 enum { ITEMS_NONE, ITEMS_FIRST, ITEMS_NEXT, ITEMS_ELEMENT };
 
+// Ready to read a value from at: a doc block can begin there only at the
+// start of a line.
 static void value_restart(rt_device_t *d) {
     rt_json_reset(&d->json);
     rt_sexp_reset(&d->sexp);
-    d->scanned = 0;
+    d->sexp.mid_line = d->mid_line;
+    d->scanned       = 0;
 }
 
-// The next JSON value or datum in what's been read, as cut does; or 2 if
-// there's nothing but space before the end.
+// (word f text line).
+static void tell_doc(rt_device_t *d, const char *text, size_t len, int64_t line) {
+    uint64_t *space = must(malloc((len / 8 + 6) * sizeof *space));
+    _Alignas(16) rt_value_t cells[4];
+    tell_list(d, RT_DEV_DOC, cons_at(cells, string_in(space, text, len), cons_at(cells + 2, rt_int(line), RT_NIL)), 1);
+    free(space);
+}
+
+// The next JSON value, datum or doc block in what's been read, as cut does;
+// or 2 if there's nothing but space before the end.
 static int cut_value(rt_device_t *d) {
-    int sexp = d->how == RT_DEV_SEXP, bad = sexp ? ERR_BADSEXP : ERR_BADJSON;
+    int sexp = d->how == RT_DEV_SEXP || d->how == RT_DEV_SOURCE, bad = sexp ? ERR_BADSEXP : ERR_BADJSON;
+    d->sexp.docs = d->how == RT_DEV_SOURCE;
     for (;;) {
         // between the elements of a top-level array, the [ , and ] are
         // read here, and the elements by the scan
         if (d->how == RT_DEV_JSON_ITEMS && d->items != ITEMS_ELEMENT && d->scanned == 0) {
-            while (d->at < d->len && (d->buf[d->at] == ' ' || d->buf[d->at] == '\t' || d->buf[d->at] == '\n' || d->buf[d->at] == '\r')) d->at++;
+            while (d->at < d->len && (d->buf[d->at] == ' ' || d->buf[d->at] == '\t' || d->buf[d->at] == '\n' || d->buf[d->at] == '\r')) consume(d, 1);
             if (d->at == d->len) {
                 if (!d->eof)                return 0;
                 if (d->items == ITEMS_NONE) return 2;
@@ -1307,12 +1335,12 @@ static int cut_value(rt_device_t *d) {
             char c = d->buf[d->at];
             if (d->items == ITEMS_NONE) {
                 if (c == '[') {
-                    d->at++;
+                    consume(d, 1);
                     d->items = ITEMS_FIRST;
                     continue;
                 }
             } else if (c == ']') {
-                d->at++;
+                consume(d, 1);
                 d->items = ITEMS_NONE;
                 continue;
             } else if (d->items == ITEMS_NEXT) {
@@ -1320,7 +1348,7 @@ static int cut_value(rt_device_t *d) {
                     fail(d, ERR_BADJSON);
                     return 1;
                 }
-                d->at++;
+                consume(d, 1);
                 d->items = ITEMS_ELEMENT;
                 continue;
             } else {
@@ -1336,21 +1364,30 @@ static int cut_value(rt_device_t *d) {
             return 0;
         }
         if (r == RT_SCAN_NONE && d->items == ITEMS_NONE) return 2;
-        if (r != RT_SCAN_DONE) {
+        if (r != RT_SCAN_DONE && r != RT_SCAN_DOC) {
             fail(d, bad);
             return 1;
         }
-        size_t     n = d->scanned + used;
-        arena_t    a = { 0 };
+        size_t  n    = d->scanned + used;
+        int64_t line = d->line + (int64_t)d->sexp.first_line;
+        if (r == RT_SCAN_DOC) {
+            tell_doc(d, d->buf + d->at + d->sexp.doc_from, d->sexp.doc_to - d->sexp.doc_from, line);
+            consume(d, n);
+            value_restart(d);
+            return 1;
+        }
+        size_t     from = sexp ? d->sexp.from : 0;      // past what came before the datum
+        arena_t    a    = { 0 };
         rt_value_t v;
-        int        built = sexp ? rt_sexp_build(d->buf + d->at, n, arena_alloc, &a, &v)
+        int        built = sexp ? rt_sexp_build(d->buf + d->at + from, n - from, arena_alloc, &a, &v)
                                 : rt_json_build(d->buf + d->at, n, arena_alloc, &a, &v);
-        value_restart(d);
         if (built == 0) {
-            _Alignas(16) rt_value_t cell[2];
-            d->at += n;
+            _Alignas(16) rt_value_t cells[4];
+            consume(d, n);
+            value_restart(d);
             if (d->items == ITEMS_ELEMENT) d->items = ITEMS_NEXT;
-            tell_list(d, sexp ? RT_DEV_SEXP : RT_DEV_JSON, cons_at(cell, v, RT_NIL), 1);
+            if (d->how == RT_DEV_SOURCE) tell_list(d, RT_DEV_FORM, cons_at(cells, v, cons_at(cells + 2, rt_int(line), RT_NIL)), 1);
+            else                         tell_list(d, sexp ? RT_DEV_SEXP : RT_DEV_JSON, cons_at(cells, v, RT_NIL), 1);
         }
         free_chunks(a.chunks);
         if (built != 0) fail(d, ERR_TOOBIG);
@@ -1373,11 +1410,11 @@ static int cut(rt_device_t *d) {
         n        = have < (size_t)d->count ? have : (size_t)d->count;
         d->count = -1;
         tell_string(d, RT_DEV_CHUNK, d->buf + d->at, n);
-        d->at   += n;
+        consume(d, n);
         value_restart(d);                       // a value being read has lost its start
         return 1;
     }
-    if (d->how == RT_DEV_JSON || d->how == RT_DEV_JSON_ITEMS || d->how == RT_DEV_SEXP) {
+    if (d->how == RT_DEV_JSON || d->how == RT_DEV_JSON_ITEMS || d->how == RT_DEV_SEXP || d->how == RT_DEV_SOURCE) {
         int r = cut_value(d);
         if (r != 2) return r;                   // 2: on to (:eof f)
     }
@@ -1388,7 +1425,7 @@ static int cut(rt_device_t *d) {
     if (d->how == RT_DEV_CHUNKS && have) {
         n      = have < READ_CHUNK ? have : READ_CHUNK;
         tell_string(d, RT_DEV_CHUNK, d->buf + d->at, n);
-        d->at += n;
+        consume(d, n);
         return 1;
     }
     if (d->eof) {
@@ -1421,9 +1458,9 @@ static void read_on(rt_proc_t *p, rt_value_t pid) {
 // (:read how), to reader d: 0 if how isn't one it knows.
 static int read_as(rt_device_t *d, rt_value_t args) {
     rt_value_t how = rt_is_cons(args) && rt_cdr(args) == RT_NIL ? rt_car(args) : RT_NIL;
-    uint64_t ways[] = { RT_DEV_LINES, RT_DEV_CHUNKS, RT_DEV_JSON, RT_DEV_JSON_ITEMS, RT_DEV_SEXP }, k = 0;
-    while (k < 5 && how != rt_symbol(RT_SYM_DEVICE + ways[k])) k++;
-    if (k < 5) {
+    uint64_t ways[] = { RT_DEV_LINES, RT_DEV_CHUNKS, RT_DEV_JSON, RT_DEV_JSON_ITEMS, RT_DEV_SEXP, RT_DEV_SOURCE }, k = 0;
+    while (k < 6 && how != rt_symbol(RT_SYM_DEVICE + ways[k])) k++;
+    if (k < 6) {
         d->how   = ways[k];
         d->items = ITEMS_NONE;
         value_restart(d);

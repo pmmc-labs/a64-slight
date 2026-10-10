@@ -26,6 +26,7 @@ export const KEY_NAMES: readonly string[] = [
 // What a device and its owner say to each other, in RT_DEV_ order.
 export const DEVICE_WORDS: readonly string[] = [
     'open', 'line', 'eof', 'write', 'accept', 'read', 'lines', 'chunks', 'chunk', 'json', 'json/items', 'sexp',
+    'source', 'form', 'doc',
 ];
 
 // Why a device failed, from errno, in RT_ERR_ order.

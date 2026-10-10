@@ -44,11 +44,11 @@ The reader (`compiler/src/reader.ts`, D37) reads:
   `#true`/`#false` are the booleans.
 - `'x` is `(quote x)`
 - `;` starts a comment
-- planned (D156): a line starting with `=` and a letter, between
-  top-level forms, begins a doc block, which runs to a line `=cut`. The
-  compiler skips it. `=doc` holds Markdown (a subset: headings,
-  paragraphs, emphasis, code, fenced blocks, lists, links); other
-  `=word`s are kept for later.
+- doc blocks (D156, D164): between top-level forms, a line `=doc`
+  begins one, which runs to a line `=cut` or the end of the file. The
+  compiler skips it. It holds Markdown (a subset: headings, paragraphs,
+  emphasis, code, fenced blocks, lists, links); any other `=word` there
+  is an error, kept for later kinds.
 - `$$` (self) and `^$$` (parent)
 - `@ARGV`, the program's arguments, at the top level only (Program
   structure, below)
@@ -413,7 +413,7 @@ The byte builtins that don't count are right for UTF-8 as they are:
 bytes as they are. `utf8/chars` takes 32 bytes a character, and the root
 never collects, so a text split there tops out at about 2 MB.
 
-### JSON, s-expressions and source (step 12a; JSON and s-expressions done)
+### JSON, s-expressions and source (step 12a, done)
 
 Parsed in C, as builtins for text already in hand and as ways a device
 can cut its bytes into messages (D154–D156):
@@ -443,10 +443,13 @@ can cut its bytes into messages (D154–D156):
   comments. A symbol the program mentions reads as itself, any other as
   `(:symbol "name")` (D14 holds: no symbols are made at run time); `:a`
   and `a` are the same symbol (D52).
-- **Source:** where `:sexp` skips doc blocks, `:source` gives a file's
-  forms and doc blocks in order, `(:form f form line)` and `(:doc f text
-  line)`, a doc block as its raw text. A form's raw text instead, D156's
-  option, is left out till something needs it (D159).
+- **Source** (D156, D164): where `:sexp` skips doc blocks, as the
+  compiler and `sexp/parse` do, `:source` gives a file's forms and doc
+  blocks in order, `(:form f form line)` and `(:doc f text line)`, a doc
+  block as its raw text (the lines between `=doc` and `=cut`), and
+  `line` the one each begins on, counted from the top of the file
+  through any way of reading. A form's raw text instead, D156's option,
+  is left out till something needs it (D159).
 
 ### Not in the language
 
@@ -627,10 +630,11 @@ Lalloc_N:
   `(:read how)`, from anyone, changes how it cuts (D159): `:lines`;
   `:chunks`, `(:chunk f s)` of what one read gives, up to 64 KB; or a
   count `n`, one `(:chunk f s)` of the next `n` bytes (fewer at the end),
-  and then the way before; or `:json`, `:json/items` and `:sexp` (under
-  JSON, s-expressions and source, above). Then `(:eof f)`, and it
-  closes; nothing comes after it. A line, count, value or datum of 64 MB
-  or more ends the owner with `(:error (:too-big path))` (D160). `:fs/write`
+  and then the way before; or `:json`, `:json/items`, `:sexp` and
+  `:source` (under JSON, s-expressions and source, above). Then
+  `(:eof f)`, and it closes; nothing comes after it. A line, count,
+  value or datum of 64 MB or more ends the owner with `(:error (:too-big
+  path))` (D160). `:fs/write`
   (creating the file, or emptying it) and `:fs/append` (creating it)
   take `(:write x ...)` from anyone, render the `x`s as `tty/write` does,
   and write them at once. Anything else sent to a device is a dead

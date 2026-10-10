@@ -35,13 +35,17 @@ hands an accepted connection to a process. A reader (a file or a
 connection) cuts its next message when its owner next waits in `recv`
 (D158), and `(:read how)` switches it between lines, chunks of up to 64
 KB, a count of bytes for the next message alone, JSON values (`:json`,
-`:json/items`) and s-expressions (`:sexp`) (D159); a line, count or
-value of 64 MB or more ends the owner with `:too-big` (D160). JSON in C (`runtime/json.c`,
-D162): `json/parse` gives a Result, `json/print` compact JSON, and the
-same validator reads it from a device as the bytes come. S-expressions
+`:json/items`), s-expressions (`:sexp`) and source (`:source`) (D159); a
+line, count or value of 64 MB or more ends the owner with `:too-big`
+(D160). JSON in C (`runtime/json.c`, D162): `json/parse` gives a Result,
+`json/print` compact JSON, and the same validator reads it from a device
+as the bytes come. S-expressions
 as data the same way (`runtime/sexp.c`, D155, D163): `sexp/parse`,
 `sexp/print`, and `:sexp` on a device; a name the program doesn't
-mention reads as `(:symbol "name")`.
+mention reads as `(:symbol "name")`. Doc blocks, after Perl's POD
+(D156, D164): between top-level forms, `=doc` ... `=cut`, which both
+readers skip, and `:source` reads a file's forms and doc blocks in
+order, with their lines.
 `(@include "path")` and `(@include :name)` splice in other files (each
 once); `@ARGV`, the program's arguments, is the top level's parameter
 (D144); and `if`, `when`, `case`, `and` and `or` are made into `cond`
@@ -59,19 +63,16 @@ the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
 x86-64 natively), and on macOS (Stevan runs it on his M2 Max after every
 step, and reports only failures; x86-64 passes there too, under Rosetta
-2, with `make golden TARGETS=x86_64`). **Next: the rest of step 12**,
-the groundwork HTTP needs: 12a, ways to read a device, settled in
-D158–D161 and built in four pieces, of which three (chunks, counts and
-switching; JSON; s-expressions) are done; next inline docs after Perl's
-POD, and `:source` (D156); 12b, collecting outside `recv`;
-12c, C libraries vendored as source (D151, D152), then TLS; 12d,
-looking up host names in the runtime (D153). Then where `recv` can go
-(13: `defactor`, or splitting functions at `recv`), HTTP in slight
-(14), and agents (15: chat as actors, tools as messages, `:exec`,
-models over HTTP). Each has points to settle with Stevan first
-(`docs/PLAN.md`); 12b and 13 need a discussion in depth before
-building. Self-hosting waits till the language settles (17). Update
-this section as steps land.
+2, with `make golden TARGETS=x86_64`). Step 12a, ways to read a device
+(D158–D164), is done. **Next: the rest of step 12**, the groundwork HTTP
+needs: 12b, collecting outside `recv`; 12c, C libraries vendored as
+source (D151, D152), then TLS; 12d, looking up host names in the
+runtime (D153). Then where `recv` can go (13: `defactor`, or splitting
+functions at `recv`), HTTP in slight (14), and agents (15: chat as
+actors, tools as messages, `:exec`, models over HTTP). Each has points
+to settle with Stevan first (`docs/PLAN.md`); 12b and 13 need a
+discussion in depth before building. Self-hosting waits till the
+language settles (17). Update this section as steps land.
 
 ## Read first, in this order
 

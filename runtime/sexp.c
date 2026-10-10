@@ -28,6 +28,9 @@ enum {
     S_COLON,                    // just after a keyword's :
     S_KEYWORD,                  // in a keyword's name
     S_STRING, S_ESCAPE, S_BRACE, S_HEX,
+    S_EQUALS,                   // a = to start a line between top-level data: a doc block, or a name
+    S_DOC_FIRST,                // in a doc block's first line, =doc and then only space
+    S_DOC_BODY,                 // in a doc block, till a line =cut
 };
 
 // Where a token is in the reader's grammar of numbers: -?D+ is an integer,
@@ -63,17 +66,19 @@ static int hex_value(int c) {
     return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
 }
 
+// Ready for the next datum: where it is in a line, and whether it reads
+// doc blocks or turns down a datum, stay as they were.
 void rt_sexp_reset(rt_sexp_t *s) {
     s->depth = 0;
     s->state = S_SPACE;
+    s->seen  = 0;
+    s->lines = 0;
     if (s->quoted) s->quoted[0] = 0;
 }
 
 void rt_sexp_free(rt_sexp_t *s) {
     free(s->quoted);
-    s->quoted = NULL;
-    s->cap    = 0;
-    rt_sexp_reset(s);
+    *s = (rt_sexp_t){ 0 };
 }
 
 // A datum has just ended at the current level, which takes any ' waiting
@@ -88,6 +93,9 @@ static int token_ok(const rt_sexp_t *s) {
     return s->state == S_ATOM || (s->state == S_HASH && s->word && !*s->word) || (s->state == S_KEYWORD && !is_number(s->num));
 }
 
+static int is_blank(int c)  { return c == ' ' || c == '\t' || c == '\r'; }
+static int is_letter(int c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z'); }
+
 int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *used) {
     if (!s->quoted) {
         s->cap    = 16;
@@ -95,12 +103,25 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
         if (!s->quoted) abort();
     }
     size_t i = 0;
+    int    r = RT_SCAN_MORE;
     for (; i < len; i++) {
-        int c = (unsigned char)bytes[i];
+        int    c   = (unsigned char)bytes[i];
+        int    end = 0;                         // 1: a datum ends with byte i; 2: a doc block does
+        size_t at  = s->seen + i;               // byte i's offset since the reset
         switch (s->state) {
         case S_COMMENT:
             if (c == '\n') s->state = S_SPACE;
             break;
+        case S_EQUALS:
+            if (is_letter(c)) {                 // a doc block: =doc is the one kind, for now (D164)
+                if (c != 'd') goto bad;
+                s->state = S_DOC_FIRST;
+                s->k     = 1;
+                break;
+            }
+            if (s->closed) goto bad;
+            s->state = S_ATOM;                  // a name that starts with =
+            // fall through
         case S_ATOM:
         case S_DOT:
         case S_HASH:
@@ -125,19 +146,33 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
             s->state = S_SPACE;
             if (ended(s)) {
                 *used = i;
-                return RT_SCAN_DONE;
+                r     = RT_SCAN_DONE;
+                goto out;
             }
             i--;                                 // byte i is the list's again
-            break;
+            continue;
         case S_SPACE:
             if (is_space(c))                    break;
-            if (c == ';')                       s->state = S_COMMENT;
-            else if (c == '\'')                 s->quoted[s->depth] = 1;
+            if (c == ';') {
+                s->state = S_COMMENT;
+                break;
+            }
+            if (c == '=' && !s->mid_line && s->depth == 0 && !s->quoted[0]) {
+                s->state      = S_EQUALS;
+                s->from       = at;
+                s->first_line = s->lines;
+                break;
+            }
+            if (s->closed || c == '`' || c == ',') goto bad;
+            if (s->depth == 0 && !s->quoted[0]) {   // a top-level datum begins
+                s->from       = at;
+                s->first_line = s->lines;
+            }
+            if (c == '\'')                      s->quoted[s->depth] = 1;
             else if (c == '"')                  s->state = S_STRING;
             else if (c == '#')                  s->state = S_HASH, s->word = NULL;
             else if (c == ':')                  s->state = S_COLON;
             else if (c == '.')                  s->state = S_DOT;
-            else if (c == '`' || c == ',')      goto bad;
             else if (c == '(') {
                 if (s->depth + 1 == s->cap) {
                     s->cap   *= 2;
@@ -148,10 +183,7 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
             } else if (c == ')') {
                 if (s->depth == 0 || s->quoted[s->depth]) goto bad;
                 s->depth--;
-                if (ended(s)) {
-                    *used = i + 1;
-                    return RT_SCAN_DONE;
-                }
+                end = ended(s);
             } else {
                 s->state = S_ATOM;
             }
@@ -161,10 +193,7 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
                 s->state = S_ESCAPE;
             } else if (c == '"') {
                 s->state = S_SPACE;
-                if (ended(s)) {
-                    *used = i + 1;
-                    return RT_SCAN_DONE;
-                }
+                end      = ended(s);
             }
             break;
         case S_ESCAPE:
@@ -189,14 +218,79 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
             s->hex++;
             if (s->code > 0x10ffff)             goto bad;
             break;
+        case S_DOC_FIRST:                       // k: how much of "doc" there's been
+            if (s->k < 3) {
+                if (c != "doc"[s->k])           goto bad;
+                s->k++;
+            } else if (c == '\n') {
+                s->state    = S_DOC_BODY;
+                s->k        = 0;
+                s->doc_from = s->line_from = at + 1;
+            } else if (!is_blank(c)) {
+                goto bad;
+            }
+            break;
+        case S_DOC_BODY:                        // k: how much of "=cut" the line has been, or -1
+            if (c == '\n') {
+                if (s->k >= 4) {
+                    s->doc_to = s->line_from;
+                    end       = 2;
+                } else {
+                    s->k         = 0;
+                    s->line_from = at + 1;
+                }
+            } else if (s->k >= 4) {
+                if (!is_blank(c)) s->k = -1;
+            } else if (s->k >= 0) {
+                s->k = c == "=cut"[s->k] ? s->k + 1 : -1;
+            }
+            break;
+        }
+        if (c == '\n') s->lines++;
+        s->mid_line = c != '\n';
+        if (end == 1) {
+            *used = i + 1;
+            r     = RT_SCAN_DONE;
+            i++;
+            goto out;
+        }
+        if (end == 2) {
+            s->state = S_SPACE;
+            if (s->docs) {
+                *used = i + 1;
+                r     = RT_SCAN_DOC;
+                i++;
+                goto out;
+            }
         }
     }
-    if (!eof) return RT_SCAN_MORE;
-    if (s->state >= S_ATOM && s->state <= S_KEYWORD && token_ok(s) && s->depth == 0) {
-        *used = len;
-        return RT_SCAN_DONE;
+    if (eof) {
+        if (s->state == S_DOC_FIRST || s->state == S_DOC_BODY) {    // the end of the file ends a doc block
+            if (s->state == S_DOC_FIRST && s->k < 3) goto bad;
+            if (s->state == S_DOC_FIRST) s->doc_from = s->doc_to = s->seen + len;
+            else                         s->doc_to = s->k >= 4 ? s->line_from : s->seen + len;
+            s->state = S_SPACE;
+            if (s->docs) {
+                *used = len;
+                r     = RT_SCAN_DOC;
+                goto out;
+            }
+        }
+        if (s->state >= S_ATOM && s->state <= S_KEYWORD && token_ok(s) && s->depth == 0) {
+            *used = len;
+            r     = RT_SCAN_DONE;
+        } else if (s->state == S_EQUALS && !s->closed) {
+            *used = len;
+            r     = RT_SCAN_DONE;
+        } else if ((s->state == S_SPACE || s->state == S_COMMENT) && s->depth == 0 && !s->quoted[0]) {
+            return RT_SCAN_NONE;
+        } else {
+            goto bad;
+        }
     }
-    if ((s->state == S_SPACE || s->state == S_COMMENT) && s->depth == 0 && !s->quoted[0]) return RT_SCAN_NONE;
+out:
+    s->seen += i;
+    return r;
 bad:
     *used = i;
     return RT_SCAN_BAD;
@@ -399,19 +493,17 @@ rt_value_t rt_sexp_parse(rt_value_t s, const char *site) {
     size_t      len  = rt_string_len(s), used = 0;
     rt_sexp_t   x    = { 0 };
     int         r    = rt_sexp_scan(&x, text, len, 1, &used);
-    rt_sexp_free(&x);
-    if (r == RT_SCAN_DONE) {                    // only space and comments may follow
-        size_t k = used;
-        while (k < len && (is_space((unsigned char)text[k]) || text[k] == ';')) {
-            if (text[k] == ';') while (k < len && text[k] != '\n') k++;
-            else                k++;
-        }
-        if (k < len) r = RT_SCAN_BAD, used = k;
+    size_t      from = x.from, rest;
+    if (r == RT_SCAN_DONE) {                    // only space, comments and doc blocks may follow
+        rt_sexp_reset(&x);
+        x.closed = 1;
+        if (rt_sexp_scan(&x, text + used, len - used, 1, &rest) == RT_SCAN_BAD) r = RT_SCAN_BAD, used += rest;
     }
+    rt_sexp_free(&x);
     if (r == RT_SCAN_NONE) r = RT_SCAN_BAD, used = len;
     rt_value_t *outer = rt_alloc(32, site), v;
     if (r == RT_SCAN_DONE) {
-        rt_sexp_build(text, used, heap_alloc, (void *)site, &v);     // the heap faults before it gives out
+        rt_sexp_build(text + from, used - from, heap_alloc, (void *)site, &v);  // the heap faults before it gives out
         outer[0] = rt_symbol(RT_SYM_OK);
     } else {
         rt_value_t *why = rt_alloc(32, site);

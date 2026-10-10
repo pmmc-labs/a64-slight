@@ -192,3 +192,39 @@ test('elements inside a list have their own positions', () => {
     const body = toArray(l[3]!)!;
     assert.deepEqual(body[1]!.t === 'sym' && body[1]!.pos, { file: 'test.slight', line: 2, col: 8 });
 });
+
+// --- doc blocks (D156, D164) ---------------------------------------------------
+
+test('a doc block between top-level forms is skipped', () => {
+    assert.equal(shows('=doc\n# Title\n(not code)\n=cut\n42\n=doc\nmore\n=cut\n"x"'), '42 "x"');
+    assert.equal(shows('(a)\n=doc   \nbody\n=cut  \r\n(b)'), '(a) (b)');
+});
+
+test('a doc block without =cut runs to the end of the file', () => {
+    assert.equal(shows('42\n=doc\n(all of this is doc)'), '42');
+    assert.equal(shows('42\n=doc'), '42');
+    assert.equal(shows('42\n=doc\nbody\n=cut'), '42');
+});
+
+test('only a whole line =cut ends a doc block', () => {
+    assert.equal(shows('=doc\n=cutting\n =cut\n=cut x\n=cut\n7'), '7');
+});
+
+test('forms after a doc block keep their lines', () => {
+    const [x] = forms('=doc\none\ntwo\n=cut\n  x');
+    assert.deepEqual(x!.t === 'sym' && x!.pos, { file: 'test.slight', line: 5, col: 3 });
+});
+
+test('=word inside a form, after a quote, or not at the start of a line is a name', () => {
+    assert.equal(shows("'(a\n=doc\nb)"), '(quote (a =doc b))');
+    assert.equal(shows("'\n=doc"), '(quote =doc)');
+    assert.equal(shows('x =doc'), 'x =doc');
+    assert.equal(shows('==\n=1'), '== =1');
+});
+
+test('=doc is the one kind of doc block, for now', () => {
+    fails('=example\n(+ 1 2)\n=cut', /unknown doc block '=example'/);
+    fails('42\n=cut', /=cut without a doc block/);
+    fails('=doc Title\n=cut', /first line is =doc alone/);
+    fails('=docs\n=cut', /unknown doc block '=docs'/);
+});

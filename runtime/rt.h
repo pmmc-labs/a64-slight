@@ -117,9 +117,10 @@
 // owner with these: (:open f) first (a listener's is (:open l port)), a
 // reader's (:line f s), (:chunk f s) and (:eof f), a listener's (:accept l
 // conn); and it takes a writer's (:write x ...), and a reader's (:read how),
-// how being :lines, :chunks, :json, :json/items, :sexp or a count; a reader
-// of JSON sends (:json f v), and of s-expressions (:sexp f v). RT_DEV_x is
-// symbol RT_SYM_DEVICE + x.
+// how being :lines, :chunks, :json, :json/items, :sexp, :source or a count;
+// a reader of JSON sends (:json f v), of s-expressions (:sexp f v), and of
+// source (:form f form line) and (:doc f text line). RT_DEV_x is symbol
+// RT_SYM_DEVICE + x.
 #define RT_SYM_DEVICE       56    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
 #define RT_DEV_LINE          1    // :line
@@ -133,12 +134,15 @@
 #define RT_DEV_JSON          9    // :json
 #define RT_DEV_JSON_ITEMS   10    // :json/items
 #define RT_DEV_SEXP         11    // :sexp
-#define RT_DEV_COUNT        12
+#define RT_DEV_SOURCE       12    // :source
+#define RT_DEV_FORM         13    // :form
+#define RT_DEV_DOC          14    // :doc
+#define RT_DEV_COUNT        15
 
 // Why a device failed, from errno: a device's owner ends with
 // (:error (name path)), path being the file's, or the socket's "host:port"
 // (a listener's port). RT_ERR_x is symbol RT_SYM_ERRS + x.
-#define RT_SYM_ERRS         68    // RT_SYM_DEVICE + RT_DEV_COUNT
+#define RT_SYM_ERRS         71    // RT_SYM_DEVICE + RT_DEV_COUNT
 #define RT_ERR_ENOENT        0    // :enoent        no such file or directory
 #define RT_ERR_EACCES        1    // :eacces        permission denied
 #define RT_ERR_EPERM         2    // :eperm         operation not permitted
@@ -170,14 +174,14 @@
 
 // The symbols JSON's values need beyond #true and #false (json.c):
 // RT_JSON_x is symbol RT_SYM_JSON + x.
-#define RT_SYM_JSON         95    // RT_SYM_ERRS + RT_ERR_COUNT
+#define RT_SYM_JSON         98    // RT_SYM_ERRS + RT_ERR_COUNT
 #define RT_JSON_NULL         0    // :null
 #define RT_JSON_OBJECT       1    // :object        (:object (key value) ...)
 #define RT_JSON_COUNT        2
 
 // And those the s-expression reader makes (sexp.c): RT_SEXP_x is symbol
 // RT_SYM_SEXP + x.
-#define RT_SYM_SEXP         97    // RT_SYM_JSON + RT_JSON_COUNT
+#define RT_SYM_SEXP        100    // RT_SYM_JSON + RT_JSON_COUNT
 #define RT_SEXP_SYMBOL       0    // :symbol        (:symbol "name"), a name the program doesn't mention
 #define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
 #define RT_SEXP_COUNT        2
@@ -603,6 +607,7 @@ size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key));
 #define RT_SCAN_DONE 1
 #define RT_SCAN_BAD  2
 #define RT_SCAN_NONE 3
+#define RT_SCAN_DOC  4                  // rt_sexp_scan, with docs: a doc block has ended
 
 typedef struct rt_json {
     unsigned char *open;        // the containers open, '[' or '{', innermost last
@@ -618,13 +623,23 @@ void rt_json_reset(rt_json_t *j);
 void rt_json_free(rt_json_t *j);
 int  rt_json_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx, rt_value_t *out);
 
-// The same for s-expressions: rt_sexp_scan, rt_sexp_reset and so on.
+// The same for s-expressions: rt_sexp_scan, rt_sexp_reset and so on. A
+// datum, or with docs set a doc block (D156, D164), is from `from` to
+// *used, counting since the reset, and begins on line first_line (the
+// newlines before it since then); a doc block's text is from doc_from to
+// doc_to. With closed set, no datum may begin (what comes after the one
+// sexp/parse reads). rt_sexp_reset keeps those two, and where it is in a
+// line.
 typedef struct rt_sexp {
     unsigned char *quoted;      // for each list open, and the top level: whether a ' waits there
     size_t         depth, cap;
-    int            state, num, hex;
+    int            state, num, hex, k;
     uint32_t       code;        // a \u{...} escape's, so far
     const char    *word;        // what's left of #true or #false
+    int            docs, closed;
+    int            mid_line;    // the last byte taken wasn't a newline
+    size_t         seen, lines; // bytes and newlines taken since the reset
+    size_t         from, first_line, doc_from, doc_to, line_from;
 } rt_sexp_t;
 
 int  rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *used);
