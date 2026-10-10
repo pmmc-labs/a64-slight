@@ -647,5 +647,28 @@ void rt_sexp_reset(rt_sexp_t *s);
 void rt_sexp_free(rt_sexp_t *s);
 int  rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx, rt_value_t *out);
 
+// Finding a host's IPv4 address (dns.c, D153, D165). rt_lookup_begin gives
+// RT_LOOKUP_DONE, with *addr (in network order), when the host is an
+// address or in the hosts file; or RT_LOOKUP_ASKED, with *out, a query sent
+// to a name server; or RT_LOOKUP_NOTFOUND. Then the caller waits on
+// rt_lookup_fd (for writing if *write) and, when it's ready, or
+// rt_lookup_timeout ms have passed since the last RT_LOOKUP_ASKED, calls
+// rt_lookup_ready: RT_LOOKUP_WAIT to wait on, RT_LOOKUP_ASKED, DONE,
+// NOTFOUND, or RT_LOOKUP_TIMEOUT, no server answered. rt_lookup_free when
+// it's done, or no longer wanted.
+#define RT_LOOKUP_WAIT     0
+#define RT_LOOKUP_ASKED    1
+#define RT_LOOKUP_DONE     2
+#define RT_LOOKUP_NOTFOUND 3
+#define RT_LOOKUP_TIMEOUT  4
+
+typedef struct rt_lookup rt_lookup_t;
+
+int      rt_lookup_begin(rt_lookup_t **out, const char *host, uint32_t *addr);
+int      rt_lookup_fd(const rt_lookup_t *l, int *write);
+uint64_t rt_lookup_timeout(const rt_lookup_t *l);
+int      rt_lookup_ready(rt_lookup_t *l, int timed_out, uint32_t *addr);
+void     rt_lookup_free(rt_lookup_t *l);
+
 #endif // __ASSEMBLER__
 #endif // RT_H

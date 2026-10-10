@@ -1,0 +1,157 @@
+; env: SLIGHT_HOSTS=t/data/hosts SLIGHT_RESOLV_CONF=build/t/186-dns.resolv.conf
+; Looking up host names (D153, D165). A name in the hosts file is used as
+; it is (in any case), and "localhost" is 127.0.0.1 even when the hosts
+; file doesn't say so; any other is asked of the name servers in
+; resolv.conf. Here the name server is this program: a slight process
+; serving DNS over TCP ("options use-vc"), reading each query's length and
+; then the query with counts, and answering from a small zone. It notes each name it's asked
+; about, so the order the names are tried in shows: with "search test",
+; a name with no dot is tried in the domain first, and one with a dot as
+; it is first. The first server listed refuses every connection, so each
+; query goes there first, and then to the next. Names that aren't there
+; are :enotfound; names no server answers for are :etimedout, after
+; "timeout:1 attempts:3", on the virtual clock. Then a query over UDP, to
+; a port nothing listens on.
+
+; --- the name server -------------------------------------------------------
+
+(defun bytes (xs) (bytes->string xs))
+(defun u16 (n) (bytes (list (div n 256) (% n 256))))
+
+; "one.test" as a query writes it: each label after its length, then 0.
+(defun encode (name)
+    (~ (str-join "" (map (lambda (label) (~ (bytes (list (str-len label))) label)) (str-split name "."))) (bytes (list 0))))
+
+; The labels of the name in a query, from byte at.
+(defun labels (q at acc)
+    (let n (byte-at q at))
+    (cond
+        ((== n 0) (reverse acc))
+        (#true    (labels q (+ (+ at 1) n) (cons (substring q (+ at 1) (+ (+ at 1) n)) acc)))))
+
+(defun a-record (name-bytes) (~ name-bytes (bytes (list 0 1 0 1 0 0 0 60 0 4 127 0 0 1))))
+
+; The answer to query q about name: (rcode answer-records count), or
+; :silence for a name the server never answers about.
+(defun zone (name)
+    (cond
+        ((member? name (list "one.test" "short.test" "abs.test"))
+            (list 0 (a-record (bytes (list 192 12))) 1))
+        ((eq? name "cname.test")
+            (list 0 (~ (~ (bytes (list 192 12 0 5 0 1 0 0 0 60)) (~ (u16 (str-len (encode "one.test"))) (encode "one.test")))
+                       (a-record (encode "one.test")))
+                  2))
+        ((eq? name "empty.test") (list 0 "" 0))
+        ((eq? name "fail.test")  (list 2 "" 0))
+        ((eq? name "slow.test")  :silence)
+        (#true                   (list 3 "" 0))))
+
+(defun response (q name)
+    (let z (zone name))
+    (let question (substring q 12 (+ (+ 12 (str-len (encode name))) 4)))
+    (cond
+        ((eq? z :silence) "")
+        (#true
+            (let body (concat (substring q 0 2) (bytes (list 129 (+ 128 (car z)) 0 1)) (u16 (nth 2 z)) (bytes (list 0 0 0 0))
+                              question (cadr z)))
+            (~ (u16 (str-len body)) body))))
+
+(defun dns-conn (log)
+    (recv
+        ((:open c) (send c (list :read 2)) (dns-length log))))
+
+(defun dns-length (log)
+    (recv
+        ((:chunk c s)
+            (cond
+                ((== (str-len s) 2) (send c (list :read (+ (* 256 (byte-at s 0)) (byte-at s 1)))) (dns-query log))
+                (#true              (disconnect c))))
+        ((:eof c) (disconnect c))))
+
+(defun dns-query (log)
+    (recv
+        ((:chunk c q)
+            (let name (str-join "." (labels q 12 ())))
+            (send log (list :asked name))
+            (send c (list :write (response q name)))
+            (send c (list :read 2))
+            (dns-length log))
+        ((:eof c) (disconnect c))))
+
+(defun dns-server (to)
+    (recv
+        ((:open l port)   (send to (list :port port)) (dns-serving l ()))))
+
+; Until :stop, which closes the listener, and ends with what it was asked.
+(defun dns-serving (l asked)
+    (recv
+        ((:accept _ conn)
+            (let me $$)
+            (connect conn (dns-conn me))
+            (dns-serving l asked))
+        ((:asked name)    (dns-serving l (cons name asked)))
+        (:stop            (disconnect l) (reverse asked))))
+
+; --- a service to connect to, and a client --------------------------------
+
+(defun echo-server (to)
+    (recv
+        ((:open l port)   (send to (list :port port)) (echo-serving l))))
+
+(defun echo-serving (l)
+    (recv
+        ((:accept _ conn) (connect conn (echo)) (echo-serving l))
+        (:stop            (disconnect l))))
+
+(defun echo ()
+    (recv
+        ((:open c)   (echo))
+        ((:line c s) (send c (list :write "echo: " s \n)) (echo))
+        ((:eof c)    (disconnect c))))
+
+(defun client ()
+    (recv
+        ((:open c)   (send c (list :write "hi" \n)) (client))
+        ((:line c s) (disconnect c) s)))
+
+; --- the test --------------------------------------------------------------
+
+; A process that ends with the first message it gets, so the root, which
+; can't wait in recv but where it ends, can join it for an answer.
+(defun box () (recv (msg msg)))
+(defun answer (box) (cadr (cadr (join box))))
+
+(let dns-box (fork (box)))
+(let dns (connect :tcp/listen 0 (dns-server dns-box)))
+(let dns-port (answer dns-box))
+(let echo-box (fork (box)))
+(let echo (connect :tcp/listen 0 (echo-server echo-box)))
+(let echo-port (answer echo-box))
+
+(defun writer (text)
+    (recv
+        ((:open f) (send f (list :write text)) (disconnect f))))
+
+(defun resolv-conf (text) (join (connect :fs/write "build/t/186-dns.resolv.conf" (writer text))))
+
+(resolv-conf (concat "nameserver 127.0.0.1:1\nnameserver 127.0.0.1:" dns-port "\nsearch test\noptions use-vc timeout:1 attempts:3\n"))
+
+; What connecting to name gets: the echo, or why not.
+(defun try (port name) (pprint (list name (outcome (join (connect :tcp (concat name ":" port) (client)))))))
+
+(defun outcome (r)
+    (cond
+        ((eq? (car r) :ok) (cadr r))
+        (#true             (car (cadr r)))))
+
+(map (lambda (name) (try echo-port name))
+     (list "alias.test" "other.test" "Other.Test" "localhost" "one.test" "cname.test" "short" "abs.test."
+           "empty.test" "none.test" "ip6only.test" "fail.test" "slow.test"))
+
+(resolv-conf "nameserver 127.0.0.1:1\noptions timeout:1 attempts:1\n")
+(try echo-port "udp.test")
+
+; and what the name server was asked, in order
+(send echo :stop)
+(send dns :stop)
+(pprint (cadr (join dns)))

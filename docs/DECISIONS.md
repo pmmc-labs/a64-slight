@@ -1275,7 +1275,7 @@ Odin's `core:net`.)* `getaddrinfo` blocks, and every process with it
 query over UDP to the servers in `/etc/resolv.conf`, and wait for the
 answer in `select()` like any socket. That also takes away the main
 reason for a worker thread. Caveat: macOS generates `/etc/resolv.conf`,
-and it can miss per-interface and VPN settings.
+and it can miss per-interface and VPN settings. (Built in step 12d: D165.)
 
 **D154. Parsing in C: JSON and s-expressions, as builtins and as ways to
 read a device.** *(User, Oct 2026: "most common parsing cases get done in
@@ -1548,3 +1548,57 @@ agreed.)*
   `line` is that of its first byte, a quote's if it has one. A device counts
   lines through every way of reading, so after a line read with `:lines`
   the next form's line is still the file's.
+
+**D165. How the runtime looks up host names.** *(Default; D153 as
+agreed.)* `runtime/dns.c`, about 350 lines.
+- **The order**, as glibc and Go have it: a dotted IPv4 address is
+  itself; then the hosts file, its IPv4 lines only (D139), names compared
+  without case, as DNS compares them; then `localhost` is 127.0.0.1 even
+  when the hosts file doesn't say so (RFC 6761, as Go does); then the name
+  servers in `resolv.conf`, at most three, or 127.0.0.1 when it names
+  none. Both files are read at every lookup, so a change to them counts
+  at once, and there's nothing to keep up to date.
+- **`resolv.conf`:** `nameserver`, `search` (or `domain`), and the
+  options `ndots:n`, `timeout:n`, `attempts:n` and `use-vc`, with glibc's
+  meanings and defaults (1, 5 seconds, 2, off). A name with fewer dots
+  than `ndots` is tried in each search domain first and then as it is;
+  any other, as it is first; one that ends in a dot, only as itself. Each
+  name is asked of each server in turn, `attempts` times round. A server
+  that says the name doesn't exist, or that it has no IPv4 address, moves
+  the lookup on to the next name; one that fails (SERVFAIL, REFUSED),
+  can't be reached, or doesn't answer in `timeout`, to the next server.
+  The rest of the file is ignored: `rotate`, `sortlist`, `edns0`, and
+  IPv6 servers.
+- **The query** asks for one A record, recursion desired, under a random
+  ID; an answer with another ID is ignored. It goes over UDP, then over
+  TCP to the same server if the answer was cut short, or only over TCP
+  with `use-vc`. The address is the first A record in the answer, after
+  any CNAMEs the server followed.
+- **Waiting:** the query's socket is waited for in `select()`, as the
+  connection's own will be, and its timeout is a timer the device sets
+  itself and unsets when the answer comes, so a lookup keeps the program
+  running, and the virtual clock covers it in tests. The connection is a
+  device from the start: what's written to it while its host is looked up
+  is kept, and `disconnect` gives up the lookup.
+- **Errors:** `:enotfound` when every name tried doesn't exist, has no
+  IPv4 address, or can't be one (an empty label, or a label over 63
+  bytes); `:etimedout` when no server would answer for a name, which
+  might exist, and then the names after it aren't tried (glibc's "no
+  servers could be reached").
+- **The port** in `"host:port"` is a number now; `getaddrinfo` also took
+  a service's name (`"host:http"`), which is `:enotfound` now.
+- **For tests:** `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` name other files
+  to read, and a `nameserver` line may give a port (`127.0.0.1:5353`), an
+  extension no libc reads, so a test can serve its own names on a port the
+  system picked. A golden test's line `; env: NAME=value ...` sets them
+  (`t/186`). The name server there is slight, so it's asked over TCP
+  (`use-vc`), since slight has no UDP; UDP is tested against a port
+  nothing listens on, and was tried by hand against a real resolver and
+  against one that never answers (two queries, two seconds, then
+  `:etimedout`).
+- **Turned down:** `getaddrinfo` on a worker thread (D153); IPv6 (AAAA
+  records), which waits for IPv6 sockets (D139); keeping answers (a
+  cache needs TTLs, and the local resolver usually keeps them anyway);
+  reading what macOS's `scutil --dns` shows, per interface (D153's
+  caveat), since `/etc/resolv.conf` has the default servers, which is
+  enough for now.

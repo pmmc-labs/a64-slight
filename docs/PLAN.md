@@ -7,10 +7,10 @@ be a session or two each.
 **Progress:** steps 0–9 and 10a–10e done (under qemu, and natively on
 macOS: Stevan runs `make test` on his M2 Max after every step), a
 second target, x86-64 (which passes on the M2 too, under Rosetta 2), and
-UTF-8 builtins (both below, after 10e), and tooling (11). Next (D149):
-the groundwork HTTP needs (12: ways to read a device, collecting outside
-`recv`, C libraries and TLS, looking up names), where `recv` can go
-(13), then HTTP (14).
+UTF-8 builtins (both below, after 10e), tooling (11), and of the
+groundwork HTTP needs (12), ways to read a device (12a) and looking up
+host names (12d). Next (D149): the rest of 12 (collecting outside `recv`,
+C libraries and TLS), where `recv` can go (13), then HTTP (14).
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -383,11 +383,13 @@ unless something better turns up. To settle: confirming mbedTLS, where a
 client finds its CA certificates (macOS keeps them in the Keychain), and
 how a server is given its certificate and key.
 
-#### 12d. Looking up host names
+#### 12d. Looking up host names (done)
 
 `getaddrinfo` blocks the whole runtime. As Odin's `core:net` does, the
 runtime will read `/etc/hosts`, query the servers in `/etc/resolv.conf`
-itself over UDP, and wait for the answer in `select()` (D153).
+itself over UDP, and wait for the answer in `select()` (D153). Done (Oct
+2026, D165): `runtime/dns.c`, and golden test 186, with a name server
+written in slight.
 
 ### 13. Where `recv` can go
 

@@ -598,7 +598,8 @@ Lalloc_N:
   sp, d8–d15).
 - **Idle**: when nothing is runnable, wait in `select()` (on macOS and
   Linux alike, D113) on stdin, if a process is connected to `:keypress`,
-  and on the sockets, with the timeout set to the next timer. Timers are a
+  and on the sockets (a host's lookup among them), with the timeout set
+  to the next timer. Timers are a
   binary heap. While processes are busy, stdin and the sockets are looked
   at every 10 ms (D122). On the virtual clock they're looked at only when
   nothing can run: the sockets first, then a key, then the clock moves to
@@ -649,9 +650,11 @@ Lalloc_N:
   `join`, `monitor` and `kill`, a device is a process that ended with
   `(:ok ())`.
 - **Sockets are devices too** (D133–D139). `(connect :tcp "host:port"
-  expr)` connects, without stalling the runtime (looking up the host does
-  stall it, briefly, until the runtime looks names up itself: D153); the
-  connection's first message is `(:open c)`, once
+  expr)` connects, without stalling the runtime, after looking up the
+  host, which doesn't stall it either (`runtime/dns.c`, D153, D165): the
+  hosts file, then a query to the name servers in `resolv.conf`, over UDP
+  or TCP, its socket waited for in `select()` and its timeout a timer of
+  the device's own. The connection's first message is `(:open c)`, once
   it's connected, or the owner ends with `(:error (econnrefused
   "host:port"))` and the like. It then reads as a file does, one message
   at a time (it's read only while its owner waits for its next one, so a
@@ -668,7 +671,7 @@ Lalloc_N:
   a process of its own. Open sockets keep the program running. The error
   names are errno's (`:econnrefused`, `:econnreset`, `:epipe`,
   `:eaddrinuse`, ...), and `:enotfound` (Node's) for a host that can't be
-  found; SIGPIPE is ignored, so writing to a closed connection is
+  found, or `:etimedout` when no name server answers; SIGPIPE is ignored, so writing to a closed connection is
   `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. HTTP will
   be a slight library on top (D132, D140).
 - **C libraries** (D151, D152; planned, step 12c). A pure function bounded

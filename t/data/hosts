@@ -1,0 +1,3 @@
+# the hosts file t/186-dns.slight reads (SLIGHT_HOSTS)
+127.0.0.1   alias.test  other.test      # a name, and an alias
+::1         ip6only.test                # IPv6, which slight doesn't use

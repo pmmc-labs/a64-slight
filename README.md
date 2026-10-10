@@ -85,9 +85,9 @@ seconds.
 
 Next is the rest of the groundwork HTTP needs (step 12; reading a
 device in chunks, by length, and as JSON, s-expressions or source is
-done, and so are JSON and s-expressions in C, and doc blocks):
-collecting outside `recv`, C libraries and TLS, and looking up host
-names. Then where
+done, and so are JSON and s-expressions in C, doc blocks, and looking up
+host names without stalling the runtime): collecting outside `recv`, and
+C libraries and TLS. Then where
 `recv` can go (13), and HTTP, written in slight on top of TCP (14).
 Self-hosting waits until the language settles.
 

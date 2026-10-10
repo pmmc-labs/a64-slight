@@ -669,8 +669,12 @@ process's heap, with `(:error (:too-big path))`.
     (connect :tcp/listen port expr)
 
 TCP, IPv4 only, and about 1,000 sockets at once (the limit of
-`select()`). Connecting doesn't hold up the other processes, but looking
-up a host name does, briefly, for now (D153).
+`select()`). The port is a number. Neither connecting nor looking up the
+host holds up the other processes: the runtime reads `/etc/hosts`, and
+asks the name servers in `/etc/resolv.conf` about any other name itself
+(D153, D165). `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` name other files
+for it to read, and there a `nameserver` line may give a port
+(`nameserver 127.0.0.1:5353`), so a test can serve its own names.
 
 A connection's first message is `(:open c)`, once it's connected. Then
 it reads as a file does: lines at first, one message at a time, and
@@ -692,7 +696,8 @@ that isn't an open device faults (`:not-a-device`).
 A connection that fails ends its owner with `(:error (name "host:port"))`
 (a listener's, with its port): errno's names, such as `:econnrefused`,
 `:econnreset`, `:epipe` and `:eaddrinuse`, and `:enotfound` for a host
-that can't be found. Open sockets keep the program running.
+that can't be found, or `:etimedout` when no name server answered. Open
+sockets keep the program running, and so does a host being looked up.
 
     (defun echo ()
         (recv

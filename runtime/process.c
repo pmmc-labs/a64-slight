@@ -26,7 +26,6 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <inttypes.h>
-#include <netdb.h>
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <signal.h>
@@ -769,17 +768,40 @@ static void set_alarm(uint64_t due, rt_value_t pid, rt_msg_t *msg) {
     alarms[i] = a;
 }
 
-static alarm_t next_alarm(void) {
-    alarm_t  first = alarms[0], last = alarms[--nalarms];
-    uint64_t i     = 0;
+// Takes alarms[i] out, the last one going in its place, up or down.
+static void remove_alarm(uint64_t i) {
+    alarm_t last = alarms[--nalarms];
+    if (i == nalarms) return;
+    for (; i > 0 && before(&last, &alarms[(i - 1) / 2]); i = (i - 1) / 2) alarms[i] = alarms[(i - 1) / 2];
     for (uint64_t c; (c = 2 * i + 1) < nalarms; i = c) {
         if (c + 1 < nalarms && before(&alarms[c + 1], &alarms[c])) c++;
         if (!before(&alarms[c], &last)) break;
         alarms[i] = alarms[c];
     }
     alarms[i] = last;
+}
+
+static alarm_t next_alarm(void) {
+    alarm_t first = alarms[0];
+    remove_alarm(0);
     return first;
 }
+
+// A timer a device sets itself (a lookup's), unset when it's no longer
+// wanted, since a pending timer keeps the program running: its seq + 1.
+static uint64_t own_alarm(uint64_t due, rt_value_t pid) {
+    set_alarm(due, pid, NULL);
+    return alarms_set;
+}
+
+static void unset_alarm(uint64_t *alarm) {
+    for (uint64_t i = 0; *alarm && i < nalarms; i++) {
+        if (alarms[i].seq + 1 == *alarm) remove_alarm(i);
+    }
+    *alarm = 0;
+}
+
+static void lookup_timed_out(struct rt_device *d, uint64_t seq);
 
 // Fires every timer that's due.
 static void ring(void) {
@@ -788,7 +810,8 @@ static void ring(void) {
         rt_proc_t *p = procs[a.pid >> RT_PID_SHIFT].proc;
         if (!p) {
             struct rt_device *d = procs[a.pid >> RT_PID_SHIFT].device;
-            if (d && a.msg) command(d, a.msg->value);
+            if (d && a.msg)  command(d, a.msg->value);
+            else if (d)      lookup_timed_out(d, a.seq);
             if (a.msg) free_msg(a.msg);
         } else if (a.msg) {
             deliver(p, a.msg);
@@ -994,11 +1017,13 @@ static int idle(void) {
 // runtime.
 //
 // A socket (connect :tcp "host:port" expr, connect :tcp/listen port expr)
-// is waited for in select(), with stdin and the next timer. A connection
-// sends (:open c) once it's connected, then reads as a file does (but
-// only while its owner waits for what it has, so a fast sender is held
-// back by TCP), and (:eof c) when the other end closes; it can still be
-// written to then. It takes
+// is waited for in select(), with stdin and the next timer. Its host is
+// looked up first (dns.c): a name the hosts file doesn't have is asked of a
+// name server, over a socket of the lookup's own, waited for in select()
+// too. A connection sends (:open c) once it's connected, then reads as a
+// file does (but only while its owner waits for what it has, so a fast
+// sender is held back by TCP), and (:eof c) when the other end closes; it
+// can still be written to then. It takes
 // (:write x ...) as a file does, but keeps what the socket can't take yet,
 // and writes it when it can; closing it waits for that, and until then it
 // keeps the program running. A listener sends (:open l port), port being
@@ -1009,7 +1034,7 @@ static int idle(void) {
 
 #define DEV_TCP      3                  // a device's mode, after RT_FS_READ, _WRITE and _APPEND
 #define DEV_LISTEN   4
-#define ERR_NOTFOUND (-1)               // no such host: getaddrinfo's errors aren't errno's
+#define ERR_NOTFOUND (-1)               // no such host, which has no errno
 #define ERR_TOOBIG   (-2)               // a line, count or value of HEAP_MAX or more
 #define ERR_BADJSON  (-3)
 #define ERR_BADSEXP  (-4)
@@ -1022,7 +1047,9 @@ typedef struct rt_device {
     const char       *site;             // the connect's, for dead letters
     char             *path;             // a file's path, a connection's "host:port"; NUL-terminated
     size_t            path_len;
-    int64_t           port;             // a listener's
+    int64_t           port;             // a listener's, or the port a connection is to be made to
+    rt_lookup_t      *lookup;           // while a connection's host is looked up...
+    uint64_t          alarm;            // ...the timer for its query (own_alarm)
     char             *buf;              // what's been read, but not yet sent...
     size_t            at, len, cap;     // ...from at to len
     uint64_t          how;              // how it cuts: RT_DEV_LINES, _CHUNKS, _JSON, _JSON_ITEMS or _SEXP
@@ -1124,7 +1151,12 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
 // Closes d's file descriptor. A socket is freed later (bury), since an
 // event in hand may still refer to it.
 static void close_now(rt_device_t *d) {
-    close(d->fd);
+    if (d->fd >= 0) close(d->fd);
+    if (d->lookup) {
+        unset_alarm(&d->alarm);
+        rt_lookup_free(d->lookup);
+        d->lookup = NULL;
+    }
     if (d->mode < DEV_TCP) {
         rt_json_free(&d->json);
         rt_sexp_free(&d->sexp);
@@ -1160,8 +1192,8 @@ static void bury(void) {
 // written. The owner's list is the caller's to fix.
 static void shut(rt_device_t *d) {
     procs[d->pid >> RT_PID_SHIFT].device = NULL;
-    if (d->mode == DEV_TCP && d->out_len > d->out_at) d->closing = 1;
-    else                                              close_now(d);
+    if (d->mode == DEV_TCP && d->out_len > d->out_at && !d->lookup) d->closing = 1;
+    else                                                            close_now(d);   // (a host still looked up never connected)
 }
 
 static void close_all(rt_proc_t *p) {
@@ -1583,30 +1615,73 @@ static int tcp_listen(rt_proc_t *p, const char *site, int64_t port) {
     return 0;
 }
 
-// Starts connecting to "host:port" (split at the last colon).
+// Starts connecting a socket to addr (network order) and port: 0, with it
+// in *fd, or an errno.
+static int open_connection(uint32_t addr, int64_t port, int *fd) {
+    struct sockaddr_in a = { 0 };
+    a.sin_family      = AF_INET;
+    a.sin_port        = htons((uint16_t)port);
+    a.sin_addr.s_addr = addr;
+    int s = socket(AF_INET, SOCK_STREAM, 0), err = s < 0 ? errno : setup(s);
+    if (!err && connect(s, (struct sockaddr *)&a, sizeof a) < 0 && errno != EINPROGRESS) err = errno;
+    if (err && s >= 0) close(s);
+    *fd = err ? -1 : s;
+    return err;
+}
+
+static void lookup_step(rt_device_t *d, int r, uint32_t addr);
+
+// Starts connecting to "host:port" (split at the last colon; the port is a
+// number). Even if it has connected already, (:open c) comes from the
+// event loop, so it always comes in the same order; and a host that has to
+// be asked about is looked up first, the device waiting for that.
 static int tcp_connect(rt_proc_t *p, const char *site, const char *where, size_t len) {
     size_t colon = len;
     while (colon > 0 && where[colon - 1] != ':') colon--;
-    if (colon == 0 || memchr(where, '\0', len)) return ERR_NOTFOUND;
+    if (colon == 0 || colon == len || memchr(where, '\0', len)) return ERR_NOTFOUND;
+    int64_t port = 0;
+    for (size_t i = colon; i < len && port <= 65535; i++) port = where[i] >= '0' && where[i] <= '9' ? port * 10 + where[i] - '0' : 65536;
+    if (port > 65535) return ERR_NOTFOUND;
     char host[len + 1];
     memcpy(host, where, colon - 1);
     host[colon - 1] = '\0';
-    struct addrinfo hints = { 0 }, *res;
-    hints.ai_family   = AF_INET;
-    hints.ai_socktype = SOCK_STREAM;
-    int gai = getaddrinfo(host, where + colon, &hints, &res);      // waits, with the whole runtime
-    if (gai != 0) return gai == EAI_SYSTEM ? errno : ERR_NOTFOUND;
-    int fd = socket(AF_INET, SOCK_STREAM, 0), err = fd < 0 ? errno : setup(fd);
-    if (!err && connect(fd, res->ai_addr, res->ai_addrlen) < 0 && errno != EINPROGRESS) err = errno;
-    freeaddrinfo(res);
-    if (err) {
-        if (fd >= 0) close(fd);
-        return err;
+    rt_lookup_t *l;
+    uint32_t     addr;
+    int          fd, r = rt_lookup_begin(&l, host, &addr), err;
+    if (r == RT_LOOKUP_NOTFOUND) return ERR_NOTFOUND;
+    if (r == RT_LOOKUP_TIMEOUT)  return ETIMEDOUT;       // no query could even be sent
+    if (r == RT_LOOKUP_DONE && (err = open_connection(addr, port, &fd)) != 0) return err;
+    rt_device_t *d = new_device(p, DEV_TCP, r == RT_LOOKUP_DONE ? fd : -1, site, where, len);
+    d->connecting  = 1;
+    d->port        = port;
+    if (r == RT_LOOKUP_ASKED) {
+        d->lookup = l;
+        lookup_step(d, r, 0);
     }
-    // Even if it has connected already, (:open c) comes from the event
-    // loop, so it always comes in the same order.
-    new_device(p, DEV_TCP, fd, site, where, len)->connecting = 1;
     return 0;
+}
+
+// What a step of d's lookup came to: wait on; a new query, its timer set
+// afresh; or the end of it, the connection started or failed.
+static void lookup_step(rt_device_t *d, int r, uint32_t addr) {
+    if (r == RT_LOOKUP_WAIT) return;
+    unset_alarm(&d->alarm);
+    if (r == RT_LOOKUP_ASKED) {
+        uint64_t ms = rt_lookup_timeout(d->lookup);
+        d->alarm    = own_alarm(now() + ms * 1000000, d->pid);
+        return;
+    }
+    rt_lookup_free(d->lookup);
+    d->lookup = NULL;
+    int err   = r == RT_LOOKUP_DONE ? open_connection(addr, d->port, &d->fd) : r == RT_LOOKUP_TIMEOUT ? ETIMEDOUT : ERR_NOTFOUND;
+    if (err) fail(d, err);
+}
+
+static void lookup_timed_out(rt_device_t *d, uint64_t seq) {
+    uint32_t addr;
+    if (!d->lookup || d->alarm != seq + 1) return;      // a query since has its own
+    d->alarm = 0;
+    lookup_step(d, rt_lookup_ready(d->lookup, 1, &addr), addr);
 }
 
 rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
@@ -1678,6 +1753,12 @@ static void accept_all(rt_device_t *l) {
 static void socket_fds(fd_set *in, fd_set *out, int *max) {
     bury();
     for (rt_device_t *d = sockets; d; d = d->next_socket) {
+        if (d->lookup) {
+            int write, fd = rt_lookup_fd(d->lookup, &write);
+            FD_SET(fd, write ? out : in);
+            if (fd > *max) *max = fd;
+            continue;
+        }
         int r = d->mode == DEV_LISTEN || (!d->connecting && !d->waiting && !d->sent && !d->eof && !d->closing);
         int w = d->connecting || d->out_len > d->out_at;
         if (r) FD_SET(d->fd, in);
@@ -1687,6 +1768,11 @@ static void socket_fds(fd_set *in, fd_set *out, int *max) {
 }
 
 static void socket_event(rt_device_t *d, int r, int w) {
+    if (d->lookup) {
+        uint32_t addr;
+        lookup_step(d, rt_lookup_ready(d->lookup, 0, &addr), addr);
+        return;
+    }
     if (d->mode == DEV_LISTEN) {
         accept_all(d);
         return;
@@ -1739,7 +1825,8 @@ static int socket_events(fd_set *in, fd_set *out) {
     ready_t *ready = must(malloc((nsockets + 1) * sizeof *ready));
     uint64_t n     = 0;
     for (rt_device_t *d = sockets; d; d = d->next_socket) {
-        int r = FD_ISSET(d->fd, in), w = FD_ISSET(d->fd, out);
+        int write, fd = d->lookup ? rt_lookup_fd(d->lookup, &write) : d->fd;
+        int r = FD_ISSET(fd, in), w = FD_ISSET(fd, out);
         if (r || w) ready[n++] = (ready_t){ d, r, w };
     }
     qsort(ready, n, sizeof *ready, by_pid);

@@ -6,7 +6,8 @@
 # what the test reads from stdin (keys, say), written
 # with printf %b's escapes: \n, \r, \t, \\, and \0nnn in octal (\033 is
 # ESC); without one, stdin is empty. A line "; args: words" gives the
-# program its arguments, split at spaces.
+# program its arguments, split at spaces, and "; env: NAME=value ..." sets
+# variables for it (the files a DNS lookup reads, say).
 # $TARGET is the architecture to compile for: aarch64 (the default) or
 # x86_64. $RUN prefixes the binary: qemu when it isn't the machine's own
 # architecture, empty when it is (or on macOS, where Rosetta 2 runs x86-64).
@@ -34,8 +35,8 @@ export SLIGHT_CLOCK=virtual
 # output can't go down the pipe to diff: diff would wait for it.
 output() {
     rm -f "$1.killed"
-    set -f                                  # $3 is split into arguments, not globbed
-    $RUN "./$1" $3 <"$2" 2>&1 &
+    set -f                                  # $3 and $4 are split into words, not globbed
+    env $4 $RUN "./$1" $3 <"$2" 2>&1 &
     set +f
     pid=$!
     ( sleep "$TIMEOUT" && : >"$1.killed" && kill "$pid" ) >/dev/null 2>&1 &
@@ -57,7 +58,7 @@ if [ "$1" = "--one" ]; then
     if ! node bin/slightc.ts --target "$TARGET" -o "$bin" "$src" >"$bin.fail" 2>&1; then
         echo "FAIL $name (compile)"
         exit 1
-    elif output "$bin" "$bin.stdin" "$(sed -n 's/^; args: //p' "$src")" | diff -u "${src%.slight}.expected" - >"$bin.fail"; then
+    elif output "$bin" "$bin.stdin" "$(sed -n 's/^; args: //p' "$src")" "$(sed -n 's/^; env: //p' "$src")" | diff -u "${src%.slight}.expected" - >"$bin.fail"; then
         rm -f "$bin.fail"
         echo "ok   $name"
     else
