@@ -1,0 +1,31 @@
+; json/print (D154, D161): compact JSON on one line, so what it gives is
+; NDJSON as it is. A float always has a point or an exponent, so it reads
+; back as a float; a string's bytes pass through, but for " and \ and
+; the control characters, which are escaped. What JSON can't hold faults,
+; :not-json: a symbol but :null, #true and #false, a pid, a function, nan
+; or inf, and an object's member that isn't (key value) with a string key.
+
+(defun show (v) (tty/write (json/print v) "\n"))
+
+(show (list :object (list "a" (list 1 2.5 "é")) (list "b" (list :object (list "c" :null) (list "d" #false))) (list "e" #true)))
+(show (list () (list :object) (list (list :object)) (list (list))))
+(show (list 0 -7 4611686018427387903 -4611686018427387904))
+(show (list 1.0 -0.0 0.1 100.0 1.0e21 1.5e-7 123456.789 (/ 1 3)))
+(show "plain")
+(show (concat "\"" "\\" "/" (bytes->string (list 8 12 10 13 9 0 1 31 127)) "é😀"))
+
+; parsed and printed back, the same text, if it was compact to begin with
+(defun round-trip? (text) (eq? (json/print (cadr (json/parse text))) text))
+(pprint (map round-trip? (list "{\"a\":[1,2.5,null],\"b\":{}}" "[[],[{}],\"\\u0001\",-0.0,1e+21]" "\"\\\\\"")))
+
+; what JSON can't hold, each in a process of its own
+(defun try (v) (join (fork (json/print v))))
+(pprint (try :other))
+(pprint (try (list 1 $$)))
+(pprint (try (list :object (list "f" car))))
+(pprint (try (list (sqrt -1))))
+(pprint (try (* 1.0e308 10.0)))
+(pprint (try (list :object (list 1 2))))
+(pprint (try (list :object (list "k"))))
+(pprint (try (list :object (list "k" 1 2))))
+(pprint (try (list :object "k")))

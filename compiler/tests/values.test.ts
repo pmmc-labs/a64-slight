@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { DEVICE_WORDS, ERRNO_NAMES, FAULT_KINDS, intWord, KEY_NAMES, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from '../src/values.ts';
+import { DEVICE_WORDS, ERRNO_NAMES, FAULT_KINDS, intWord, JSON_WORDS, KEY_NAMES, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from '../src/values.ts';
 
 const RT_H = readFileSync(new URL('../../runtime/rt.h', import.meta.url), 'utf8');
 
@@ -40,6 +40,7 @@ test("the runtime's symbols follow #true, as rt.h numbers them", () => {
     assert.equal(BigInt(id(KEY_NAMES[0]!)), define('RT_SYM_KEYS'));
     assert.equal(BigInt(id(DEVICE_WORDS[0]!)), define('RT_SYM_DEVICE'));
     assert.equal(BigInt(id(ERRNO_NAMES[0]!)), define('RT_SYM_ERRS'));
+    assert.equal(BigInt(id(JSON_WORDS[0]!)), define('RT_SYM_JSON'));
 });
 
 test("the fault kinds are rt.h's, in order", () => {
@@ -56,8 +57,9 @@ test("the key names are rt.h's, in order", () => {
     assert.deepEqual(keys.map((m) => m[2]), KEY_NAMES);
 });
 
-test("a device's words and the errno names are rt.h's, in order", () => {
-    for (const [prefix, names, count] of [['RT_DEV_', DEVICE_WORDS, 'RT_DEV_COUNT'], ['RT_ERR_', ERRNO_NAMES, 'RT_ERR_COUNT']] as const) {
+test("a device's words, the errno names and JSON's words are rt.h's, in order", () => {
+    const groups = [['RT_DEV_', DEVICE_WORDS, 'RT_DEV_COUNT'], ['RT_ERR_', ERRNO_NAMES, 'RT_ERR_COUNT'], ['RT_JSON_', JSON_WORDS, 'RT_JSON_COUNT']] as const;
+    for (const [prefix, names, count] of groups) {
         const found = [...RT_H.matchAll(new RegExp(`^#define ${prefix}\\w+\\s+(\\d+)\\s+// :(\\S+)`, 'gm'))];
         assert.equal(BigInt(found.length), define(count));
         assert.deepEqual(found.map((m) => Number(m[1])), names.map((_, i) => i));

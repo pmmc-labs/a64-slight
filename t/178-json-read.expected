@@ -1,0 +1,44 @@
+(object ("id" 1) ("tags" ("a" "b")))
+(object ("id" 2) ("tags" ()))
+(1 2 3)
+"four"
+5.0
+#true
+null
+(object ("nested" (object ("deep" ((((object ("x" "y")))))))))
+(ok (values 8))
+(object ("id" 1) ("tags" ("a" "b")))
+(object ("id" 2) ("tags" ()))
+1
+2
+3
+"four"
+5.0
+#true
+null
+(object ("nested" (object ("deep" ((((object ("x" "y")))))))))
+(ok (values 10))
+(line "# a header line")
+(json (object ("a" 1)))
+(json (2 3))
+(line "")
+(line "# a footer line")
+(ok done)
+(json (object ("len" 5)))
+(chunk "hello")
+(json (1))
+(ok done)
+(object ("a" 1))
+(error (bad-json "build/t/178-bad.json"))
+1
+2
+(error (bad-json "build/t/178-open.json"))
+1
+(error (bad-json "build/t/178-space.json"))
+1
+(error (bad-json "build/t/178-comma.json"))
+(error (bad-json "build/t/178-comma.json"))
+(ok (20000 199990000))
+(ok 20000)
+(error (too-big "build/t/178-huge.json"))
+()

@@ -343,7 +343,9 @@ line. In four pieces, each with golden tests:
 2. JSON: the push parser, `json/parse`, `json/print`, `:json` and
    `:json/items`. JSONTestSuite's files under `t/data/` with their
    licence, Python's `json` as the model, and inputs cut at every point
-   (not at random ones, so the tests stay the same every run).
+   (not at random ones, so the tests stay the same every run). Done (Oct
+   2026), as a validator and a builder (D162): `runtime/json.c`, golden
+   tests 175–179, and 168 checks its parser in slight against the C one.
 3. S-expressions: `sexp/parse`, `sexp/print` and `:sexp`.
 4. Doc blocks in both readers (golden tests that must compile as if they
    weren't there), and `:source`.

@@ -2,7 +2,8 @@
 ; A JSON parser and printer in slight, on the utf8/ builtins and
 ; string->float (D148): each JSON text in t/data/json.txt, parsed and
 ; printed back, as is and with everything past ASCII escaped. The expected
-; output is from Python's json module (t/models/json.py).
+; output is from Python's json module (t/models/json-round-trip.py). The
+; builtins json/parse and json/print, in C, must agree with it.
 ;
 ; JSON in slight: null is :null, true and false are #true and #false,
 ; numbers are integers or floats, strings are strings, an array is a list,
@@ -10,7 +11,7 @@
 
 ; --- parsing: each step takes the characters left, and gives (value rest)
 
-(defun json/parse (text)
+(defun parse-json (text)
     (let r (parse-value (skip-ws (utf8/chars text))))
     (cond
         ((nil? (skip-ws (cadr r))) (car r))
@@ -151,7 +152,7 @@
 ; --- printing: compact, as Python's json.dumps(v, separators=(",", ":"));
 ; with ascii, everything past ~ is a \u escape, as with ensure_ascii
 
-(defun json/print (v ascii)
+(defun print-json (v ascii)
     (cond
         ((eq? v :null)  "null")
         ((eq? v #true)  "true")
@@ -159,9 +160,9 @@
         ((num? v)       (concat v))
         ((str? v)       (quote-string v ascii))
         ((and (cons? v) (eq? (car v) :object))
-            (concat "{" (str-join "," (map (lambda (m) (concat (quote-string (car m) ascii) ":" (json/print (cadr m) ascii))) (cdr v))) "}"))
+            (concat "{" (str-join "," (map (lambda (m) (concat (quote-string (car m) ascii) ":" (print-json (cadr m) ascii))) (cdr v))) "}"))
         (#true
-            (concat "[" (str-join "," (map (lambda (x) (json/print x ascii)) v)) "]"))))
+            (concat "[" (str-join "," (map (lambda (x) (print-json x ascii)) v)) "]"))))
 
 (defun quote-string (s ascii)
     (concat "\"" (str-join "" (map (lambda (c) (escape c ascii)) (utf8/chars s))) "\""))
@@ -194,17 +195,24 @@
 ; --- the texts
 
 (defun show (text)
-    (let v (json/parse text))
-    (tty/write (json/print v #false) "\n" (json/print v #true) "\n"))
+    (let v (parse-json text))
+    (tty/write (print-json v #false) "\n" (print-json v #true) "\n"))
 
 (map show (cadr (slurp "t/data/json.txt")))
 
 ; what a parsed value looks like in slight
-(pprint (json/parse "{\"a\": [1, 2.5, \"\\u00e9\"], \"b\": {\"c\": null, \"d\": false}}"))
-(pprint (json/parse "\n{\n    \"spaced\" :\n        [ true ]\n}\n"))
+(pprint (parse-json "{\"a\": [1, 2.5, \"\\u00e9\"], \"b\": {\"c\": null, \"d\": false}}"))
+(pprint (parse-json "\n{\n    \"spaced\" :\n        [ true ]\n}\n"))
+
+; and the builtins agree on every text
+(defun agrees? (text)
+    (let v (parse-json text))
+    (and (eq? (json/parse text) (list :ok v)) (eq? (json/print v) (print-json v #false))))
+
+(pprint (list :builtins-agree (nil? (filter (lambda (text) (not (agrees? text))) (cadr (slurp "t/data/json.txt"))))))
 
 ; and what a bad text does
-(defun try (text) (join (fork (json/parse text))))
+(defun try (text) (join (fork (parse-json text))))
 (pprint (try "[1, 2,]"))
 (pprint (try "{\"a\" 1}"))
 (pprint (try "\"\\ud83d\""))

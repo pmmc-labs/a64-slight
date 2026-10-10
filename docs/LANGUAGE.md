@@ -460,6 +460,7 @@ The fault kinds:
 - `:not-a-pid`: a process operation given something else
 - `:join-self`: `(join $$)`, which would wait forever
 - `:not-a-device`: `connect` handed something that isn't an open device
+- `:not-json`: `json/print` given something JSON can't hold
 
 ### Waiting for a process
 
@@ -571,6 +572,13 @@ one of:
 - `:lines`, the way it starts: `(:line f s)`.
 - `:chunks`: `(:chunk f s)`, what one read gives (or what's been read
   and not yet sent), never more than 64 KB, and never empty.
+- `:json`: `(:json f v)` for each top-level JSON value, `v` as
+  `json/parse` makes it (under Builtins, JSON). Space between values
+  doesn't matter, so NDJSON (a value a line) and values one after
+  another both work.
+- `:json/items`: as `:json`, but a top-level array comes an element at
+  a time, a `(:json f v)` for each, so an array too big to hold can be
+  read through.
 - A count, an integer `n` from 0: one `(:chunk f s)` of the next `n`
   bytes, and then back to the way before. If the input ends first, `s`
   is shorter, and `(:eof f)` comes next. A count is for the next message
@@ -578,7 +586,9 @@ one of:
   whichever was sent first.
 
 Nothing comes after `(:eof f)`. Anything else sent to a device, `:read`
-to a writer or a `how` it doesn't know included, is a dead letter.
+to a writer or a `how` it doesn't know included, is a dead letter. Bad
+JSON ends the owner with `(:error (:bad-json path))`, after the values
+before it.
 
     (defun size (n)
         (recv
@@ -597,8 +607,8 @@ If the file can't be opened, the owner ends before it runs, with
 `(:error (name path))`, `name` being errno's: `:enoent`, `:eacces`,
 `:eisdir`, `:enotdir`, `:enospc`, and so on, or `:io-error`. A read or a
 write that fails ends it the same way, when it happens; and so does a
-line or a count of 64 MB or more, too big for a process's heap, with
-`(:error (:too-big path))`.
+line, a count or a JSON value of 64 MB or more, too big for a process's
+heap, with `(:error (:too-big path))`.
 
     (defun reader (lines)
         (recv
@@ -808,6 +818,32 @@ The byte builtins that don't count are right for UTF-8 as they are:
 type: a character is an integer or a one-character string. Build a long
 string by collecting the pieces in a list and joining them.
 
+### JSON
+
+JSON in slight: `null` is `:null`, `true` and `false` are `#true` and
+`#false`, a number is an integer if it's written as one and fits in 63
+bits and a float otherwise, a string is a string, an array is a list,
+and an object is `(:object (key value) ...)`, its keys strings, in
+order, duplicates kept. `{"a": [1, 2.5], "b": null}` is
+
+    (:object ("a" (1 2.5)) ("b" :null))
+
+- `(json/parse s)`: `(:ok value)` for the JSON text `s`, or
+  `(:error (:bad-json at))`, `at` being where it went wrong: the first
+  byte no JSON text could have there, or the end of one that stops too
+  soon, so `(json/parse "[1,]")` is `(:error (:bad-json 3))`. A `\u`
+  escape of a lone surrogate gives U+FFFD, and bytes that aren't UTF-8
+  pass through.
+- `(json/print v)`: `v` as compact JSON, on one line, so what it gives
+  is NDJSON as it is: `(json/print (list 1 "a" :null))` is
+  `"[1,\"a\",null]"`. A float keeps its point or exponent, and a string
+  escapes `"`, `\` and the control characters. Anything JSON can't
+  hold faults (`:not-json`): any other symbol, a pid, a function, `nan`
+  or `inf`, or an object's member that isn't `(key value)` with a string
+  key.
+
+A file or socket can be read as JSON too: `(:read :json)`, under Files.
+
 ### Output
 
 - `(pprint x)`: writes `x` as the program shows values (strings in
@@ -984,11 +1020,9 @@ timer keeps the program running.
 
 ## Planned
 
-Step 12 of PLAN.md (D154–D161): JSON and s-expressions parsed in C, with
-`json/parse`, `json/print`, `sexp/parse` and `sexp/print` for text in
-hand, and more ways to read a file or socket, `(:read :json)`,
-`(:read :json/items)` and `(:read :sexp)`, for whole JSON values or
-forms; inline documentation, a line
+Step 12 of PLAN.md (D155, D156): s-expressions parsed in C, with
+`sexp/parse` and `sexp/print` for text in hand, and `(:read :sexp)` for
+reading forms from a file or socket; inline documentation, a line
 `=doc` between top-level forms starting a block of Markdown that runs to
 a line `=cut`, which the compiler skips; and a `:source` way to read a
 file that gives its forms and its doc blocks, in order. DESIGN.md has

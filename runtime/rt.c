@@ -310,6 +310,7 @@ static const struct {
     [RT_FAULT_NOT_PID]    = { "not a pid: ", 1 },
     [RT_FAULT_JOIN_SELF]  = { "a process can't join itself: ", 1 },
     [RT_FAULT_NOT_DEVICE] = { "not a device: ", 1 },
+    [RT_FAULT_NOT_JSON]   = { "not JSON: ", 1 },
 };
 
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {

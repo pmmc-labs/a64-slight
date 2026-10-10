@@ -1,0 +1,110 @@
+; Reading JSON from a file (D154, D159, D160). With (:read :json) a reader
+; sends (:json f v) for each top-level value, whatever space there is
+; between them, so NDJSON and values one after another both work; with
+; (:read :json/items), a top-level array comes an element at a time, and
+; any other value whole. Bad JSON ends the owner with (:error (:bad-json
+; path)), after the values before it; a value of 64 MB or more, too big
+; for a heap, with (:error (:too-big path)).
+
+; The values a reader of path gets, as how says, each printed as it
+; comes; then how many there were.
+(defun read-all (path how) (join (connect :fs/read path (reading how 0))))
+
+(defun reading (how n)
+    (recv
+        ((:open f)   (send f (list :read how)) (reading how n))
+        ((:json f v) (pprint v) (reading how (+ n 1)))
+        ((:eof f)    (list :values n))))
+
+(pprint (read-all "t/data/json-stream.txt" :json))
+(pprint (read-all "t/data/json-stream.txt" :json/items))
+
+; lines, then JSON, then lines again: what's left of a line after a value
+; comes as a line
+(defun mixed (n)
+    (recv
+        ((:line f s)
+            (pprint (list :line s))
+            (cond
+                ((== n 0) (send f (list :read :json)) (mixed n))
+                (#true    (mixed n))))
+        ((:json f v)
+            (pprint (list :json v))
+            (cond
+                ((== n 1) (send f (list :read :lines)) (mixed 2))
+                (#true    (mixed (+ n 1)))))
+        ((:eof f) :done)
+        ((:open f) (mixed n))))
+
+(pprint (join (connect :fs/read "t/data/json-mixed.txt" (mixed 0))))
+
+; a count in a stream of JSON, as a netstring has: then back to JSON
+(defun counted ()
+    (recv
+        ((:open f)    (send f (list :read :json)) (counted))
+        ((:json f v)
+            (pprint (list :json v))
+            (cond
+                ((eq? (car v) :object) (send f (list :read (cadr (cadr v)))) (counted))
+                (#true                 (counted))))
+        ((:chunk f s) (pprint (list :chunk s)) (counted))
+        ((:eof f)     :done)))
+
+(pprint (join (connect :fs/read "t/data/json-count.txt" (counted))))
+
+; files the test writes
+(defun writer (texts)
+    (recv
+        ((:open f) (map (lambda (t) (send f (list :write t))) texts) (disconnect f))))
+
+(defun write-file (path texts) (join (connect :fs/write path (writer texts))))
+
+; bad JSON, after a good value; an array that ends too soon; elements
+; without a comma between them; an element that isn't one
+(write-file "build/t/178-bad.json" (list "{\"a\": 1}\n{\"b\": }\n"))
+(pprint (read-all "build/t/178-bad.json" :json))
+(write-file "build/t/178-open.json" (list "[1, 2"))
+(pprint (read-all "build/t/178-open.json" :json/items))
+(write-file "build/t/178-space.json" (list "[1 2]"))
+(pprint (read-all "build/t/178-space.json" :json/items))
+(write-file "build/t/178-comma.json" (list "[1,]"))
+(pprint (read-all "build/t/178-comma.json" :json/items))
+(pprint (read-all "build/t/178-comma.json" :json))
+
+; 20,000 objects in one array: an element at a time, the reader's heap
+; stays small; as one value, it's a list of 20,000
+(defun objects (i n acc)
+    (cond
+        ((== i n) acc)
+        (#true    (objects (+ i 1) n (cons (concat ",{\"n\": " i "}") acc)))))
+
+(write-file "build/t/178-big.json" (list "[{\"n\": 0}" (str-join "" (reverse (objects 1 20000 ()))) "]"))
+
+(defun summing (total count)
+    (recv
+        ((:open f)   (send f (list :read :json/items)) (summing total count))
+        ((:json f v) (summing (+ total (cadr (cadr v))) (+ count 1)))
+        ((:eof f)    (list count total))))
+
+(pprint (join (connect :fs/read "build/t/178-big.json" (summing 0 0))))
+
+(defun whole ()
+    (recv
+        ((:open f)   (send f (list :read :json)) (whole))
+        ((:json f v) (whole-then (length v)))))
+
+(defun whole-then (n)
+    (recv
+        ((:eof f) n)))
+
+(pprint (join (connect :fs/read "build/t/178-big.json" (whole))))
+
+; 4,194,305 zeros in an array take 64 MB of cells, more than a heap holds
+(defun double-up (s n)
+    (cond
+        ((== n 0) s)
+        (#true    (double-up (~ s s) (- n 1)))))
+
+(let zeros (double-up "0," 21))
+(write-file "build/t/178-huge.json" (list "[" zeros zeros "0]"))
+(pprint (join (connect :fs/read "build/t/178-huge.json" (whole))))

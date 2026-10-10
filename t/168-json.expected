@@ -24,6 +24,7 @@ null
 null
 (object ("a" (1 2.5 "é")) ("b" (object ("c" null) ("d" #false))))
 (object ("spaced" (#true)))
+(builtins-agree #true)
 (error (json "not a value"))
 (error (json "expected :"))
 (ok "�")

@@ -1,0 +1,64 @@
+(@include :fs)
+; json/parse (D154, D160): (:ok value), or (:error (:bad-json at)), at
+; being where the text went wrong: the first byte no valid text could have
+; there, or the end of a text that stops too soon. That's the length of
+; its longest valid prefix. null is :null, an array a list, an object
+; (:object (key value) ...); a number is an integer if it's written as one
+; and fits in 63 bits, and a float otherwise.
+
+(defun show (text) (pprint (json/parse text)))
+
+(show "{\"a\": [1, 2.5, \"é\"], \"b\": {\"c\": null, \"d\": false}, \"e\": true}")
+(show "{\"a\": 1, \"a\": 2}")
+(show "[[], {}, [{}]]")
+(show " \t\n\r [ 1 ] \n")
+(show "\"top\"")
+
+; numbers: 2^62 - 1 is the biggest integer, and -2^62 the smallest; past
+; them, floats, as is anything with a point or an exponent
+(show "[0, -0, 4611686018427387903, 4611686018427387904, -4611686018427387904, -4611686018427387905]")
+(show "[1.0, -0.0, 1e2, 1E-2, 2.5e+3, 0.1, 123456789012345678901234567890]")
+(show "[1e400, -1e400, 1e-400]")
+(show "-2.5E+3")
+
+; strings, as their code points: escapes, a surrogate pair, and lone
+; surrogates, which have no UTF-8, as U+FFFD
+(defun codes (text) (map ord (utf8/chars (cadr (json/parse text)))))
+
+(pprint (codes "\"\\\"\\\\\\/\\b\\f\\n\\r\\t\""))
+(pprint (codes "\"\\u0041\\u00e9\\u20ac\\ud83d\\ude00\\u0000\""))
+(pprint (codes "\"\\ud83d|\\ude00|\\ud83d\\u0041|\\udbff\\udfff|\\ud800\\ud800\\udc00\""))
+
+; bytes that aren't UTF-8 pass through
+(let raw (cadr (json/parse (~ "\"" (~ (bytes->string (list 255 128 65)) "\"")))))
+(pprint (map (lambda (i) (byte-at raw i)) (range 0 (str-len raw))))
+
+; nested as deep as the heap allows
+(defun depth (v n)
+    (cond
+        ((nil? v) n)
+        (#true    (depth (car v) (+ n 1)))))
+
+(defun double-up (s n)
+    (cond
+        ((== n 0) s)
+        (#true    (double-up (~ s s) (- n 1)))))
+
+(let opening (double-up "[" 17))                ; 131,072 of them
+(let deep (~ opening (double-up "]" 17)))
+(let parsed (cadr (json/parse deep)))
+(pprint (list (depth parsed 0) (eq? (json/print parsed) deep)))
+(show opening)
+
+; bad texts, from t/data/json-bad.txt, one a line
+(map show (cadr (slurp "t/data/json-bad.txt")))
+
+; and a few with bytes a line can't hold: a newline and a tab in a string,
+; a byte past ASCII outside one, UTF-8's byte order mark, a NUL after a value
+(show "\"a\nb\"")
+(show "\"a\tb\"")
+(show (bytes->string (list 91 255 93)))
+(show (bytes->string (list 239 187 191 123 125)))
+(show (~ "1" (bytes->string (list 0))))
+
+(pprint (join (fork (json/parse 5))))

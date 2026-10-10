@@ -413,26 +413,29 @@ The byte builtins that don't count are right for UTF-8 as they are:
 bytes as they are. `utf8/chars` takes 32 bytes a character, and the root
 never collects, so a text split there tops out at about 2 MB.
 
-### JSON, s-expressions and source (planned, step 12a)
+### JSON, s-expressions and source (step 12a; JSON done)
 
 Parsed in C, as builtins for text already in hand and as ways a device
 can cut its bytes into messages (D154–D156):
 
-- **Builtins:** `(json/parse s)` and `(sexp/parse s)` give `(:ok v)`, or
-  `(:error (:bad-json at))` (`:bad-sexp`), `at` being a byte offset
-  (D160); `(json/print v)` gives compact JSON on one line, so NDJSON as
-  it is (D161); and `(sexp/print v)`.
-- **Devices:** more ways to read (D159): `(:read :json)` gives `(:json f
-  v)` for each top-level value, `(:read :json/items)` one for each
-  element of a top-level array, and `(:read :sexp)` `(:sexp f v)` for
-  each form. The next value is parsed only when the owner waits again, as
-  with lines (D158), so a big input goes through a bounded heap. Bad text
-  ends the owner with `(:error (:bad-json where))` (`:bad-sexp`), and a
-  value of 64 MB or more with `:too-big` (D160).
-- **JSON in slight:** `:null`, `#true`, `#false`, integers (floats past 63
-  bits), floats, strings, lists for arrays, and `(:object (key value)
-  ...)` for objects, keys as strings, in order, duplicates kept.
-  `json/print` faults on what JSON can't hold.
+- **JSON** (`runtime/json.c`, D162). `(json/parse s)` gives `(:ok v)`,
+  or `(:error (:bad-json at))`, `at` being the length of the text's
+  longest valid prefix (D160); `(json/print v)` gives compact JSON on
+  one line, so NDJSON as it is (D161), and faults (`:not-json`) on what
+  JSON can't hold. In slight: `:null`, `#true`, `#false`, integers
+  (floats past 63 bits), floats, strings (bytes, passed through; a lone
+  surrogate's escape is U+FFFD), lists for arrays, and `(:object (key
+  value) ...)` for objects, keys as strings, in order, duplicates kept.
+  A device reads JSON with `(:read :json)`, `(:json f v)` for each
+  top-level value, or `(:read :json/items)`, one for each element of a
+  top-level array (D159). A validator takes the bytes as they come, and
+  a builder makes a value once its text is whole; the next is cut only
+  when the owner waits again (D158), so a big input goes through a
+  bounded heap. Bad text ends the owner with `(:error (:bad-json
+  where))`, and a value of 64 MB or more with `:too-big` (D160).
+- **S-expressions** (planned): `(sexp/parse s)`, the same Results with
+  `:bad-sexp`; `(sexp/print v)`; and `(:read :sexp)`, `(:sexp f v)` for
+  each form.
 - **S-expressions as data:** lists, numbers, strings, symbols, `#true`,
   `#false`, `'x`, comments. A symbol the program mentions reads as itself,
   any other as `(:symbol "name")` (D14 holds: no symbols are made at run
@@ -624,8 +627,9 @@ Lalloc_N:
   `(:read how)`, from anyone, changes how it cuts (D159): `:lines`;
   `:chunks`, `(:chunk f s)` of what one read gives, up to 64 KB; or a
   count `n`, one `(:chunk f s)` of the next `n` bytes (fewer at the end),
-  and then the way before. Then `(:eof f)`, and it closes; nothing comes
-  after it. A line or a count of 64 MB or more ends the owner with
+  and then the way before; or `:json` and `:json/items` (under JSON,
+  above). Then `(:eof f)`, and it closes; nothing comes after it. A
+  line, count or JSON value of 64 MB or more ends the owner with
   `(:error (:too-big path))` (D160). `:fs/write`
   (creating the file, or emptying it) and `:fs/append` (creating it)
   take `(:write x ...)` from anyone, render the `x`s as `tty/write` does,

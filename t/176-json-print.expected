@@ -1,0 +1,26 @@
+{"a":[1,2.5,"é"],"b":{"c":null,"d":false},"e":true}
+[[],{},[{}],[[]]]
+[0,-7,4611686018427387903,-4611686018427387904]
+[1.0,-0.0,0.1,100.0,1e+21,1.5e-7,123456.789,0.3333333333333333]
+"plain"
+"\"\\/\b\f\n\r\t\u0000\u0001\u001fé😀"
+(#true #true #true)
+fault in #<pid 2>: not JSON: other (json/print at t/176-json-print.slight:22:28)
+(error (not-json other "json/print at t/176-json-print.slight:22:28"))
+fault in #<pid 3>: not JSON: #<pid 1> (json/print at t/176-json-print.slight:22:28)
+(error (not-json #<pid 1> "json/print at t/176-json-print.slight:22:28"))
+fault in #<pid 4>: not JSON: #<function car> (json/print at t/176-json-print.slight:22:28)
+(error (not-json #<function car> "json/print at t/176-json-print.slight:22:28"))
+fault in #<pid 5>: not JSON: nan (json/print at t/176-json-print.slight:22:28)
+(error (not-json nan "json/print at t/176-json-print.slight:22:28"))
+fault in #<pid 6>: not JSON: inf (json/print at t/176-json-print.slight:22:28)
+(error (not-json inf "json/print at t/176-json-print.slight:22:28"))
+fault in #<pid 7>: not JSON: (1 2) (json/print at t/176-json-print.slight:22:28)
+(error (not-json (1 2) "json/print at t/176-json-print.slight:22:28"))
+fault in #<pid 8>: not JSON: ("k") (json/print at t/176-json-print.slight:22:28)
+(error (not-json ("k") "json/print at t/176-json-print.slight:22:28"))
+fault in #<pid 9>: not JSON: ("k" 1 2) (json/print at t/176-json-print.slight:22:28)
+(error (not-json ("k" 1 2) "json/print at t/176-json-print.slight:22:28"))
+fault in #<pid 10>: not JSON: "k" (json/print at t/176-json-print.slight:22:28)
+(error (not-json "k" "json/print at t/176-json-print.slight:22:28"))
+()

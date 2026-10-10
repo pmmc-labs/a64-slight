@@ -1308,7 +1308,7 @@ bytes arrive: the whole document still lands in one buffer and comes out
 at the end; it stays the fallback for `json/parse` if ours is slow);
 YAJL (a streaming parser, but unmaintained for some ten years); raw
 parse events as messages (many more messages, and slight would rebuild
-the values anyway).
+the values anyway). (How it was built: D162.)
 
 **D155. S-expressions as data: symbols as D14 has them, and a printer
 that reads back.** *(User.)* The data reader takes lists, integers and
@@ -1460,3 +1460,38 @@ serves chunks and counts.
 **D161. `json/print` writes compact JSON, on one line.** *(User.)*
 `{"a":1,"b":[1,2]}`, so what it prints is NDJSON as it is. Indenting can
 come when something wants it.
+
+**D162. How JSON is read and printed.** *(Default; the rest of D154 and
+D160 as agreed.)*
+- **A validator, then a builder.** D154 had one push parser building
+  values as the bytes came. What's built is simpler: a validator that
+  takes text a piece at a time and keeps only its state (where it is, and
+  the containers open), and a builder that makes the value of text the
+  validator has passed, so it checks nothing. `json/parse` runs one, then
+  the other; a device runs the validator on each read, and the builder
+  once a value is whole, into chunks of its own that are copied into the
+  message. It costs a second pass over each value and a copy, and saves
+  keeping half-built strings, numbers and lists between reads. Both walk
+  without recursing in C (D147), so nesting is limited only by memory.
+- **Where bad text went wrong** is the length of its longest valid
+  prefix: the first byte no valid text could have there, or the end of
+  one that stops too soon (`"[1,]"` at 3, `"tru"` at 3, `"01"` at 1). It
+  depends only on the text, not on how a parser is written.
+- **JSONTestSuite's implementation-defined (`i_`) cases.** Numbers too
+  big for a double are `inf` or `-inf`, too small `0.0`, as in JavaScript
+  and Python; integers past 63 bits are floats. A `\u` escape of a lone
+  surrogate is U+FFFD (D148). Bytes in a string that aren't UTF-8 pass
+  through, since strings are bytes, and `json/print` passes them back.
+  UTF-8's byte order mark and UTF-16 are turned down: neither is JSON's
+  whitespace. `-0` is the integer 0.
+- **`json/print`** escapes `"`, `\` and the control characters (`\b`,
+  `\f`, `\n`, `\r`, `\t`, and `\u00xx` for the rest), and nothing else;
+  numbers come out as slight prints them, so a float keeps its point or
+  exponent and reads back as a float. What JSON can't hold faults with
+  `:not-json`, a new fault kind, showing the piece that couldn't go.
+- **On a device**, values need no space between them where they can't
+  run together, so `1 2` is two values and so is `[1][2]`. With
+  `:json/items`, the `[`, `,` and `]` around the elements are read
+  between them; changing the way of reading inside the array forgets it.
+  A value that would take 64 MB or more as slight values, however short
+  its text, is `:too-big`.

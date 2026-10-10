@@ -884,10 +884,11 @@ const RT_TAG_LIST = 1;
 // symbols too, so sym? says yes to them.
 const PREDICATES: readonly string[] = ['int?', 'nil?', 'cons?', 'pid?', 'sym?', 'bool?'];
 
-// Builtins written in C (runtime/strings.c): the C function, and how many
-// arguments it takes. Missing optional arguments are passed as (). The
-// call's site goes in the register after the arguments, for the faults
-// the C code raises. A variadic builtin gets its arguments as one list.
+// Builtins written in C (runtime/strings.c, json.c, ...): the C function,
+// and how many arguments it takes. Missing optional arguments are passed
+// as (). The call's site goes in the register after the arguments, for
+// the faults the C code raises. A variadic builtin gets its arguments as
+// one list.
 type CBuiltin = { readonly fn: string; readonly min: number; readonly max: number; readonly variadic: boolean };
 
 const fixed    = (fn: string, min: number, max = min): CBuiltin => ({ fn, min, max, variadic: false });
@@ -917,6 +918,8 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'utf8/code':      fixed('rt_utf8_code', 1),
     'utf8/char':      fixed('rt_utf8_char', 1),
     'utf8/valid?':    fixed('rt_utf8_valid', 1),
+    'json/parse':     fixed('rt_json_parse', 1),
+    'json/print':     fixed('rt_json_print', 1),
     '/':              fixed('rt_divide', 2),
     'float?':         fixed('rt_is_flt', 1),
     'num?':           fixed('rt_is_num', 1),

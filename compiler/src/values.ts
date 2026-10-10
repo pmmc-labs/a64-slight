@@ -13,7 +13,7 @@ export const RESERVED_SYMBOLS: readonly string[] = ['#false', '#true'];
 export const FAULT_KINDS: readonly string[] = [
     'not-an-int', 'overflow', 'not-a-bool', 'no-clause', 'stack', 'not-a-cons', 'not-a-list', 'heap',
     'not-a-string', 'not-a-symbol', 'out-of-range', 'not-a-number', 'div-by-zero', 'not-a-function',
-    'arity', 'not-a-pid', 'join-self', 'not-a-device',
+    'arity', 'not-a-pid', 'join-self', 'not-a-device', 'not-json',
 ];
 
 // The names of keys from :keypress, then the modifiers, in RT_KEY_ order.
@@ -24,17 +24,22 @@ export const KEY_NAMES: readonly string[] = [
 ];
 
 // What a device and its owner say to each other, in RT_DEV_ order.
-export const DEVICE_WORDS: readonly string[] = ['open', 'line', 'eof', 'write', 'accept', 'read', 'lines', 'chunks', 'chunk'];
+export const DEVICE_WORDS: readonly string[] = [
+    'open', 'line', 'eof', 'write', 'accept', 'read', 'lines', 'chunks', 'chunk', 'json', 'json/items',
+];
 
 // Why a device failed, from errno, in RT_ERR_ order.
 export const ERRNO_NAMES: readonly string[] = [
     'enoent', 'eacces', 'eperm', 'eexist', 'eisdir', 'enotdir', 'enametoolong', 'eloop', 'erofs', 'enospc',
     'efbig', 'emfile', 'enfile', 'eio', 'econnrefused', 'econnreset', 'epipe', 'etimedout', 'eaddrinuse',
-    'eaddrnotavail', 'ehostunreach', 'enetunreach', 'enotfound', 'too-big', 'io-error',
+    'eaddrnotavail', 'ehostunreach', 'enetunreach', 'enotfound', 'too-big', 'bad-json', 'io-error',
 ];
 
+// What JSON's values need beyond #true and #false, in RT_JSON_ order.
+export const JSON_WORDS: readonly string[] = ['null', 'object'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
-// devices), which follow the reserved ones: RT_SYM_OK and on in rt.h.
+// devices, JSON), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
-    'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES,
+    'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS,
 ];

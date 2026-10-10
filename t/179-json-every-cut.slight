@@ -1,0 +1,64 @@
+; JSON read through a socket a byte at a time (D154): the server writes
+; the text one byte to a timer's tick, so the reader takes each byte in a
+; read of its own, and every place the text can be cut, in a string, an
+; escape, a number, a word, between values or elements, is one where it
+; was. The reader must get what json/parse gets from the whole text, with
+; :json and with :json/items. The last value, a number, ends only with
+; the input.
+
+(let text (concat
+    "{\"s\": \"a\\\"b\\\\c\\/\\u00e9\\ud83d\\ude00\", "
+    "\"n\": [0, -1, 2.5, -3.25e+2, 4E-1, 12345678901234567890], "
+    "\"w\": [true, false, null], \"e\": {}, \"a\": [[], [{}]]}\n"
+    "7 \"x\"[1, {\"k\" : [2]} ,3]\t-0.5"))
+
+(defun dripper (text)
+    (recv
+        ((:open c) (drip c text 0))))
+
+(defun drip (c text i)
+    (cond
+        ((== i (str-len text)) (disconnect c))
+        (#true
+            (send c (list :write (substring text i (+ i 1))))
+            (after 1 $$ :next)
+            (drip-wait c text (+ i 1)))))
+
+(defun drip-wait (c text i)
+    (recv
+        (:next (drip c text i))))
+
+(defun reader (how seen)
+    (recv
+        ((:open c)   (send c (list :read how)) (reader how seen))
+        ((:json c v) (reader how (cons v seen)))
+        ((:eof c)    (disconnect c) (reverse seen))))
+
+(defun listener (text how)
+    (recv
+        ((:open l port)
+            (let me $$)
+            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (reader how ()))))))
+            (serving l text))))
+
+(defun serving (l text)
+    (recv
+        ((:accept _ conn) (connect conn (dripper text)) (serving l text))
+        ((:client r)      (disconnect l) (cadr r))))
+
+(defun read-dripped (text how) (cadr (join (connect :tcp/listen 0 (listener text how)))))
+
+; the whole text as one array of its values, for json/parse
+(let whole (cadr (json/parse (concat "["
+    "{\"s\": \"a\\\"b\\\\c\\/\\u00e9\\ud83d\\ude00\", "
+    "\"n\": [0, -1, 2.5, -3.25e+2, 4E-1, 12345678901234567890], "
+    "\"w\": [true, false, null], \"e\": {}, \"a\": [[], [{}]]},"
+    "7, \"x\", [1, {\"k\" : [2]} ,3], -0.5]"))))
+
+(let values (read-dripped text :json))
+(pprint values)
+(pprint (eq? values whole))
+
+(let items (read-dripped text :json/items))
+(pprint items)
+(pprint (eq? items (append (take 3 whole) (append (nth 3 whole) (list (nth 4 whole))))))

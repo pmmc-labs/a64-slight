@@ -52,7 +52,7 @@ const ARCHES: Readonly<Record<string, Arch>> = {
 };
 
 const runtimeSources = (arch: Arch): readonly string[] =>
-    ['rt.c', 'process.c', 'strings.c', 'numbers.c', 'tty.c', arch.asm].map((f) => join(RUNTIME_DIR, f));
+    ['rt.c', 'process.c', 'strings.c', 'numbers.c', 'tty.c', 'json.c', arch.asm].map((f) => join(RUNTIME_DIR, f));
 
 function usage(message: string): never {
     process.stderr.write(`slightc: ${message}\nusage: node bin/slightc.ts [-o out] [-S] [--target aarch64|x86_64] file.slight ...\n`

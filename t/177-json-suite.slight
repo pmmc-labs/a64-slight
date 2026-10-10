@@ -1,0 +1,44 @@
+(@include :fs)
+; JSONTestSuite's parsing tests (t/data/json-suite): json/parse must take
+; each y_ file and turn down each n_ one; an i_ one is the parser's choice,
+; and D162 says what slight's is. A y_ file's value is printed back with
+; json/print, and read through a device with (:read :json) it must come
+; the same, alone. The expected output is from a model in Python
+; (t/models/json-suite.py).
+
+; The whole of the file at path, as one string: a count bigger than any
+; of them gives it all in one chunk, even when it's empty.
+(defun bytes-of (path) (cadr (join (connect :fs/read path (whole)))))
+
+(defun whole ()
+    (recv
+        ((:open f)    (send f (list :read 1000000)) (whole))
+        ((:chunk f s) (whole-then s))))
+
+(defun whole-then (s)
+    (recv
+        ((:eof f) s)))
+
+; The values a device gives for the file at path, read as JSON.
+(defun values-of (path) (cadr (join (connect :fs/read path (values ())))))
+
+(defun values (seen)
+    (recv
+        ((:open f)   (send f (list :read :json)) (values seen))
+        ((:json f v) (values (cons v seen)))
+        ((:eof f)    (reverse seen))))
+
+; Whether a y_ file's value comes the same from a device.
+(defun check (name)
+    (let path (~ "t/data/json-suite/" name))
+    (let r (json/parse (bytes-of path)))
+    (cond
+        ((and (starts-with? name "y_") (eq? (car r) :ok))
+            (tty/write name " ok " (json/print (cadr r)) "\n")
+            (eq? (values-of path) (cdr r)))
+        (#true
+            (tty/write name " " (car r) "\n")
+            #true)))
+
+(let results (map check (cadr (slurp "t/data/json-suite/files.txt"))))
+(pprint (list :devices-agree (nil? (filter not results))))

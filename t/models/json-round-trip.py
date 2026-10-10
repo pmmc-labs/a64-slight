@@ -68,6 +68,7 @@ with open('t/data/json.txt', encoding='utf-8') as f:
 backslash = chr(92)
 out.append(slight(json.loads('{"a": [1, 2.5, "' + backslash + 'u00e9"], "b": {"c": null, "d": false}}')))
 out.append(slight(json.loads('\n{\n    "spaced" :\n        [ true ]\n}\n')))
+out.append('(builtins-agree #true)')                 # json/parse and json/print, the same
 
 # The bad texts, by hand: what the parser in the test does with them.
 out.append('(error (json "not a value"))')          # [1, 2,]: a ] where a value goes

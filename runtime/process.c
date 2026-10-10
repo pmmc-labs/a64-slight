@@ -977,7 +977,11 @@ static int idle(void) {
 // what's been read, up to 64 KB; or a count, one (:chunk f s) of that many
 // bytes, fewer if the input ends first, for the next message alone. Then
 // (:eof f), and nothing more. A line or count of 64 MB or more, too big
-// for a heap, ends the owner with (:error (:too-big where)).
+// for a heap, ends the owner with (:error (:too-big where)). With :json, it
+// sends (:json f v) for each top-level value; with :json/items, for each
+// element of a top-level array, and any other value whole. Bad JSON ends
+// the owner with (:error (:bad-json where)); a value of 64 MB or more,
+// :too-big.
 //
 // A file (connect :fs/read path expr, :fs/write, :fs/append) closes after
 // (:eof f). A writer takes (:write x ...) from anyone, renders the xs as
@@ -1003,7 +1007,8 @@ static int idle(void) {
 #define DEV_TCP      3                  // a device's mode, after RT_FS_READ, _WRITE and _APPEND
 #define DEV_LISTEN   4
 #define ERR_NOTFOUND (-1)               // no such host: getaddrinfo's errors aren't errno's
-#define ERR_TOOBIG   (-2)               // a line or count of HEAP_MAX or more
+#define ERR_TOOBIG   (-2)               // a line, count or value of HEAP_MAX or more
+#define ERR_BADJSON  (-3)
 #define READ_CHUNK   (64 << 10)         // the most a chunk holds
 
 typedef struct rt_device {
@@ -1016,8 +1021,11 @@ typedef struct rt_device {
     int64_t           port;             // a listener's
     char             *buf;              // what's been read, but not yet sent...
     size_t            at, len, cap;     // ...from at to len
-    uint64_t          how;              // how it cuts: RT_DEV_LINES or RT_DEV_CHUNKS
+    uint64_t          how;              // how it cuts: RT_DEV_LINES, _CHUNKS, _JSON or _JSON_ITEMS
     int64_t           count;            // bytes for its next message alone, or -1
+    rt_json_t         json;             // the JSON value being read...
+    size_t            scanned;          // ...as far as from at
+    int               items;            // with :json/items, where in a top-level array it is
     int               eof;              // read has returned 0
     int               sent;             // its owner has its last message, and hasn't waited since
     struct rt_device *next_socket;      // in sockets, or graveyard
@@ -1059,6 +1067,7 @@ static uint64_t errno_name(int err) {
         case ENETUNREACH:   return RT_ERR_ENETUNREACH;
         case ERR_NOTFOUND:  return RT_ERR_ENOTFOUND;
         case ERR_TOOBIG:    return RT_ERR_TOOBIG;
+        case ERR_BADJSON:   return RT_ERR_BADJSON;
         default:            return RT_ERR_OTHER;
     }
 }
@@ -1108,6 +1117,7 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
 static void close_now(rt_device_t *d) {
     close(d->fd);
     if (d->mode < DEV_TCP) {
+        rt_json_free(&d->json);
         free(d->buf);
         free(d->path);
         free(d);
@@ -1126,6 +1136,7 @@ static void bury(void) {
     while (graveyard) {
         rt_device_t *d = graveyard;
         graveyard = d->next_socket;
+        rt_json_free(&d->json);
         free(d->buf);
         free(d->out);
         free(d->path);
@@ -1236,6 +1247,106 @@ static ssize_t fill(rt_device_t *d) {
     return got;
 }
 
+// What a JSON value is built in, to be copied into a message: chunks that
+// give out once they'd hold as much as a heap can.
+typedef struct {
+    rt_chunk_t *chunks;
+    size_t      used, left, total;
+} arena_t;
+
+static void *arena_alloc(void *cx, size_t bytes) {
+    arena_t *a = cx;
+    bytes = (bytes + 15) & ~(size_t)15;
+    if (a->total + bytes >= HEAP_MAX) return NULL;
+    if (a->left < bytes) {
+        size_t      size = bytes > CHUNK_MAX ? bytes : CHUNK_MAX;
+        rt_chunk_t *c    = new_chunk(size);
+        c->next   = a->chunks;
+        a->chunks = c;
+        a->used   = 0;
+        a->left   = size;
+    }
+    void *p = (char *)(a->chunks + 1) + a->used;
+    a->used  += bytes;
+    a->left  -= bytes;
+    a->total += bytes;
+    return p;
+}
+
+// Where :json/items is: not in an array; just after its [, or after an
+// element; or at an element.
+enum { ITEMS_NONE, ITEMS_FIRST, ITEMS_NEXT, ITEMS_ELEMENT };
+
+static void json_restart(rt_device_t *d) {
+    rt_json_reset(&d->json);
+    d->scanned = 0;
+}
+
+// The next JSON value in what's been read, as cut does; or 2 if there's
+// nothing but space before the end.
+static int cut_json(rt_device_t *d) {
+    for (;;) {
+        // between the elements of a top-level array, the [ , and ] are
+        // read here, and the elements by the scan
+        if (d->how == RT_DEV_JSON_ITEMS && d->items != ITEMS_ELEMENT && d->scanned == 0) {
+            while (d->at < d->len && (d->buf[d->at] == ' ' || d->buf[d->at] == '\t' || d->buf[d->at] == '\n' || d->buf[d->at] == '\r')) d->at++;
+            if (d->at == d->len) {
+                if (!d->eof)                return 0;
+                if (d->items == ITEMS_NONE) return 2;
+                fail(d, ERR_BADJSON);       // an array not closed
+                return 1;
+            }
+            char c = d->buf[d->at];
+            if (d->items == ITEMS_NONE) {
+                if (c == '[') {
+                    d->at++;
+                    d->items = ITEMS_FIRST;
+                    continue;
+                }
+            } else if (c == ']') {
+                d->at++;
+                d->items = ITEMS_NONE;
+                continue;
+            } else if (d->items == ITEMS_NEXT) {
+                if (c != ',') {
+                    fail(d, ERR_BADJSON);
+                    return 1;
+                }
+                d->at++;
+                d->items = ITEMS_ELEMENT;
+                continue;
+            } else {
+                d->items = ITEMS_ELEMENT;
+            }
+        }
+        size_t have = d->len - d->at, used;
+        int    r    = rt_json_scan(&d->json, d->buf + d->at + d->scanned, have - d->scanned, d->eof, &used);
+        if (r == RT_JSON_MORE) {
+            d->scanned = have;
+            return 0;
+        }
+        if (r == RT_JSON_NONE && d->items == ITEMS_NONE) return 2;
+        if (r != RT_JSON_DONE) {
+            fail(d, ERR_BADJSON);
+            return 1;
+        }
+        size_t     n = d->scanned + used;
+        arena_t    a = { 0 };
+        rt_value_t v;
+        int        built = rt_json_build(d->buf + d->at, n, arena_alloc, &a, &v);
+        json_restart(d);
+        if (built == 0) {
+            _Alignas(16) rt_value_t cell[2];
+            d->at += n;
+            if (d->items == ITEMS_ELEMENT) d->items = ITEMS_NEXT;
+            tell_list(d, RT_DEV_JSON, cons_at(cell, v, RT_NIL), 1);
+        }
+        free_chunks(a.chunks);
+        if (built != 0) fail(d, ERR_TOOBIG);
+        return 1;
+    }
+}
+
 // Sends d's next message, if what's been read makes one: 1 if it did, or
 // has nothing more to send (and d may be gone); 0 if it needs more bytes.
 static int cut(rt_device_t *d) {
@@ -1252,7 +1363,12 @@ static int cut(rt_device_t *d) {
         d->count = -1;
         tell_string(d, RT_DEV_CHUNK, d->buf + d->at, n);
         d->at   += n;
+        json_restart(d);                        // a value being read has lost its start
         return 1;
+    }
+    if (d->how == RT_DEV_JSON || d->how == RT_DEV_JSON_ITEMS) {
+        int r = cut_json(d);
+        if (r != 2) return r;                   // 2: on to (:eof f)
     }
     if (d->how == RT_DEV_LINES && take_line(d, &line, &n)) {
         tell_string(d, RT_DEV_LINE, line, n);
@@ -1294,10 +1410,17 @@ static void read_on(rt_proc_t *p, rt_value_t pid) {
 // (:read how), to reader d: 0 if how isn't one it knows.
 static int read_as(rt_device_t *d, rt_value_t args) {
     rt_value_t how = rt_is_cons(args) && rt_cdr(args) == RT_NIL ? rt_car(args) : RT_NIL;
-    if (how == rt_symbol(RT_SYM_DEVICE + RT_DEV_LINES))          d->how   = RT_DEV_LINES;
-    else if (how == rt_symbol(RT_SYM_DEVICE + RT_DEV_CHUNKS))    d->how   = RT_DEV_CHUNKS;
-    else if (!(how & RT_TAG_INT_MASK) && rt_int_value(how) >= 0) d->count = rt_int_value(how);
-    else                                                         return 0;
+    uint64_t ways[] = { RT_DEV_LINES, RT_DEV_CHUNKS, RT_DEV_JSON, RT_DEV_JSON_ITEMS }, k = 0;
+    while (k < 4 && how != rt_symbol(RT_SYM_DEVICE + ways[k])) k++;
+    if (k < 4) {
+        d->how   = ways[k];
+        d->items = ITEMS_NONE;
+        json_restart(d);
+    } else if (!(how & RT_TAG_INT_MASK) && rt_int_value(how) >= 0) {
+        d->count = rt_int_value(how);
+    } else {
+        return 0;
+    }
     // A connection waiting in select() may have enough for the new way.
     if (d->mode == DEV_TCP && !d->sent && !d->connecting && !d->waiting) cut(d);
     return 1;

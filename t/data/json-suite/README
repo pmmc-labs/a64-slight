@@ -1,0 +1,9 @@
+JSONTestSuite's parsing tests, the files in its test_parsing/ as they
+are, from https://github.com/nst/JSONTestSuite at commit
+1ef36fa01286573e846ac449e8683f8833c5b26a (Nov 2024). LICENSE is its
+licence (MIT).
+
+A file named y_... must parse, and one named n_... must not; one named
+i_... is left to the parser (DECISIONS.md, D162, says what slight's
+does). t/177-json-suite.slight reads them all, in the order files.txt
+lists them, since a slight program can't list a directory.

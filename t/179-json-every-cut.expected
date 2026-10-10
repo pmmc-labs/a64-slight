@@ -1,0 +1,5 @@
+((object ("s" "a"b\c/é😀") ("n" (0 -1 2.5 -325.0 0.4 12345678901234567000.0)) ("w" (#true #false null)) ("e" (object)) ("a" (() ((object))))) 7 "x" (1 (object ("k" (2))) 3) -0.5)
+#true
+((object ("s" "a"b\c/é😀") ("n" (0 -1 2.5 -325.0 0.4 12345678901234567000.0)) ("w" (#true #false null)) ("e" (object)) ("a" (() ((object))))) 7 "x" 1 (object ("k" (2))) 3 -0.5)
+#true
+()

@@ -62,7 +62,8 @@
 #define RT_FAULT_NOT_PID    16    // :not-a-pid       a process operation was given something else
 #define RT_FAULT_JOIN_SELF  17    // :join-self       (join $$), which would wait forever
 #define RT_FAULT_NOT_DEVICE 18    // :not-a-device    connect was handed something that isn't an open device
-#define RT_FAULT_COUNT      18
+#define RT_FAULT_NOT_JSON   19    // :not-json        json/print was given something JSON can't hold
+#define RT_FAULT_COUNT      19
 
 // Symbols the runtime makes: every program has them, after #false and
 // #true, in this order (values.ts, RUNTIME_SYMBOLS). The fault kinds
@@ -78,7 +79,7 @@
 // in the order :ctrl :alt :shift. Their symbols follow the fault kinds:
 // RT_KEY_x is symbol RT_SYM_KEYS + x. compiler/tests/values.test.ts reads
 // the names from here.
-#define RT_SYM_KEYS         24    // RT_SYM_FAULTS + RT_FAULT_COUNT
+#define RT_SYM_KEYS         25    // RT_SYM_FAULTS + RT_FAULT_COUNT
 #define RT_KEY_UP            0    // :ArrowUp       the arrows are in the order of
 #define RT_KEY_DOWN          1    // :ArrowDown     their escape sequences, ESC [ A
 #define RT_KEY_RIGHT         2    // :ArrowRight    to ESC [ D
@@ -115,8 +116,9 @@
 // owner with these: (:open f) first (a listener's is (:open l port)), a
 // reader's (:line f s), (:chunk f s) and (:eof f), a listener's (:accept l
 // conn); and it takes a writer's (:write x ...), and a reader's (:read how),
-// how being :lines, :chunks or a count. RT_DEV_x is symbol RT_SYM_DEVICE + x.
-#define RT_SYM_DEVICE       54    // RT_SYM_KEYS + RT_KEY_COUNT
+// how being :lines, :chunks, :json, :json/items or a count; a reader of JSON
+// sends (:json f v). RT_DEV_x is symbol RT_SYM_DEVICE + x.
+#define RT_SYM_DEVICE       55    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
 #define RT_DEV_LINE          1    // :line
 #define RT_DEV_EOF           2    // :eof
@@ -126,12 +128,14 @@
 #define RT_DEV_LINES         6    // :lines
 #define RT_DEV_CHUNKS        7    // :chunks
 #define RT_DEV_CHUNK         8    // :chunk
-#define RT_DEV_COUNT         9
+#define RT_DEV_JSON          9    // :json
+#define RT_DEV_JSON_ITEMS   10    // :json/items
+#define RT_DEV_COUNT        11
 
 // Why a device failed, from errno: a device's owner ends with
 // (:error (name path)), path being the file's, or the socket's "host:port"
 // (a listener's port). RT_ERR_x is symbol RT_SYM_ERRS + x.
-#define RT_SYM_ERRS         63    // RT_SYM_DEVICE + RT_DEV_COUNT
+#define RT_SYM_ERRS         66    // RT_SYM_DEVICE + RT_DEV_COUNT
 #define RT_ERR_ENOENT        0    // :enoent        no such file or directory
 #define RT_ERR_EACCES        1    // :eacces        permission denied
 #define RT_ERR_EPERM         2    // :eperm         operation not permitted
@@ -155,9 +159,17 @@
 #define RT_ERR_EHOSTUNREACH 20    // :ehostunreach
 #define RT_ERR_ENETUNREACH  21    // :enetunreach
 #define RT_ERR_ENOTFOUND    22    // :enotfound     no such host (Node's name: it isn't an errno)
-#define RT_ERR_TOOBIG       23    // :too-big       a line or count of 64 MB or more (nor is this)
-#define RT_ERR_OTHER        24    // :io-error      anything else
-#define RT_ERR_COUNT        25
+#define RT_ERR_TOOBIG       23    // :too-big       a line, count or value of 64 MB or more (nor is this)
+#define RT_ERR_BADJSON      24    // :bad-json      what was read isn't JSON (nor this)
+#define RT_ERR_OTHER        25    // :io-error      anything else
+#define RT_ERR_COUNT        26
+
+// The symbols JSON's values need beyond #true and #false (json.c):
+// RT_JSON_x is symbol RT_SYM_JSON + x.
+#define RT_SYM_JSON         92    // RT_SYM_ERRS + RT_ERR_COUNT
+#define RT_JSON_NULL         0    // :null
+#define RT_JSON_OBJECT       1    // :object        (:object (key value) ...)
+#define RT_JSON_COUNT        2
 
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
@@ -420,6 +432,10 @@ rt_value_t rt_utf8_code(rt_value_t s, const char *site) RT_ASM(rt_utf8_code);
 rt_value_t rt_utf8_char(rt_value_t n, const char *site) RT_ASM(rt_utf8_char);
 rt_value_t rt_utf8_valid(rt_value_t s, const char *site) RT_ASM(rt_utf8_valid);
 
+// JSON (json.c, D154). The builtins:
+rt_value_t rt_json_parse(rt_value_t s, const char *site) RT_ASM(rt_json_parse);
+rt_value_t rt_json_print(rt_value_t v, const char *site) RT_ASM(rt_json_print);
+
 // The terminal (tty.c). The screen's size, or 24 by 80 when stdout isn't
 // a terminal.
 rt_value_t rt_screen_rows(const char *site) RT_ASM(rt_screen_rows);
@@ -554,6 +570,34 @@ void       rt_run(void);
 // the program, with exit status 130, instead.
 void   rt_tty_raw(int on);
 size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key));
+
+// And what a device reads JSON with. rt_json_scan checks the bytes it's
+// given, after the ones it was given before: RT_JSON_MORE if they're good
+// and the value isn't over; RT_JSON_DONE when it is, with *used the bytes up
+// to its end; RT_JSON_BAD with *used where the text went wrong, a byte no
+// valid text could have there; or, at the end of the input (eof), with no
+// value begun, RT_JSON_NONE. A zeroed rt_json_t is ready; after
+// RT_JSON_DONE, rt_json_reset it for the next value. rt_json_build makes
+// the value of len bytes the scan passed, allocating with alloc (which
+// can give out, returning NULL, when it returns -1); 0 otherwise.
+#define RT_JSON_MORE 0
+#define RT_JSON_DONE 1
+#define RT_JSON_BAD  2
+#define RT_JSON_NONE 3
+
+typedef struct rt_json {
+    unsigned char *open;        // the containers open, '[' or '{', innermost last
+    size_t         depth, cap;
+    int            state, key, hex;
+    const char    *word;        // what's left of true, false or null
+} rt_json_t;
+
+typedef void *(*rt_json_alloc_t)(void *cx, size_t bytes);
+
+int  rt_json_scan(rt_json_t *j, const char *bytes, size_t len, int eof, size_t *used);
+void rt_json_reset(rt_json_t *j);
+void rt_json_free(rt_json_t *j);
+int  rt_json_build(const char *text, size_t len, rt_json_alloc_t alloc, void *cx, rt_value_t *out);
 
 #endif // __ASSEMBLER__
 #endif // RT_H
