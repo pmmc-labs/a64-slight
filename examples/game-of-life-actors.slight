@@ -1,0 +1,118 @@
+; game-of-life-actors: the game of life with a process for each cell, on
+; the glider, grid and four generations game-of-life has, so it prints
+; just what that does. A generation goes in two steps, the root waiting
+; for every cell between them, so a cell is only ever asked how it is in
+; the generation it's in:
+;
+;   - :count: each cell forks a watcher, which asks its eight neighbours
+;     how they are, one at a time, waiting for each answer in the middle of
+;     its function (D167), and tells the cell how many live; the cell works
+;     out its next state, and tells the root it's ready. (A cell can't ask
+;     its neighbours itself: they ask it too, and recv takes the first
+;     message, whatever it is.)
+;   - :commit: each cell takes its next state, and tells the root what it
+;     is, and where.
+;
+; The root keeps the cells' pids, and the states it shows, as tuples of
+; rows (D169).
+
+(defun wrap-around (n size) (% (+ n size) size))
+
+(defun glider-cell (x y)
+    (if (member? (list x y) '((0 1) (1 2) (2 0) (2 1) (2 2))) :LIVE :DEAD))
+
+(defun next-state (state n)
+    (match (list state n)
+        ((:LIVE 2) :LIVE)
+        ((:LIVE 3) :LIVE)
+        ((:DEAD 3) :LIVE)
+        (_         :DEAD)))
+
+; --- a cell -------------------------------------------------------------------
+
+; Where it is, its state, its next state once it has counted, its
+; neighbours, and the root.
+(defun cell (x y state next neighbors root)
+    (recv
+        ((:neighbors ns) (cell x y state next ns root))
+        ((:status from)  (send from (list :status state)) (cell x y state next neighbors root))
+        (:count
+            (let me $$)
+            (fork (watch me neighbors 0))
+            (cell x y state next neighbors root))
+        ((:counted n)
+            (send root :ready)
+            (cell x y state (next-state state n) neighbors root))
+        (:commit
+            (send root (list :cell x y next))
+            (cell x y next () neighbors root))
+        (:stop ())))
+
+(defun watch (cell neighbors n)
+    (match neighbors
+        (() (send cell (list :counted n)))
+        ((neighbor & rest)
+            (send neighbor (list :status $$))
+            (match (recv)
+                ((:status :LIVE) (watch cell rest (+ n 1)))
+                ((:status :DEAD) (watch cell rest n))))))
+
+; --- the root -----------------------------------------------------------------
+
+; h rows of w things, (f x y) for each.
+(defun grid (h w f)
+    (list->tuple (map (lambda (x) (list->tuple (map (lambda (y) (f x y)) (range 0 w)))) (range 0 h))))
+
+(defun rows (grid) (tuple/len grid))
+(defun cols (grid) (tuple/len (tuple/get grid 0)))
+(defun at (grid x y) (tuple/get (tuple/get grid x) y))
+(defun put (grid x y v) (tuple/set grid x (tuple/set (tuple/get grid x) y v)))
+
+(defun each-cell (cells msg)
+    (map (lambda (row) (map (lambda (c) (send c msg)) (tuple->list row))) (tuple->list cells)))
+
+(defun neighbors-of (cells x y)
+    (map (lambda (offset)
+        (match offset
+            ((dx dy) (at cells (wrap-around (+ x dx) (rows cells)) (wrap-around (+ y dy) (cols cells))))))
+        '((-1 0) (-1 1) (0 1) (1 1) (1 0) (1 -1) (0 -1) (-1 -1))))
+
+(defun display-grid (states gen)
+    (tty/write "generation " gen \n)
+    (map (lambda (row)
+        (tty/write (str-join "" (map (lambda (c) (if (eq? c :LIVE) "@" "_")) (tuple->list row))) \n))
+        (tuple->list states)))
+
+; Shows the states; then, for the last of n generations, stops the cells,
+; or else has them count.
+(defun generation (cells states n gen)
+    (display-grid states gen)
+    (cond
+        ((== n 1) (each-cell cells :stop) (+ gen 1))
+        (#true
+            (each-cell cells :count)
+            (ready cells states n gen (* (rows cells) (cols cells))))))
+
+; Waits till every cell is ready, then has them all change.
+(defun ready (cells states n gen left)
+    (cond
+        ((== left 0)
+            (each-cell cells :commit)
+            (gather cells states n gen (* (rows cells) (cols cells))))
+        (#true
+            (recv (:ready (ready cells states n gen (- left 1)))))))
+
+; What every cell is now.
+(defun gather (cells states n gen left)
+    (cond
+        ((== left 0) (generation cells states (- n 1) (+ gen 1)))
+        (#true
+            (recv ((:cell x y state) (gather cells (put states x y state) n gen (- left 1)))))))
+
+(let root $$)
+(let cells (grid 6 8 (lambda (x y) (fork (cell x y (glider-cell x y) () () root)))))
+(dotimes 0 6 (lambda (x)
+    (dotimes 0 8 (lambda (y)
+        (send (at cells x y) (list :neighbors (neighbors-of cells x y)))))))
+
+(generation cells (grid 6 8 glider-cell) 4 0)

@@ -640,7 +640,10 @@ grows. BACKGROUND.md has the discussions so far.
 
 Porting stopped in Oct 2026 (D149): fifteen are ported (`examples/`),
 enough to have tried the language on, and new examples are written for
-this version. The survey below is kept as a record.
+this version. The survey below is kept as a record. After `match`,
+tuples and `recv` anywhere (D167–D169), three more fit and were ported,
+and every example was rewritten to use them where they read better
+(below).
 
 Not every example has to be ported, and an example can change as much as
 it needs to: if one calls for a change to the compiler or runtime, change
@@ -660,12 +663,12 @@ builtin. Beyond that:
 | `ping-pong`, `ring-benchmark`, `million-forks` | ported in step 7 (`examples/`, D97) |
 | `pub-sub`, `even-odd-actors`, `fixed-tournament` | ported in step 8 (D104) |
 | `ping-pong-tournament` | ported in step 10a, without a golden test (D115) |
-| `simple-db-server`, `game-of-life-actors` | `(recv)` used as an expression mid-function becomes receive functions; `simple-db-server`'s `db-client` does `(recv)` inside a lambda, so it needs restructuring |
-| `active-objects` | as above, plus drop `gensym` |
+| `simple-db-server`, `game-of-life-actors` | ported after step 13: `recv` goes in the middle of a function now (D167); `simple-db-server`'s client asks with `lib/ds.slight`'s `ask`, as a lambda can't wait; `game-of-life-actors` takes its count and its change in two steps, the root waiting for every cell between them, and is on `game-of-life`'s glider, so it prints just what that does |
+| `active-objects` | ported after step 13, as `simple-db-server` (with `ask`), and with names in place of `gensym` |
 | `key-catcher`, `divisions`, `tail-chase-game` | ported in step 10b (D123) |
-| `window-manager`, `better-window-manager` | as above, plus `connect :keypress` and the screen size (step 10b) |
-| `meta-circular` | `join`/`yield`/`apply`; no `recv`, so likely as-is |
-| `more-oop` | local `defun`s lifted to top level; it uses `slight/eval` to look up methods, which has to go |
+| `window-manager`, `better-window-manager` | as above, plus `connect :keypress` and the screen size (step 10b); Stevan's port, of both, is in `author/window-manager.slight` |
+| `meta-circular` | `join`/`yield`/`apply`; no `recv`, so likely as-is; Stevan's port is in `author/meta-circular.slight` |
+| `more-oop` | local `defun`s lifted to top level; it uses `slight/eval` to look up methods, which has to go; without it, it's `closure-objects` again, so not ported |
 | `text-editor` | local `defun`s lifted; drop the `slight/parse`/`slight/expand` feature; files (`lib/fs.slight`'s `slurp` gives lines) |
 | `repl` | no `eval`, so it becomes a line-editor demo (or evaluates a tiny calculator language written in slight) |
 | `eval-string`, `hot-code-reload` | out: they exist to show `eval` and hot reload |

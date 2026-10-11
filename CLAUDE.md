@@ -69,7 +69,7 @@ interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 beside the byte builtins, the `utf8/` ones count characters (a bad byte
 is a character of its own, as in Go), with `ord` and `chr` in the
 prelude, and `string->float` (D148).
-`examples/` has fifteen example programs (all but `ping-pong-tournament`
+`examples/` has eighteen example programs (all but `ping-pong-tournament`
 are golden tests); new ones are written when they're wanted (D149).
 Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in

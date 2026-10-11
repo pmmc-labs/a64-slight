@@ -1,0 +1,52 @@
+; simple-db-server: a key-value store as a process. The server takes a
+; command, says what it got, and answers; the client asks with ask, from
+; lib/ds.slight, which sends the command with a box for the answer and
+; waits for it. (In ts-slight the client waited in a lambda, which slight
+; doesn't allow: a box is a process of its own, so ask can wait anywhere.)
+; The server waits in the middle of its function, and matches each
+; command (D167, D168).
+
+(@include :ds)
+
+(defun db-server (data)
+    (match (recv)
+        ((cmd key value to)
+            (tty/write "... " cmd " -> " (list key value) \n)
+            (match cmd
+                (:update
+                    (reply to (list :ok ()))
+                    (db-server (cons (list key value) data)))
+                (:delete
+                    (reply to (list :ok ()))
+                    (db-server (remove (lambda (row) (eq? (car row) key)) data)))
+                (:lookup
+                    (reply to (match (find (lambda (row) (eq? (car row) key)) data)
+                                  (()        (list :not-found))
+                                  ((_ found) (list :found found))))
+                    (db-server data))
+                (:exit
+                    (reply to (list :shutdown ()))
+                    (tty/write "... shutting down server" \n))
+                (_
+                    (tty/write "... logging unknown command " cmd \n)
+                    (reply to (list :unknown-command cmd))
+                    (db-server data))))))
+
+(defun db (pid cmd key value) (ask pid (list cmd key value)))
+
+(let server (fork (db-server ())))
+
+(pprint (db server :update :x 10))
+(pprint (db server :update :y 20))
+(pprint (db server :update :z 30))
+
+(pprint (db server :lookup :x ()))
+(pprint (db server :lookup :z ()))
+(pprint (db server :lookup :y ()))
+
+(pprint (db server :delete :z ()))
+(pprint (db server :lookup :z ()))
+(pprint (db server :lookup :x ()))
+
+(pprint (db server :wassup () ()))
+(pprint (db server :exit () ()))
