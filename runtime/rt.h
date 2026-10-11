@@ -189,6 +189,33 @@
 #define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
 #define RT_SEXP_COUNT        2
 
+// What :system (process.c, D171) is asked and answers with: RT_SYS_x is
+// symbol RT_SYM_SYSTEM + x. A process's :heap and :stack are the fault
+// kinds' symbols, which have those names already.
+#define RT_SYM_SYSTEM      104    // RT_SYM_SEXP + RT_SEXP_COUNT
+#define RT_SYS_PROCESSES     0    // :processes     asked for every process; and how many there are
+#define RT_SYS_PROCESS       1    // :process       asked for one; and (:process s info) for each
+#define RT_SYS_RUNTIME       2    // :runtime       asked for the runtime's counts, and (:runtime s info)
+#define RT_SYS_END           3    // :end           after the last (:process s info)
+#define RT_SYS_ENDED         4    // :ended         (:ended s pid result), for a process that has
+#define RT_SYS_PID           5    // :pid           the fields of a process's info
+#define RT_SYS_PARENT        6    // :parent
+#define RT_SYS_STATE         7    // :state
+#define RT_SYS_IN            8    // :in            the function it's in
+#define RT_SYS_MAIL          9    // :mail          messages waiting
+#define RT_SYS_REDUCTIONS   10    // :reductions    calls made so far
+#define RT_SYS_DEVICES      11    // :devices       the devices it owns; and how many are open
+#define RT_SYS_JOINING      12    // :joining       a state, and whom
+#define RT_SYS_RUNNING      13    // :running       the states
+#define RT_SYS_READY        14    // :ready         a state; and the run queue's length
+#define RT_SYS_RECV         15    // :recv
+#define RT_SYS_SLEEPING     16    // :sleeping
+#define RT_SYS_PIDS         17    // :pids          the runtime's counts: pids made
+#define RT_SYS_TIMERS       18    // :timers        timers pending
+#define RT_SYS_STACKS       19    // :stacks        stacks held
+#define RT_SYS_CLOCK        20    // :clock         milliseconds since the program started
+#define RT_SYS_COUNT        21
+
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it
@@ -319,6 +346,9 @@ typedef struct rt_proc {
     struct rt_device *devices;  // the files it has open (process.c)
     rt_value_t      reading;    // the reader whose message it took last, to read on at its next recv; or 0
     int64_t         slice_rest; // calls left in its slice after reductions run out (process.c)
+    int64_t         slice;      // the calls its last slice had, reductions and slice_rest together
+    uint64_t        calls;      // the calls of its slices before that one, for :system
+    uintptr_t       at;         // where in compiled code it last stopped while holding a stack, or 0
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -369,6 +399,11 @@ rt_value_t slight_main(void) RT_ASM(slight_main);
 extern const uint64_t slight_symbol_count   RT_ASM(slight_symbol_count);
 extern const char     slight_symbol_names[] RT_ASM(slight_symbol_names);
 
+// Every compiled function's entry and name (a C string), in pairs, for
+// :system and the deadlock message to say where a process is (D171).
+extern const uint64_t  slight_function_count RT_ASM(slight_function_count);
+extern const uintptr_t slight_functions[]    RT_ASM(slight_functions);
+
 // --- called by compiled code --------------------------------------------------
 
 // Processes (process.c). rt_recv returns the next message, or, when there
@@ -377,9 +412,12 @@ extern const char     slight_symbol_names[] RT_ASM(slight_symbol_names);
 // garbage, with args (the receive function's, in its frame) as the roots,
 // which it updates. rt_fork starts code(values...)
 // in a new process, with the values deep-copied into its heap; rt_connect
-// does the same, and sends the new process every key from :keypress.
+// does the same, and sends the new process every key from :keypress;
+// rt_connect_system does too, and gives the new process a :system device
+// (D171).
 rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
 rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect);
+rt_value_t rt_connect_system(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect_system);
 
 // Files (process.c). rt_connect_fs forks as rt_fork does, and opens path
 // (RT_FS_READ, _WRITE or _APPEND) on a device, a new pid that the runtime
@@ -520,10 +558,11 @@ rt_value_t rt_exp(rt_value_t x, const char *site) RT_ASM(rt_exp);
 
 // Called at a function's entry when proc's reductions run out, with the
 // function's first n slots (from frame: its parameters and captured
-// values, all it has stored yet) and its frame pointer, from which the
-// frames below can be found: collects, if it's time to, and then refills
-// the reductions, and lets the next process run, if one is waiting to.
-void rt_preempt(rt_proc_t *proc, rt_value_t *frame, uint64_t n, const uintptr_t *fp) RT_ASM(rt_preempt);
+// values, all it has stored yet), its frame pointer, from which the
+// frames below can be found, and its entry, for :system to say where the
+// process is: collects, if it's time to, and then refills the
+// reductions, and lets the next process run, if one is waiting to.
+void rt_preempt(rt_proc_t *proc, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t entry) RT_ASM(rt_preempt);
 
 // --- the runtime itself -------------------------------------------------------
 

@@ -1,0 +1,19 @@
+(worker (pid #<pid 2>) (parent #<pid 1>) (state ready) (joining ()) (in "worker") (mail 3) (stack #false) (devices ()))
+(runtime (processes 8) (pids 11) (ready 1) (timers 1) (devices 1) (stacks 4) (clock 1))
+(me (parent #<pid 1>) (state running) (in "check (recv at t/200-system.slight:26:13)") (mail 0) (stack #true) (devices (#<pid 11>)))
+(server (state recv) (in "server (recv at t/200-system.slight:7:12)") (stack #false))
+(napper (state sleeping) (in "napper") (stack #true))
+(joiner (state joining) (joining #<pid 2>) (in "joiner") (stack #true))
+(spinner (state recv) (in "spinner (recv at t/200-system.slight:12:32)"))
+(ended #<pid 11> #<pid 8> (ok 42))
+(ended #<pid 11> #<pid 9> (error killed))
+(ended #<pid 11> #<pid 11> (ok ()))
+(spinner-busiest #true #true #true)
+(hoarder-biggest #true #true)
+#true
+(#<pid 1> 0)
+8
+#true
+dead letter: (bogus) (connect at t/200-system.slight:116:7)
+dead letter: (process 7) (connect at t/200-system.slight:116:7)
+(ok 7)

@@ -1,0 +1,30 @@
+; A timer can ask :system (D171) too: its message goes to the device
+; when it's due, from the scheduler, with no process running. Three
+; ticks 100 ms apart, each answered with the clock, the processes and
+; the timers (the napper's); then every process's state, and where it
+; waits, the ticker waiting in states when it's asked.
+
+(defun napper () (sleep 1000))
+
+(defun ticker (n)
+    (let s (recv ((:open s) s)))
+    (tick s n))
+
+(defun tick (s n)
+    (if (== n 0)
+        (do
+            (after 50 s (list :processes))
+            (states s ()))
+        (do
+            (after 100 s (list :runtime))
+            (let i (recv ((:runtime s2 i) i)))
+            (pprint (map (lambda (k) (lookup k i)) (list :clock :processes :timers)))
+            (tick s (- n 1)))))
+
+(defun states (s acc)
+    (recv
+        ((:process s2 i) (states s (cons (map (lambda (k) (lookup k i)) (list :pid :state :in)) acc)))
+        ((:end s2)       (reverse acc))))
+
+(fork (napper))
+(join (connect :system (ticker 3)))

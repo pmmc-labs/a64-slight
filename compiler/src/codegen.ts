@@ -89,6 +89,7 @@ type St = {
     readonly consts: Code;
     readonly lambdas: Code;                 // functions compiled along the way: lambdas, builtin wrappers
     readonly closures: readonly string[];   // functions whose static closure has been emitted
+    readonly functions: Code;               // every function's entry and name, for the runtime (D171)
 };
 
 const MAX_ARGS = 8;     // in registers, on every target
@@ -115,7 +116,7 @@ export function compileProgram(forms: Sexp, prelude: Sexp = NIL, t: Target = AAR
     const state  = stateFunctions(defuns.map((d) => ({ name: d.name.name, params: d.params.map((p) => p.name), body: d.body })));
     const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user', state.includes(d.name.name)), preludeFns);
     const top    = all.filter((f) => !isForm(f, 'defun'));
-    const empty: St = { t, labels: 0, slots: 0, calls: false, symbols: null, stubs: [], data: [], consts: [], lambdas: [], closures: [] };
+    const empty: St = { t, labels: 0, slots: 0, calls: false, symbols: null, stubs: [], data: [], consts: [], lambdas: [], closures: [], functions: [] };
     const st0 = [...RESERVED_SYMBOLS, ...RUNTIME_SYMBOLS].reduce((st, name) => symbolId(st, name)[1], empty);
 
     const compileAll = (ds: readonly Defun[], visible: Fns, module: Module, st: St): [Code, St] =>
@@ -154,7 +155,20 @@ export function compileProgram(forms: Sexp, prelude: Sexp = NIL, t: Target = AAR
         st3.consts,
         '    .globl slight_const_end',
         'slight_const_end:',
+        '',
+        // where :system and the deadlock message find a process's function's name
+        '    .p2align 3',
+        '    .globl slight_function_count',
+        'slight_function_count:',
+        `    .quad ${countFunctions(st3.functions)}`,
+        '    .globl slight_functions',
+        'slight_functions:',
+        st3.functions,
     ]).join('\n') + '\n';
+}
+
+function countFunctions(functions: Code): number {
+    return flatten(functions).length;
 }
 
 // Every symbol's name, in id order, for the runtime's printer.
@@ -243,15 +257,16 @@ function compileFunction(entry: string, d: Defun, free: readonly string[], fns: 
     if (size > 4095) throw new CompileError(`${d.name.name} needs too many frame slots (${st1.slots})`, d.pos);
     const [overflow, st2] = faultLabel(st1, 'RT_FAULT_STACK', d.name.name, at);
     const [preempt, st3]  = label(st2, 'preempt');
+    const [name, st4]     = cString(d.name.name, st3);
     const t    = st.t;
-    const stub = [`${preempt}:`, t.call('rt_preempt', [PROC, FRAME, imm(locals.length), FP], false), t.jump(`${preempt}_done`)];
+    const stub = [`${preempt}:`, t.call('rt_preempt', [PROC, FRAME, imm(locals.length), FP, addr(entry)], false), t.jump(`${preempt}_done`)];
     return [[
         '',
         t.functionStart(entry, d.name.name),
         t.prologue(size, overflow, d.params.map((p) => p.name), free, preempt, st1.calls),
         body,
         t.ret,
-    ], { ...st3, calls: st.calls, stubs: [st3.stubs, stub] }];
+    ], { ...st4, calls: st.calls, stubs: [st4.stubs, stub], functions: [st4.functions, `    .quad ${entry}, ${name}`] }];
 }
 
 // A call: each argument waits in a slot while the rest are computed, then
@@ -613,9 +628,9 @@ function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, 
     const quoted = isForm(source, 'quote');
     const items  = quoted ? toArray(source) : null;
     const name   = items !== null && items.length === 2 && items[1]!.t === 'sym' ? (items[1] as Sym).name : null;
-    if (name === 'keypress') {
+    if (name === 'keypress' || name === 'system') {
         checkArity(x, 'connect', args, 2);
-        return compileFork(x, 'connect', args[1]!, 'rt_connect', cx, st);
+        return compileFork(x, 'connect', args[1]!, name === 'keypress' ? 'rt_connect' : 'rt_connect_system', cx, st);
     }
     if (name !== null && name in SOURCES) {
         checkArity(x, 'connect', args, 3);
@@ -623,7 +638,7 @@ function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, 
         return compileFork(x, 'connect', args[2]!, fn, cx, st, [args[1]!], [mode]);
     }
     if (quoted) {
-        throw new CompileError(`connect's source can be :keypress, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not ${show(source)}`,
+        throw new CompileError(`connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not ${show(source)}`,
                                posOf(source) ?? x.pos);
     }
     checkArity(x, 'connect', args, 2);

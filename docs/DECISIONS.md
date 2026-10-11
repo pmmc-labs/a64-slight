@@ -1860,3 +1860,56 @@ So:
   that's portable between machines (it's for debugging where it was
   made); exploring schedules systematically (PCT, or a model checker),
   for which seeds are the cheap first step.
+
+**D171. `:system`, a device that tells about the processes and the
+runtime.** *(Stevan agreed to the device, to anyone connecting, to
+counting reductions, to the table of function names and to tests of
+facts; the message shapes are defaults.)* For a `top` written in slight,
+health checks in a supervisor, and finding where a stuck program waits.
+- **A device, not builtins:** `(connect :system expr)`, whose owner asks
+  with `(:processes)`, `(:process pid)` and `(:runtime)`. A list of
+  every process wouldn't fit a heap at a million processes; a device
+  sends one `(:process s info)` at a time, the next when its owner waits
+  again (D158), and then `(:end s)`. With one core nothing runs while
+  the device answers, so it copies what it tells of every process at
+  once, outside any heap, and every message describes the same moment
+  for free. And it's a capability, which `(connect s expr)` can hand on.
+  A `(:processes)` asked before the last one's `(:end s)` is answered
+  after it; `(:process pid)` and `(:runtime)` are answered at once.
+- **Anyone can connect,** as with `:keypress` and files. Only the root
+  connecting, and handing the device to code it trusts, goes with
+  Misty's grants, if devices are ever restricted.
+- **`info` is a list of `(key value)`,** which `lookup` reads, so keys
+  can be added without breaking anyone; a tuple by position would break
+  at the first. A process's: `:pid`, `:parent`, `:state` (`:running`,
+  `:ready`, `:recv`, `:joining`, `:sleeping`), `:joining`, `:in`,
+  `:mail`, `:heap` (in use), `:reductions`, `:stack` (held or not) and
+  `:devices`. The runtime's: `:processes`, `:pids`, `:ready`, `:timers`,
+  `:devices`, `:heap`, `:stacks`, `:clock` (milliseconds since the
+  program started, on either clock) and `:reductions`.
+- **Reductions are counted,** since a `top` can't show who's busy
+  without them: the calls a slice had, less what's left of it, added up
+  when the next slice starts, so nothing is added to a call. The count
+  is exact, and the same under `SLIGHT_GC_STRESS` and `SLIGHT_SCHED`.
+- **Where a process is:** the compiler emits every function's entry and
+  name (`slight_functions`, a few bytes a function), and the runtime
+  finds the function with the last entry at or before an address. A
+  process holding a stack is where it last stopped: the function it was
+  entering when preempted (`rt_preempt` is passed the entry), or the one
+  that called `join`, `sleep`, `yield` or `send` to a device (their
+  return address); one without a stack is at its code: the receive
+  function it waits in, or where it starts. A receive function made from
+  a `recv` inside a function is named for both (D167), so `:in` says
+  which `recv`: `"server (recv at prog.slight:7:12)"`.
+- **The deadlock message says where the root waits:** `deadlock: the
+  root process is waiting in server (recv at prog.slight:7:12) for a
+  message, and nothing else can run`, from the same table.
+- **Tests check facts,** not the bytes of a heap or the count of
+  reductions, which change with the prelude: states, names, mailboxes,
+  devices, exits, and comparisons (`t/200`–`t/202`). `examples/top.slight`
+  isn't a golden test for the same reason.
+- **Left for later:** a feed of events (`(:watch)`, each process's start
+  and end), which a supervisor of everything would want and `monitor`
+  covers for one process; acting on processes (`kill` already works on
+  any pid, so the device only looks); the heap's limit before the next
+  collection.

@@ -1,2 +1,2 @@
-deadlock: the root process is waiting for #<pid 3> to end, and nothing else can run
+deadlock: the root process is waiting in the top level for #<pid 3> to end, and nothing else can run
 exit: 1

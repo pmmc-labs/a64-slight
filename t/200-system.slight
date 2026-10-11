@@ -1,0 +1,116 @@
+; The :system device (D171), asked by its owner about processes in each
+; state. Only facts are printed, nothing that changes with the size of
+; the prelude's code: heaps and reductions are compared, not shown.
+
+(defun worker () (recv (n (worker))))
+(defun server (n)
+    (let m (recv ((:add k) k)))
+    (server (+ n m)))
+(defun napper () (sleep 1000) :rested)
+(defun joiner (p) (join p))
+(defun spin (n) (if (== n 0) :spun (spin (- n 1))))
+(defun spinner () (spin 10000) (recv (_ :done)))
+(defun hoarder (xs) (recv (_ (length xs))))
+
+(defun facts (name i keys) (cons name (map (lambda (k) (list k (lookup k i))) keys)))
+
+(defun check (me w sv nap j sp h gone)
+    (let s (recv ((:open s) s)))            ; at the start of its first slice
+    (send w 1)
+    (send w 2)
+    (send w 3)
+    ; each answer is in the mailbox by the time the ask returns
+    (send s (list :process w))
+    (let wi (recv ((:process s2 i) i)))
+    (send s (list :runtime))
+    (let rt (recv ((:runtime s2 i) i)))
+    (send s (list :process $$))
+    (let mine (recv ((:process s2 i) i)))
+    (map (lambda (p) (send s (list :process p))) (list sv nap j sp h (car gone) (cadr gone) s))
+    (let svi (recv ((:process s2 i) i)))
+    (let napi (recv ((:process s2 i) i)))
+    (let ji (recv ((:process s2 i) i)))
+    (let spi (recv ((:process s2 i) i)))
+    (let hi (recv ((:process s2 i) i)))
+    (let done (recv (m m)))
+    (let killed (recv (m m)))
+    (let dev (recv (m m)))
+    (pprint (facts :worker wi (list :pid :parent :state :joining :in :mail :stack :devices)))
+    (pprint (facts :runtime rt (list :processes :pids :ready :timers :devices :stacks :clock)))
+    (pprint (facts :me mine (list :parent :state :in :mail :stack :devices)))
+    (pprint (facts :server svi (list :state :in :stack)))
+    (pprint (facts :napper napi (list :state :in :stack)))
+    (pprint (facts :joiner ji (list :state :joining :in :stack)))
+    (pprint (facts :spinner spi (list :state :in)))
+    (pprint done)
+    (pprint killed)
+    (pprint dev)
+    (pprint (list :spinner-busiest (> (lookup :reductions spi) 10000) (< (lookup :reductions wi) 100)
+                  (>= (lookup :reductions rt) (lookup :reductions spi))))
+    (pprint (list :hoarder-biggest (>= (lookup :heap hi) 16000) (< (lookup :heap wi) 1000)))
+    ; every live process, in the order of their pids
+    (send s (list :processes))
+    (pids s () (list :all (list me w sv nap j sp h $$))))
+
+; The pids a (:processes) tells of, up to its (:end s); then the next step.
+(defun pids (s acc step)
+    (recv
+        ((:process s2 i) (pids s (cons (lookup :pid i) acc) step))
+        ((:end s2)       (next s (reverse acc) step))))
+
+(defun next (s ps step)
+    (match step
+        ((:all expected)
+            (pprint (eq? ps expected))
+            (holding s))
+        (:holding
+            (pprint (length ps))
+            (send s (list :processes))
+            (send s (list :processes))
+            (pids s () :once))
+        (:once
+            (pids s () (list :twice ps)))
+        ((:twice one)
+            (pprint (eq? one ps))
+            (hand-over s))))
+
+; One at a time: holding the first, nothing more of them is waiting.
+(defun holding (s)
+    (send s (list :processes))
+    (let first (recv ((:process s2 i) (lookup :pid i))))
+    (send s (list :process $$))
+    (let mine (recv ((:process s2 i) i)))
+    (pprint (list first (lookup :mail mine)))
+    (pids s (list first) :holding))
+
+; Handed over with the first taken, the rest go to the new owner.
+(defun hand-over (s)
+    (send s (list :bogus))
+    (send s (list :process 7))
+    (send s (list :processes))
+    (let first (recv ((:process s2 i) i)))
+    (let owner $$)
+    (connect s (taker owner))
+    (recv (n n)))
+
+(defun taker (to)
+    (recv ((:open s) (count s to 0))))
+
+(defun count (s to n)
+    (recv
+        ((:process s2 i) (count s to (+ n 1)))
+        ((:end s2)       (send to n))))
+
+(let me $$)
+(let w (fork (worker)))
+(let sv (fork (server 0)))
+(let nap (fork (napper)))
+(let j (fork (joiner w)))
+(let sp (fork (spinner)))
+(let h (fork (hoarder (range 0 1000))))
+(let done (fork 42))
+(let killed (fork (worker)))
+(kill killed)
+(let gone (list done killed))
+(sleep 1)                                   ; till all but the napper wait
+(join (connect :system (check me w sv nap j sp h gone)))

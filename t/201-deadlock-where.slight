@@ -1,0 +1,11 @@
+; The deadlock message says where the root waits (D171): here in the
+; receive function made for the second recv in ask-twice (D167), the
+; first having taken the one message there is.
+
+(defun ask-twice ()
+    (let a (recv (x x)))
+    (let b (recv (y y)))
+    (list a b))
+
+(send $$ :one)
+(ask-twice)

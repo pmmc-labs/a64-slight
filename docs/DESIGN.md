@@ -81,7 +81,7 @@ Booleans are the reserved symbols `#true` and `#false`.
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
 | `(fork expr)` | Runs `expr` in a new process and returns its pid. |
-| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); or a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`. `(connect dev expr)` hands the device `dev` to the new process. |
+| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
 | `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
@@ -220,6 +220,7 @@ reply refs.
 | `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
 | `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
 | `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
+| `(connect :system expr)` | `fork`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
 | `(connect dev expr)` | `fork`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
 | `(disconnect f)` | Closes the device `f`. Anything that isn't an open device it ignores. Returns `()`. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
@@ -259,9 +260,10 @@ reply refs.
   the run queue empties, no timer is pending, no process is connected to
   `:keypress` with stdin still open, no socket can be waited for (below),
   and the root process hasn't ended,
-  the program prints `deadlock: the root process is waiting for a
-  message, and nothing else can run` (or `... waiting for #<pid N> to end,
-  ...`, in `join`) to stderr and exits 1.
+  the program prints `deadlock: the root process is waiting in f for a
+  message, and nothing else can run` (or `... waiting in f for #<pid N>
+  to end, ...`, in `join`) to stderr and exits 1, `f` being the function
+  it waits in (D171).
 - **The program ends when nothing can run** and nothing more can come (no
   timer is pending, no socket can be waited for, and no process is
   connected to `:keypress` or stdin has ended), not when the root ends: other
@@ -731,6 +733,20 @@ Lalloc_N:
   found, or `:etimedout` when no name server answers; SIGPIPE is ignored, so writing to a closed connection is
   `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. HTTP will
   be a slight library on top (D132, D140).
+- **`:system` is a device too** (D171). `(connect :system expr)`; its
+  owner asks `(:processes)`, `(:process pid)` or `(:runtime)`, and hears
+  `(:process s info)` for each live process (one at a time, the next
+  when it waits again, as a reader's lines, D158) and `(:end s)`;
+  `(:process s info)` or `(:ended s pid result)`; or `(:runtime s
+  info)`. An `info` is a list of `(key value)`. `(:processes)` copies
+  every process's at once, outside any heap; with one core nothing runs
+  meanwhile, so they all describe one moment. A process's reductions
+  are counted per slice (`calls`, `slice` in `rt_proc_t`), and where it
+  is (`:in`) comes from a table the compiler emits of every function's
+  entry and name (`slight_functions`): a process holding a stack is at
+  `at`, the entry `rt_preempt` was passed or the return address of the
+  `join`, `sleep`, `yield` or device `send` it stopped in; one without
+  is at its `code`. The deadlock message uses the same table.
 - **C libraries** (D151, D152; planned, step 12c). A pure function bounded
   by its input may be a builtin, called on the process's stack; anything
   with state or I/O is a device, its state in the runtime behind a pid,

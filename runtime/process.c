@@ -162,12 +162,20 @@ static void release_stack(rt_proc_t *p) {
     p->stack    = NULL;
 }
 
+// The calls p has made: those of its slices before this one, and this
+// one's so far, which is what's left of it taken from what it had.
+static uint64_t calls_of(const rt_proc_t *p) {
+    return p->calls + (uint64_t)(p->slice - p->reductions - p->slice_rest);
+}
+
 // A new slice of QUOTA calls, the last of which calls rt_preempt. With
 // SLIGHT_GC_STRESS=n, every nth one does, to collect, and the slice goes on
 // (slice_rest) till its end, so a process is preempted after the same
 // calls as without it.
 static void refill(rt_proc_t *p) {
     int64_t calls = sched ? 1 + (int64_t)(sched_next() % QUOTA) : QUOTA;
+    p->calls      = calls_of(p);
+    p->slice      = calls;
     p->reductions = gc_stress && gc_stress < calls ? gc_stress : calls;
     p->slice_rest = calls - p->reductions;
 }
@@ -583,8 +591,12 @@ static void read_on(rt_proc_t *p, rt_value_t pid);
 // device takes it at once.
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
     entry_t *e = entry(pid, site);
-    if (e->proc)        deliver(e->proc, new_msg(msg));
-    else if (e->device) command(e->device, msg);
+    if (e->proc) {
+        deliver(e->proc, new_msg(msg));
+    } else if (e->device) {
+        rt_current->at = (uintptr_t)__builtin_return_address(0);   // for :system
+        command(e->device, msg);
+    }
     return RT_NIL;
 }
 
@@ -682,7 +694,10 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     p->state = RT_DONE;
 }
 
+static uint64_t retired_calls;          // the calls of the processes that have ended
+
 static void retire(rt_proc_t *p) {
+    retired_calls += calls_of(p);
     if (p->stack) release_stack(p);
     procs[p->pid >> RT_PID_SHIFT].proc = NULL;
     free(p);
@@ -716,6 +731,7 @@ rt_value_t rt_join(rt_value_t pid, const char *site) {
         p->next_joiner = NULL;
         p->joining     = pid;
         p->state       = RT_JOINING;
+        p->at          = (uintptr_t)__builtin_return_address(0);
         to_scheduler(p);                        // until t ends, and finish wakes us
     }
     _Alignas(16) rt_value_t cells[4];
@@ -765,7 +781,8 @@ rt_value_t rt_kill(rt_value_t pid, const char *site) {
 
 static void events(void);
 
-void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp) {
+void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t entry) {
+    p->at = entry;
     if (gc_stress || in_use(p) >= p->gc_at) collect(p, frame, n, fp);
     if (p->slice_rest > 0) {                    // here before the slice's end, to collect
         p->reductions  = gc_stress && gc_stress < p->slice_rest ? gc_stress : p->slice_rest;
@@ -782,6 +799,7 @@ void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp
 
 void rt_yield(void) {
     rt_proc_t *p = rt_current;
+    p->at = (uintptr_t)__builtin_return_address(0);
     refill(p);
     enqueue(p);
     to_scheduler(p);
@@ -812,6 +830,7 @@ static alarm_t  *alarms;                // alarms[0] is the next due
 static uint64_t  nalarms, alarms_cap, alarms_set;
 static int       virtual_clock;
 static uint64_t  virtual_now;
+static uint64_t  started;               // when the program started, for :system
 
 static uint64_t now(void) {
     return virtual_clock ? virtual_now : rt_io_clock();
@@ -910,6 +929,7 @@ rt_value_t rt_sleep(rt_value_t ms, const char *site) {
     rt_proc_t *p = rt_current;
     set_alarm(due_in(ms, site), p->pid, NULL);
     p->state = RT_SLEEPING;
+    p->at    = (uintptr_t)__builtin_return_address(0);
     to_scheduler(p);                            // until ring wakes it
     return RT_NIL;
 }
@@ -1126,6 +1146,7 @@ static int idle(void) {
 
 #define DEV_TCP      3                  // a device's mode, after RT_FS_READ, _WRITE and _APPEND
 #define DEV_LISTEN   4
+#define DEV_SYSTEM   5                  // :system (below)
 #define ERR_NOTFOUND (-1)               // no such host, which has no errno
 #define ERR_TOOBIG   (-2)               // a line, count or value of HEAP_MAX or more
 #define ERR_BADJSON  (-3)
@@ -1162,9 +1183,14 @@ typedef struct rt_device {
     int               dead;             // closed: freed once the events in hand are done
     char             *out;              // written to it, and not yet taken by the socket...
     size_t            out_at, out_len, out_cap; // ...from out_at to out_len
+    struct snapshot  *snap;             // :system's processes, still to be sent...
+    uint64_t          snap_at, snap_len, snap_cap;  // ...from snap_at to snap_len
+    rt_value_t       *snap_devices;     // ...and the devices they own
+    uint64_t          snap_ndevices, snap_devices_cap;
 } rt_device_t;
 
 static rt_device_t *sockets;            // open sockets, and closing ones (nsockets counts them)
+static uint64_t     ndevices;           // open devices
 static rt_device_t *graveyard;          // closed sockets
 
 static uint64_t errno_name(int err) {
@@ -1214,6 +1240,10 @@ static rt_value_t string_in(uint64_t *space, const char *bytes, size_t len) {
     return (rt_value_t)box | RT_TAG_BOXED;
 }
 
+static int is_socket(const rt_device_t *d) {
+    return d->mode == DEV_TCP || d->mode == DEV_LISTEN;
+}
+
 static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site, const char *path, size_t len) {
     rt_device_t *d = must(calloc(1, sizeof *d));
     d->pid   = new_entry((entry_t){ .value = RT_NIL, .ok = 1, .device = d });
@@ -1232,7 +1262,8 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
     }
     d->next    = p->devices;
     p->devices = d;
-    if (mode >= DEV_TCP) {
+    ndevices++;
+    if (is_socket(d)) {
         d->next_socket = sockets;
         sockets        = d;
         nsockets++;
@@ -1249,11 +1280,13 @@ static void close_now(rt_device_t *d) {
         rt_lookup_free(d->lookup);
         d->lookup = NULL;
     }
-    if (d->mode < DEV_TCP) {
+    if (!is_socket(d)) {
         rt_json_free(&d->json);
         rt_sexp_free(&d->sexp);
         free(d->buf);
         free(d->path);
+        free(d->snap);
+        free(d->snap_devices);
         free(d);
         return;
     }
@@ -1284,6 +1317,7 @@ static void bury(void) {
 // written. The owner's list is the caller's to fix.
 static void shut(rt_device_t *d) {
     procs[d->pid >> RT_PID_SHIFT].device = NULL;
+    ndevices--;
     if (d->mode == DEV_TCP && d->out_len > d->out_at && !d->lookup) d->closing = 1;
     else                                                            close_now(d);   // (a host still looked up never connected)
 }
@@ -1318,13 +1352,17 @@ static void fail(rt_device_t *d, int err) {
     end_other(owner, reason);
 }
 
-// Sends d's owner (word f rest...); taking it reads on, if more says so.
-static void tell_list(rt_device_t *d, uint64_t word, rt_value_t rest, int more) {
+// Sends d's owner (sym f rest...); taking it reads on, if more says so.
+static void tell_sym(rt_device_t *d, rt_value_t sym, rt_value_t rest, int more) {
     _Alignas(16) rt_value_t cells[4];
-    rt_msg_t *m = new_msg(cons_at(cells, rt_symbol(RT_SYM_DEVICE + word), cons_at(cells + 2, d->pid, rest)));
+    rt_msg_t *m = new_msg(cons_at(cells, sym, cons_at(cells + 2, d->pid, rest)));
     m->device = more ? d->pid : 0;
     d->sent   = d->sent || more;
     deliver(procs[d->owner >> RT_PID_SHIFT].proc, m);
+}
+
+static void tell_list(rt_device_t *d, uint64_t word, rt_value_t rest, int more) {
+    tell_sym(d, rt_symbol(RT_SYM_DEVICE + word), rest, more);
 }
 
 static void tell(rt_device_t *d, uint64_t word, int more) {
@@ -1340,10 +1378,12 @@ static void tell_string(rt_device_t *d, uint64_t word, const char *bytes, size_t
 }
 
 // The device's first message: (:open f), or a listener's (:open l port).
+// :system's reads on too, so that one handed over in the middle of
+// sending its processes goes on to its new owner.
 static void tell_open(rt_device_t *d) {
     _Alignas(16) rt_value_t cell[2];
     if (d->mode == DEV_LISTEN) tell_list(d, RT_DEV_OPEN, cons_at(cell, rt_int(d->port), RT_NIL), 0);
-    else                       tell(d, RT_DEV_OPEN, d->mode == RT_FS_READ || d->mode == DEV_TCP);
+    else                       tell(d, RT_DEV_OPEN, d->mode == RT_FS_READ || d->mode == DEV_TCP || d->mode == DEV_SYSTEM);
 }
 
 // Takes n bytes of what's been read, counting the lines they end.
@@ -1567,10 +1607,16 @@ static int cut(rt_device_t *d) {
 
 // p, waiting again, took reader pid's message last: on to its next. A
 // file reads till it has one; a connection waits in select() for more.
+static void system_next(rt_device_t *d);
+
 static void read_on(rt_proc_t *p, rt_value_t pid) {
     rt_device_t *d = procs[pid >> RT_PID_SHIFT].device;
     if (!d || d->owner != p->pid) return;       // closed since, or handed over
     d->sent = 0;
+    if (d->mode == DEV_SYSTEM) {
+        system_next(d);
+        return;
+    }
     while (!cut(d) && d->mode != DEV_TCP) {
         if (fill(d) < 0) {
             fail(d, errno);
@@ -1625,9 +1671,15 @@ static void queue(rt_device_t *d, const char *bytes, size_t len) {
     d->out_len += len;
 }
 
+static void system_command(rt_device_t *d, rt_value_t msg);
+
 static void command(rt_device_t *d, rt_value_t msg) {
     rt_value_t word   = rt_is_cons(msg) ? rt_car(msg) : RT_NIL;
     int        reader = d->mode == RT_FS_READ || d->mode == DEV_TCP;
+    if (d->mode == DEV_SYSTEM) {
+        system_command(d, msg);
+        return;
+    }
     if (reader && word == rt_symbol(RT_SYM_DEVICE + RT_DEV_READ) && read_as(d, rt_cdr(msg))) return;
     if (d->mode == RT_FS_READ || d->mode == DEV_LISTEN || word != rt_symbol(RT_SYM_DEVICE + RT_DEV_WRITE)) {
         rt_dead_letter(msg, d->site);
@@ -1933,6 +1985,220 @@ static int socket_events(fd_set *in, fd_set *out) {
     return n > 0;
 }
 
+// --- :system -----------------------------------------------------------------
+//
+// (connect :system expr) forks expr with a device that tells about the
+// processes and the runtime (D171). Anyone may ask it; it answers its
+// owner. (:processes) is answered with (:process s info) for each live
+// process, in the order of their pids, then (:end s); (:process pid) with
+// (:process s info), or with (:ended s pid result) if pid has ended (a
+// device counts as a process that ended with (:ok ())); (:runtime) with
+// (:runtime s info). Anything else is a dead letter.
+//
+// (:processes) copies what it tells of every process at once, outside any
+// heap: with one core, nothing runs meanwhile, so it all describes one
+// moment. Then it sends them one at a time, as a reader does: the next
+// when its owner next waits in recv after taking the last (D158), so that
+// a million processes don't pile up in a mailbox. A (:processes) asked
+// before the last one's (:end s) is answered after it.
+//
+// Where a process is, :in, is the name of the compiled function it's in:
+// the receive function it waits in, the function it was about to enter
+// when it was preempted, the one that called join, sleep or yield or
+// asked :system, or the one it's to start at. The compiler emits every
+// function's entry and name (slight_functions).
+
+#define SYS(word) (RT_SYM_SYSTEM + RT_SYS_##word)
+
+typedef struct snapshot {
+    rt_value_t pid, parent, joining;    // pid 0: the end of a (:processes)
+    uintptr_t  in;                      // where it is in compiled code, or 0
+    uint64_t   mail, heap, calls;
+    uint64_t   devices, ndevices;       // its devices: snap_devices from devices
+    int        state, stack;            // an RT_SYS_ state; whether it holds a stack
+} snapshot_t;
+
+typedef struct {
+    uintptr_t   entry;
+    const char *name;
+} function_t;
+
+static function_t *functions;           // slight_functions, sorted by entry
+
+static int by_entry(const void *a, const void *b) {
+    uintptr_t x = ((const function_t *)a)->entry, y = ((const function_t *)b)->entry;
+    return x < y ? -1 : x > y;
+}
+
+// The name of the compiled function pc is in: the one with the last entry
+// at or before it. NULL if there's none.
+static const char *function_name(uintptr_t pc) {
+    uint64_t n = slight_function_count;
+    if (!functions) {
+        functions = must(malloc((n + 1) * sizeof *functions));
+        memcpy(functions, slight_functions, n * sizeof *functions);
+        qsort(functions, n, sizeof *functions, by_entry);
+    }
+    uint64_t lo = 0, hi = n;                    // the first entry after pc
+    while (lo < hi) {
+        uint64_t mid = lo + (hi - lo) / 2;
+        if (functions[mid].entry <= pc) lo = mid + 1;
+        else                            hi = mid;
+    }
+    return lo ? functions[lo - 1].name : NULL;
+}
+
+// Where p is (see above), or 0.
+static uintptr_t where(const rt_proc_t *p) {
+    return p->stack ? p->at : (uintptr_t)p->code;
+}
+
+static void *grow(void *array, uint64_t *cap, size_t size) {
+    *cap = *cap ? *cap * 2 : 16;
+    return must(realloc(array, *cap * size));
+}
+
+static snapshot_t take(rt_device_t *d, const rt_proc_t *p) {
+    static const int states[] = {
+        [RT_READY] = RT_SYS_READY, [RT_RUNNING] = RT_SYS_RUNNING, [RT_WAITING] = RT_SYS_RECV,
+        [RT_JOINING] = RT_SYS_JOINING, [RT_SLEEPING] = RT_SYS_SLEEPING,
+    };
+    snapshot_t r = {
+        .pid   = p->pid, .parent = p->parent, .joining = p->state == RT_JOINING ? p->joining : RT_NIL,
+        .in    = where(p), .heap = in_use(p), .calls = calls_of(p),
+        .state = states[p->state], .stack = p->stack != NULL, .devices = d->snap_ndevices,
+    };
+    for (rt_msg_t *m = p->mail; m; m = m->next) r.mail++;
+    for (rt_device_t *x = p->devices; x; x = x->next) {
+        if (d->snap_ndevices == d->snap_devices_cap) d->snap_devices = grow(d->snap_devices, &d->snap_devices_cap, sizeof *d->snap_devices);
+        d->snap_devices[d->snap_ndevices++] = x->pid;
+    }
+    r.ndevices = d->snap_ndevices - r.devices;
+    return r;
+}
+
+// (key value), in 4 words at *at, which it moves past them.
+static rt_value_t field(rt_value_t **at, uint64_t key, rt_value_t value) {
+    rt_value_t *c = *at;
+    *at += 4;
+    return cons_at(c, rt_symbol(key), cons_at(c + 2, value, RT_NIL));
+}
+
+// The list of xs[0..n), in 2n words at *at.
+static rt_value_t list_at(rt_value_t **at, const rt_value_t *xs, uint64_t n) {
+    rt_value_t list = RT_NIL;
+    for (uint64_t i = n; i > 0; i--, *at += 2) list = cons_at(*at, xs[i - 1], list);
+    return list;
+}
+
+// (:process s info).
+static void tell_process(rt_device_t *d, const snapshot_t *r, int more) {
+    const char *name  = r->in ? function_name(r->in) : NULL;
+    size_t      len   = name ? strlen(name) : 0;
+    uint64_t    words = (len / 8 + 7) & ~(uint64_t)1;     // the name's string, then cells
+    rt_value_t *space = must(malloc((words + 62 + 2 * r->ndevices) * sizeof *space)), *at = space + words;
+    rt_value_t  in    = name ? string_in(space, name, len) : RT_NIL;
+    rt_value_t  devices = RT_NIL;                          // they're newest first: the list is oldest first
+    for (uint64_t i = 0; i < r->ndevices; i++, at += 2) devices = cons_at(at, d->snap_devices[r->devices + i], devices);
+    rt_value_t fields[] = {
+        field(&at, SYS(PID), r->pid),
+        field(&at, SYS(PARENT), r->parent),
+        field(&at, SYS(STATE), rt_symbol(RT_SYM_SYSTEM + (uint64_t)r->state)),
+        field(&at, SYS(JOINING), r->joining),
+        field(&at, SYS(IN), in),
+        field(&at, SYS(MAIL), rt_int((int64_t)r->mail)),
+        field(&at, RT_SYM_FAULTS - 1 + RT_FAULT_HEAP, rt_int((int64_t)r->heap)),
+        field(&at, SYS(REDUCTIONS), rt_int((int64_t)r->calls)),
+        field(&at, RT_SYM_FAULTS - 1 + RT_FAULT_STACK, r->stack ? RT_TRUE : RT_FALSE),
+        field(&at, SYS(DEVICES), devices),
+    };
+    rt_value_t info = list_at(&at, fields, sizeof fields / sizeof *fields);
+    tell_sym(d, rt_symbol(SYS(PROCESS)), cons_at(at, info, RT_NIL), more);
+    free(space);
+}
+
+// (:runtime s info).
+static void tell_runtime(rt_device_t *d) {
+    uint64_t live = 0, ready = 0, heap = 0, stacks = 0, calls = retired_calls;
+    for (uint64_t i = 1; i <= nprocs; i++) {
+        const rt_proc_t *p = procs[i].proc;
+        if (!p) continue;
+        live++;
+        heap   += in_use(p);
+        stacks += p->stack != NULL;
+        calls  += calls_of(p);
+    }
+    for (const rt_proc_t *p = ready_head; p; p = p->next_ready) ready++;
+    _Alignas(16) rt_value_t space[9 * 6 + 2], *at = space;
+    rt_value_t fields[] = {
+        field(&at, SYS(PROCESSES), rt_int((int64_t)live)),
+        field(&at, SYS(PIDS), rt_int((int64_t)nprocs)),
+        field(&at, SYS(READY), rt_int((int64_t)ready)),
+        field(&at, SYS(TIMERS), rt_int((int64_t)nalarms)),
+        field(&at, SYS(DEVICES), rt_int((int64_t)ndevices)),
+        field(&at, RT_SYM_FAULTS - 1 + RT_FAULT_HEAP, rt_int((int64_t)heap)),
+        field(&at, SYS(STACKS), rt_int((int64_t)stacks)),
+        field(&at, SYS(CLOCK), rt_int((int64_t)((now() - started) / 1000000))),
+        field(&at, SYS(REDUCTIONS), rt_int((int64_t)calls)),
+    };
+    rt_value_t info = list_at(&at, fields, sizeof fields / sizeof *fields);
+    tell_sym(d, rt_symbol(SYS(RUNTIME)), cons_at(at, info, RT_NIL), 0);
+}
+
+// Not yet ended. (A process that has is RT_DONE only on its way out,
+// between finish and retire, when its exit record is written already.)
+static int alive(const rt_proc_t *p) {
+    return p && p->state != RT_DONE;
+}
+
+static void push_snapshot(rt_device_t *d, snapshot_t r) {
+    if (d->snap_len == d->snap_cap) d->snap = grow(d->snap, &d->snap_cap, sizeof *d->snap);
+    d->snap[d->snap_len++] = r;
+}
+
+// Sends the next of the processes still to be sent, if there are any.
+static void system_next(rt_device_t *d) {
+    if (d->snap_at == d->snap_len) return;
+    snapshot_t r    = d->snap[d->snap_at++];
+    int        more = d->snap_at < d->snap_len;
+    if (r.pid) tell_process(d, &r, 1);
+    else       tell_sym(d, rt_symbol(SYS(END)), RT_NIL, more);
+    if (!more) d->snap_at = d->snap_len = d->snap_ndevices = 0;
+}
+
+static void system_command(rt_device_t *d, rt_value_t msg) {
+    rt_value_t word = rt_is_cons(msg) ? rt_car(msg) : RT_NIL, args = rt_is_cons(msg) ? rt_cdr(msg) : RT_NIL;
+    rt_value_t pid  = rt_is_cons(args) && rt_cdr(args) == RT_NIL ? rt_car(args) : RT_NIL;
+    if (word == rt_symbol(SYS(PROCESSES)) && args == RT_NIL) {
+        for (uint64_t i = 1; i <= nprocs; i++) {
+            if (alive(procs[i].proc)) push_snapshot(d, take(d, procs[i].proc));
+        }
+        push_snapshot(d, (snapshot_t){ 0 });
+        if (!d->sent) system_next(d);               // else when the owner waits for the next
+    } else if (word == rt_symbol(SYS(PROCESS)) && (pid & RT_TAG_MASK) == RT_TAG_PID) {
+        const entry_t *e = &procs[pid >> RT_PID_SHIFT];
+        if (alive(e->proc)) {
+            uint64_t   mark = d->snap_ndevices;     // its devices go after the ones still to be sent
+            snapshot_t r    = take(d, e->proc);
+            tell_process(d, &r, 0);
+            d->snap_ndevices = mark;
+        } else {
+            _Alignas(16) rt_value_t cells[8];
+            tell_sym(d, rt_symbol(SYS(ENDED)), cons_at(cells + 4, pid, cons_at(cells + 6, result_at(cells, e), RT_NIL)), 0);
+        }
+    } else if (word == rt_symbol(SYS(RUNTIME)) && args == RT_NIL) {
+        tell_runtime(d);
+    } else {
+        rt_dead_letter(msg, d->site);
+    }
+}
+
+rt_value_t rt_connect_system(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
+    rt_value_t pid = rt_fork(code, n, values, site);
+    tell_open(new_device(procs[pid >> RT_PID_SHIFT].proc, DEV_SYSTEM, -1, site, NULL, 0));
+    return pid;
+}
+
 // --- the scheduler ------------------------------------------------------------
 
 void rt_run(void) {
@@ -1987,17 +2253,19 @@ int main(int argc, char **argv) {
     rt_io_start(&argc, &argv, &settings);       // replaying, the record's settings and arguments
     virtual_clock = settings.virtual_clock;
     sched         = settings.sched_seed;
+    started       = now();
     rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);
     p->args[0]   = arguments(p, argc, argv);
     rt_run();
     const entry_t *root = &procs[1];
     if (root->proc) {
+        const char *in = function_name(where(root->proc));
         fflush(stdout);
         if (root->proc->state == RT_JOINING) {
-            fprintf(stderr, "deadlock: the root process is waiting for #<pid %" PRIu64 "> to end, and nothing else can run\n",
-                    root->proc->joining >> RT_PID_SHIFT);
+            fprintf(stderr, "deadlock: the root process is waiting in %s for #<pid %" PRIu64 "> to end, and nothing else can run\n",
+                    in ? in : "?", root->proc->joining >> RT_PID_SHIFT);
         } else {
-            fputs("deadlock: the root process is waiting for a message, and nothing else can run\n", stderr);
+            fprintf(stderr, "deadlock: the root process is waiting in %s for a message, and nothing else can run\n", in ? in : "?");
         }
         return 1;
     }

@@ -1,0 +1,2 @@
+deadlock: the root process is waiting in ask-twice (recv at t/201-deadlock-where.slight:7:12) for a message, and nothing else can run
+exit: 1

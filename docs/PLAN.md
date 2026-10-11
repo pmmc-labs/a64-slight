@@ -468,12 +468,12 @@ becomes
   without a new special form, and may replace it. It changes the `recv`
   rule, so it's Stevan's decision.
 
-### After 13: patterns, tuples, replay (done, Oct 2026)
+### After 13: patterns, tuples, replay, `:system` (done, Oct 2026)
 
-Three of the changes Claude listed when Stevan asked what would make
+Four of the changes Claude listed when Stevan asked what would make
 slight more useful (BACKGROUND.md has Misty, which started the talk);
-Stevan picked these to do at once, and the rest are under "Later",
-below.
+Stevan picked three to do at once, and `:system` after them, and the
+rest are under "Later", below.
 
 - **`match`, and nested patterns for `recv`** (D168): one lowering of
   patterns to tests and bindings (`compiler/src/pattern.ts`), used by the
@@ -485,6 +485,11 @@ below.
 - **Recording and replaying a run, and a seeded schedule** (D170):
   `runtime/replay.c`, `SLIGHT_RECORD`, `SLIGHT_REPLAY` and
   `SLIGHT_SCHED`; `t/replay.sh` (`make replay`) and golden test 199.
+- **`:system`** (D171): a device that tells about every process (its
+  state, where it is, its mailbox, heap and reductions) and the runtime,
+  one process at a time; reductions counted per process; a table of
+  every compiled function's entry and name, which the deadlock message
+  uses too. Golden tests 200–202, and `examples/top.slight`.
 
 ### 14. HTTP in slight
 
@@ -588,11 +593,6 @@ with Stevan first.
   count of its users, as the BEAM's large binaries are. To settle: the
   size from which a string is shared, and how the count goes down when a
   heap is collected or freed.
-- **A `:system` device for looking at the runtime:** the processes,
-  their states, mailboxes and heap sizes, and the run queue, as
-  messages, so a `top`, and a supervisor's health checks, can be written
-  in slight. To settle: what can be asked, and whether any process may
-  ask.
 - **Distribution, as a library first:** a process that stands for one on
   another machine, forwarding messages as s-expressions over TCP (D155),
   as Termite Scheme does, with no runtime change until it's proved

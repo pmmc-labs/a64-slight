@@ -1,0 +1,151 @@
+; top: the processes of the program it's in, redrawn every second from
+; the :system device (D171): each one's pid, parent and state, the
+; messages waiting for it, its heap, how busy it's been since the frame
+; before, and where it is. q quits. Given a number, it draws that many
+; frames, one under another, and stops:
+;
+;     node bin/slightc.ts -o top examples/top.slight
+;     ./top                                       (q quits)
+;     SLIGHT_CLOCK=virtual ./top 3 </dev/null     (three frames, at once)
+;
+; It isn't a golden test: its numbers change whenever the prelude does.
+;
+; It watches processes of its own, to have something to show: a cruncher
+; that works in bursts, a pair playing ping-pong, a producer outrunning
+; its consumer, whose mailbox grows, and a hoarder, whose heap does. A
+; timer asks the device for each frame: its message goes to the device
+; when it's due, and the answers come to the top.
+
+; --- what it watches ----------------------------------------------------------
+
+(defun spin (n) (if (== n 0) :done (spin (dec n))))
+
+(defun cruncher ()
+    (spin 20000)
+    (sleep 300)
+    (cruncher))
+
+(defun pinger (other n)
+    (cond
+        ((== n 0)
+            (sleep 100)
+            (pinger other 50))
+        (#true
+            (send other (list :ping $$))
+            (recv (:pong (pinger other (dec n)))))))
+
+(defun ponger ()
+    (recv
+        ((:ping from)
+            (send from :pong)
+            (ponger))))
+
+(defun producer (to n)
+    (send to n)
+    (sleep 100)
+    (producer to (inc n)))
+
+(defun consumer ()
+    (recv
+        (_
+            (sleep 250)
+            (consumer))))
+
+(defun hoarder (xs)
+    (sleep 200)
+    (hoarder (cons (range 0 50) xs)))
+
+(defun keys (to)
+    (recv
+        (key
+            (send to key)
+            (keys to))))
+
+; --- top ----------------------------------------------------------------------
+
+(defun top (frames)
+    (let s (recv ((:open s) s)))
+    (ask s)
+    (between s frames () 0))
+
+(defun ask (s)
+    (after 1000 s (list :runtime))
+    (after 1000 s (list :processes)))
+
+; Between frames: last is the processes of the frame before, and calls the
+; runtime's reductions then, to see how busy each has been since.
+(defun between (s frames last calls)
+    (recv
+        ((:runtime s2 rt) (gather s frames last calls rt ()))
+        (("q" & _)        :quit)
+        (_                (between s frames last calls))))
+
+; The processes, one at a time; a q now makes this frame the last.
+(defun gather (s frames last calls rt ps)
+    (recv
+        ((:process s2 i) (gather s frames last calls rt (cons i ps)))
+        ((:end s2)       (frame s frames last calls rt (reverse ps)))
+        (("q" & _)       (gather s 1 last calls rt ps))
+        (_               (gather s frames last calls rt ps))))
+
+(defun frame (s frames last calls rt ps)
+    (let spent (- (lookup :reductions rt) calls))
+    (tty/write
+        (if (< frames 0) (concat \e "[H" \e "[2J") "")
+        "top at " (seconds (lookup :clock rt)) ":   processes " (lookup :processes rt)
+        "   ready " (lookup :ready rt) "   timers " (lookup :timers rt)
+        "   devices " (lookup :devices rt) "   heap " (lookup :heap rt) "\n\n"
+        "  PID PARENT STATE      MAIL     HEAP  BUSY  IN\n")
+    (map (lambda (i) (tty/write (row i last spent) "\n")) ps)
+    (cond
+        ((== frames 1) :done)
+        (#true
+            (tty/write (if (< frames 0) "" "\n"))
+            (ask s)
+            (between s (dec frames) ps (lookup :reductions rt)))))
+
+(defun row (i last spent)
+    (let pid (lookup :pid i))
+    (let in (lookup :in i))
+    (concat
+        (pad-start (pid-number pid) 5 " ") " "
+        (pad-start (pid-number (lookup :parent i)) 6 " ") " "
+        (pad-end (symbol->string (lookup :state i)) 9 " ")
+        (format-num (lookup :mail i) 6)
+        (format-num (lookup :heap i) 9)
+        (format-num (busy (- (lookup :reductions i) (calls-before pid last)) spent) 5) "%  "
+        (if (eq? in ()) "?" in)))
+
+; a pid's number, as text: "" for none (the root's parent)
+(defun pid-number (p)
+    (match p
+        (() "")
+        (_
+            (let s (concat p))
+            (substring s 6 (dec (str-len s))))))
+
+(defun calls-before (pid last)
+    (match (find (lambda (i) (eq? (lookup :pid i) pid)) last)
+        (() 0)
+        (i  (lookup :reductions i))))
+
+(defun busy (calls spent)
+    (if (== spent 0) 0 (div (* 100 calls) spent)))
+
+(defun seconds (ms)
+    (concat (div ms 1000) "." (div (% ms 1000) 100) " s"))
+
+; --- the program --------------------------------------------------------------
+
+(let frames
+    (match @ARGV
+        ((n) (match (string->int n) (#false -1) (k k)))
+        (_   -1)))
+(let pong (fork (ponger)))
+(let sink (fork (consumer)))
+(let workers (list (fork (cruncher)) (fork (pinger pong 50)) pong (fork (producer sink 0)) sink (fork (hoarder ()))))
+(let watcher (connect :system (top frames)))
+(let keyboard (connect :keypress (keys watcher)))
+(join watcher)
+(map kill (cons keyboard workers))
+:bye

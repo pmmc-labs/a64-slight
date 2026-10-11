@@ -213,6 +213,19 @@ test('every function checks the stack and its reductions on entry', () => {
     }
     // the parameters are saved before rt_preempt could clobber x0..x7
     assert.ok(entry.indexOf('// b') < entry.indexOf('RT_PROC_REDUCTIONS'));
+    // rt_preempt is told the function's entry, for :system (D171)
+    assert.match(asm, /LOADADDR x4, fn_f\n {4}bl {3}rt_preempt\n/);
+});
+
+test('every function is in the table of entries and names, the top level too', () => {
+    const asm   = compile('(defun f (a) a) (let g (lambda (x) x)) (f 1)');
+    const table = asm.slice(asm.indexOf('slight_function_count:'));
+    const pairs = [...table.matchAll(/^ {4}\.quad (\S+), (\S+)$/gm)];
+    const entry = new Map(pairs.map((m) => [asm.match(new RegExp(`^${m[2]}:\\n {4}\\.asciz "(.*)"$`, 'm'))?.[1], m[1]]));
+    assert.match(table, new RegExp(`^ {4}\\.quad ${pairs.length}$`, 'm'));
+    assert.equal(entry.get('f'), 'fn_f');
+    assert.match(entry.get('lambda at test.slight:1:24') ?? '', /^Llambda_\d+$/);
+    assert.equal(entry.get('the top level'), 'slight_main');
 });
 
 test('function labels spell out everything but letters and digits', () => {
@@ -555,11 +568,16 @@ test('join, monitor, kill and raise are builtins in the runtime, and can be valu
 test('connect is a fork whose process gets the keys, from :keypress', () => {
     assert.match(compile('(defun f (n) n) (let n 1) (connect :keypress (f n))'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_connect\n/);
     assert.match(compile('(connect :keypress 1)'), /\.asciz "connect at test\.slight:1:1"/);
-    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can be :keypress, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not (quote x)");
+    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not (quote x)");
     fails('(connect :keypress)', 'test.slight:1:1: connect takes 2 arguments, not 1');
     fails('(connect)', 'test.slight:1:1: connect takes 2 arguments, not 0');
     fails('(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (connect :keypress (list a b c d e f g h i))',
           'test.slight:1:91: a connect can take at most 8 locals into the new process, and this one uses 9');
+});
+
+test('connect :system is a fork whose process gets the :system device', () => {
+    assert.match(compile('(defun f (n) n) (let n 1) (connect :system (f n))'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_connect_system\n/);
+    fails('(connect :system)', 'test.slight:1:1: connect takes 2 arguments, not 1');
 });
 
 test('tty/screen/rows and tty/screen/cols are builtins in the runtime', () => {
@@ -586,7 +604,7 @@ test('connect to a file evaluates the path in the parent, and passes it and the 
     assert.match(compile('(connect :fs/read "a" 1)'), /mov {2}x5, #RT_FS_READ\n/);
     assert.match(compile('(connect :fs/append "a" 1)'), /mov {2}x5, #RT_FS_APPEND\n/);
     fails('(connect :fs/read "a")', 'test.slight:1:1: connect takes 3 arguments, not 2');
-    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not (quote fs)");
+    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not (quote fs)");
 });
 
 test('disconnect is a builtin in the runtime', () => {

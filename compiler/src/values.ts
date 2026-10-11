@@ -42,8 +42,15 @@ export const JSON_WORDS: readonly string[] = ['null', 'object'];
 // What the s-expression reader makes, in RT_SEXP_ order.
 export const SEXP_WORDS: readonly string[] = ['symbol', 'quote'];
 
+// What :system is asked and answers with, in RT_SYS_ order (D171).
+export const SYSTEM_WORDS: readonly string[] = [
+    'processes', 'process', 'runtime', 'end', 'ended', 'pid', 'parent', 'state', 'in', 'mail', 'reductions',
+    'devices', 'joining', 'running', 'ready', 'recv', 'sleeping', 'pids', 'timers', 'stacks', 'clock',
+];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
+    ...SYSTEM_WORDS,
 ];

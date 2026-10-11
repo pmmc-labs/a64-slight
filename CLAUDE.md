@@ -62,15 +62,18 @@ D168). Tuples: immutable, fixed in size, an element in one step,
 printed `#(1 2)` (`runtime/tuples.c`, D169). A run can be recorded and
 replayed exactly (`SLIGHT_RECORD`, `SLIGHT_REPLAY`: everything from the
 world goes through `runtime/replay.c`), and tried under seeded orders
-(`SLIGHT_SCHED`) (D170).
+(`SLIGHT_SCHED`) (D170). `connect :system` opens a device that tells
+about every process (its state, the function it's in, its mailbox, heap
+and reductions) and the runtime, from a table of function names the
+compiler emits, which the deadlock message uses too (D171).
 A second target, x86-64: the code generator emits through a target
 interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 `slightc --target x86_64` builds for it (D145, D146). Strings are bytes;
 beside the byte builtins, the `utf8/` ones count characters (a bad byte
 is a character of its own, as in Go), with `ord` and `chr` in the
 prelude, and `string->float` (D148).
-`examples/` has eighteen example programs (all but `ping-pong-tournament`
-are golden tests); new ones are written when they're wanted (D149).
+`examples/` has nineteen example programs (all but `ping-pong-tournament`
+and `top` are golden tests); new ones are written when they're wanted (D149).
 Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
@@ -188,7 +191,7 @@ to get them back from git (`3fd71e0`).
 | `bin/slightc.ts` | The driver: read and expand (with the files it includes), compile, write `out.S`, link with clang |
 | `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `pattern.ts` (`match`'s and `recv`'s patterns, as tests and bindings), `split.ts` (a `recv` anywhere a tail call could go, made the whole body of a generated receive function), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
-| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, for recording and replaying a run) |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, for recording and replaying a run) |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include, JSONTestSuite's among them; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |

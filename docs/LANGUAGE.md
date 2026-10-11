@@ -49,10 +49,12 @@ message or for another process, with nothing left that could wake it,
 never ends; when that's the root, the program says so on stderr and
 exits 1:
 
-    deadlock: the root process is waiting for a message, and nothing
-    else can run
+    deadlock: the root process is waiting in wait-forever for a
+    message, and nothing else can run
 
-(on one line; the other kind is `... waiting for #<pid 2> to end, ...`).
+(on one line; the other kind is `... waiting in the top level for #<pid
+2> to end, ...`). It names the function the root waits in, as `:system`
+does (under Devices).
 
 These also go to stderr, as they happen:
 
@@ -335,6 +337,7 @@ function that waits in `recv`, which is the usual way to start an actor:
     (connect :keypress expr)
     (connect :fs/read path expr)
     (connect :tcp "host:port" expr)
+    (connect :system expr)
     (connect device expr)
 
 A `fork` whose new process is also connected to a source of messages.
@@ -831,6 +834,72 @@ blank line, so none of the body is cut as lines:
 
 To `join`, `monitor` and `kill`, a device is a process that has ended
 with `(:ok ())`.
+
+### The system
+
+    (connect :system expr)
+
+A device that tells about the program's processes and the runtime
+(D171). Any process may connect to it, and anyone may ask it; it
+answers its owner, whose first message is `(:open s)`. It's asked:
+
+- `(:processes)`: it answers with `(:process s info)` for each process
+  that hasn't ended, in the order of their pids, and then `(:end s)`.
+  It copies what it tells of them all at once, so that it all describes
+  one moment: nothing runs in between. Then it sends them one at a
+  time, as a file sends lines: the next when the owner, having taken
+  the last, waits in `recv` again; so a million processes never pile up
+  in a mailbox. A `(:processes)` asked before the last one's `(:end s)`
+  is answered after it.
+- `(:process pid)`: it answers at once, with `(:process s info)`, or
+  `(:ended s pid result)` if `pid` has ended, `result` being what `join`
+  would give. A device is a process that ended with `(:ok ())`.
+- `(:runtime)`: it answers at once, with `(:runtime s info)`.
+
+Anything else is a dead letter. An `info` is a list of `(key value)`,
+which `lookup` reads; more keys may come. A process's:
+
+- `(:pid p)`, and `(:parent q)`, the process that forked it (`()` for
+  the root).
+- `(:state st)`: `:running` (the one asking, unless a timer asked),
+  `:ready` (in the run queue), `:recv` (waiting for a message),
+  `:joining` or `:sleeping`.
+- `(:joining p)`: the process it waits for in `join`, or `()`.
+- `(:in name)`: the function it's in, as a string: the receive function
+  it waits in; the one that called `join`, `sleep`, `yield`, or `send`
+  to a device; the one it was entering when it was preempted; or the one
+  it starts in. A `recv` in the middle of a function waits in a receive
+  function of its own, named for both: `"server (recv at
+  prog.slight:7:12)"`. The top level is `"the top level"`, a `fork`'s
+  body `"fork at prog.slight:3:9"` (a `connect`'s, `"connect at ..."`),
+  and a lambda `"lambda at ..."`.
+- `(:mail n)`: the messages waiting for it.
+- `(:heap bytes)`: its heap in use.
+- `(:reductions n)`: the calls it has made (under Scheduling).
+- `(:stack held)`: whether it holds a stack (waiting in `recv`, it gives
+  its back).
+- `(:devices pids)`: the devices it owns.
+
+The runtime's: `(:processes n)` that haven't ended; `(:pids n)` made,
+processes and devices, ended or not; `(:ready n)` in the run queue;
+`(:timers n)` pending; `(:devices n)` open; `(:heap bytes)` in use by
+all the processes; `(:stacks n)` held; `(:clock ms)` since the program
+started; and `(:reductions n)`, made by every process, ended or not.
+
+A timer's message to the device is answered when it's due, so this
+shows where every process is, once a second (`examples/top.slight` is a
+fuller `top`):
+
+    (defun every-second (s)
+        (after 1000 s (list :processes))
+        (show s ()))
+
+    (defun show (s ins)
+        (recv
+            ((:process s i) (show s (cons (lookup :in i) ins)))
+            ((:end s)       (pprint (reverse ins)) (every-second s))))
+
+    (connect :system (recv ((:open s) (every-second s))))
 
 
 ## Builtins

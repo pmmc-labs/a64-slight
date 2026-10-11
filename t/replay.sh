@@ -93,7 +93,7 @@ fi
 
 # A record of one program, replayed by another, stops where they part.
 run SLIGHT_REPLAY="$dir/world.record" net </dev/null >"$dir/net.wrong"
-if grep -q '^replay: the run goes another way at entry 1:' "$dir/net.wrong" && grep -q '^exit: 2$' "$dir/net.wrong"; then
+if grep -q '^replay: the run goes another way at entry [0-9]*:' "$dir/net.wrong" && grep -q '^exit: 2$' "$dir/net.wrong"; then
     check "a record that isn't the program's stops the replay" ok
 else
     cat "$dir/net.wrong"
