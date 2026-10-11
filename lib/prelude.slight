@@ -24,9 +24,9 @@
 
 ; (f acc x) for each x, from the left.
 (defun fold/l (acc f xs)
-    (cond
-        ((nil? xs) acc)
-        (#true     (fold/l (f acc (car xs)) f (cdr xs)))))
+    (match xs
+        (()         acc)
+        ((x & rest) (fold/l (f acc x) f rest))))
 
 ; (f x acc) for each x, from the right.
 (defun fold/r (acc f xs)
@@ -77,23 +77,20 @@
 
 ; The element at index i, or () if there isn't one.
 (defun nth (i xs)
-    (cond
-        ((nil? xs) ())
-        ((== i 0)  (car xs))
-        (#true     (nth (- i 1) (cdr xs)))))
+    (match xs
+        (()         ())
+        ((x & rest) (if (== i 0) x (nth (- i 1) rest)))))
 
 ; The first element for which (f x) is #true, or ().
 (defun find (f xs)
-    (cond
-        ((nil? xs)   ())
-        ((f (car xs)) (car xs))
-        (#true       (find f (cdr xs)))))
+    (match xs
+        (()         ())
+        ((x & rest) (if (f x) x (find f rest)))))
 
 (defun member? (x xs)
-    (cond
-        ((nil? xs)         #false)
-        ((eq? x (car xs))  #true)
-        (#true             (member? x (cdr xs)))))
+    (match xs
+        (()         #false)
+        ((y & rest) (or (eq? x y) (member? x rest)))))
 
 ; start, start + 1, ... up to but not including end.
 (defun range (start end) (range-loop (- end 1) start ()))
@@ -115,10 +112,9 @@
 
 ; The value for k, or :not-found.
 (defun lookup (k table)
-    (cond
-        ((nil? table)            :not-found)
-        ((eq? k (car (car table))) (cadr (car table)))
-        (#true                   (lookup k (cdr table)))))
+    (match table
+        (()                   :not-found)
+        (((key value) & rest) (if (eq? k key) value (lookup k rest)))))
 
 ; --- strings ------------------------------------------------------------------
 

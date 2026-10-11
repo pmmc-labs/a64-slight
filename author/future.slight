@@ -14,10 +14,9 @@
 (defun ask? ($to @msg)
     (let $f (fork (Future)))
     (send $to (append @msg (list $f)))
-    (let result (join $f))
-    (case (car result)
-        (:ok    (cadr result))
-        (:error (raise (cadr result)))))
+    (match (join $f)
+        ((:ok    value)  value)
+        ((:error reason) (raise reason))))
 
 (let calc (fork (Calculator)))
 

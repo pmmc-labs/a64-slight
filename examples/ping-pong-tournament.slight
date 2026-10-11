@@ -11,8 +11,9 @@
 ;
 ; Each game is a process that forks its two players, waits for the
 ; :START gate, serves, sleeps for D ms, stops them, and collects their
-; counts. The root starts the games, joins them all, says where a game's
-; counts differ from the one before by more than one, and adds them up.
+; counts, waiting in the middle of its function each time (D167). The root
+; starts the games, joins them all, says where a game's counts differ from
+; the one before by more than one, and adds them up.
 ; N and D come from @ARGV, through string->int, and default to 10 and
 ; 100. A game is forked by name: a function that waits isn't a value.
 
@@ -30,28 +31,18 @@
         ((:EXIT reply-to)
             (send reply-to (list :Final counter)))))
 
+; wait for the :START gate, serve, let them play for duration ms, stop
+; them, then collect the two finals, labelled in the order they arrive
 (defun ping-pong (duration)
     (let p1 (fork (player 0)))
     (let p2 (fork (player 0)))
-    (ping-pong-start p1 p2 duration))
-
-; wait for the :START gate, serve, let them play for duration ms, stop
-; them, then collect the two finals, labelled in the order they arrive
-(defun ping-pong-start (p1 p2 duration)
-    (recv
-        (start
-            (send p1 (list :Serve p2))
-            (sleep duration)
-            (send p1 (list :EXIT $$))
-            (send p2 (list :EXIT $$))
-            (ping-pong-finals p1 p2 ()))))
-
-(defun ping-pong-finals (p1 p2 got)
-    (recv
-        (final
-            (cond
-                ((nil? got) (ping-pong-finals p1 p2 final))
-                (#true      (list (list p1 got) (list p2 final)))))))
+    (recv)
+    (send p1 (list :Serve p2))
+    (sleep duration)
+    (send p1 (list :EXIT $$))
+    (send p2 (list :EXIT $$))
+    (let got (recv))
+    (list (list p1 got) (list p2 (recv))))
 
 (defun setup-tournament (n duration)
     (cond
@@ -64,30 +55,24 @@
 (defun await-results (pids)
     (map (lambda (pid) (cadr (join pid))) pids))
 
-(defun converged? (lhs rhs tolerance)
-    (<= (abs (- (cadr lhs) (cadr rhs))) tolerance))
+; a game's two counts, from its result: ((p1 (:Final a)) (p2 (:Final b)))
+(defun counts (r)
+    (match r
+        (((_ (:Final a)) (_ (:Final b))) (list a b))))
 
 (defun check-results (results)
     (fold/l (car results) (lambda (acc r)
-        (let acc-p1 (car  acc))
-        (let acc-p2 (cadr acc))
-        (let r-p1   (car  r))
-        (let r-p2   (cadr r))
-        (cond
-            ((and (converged? (cadr acc-p1) (cadr r-p1) 1)
-                  (converged? (cadr acc-p2) (cadr r-p2) 1))
-                acc)
-            (#true
-                (tty/write "... results diverged from " acc " to " r \n)
-                r)))
+        (match (list (counts acc) (counts r))
+            (((a1 a2) (b1 b2))
+                (cond
+                    ((and (<= (abs (- a1 b1)) 1) (<= (abs (- a2 b2)) 1)) acc)
+                    (#true
+                        (tty/write "... results diverged from " acc " to " r \n)
+                        r)))))
         (cdr results)))
 
 (defun calculate-totals (results)
-    (fold/l 0 (lambda (acc r)
-        (+ acc
-            (+ (cadr (cadr (car  r)))
-               (cadr (cadr (cadr r))))))
-        results))
+    (fold/l 0 (lambda (acc r) (+ acc (sum (counts r)))) results))
 
 (let num-games     (if (nil? @ARGV) 10  (string->int (car  @ARGV))))
 (let game-duration (if (nil? @ARGV) 100 (string->int (cadr @ARGV))))

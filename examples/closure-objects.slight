@@ -1,29 +1,29 @@
 ; closure-objects: objects are closures over their fields, answering
-; messages. A Point hands what it doesn't know to its Object, its super;
-; each object is given its id when it's made; and a message no object
-; knows is answered with (method-not-found m).
+; messages, which they match on. A Point hands what it doesn't know to its
+; Object, its super; each object is given its id when it's made; and a
+; message no object knows is answered with (method-not-found m).
 
 (defun Object (oid)
     (lambda (m)
-        (cond
-            ((eq? m :oid)   oid)
-            ((eq? m :class) Object)
-            ((eq? m :===)   (lambda (o) (eq? oid (o :oid))))
-            (#true          (list :method-not-found m)))))
+        (match m
+            (:oid   oid)
+            (:class Object)
+            (:===   (lambda (o) (eq? oid (o :oid))))
+            (_      (list :method-not-found m)))))
 
 (defun Point (oid x y)
     (let super (Object oid))
     (lambda (m)
-        (cond
-            ((eq? m :class)  Point)
-            ((eq? m :x)      x)
-            ((eq? m :y)      y)
-            ((eq? m :+)      (lambda (o) (Point (list oid :+ (o :oid)) (+ x (o :x)) (+ y (o :y)))))
-            ((eq? m :-)      (lambda (o) (Point (list oid :- (o :oid)) (- x (o :x)) (- y (o :y)))))
-            ((eq? m :==)     (lambda (o) (and (== x (o :x)) (== y (o :y)))))
-            ((eq? m :!=)     (lambda (o) (or  (!= x (o :x)) (!= y (o :y)))))
-            ((eq? m :to-str) (concat "Point:" x ":" y))
-            (#true           (super m)))))
+        (match m
+            (:class  Point)
+            (:x      x)
+            (:y      y)
+            (:+      (lambda (o) (Point (list oid :+ (o :oid)) (+ x (o :x)) (+ y (o :y)))))
+            (:-      (lambda (o) (Point (list oid :- (o :oid)) (- x (o :x)) (- y (o :y)))))
+            (:==     (lambda (o) (and (== x (o :x)) (== y (o :y)))))
+            (:!=     (lambda (o) (or  (!= x (o :x)) (!= y (o :y)))))
+            (:to-str (concat "Point:" x ":" y))
+            (_       (super m)))))
 
 (let obj1 (Object 1))
 (let obj2 (Object 2))

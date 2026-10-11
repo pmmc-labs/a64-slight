@@ -29,16 +29,11 @@
     (cond
         ((>= count 0)
             (send pid (list :PING 0))
-            (await-ping pid count))
+            (recv ((:COMPLETED n from) (tty/write "COMPLETED " n " at " from \n)))
+            (send-ping pid (- count 1)))
         (#true
             (send pid (list :EXIT 0))
             :done)))
-
-(defun await-ping (pid count)
-    (recv
-        ((:COMPLETED n from)
-            (tty/write "COMPLETED " n " at " from \n)
-            (send-ping pid (- count 1)))))
 
 (let self $$)
 (let actor-count (if (nil? @ARGV) 1000 (string->int (car  @ARGV))))

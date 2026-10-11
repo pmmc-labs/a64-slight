@@ -12,11 +12,11 @@
 (defun run-tests (tests) (run-tests-loop tests 0 0))
 
 (defun run-tests-loop (tests n failed)
-    (cond
-        ((nil? tests) (done-testing n failed))
-        (#true
-            (let counts ((car tests) n failed))
-            (run-tests-loop (cdr tests) (car counts) (cadr counts)))))
+    (match tests
+        (()            (done-testing n failed))
+        ((test & rest)
+            (match (test n failed)
+                ((n failed) (run-tests-loop rest n failed))))))
 
 (defun done-testing (n failed)
     (tty/write "1.." n \n)

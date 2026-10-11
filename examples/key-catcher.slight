@@ -5,26 +5,25 @@
 ; key: Ctrl-C ends it.
 ;
 ; The keyboard is one receive function, connected to :keypress, with the
-; colour as its state. A key is (key mods...): the arrows are names such
-; as :ArrowUp, and the digits are one-character strings ("1" rather than
-; 1), so pick-color reads them with string->int.
+; colour as its state. A key is (key mods...), taken apart by recv's
+; pattern and then matched: the arrows are names such as :ArrowUp, and the
+; digits are one-character strings ("1" rather than 1), so pick-color
+; reads them with string->int.
 
 (defun keyboard (color)
     (recv
-        (key
-            (let mods (cdr key))
-            (cond
-                ((nil? mods)              ())
-                ((eq? (car mods) :shift) (tty/write \e "[" color "m " \e "[D"))
-                ((eq? (car mods) :alt)   (tty/write \e "[49m " \e "[D"))
-                (#true                    ()))
-            (cond
-                ((eq? (car key) :ArrowUp)    (tty/write \e "[A"))
-                ((eq? (car key) :ArrowDown)  (tty/write \e "[B"))
-                ((eq? (car key) :ArrowRight) (tty/write \e "[C"))
-                ((eq? (car key) :ArrowLeft)  (tty/write \e "[D"))
-                (#true                       ()))
-            (keyboard (pick-color (car key) color)))))
+        ((key & mods)
+            (match mods
+                ((:shift & _) (tty/write \e "[" color "m " \e "[D"))
+                ((:alt & _)   (tty/write \e "[49m " \e "[D"))
+                (_            ()))
+            (match key
+                (:ArrowUp    (tty/write \e "[A"))
+                (:ArrowDown  (tty/write \e "[B"))
+                (:ArrowRight (tty/write \e "[C"))
+                (:ArrowLeft  (tty/write \e "[D"))
+                (_           ()))
+            (keyboard (pick-color key color)))))
 
 ; a digit from 1 to 7 picks a colour (41 to 47); any other key keeps it
 (defun pick-color (key color)

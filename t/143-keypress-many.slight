@@ -5,11 +5,11 @@
 
 (defun listener (name)
     (recv
-        (key
-            (pprint (list name (car key)))
-            (cond
-                ((eq? (car key) "q") name)
-                (#true               (listener name))))))
+        ((key & _)
+            (pprint (list name key))
+            (match key
+                ("q" name)
+                (_   (listener name))))))
 
 (fork (do (sleep 1) (pprint :slept)))
 (let one (connect :keypress (listener :one)))

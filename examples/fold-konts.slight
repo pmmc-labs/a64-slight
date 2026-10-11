@@ -4,14 +4,14 @@
 ; stack as the list is long.
 
 (defun hand-written-foldr (init f seq)
-    (cond
-        ((nil? seq) init)
-        (#true      (f (car seq) (hand-written-foldr init f (cdr seq))))))
+    (match seq
+        (()         init)
+        ((x & rest) (f x (hand-written-foldr init f rest)))))
 
 (defun old-map (f lst)
-    (cond
-        ((nil? lst) ())
-        (#true      (cons (f (car lst)) (old-map f (cdr lst))))))
+    (match lst
+        (()         ())
+        ((x & rest) (cons (f x) (old-map f rest)))))
 
 ; 0 to 9, 144 times
 (let the-big-list (fold/l () (lambda (acc i) (append (range 0 10) acc)) (range 0 144)))

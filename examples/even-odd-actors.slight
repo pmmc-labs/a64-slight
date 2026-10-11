@@ -1,37 +1,35 @@
 ; even-odd-actors: two processes decide whether a number is even by
 ; passing it back and forth, counting down, until one of them reaches 0
 ; and tells the root. Each is a receive function that prints what it got
-; and passes the count on; anything else (:STOP) ends it. The root waits
-; for the four answers in a receive function of its own (collect-wait),
-; then stops both.
+; and matches it: a count of 0 is the answer, and any other is passed on;
+; anything else (:STOP) ends it. The root takes the four answers as they
+; come, then stops both.
 
 (defun is-it-even? (reply-to)
     (recv
         (msg
             (pprint (list :is-it-even? :got msg))
-            (cond
-                ((eq? (car msg) :IS-EVEN?)
-                    (cond
-                        ((== (cadr msg) 0)
-                            (send reply-to (list :IT-IS-EVEN!)))
-                        (#true
-                            (send (caddr msg) (list :IS-ODD? (- (cadr msg) 1) $$))))
+            (match msg
+                ((:IS-EVEN? 0 _)
+                    (send reply-to (list :IT-IS-EVEN!))
                     (is-it-even? reply-to))
-                (#true ())))))
+                ((:IS-EVEN? n peer)
+                    (send peer (list :IS-ODD? (- n 1) $$))
+                    (is-it-even? reply-to))
+                (_ ())))))
 
 (defun is-it-odd? (reply-to)
     (recv
         (msg
             (pprint (list :is-it-odd? :got msg))
-            (cond
-                ((eq? (car msg) :IS-ODD?)
-                    (cond
-                        ((== (cadr msg) 0)
-                            (send reply-to (list :IT-IS-ODD!)))
-                        (#true
-                            (send (caddr msg) (list :IS-EVEN? (- (cadr msg) 1) $$))))
+            (match msg
+                ((:IS-ODD? 0 _)
+                    (send reply-to (list :IT-IS-ODD!))
                     (is-it-odd? reply-to))
-                (#true ())))))
+                ((:IS-ODD? n peer)
+                    (send peer (list :IS-EVEN? (- n 1) $$))
+                    (is-it-odd? reply-to))
+                (_ ())))))
 
 ; the root: wait for n answers, print them, and stop both actors
 (defun collect (n answers is-even? is-odd?)
@@ -40,11 +38,7 @@
             (pprint (reverse answers))
             (send is-even? (list :STOP))
             (send is-odd?  (list :STOP)))
-        (#true (collect-wait n answers is-even? is-odd?))))
-
-(defun collect-wait (n answers is-even? is-odd?)
-    (recv
-        (answer (collect (- n 1) (cons answer answers) is-even? is-odd?))))
+        (#true (collect (- n 1) (cons (recv) answers) is-even? is-odd?))))
 
 (let $reply-to $$)
 

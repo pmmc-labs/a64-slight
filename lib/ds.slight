@@ -41,7 +41,10 @@
 
 (defun ask/via (box pid msg)
     (send pid (append msg (list box)))
-    (ask/answer pid (cadr (join box))))
+    (match (join box)
+        ((:ok (:reply v))      v)
+        ((:ok (:ended result)) (raise (list :ended pid result)))
+        ((:ok (:timeout))      (raise (list :timeout pid)))))
 
 ; The box: watches pid, and ends with the first thing it hears.
 (defun ask/box (pid)
@@ -50,12 +53,6 @@
         ((:reply v)       (list :reply v))
         ((:exit p result) (list :ended result))
         (:timeout         (list :timeout))))
-
-(defun ask/answer (pid heard)
-    (cond
-        ((eq? (car heard) :reply) (cadr heard))
-        ((eq? (car heard) :ended) (raise (list :ended pid (cadr heard))))
-        (#true                    (raise (list :timeout pid)))))
 
 ; --- cell: one value ---------------------------------------------------
 
@@ -112,10 +109,9 @@
 (defun dict/without (k table) (remove (lambda (kv) (eq? (car kv) k)) table))
 
 (defun dict/value (k table default)
-    (let v (lookup k table))
-    (cond
-        ((eq? v :not-found) default)
-        (#true              v)))
+    (match (lookup k table)
+        (:not-found default)
+        (v          v)))
 
 ; --- queue: first in, first out ----------------------------------------
 
@@ -136,10 +132,10 @@
         ((:size to) (reply to (+ (length front) (length back))) (queue/loop front back))))
 
 (defun queue/pop-from (front back to)
-    (cond
-        ((cons? front) (reply to (car front)) (queue/loop (cdr front) back))
-        ((cons? back)  (queue/pop-from (reverse back) () to))
-        (#true         (reply to :empty) (queue/loop () ()))))
+    (match (list front back)
+        (((x & rest) _) (reply to x) (queue/loop rest back))
+        ((() ())        (reply to :empty) (queue/loop () ()))
+        ((() _)         (queue/pop-from (reverse back) () to))))
 
 ; --- channel: take waits for an item -----------------------------------
 
@@ -154,10 +150,10 @@
 (defun channel/loop (items takers)
     (recv
         ((:put x)
-            (cond
-                ((nil? takers) (channel/loop (append items (list x)) ()))
-                (#true         (reply (car takers) x) (channel/loop items (cdr takers)))))
+            (match takers
+                (()               (channel/loop (append items (list x)) ()))
+                ((taker & others) (reply taker x) (channel/loop items others))))
         ((:take to)
-            (cond
-                ((nil? items)  (channel/loop () (append takers (list to))))
-                (#true         (reply to (car items)) (channel/loop (cdr items) takers))))))
+            (match items
+                (()          (channel/loop () (append takers (list to))))
+                ((x & rest)  (reply to x) (channel/loop rest takers))))))

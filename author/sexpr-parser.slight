@@ -1,69 +1,42 @@
 
 
 (defun tokenize-atom (chars tokens acc)
-    (if (nil? chars)
-        (tokenizer chars (cons acc tokens))
-        (case (car chars)
-            (" "   (tokenizer (cdr chars) (cons acc tokens)))
-            ("("   (tokenizer chars (cons acc tokens)))
-            (")"   (tokenizer chars (cons acc tokens)))
-            (#true (tokenize-atom (cdr chars) tokens (~ acc (car chars))))
-        )
-    )
-)
+    (match chars
+        (()           (tokenizer chars (cons acc tokens)))
+        ((" " & rest) (tokenizer rest (cons acc tokens)))
+        (("(" & _)    (tokenizer chars (cons acc tokens)))
+        ((")" & _)    (tokenizer chars (cons acc tokens)))
+        ((c & rest)   (tokenize-atom rest tokens (~ acc c)))))
 
 (defun tokenizer (chars tokens)
-    (if (nil? chars) (reverse tokens)
-        (case (car chars)
-            (" "   (tokenizer (cdr chars) tokens))
-            ("("   (tokenizer (cdr chars) (cons :OPEN  tokens)))
-            (")"   (tokenizer (cdr chars) (cons :CLOSE tokens)))
-            (#true (tokenize-atom (cdr chars) tokens (car chars)))
-        )
-    )
-)
+    (match chars
+        (()           (reverse tokens))
+        ((" " & rest) (tokenizer rest tokens))
+        (("(" & rest) (tokenizer rest (cons :OPEN  tokens)))
+        ((")" & rest) (tokenizer rest (cons :CLOSE tokens)))
+        ((c & rest)   (tokenize-atom rest tokens c))))
 
 (defun lexer (tokens acc)
-    (if (nil? tokens) (reverse acc)
-        (do
-            (let token (car tokens))
-            (if (sym? token)
-                (lexer (cdr tokens) (cons token acc))
-                (if (int? (string->int token))
-                    (lexer (cdr tokens) (cons (list :INT (string->int token)) acc))
-                    (lexer (cdr tokens) (cons (list :SYM token)               acc))
-                )
-            )
-        )
-    )
-)
+    (match tokens
+        (() (reverse acc))
+        ((token & rest)
+            (cond
+                ((sym? token)               (lexer rest (cons token acc)))
+                ((int? (string->int token)) (lexer rest (cons (list :INT (string->int token)) acc)))
+                (#true                      (lexer rest (cons (list :SYM token) acc)))))))
 
 (defun close-expression (stack acc)
-    (if (nil? stack) acc
-        (do
-            (let next (car stack))
-            (if (and (sym? next) (eq? next :MARK))
-                (cons acc (cdr stack))
-                (close-expression (cdr stack) (cons next acc))
-            )
-        )
-    )
-)
+    (match stack
+        (()             acc)
+        ((:MARK & rest) (cons acc rest))
+        ((next & rest)  (close-expression rest (cons next acc)))))
 
 (defun parser (lexed acc)
-    (if (nil? lexed) acc
-        (do
-            (let next (car lexed))
-            (cond
-                ((sym? next)
-                    (case next
-                        (:OPEN  (parser (cdr lexed) (cons :MARK acc)))
-                        (:CLOSE (parser (cdr lexed) (close-expression acc ())))))
-                (#true (parser (cdr lexed) (cons next acc)))
-            )
-        )
-    )
-)
+    (match lexed
+        (()              acc)
+        ((:OPEN & rest)  (parser rest (cons :MARK acc)))
+        ((:CLOSE & rest) (parser rest (close-expression acc ())))
+        ((next & rest)   (parser rest (cons next acc)))))
 
 (pprint
     (parser

@@ -27,8 +27,8 @@
         ((:open f) (spew-each f lines))))
 
 (defun spew-each (f lines)
-    (cond
-        ((nil? lines) (disconnect f))
-        (#true
-            (send f (list :write (car lines) \n))
-            (spew-each f (cdr lines)))))
+    (match lines
+        (() (disconnect f))
+        ((line & rest)
+            (send f (list :write line \n))
+            (spew-each f rest))))

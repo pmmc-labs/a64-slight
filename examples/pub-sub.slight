@@ -4,18 +4,18 @@
 ; the broker, and joins all three.
 
 (defun notify-all (subs item)
-    (cond
-        ((nil? subs) ())
-        (#true
-            (send (car subs) (list :item item))
-            (notify-all (cdr subs) item))))
+    (match subs
+        (() ())
+        ((sub & rest)
+            (send sub (list :item item))
+            (notify-all rest item))))
 
 (defun stop-all (subs)
-    (cond
-        ((nil? subs) ())
-        (#true
-            (send (car subs) (list :done))
-            (stop-all (cdr subs)))))
+    (match subs
+        (() ())
+        ((sub & rest)
+            (send sub (list :done))
+            (stop-all rest))))
 
 (defun subscriber ()
     (recv

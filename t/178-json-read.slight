@@ -44,9 +44,10 @@
         ((:open f)    (send f (list :read :json)) (counted))
         ((:json f v)
             (pprint (list :json v))
-            (cond
-                ((eq? (car v) :object) (send f (list :read (cadr (cadr v)))) (counted))
-                (#true                 (counted))))
+            (match v
+                ((:object (_ how) & _) (send f (list :read how)))
+                (_                     ()))
+            (counted))
         ((:chunk f s) (pprint (list :chunk s)) (counted))
         ((:eof f)     :done)))
 

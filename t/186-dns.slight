@@ -119,7 +119,7 @@
 ; A process that ends with the first message it gets, so the root, which
 ; can't wait in recv but where it ends, can join it for an answer.
 (defun box () (recv (msg msg)))
-(defun answer (box) (cadr (cadr (join box))))
+(defun answer (box) (match (join box) ((:ok (_ v)) v)))
 
 (let dns-box (fork (box)))
 (let dns (connect :tcp/listen 0 (dns-server dns-box)))
@@ -140,9 +140,9 @@
 (defun try (port name) (pprint (list name (outcome (join (connect :tcp (concat name ":" port) (client)))))))
 
 (defun outcome (r)
-    (cond
-        ((eq? (car r) :ok) (cadr r))
-        (#true             (car (cadr r)))))
+    (match r
+        ((:ok v)             v)
+        ((:error (why & _)) why)))
 
 (map (lambda (name) (try echo-port name))
      (list "alias.test" "other.test" "Other.Test" "localhost" "one.test" "cname.test" "short" "abs.test."

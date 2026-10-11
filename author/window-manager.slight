@@ -1,6 +1,6 @@
 
-(defun Coords     (x y) (lambda (m) (case m (:x x) (:y y))))
-(defun Dimensions (h w) (lambda (m) (case m (:h h) (:w w))))
+(defun Coords     (x y) (lambda (m) (match m (:x x) (:y y))))
+(defun Dimensions (h w) (lambda (m) (match m (:h h) (:w w))))
 
 (defun Logger (dims coords logs)
     (recv
@@ -15,7 +15,7 @@
             (tty/write \e "[s" \e "[" (+ (coords :x) (+ (length logs) 2)) ";" (inc (coords :y)) "H")
             (tty/write
                 \e "[4"
-                    (case level
+                    (match level
                         (:INFO  6)
                         (:ALERT 5)
                         (:DEBUG 3)
@@ -63,15 +63,13 @@
 
 (defun Keyboard (window-manager logger)
     (recv
-        (key
-            (cond
-                ((eq? (car key) "q")
-                    (send window-manager :EXIT)
-                    (send logger         :EXIT)
-                    (join window-manager)
-                    (join logger))
-                (#true
-                    (Keyboard window-manager logger))))))
+        (("q" & _)
+            (send window-manager :EXIT)
+            (send logger         :EXIT)
+            (join window-manager)
+            (join logger))
+        (_
+            (Keyboard window-manager logger))))
 
 (tty/write \e "[1J")
 

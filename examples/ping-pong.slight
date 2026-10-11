@@ -1,6 +1,6 @@
-; ping-pong: a pinger and a ponger play 30 rounds. Sending and then
-; waiting is two functions: pinger sends, and tail-calls pinger-wait,
-; whose whole body is the recv. The root joins both.
+; ping-pong: a pinger and a ponger play 30 rounds. The pinger sends, and
+; waits for the reply in the middle of its loop (D167). The root joins
+; both.
 
 (defun ponger ()
     (recv
@@ -16,11 +16,7 @@
             :ping-done)
         (#true
             (send target (list :ping $$))
-            (pinger-wait target n))))
-
-(defun pinger-wait (target n)
-    (recv
-        (reply
+            (let reply (recv))
             (pprint (list :round n :reply reply))
             (pinger target (- n 1)))))
 

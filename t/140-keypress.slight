@@ -11,9 +11,9 @@
     (recv
         (key
             (pprint key)
-            (cond
-                ((eq? (car key) "q") :quit)
-                (#true               (show-keys))))))
+            (match key
+                (("q" & _) :quit)
+                (_         (show-keys))))))
 
 (pprint (list (tty/screen/rows) (tty/screen/cols)))
 (pprint (join (connect :keypress (show-keys))))
