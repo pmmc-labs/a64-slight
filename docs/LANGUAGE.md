@@ -31,7 +31,7 @@ The root process is pid 1. Its value is that of its last form, or `()`
 if there are none.
 
 When nothing can run any more, and nothing more can come (no timer is
-pending, no socket is open, and no process is waiting for keys from a
+pending, no socket can be waited for, and no process is waiting for keys from a
 stdin that's still open), the program prints the root's value and a
 newline, and exits. That isn't the moment the root ends: other processes
 keep running after it, and its value comes out last.

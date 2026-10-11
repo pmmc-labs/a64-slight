@@ -1,0 +1,46 @@
+; A recv in tail position of a clause body, after a let there, with
+; something after the outer recv: in each of the shapes the splitter
+; gives a recv a function of its own for (D167). The clause body's lets
+; stay its own: the rest of the function sees the names from before.
+(defun one (c)
+    (let v (recv
+        ((:a x)
+            (let y (* x 2))
+            (recv ((:b z) (+ y z))))))
+    (pprint (list :one v))
+    v)
+
+(defun two (c)
+    (let v (recv
+        ((:a x) (let y (* x 2)) (recv ((:b z) (+ y z))))
+        ((:c x) x)))
+    (pprint (list :two v))
+    v)
+
+(defun dropped (c)
+    (recv
+        ((:a x) (let y (* x 2)) (recv ((:b z) (pprint (list :dropped (+ y z))))))
+        ((:c x) (pprint x)))
+    (pprint :after)
+    c)
+
+(defun shadowed (n)
+    (let v (recv ((:a x) (let n 10) (recv ((:b z) (+ n (+ x z)))))))
+    (list v n))
+
+(let w (fork (one 1)))
+(send w (list :a 5))
+(send w (list :b 1))
+(pprint (join w))
+(let w (fork (two 1)))
+(send w (list :a 5))
+(send w (list :b 1))
+(pprint (join w))
+(let w (fork (dropped 1)))
+(send w (list :a 5))
+(send w (list :b 1))
+(pprint (join w))
+(let w (fork (shadowed 1)))
+(send w (list :a 5))
+(send w (list :b 1))
+(join w)
