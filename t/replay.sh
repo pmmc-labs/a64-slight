@@ -45,20 +45,32 @@ for name in world net order; do
 done
 [ $fail -eq 0 ] || exit 1
 
-# Runs a program as itself and prints what it printed, then its exit status.
+# run [NAME=value ...] prog [args ...]: runs a program, with those
+# variables set for it alone, and prints what it printed, then its exit
+# status. The variables go through env, never as assignments before a
+# call to run: after a call to a function, a shell may keep them set
+# (macOS's sh, bash 3.2 in POSIX mode, does), and every run after it
+# would have them.
 run() {
+    vars=
+    while :; do
+        case $1 in
+            *=*) vars="$vars $1"; shift ;;
+            *)   break ;;
+        esac
+    done
     prog=$1
     shift
-    $RUN "$dir/$prog" "$@" 2>&1
+    env $vars $RUN "$dir/$prog" "$@" 2>&1
     echo "exit: $?"
 }
 
 # world: recorded with keys, a file to read and one to write; replayed
 # with none of them.
 printf 'line one\nline two\n' >"$dir/in.txt"
-printf 'abq' | SLIGHT_RECORD="$dir/world.record" run world "$dir/in.txt" "$dir/out.txt" >"$dir/world.recorded"
+printf 'abq' | run SLIGHT_RECORD="$dir/world.record" world "$dir/in.txt" "$dir/out.txt" >"$dir/world.recorded"
 rm -f "$dir/in.txt" "$dir/out.txt"
-SLIGHT_REPLAY="$dir/world.record" run world other args </dev/null >"$dir/world.replayed"
+run SLIGHT_REPLAY="$dir/world.record" world other args </dev/null >"$dir/world.replayed"
 if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(ok ("line one" "line two"))$' "$dir/world.recorded"; then
     check "world replays as recorded" ok
 else
@@ -69,9 +81,9 @@ if [ -e "$dir/out.txt" ]; then check "world's replay writes no file" no; else ch
 
 # net: a server and a client, the client finding it in a hosts file.
 printf '127.0.0.1 echo.test\n' >"$dir/hosts"
-SLIGHT_HOSTS="$dir/hosts" SLIGHT_RECORD="$dir/net.record" run net </dev/null >"$dir/net.recorded"
+run SLIGHT_HOSTS="$dir/hosts" SLIGHT_RECORD="$dir/net.record" net </dev/null >"$dir/net.recorded"
 rm -f "$dir/hosts"
-SLIGHT_REPLAY="$dir/net.record" run net </dev/null >"$dir/net.replayed"
+run SLIGHT_REPLAY="$dir/net.record" net </dev/null >"$dir/net.replayed"
 if cmp -s "$dir/net.recorded" "$dir/net.replayed" && grep -q '^(ok ("echo one" "echo two" "echo three"))$' "$dir/net.recorded"; then
     check "net replays as recorded" ok
 else
@@ -80,7 +92,7 @@ else
 fi
 
 # A record of one program, replayed by another, stops where they part.
-SLIGHT_REPLAY="$dir/world.record" run net </dev/null >"$dir/net.wrong"
+run SLIGHT_REPLAY="$dir/world.record" net </dev/null >"$dir/net.wrong"
 if grep -q '^replay: the run goes another way at entry 1:' "$dir/net.wrong" && grep -q '^exit: 2$' "$dir/net.wrong"; then
     check "a record that isn't the program's stops the replay" ok
 else
@@ -93,8 +105,8 @@ fifo=$(run order | head -1)
 [ "$fifo" = "1 2 3 4 5 " ] && check "first in, first out: $fifo" ok || check "first in, first out: $fifo" no
 orders=""
 for seed in $(seq 1 20); do
-    one=$(SLIGHT_SCHED=$seed run order | head -1)
-    two=$(SLIGHT_SCHED=$seed run order | head -1)
+    one=$(run SLIGHT_SCHED=$seed order | head -1)
+    two=$(run SLIGHT_SCHED=$seed order | head -1)
     sorted=$(echo "$one" | tr ' ' '\n' | grep . | sort | tr '\n' ' ')
     if [ "$one" != "$two" ] || [ "$sorted" != "1 2 3 4 5 " ]; then
         check "seed $seed: '$one', then '$two'" no
@@ -105,10 +117,15 @@ done
 distinct=$(printf '%s' "$orders" | sort -u | wc -l)
 [ "$distinct" -gt 1 ] && check "20 seeds give $distinct orders, each the same every time" ok \
                       || check "20 seeds give $distinct orders, each the same every time" no
-SLIGHT_SCHED=7 SLIGHT_RECORD="$dir/order.record" run order >"$dir/order.recorded"
-run_replay=$(SLIGHT_REPLAY="$dir/order.record" run order)
-[ "$run_replay" = "$(cat "$dir/order.recorded")" ] && check "a seeded run replays as recorded" ok \
-                                                   || check "a seeded run replays as recorded" no
+run SLIGHT_SCHED=7 SLIGHT_RECORD="$dir/order.record" order >"$dir/order.recorded"
+run SLIGHT_REPLAY="$dir/order.record" order >"$dir/order.replayed"
+recorded=$(head -1 "$dir/order.recorded" | tr ' ' '\n' | grep . | sort | tr '\n' ' ')
+if cmp -s "$dir/order.recorded" "$dir/order.replayed" && [ "$recorded" = "1 2 3 4 5 " ] && grep -q '^exit: 0$' "$dir/order.recorded"; then
+    check "a seeded run replays as recorded" ok
+else
+    diff -u "$dir/order.recorded" "$dir/order.replayed"
+    check "a seeded run replays as recorded" no
+fi
 
 echo "replay: $fail failed"
 [ $fail -eq 0 ]
