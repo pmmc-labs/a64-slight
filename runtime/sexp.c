@@ -59,12 +59,7 @@ static int number_kind(const char *p, size_t len) {
 }
 
 static int is_number(int n)    { return n == N_INT || n == N_FRAC || n == N_EXP; }
-static int is_space(int c)     { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
-static int is_delimiter(int c) { return is_space(c) || (c && strchr("()';\"`,", c)); }
-
-static int hex_value(int c) {
-    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
-}
+static int is_delimiter(int c) { return rt_is_space(c) || (c && strchr("()';\"`,", c)); }
 
 // Ready for the next datum: where it is in a line, and whether it reads
 // doc blocks or turns down a datum, stay as they were.
@@ -99,8 +94,7 @@ static int is_letter(int c) { return (c >= 'a' && c <= 'z') || (c >= 'A' && c <=
 int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *used) {
     if (!s->quoted) {
         s->cap    = 16;
-        s->quoted = calloc(s->cap, 1);
-        if (!s->quoted) abort();
+        s->quoted = rt_must(calloc(s->cap, 1));
     }
     size_t i = 0;
     int    r = RT_SCAN_MORE;
@@ -152,7 +146,7 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
             i--;                                 // byte i is the list's again
             continue;
         case S_SPACE:
-            if (is_space(c))                    break;
+            if (rt_is_space(c))                    break;
             if (c == ';') {
                 s->state = S_COMMENT;
                 break;
@@ -176,8 +170,7 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
             else if (c == '(') {
                 if (s->depth + 1 == s->cap) {
                     s->cap   *= 2;
-                    s->quoted = realloc(s->quoted, s->cap);
-                    if (!s->quoted) abort();
+                    s->quoted = rt_must(realloc(s->quoted, s->cap));
                 }
                 s->quoted[++s->depth] = 0;
             } else if (c == ')') {
@@ -213,8 +206,8 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
                 s->state = S_STRING;
                 break;
             }
-            if (hex_value(c) < 0 || s->hex == 6) goto bad;
-            s->code = s->code << 4 | (uint32_t)hex_value(c);
+            if (rt_hex_value(c) < 0 || s->hex == 6) goto bad;
+            s->code = s->code << 4 | (uint32_t)rt_hex_value(c);
             s->hex++;
             if (s->code > 0x10ffff)             goto bad;
             break;
@@ -326,7 +319,7 @@ static size_t decode(const char *p, char *out, const char **end) {
             continue;
         }
         uint32_t u = 0;
-        for (p += 3; *p != '}'; p++) u = u << 4 | (uint32_t)hex_value((unsigned char)*p);
+        for (p += 3; *p != '}'; p++) u = u << 4 | (uint32_t)rt_hex_value((unsigned char)*p);
         p++;
         unsigned char b[4];
         size_t        k = u < 0x80 ? 1 : u < 0x800 ? 2 : u < 0x10000 ? 3 : 4;
@@ -384,8 +377,7 @@ static int token(const char *p, size_t len, rt_build_alloc_t alloc, void *cx, rt
             return 1;
         }
     }
-    char local[64], *text = len < sizeof local ? local : malloc(len + 1);
-    if (!text) abort();
+    char local[64], *text = len < sizeof local ? local : rt_must(malloc(len + 1));
     memcpy(text, p, len);
     text[len] = '\0';
     double d = strtod(text, NULL);
@@ -412,7 +404,7 @@ int rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
     const char *p = text, *end = text + len;
     rt_value_t  v;
     for (;;) {
-        while (is_space((unsigned char)*p) || *p == ';') {
+        while (rt_is_space((unsigned char)*p) || *p == ';') {
             if (*p == ';') while (p < end && *p != '\n') p++;
             else           p++;
         }
@@ -425,8 +417,7 @@ int rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
         if (*p == '(') {
             if (depth == cap) {
                 cap    = cap ? cap * 2 : 16;
-                frames = realloc(frames, cap * sizeof *frames);
-                if (!frames) abort();
+                frames = rt_must(realloc(frames, cap * sizeof *frames));
                 quotes = depth ? &frames[depth - 1].quotes : &top_quotes;
             }
             frames[depth++] = (frame_t){ .head = RT_NIL, .last = NULL, .quotes = 0, .wrap = *quotes };
@@ -481,10 +472,6 @@ too_big:
 
 // --- the builtins -------------------------------------------------------------
 
-static void *heap_alloc(void *site, size_t bytes) {
-    return rt_alloc(bytes, site);
-}
-
 // (:ok datum), or (:error (:bad-sexp at)), at being where the text went
 // wrong: a byte no valid text could have there, or the end.
 rt_value_t rt_sexp_parse(rt_value_t s, const char *site) {
@@ -503,7 +490,7 @@ rt_value_t rt_sexp_parse(rt_value_t s, const char *site) {
     if (r == RT_SCAN_NONE) r = RT_SCAN_BAD, used = len;
     rt_value_t *outer = rt_alloc(32, site), v;
     if (r == RT_SCAN_DONE) {
-        rt_sexp_build(text + from, used - from, heap_alloc, (void *)site, &v);  // the heap faults before it gives out
+        rt_sexp_build(text + from, used - from, rt_heap_alloc, (void *)site, &v);  // the heap faults before it gives out
         outer[0] = rt_symbol(RT_SYM_OK);
     } else {
         rt_value_t *why = rt_alloc(32, site);

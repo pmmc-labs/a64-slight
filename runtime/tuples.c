@@ -11,11 +11,6 @@ static void need_tuple(rt_value_t v, const char *site) {
     if (!rt_is_tuple(v)) rt_fault(RT_FAULT_NOT_TUPLE, v, site);
 }
 
-static int64_t need_int(rt_value_t v, const char *site) {
-    if (v & RT_TAG_INT_MASK) rt_fault(RT_FAULT_NOT_INT, v, site);
-    return rt_int_value(v);
-}
-
 // A new tuple of n elements, for the caller to fill.
 static uint64_t *new_tuple(uint64_t n, const char *site) {
     if (n > (UINT64_MAX >> RT_BOX_SIZE_SHIFT) / 8) rt_fault(RT_FAULT_HEAP, RT_NIL, site);
@@ -48,7 +43,7 @@ rt_value_t rt_tuple_len_of(rt_value_t t, const char *site) {
 // The element at index i, from 0; any other index faults.
 static uint64_t index_of(rt_value_t t, rt_value_t i, const char *site) {
     need_tuple(t, site);
-    int64_t k = need_int(i, site);
+    int64_t k = rt_need_int(i, site);
     if (k < 0 || (uint64_t)k >= rt_tuple_len(t)) rt_fault(RT_FAULT_RANGE, i, site);
     return (uint64_t)k;
 }
@@ -69,7 +64,7 @@ rt_value_t rt_tuple_set(rt_value_t t, rt_value_t i, rt_value_t v, const char *si
 
 // n elements, each v.
 rt_value_t rt_tuple_make(rt_value_t n, rt_value_t v, const char *site) {
-    int64_t k = need_int(n, site);
+    int64_t k = rt_need_int(n, site);
     if (k < 0) rt_fault(RT_FAULT_RANGE, n, site);
     uint64_t *box = new_tuple((uint64_t)k, site);
     for (int64_t i = 0; i < k; i++) box[1 + i] = v;
@@ -82,7 +77,7 @@ rt_value_t rt_tuple_make(rt_value_t n, rt_value_t v, const char *site) {
 rt_value_t rt_tuple_slice(rt_value_t t, rt_value_t start, rt_value_t end, const char *site) {
     need_tuple(t, site);
     int64_t n = (int64_t)rt_tuple_len(t);
-    int64_t a = need_int(start, site), b = need_int(end, site);
+    int64_t a = rt_need_int(start, site), b = rt_need_int(end, site);
     a = a < 0 ? 0 : a > n ? n : a;
     b = b < 0 ? 0 : b > n ? n : b;
     uint64_t  k   = b > a ? (uint64_t)(b - a) : 0;

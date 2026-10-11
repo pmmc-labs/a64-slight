@@ -3,6 +3,10 @@
 // RT_NIL, ...); these are for what the compiler has to compute itself.
 // tests/values.test.ts checks that the two agree.
 
+// The most arguments a call can pass: in registers, on every target; and
+// what a process waiting in recv keeps of them (rt_proc_t.args).
+export const MAX_ARGS = 8;
+
 export const intWord    = (n: bigint): bigint => n << 1n;
 export const symbolWord = (id: number): bigint => (BigInt(id) << 3n) | 5n;
 

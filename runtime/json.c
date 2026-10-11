@@ -31,12 +31,7 @@ enum {
     J_WORD,                     // in true, false or null
 };
 
-static int is_space(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
 static int is_digit(int c) { return c >= '0' && c <= '9'; }
-
-static int hex_value(int c) {
-    return is_digit(c) ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
-}
 
 void rt_json_reset(rt_json_t *j) {
     j->depth = 0;
@@ -53,8 +48,7 @@ void rt_json_free(rt_json_t *j) {
 static void open_container(rt_json_t *j, unsigned char c) {
     if (j->depth == j->cap) {
         j->cap  = j->cap ? j->cap * 2 : 64;
-        j->open = realloc(j->open, j->cap);
-        if (!j->open) abort();
+        j->open = rt_must(realloc(j->open, j->cap));
     }
     j->open[j->depth++] = c;
 }
@@ -72,7 +66,7 @@ int rt_json_scan(rt_json_t *j, const char *bytes, size_t len, int eof, size_t *u
             }
             // fall through
         case J_VALUE:
-            if (is_space(c))                         break;
+            if (rt_is_space(c))                         break;
             if (c == '{')                            open_container(j, '{'), j->state = J_KEY;
             else if (c == '[')                       open_container(j, '['), j->state = J_FIRST;
             else if (c == '"')                       j->key = 0, j->state = J_STRING;
@@ -92,18 +86,18 @@ int rt_json_scan(rt_json_t *j, const char *bytes, size_t len, int eof, size_t *u
             }
             // fall through
         case J_NEXT_KEY:
-            if (is_space(c))                         break;
+            if (rt_is_space(c))                         break;
             if (c != '"')                            goto bad;
             j->key   = 1;
             j->state = J_STRING;
             break;
         case J_COLON:
-            if (is_space(c))                         break;
+            if (rt_is_space(c))                         break;
             if (c != ':')                            goto bad;
             j->state = J_VALUE;
             break;
         case J_AFTER:
-            if (is_space(c))                         break;
+            if (rt_is_space(c))                         break;
             if (c == ',')                            j->state = j->open[j->depth - 1] == '[' ? J_VALUE : J_NEXT_KEY;
             else if (c == (j->open[j->depth - 1] == '[' ? ']' : '}')) j->depth--, ended = 1;
             else                                     goto bad;
@@ -124,7 +118,7 @@ int rt_json_scan(rt_json_t *j, const char *bytes, size_t len, int eof, size_t *u
             else                                     goto bad;
             break;
         case J_HEX:
-            if (hex_value(c) < 0)                    goto bad;
+            if (rt_hex_value(c) < 0)                    goto bad;
             if (--j->hex == 0)                       j->state = J_STRING;
             break;
         case J_MINUS:
@@ -200,7 +194,7 @@ static int is_low(uint32_t u)  { return u >= 0xdc00 && u <= 0xdfff; }
 
 static uint32_t hex4(const char *p) {
     uint32_t u = 0;
-    for (int k = 0; k < 4; k++) u = u << 4 | (uint32_t)hex_value((unsigned char)p[k]);
+    for (int k = 0; k < 4; k++) u = u << 4 | (uint32_t)rt_hex_value((unsigned char)p[k]);
     return u;
 }
 
@@ -283,8 +277,7 @@ static int number(const char **p, const char *end, rt_build_alloc_t alloc, void 
         }
     }
     size_t len = (size_t)(q - s);
-    char   local[64], *text = len < sizeof local ? local : malloc(len + 1);
-    if (!text) abort();
+    char   local[64], *text = len < sizeof local ? local : rt_must(malloc(len + 1));
     memcpy(text, s, len);
     text[len] = '\0';
     double d = strtod(text, NULL);
@@ -311,12 +304,11 @@ int rt_json_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
     const char *p = text;
     rt_value_t  v;
     for (;;) {
-        while (is_space(*p) || *p == ',' || *p == ':') p++;     // separators, in valid text
+        while (rt_is_space(*p) || *p == ',' || *p == ':') p++;     // separators, in valid text
         if (*p == '[' || *p == '{') {
             if (depth == cap) {
                 cap    = cap ? cap * 2 : 16;
-                frames = realloc(frames, cap * sizeof *frames);
-                if (!frames) abort();
+                frames = rt_must(realloc(frames, cap * sizeof *frames));
             }
             frame_t *f = &frames[depth++];
             f->object  = *p++ == '{';
@@ -370,10 +362,6 @@ too_big:
 
 // --- the builtins -------------------------------------------------------------
 
-static void *heap_alloc(void *site, size_t bytes) {
-    return rt_alloc(bytes, site);
-}
-
 // (:ok value), or (:error (:bad-json at)), at being where the text went
 // wrong: a byte no valid text could have there, or the end.
 rt_value_t rt_json_parse(rt_value_t s, const char *site) {
@@ -385,13 +373,13 @@ rt_value_t rt_json_parse(rt_value_t s, const char *site) {
     rt_json_free(&j);
     if (r == RT_SCAN_DONE) {
         size_t rest = used;
-        while (rest < len && is_space((unsigned char)text[rest])) rest++;
+        while (rest < len && rt_is_space((unsigned char)text[rest])) rest++;
         if (rest < len) r = RT_SCAN_BAD, used = rest;
     }
     if (r == RT_SCAN_NONE) r = RT_SCAN_BAD, used = len;
     rt_value_t *outer = rt_alloc(32, site), v;
     if (r == RT_SCAN_DONE) {
-        rt_json_build(text, used, heap_alloc, (void *)site, &v);     // the heap faults before it gives out
+        rt_json_build(text, used, rt_heap_alloc, (void *)site, &v);     // the heap faults before it gives out
         outer[0] = rt_symbol(RT_SYM_OK);
     } else {
         rt_value_t *why = rt_alloc(32, site);

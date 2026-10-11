@@ -296,8 +296,7 @@ int rt_lookup_begin(rt_lookup_t **out, const char *host, uint32_t *addr) {
         return RT_LOOKUP_DONE;
     }
     if (strlen(host) >= MAX_NAME - 1) return RT_LOOKUP_NOTFOUND;
-    rt_lookup_t *l = calloc(1, sizeof *l);
-    if (!l) abort();
+    rt_lookup_t *l = rt_must(calloc(1, sizeof *l));
     l->fd   = -1;
     l->name = -1;
     read_resolv_conf(l, host);
@@ -332,8 +331,7 @@ int rt_lookup_ready(rt_lookup_t *l, int timed_out, uint32_t *addr) {
     }
     if (l->answer_len == l->answer_cap) {
         l->answer_cap = l->answer_cap ? l->answer_cap * 2 : 1024;
-        l->answer     = realloc(l->answer, l->answer_cap);
-        if (!l->answer) abort();
+        l->answer     = rt_must(realloc(l->answer, l->answer_cap));
     }
     ssize_t n = rt_io_recv(l->fd, l->answer + l->answer_len, l->answer_cap - l->answer_len);
     if (n < 0) return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR ? RT_LOOKUP_WAIT : next_server(l);

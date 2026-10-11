@@ -100,19 +100,10 @@ static size_t sequence(const unsigned char *in, size_t n, keypress_t *k) {
     return i;
 }
 
-// How many bytes the UTF-8 character at in takes, or 0 if it isn't one.
-static size_t utf8(const unsigned char *in, size_t n) {
-    size_t len = in[0] >= 0xf0 && in[0] <= 0xf4 ? 4 : in[0] >= 0xe0 ? 3 : in[0] >= 0xc2 ? 2 : 0;
-    if (len > n) return 0;
-    for (size_t i = 1; i < len; i++) {
-        if ((in[i] & 0xc0) != 0x80) return 0;
-    }
-    return len;
-}
-
 // The key at in (n > 0 bytes); returns how many bytes it took.
 static size_t decode(const unsigned char *in, size_t n, keypress_t *k) {
     unsigned char c = in[0];
+    uint32_t      code;
     if (c == ESC) {
         if (n == 1) {
             k->name = RT_KEY_ESCAPE;
@@ -127,14 +118,8 @@ static size_t decode(const unsigned char *in, size_t n, keypress_t *k) {
     else if (c == 0x7f || c == '\b') k->name = RT_KEY_BACKSPACE;
     else if (c >= 1 && c <= 26)      k->text = &letters[c - 1], k->len = 1, k->ctrl = 1;
     else if (c >= ' ' && c < 0x7f)   k->text = in, k->len = 1, k->shift = c >= 'A' && c <= 'Z';
-    else if ((k->len = utf8(in, n))) k->text = in;
+    else if (c >= 0x80 && (k->len = rt_utf8_sequence(in, n, &code))) k->text = in;   // as the utf8/ builtins count (D148)
     return k->len ? k->len : 1;
-}
-
-static rt_value_t cons_at(rt_value_t *cell, rt_value_t car, rt_value_t cdr) {
-    cell[0] = car;
-    cell[1] = cdr;
-    return (rt_value_t)cell | RT_TAG_LIST;
 }
 
 size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key)) {
@@ -152,10 +137,10 @@ size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key)) {
         key = (rt_value_t)text | RT_TAG_BOXED;
     }
     rt_value_t list = RT_NIL;
-    if (k.shift) list = cons_at(cells + 6, rt_symbol(RT_SYM_KEYS + RT_KEY_SHIFT), list);
-    if (k.alt)   list = cons_at(cells + 4, rt_symbol(RT_SYM_KEYS + RT_KEY_ALT), list);
-    if (k.ctrl)  list = cons_at(cells + 2, rt_symbol(RT_SYM_KEYS + RT_KEY_CTRL), list);
-    emit(cons_at(cells, key, list));
+    if (k.shift) list = rt_cons_at(cells + 6, rt_symbol(RT_SYM_KEYS + RT_KEY_SHIFT), list);
+    if (k.alt)   list = rt_cons_at(cells + 4, rt_symbol(RT_SYM_KEYS + RT_KEY_ALT), list);
+    if (k.ctrl)  list = rt_cons_at(cells + 2, rt_symbol(RT_SYM_KEYS + RT_KEY_CTRL), list);
+    emit(rt_cons_at(cells, key, list));
     return used;
 }
 

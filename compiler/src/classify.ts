@@ -11,12 +11,12 @@
 // can't see the program's functions.
 
 import { patternNames } from './pattern.ts';
-import { toArray, type Sexp } from './sexp.ts';
+import { isForm, toArray, type Sexp } from './sexp.ts';
 
 export type FnSource = { readonly name: string; readonly params: readonly string[]; readonly body: Sexp };
 
 export const isReceiveBody = (body: Sexp): boolean =>
-    body.t === 'pair' && body.cdr.t === 'nil' && body.car.t === 'pair' && body.car.car.t === 'sym' && body.car.car.name === 'recv';
+    body.t === 'pair' && body.cdr.t === 'nil' && isForm(body.car, 'recv');
 
 export function stateFunctions(defuns: readonly FnSource[]): readonly string[] {
     const names = defuns.map((d) => d.name);

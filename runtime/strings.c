@@ -14,11 +14,6 @@ static void need_string(rt_value_t v, const char *site) {
     if (!rt_is_string(v)) rt_fault(RT_FAULT_NOT_STRING, v, site);
 }
 
-static int64_t need_int(rt_value_t v, const char *site) {
-    if (v & RT_TAG_INT_MASK) rt_fault(RT_FAULT_NOT_INT, v, site);
-    return rt_int_value(v);
-}
-
 static rt_value_t need_list(rt_value_t v, const char *site) {
     if ((v & RT_TAG_MASK) != RT_TAG_LIST) rt_fault(RT_FAULT_NOT_LIST, v, site);
     return v;
@@ -60,8 +55,8 @@ rt_value_t rt_str_len(rt_value_t s, const char *site) {
 rt_value_t rt_substring(rt_value_t s, rt_value_t start, rt_value_t end, const char *site) {
     need_string(s, site);
     int64_t len = (int64_t)rt_string_len(s);
-    int64_t a   = need_int(start, site);
-    int64_t b   = need_int(end, site);
+    int64_t a   = rt_need_int(start, site);
+    int64_t b   = rt_need_int(end, site);
     a = a < 0 ? 0 : a > len ? len : a;
     b = b < 0 ? 0 : b > len ? len : b;
     if (a > b) {
@@ -201,7 +196,7 @@ rt_value_t rt_string_to_symbol(rt_value_t s, const char *site) {
 
 rt_value_t rt_byte_at(rt_value_t s, rt_value_t i, const char *site) {
     need_string(s, site);
-    int64_t at = need_int(i, site);
+    int64_t at = rt_need_int(i, site);
     if (at < 0 || (uint64_t)at >= rt_string_len(s)) rt_fault(RT_FAULT_RANGE, i, site);
     return rt_int((unsigned char)rt_string_bytes(s)[at]);
 }
@@ -210,7 +205,7 @@ rt_value_t rt_bytes_to_string(rt_value_t xs, const char *site) {
     need_list(xs, site);
     rt_buf_t b = { 0 };
     for (; rt_is_cons(xs); xs = rt_cdr(xs)) {
-        int64_t byte = need_int(rt_car(xs), site);
+        int64_t byte = rt_need_int(rt_car(xs), site);
         if (byte < 0 || byte > 255) rt_fault(RT_FAULT_RANGE, rt_car(xs), site);
         char c = (char)byte;
         rt_buf_add(&b, &c, 1);
@@ -222,7 +217,7 @@ rt_value_t rt_bytes_to_string(rt_value_t xs, const char *site) {
 // repeated and cut to fit, as JavaScript's padStart does.
 rt_value_t rt_format_num(rt_value_t n, rt_value_t width, rt_value_t fill, const char *site) {
     if ((n & RT_TAG_INT_MASK) && !rt_is_float(n)) rt_fault(RT_FAULT_NOT_NUMBER, n, site);
-    int64_t w = need_int(width, site);
+    int64_t w = rt_need_int(width, site);
     if (fill == RT_NIL) fill = rt_new_string(" ", 1, site);
     need_string(fill, site);
     rt_buf_t text = { 0 }, b = { 0 };
@@ -256,7 +251,7 @@ rt_value_t rt_tty_write(rt_value_t args, const char *site) {
 // at p, with its code point in *code; 0 if they don't start one. The
 // second byte's range rules out overlong forms, surrogates and what's
 // past U+10FFFF (Unicode's table 3-7).
-static size_t sequence(const unsigned char *p, size_t n, uint32_t *code) {
+size_t rt_utf8_sequence(const unsigned char *p, size_t n, uint32_t *code) {
     unsigned char b = p[0];
     if (b < 0x80) {
         *code = b;
@@ -278,7 +273,7 @@ static size_t sequence(const unsigned char *p, size_t n, uint32_t *code) {
 // How many bytes the character at p takes, of the n > 0 left.
 static size_t char_len(const char *p, size_t n) {
     uint32_t code;
-    size_t   len = sequence((const unsigned char *)p, n, &code);
+    size_t   len = rt_utf8_sequence((const unsigned char *)p, n, &code);
     return len ? len : 1;
 }
 
@@ -303,8 +298,8 @@ rt_value_t rt_utf8_len(rt_value_t s, const char *site) {
 // Only the clamp at 0 is needed: char_offset stops at the end anyway.
 rt_value_t rt_utf8_substring(rt_value_t s, rt_value_t start, rt_value_t end, const char *site) {
     need_string(s, site);
-    int64_t a = need_int(start, site);
-    int64_t b = need_int(end, site);
+    int64_t a = rt_need_int(start, site);
+    int64_t b = rt_need_int(end, site);
     a = a < 0 ? 0 : a;
     b = b < 0 ? 0 : b;
     if (a > b) {
@@ -356,7 +351,7 @@ rt_value_t rt_utf8_code(rt_value_t s, const char *site) {
     need_string(s, site);
     if (rt_string_len(s) == 0) rt_fault(RT_FAULT_RANGE, s, site);
     uint32_t code = 0xfffd;
-    sequence((const unsigned char *)rt_string_bytes(s), rt_string_len(s), &code);
+    rt_utf8_sequence((const unsigned char *)rt_string_bytes(s), rt_string_len(s), &code);
     return rt_int(code);
 }
 
@@ -364,7 +359,7 @@ rt_value_t rt_utf8_code(rt_value_t s, const char *site) {
 // this, in the prelude). A surrogate, or anything past U+10FFFF, has no
 // UTF-8.
 rt_value_t rt_utf8_char(rt_value_t n, const char *site) {
-    int64_t c = need_int(n, site);
+    int64_t c = rt_need_int(n, site);
     if (c < 0 || c > 0x10ffff || (c >= 0xd800 && c <= 0xdfff)) rt_fault(RT_FAULT_RANGE, n, site);
     static const unsigned char lead[] = { 0, 0, 0xc0, 0xe0, 0xf0 };
     char   b[4];
@@ -381,7 +376,7 @@ rt_value_t rt_utf8_valid(rt_value_t s, const char *site) {
     size_t               len = rt_string_len(s);
     for (size_t at = 0; at < len;) {
         uint32_t code;
-        size_t   n = sequence(p + at, len - at, &code);
+        size_t   n = rt_utf8_sequence(p + at, len - at, &code);
         if (n == 0) return RT_FALSE;
         at += n;
     }

@@ -39,17 +39,21 @@ _Static_assert(RT_SYM_KEYS == RT_SYM_FAULTS + RT_FAULT_COUNT, "the keys follow t
 
 rt_proc_t *rt_current;
 
+void *rt_must(void *p) {
+    if (!p) {
+        perror("rt: out of memory");
+        exit(2);
+    }
+    return p;
+}
+
 // --- text ---------------------------------------------------------------------
 
 void rt_buf_add(rt_buf_t *b, const char *bytes, size_t len) {
     if (!len) return;                           // so an empty buffer's NULL is never copied to
     if (b->len + len > b->cap) {
         b->cap   = (b->len + len) * 2 + 64;
-        b->bytes = realloc(b->bytes, b->cap);
-        if (!b->bytes) {
-            perror("rt: out of memory");
-            exit(2);
-        }
+        b->bytes = rt_must(realloc(b->bytes, b->cap));
     }
     memcpy(b->bytes + b->len, bytes, len);
     b->len += len;
@@ -64,11 +68,7 @@ void rt_buf_free(rt_buf_t *b) {
 
 void rt_work_grow(rt_work_t *w) {
     size_t      cap   = 2 * w->cap;
-    rt_value_t *items = malloc(cap * sizeof *items);
-    if (!items) {
-        perror("rt: out of memory");
-        exit(2);
-    }
+    rt_value_t *items = rt_must(malloc(cap * sizeof *items));
     memcpy(items, w->items, w->n * sizeof *items);
     rt_work_free(w);
     w->items = items;
@@ -93,10 +93,9 @@ static uint64_t name_hash(const char *bytes, size_t len) {
 }
 
 static void index_symbols(void) {
-    symbol_names = malloc((slight_symbol_count + 1) * sizeof *symbol_names);
+    symbol_names = rt_must(malloc((slight_symbol_count + 1) * sizeof *symbol_names));
     for (symbol_slots = 16; symbol_slots < 2 * slight_symbol_count; symbol_slots *= 2) {}
-    symbol_table = calloc(symbol_slots, sizeof *symbol_table);
-    if (!symbol_names || !symbol_table) abort();
+    symbol_table = rt_must(calloc(symbol_slots, sizeof *symbol_table));
     const char *name = slight_symbol_names;
     for (uint64_t id = 0; id < slight_symbol_count; id++, name += strlen(name) + 1) {
         symbol_names[id] = name;
@@ -421,6 +420,11 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
     rt_end(0, (rt_value_t)cells | RT_TAG_LIST, 1);
 }
 
+int64_t rt_need_int(rt_value_t v, const char *site) {
+    if (v & RT_TAG_INT_MASK) rt_fault(RT_FAULT_NOT_INT, v, site);
+    return rt_int_value(v);
+}
+
 // --- the heap -----------------------------------------------------------------
 
 void *rt_alloc(size_t bytes, const char *site) {
@@ -429,6 +433,10 @@ void *rt_alloc(size_t bytes, const char *site) {
     void *p = (void *)rt_current->heap_ptr;
     rt_current->heap_ptr += bytes;
     return p;
+}
+
+void *rt_heap_alloc(void *site, size_t bytes) {
+    return rt_alloc(bytes, site);
 }
 
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site) {

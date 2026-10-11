@@ -8,6 +8,7 @@ import assert from 'node:assert/strict';
 import { asmString, compileProgram, functionLabel } from '../src/codegen.ts';
 import { loadWord } from '../src/aarch64.ts';
 import { CompileError } from '../src/errors.ts';
+import { expand } from '../src/expand.ts';
 import { read } from '../src/reader.ts';
 import { RESERVED_SYMBOLS, RUNTIME_SYMBOLS } from '../src/values.ts';
 
@@ -498,6 +499,15 @@ test('recv goes anywhere a tail call could (D167), but not in a lambda', () => {
         "test.slight:1:13: a recv can only be in a do that's in tail position, or one with no lets; take the message first, with (let m (recv ...))");
     fails('(defun f () (yield (recv)) 2) (f)',
         "test.slight:1:13: a recv can only be in a yield that's in tail position; take the message first, with (let m (recv ...))");
+    // a case or a match becomes a do that binds its topic, and is named as written
+    const expanded = (src: string, message: string): void =>
+        assert.throws(() => compileProgram(expand(read(src, 'test.slight'))), (e: unknown) => e instanceof CompileError && e.message === message);
+    expanded('(defun f (x) (let v (case x (1 (recv (m m))) (#true 2))) v) (f 1)',
+        "test.slight:1:21: a recv can only be in a case that's in tail position; take the message first, with (let m (recv ...))");
+    expanded('(defun f (x) (match x (1 (recv (m m))) (_ 2)) 3) (f 1)',
+        "test.slight:1:14: a recv can only be in a match that's in tail position; take the message first, with (let m (recv ...))");
+    expanded('(defun f () (do (let x (recv)) x) 2) (f)',
+        "test.slight:1:13: a recv can only be in a do that's in tail position, or one with no lets; take the message first, with (let m (recv ...))");
 });
 
 test('a function with a recv in it waits, so it can only be called in tail position', () => {

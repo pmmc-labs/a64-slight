@@ -44,10 +44,10 @@
 // and is split as one.
 
 import { CompileError } from './errors.ts';
+import { madeFrom } from './expand.ts';
 import { patternNames } from './pattern.ts';
-import { NIL, cons, list, posOf, show, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
-
-const MAX_ARGS = 8;     // as in codegen.ts: arguments go in registers
+import { NIL, cons, form, isForm, list, posOf, show, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { MAX_ARGS } from './values.ts';
 
 // The functions generated so far, newest last, and a count for names
 // where a recv has no position.
@@ -504,8 +504,6 @@ function rename(x: Sexp, from: string, to: Sym): Sexp {
 
 // --- small things -----------------------------------------------------------
 
-const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;
-
 // The name and value of (let name value), or null.
 function letParts(x: Sexp): readonly [Sym, Sexp] | null {
     const items = isForm(x, 'let') ? toArray(x) : null;
@@ -514,20 +512,19 @@ function letParts(x: Sexp): readonly [Sym, Sexp] | null {
 
 const letForm = (name: Sym, value: Sexp): Sexp => form(name.pos, sym('let', name.pos), name, value);
 
-// A list whose first pair is at pos, so errors and faults point there.
-function form(pos: Pos | null, ...items: readonly Sexp[]): Sexp {
-    const xs = list(...items);
-    return xs.t === 'pair' ? cons(xs.car, xs.cdr, pos) : xs;
-}
-
 const clauseOf = (c: Sexp): Pos | null => (c.t === 'pair' ? c.pos : null);
 
 // "recv at file:line:col", for names; n when there's no position.
 const where = (pos: Pos | null, n = 0): string => (pos === null ? `recv ${n}` : `recv at ${at(pos)}`);
 const at    = (pos: Pos | null): string => (pos === null ? '?' : `${pos.file}:${pos.line}:${pos.col}`);
 
-const notTail = (head: string, x: Pair): CompileError =>
-    new CompileError(`a recv can only be in a ${head} that's in tail position${head === 'do' ? ', or one with no lets' : ''}; take the message first, with (let m (recv ...))`, x.pos);
+// A do made of a case or a match is named as the program has it, and its
+// let is the expander's, not one the program could leave out.
+function notTail(head: string, x: Pair): CompileError {
+    const made = head === 'do' ? madeFrom(x) : null;
+    const lets = head === 'do' && made === null ? ', or one with no lets' : '';
+    return new CompileError(`a recv can only be in a ${made ?? head} that's in tail position${lets}; take the message first, with (let m (recv ...))`, x.pos);
+}
 
 // f over xs in order, threading the state.
 function mapSt<T>(xs: readonly T[], st: St, f: (x: T, st: St, i: number) => [Sexp, St]): [readonly Sexp[], St] {

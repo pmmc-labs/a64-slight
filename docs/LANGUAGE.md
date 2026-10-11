@@ -663,10 +663,11 @@ the new process's pid.
 The new process is sent every key typed, as `(key mods...)`:
 
 - `key` is a one-character string for a printable key (any UTF-8
-  character), or a name: `:ArrowUp`, `:ArrowDown`, `:ArrowLeft`,
-  `:ArrowRight`, `:Home`, `:End`, `:Insert`, `:Delete`, `:PageUp`,
-  `:PageDown`, `:Enter`, `:Escape`, `:Backspace`, `:Tab`, `:F1` to
-  `:F12`, or `:Unidentified`.
+  character, well-formed as the `utf8/` builtins have it), or a name:
+  `:ArrowUp`, `:ArrowDown`, `:ArrowLeft`, `:ArrowRight`, `:Home`, `:End`,
+  `:Insert`, `:Delete`, `:PageUp`, `:PageDown`, `:Enter`, `:Escape`,
+  `:Backspace`, `:Tab`, `:F1` to `:F12`, or `:Unidentified`, which is
+  also what each byte of a malformed character is.
 - the mods are those held, in the order `:ctrl :alt :shift`. An
   upper-case letter comes with `:shift`, and Ctrl and a letter is the
   lower-case letter with `:ctrl` (but Ctrl-H, Ctrl-I, Ctrl-J and Ctrl-M
@@ -1102,7 +1103,9 @@ forms, and a program can read slight's own source:
   `json/parse`. The text is what the compiler reads: lists, integers and
   floats, strings with the same escapes, symbols and keywords, `#true`
   and `#false`, `'x` as `(quote x)`, comments, and doc blocks, which it
-  skips. But `:a` reads as
+  skips. So, as in a file, a line that starts with `=` and a letter is a
+  doc block's, or an error: `(sexp/parse "=x")` is `(:error (:bad-sexp
+  1))`, but `" =x"` and `"(=x)"` read `=x` as a name. And `:a` reads as
   the symbol `a`, as `a` does; a symbol the program mentions (as `:name`
   or `'name`) reads as itself, and any other as `(:symbol "name")`,
   since symbols are made only by the compiler. An integer past 63 bits

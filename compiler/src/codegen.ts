@@ -18,16 +18,15 @@
 // there, and rt.h's constants (RT_TRUE, RT_FAULT_OVERFLOW, ...) can be used
 // by name.
 //
-// So far (docs/PLAN.md, steps 1-7): integers, floats, #true/#false, (),
-// symbols, lists (cons cells bump-allocated in the process's heap, or
-// static data when quoted), strings, closures, pids, the numeric, list and
-// string primitives, eq?/ne?, type predicates, cond, let, do, pprint,
-// defun, lambda, apply, calls, and processes: fork, send, recv, yield, $$
-// and ^$$, with the recv rule (classify.ts) enforced here. Floats, strings and closures are boxes;
-// literals, and closures that capture nothing, are static data. The
-// top-level forms that aren't defuns are the body of slight_main, whose one
-// parameter is @ARGV, the program's arguments: so only they can see it
-// (D144).
+// What it compiles is what expand.ts and split.ts leave: the special
+// forms (SPECIAL_FORMS, below), calls and tail calls, closures, and the
+// builtins, inline or as calls to the runtime's C (docs/LANGUAGE.md has
+// them all), with the recv rule (classify.ts) enforced here. Cons cells
+// are bump-allocated in the process's heap; floats, strings, closures and
+// tuples are boxes; literals, and closures that capture nothing, are
+// static data. The top-level forms that aren't defuns are the body of
+// slight_main, whose one parameter is @ARGV, the program's arguments: so
+// only they can see it (D144).
 //
 // The prelude (lib/prelude.slight) is compiled with every program. Its
 // functions are in their own namespace: a program can define a function
@@ -35,8 +34,8 @@
 // prelude keeps using the prelude's (D80).
 
 import { CompileError } from './errors.ts';
-import { float, list, NIL, posOf, show, str, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
-import { intWord, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from './values.ts';
+import { float, isForm, list, NIL, posOf, show, str, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from './values.ts';
 import { isReceiveBody, stateFunctions } from './classify.ts';
 import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE } from './pattern.ts';
 import { splitProgram } from './split.ts';
@@ -91,8 +90,6 @@ type St = {
     readonly closures: readonly string[];   // functions whose static closure has been emitted
     readonly functions: Code;               // every function's entry and name, for the runtime (D171)
 };
-
-const MAX_ARGS = 8;     // in registers, on every target
 
 // The special forms, and those the expander turns into others (expand.ts),
 // which it leaves none of: neither kind can be a name.
@@ -502,8 +499,6 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (fn !== null) return compileCall(x, fn, args, cx, st);
     throw new CompileError(`unknown function '${name}'`, head.pos);
 }
-
-const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;
 
 // --- processes ----------------------------------------------------------------
 

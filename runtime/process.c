@@ -68,14 +68,6 @@ static int         poison;              // SLIGHT_POISON: fill what the collecto
 static int64_t     gc_stress;           // SLIGHT_GC_STRESS=n: collect at every nth call (n <= QUOTA), and every recv
 static uint64_t    sched;               // SLIGHT_SCHED's generator, or 0: first in, first out
 
-static void *must(void *p) {
-    if (!p) {
-        perror("rt: out of memory");
-        exit(2);
-    }
-    return p;
-}
-
 // --- the run queue ------------------------------------------------------------
 //
 // First in, first out (D86). With SLIGHT_SCHED=n, a generator seeded with
@@ -204,11 +196,7 @@ static void start(rt_proc_t *p) {
 // --- heaps --------------------------------------------------------------------
 
 static rt_chunk_t *new_chunk(size_t bytes) {
-    rt_chunk_t *c = malloc(sizeof *c + bytes);
-    if (!c) {
-        perror("rt: out of memory");
-        exit(2);
-    }
+    rt_chunk_t *c = rt_must(malloc(sizeof *c + bytes));
     c->next = NULL;
     c->size = bytes;
     return c;
@@ -532,14 +520,14 @@ static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t
 static rt_value_t new_entry(entry_t e) {
     if (nprocs + 1 >= procs_cap) {
         procs_cap = procs_cap ? procs_cap * 2 : 1024;
-        procs     = must(realloc(procs, procs_cap * sizeof *procs));
+        procs     = rt_must(realloc(procs, procs_cap * sizeof *procs));
     }
     procs[++nprocs] = e;
     return nprocs << RT_PID_SHIFT | RT_TAG_PID;
 }
 
 rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
-    rt_proc_t *p = must(calloc(1, sizeof *p));
+    rt_proc_t *p = rt_must(calloc(1, sizeof *p));
     p->pid      = new_entry((entry_t){ .proc = p });
     p->parent   = parent;
     p->code     = code;
@@ -565,11 +553,7 @@ rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const c
 
 // A message holding a copy of msg, in a chunk of its own.
 static rt_msg_t *new_msg(rt_value_t msg) {
-    rt_msg_t *m = malloc(sizeof *m);
-    if (!m) {
-        perror("rt: out of memory");
-        exit(2);
-    }
+    rt_msg_t *m = rt_must(malloc(sizeof *m));
     m->next   = NULL;
     m->chunk  = copy_values(&msg, &m->value, 1);
     m->device = 0;
@@ -641,15 +625,9 @@ void rt_dead_letter(rt_value_t msg, const char *site) {
 // Values built here, like (:ok value) around a record's value, are built
 // on the C stack, and copied to where they're going.
 
-static rt_value_t cons_at(rt_value_t *cell, rt_value_t car, rt_value_t cdr) {
-    cell[0] = car;
-    cell[1] = cdr;
-    return (rt_value_t)cell | RT_TAG_LIST;
-}
-
 // The result in e, (:ok value) or (:error reason), in cells (4 words).
 static rt_value_t result_at(rt_value_t *cells, const entry_t *e) {
-    return cons_at(cells, rt_symbol(e->ok ? RT_SYM_OK : RT_SYM_ERROR), cons_at(cells + 2, e->value, RT_NIL));
+    return rt_cons_at(cells, rt_symbol(e->ok ? RT_SYM_OK : RT_SYM_ERROR), rt_cons_at(cells + 2, e->value, RT_NIL));
 }
 
 // Sends (:exit pid result) to `to`, about the process that ended at e.
@@ -658,7 +636,7 @@ static void notify(rt_value_t to, rt_value_t pid, const entry_t *e) {
     if (!w) return;
     _Alignas(16) rt_value_t cells[10];
     rt_value_t result = result_at(cells, e);
-    deliver(w, new_msg(cons_at(cells + 4, rt_symbol(RT_SYM_EXIT), cons_at(cells + 6, pid, cons_at(cells + 8, result, RT_NIL)))));
+    deliver(w, new_msg(rt_cons_at(cells + 4, rt_symbol(RT_SYM_EXIT), rt_cons_at(cells + 6, pid, rt_cons_at(cells + 8, result, RT_NIL)))));
 }
 
 // p ends. Its result goes into its exit record, its joiners wake, its
@@ -744,11 +722,7 @@ rt_value_t rt_monitor(rt_value_t pid, const char *site) {
         notify(rt_current->pid, pid, e);
         return RT_NIL;
     }
-    rt_watch_t *w = malloc(sizeof *w);
-    if (!w) {
-        perror("rt: out of memory");
-        exit(2);
-    }
+    rt_watch_t *w = rt_must(malloc(sizeof *w));
     w->next = NULL;
     w->pid  = rt_current->pid;
     rt_watch_t **link = &e->proc->watchers;
@@ -839,8 +813,7 @@ static uint64_t now(void) {
 // When a timer set now for ms milliseconds is due. A negative ms counts
 // as 0; one too far off for the clock is due at its end.
 static uint64_t due_in(rt_value_t ms, const char *site) {
-    if (ms & RT_TAG_INT_MASK) rt_fault(RT_FAULT_NOT_INT, ms, site);
-    int64_t  n = rt_int_value(ms);
+    int64_t  n = rt_need_int(ms, site);
     uint64_t t = now();
     if (n <= 0) return t;
     return (uint64_t)n > (UINT64_MAX - t) / 1000000 ? UINT64_MAX : t + (uint64_t)n * 1000000;
@@ -853,11 +826,7 @@ static int before(const alarm_t *a, const alarm_t *b) {
 static void set_alarm(uint64_t due, rt_value_t pid, rt_msg_t *msg) {
     if (nalarms == alarms_cap) {
         alarms_cap = alarms_cap ? alarms_cap * 2 : 64;
-        alarms     = realloc(alarms, alarms_cap * sizeof *alarms);
-        if (!alarms) {
-            perror("rt: out of memory");
-            exit(2);
-        }
+        alarms     = rt_must(realloc(alarms, alarms_cap * sizeof *alarms));
     }
     alarm_t  a = { due, alarms_set++, pid, msg };
     uint64_t i = nalarms++;
@@ -960,11 +929,7 @@ rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, cons
     rt_value_t pid = rt_fork(code, n, values, site);
     if (nconnected == connected_cap) {
         connected_cap = connected_cap ? connected_cap * 2 : 8;
-        connected     = realloc(connected, connected_cap * sizeof *connected);
-        if (!connected) {
-            perror("rt: out of memory");
-            exit(2);
-        }
+        connected     = rt_must(realloc(connected, connected_cap * sizeof *connected));
     }
     rt_proc_t *p = procs[pid >> RT_PID_SHIFT].proc;
     p->keypress  = 1;
@@ -1227,7 +1192,7 @@ static uint64_t errno_name(int err) {
 
 // (name path), for errno err, in cells (4 words).
 static rt_value_t io_reason(rt_value_t *cells, int err, rt_value_t path) {
-    return cons_at(cells, rt_symbol(RT_SYM_ERRS + errno_name(err)), cons_at(cells + 2, path, RT_NIL));
+    return rt_cons_at(cells, rt_symbol(RT_SYM_ERRS + errno_name(err)), rt_cons_at(cells + 2, path, RT_NIL));
 }
 
 // A string box of len bytes, in space with room for it (len / 8 + 6
@@ -1245,7 +1210,7 @@ static int is_socket(const rt_device_t *d) {
 }
 
 static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site, const char *path, size_t len) {
-    rt_device_t *d = must(calloc(1, sizeof *d));
+    rt_device_t *d = rt_must(calloc(1, sizeof *d));
     d->pid   = new_entry((entry_t){ .value = RT_NIL, .ok = 1, .device = d });
     d->owner = p->pid;
     d->fd    = fd;
@@ -1255,7 +1220,7 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
     d->count = -1;
     d->line  = 1;
     if (path) {
-        d->path     = must(malloc(len + 1));
+        d->path     = rt_must(malloc(len + 1));
         d->path_len = len;
         memcpy(d->path, path, len);
         d->path[len] = '\0';
@@ -1341,7 +1306,10 @@ static void close_device(rt_device_t *d) {
     shut(d);
 }
 
-// d's owner ends with (:error (name path)), which closes d.
+// d's owner ends with (:error (name path)), which closes d. If the owner
+// is the process running, this doesn't return; if not, d is freed (a
+// file) or buried (a socket) by the time it does, so the caller returns
+// at once, and doesn't touch d again.
 static void fail(rt_device_t *d, int err) {
     rt_proc_t *owner = procs[d->owner >> RT_PID_SHIFT].proc;
     uint64_t   space[d->path_len / 8 + 6];
@@ -1355,7 +1323,7 @@ static void fail(rt_device_t *d, int err) {
 // Sends d's owner (sym f rest...); taking it reads on, if more says so.
 static void tell_sym(rt_device_t *d, rt_value_t sym, rt_value_t rest, int more) {
     _Alignas(16) rt_value_t cells[4];
-    rt_msg_t *m = new_msg(cons_at(cells, sym, cons_at(cells + 2, d->pid, rest)));
+    rt_msg_t *m = new_msg(rt_cons_at(cells, sym, rt_cons_at(cells + 2, d->pid, rest)));
     m->device = more ? d->pid : 0;
     d->sent   = d->sent || more;
     deliver(procs[d->owner >> RT_PID_SHIFT].proc, m);
@@ -1371,9 +1339,9 @@ static void tell(rt_device_t *d, uint64_t word, int more) {
 
 // (word f s): a line or a chunk.
 static void tell_string(rt_device_t *d, uint64_t word, const char *bytes, size_t len) {
-    uint64_t *space = must(malloc((len / 8 + 6) * sizeof *space));
+    uint64_t *space = rt_must(malloc((len / 8 + 6) * sizeof *space));
     _Alignas(16) rt_value_t cell[2];
-    tell_list(d, word, cons_at(cell, string_in(space, bytes, len), RT_NIL), 1);
+    tell_list(d, word, rt_cons_at(cell, string_in(space, bytes, len), RT_NIL), 1);
     free(space);
 }
 
@@ -1382,7 +1350,7 @@ static void tell_string(rt_device_t *d, uint64_t word, const char *bytes, size_t
 // sending its processes goes on to its new owner.
 static void tell_open(rt_device_t *d) {
     _Alignas(16) rt_value_t cell[2];
-    if (d->mode == DEV_LISTEN) tell_list(d, RT_DEV_OPEN, cons_at(cell, rt_int(d->port), RT_NIL), 0);
+    if (d->mode == DEV_LISTEN) tell_list(d, RT_DEV_OPEN, rt_cons_at(cell, rt_int(d->port), RT_NIL), 0);
     else                       tell(d, RT_DEV_OPEN, d->mode == RT_FS_READ || d->mode == DEV_TCP || d->mode == DEV_SYSTEM);
 }
 
@@ -1424,7 +1392,7 @@ static ssize_t fill(rt_device_t *d) {
     while (cap - d->len < room) cap *= 2;
     if (cap != d->cap) {
         d->cap = cap;
-        d->buf = must(realloc(d->buf, cap));
+        d->buf = rt_must(realloc(d->buf, cap));
     }
     ssize_t got;
     do got = rt_io_read(d->fd, d->buf + d->len, d->cap - d->len); while (got < 0 && errno == EINTR);
@@ -1474,9 +1442,9 @@ static void value_restart(rt_device_t *d) {
 
 // (word f text line).
 static void tell_doc(rt_device_t *d, const char *text, size_t len, int64_t line) {
-    uint64_t *space = must(malloc((len / 8 + 6) * sizeof *space));
+    uint64_t *space = rt_must(malloc((len / 8 + 6) * sizeof *space));
     _Alignas(16) rt_value_t cells[4];
-    tell_list(d, RT_DEV_DOC, cons_at(cells, string_in(space, text, len), cons_at(cells + 2, rt_int(line), RT_NIL)), 1);
+    tell_list(d, RT_DEV_DOC, rt_cons_at(cells, string_in(space, text, len), rt_cons_at(cells + 2, rt_int(line), RT_NIL)), 1);
     free(space);
 }
 
@@ -1550,8 +1518,8 @@ static int cut_value(rt_device_t *d) {
             consume(d, n);
             value_restart(d);
             if (d->items == ITEMS_ELEMENT) d->items = ITEMS_NEXT;
-            if (d->how == RT_DEV_SOURCE) tell_list(d, RT_DEV_FORM, cons_at(cells, v, cons_at(cells + 2, rt_int(line), RT_NIL)), 1);
-            else                         tell_list(d, sexp ? RT_DEV_SEXP : RT_DEV_JSON, cons_at(cells, v, RT_NIL), 1);
+            if (d->how == RT_DEV_SOURCE) tell_list(d, RT_DEV_FORM, rt_cons_at(cells, v, rt_cons_at(cells + 2, rt_int(line), RT_NIL)), 1);
+            else                         tell_list(d, sexp ? RT_DEV_SEXP : RT_DEV_JSON, rt_cons_at(cells, v, RT_NIL), 1);
         }
         free_chunks(a.chunks);
         if (built != 0) fail(d, ERR_TOOBIG);
@@ -1665,7 +1633,7 @@ static void queue(rt_device_t *d, const char *bytes, size_t len) {
     }
     if (d->out_len + len > d->out_cap) {
         d->out_cap = (d->out_len + len) * 2;
-        d->out     = must(realloc(d->out, d->out_cap));
+        d->out     = rt_must(realloc(d->out, d->out_cap));
     }
     if (len) memcpy(d->out + d->out_len, bytes, len);
     d->out_len += len;
@@ -1817,8 +1785,8 @@ static void lookup_timed_out(rt_device_t *d, uint64_t seq) {
 rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                           rt_value_t where, uint64_t mode) {
     if (mode == RT_TCP_LISTEN) {
-        if (where & RT_TAG_INT_MASK) rt_fault(RT_FAULT_NOT_INT, where, site);
-        if (rt_int_value(where) < 0 || rt_int_value(where) > 65535) rt_fault(RT_FAULT_RANGE, where, site);
+        int64_t port = rt_need_int(where, site);
+        if (port < 0 || port > 65535) rt_fault(RT_FAULT_RANGE, where, site);
     } else if (!rt_is_string(where)) {
         rt_fault(RT_FAULT_NOT_STRING, where, site);
     }
@@ -1870,7 +1838,7 @@ static void accept_all(rt_device_t *l) {
         rt_device_t *c = new_device(owner, DEV_TCP, fd, l->site, where, strlen(where));
         c->waiting = 1;
         _Alignas(16) rt_value_t cell[2];
-        tell_list(l, RT_DEV_ACCEPT, cons_at(cell, c->pid, RT_NIL), 0);
+        tell_list(l, RT_DEV_ACCEPT, rt_cons_at(cell, c->pid, RT_NIL), 0);
     }
 }
 
@@ -1967,10 +1935,18 @@ static int by_pid(const void *a, const void *b) {
 }
 
 // Handles the sockets select() says are ready, in the order of their
-// pids; returns whether there were any.
+// pids; returns whether there were any. An event can end the process
+// running (fail, when events() is called from rt_preempt), and then this
+// never returns: so the list of them is kept for the next time, not
+// freed, and the sockets closed meanwhile are buried then.
 static int socket_events(fd_set *in, fd_set *out) {
-    ready_t *ready = must(malloc((nsockets + 1) * sizeof *ready));
-    uint64_t n     = 0;
+    static ready_t  *ready;
+    static uint64_t  ready_cap;
+    if (ready_cap < nsockets + 1) {
+        ready_cap = nsockets + 1;
+        ready     = rt_must(realloc(ready, ready_cap * sizeof *ready));
+    }
+    uint64_t n = 0;
     for (rt_device_t *d = sockets; d; d = d->next_socket) {
         int write, fd = d->lookup ? rt_lookup_fd(d->lookup, &write) : d->fd;
         int r = FD_ISSET(fd, in), w = FD_ISSET(fd, out);
@@ -1980,7 +1956,6 @@ static int socket_events(fd_set *in, fd_set *out) {
     for (uint64_t i = 0; i < n; i++) {
         if (!ready[i].d->dead) socket_event(ready[i].d, ready[i].r, ready[i].w);
     }
-    free(ready);
     bury();
     return n > 0;
 }
@@ -2035,7 +2010,7 @@ static int by_entry(const void *a, const void *b) {
 static const char *function_name(uintptr_t pc) {
     uint64_t n = slight_function_count;
     if (!functions) {
-        functions = must(malloc((n + 1) * sizeof *functions));
+        functions = rt_must(malloc((n + 1) * sizeof *functions));
         memcpy(functions, slight_functions, n * sizeof *functions);
         qsort(functions, n, sizeof *functions, by_entry);
     }
@@ -2055,7 +2030,7 @@ static uintptr_t where(const rt_proc_t *p) {
 
 static void *grow(void *array, uint64_t *cap, size_t size) {
     *cap = *cap ? *cap * 2 : 16;
-    return must(realloc(array, *cap * size));
+    return rt_must(realloc(array, *cap * size));
 }
 
 static snapshot_t take(rt_device_t *d, const rt_proc_t *p) {
@@ -2081,13 +2056,13 @@ static snapshot_t take(rt_device_t *d, const rt_proc_t *p) {
 static rt_value_t field(rt_value_t **at, uint64_t key, rt_value_t value) {
     rt_value_t *c = *at;
     *at += 4;
-    return cons_at(c, rt_symbol(key), cons_at(c + 2, value, RT_NIL));
+    return rt_cons_at(c, rt_symbol(key), rt_cons_at(c + 2, value, RT_NIL));
 }
 
 // The list of xs[0..n), in 2n words at *at.
 static rt_value_t list_at(rt_value_t **at, const rt_value_t *xs, uint64_t n) {
     rt_value_t list = RT_NIL;
-    for (uint64_t i = n; i > 0; i--, *at += 2) list = cons_at(*at, xs[i - 1], list);
+    for (uint64_t i = n; i > 0; i--, *at += 2) list = rt_cons_at(*at, xs[i - 1], list);
     return list;
 }
 
@@ -2096,10 +2071,10 @@ static void tell_process(rt_device_t *d, const snapshot_t *r, int more) {
     const char *name  = r->in ? function_name(r->in) : NULL;
     size_t      len   = name ? strlen(name) : 0;
     uint64_t    words = (len / 8 + 7) & ~(uint64_t)1;     // the name's string, then cells
-    rt_value_t *space = must(malloc((words + 62 + 2 * r->ndevices) * sizeof *space)), *at = space + words;
+    rt_value_t *space = rt_must(malloc((words + 62 + 2 * r->ndevices) * sizeof *space)), *at = space + words;
     rt_value_t  in    = name ? string_in(space, name, len) : RT_NIL;
     rt_value_t  devices = RT_NIL;                          // they're newest first: the list is oldest first
-    for (uint64_t i = 0; i < r->ndevices; i++, at += 2) devices = cons_at(at, d->snap_devices[r->devices + i], devices);
+    for (uint64_t i = 0; i < r->ndevices; i++, at += 2) devices = rt_cons_at(at, d->snap_devices[r->devices + i], devices);
     rt_value_t fields[] = {
         field(&at, SYS(PID), r->pid),
         field(&at, SYS(PARENT), r->parent),
@@ -2113,7 +2088,7 @@ static void tell_process(rt_device_t *d, const snapshot_t *r, int more) {
         field(&at, SYS(DEVICES), devices),
     };
     rt_value_t info = list_at(&at, fields, sizeof fields / sizeof *fields);
-    tell_sym(d, rt_symbol(SYS(PROCESS)), cons_at(at, info, RT_NIL), more);
+    tell_sym(d, rt_symbol(SYS(PROCESS)), rt_cons_at(at, info, RT_NIL), more);
     free(space);
 }
 
@@ -2142,7 +2117,7 @@ static void tell_runtime(rt_device_t *d) {
         field(&at, SYS(REDUCTIONS), rt_int((int64_t)calls)),
     };
     rt_value_t info = list_at(&at, fields, sizeof fields / sizeof *fields);
-    tell_sym(d, rt_symbol(SYS(RUNTIME)), cons_at(at, info, RT_NIL), 0);
+    tell_sym(d, rt_symbol(SYS(RUNTIME)), rt_cons_at(at, info, RT_NIL), 0);
 }
 
 // Not yet ended. (A process that has is RT_DONE only on its way out,
@@ -2184,7 +2159,7 @@ static void system_command(rt_device_t *d, rt_value_t msg) {
             d->snap_ndevices = mark;
         } else {
             _Alignas(16) rt_value_t cells[8];
-            tell_sym(d, rt_symbol(SYS(ENDED)), cons_at(cells + 4, pid, cons_at(cells + 6, result_at(cells, e), RT_NIL)), 0);
+            tell_sym(d, rt_symbol(SYS(ENDED)), rt_cons_at(cells + 4, pid, rt_cons_at(cells + 6, result_at(cells, e), RT_NIL)), 0);
         }
     } else if (word == rt_symbol(SYS(RUNTIME)) && args == RT_NIL) {
         tell_runtime(d);

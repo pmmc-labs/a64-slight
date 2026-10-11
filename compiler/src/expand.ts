@@ -46,7 +46,7 @@
 import { CompileError } from './errors.ts';
 import { lowerPattern, NO_MATCH } from './pattern.ts';
 import { read } from './reader.ts';
-import { NIL, cons, list, posOf, show, sym, toArray, type Pair, type Pos, type Sexp } from './sexp.ts';
+import { NIL, cons, form, isForm, isSym, list, posOf, show, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 
 // The outside world: a key for the file at path that's the same however
 // it's named (its real path), or null if there's no such file; and the
@@ -96,7 +96,7 @@ function includeFile(src: Source, from: Pos | null, cx: Cx, stack: readonly Open
     let d = done;
     for (let xs = read(cx.load.text(key), src.name); xs.t === 'pair'; xs = xs.cdr) {
         const x = xs.car;
-        if (headIs(x, '@include')) {
+        if (isForm(x, '@include')) {
             const [forms, d1] = includeFile(target(x as Pair, src, cx.lib), (x as Pair).pos, cx, path, d);
             out.push(...forms);
             d = d1;
@@ -132,21 +132,13 @@ export function relative(from: string, path: string): string {
     return out.join('/');
 }
 
-const headIs = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;
-
 // The name in (quote name), or null.
 function keyword(x: Sexp): string | null {
-    const items = headIs(x, 'quote') ? toArray(x) : null;
+    const items = isForm(x, 'quote') ? toArray(x) : null;
     return items !== null && items.length === 2 && items[1]!.t === 'sym' ? items[1]!.name : null;
 }
 
 // --- the forms that become cond -----------------------------------------------
-
-// A list whose first pair is at pos, so errors and faults point there.
-function form(pos: Pos | null, ...items: readonly Sexp[]): Sexp {
-    const xs = list(...items);
-    return xs.t === 'pair' ? cons(xs.car, xs.cdr, pos) : xs;
-}
 
 // f over the elements of a list, in order, keeping its positions. A loop
 // (D39), so that a long list doesn't run Node out of stack.
@@ -204,10 +196,24 @@ function expandWhen(x: Pair): Sexp {
     return form(x.pos, sym('cond', x.pos), list(test!, ...body), list(TRUE, NIL));
 }
 
+// A case's or a match's topic is bound under a name no program can write,
+// which says which of them it was.
+function topicName(of: 'case' | 'match', x: Pair): Sym {
+    const where = x.pos === null ? '' : ` ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
+    return sym(`${of} topic${where}`, x.pos);
+}
+
+// The case or match a do was made from, or null: so that a message about
+// it can name what the program has (split.ts), not the do it became.
+export function madeFrom(x: Pair): string | null {
+    const first = x.cdr.t === 'pair' ? toArray(x.cdr.car) : null;
+    const name  = first !== null && first.length === 3 && isSym(first[0]!, 'let') && first[1]!.t === 'sym' ? first[1]!.name : '';
+    return name.startsWith('case topic') ? 'case' : name.startsWith('match topic') ? 'match' : null;
+}
+
 function expandCase(x: Pair): Sexp {
     const [topic, ...clauses] = args(x, 'case', 1, Infinity, 'a topic and clauses');
-    const where = x.pos === null ? '' : ` ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
-    const t     = sym(`case topic${where}`, x.pos);
+    const t     = topicName('case', x);
     const tests = clauses.map((c) => {
         const items = toArray(c);
         if (items === null || items.length < 2) throw new CompileError(`a case clause is (value body...), not ${show(c)}`, x.pos);
@@ -238,8 +244,7 @@ function expandOr(x: Pair): Sexp {
 
 function expandMatch(x: Pair): Sexp {
     const [topic, ...clauses] = args(x, 'match', 2, Infinity, 'a topic and clauses');
-    const where = x.pos === null ? '' : ` ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
-    const t     = sym(`match topic${where}`, x.pos);
+    const t     = topicName('match', x);
     const conds = clauses.map((c) => {
         const items = toArray(c);
         if (items === null || items.length < 2) throw new CompileError(`a match clause is (pattern body...), not ${show(c)}`, posOf(c) ?? x.pos);

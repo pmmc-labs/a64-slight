@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { DEVICE_WORDS, ERRNO_NAMES, FAULT_KINDS, intWord, JSON_WORDS, KEY_NAMES, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS } from '../src/values.ts';
+import { DEVICE_WORDS, ERRNO_NAMES, FAULT_KINDS, intWord, JSON_WORDS, KEY_NAMES, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS } from '../src/values.ts';
 
 const RT_H = readFileSync(new URL('../../runtime/rt.h', import.meta.url), 'utf8');
 
@@ -79,4 +79,8 @@ test("a device's words, the errno names and the data's words are rt.h's, in orde
 
 test('nil is the list tag on a null pointer', () => {
     assert.equal(define('RT_NIL'), define('RT_TAG_LIST'));
+});
+
+test('a call passes as many arguments as a waiting process keeps', () => {
+    assert.equal(BigInt(MAX_ARGS), define('RT_MAX_ARGS'));
 });

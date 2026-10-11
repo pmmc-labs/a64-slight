@@ -180,11 +180,12 @@ void rt_io_start(int *argc, char ***argv, rt_io_settings_t *s) {
     if (!get(magic, sizeof magic) || memcmp(magic, MAGIC, sizeof magic) != 0) stop("that isn't a record of a run");
     if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed) || !get(&n, sizeof n)) stop("the record is cut short");
     s->virtual_clock = clock;
-    char **args = calloc((size_t)n + 1, sizeof *args);
-    if (!args) abort();
+    char **args = rt_must(calloc((size_t)n + 1, sizeof *args));
     for (uint32_t i = 0; i < n; i++) {
         uint32_t len;
-        if (!get(&len, sizeof len) || !(args[i] = calloc(len + 1, 1)) || !get(args[i], len)) stop("the record is cut short");
+        if (!get(&len, sizeof len)) stop("the record is cut short");
+        args[i] = rt_must(calloc(len + 1, 1));
+        if (!get(args[i], len)) stop("the record is cut short");
     }
     *argc = (int)n;
     *argv = args;

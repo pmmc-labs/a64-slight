@@ -238,7 +238,8 @@
 #define RT_PROC_PID         32    // rt_proc_t.pid: $$
 #define RT_PROC_PARENT      40    // rt_proc_t.parent: ^$$
 #define RT_PROC_CODE        48    // rt_proc_t.code: what the trampoline calls...
-#define RT_PROC_ARGS        56    // rt_proc_t.args[8]: ...with these in the argument registers
+#define RT_PROC_ARGS        56    // rt_proc_t.args[RT_MAX_ARGS]: ...with these in the argument registers
+#define RT_MAX_ARGS          8    // the most a call passes (the compiler's MAX_ARGS)
 #define RT_PROC_CTX        120    // rt_proc_t.ctx: the registers, while it's switched out
 
 // rt_ctx_t: the callee-saved registers, which are all rt_switch keeps.
@@ -327,7 +328,7 @@ typedef struct rt_proc {
     rt_value_t  pid;            // as a value
     rt_value_t  parent;         // as a value; () for the root
     rt_code_t   code;           // where it starts, or restarts after waiting in recv
-    rt_value_t  args[8];
+    rt_value_t  args[RT_MAX_ARGS];
     rt_ctx_t    ctx;
 
     rt_state_t      state;
@@ -389,6 +390,15 @@ static inline uint64_t rt_box_first_value(uint64_t header) {
 static inline rt_value_t rt_int(int64_t n)        { return (rt_value_t)((uint64_t)n << 1); }
 static inline int64_t    rt_int_value(rt_value_t v) { return (int64_t)v >> 1; }
 static inline rt_value_t rt_symbol(uint64_t id)    { return id << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL; }
+
+// A cons cell in the two words at cell (16-byte aligned): for a value the
+// runtime builds outside any heap, on the C stack say, and copies before
+// cell goes.
+static inline rt_value_t rt_cons_at(rt_value_t *cell, rt_value_t car, rt_value_t cdr) {
+    cell[0] = car;
+    cell[1] = cdr;
+    return (rt_value_t)cell | RT_TAG_LIST;
+}
 
 // --- emitted by the compiler -------------------------------------------------
 
@@ -467,6 +477,9 @@ void rt_heap_grow(uint64_t bytes, const char *site) RT_ASM(rt_heap_grow);
 __attribute__((noreturn))
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) RT_ASM(rt_fault);
 
+// v's value, if it's an integer; otherwise it faults (:not-an-int).
+int64_t rt_need_int(rt_value_t v, const char *site);
+
 // Prints a value and a newline. Returns nil.
 rt_value_t rt_pprint(rt_value_t v) RT_ASM(rt_pprint);
 
@@ -502,6 +515,11 @@ rt_value_t rt_utf8_chars(rt_value_t s, const char *site) RT_ASM(rt_utf8_chars);
 rt_value_t rt_utf8_code(rt_value_t s, const char *site) RT_ASM(rt_utf8_code);
 rt_value_t rt_utf8_char(rt_value_t n, const char *site) RT_ASM(rt_utf8_char);
 rt_value_t rt_utf8_valid(rt_value_t s, const char *site) RT_ASM(rt_utf8_valid);
+
+// The length of the well-formed UTF-8 sequence at the start of the n > 0
+// bytes at p, with its code point in *code; 0 if they don't start one.
+// Keys are decoded by it too (tty.c).
+size_t rt_utf8_sequence(const unsigned char *p, size_t n, uint32_t *code);
 
 // JSON (json.c, D154). The builtins:
 rt_value_t rt_json_parse(rt_value_t s, const char *site) RT_ASM(rt_json_parse);
@@ -572,6 +590,10 @@ extern rt_proc_t *rt_current;
 // Allocates from the current process's heap, in 16-byte units; faults at
 // `site` when the heap is full.
 void *rt_alloc(size_t bytes, const char *site);
+
+// p, from malloc, calloc or realloc; if it's NULL, the program ends, with
+// exit status 2, since the runtime can't go on without memory.
+void *rt_must(void *p);
 
 // A new string holding a copy of len bytes.
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site);
@@ -688,6 +710,16 @@ typedef struct rt_json {
 } rt_json_t;
 
 typedef void *(*rt_build_alloc_t)(void *cx, size_t bytes);
+
+// rt_alloc as an rt_build_alloc_t, cx being the site: for json/parse and
+// sexp/parse, which build in the heap, and fault when it's full.
+void *rt_heap_alloc(void *site, size_t bytes);
+
+// What both kinds of text count as space, and a hex digit's value, or -1.
+static inline int rt_is_space(int c) { return c == ' ' || c == '\t' || c == '\n' || c == '\r'; }
+static inline int rt_hex_value(int c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
 
 int  rt_json_scan(rt_json_t *j, const char *bytes, size_t len, int eof, size_t *used);
 void rt_json_reset(rt_json_t *j);

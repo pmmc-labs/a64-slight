@@ -33,6 +33,9 @@ export const fitsInt = (n: bigint): boolean => n >= INT_MIN && n <= INT_MAX;
 
 export const isSym = (x: Sexp, name: string): boolean => x.t === 'sym' && x.name === name;
 
+// Whether x is a form headed by the symbol name: (name ...).
+export const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;
+
 // The position of an expression, for error messages: its own, or failing
 // that, its first element's.
 export function posOf(x: Sexp): Pos | null {
@@ -43,6 +46,12 @@ export function posOf(x: Sexp): Pos | null {
 
 export function list(...items: readonly Sexp[]): Sexp {
     return items.reduceRight<Sexp>((tail, item) => cons(item, tail), NIL);
+}
+
+// A list whose first pair is at pos, so errors and faults point there.
+export function form(pos: Pos | null, ...items: readonly Sexp[]): Sexp {
+    const xs = list(...items);
+    return xs.t === 'pair' ? cons(xs.car, xs.cdr, pos) : xs;
 }
 
 export function reverse(xs: Sexp, acc: Sexp = NIL): Sexp {
