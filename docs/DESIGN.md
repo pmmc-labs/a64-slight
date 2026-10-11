@@ -251,14 +251,14 @@ reply refs.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
   sources, no blocked I/O) is detected and reported. So far (step 10d): if
   the run queue empties, no timer is pending, no process is connected to
-  `:keypress` with stdin still open, no socket is open, and the root
-  process hasn't ended,
+  `:keypress` with stdin still open, no socket can be waited for (below),
+  and the root process hasn't ended,
   the program prints `deadlock: the root process is waiting for a
   message, and nothing else can run` (or `... waiting for #<pid N> to end,
   ...`, in `join`) to stderr and exits 1.
 - **The program ends when nothing can run** and nothing more can come (no
-  timer is pending, no socket is open, and no process is connected to
-  `:keypress` or stdin has ended), not when the root ends: other
+  timer is pending, no socket can be waited for, and no process is
+  connected to `:keypress` or stdin has ended), not when the root ends: other
   processes keep running after the root has its value (or its error), and
   the root's value is printed last. Processes
   still waiting in `recv` or `join` at that point are dropped (D93).
@@ -693,7 +693,13 @@ Lalloc_N:
   other end closes; it can still be written to then. It takes `(:write x
   ...)` as a file does, and keeps what the socket can't take yet, writing
   it when it can, so `send` still never blocks; closing it waits till
-  that's written, and meanwhile it keeps the program running.
+  that's written, and meanwhile it keeps the program running. A socket
+  counts as something that can still happen only while `select()` can
+  wait on it: a listener, a connection connecting or with output
+  waiting, a lookup, or a connection read because its owner waits for
+  what it has. One whose owner has its last message and isn't waiting,
+  or that no process has been handed, can't do anything till a process
+  runs, so when none can, that's a deadlock, not a wait.
   `(connect :tcp/listen port expr)` listens on all interfaces; its first
   message is `(:open l port)`, port being the one it got (0 lets the
   system pick, which tests use, with server and client in one program),

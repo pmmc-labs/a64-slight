@@ -930,6 +930,7 @@ static int listening(void) {
 }
 
 static uint64_t nsockets;
+static int      sockets_waiting(void);
 static void     socket_fds(fd_set *in, fd_set *out, int *max);
 static int      socket_events(fd_set *in, fd_set *out);
 
@@ -994,11 +995,14 @@ static void events(void) {
 }
 
 // Nothing can run: waits for a key, a socket or the next timer. Returns 0
-// if none of them can come. On the virtual clock, the sockets come first,
-// then a key, then the clock moves; only when nothing else can happen does
-// it wait for real.
+// if none of them can come: an open socket counts only while select() can
+// wait on it (wants); one whose owner has its last message and isn't
+// waiting, or that no process has been handed, can't do anything till a
+// process runs, and none can. On the virtual clock, the sockets come
+// first, then a key, then the clock moves; only when nothing else can
+// happen does it wait for real.
 static int idle(void) {
-    if (!listening() && !nalarms && !nsockets) return 0;
+    if (!listening() && !nalarms && !sockets_waiting()) return 0;
     if (virtual_clock) {
         int saw = wait_for(0);
         if ((saw & IO_KEYS) && input_at == input_len) read_input();
@@ -1019,7 +1023,7 @@ static int idle(void) {
         }
         // Only the world outside can do anything now: wait for it, unless
         // stdin has just ended, and with it the last thing that could come.
-        if ((listening() || nsockets) && (wait_for(-1) & IO_KEYS)) read_input();
+        if ((listening() || sockets_waiting()) && (wait_for(-1) & IO_KEYS)) read_input();
         return 1;
     }
     uint64_t t = now();
@@ -1081,8 +1085,8 @@ static int idle(void) {
 // keeps the program running. A listener sends (:open l port), port being
 // the one it got (0 lets the system pick), then (:accept l conn) for each
 // connection; conn reads nothing until (connect conn expr) hands it to a
-// process. Open sockets count as something that can still happen. IPv4
-// only, for now.
+// process. An open socket counts as something that can still happen while
+// select() can wait on it (wants, below). IPv4 only, for now.
 
 #define DEV_TCP      3                  // a device's mode, after RT_FS_READ, _WRITE and _APPEND
 #define DEV_LISTEN   4
@@ -1800,22 +1804,45 @@ static void accept_all(rt_device_t *l) {
     }
 }
 
+// Whether select() has anything to wait for on d, and what: a listener
+// reads; a connection writes while it connects or has output waiting,
+// and reads while its owner waits for what it has (not accepted and not
+// yet handed over, not sent a message it hasn't taken, not at its end,
+// not closing); a lookup waits on its query's socket. A socket that wants
+// nothing can't do anything until a process runs, so it doesn't keep
+// the program alive (idle).
+static int wants(const rt_device_t *d, int *r, int *w) {
+    if (d->lookup) {
+        int write;
+        rt_lookup_fd(d->lookup, &write);
+        *r = !write;
+        *w = write;
+        return 1;
+    }
+    *r = d->mode == DEV_LISTEN || (!d->connecting && !d->waiting && !d->sent && !d->eof && !d->closing);
+    *w = d->connecting || d->out_len > d->out_at;
+    return *r || *w;
+}
+
+static int sockets_waiting(void) {
+    int r, w;
+    for (rt_device_t *d = sockets; d; d = d->next_socket) {
+        if (wants(d, &r, &w)) return 1;
+    }
+    return 0;
+}
+
 // Adds to the sets the sockets that are waiting to read or write, and
 // raises *max to their highest file descriptor.
 static void socket_fds(fd_set *in, fd_set *out, int *max) {
     bury();
     for (rt_device_t *d = sockets; d; d = d->next_socket) {
-        if (d->lookup) {
-            int write, fd = rt_lookup_fd(d->lookup, &write);
-            FD_SET(fd, write ? out : in);
-            if (fd > *max) *max = fd;
-            continue;
-        }
-        int r = d->mode == DEV_LISTEN || (!d->connecting && !d->waiting && !d->sent && !d->eof && !d->closing);
-        int w = d->connecting || d->out_len > d->out_at;
-        if (r) FD_SET(d->fd, in);
-        if (w) FD_SET(d->fd, out);
-        if ((r || w) && d->fd > *max) *max = d->fd;
+        int r, w, write;
+        if (!wants(d, &r, &w)) continue;
+        int fd = d->lookup ? rt_lookup_fd(d->lookup, &write) : d->fd;
+        if (r) FD_SET(fd, in);
+        if (w) FD_SET(fd, out);
+        if (fd > *max) *max = fd;
     }
 }
 
