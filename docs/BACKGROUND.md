@@ -584,3 +584,21 @@ Minefield") is the conformance test: its `y_` files must parse, its
   hardware and kernels built around message passing.
 - **CDR-coding** and **VLists** (Bagwell): denser list representations,
   possible later.
+- **Misty** (Douglas Crockford; mistysystem.com, its source and docs at
+  github.com/douglascrockford/Misty; looked at Oct 2026, out of
+  curiosity). A capability-secure, distributed actor language, so far a
+  spec, a tokenizer and a parser, with no runtime. Much like slight
+  underneath: a turn handles one message and ends with an empty stack
+  (our `recv` rule); each actor has its own heap, collected by copying
+  into a fresh block, so one actor pauses and not the world; data known
+  at build time is read-only and shared; messages are copied; an address
+  is a capability; a bug ends one actor. Unlike it above: Misty is
+  "transitional", with mutable records and arrays, `var` and `assign`,
+  callbacks rather than a receive, DEC64 as its only number, and null
+  where slight faults. Ideas noted, none taken: holding a turn's sends
+  until it ends, and dropping them if it fails; `couple` (a one-way
+  link); powers granted at build time, with facets to narrow them; the
+  requestor combinators (`sequence`, `parallel`, `race`, `fallback`,
+  `time_limit`), from Crockford's Parseq and Pronto; readable patterns in
+  place of regexes. slight's runtime could carry Misty's processes,
+  heaps, timers and devices much as they are, but not its values.
