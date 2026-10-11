@@ -146,7 +146,7 @@ reserved words: a local of the same name hides them.
 
 These names can't be bound or defined: `#true`, `#false`, `$$`, `^$$`,
 `@ARGV`, `@include`, the special forms, and the forms that become
-`cond`.
+`cond` (`match` among them).
 
 ### Documentation
 
@@ -311,9 +311,10 @@ See Devices.
         ...)
     (recv)
 
-Takes the next message, and gives the value of the clause that matched;
-`(recv)` gives the message itself. A `recv` can go anywhere a tail call
-could, and inside a call there. See Processes.
+Takes the next message, and gives the value of the clause whose pattern
+it fits (Patterns, under "The forms that become cond"); `(recv)` gives
+the message itself. A `recv` can go anywhere a tail call could, and
+inside a call there. See Processes.
 
 ### yield
 
@@ -354,6 +355,45 @@ A `case` on a message's tag:
         (#true n))
 
 `not` is a function, in the prelude, on booleans only.
+
+### match
+
+    (match topic
+        (pattern body...)
+        ...)
+
+Evaluates `topic` once, and tries the clauses in order: the first whose
+pattern the value fits gives the `match` its value, with the names in
+its pattern bound to the parts they matched, in its body only. The
+bodies are in tail position if the `match` is, so a loop can go through
+one, and so can a `recv`. If no pattern fits, the process faults
+(`:no-match`, with the value). (D168)
+
+    (defun area (shape)
+        (match shape
+            ((:circle r)            (* PI (* r r)))
+            ((:rect (x1 y1) (x2 y2)) (* (- x2 x1) (- y2 y1)))
+            ((:poly & points)       (polygon-area points))))
+
+#### Patterns
+
+`match` and `recv` take the same patterns:
+
+- `_` matches anything, and binds nothing.
+- A name matches anything, and binds it.
+- A literal matches a value `eq?` to it: an integer, a float, a string,
+  `#true`, `#false`, `()`, or anything quoted, such as `:tag`, `'x` or
+  `'(1 2)`. So `1` doesn't match `1.0`.
+- `(p ...)` matches a list of exactly as many elements, each matching
+  its pattern: `(:point x y)` matches `(:point 3 4)`, and
+  `(:line (x1 y1) (x2 y2))` a line of two points.
+- `(p ... & rest)` matches a list of at least as many, and `rest` (a
+  pattern too, usually a name) matches the list of what's left, maybe
+  `()`. `(& all)` matches any list.
+
+A name can be in a pattern only once, and it can't be a name that can't
+be bound (`$$`, `cond`, ...). There are no guards: match the shape, and
+test the rest in the body, with `cond`.
 
 
 ## Functions and calls
@@ -411,7 +451,7 @@ A function whose whole body is a `recv` is a **receive function**:
             (:stop       n)))
 
 It takes the first message in the mailbox, or waits for one, and tries
-the clauses in order:
+the clauses in order. Their patterns are `match`'s (Patterns, above):
 
 - `(:tag a b ...)` matches a list of exactly that length headed by the
   symbol `:tag`, and binds the rest of it, by position, to the names.
@@ -419,6 +459,8 @@ the clauses in order:
 - `:tag` matches that symbol.
 - A bare name matches any message, and binds it. `_` matches any message
   and binds nothing.
+- Patterns nest, a literal can go anywhere, and `&` takes the rest:
+  `((:move (x y)) ...)`, `((:write & xs) ...)`.
 
 The matching clause's body runs, in tail position when the `recv` is the
 last thing the function does, and its value is the `recv`'s. To keep
@@ -429,8 +471,7 @@ back.
 Only the first message is ever looked at; there's no selective receive.
 If no clause matches it, it's dropped and logged as a dead letter
 (`dead letter: (bogus 1) (recv at prog.slight:2:5)`), and the function
-takes the next. Patterns don't nest, and the head keyword is the only
-literal: match the outer shape, and take the rest apart in the body.
+takes the next.
 
 ### The recv rule
 
@@ -514,6 +555,7 @@ The fault kinds:
 - `:not-a-device`: `connect` handed something that isn't an open device
 - `:not-json`: `json/print` given something JSON can't hold
 - `:not-sexp`: `sexp/print` given something that isn't data
+- `:no-match`: a `match` that no clause matched
 
 ### Waiting for a process
 

@@ -1,0 +1,77 @@
+; match (D168): a topic, then clauses of a pattern and a body. The first
+; clause whose pattern fits gives the match its value, with the pattern's
+; names bound in its body. Patterns nest; a literal is compared with eq?;
+; & takes the rest of a list. (A match that matches nothing: t/196.)
+
+(defun describe (x)
+    (match x
+        (()                      "empty")
+        ((:point x y)            (concat "point " x "," y))
+        ((:line (x1 y1) (x2 y2)) (concat "line from " x1 "," y1 " to " x2 "," y2))
+        ((:add & ns)             (concat "sum " (sum ns)))
+        (("hello" name)          (concat "greeting for " name))
+        ((5 _)                   "five and something")
+        ((#true)                 "a true")
+        ('(1 2)                  "the list one two")
+        (2.5                     "two and a half")
+        ((a b)                   (concat "a pair " a " " b))
+        ((a & _)                 (concat "a list starting " a))
+        (n                       (concat "something else: " n))))
+
+(map (lambda (x) (pprint (describe x)))
+    (list ()
+          (list :point 3 4)
+          (list :line (list 0 0) (list 5 6))
+          (list :add 1 2 3)
+          (list :add)
+          (list "hello" "world")
+          (list 5 :x)
+          (list #true)
+          (list 1 2)
+          2.5
+          2
+          (list :x :y)
+          (list 1 2 3)
+          "str"
+          (list :point 3)))
+
+; The topic is evaluated once.
+(defun show (x) (pprint x) x)
+(pprint (match (show (list 1 2)) ((a) :one) ((a b) :two)))
+
+; 1 isn't eq? to 1.0, () and #false are literals anywhere
+(pprint (match 1 (1.0 :float) (1 :int)))
+(pprint (match (list () #false) ((() #false) :both) (_ :neither)))
+
+; & with nothing before it takes a list, and only a list
+(pprint (list (match 5 ((& all) all) (_ :not-a-list))
+              (match () ((& all) all))
+              (match (list 1) ((& all) all))))
+
+; A pattern's names hide others in its own body only.
+(let x 100)
+(pprint (match (list 1 2) ((x y) (list x y)) (_ x)))
+(pprint (match 7 ((x y) (list x y)) (_ x)))
+
+; A pattern can bind car and cdr, and a local named cons? doesn't get in
+; the way of the tests.
+(pprint (match (list 1 2 3) ((car cdr & more) (list car cdr more))))
+(let cons? (lambda (v) #false))
+(pprint (match (list :a) ((:a) :still-works)))
+
+; In tail position, a clause's body loops in constant stack...
+(defun len (xs n)
+    (match xs
+        (()      n)
+        ((_ & r) (len r (+ n 1)))))
+(pprint (len (range 0 1000000) 0))
+
+; ...and can wait for a message.
+(defun serve (n)
+    (match n
+        (0 :served)
+        (_ (recv ((:tick) (serve (- n 1)))))))
+(let s (fork (serve 2)))
+(send s (list :tick))
+(send s (list :tick))
+(pprint (join s))

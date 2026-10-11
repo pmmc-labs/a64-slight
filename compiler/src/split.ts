@@ -44,7 +44,7 @@
 // and is split as one.
 
 import { CompileError } from './errors.ts';
-import { patternNames } from './classify.ts';
+import { patternNames } from './pattern.ts';
 import { NIL, cons, list, posOf, show, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 
 const MAX_ARGS = 8;     // as in codegen.ts: arguments go in registers

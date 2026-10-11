@@ -1,0 +1,38 @@
+; recv's patterns are match's (D168): they nest, a literal can go
+; anywhere, and & takes the rest of a list. A message that no clause's
+; pattern fits is still a dead letter.
+
+(defun shapes (total)
+    (recv
+        ((:rect (w h))   (shapes (+ total (* w h))))
+        ((:square s)     (shapes (+ total (* s s))))
+        ((:many & sizes) (shapes (+ total (sum sizes))))
+        ((:done from)    (send from (list :total total)) :finished)))
+
+(let p (fork (shapes 0)))
+(send p (list :rect (list 2 3)))
+(send p (list :rect 2 3))
+(send p (list :square 4))
+(send p (list :many 1 2 3))
+(send p (list :many))
+(send p (list :done $$))
+(pprint (recv ((:total t) t)))
+(pprint (join p))
+
+(defun classify (from)
+    (recv
+        (5         (send from :five) (classify from))
+        ("hi"      (send from :greeting) (classify from))
+        (#true     (send from :yes) (classify from))
+        ((_ (_ x)) (send from (list :deep x)) (classify from))
+        (:stop     :stopped)))
+
+(let me $$)
+(let c (fork (classify me)))
+(send c 5)
+(send c "hi")
+(send c #true)
+(send c (list 1 (list 2 3)))
+(send c :stop)
+(pprint (list (recv) (recv) (recv) (recv)))
+(pprint (join c))

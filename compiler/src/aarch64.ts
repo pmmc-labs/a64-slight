@@ -203,7 +203,7 @@ export const AARCH64: Target = {
     branchUnlessList: (label) => ['    and  x1, x0, #RT_TAG_MASK', '    cmp  x1, #RT_TAG_LIST', `    b.ne ${label}`],
     branchUnlessCons: (label) => [IS_CONS, `    b.eq ${label}`],
     branchUnlessNil: (label) => ['    cmp  x0, #RT_NIL', `    b.ne ${label}`],
-    branchUnlessLeftIs: (word, label) => [loadWord('x2', word), '    cmp  x1, x2', `    b.ne ${label}`],
+    branchUnlessIs: (word, label) => [loadWord('x2', word), '    cmp  x0, x2', `    b.ne ${label}`],
     branchIfSame: (label) => ['    cmp  x1, x0', `    b.eq ${label}`],
 
     predicate: (name) => {
@@ -217,9 +217,6 @@ export const AARCH64: Target = {
     divide: (op, zero, overflow) => DIVISION[op](zero, overflow),
 
     cxr: (step) => (step === 'a' ? '    ldur x0, [x0, #-1]    // car' : '    ldur x0, [x0, #7]     // cdr'),
-    leftFromCar: '    ldur x1, [x0, #-1]',
-    accFromCdr: '    ldur x0, [x0, #7]',
-    storeCar: (si, note) => ['    ldur x1, [x0, #-1]', `    str  x1, ${slot(si)}${comment(note)}`],
 
     // Bump-allocates into x2. When the chunk hasn't room, rt_heap_grow makes
     // a new one (or faults, past the heap's limit) and the allocation goes

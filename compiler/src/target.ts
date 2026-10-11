@@ -102,19 +102,18 @@ export type Target = {
     // Tests that branch, leaving the accumulator as it was: to ifFalse on
     // #false and to notBool on anything but #true; unless an integer;
     // unless the accumulator and the left operand are both integers; unless
-    // a list (a cons or ()); unless a cons; unless (); unless the left
-    // operand is this word; if the left operand and the accumulator are the
-    // same word. The three that read the left operand also keep it, both
+    // a list (a cons or ()); unless a cons; unless (); unless the
+    // accumulator is this word; if the left operand and the accumulator are
+    // the same word. The two that read the left operand also keep it, both
     // ways, since what follows them reads it again (the slow arithmetic
-    // path, rt_equal, the next step of a recv pattern); the others may
-    // overwrite it, as AArch64's do.
+    // path, rt_equal); the others may overwrite it, as AArch64's do.
     readonly testBool: (ifFalse: string, notBool: string) => Code;
     readonly branchUnlessInt: (label: string) => Code;
     readonly branchUnlessInts: (label: string) => Code;
     readonly branchUnlessList: (label: string) => Code;
     readonly branchUnlessCons: (label: string) => Code;
     readonly branchUnlessNil: (label: string) => Code;
-    readonly branchUnlessLeftIs: (word: bigint, label: string) => Code;
+    readonly branchUnlessIs: (word: bigint, label: string) => Code;
     readonly branchIfSame: (label: string) => Code;
 
     // Booleans into the accumulator: a type predicate of it (int? nil?
@@ -130,14 +129,8 @@ export type Target = {
     readonly arith: (op: '+' | '-' | '*', overflow: string) => Code;
     readonly divide: (op: 'div' | '%', zero: string, overflow: string) => Code;
 
-    // The accumulator's car or cdr (it's a cons), for car, cdr and c[ad]r;
-    // and the steps of a recv pattern, walking a message in the
-    // accumulator: its car into the left operand, its cdr into the
-    // accumulator, its car into a slot.
+    // The accumulator's car or cdr (it's a cons), for car, cdr and c[ad]r.
     readonly cxr: (step: 'a' | 'd') => Code;
-    readonly leftFromCar: Code;
-    readonly accFromCdr: Code;
-    readonly storeCar: (si: number, note: string) => Code;
 
     // Allocation: `bytes` from the process's heap, at the label `again`,
     // into a register the next shapes know, keeping the accumulator and the

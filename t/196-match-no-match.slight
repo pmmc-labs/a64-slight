@@ -1,0 +1,7 @@
+; A match that matches nothing faults (:no-match), with the topic as the
+; value.
+
+(defun f (x) (match x ((:a) 1) ((:b n) n)))
+
+(pprint (join (fork (f (list :c 1)))))
+(f 5)

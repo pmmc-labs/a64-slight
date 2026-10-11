@@ -26,13 +26,27 @@
 //     tested, and is what they give if they get to it. The others are cond
 //     tests, so each must be #true or #false.
 //
+//   - match becomes cond too (D168), its patterns the tests and lets that
+//     pattern.ts makes of them:
+//
+//       (match topic               (do (let t topic)
+//           ((:move x y) body...)      (cond ((and (cons? t) (eq? (car t) :move) ...)
+//           ...)                             (let x (cadr t)) (let y (caddr t)) body...)
+//                                            ...
+//                                            (#true (no-match t))))
+//
+//     A match that matches nothing faults (:no-match), with the topic;
+//     the last clause doesn't need it when its pattern takes anything.
+//
 // It knows just enough of the special forms to leave alone what isn't an
-// expression: quoted data, the parameters of defun and lambda, and recv's
-// patterns. (Names are atoms, which it leaves alone anyway.)
+// expression: quoted data, the parameters of defun and lambda, and the
+// patterns of recv and match. (Names are atoms, which it leaves alone
+// anyway.)
 
 import { CompileError } from './errors.ts';
+import { lowerPattern, NO_MATCH } from './pattern.ts';
 import { read } from './reader.ts';
-import { NIL, cons, list, show, sym, toArray, type Pair, type Pos, type Sexp } from './sexp.ts';
+import { NIL, cons, list, posOf, show, sym, toArray, type Pair, type Pos, type Sexp } from './sexp.ts';
 
 // The outside world: a key for the file at path that's the same however
 // it's named (its real path), or null if there's no such file; and the
@@ -160,6 +174,7 @@ export function expand(x: Sexp): Sexp {
         case 'case':     return expand(expandCase(x));
         case 'and':      return expand(expandAnd(x));
         case 'or':       return expand(expandOr(x));
+        case 'match':    return expand(expandMatch(x));
         case 'defun':    return after(x, 3);    // (defun name params body...)
         case 'lambda':   return after(x, 2);    // (lambda params body...)
         case 'cond':     return cons(x.car, mapList(x.cdr, (c) => mapList(c, expand)), x.pos);
@@ -219,4 +234,21 @@ function expandOr(x: Pair): Sexp {
     const tested = operands.slice(0, -1).map((a) => list(a, TRUE));
     if (tested.length === 0) return operands[0]!;
     return form(x.pos, sym('cond', x.pos), ...tested, list(TRUE, operands[operands.length - 1]!));
+}
+
+function expandMatch(x: Pair): Sexp {
+    const [topic, ...clauses] = args(x, 'match', 2, Infinity, 'a topic and clauses');
+    const where = x.pos === null ? '' : ` ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
+    const t     = sym(`match topic${where}`, x.pos);
+    const conds = clauses.map((c) => {
+        const items = toArray(c);
+        if (items === null || items.length < 2) throw new CompileError(`a match clause is (pattern body...), not ${show(c)}`, posOf(c) ?? x.pos);
+        const [pattern, ...body] = items;
+        const { tests, binds } = lowerPattern(pattern!, t);
+        const test = tests.length === 0 ? TRUE : tests.length === 1 ? tests[0]! : form(x.pos, sym('and', x.pos), ...tests);
+        return list(test, ...binds.map(([name, part]) => form(name.pos, sym('let', name.pos), name, part)), ...body);
+    });
+    const last     = toArray(conds[conds.length - 1]!)![0]!;
+    const fallback = last === TRUE ? [] : [list(TRUE, form(x.pos, sym(NO_MATCH, x.pos), t))];
+    return form(x.pos, sym('do', x.pos), form(x.pos, sym('let', x.pos), t, topic!), form(x.pos, sym('cond', x.pos), ...conds, ...fallback));
 }

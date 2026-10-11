@@ -513,10 +513,12 @@ test('recv clauses and patterns', () => {
     fails('(defun f () (recv m))', 'test.slight:1:19: a recv clause is (pattern body...), not m');
     fails('(defun f () (pprint 1) (recv m))', 'test.slight:1:30: a recv clause is (pattern body...), not m');
     fails('(defun f () (recv (m)))', 'test.slight:1:19: a recv clause is (pattern body...), not (m)');
-    fails('(defun f () (recv ((5 a) 1)))', 'test.slight:1:20: a recv pattern is a name, a :keyword or (:keyword names...), not (5 a)');
-    fails('(defun f () (recv ((:a 1) 1)))', 'test.slight:1:20: a recv pattern is a name, a :keyword or (:keyword names...), not ((quote a) 1)');
-    fails('(defun f () (recv ((:a x x) 1)))', 'test.slight:1:20: x is in the pattern twice');
-    fails('(defun f () (recv (#true 1)))', "test.slight:1:20: can't bind #true");
+    fails('(defun f () (recv ((:a x x) 1)))', 'test.slight:1:26: x is in the pattern twice');
+    fails('(defun f () (recv ((:a &) 1)))', 'test.slight:1:20: & can only come before the last pattern of a list, not ((quote a) &)');
+    fails('(defun f () (recv ((:a $$) 1)))', "test.slight:1:24: can't bind $$");
+    fails('(defun f () (recv ((:a cond) 1)))', "test.slight:1:24: can't bind cond");
+    // patterns are match's (pattern.ts): literals anywhere, nesting, and a rest
+    assert.doesNotThrow(() => compile('(defun f () (recv ((5 a) a) ((:a 1) 1) (#true 2) (((x y) & r) r)))'));
 });
 
 test('a receive function restarts at its own entry with its parameters', () => {

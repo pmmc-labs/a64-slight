@@ -10,6 +10,7 @@
 // Only a program's own defuns are classified: the prelude has no recv, and
 // can't see the program's functions.
 
+import { patternNames } from './pattern.ts';
 import { toArray, type Sexp } from './sexp.ts';
 
 export type FnSource = { readonly name: string; readonly params: readonly string[]; readonly body: Sexp };
@@ -79,13 +80,4 @@ function tailCalls(body: Sexp, params: readonly string[], globals: readonly stri
     };
     scanBody(body, params, true);
     return found;
-}
-
-// The names a recv pattern binds: itself, if it's a name, or the names
-// after the tag of (:tag names...).
-export function patternNames(pattern: Sexp): readonly string[] {
-    if (pattern.t === 'sym') return pattern.name === '_' ? [] : [pattern.name];
-    const items = toArray(pattern) ?? [];
-    if (items[0]?.t === 'sym') return [];                  // (quote tag)
-    return items.slice(1).filter((p) => p.t === 'sym' && p.name !== '_').map((p) => (p as { name: string }).name);
 }

@@ -1,0 +1,4 @@
+fault in #<pid 2>: no pattern matched: (c 1) (match at t/196-match-no-match.slight:4:14)
+(error (no-match (c 1) "match at t/196-match-no-match.slight:4:14"))
+fault: no pattern matched: 5 (match at t/196-match-no-match.slight:4:14)
+exit: 1

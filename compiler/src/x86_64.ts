@@ -182,9 +182,9 @@ export const X86_64: Target = {
     branchUnlessList: (label) => [TAG, '    cmp  edx, RT_TAG_LIST', `    jne  ${label}`],
     branchUnlessCons: (label) => [TAG, '    cmp  edx, RT_TAG_LIST', `    jne  ${label}`, '    cmp  rax, RT_NIL', `    je   ${label}`],
     branchUnlessNil: (label) => ['    cmp  rax, RT_NIL', `    jne  ${label}`],
-    branchUnlessLeftIs: (word, label) => {
+    branchUnlessIs: (word, label) => {
         const w = BigInt.asIntN(64, word);
-        const compare = w >= -0x80000000n && w <= 0x7fffffffn ? `    cmp  rcx, ${w}` : [loadWord('rdx', word), '    cmp  rcx, rdx'];
+        const compare = w >= -0x80000000n && w <= 0x7fffffffn ? `    cmp  rax, ${w}` : [loadWord('rdx', word), '    cmp  rax, rdx'];
         return [compare, `    jne  ${label}`];
     },
     branchIfSame: (label) => ['    cmp  rcx, rax', `    je   ${label}`],
@@ -200,9 +200,6 @@ export const X86_64: Target = {
     divide: (op, zero, overflow) => DIVISION[op](zero, overflow),
 
     cxr: (step) => (step === 'a' ? '    mov  rax, qword ptr [rax - 1]    // car' : '    mov  rax, qword ptr [rax + 7]    // cdr'),
-    leftFromCar: '    mov  rcx, qword ptr [rax - 1]',
-    accFromCdr: '    mov  rax, qword ptr [rax + 7]',
-    storeCar: (si, text) => ['    mov  rcx, qword ptr [rax - 1]', `    mov  ${slot(si)}, rcx${comment(text)}`],
 
     // Bump-allocates into rdx, with rsi for the new heap pointer. When the
     // chunk hasn't room, rt_heap_grow makes a new one (or faults) and the

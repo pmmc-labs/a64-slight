@@ -3,7 +3,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 
-import { isReceiveBody, patternNames, stateFunctions } from '../src/classify.ts';
+import { isReceiveBody, stateFunctions } from '../src/classify.ts';
 import { read } from '../src/reader.ts';
 import { toArray, type Sexp } from '../src/sexp.ts';
 
@@ -57,12 +57,4 @@ test('a local of the same name hides the function', () => {
 test('yield and recv clause bodies are tail positions', () => {
     assert.deepEqual(state('(defun w () (recv (m m))) (defun y () (yield (w)))'), ['w', 'y']);
     assert.deepEqual(state('(defun w () (recv (m (w))))'), ['w']);
-});
-
-test('the names a pattern binds', () => {
-    const names = (src: string): readonly string[] => patternNames(read(src, 't').t === 'pair' ? (read(src, 't') as { car: Sexp }).car : read(src, 't'));
-    assert.deepEqual(names('msg'), ['msg']);
-    assert.deepEqual(names('_'), []);
-    assert.deepEqual(names(':stop'), []);
-    assert.deepEqual(names('(:pair a _ b)'), ['a', 'b']);
 });

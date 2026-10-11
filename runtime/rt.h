@@ -64,7 +64,8 @@
 #define RT_FAULT_NOT_DEVICE 18    // :not-a-device    connect was handed something that isn't an open device
 #define RT_FAULT_NOT_JSON   19    // :not-json        json/print was given something JSON can't hold
 #define RT_FAULT_NOT_SEXP   20    // :not-sexp        sexp/print was given something that isn't data
-#define RT_FAULT_COUNT      20
+#define RT_FAULT_NO_MATCH   21    // :no-match        no clause of a match matched
+#define RT_FAULT_COUNT      21
 
 // Symbols the runtime makes: every program has them, after #false and
 // #true, in this order (values.ts, RUNTIME_SYMBOLS). The fault kinds
@@ -80,7 +81,7 @@
 // in the order :ctrl :alt :shift. Their symbols follow the fault kinds:
 // RT_KEY_x is symbol RT_SYM_KEYS + x. compiler/tests/values.test.ts reads
 // the names from here.
-#define RT_SYM_KEYS         26    // RT_SYM_FAULTS + RT_FAULT_COUNT
+#define RT_SYM_KEYS         27    // RT_SYM_FAULTS + RT_FAULT_COUNT
 #define RT_KEY_UP            0    // :ArrowUp       the arrows are in the order of
 #define RT_KEY_DOWN          1    // :ArrowDown     their escape sequences, ESC [ A
 #define RT_KEY_RIGHT         2    // :ArrowRight    to ESC [ D
@@ -121,7 +122,7 @@
 // a reader of JSON sends (:json f v), of s-expressions (:sexp f v), and of
 // source (:form f form line) and (:doc f text line). RT_DEV_x is symbol
 // RT_SYM_DEVICE + x.
-#define RT_SYM_DEVICE       56    // RT_SYM_KEYS + RT_KEY_COUNT
+#define RT_SYM_DEVICE       57    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
 #define RT_DEV_LINE          1    // :line
 #define RT_DEV_EOF           2    // :eof
@@ -142,7 +143,7 @@
 // Why a device failed, from errno: a device's owner ends with
 // (:error (name path)), path being the file's, or the socket's "host:port"
 // (a listener's port). RT_ERR_x is symbol RT_SYM_ERRS + x.
-#define RT_SYM_ERRS         71    // RT_SYM_DEVICE + RT_DEV_COUNT
+#define RT_SYM_ERRS         72    // RT_SYM_DEVICE + RT_DEV_COUNT
 #define RT_ERR_ENOENT        0    // :enoent        no such file or directory
 #define RT_ERR_EACCES        1    // :eacces        permission denied
 #define RT_ERR_EPERM         2    // :eperm         operation not permitted
@@ -174,14 +175,14 @@
 
 // The symbols JSON's values need beyond #true and #false (json.c):
 // RT_JSON_x is symbol RT_SYM_JSON + x.
-#define RT_SYM_JSON         98    // RT_SYM_ERRS + RT_ERR_COUNT
+#define RT_SYM_JSON         99    // RT_SYM_ERRS + RT_ERR_COUNT
 #define RT_JSON_NULL         0    // :null
 #define RT_JSON_OBJECT       1    // :object        (:object (key value) ...)
 #define RT_JSON_COUNT        2
 
 // And those the s-expression reader makes (sexp.c): RT_SEXP_x is symbol
 // RT_SYM_SEXP + x.
-#define RT_SYM_SEXP        100    // RT_SYM_JSON + RT_JSON_COUNT
+#define RT_SYM_SEXP        101    // RT_SYM_JSON + RT_JSON_COUNT
 #define RT_SEXP_SYMBOL       0    // :symbol        (:symbol "name"), a name the program doesn't mention
 #define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
 #define RT_SEXP_COUNT        2

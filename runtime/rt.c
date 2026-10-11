@@ -347,6 +347,7 @@ static const struct {
     [RT_FAULT_NOT_DEVICE] = { "not a device: ", 1 },
     [RT_FAULT_NOT_JSON]   = { "not JSON: ", 1 },
     [RT_FAULT_NOT_SEXP]   = { "not data: ", 1 },
+    [RT_FAULT_NO_MATCH]   = { "no pattern matched: ", 1 },
 };
 
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {

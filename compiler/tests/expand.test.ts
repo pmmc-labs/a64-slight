@@ -56,6 +56,24 @@ test('and and or become cond, stopping at the first operand that decides; the la
     assert.deepEqual(ex('(or a b c)'), ['(cond (a #true) (b #true) (#true c))']);
 });
 
+test('match binds its topic once, and each clause is its pattern\'s tests, then its lets', () => {
+    const t = 'match topic test.slight:1:1';
+    const plain = (x: string): string => x.split(' (builtin)').join('').split(' (on conses)').join('');
+    assert.deepEqual(ex('(match (f) ((:add n) (g n)) (x x))').map(plain), [
+        `(do (let ${t} (f)) (cond `
+        + `((cond ((cons? ${t}) (cond ((eq? (car ${t}) (quote add)) (cond ((cons? (cdr ${t})) (nil? (cddr ${t}))) (#true #false))) (#true #false))) (#true #false)) `
+        + `(let n (cadr ${t})) (g n)) `
+        + `(#true (let x ${t}) x)))`,
+    ]);
+    // a last clause that can fail is followed by one that faults (:no-match)
+    assert.deepEqual(ex('(match x (5 :five))').map(plain), [
+        `(do (let ${t} x) (cond ((eq? ${t} 5) (quote five)) (#true (no match (match) ${t}))))`,
+    ]);
+    fails(() => ex('(match x)'), 'test.slight:1:1: match takes a topic and clauses, not (match x)');
+    fails(() => ex('(match x y)'), 'test.slight:1:10: a match clause is (pattern body...), not y');
+    fails(() => ex('(match x ((a a) 1))'), 'test.slight:1:14: a is in the pattern twice');
+});
+
 test('expansion goes all the way down, and into what an expansion makes', () => {
     assert.deepEqual(ex('(f (if (and a b) (when c d) e))'), [
         '(f (cond ((cond (a b) (#true #false)) (cond (c d) (#true ()))) (#true e)))',

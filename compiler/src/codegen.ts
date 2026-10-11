@@ -37,7 +37,8 @@
 import { CompileError } from './errors.ts';
 import { float, list, NIL, posOf, show, str, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { intWord, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from './values.ts';
-import { isReceiveBody, patternNames, stateFunctions } from './classify.ts';
+import { isReceiveBody, stateFunctions } from './classify.ts';
+import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE } from './pattern.ts';
 import { splitProgram } from './split.ts';
 import { AARCH64 } from './aarch64.ts';
 import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, type Code, type Cond, type Operand, type Target } from './target.ts';
@@ -96,7 +97,7 @@ const MAX_ARGS = 8;     // in registers, on every target
 // which it leaves none of: neither kind can be a name.
 const SPECIAL_FORMS: readonly string[] = [
     'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'connect', 'recv', 'yield',
-    'if', 'when', 'case', 'and', 'or', '@include',
+    'if', 'when', 'case', 'and', 'or', 'match', '@include',
 ];
 
 // --- the program ------------------------------------------------------------
@@ -430,52 +431,61 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             const [code, st1] = compileExpr(args[0]!, cx, st);
             return [[st.t.call('rt_yield', [], false), code], st1];
         }
+        case NO_MATCH: {
+            const [code, st1]  = compileExpr(args[0]!, { ...cx, tail: false }, st);
+            const [fault, st2] = faultLabel(st1, 'RT_FAULT_NO_MATCH', 'match', x.pos);
+            return [[code, st.t.jump(fault)], st2];
+        }
     }
     if (SPECIAL_FORMS.includes(head.name)) throw notYet(x);
-    if (lookup(cx.env, head.name) !== null) return compileClosureCall(x, head, args, cx, st);
-    if (head.name === 'apply') return compileApply(x, args, cx, st);
+    // A builtin by a name no local can hide (pattern.ts), or by its own.
+    const known  = head.name.endsWith(ON_CONSES);
+    const hidden = known || head.name.endsWith(BUILTIN);
+    const name   = hidden ? head.name.slice(0, -(known ? ON_CONSES : BUILTIN).length) : head.name;
+    if (!hidden && lookup(cx.env, name) !== null) return compileClosureCall(x, head, args, cx, st);
+    if (name === 'apply') return compileApply(x, args, cx, st);
     const operand: Cx = { ...cx, tail: false };
-    if (head.name === 'pprint') {
+    if (name === 'pprint') {
         checkArity(x, 'pprint', args, 1);
         const [code, st1] = compileExpr(args[0]!, operand, st);
         return [[code, st.t.call('rt_pprint', [ACC], false)], st1];
     }
-    if (PREDICATES.includes(head.name)) {
-        checkArity(x, head.name, args, 1);
+    if (PREDICATES.includes(name)) {
+        checkArity(x, name, args, 1);
         const [code, st1] = compileExpr(args[0]!, operand, st);
-        return [[code, st.t.predicate(head.name)], st1];
+        return [[code, st.t.predicate(name)], st1];
     }
-    const builtin = C_BUILTINS[head.name];
-    if (builtin !== undefined) return compileCBuiltin(x, head.name, builtin, args, operand, st);
-    if (head.name === 'eq?' || head.name === 'ne?') return compileEquality(x, head.name, args, operand, st);
-    if (head.name === 'cons') return compileCons(x, args, operand, st);
-    if (head.name === 'list') return compileList(x, args, operand, st);
-    const path = cxrPath(head.name);
-    if (path !== null) return compileCxr(x, head.name, path, args, operand, st);
-    const arith = ARITH[head.name];
+    const builtin = C_BUILTINS[name];
+    if (builtin !== undefined) return compileCBuiltin(x, name, builtin, args, operand, st);
+    if (name === 'eq?' || name === 'ne?') return compileEquality(x, name, args, operand, st);
+    if (name === 'cons') return compileCons(x, args, operand, st);
+    if (name === 'list') return compileList(x, args, operand, st);
+    const path = cxrPath(name);
+    if (path !== null) return compileCxr(x, name, path, args, operand, st, !known);
+    const arith = ARITH[name];
     if (arith !== undefined) {
-        const op = head.name as '+' | '-' | '*';
-        return compileNumeric(x, head.name, args, operand, st, arith, [], (s) => {
-            const [overflow, s1] = faultLabel(s, 'RT_FAULT_OVERFLOW', head.name, x.pos);
+        const op = name as '+' | '-' | '*';
+        return compileNumeric(x, name, args, operand, st, arith, [], (s) => {
+            const [overflow, s1] = faultLabel(s, 'RT_FAULT_OVERFLOW', name, x.pos);
             return [s.t.arith(op, overflow), s1];
         });
     }
-    const cmp = COMPARE[head.name];
+    const cmp = COMPARE[name];
     if (cmp !== undefined) {
         const [cond, op] = cmp;
-        return compileNumeric(x, head.name, args, operand, st, 'rt_compare', [imm(op)], (s) => [s.t.compareBool(cond), s]);
+        return compileNumeric(x, name, args, operand, st, 'rt_compare', [imm(op)], (s) => [s.t.compareBool(cond), s]);
     }
-    if (DIVISION.includes(head.name)) {
-        const op = head.name as 'div' | '%';
-        return compileBinary(x, head.name, args, operand, st, (s) => {
-            const [zero, s1]     = faultLabel(s, 'RT_FAULT_DIV_ZERO', head.name, x.pos);
-            const [overflow, s2] = faultLabel(s1, 'RT_FAULT_OVERFLOW', head.name, x.pos);
+    if (DIVISION.includes(name)) {
+        const op = name as 'div' | '%';
+        return compileBinary(x, name, args, operand, st, (s) => {
+            const [zero, s1]     = faultLabel(s, 'RT_FAULT_DIV_ZERO', name, x.pos);
+            const [overflow, s2] = faultLabel(s1, 'RT_FAULT_OVERFLOW', name, x.pos);
             return [s.t.divide(op, zero, overflow), s2];
         });
     }
-    const fn = lookupFn(cx.fns, head.name);
+    const fn = lookupFn(cx.fns, name);
     if (fn !== null) return compileCall(x, fn, args, cx, st);
-    throw new CompileError(`unknown function '${head.name}'`, head.pos);
+    throw new CompileError(`unknown function '${name}'`, head.pos);
 }
 
 const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;
@@ -513,69 +523,40 @@ function compileRecv(x: Pair, clauses: readonly Sexp[], cx: Cx, st: St): [Code, 
     ], st3];
 }
 
-// (pattern body...). A pattern is a name (binds the whole message; _
-// binds nothing), a :keyword (matches that symbol), or (:keyword names...),
-// which matches a list of exactly that length headed by the keyword, and
-// binds the names to the rest by position.
+// (pattern body...): the pattern's tests (pattern.ts) on the message,
+// which is in slot msg, branching to the next clause when one fails; then
+// its bindings, each in a slot of its own, except that a name for the
+// whole message is that slot.
 function compileRecvClause(x: Pair, clause: Sexp, msg: number, done: string, cx: Cx, st: St): [Code, St] {
     if (clause.t !== 'pair' || clause.cdr.t !== 'pair') {
         throw new CompileError(`a recv clause is (pattern body...), not ${show(clause)}`, posOf(clause) ?? x.pos);
     }
-    const pattern = clause.car;
-    const bad = (): CompileError =>
-        new CompileError(`a recv pattern is a name, a :keyword or (:keyword names...), not ${show(pattern)}`, posOf(pattern) ?? x.pos);
-    const names = patternNames(pattern);
-    names.forEach((n, i) => {
-        if (names.indexOf(n) !== i) throw new CompileError(`${n} is in the pattern twice`, posOf(pattern));
-    });
+    const message = sym(RECV_MESSAGE, x.pos);
+    const { tests, binds } = lowerPattern(clause.car, message);
     const [next, st1] = label(st, 'recv_next');
-    const t = st.t;
-    const keyword = (p: Sexp, s: St): [Code, St] => {
-        const items = toArray(p);
-        if (!isForm(p, 'quote') || items === null || items.length !== 2 || items[1]!.t !== 'sym') throw bad();
-        const [id, s1] = symbolId(s, (items[1] as Sym).name);
-        return [t.branchUnlessLeftIs(symbolWord(id), next), s1];
-    };
-
-    let test: Code = [];
-    let st2 = st1;
+    const here: Cx = { ...cx, env: { name: RECV_MESSAGE, slot: msg, next: cx.env }, tail: false };
+    const [code, st2] = tests.reduce<[Code, St]>(([acc, s], test) => {
+        const [c, s1] = compileTest(test, next, here, s);
+        return [[acc, c], s1];
+    }, [[], st1]);
     let env = cx.env;
     let si  = cx.si;
-    if (pattern.t === 'sym') {
-        checkBindable(pattern);
-        if (pattern.name !== '_') env = { name: pattern.name, slot: msg, next: env };
-    } else if (isForm(pattern, 'quote')) {
-        const [match, s] = keyword(pattern, st2);
-        test = [t.loadLeft(msg), match];
-        st2  = s;
-    } else {
-        const items = toArray(pattern);
-        if (items === null || items.length === 0) throw bad();
-        const [match, s] = keyword(items[0]!, st2);
-        st2 = s;
-        const rest = items.slice(1).map((p) => {
-            if (p.t !== 'sym') throw bad();
-            checkBindable(p);
-            const bind = p.name === '_' ? [] : t.storeCar(si, p.name);
-            if (p.name !== '_') {
-                env = { name: p.name, slot: si, next: env };
-                st2 = useSlot(st2, si);
-                si += 1;
-            }
-            return [t.accFromCdr, t.branchUnlessCons(next), bind];
-        });
-        test = [
-            t.loadSlot(msg),
-            t.branchUnlessCons(next),
-            t.leftFromCar,
-            match,
-            rest,
-            t.accFromCdr,
-            t.branchUnlessNil(next),
-        ];
+    let st3 = st2;
+    const bound: Code[] = [];
+    for (const [name, part] of binds) {
+        checkBindable(name);
+        if (part === message) {
+            env = { name: name.name, slot: msg, next: env };
+            continue;
+        }
+        const [c, s1] = compileExpr(part, { ...here, si }, st3);
+        bound.push(c, st.t.storeSlot(si, name.name));
+        env = { name: name.name, slot: si, next: env };
+        st3 = useSlot(s1, si);
+        si += 1;
     }
-    const [body, st3] = compileBody(clause.cdr, { ...cx, env, si }, st2);
-    return [[test, body, t.jump(done), `${next}:`], st3];
+    const [body, st4] = compileBody(clause.cdr, { ...cx, env, si }, st3);
+    return [[code, bound, body, st.t.jump(done), `${next}:`], st4];
 }
 
 // (fork expr): expr becomes the body of a function of its own, whose
@@ -1117,9 +1098,12 @@ function cxrPath(name: string): readonly string[] | null {
     return isCxr ? [...middle].reverse() : null;
 }
 
-function compileCxr(x: Pair, name: string, path: readonly string[], args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+// checked: unless each step is known to be on a cons (pattern.ts's paths).
+function compileCxr(x: Pair, name: string, path: readonly string[], args: readonly Sexp[], cx: Cx, st: St,
+                    checked = true): [Code, St] {
     checkArity(x, name, args, 1);
-    const [code, st1]    = compileExpr(args[0]!, cx, st);
+    const [code, st1] = compileExpr(args[0]!, cx, st);
+    if (!checked) return [[code, path.map((step) => st.t.cxr(step as 'a' | 'd'))], st1];
     const [notCons, st2] = faultLabel(st1, 'RT_FAULT_NOT_CONS', name, x.pos);
     const steps = path.map((step) => [st.t.branchUnlessCons(notCons), st.t.cxr(step as 'a' | 'd')]);
     return [[code, steps], st2];
@@ -1145,16 +1129,65 @@ function compileClause(x: Pair, clause: Sexp, end: string, cx: Cx, st: St): [Cod
     if (clause.t !== 'pair' || clause.cdr.t !== 'pair') {
         throw new CompileError(`a cond clause is (test body...), not ${show(clause)}`, posOf(clause) ?? x.pos);
     }
-    const test = clause.car;
-    if (test.t === 'sym' && test.name === '#true') {
-        const [body, st1] = compileBody(clause.cdr, cx, st);
-        return [[body, st.t.jump(end)], st1];
+    const [next, st1] = label(st, 'cond_next');
+    const [code, st2] = compileTest(clause.car, next, { ...cx, tail: false }, st1, posOf(clause.car) ?? clause.pos);
+    const [body, st3] = compileBody(clause.cdr, cx, st2);
+    return [[code, body, st.t.jump(end), `${next}:`], st3];
+}
+
+// A test, for where it branches: on to the code after it when it's #true,
+// and to ifFalse when it's #false. Anything else faults (:not-a-bool), but
+// some tests can only give a boolean, and branch without making one:
+// #true itself; cons?, nil?, and eq? with an immediate literal (an
+// integer, a symbol, ()), the shapes of pattern.ts's tests; and what and
+// becomes, (cond (a b) (#true #false)), which is a then b. site is where
+// a test that isn't a boolean is said to be: for b there, the and's.
+function compileTest(test: Sexp, ifFalse: string, cx: Cx, st: St, site: Pos | null = posOf(test)): [Code, St] {
+    if (test.t === 'sym' && test.name === '#true') return [[], st];
+    const items = test.t === 'pair' ? toArray(test) : null;
+    const head  = items !== null && items[0]!.t === 'sym' ? builtinName(items[0] as Sym, cx) : null;
+    if ((head === 'cons?' || head === 'nil?') && items!.length === 2) {
+        const [code, st1] = compileExpr(items![1]!, cx, st);
+        return [[code, head === 'cons?' ? st.t.branchUnlessCons(ifFalse) : st.t.branchUnlessNil(ifFalse)], st1];
     }
-    const [code, st1]    = compileExpr(test, { ...cx, tail: false }, st);
-    const [body, st2]    = compileBody(clause.cdr, cx, st1);
-    const [next, st3]    = label(st2, 'cond_next');
-    const [notBool, st4] = faultLabel(st3, 'RT_FAULT_NOT_BOOL', 'cond test', posOf(test) ?? clause.pos);
-    return [[code, st.t.testBool(next, notBool), body, st.t.jump(end), `${next}:`], st4];
+    if (head === 'eq?' && items!.length === 3 && items!.slice(1).some(isImmediateLiteral)) {
+        const [a, b]       = items!.slice(1) as [Sexp, Sexp];
+        const [lit, other] = isImmediateLiteral(b) ? [b, a] : [a, b];
+        const [word, st1]  = immediateWord(lit, st);
+        const [code, st2]  = compileExpr(other, cx, st1);
+        return [[code, st.t.branchUnlessIs(word, ifFalse)], st2];
+    }
+    if (isForm(test, 'cond') && items!.length === 3) {
+        const [first, second] = [toArray(items![1]!), toArray(items![2]!)];
+        const isAnd = first !== null && first.length === 2 && second !== null && second.length === 2
+            && isSym(second[0]!, '#true') && isSym(second[1]!, '#false');
+        if (isAnd) {
+            const [a, st1] = compileTest(first[0]!, ifFalse, cx, st);
+            const [b, st2] = compileTest(first[1]!, ifFalse, cx, st1, site);
+            return [[a, b], st2];
+        }
+    }
+    const [code, st1]    = compileExpr(test, cx, st);
+    const [notBool, st2] = faultLabel(st1, 'RT_FAULT_NOT_BOOL', 'cond test', site);
+    return [[code, st.t.testBool(ifFalse, notBool)], st2];
+}
+
+// The builtin a call's head names, if it names one: by a name no local can
+// hide, or by its own when no local hides it.
+function builtinName(head: Sym, cx: Cx): string | null {
+    if (head.name.endsWith(BUILTIN)) return head.name.slice(0, -BUILTIN.length);
+    return lookup(cx.env, head.name) === null && isBuiltin(head.name) ? head.name : null;
+}
+
+const isSym = (x: Sexp, name: string): boolean => x.t === 'sym' && x.name === name;
+
+// The word of an immediate literal (isImmediateLiteral).
+function immediateWord(x: Sexp, st: St): [bigint, St] {
+    const datum = isForm(x, 'quote') && x.t === 'pair' && x.cdr.t === 'pair' ? x.cdr.car : x;
+    if (datum.t === 'int') return [intWord(datum.v), st];
+    if (datum.t === 'nil') return [BigInt(RT_TAG_LIST), st];
+    const [id, st1] = symbolId(st, (datum as Sym).name);
+    return [symbolWord(id), st1];
 }
 
 // --- helpers ------------------------------------------------------------------
@@ -1179,7 +1212,7 @@ function label(st: St, hint: string): [string, St] {
     return [`L${hint}_${st.labels}`, { ...st, labels: st.labels + 1 }];
 }
 
-type Fault = 'RT_FAULT_NOT_INT' | 'RT_FAULT_OVERFLOW' | 'RT_FAULT_NOT_BOOL' | 'RT_FAULT_NO_CLAUSE' | 'RT_FAULT_STACK'
+type Fault = 'RT_FAULT_NOT_INT' | 'RT_FAULT_OVERFLOW' | 'RT_FAULT_NOT_BOOL' | 'RT_FAULT_NO_CLAUSE' | 'RT_FAULT_STACK' | 'RT_FAULT_NO_MATCH'
            | 'RT_FAULT_NOT_CONS' | 'RT_FAULT_NOT_LIST' | 'RT_FAULT_HEAP' | 'RT_FAULT_DIV_ZERO'
            | 'RT_FAULT_NOT_FUNC' | 'RT_FAULT_ARITY';
 

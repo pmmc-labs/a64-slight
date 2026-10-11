@@ -97,6 +97,7 @@ the reader and before the compiler, makes these into `cond`:
 | `(case topic (value body...) ...)` | the topic, once, compared with each value by `eq?`; a `#true` clause is the default, and without one, `()` when nothing matches |
 | `(and a b ... z)` | `(cond (a (and b ... z)) (#true #false))`; `(and z)` is `z`, `(and)` is `#true` |
 | `(or a b ... z)` | `(cond (a #true) (b #true) ... (#true z))`; `(or z)` is `z`, `(or)` is `#false` |
+| `(match topic (pattern body...) ...)` | the topic, once, then a `cond` whose clauses are each pattern's tests (`cons?`, `nil?`, `eq?` on its parts) and `let`s of its names; a last clause that faults (`:no-match`) unless the last pattern takes anything (D168) |
 
 `and` and `or` stop at the operand that decides. As in Scheme, the last
 operand isn't tested, and is what they give if they get to it
@@ -167,9 +168,13 @@ Syntax (D85):
   message goes to the **dead-letter log** (a line on stderr,
   `dead letter: <message> (recv at file:line:col)`) and the function takes
   the next message, or waits.
-- Not supported: nested patterns, literals other than the head keyword, a
-  rest binding. Match the outer shape, then take the rest apart with
-  `cond` in the body.
+- The patterns are `match`'s (D168, `compiler/src/pattern.ts`): they
+  nest, a literal (a number, a string, `#true`, `#false`, `()`, anything
+  quoted) can go anywhere, and `(p ... & rest)` binds the rest of a
+  list. One lowering, to tests and bindings, serves both: the expander
+  makes `match` into `cond` with it, and the code generator compiles
+  `recv`'s clauses with it, branching on each test. No guards: match the
+  shape, and test the rest with `cond` in the body.
 
 Send-then-wait is written in one function, and becomes two:
 
@@ -476,8 +481,8 @@ can cut its bytes into messages (D154–D156):
 ### Not in the language
 
 `eval`, hot reload, macros, `catch`, `gensym`, local `defun`, selective
-receive, mutable anything. (`if`, `when` and `case` aren't macros, but
-forms the expander makes into `cond`: D142.) readline isn't needed: the
+receive, mutable anything. (`if`, `when`, `case` and `match` aren't
+macros, but forms the expander makes into `cond`: D142, D168.) readline isn't needed: the
 REPL and line editing are slight code over key events.
 
 ## Runtime
@@ -844,7 +849,10 @@ that's just a walk over every function.
    operands, a test that branches, filling a cons cell (D145). Tagged
    values, a reduction check at entries and tail calls. Collection needs
    nothing from the compiler: `recv` already passes its function's
-   arguments to the runtime, to restart it after waiting.
+   arguments to the runtime, to restart it after waiting. A test that
+   can only be a boolean (`cons?`, `nil?`, `eq?` with an immediate
+   literal, and what `and` becomes) branches without making one, which
+   is what keeps a pattern's tests cheap (D168).
 9. **Emit data**: string literals, quoted constants, static closures, the
    symbol name table.
 

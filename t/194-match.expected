@@ -1,0 +1,27 @@
+"empty"
+"point 3,4"
+"line from 0,0 to 5,6"
+"sum 6"
+"sum 0"
+"greeting for world"
+"five and something"
+"a true"
+"the list one two"
+"two and a half"
+"something else: 2"
+"a pair x y"
+"a list starting 1"
+"something else: str"
+"a pair point 3"
+(1 2)
+two
+int
+both
+(not-a-list () (1))
+(1 2)
+100
+(1 2 (3))
+still-works
+1000000
+(ok served)
+()

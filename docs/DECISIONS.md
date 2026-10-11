@@ -1740,3 +1740,45 @@ recommendation that came with it.)*
   stays a process and `join` (`ask`, `(join (connect :tcp ...))`), which
   works anywhere. To look at again after HTTP (step 14), if its code needs
   helpers that wait inside one process.
+
+## After step 13: patterns, tuples, replay
+
+Three of the changes Claude listed (Oct 2026) when Stevan asked what
+would make slight more useful, taken up at once: "Lets do 1, 2, and 4
+now." Stevan chose the features; the details below are Claude's
+defaults, not discussed, and fair to revisit.
+
+**D168. `match`, and nested patterns for `recv` too.** *(User asked for
+it; the details are defaults.)* `(match topic (pattern body...) ...)`
+evaluates the topic once, and the first clause whose pattern fits gives
+the value, its names bound in its body only. The patterns, `match`'s and
+`recv`'s alike: `_`; a name; a literal compared with `eq?` (a number, a
+string, `#true`, `#false`, `()`, anything quoted); `(p ...)`, a list of
+exactly that many; `(p ... & rest)`, at least that many, `rest` matching
+the list of what's left. So D85's "patterns don't nest, and the head
+keyword is the only literal" no longer holds; every pattern that was
+allowed means what it did.
+- **How:** one lowering (`compiler/src/pattern.ts`) makes a pattern into
+  tests (`cons?`, `nil?`, `eq?` on car and cdr paths into the value) and
+  bindings (a name and its path). The expander makes `match` into `cond`
+  with them, as `case` is (D142), so `split.ts`, the `recv` rule and the
+  code generator need nothing new for it, and a `recv` can go in a
+  clause's body. The code generator compiles `recv`'s clauses with the
+  same lowering, so the two can't drift apart. A test that can only be a
+  boolean branches without making one (in any `cond`, which helps `and`
+  too), and a path's steps skip the cons check the tests already made,
+  so a `recv` costs about what it did; the ring benchmark can't tell the
+  difference.
+- **Hidden names:** the tests and paths call the builtins by names with
+  spaces in them, which no program can write and no local can hide, so a
+  pattern can bind `car`, and a local named `cons?` changes nothing.
+- **No match:** a `match` that matches nothing faults, `:no-match` with
+  the topic as the value, as `cond` faults `:no-clause`: a missed case is
+  a bug. Rejected: giving `()`, as `case` does, which hides it.
+- **`&` for the rest**, as Clojure's destructuring and Common Lisp's
+  `&rest`; slight has no dotted pairs to write `(a . rest)` with. `&` is
+  only special inside a list pattern.
+- **Left out for now:** guards (`(pattern :when test body...)`), which
+  would let a clause fall through on a value as well as a shape; matching
+  a name's current value (Erlang's bound variables); `match` in `lambda`
+  parameters and `let`. Each is small if it's wanted.
