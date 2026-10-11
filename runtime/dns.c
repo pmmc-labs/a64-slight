@@ -12,7 +12,6 @@
 
 #include <arpa/inet.h>
 #include <errno.h>
-#include <fcntl.h>
 #include <netinet/in.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -20,8 +19,8 @@
 #include <strings.h>
 #include <sys/select.h>
 #include <sys/socket.h>
-#include <time.h>
-#include <unistd.h>
+
+#include "io.h"
 
 #define MAX_SERVERS 3                   // as resolv.conf's MAXNS
 #define MAX_SEARCH  6
@@ -47,7 +46,7 @@ struct rt_lookup {
 
 static FILE *open_file(const char *env, const char *path) {
     const char *p = getenv(env);
-    return fopen(p ? p : path, "r");
+    return rt_io_fopen(p ? p : path);
 }
 
 // The next word in *p, NUL-terminated in place, or NULL at the end of the
@@ -67,14 +66,14 @@ static int in_hosts(const char *name, uint32_t *addr) {
     FILE *f = open_file("SLIGHT_HOSTS", "/etc/hosts");
     char  line[1024];
     int   found = 0;
-    while (f && !found && fgets(line, sizeof line, f)) {
+    while (f && !found && rt_io_fgets(line, sizeof line, f)) {
         char          *p = line, *a = word(&p), *n;
         struct in_addr in;
         if (!a || inet_pton(AF_INET, a, &in) != 1) continue;
         while (!found && (n = word(&p)) != NULL) found = strcasecmp(n, name) == 0;
         if (found) *addr = in.s_addr;
     }
-    if (f) fclose(f);
+    if (f) rt_io_fclose(f);
     return found;
 }
 
@@ -89,7 +88,7 @@ static void read_resolv_conf(rt_lookup_t *l, const char *name) {
     l->timeout   = 5000;
     FILE *f = open_file("SLIGHT_RESOLV_CONF", "/etc/resolv.conf");
     char  line[1024];
-    while (f && fgets(line, sizeof line, f)) {
+    while (f && rt_io_fgets(line, sizeof line, f)) {
         char *p = line, *key = word(&p), *v;
         if (!key) continue;
         if (strcmp(key, "nameserver") == 0 && (v = word(&p)) && l->nservers < MAX_SERVERS) {
@@ -112,7 +111,7 @@ static void read_resolv_conf(rt_lookup_t *l, const char *name) {
             }
         }
     }
-    if (f) fclose(f);
+    if (f) rt_io_fclose(f);
     if (l->nservers == 0) {                     // none: the local one, as glibc and Go have it
         struct sockaddr_in *s = &l->servers[l->nservers++];
         memset(s, 0, sizeof *s);
@@ -141,7 +140,7 @@ static void read_resolv_conf(rt_lookup_t *l, const char *name) {
 
 static uint16_t next_id(void) {
     static uint32_t x;
-    if (!x) x = (uint32_t)time(NULL) ^ (uint32_t)getpid() << 16 ^ (uint32_t)(uintptr_t)&x;
+    if (!x) x = rt_io_seed() | 1;
     x ^= x << 13;
     x ^= x >> 17;
     x ^= x << 5;
@@ -176,7 +175,7 @@ static int make_query(rt_lookup_t *l, const char *name) {
 }
 
 static void close_query(rt_lookup_t *l) {
-    if (l->fd >= 0) close(l->fd);
+    if (l->fd >= 0) rt_io_close(l->fd);
     l->fd         = -1;
     l->answer_len = 0;
 }
@@ -185,15 +184,14 @@ static void close_query(rt_lookup_t *l) {
 // yet: 0, or -1 if the socket failed, and the server is to be skipped.
 static int send_query(rt_lookup_t *l) {
     close_query(l);
-    int fd = socket(AF_INET, l->tcp ? SOCK_STREAM : SOCK_DGRAM, 0);
+    int fd = rt_io_socket(l->tcp ? SOCK_STREAM : SOCK_DGRAM);
     if (fd < 0) return -1;
     l->fd = fd;
-    int flags = fcntl(fd, F_GETFL);
-    if (fd >= FD_SETSIZE || flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 || fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) return -1;
+    if (rt_io_setup(fd, 0) != 0) return -1;
     const struct sockaddr_in *s = &l->servers[l->server];
-    if (connect(fd, (const struct sockaddr *)s, sizeof *s) < 0 && errno != EINPROGRESS) return -1;
+    if (rt_io_connect(fd, (const struct sockaddr *)s, sizeof *s) < 0 && errno != EINPROGRESS) return -1;
     l->connecting = l->tcp;
-    if (!l->tcp && send(fd, l->query + 2, l->query_len, 0) < 0) return -1;
+    if (!l->tcp && rt_io_send(fd, l->query + 2, l->query_len) < 0) return -1;
     return 0;
 }
 
@@ -322,16 +320,14 @@ int rt_lookup_ready(rt_lookup_t *l, int timed_out, uint32_t *addr) {
     if (timed_out) return next_server(l);
     if (!l->tcp) {
         unsigned char m[512];
-        ssize_t       n = recv(l->fd, m, sizeof m, 0);
+        ssize_t       n = rt_io_recv(l->fd, m, sizeof m);
         if (n < 0) return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR ? RT_LOOKUP_WAIT : next_server(l);
         return take_answer(l, m, (size_t)n, addr);
     }
     if (l->connecting) {                        // connected, or not: then the query goes
-        int       err = 0;
-        socklen_t len = sizeof err;
-        if (getsockopt(l->fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0 || err) return next_server(l);
+        if (rt_io_socket_error(l->fd)) return next_server(l);
         l->connecting = 0;
-        if (send(l->fd, l->query, l->query_len + 2, 0) != (ssize_t)(l->query_len + 2)) return next_server(l);
+        if (rt_io_send(l->fd, l->query, l->query_len + 2) != (ssize_t)(l->query_len + 2)) return next_server(l);
         return RT_LOOKUP_WAIT;
     }
     if (l->answer_len == l->answer_cap) {
@@ -339,7 +335,7 @@ int rt_lookup_ready(rt_lookup_t *l, int timed_out, uint32_t *addr) {
         l->answer     = realloc(l->answer, l->answer_cap);
         if (!l->answer) abort();
     }
-    ssize_t n = recv(l->fd, l->answer + l->answer_len, l->answer_cap - l->answer_len, 0);
+    ssize_t n = rt_io_recv(l->fd, l->answer + l->answer_len, l->answer_cap - l->answer_len);
     if (n < 0) return errno == EAGAIN || errno == EWOULDBLOCK || errno == EINTR ? RT_LOOKUP_WAIT : next_server(l);
     if (n == 0) return next_server(l);         // closed before it answered
     l->answer_len += (size_t)n;

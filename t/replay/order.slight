@@ -1,0 +1,14 @@
+; Five workers, each spinning a while and then saying which it is. First
+; in, first out, they finish in order; with SLIGHT_SCHED=n, in an order
+; that depends on n, and is the same every time (t/replay.sh).
+
+(defun spin (n) (if (== n 0) :done (spin (- n 1))))
+
+(defun worker (i)
+    (spin (* i 300))
+    (tty/write i " ")
+    i)
+
+(let pids (map (lambda (i) (fork (worker i))) (range 1 6)))
+(map join pids)
+(tty/write \n)

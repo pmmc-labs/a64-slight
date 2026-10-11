@@ -1815,3 +1815,48 @@ at every level.
   patterns in `match` (which would follow the syntax); growing a tuple
   in place, which nothing immutable can do. Rejected: the name "vector",
   which in Clojure and Scheme suggests something that grows or changes.
+
+**D170. Recording and replaying a run; a seeded schedule.** *(User asked
+for both; the details are defaults.)* A run is decided by what it takes
+from the world, since the scheduler counts calls, not time (D86, D91).
+So:
+- **One place for the world:** `runtime/replay.c`, behind `runtime/io.h`.
+  Every system call that brings something in, and the clock, goes
+  through it: about twenty sites in `process.c`, `dns.c` and `tty.c`.
+  `SLIGHT_RECORD=file` makes each call and writes what it gave (result,
+  `errno`, bytes); `SLIGHT_REPLAY=file` makes none, taking the record's
+  answers instead, so the run goes as the recorded one did: same output,
+  same faults, with no files, sockets or terminal. Writes aren't made in
+  a replay (but stdout and stderr). The record starts with the settings
+  that change a run (the clock, the seed) and `@ARGV`, which a replay
+  takes over from its own.
+- **Recorded at the system calls, not at the messages:** recording the
+  messages devices send would miss when they're cut (D158), when a
+  socket can take more, and what the clock said, all of which change the
+  run. The calls are where the runtime meets the world, and there are
+  few of them.
+- **What's not recorded:** writes' bytes (they're the run's own output),
+  and stdout and stderr, which a replay writes again. A replay that asks
+  for something the record doesn't have next stops, with exit status 2,
+  rather than guess: it's another program, or a source of difference left
+  out.
+- **The record is flushed after every entry,** so a crash leaves all of
+  it. That costs a write per entry while recording, which is for
+  debugging; off, the calls cost a test of a flag.
+- **`SLIGHT_SCHED=n`:** a generator (splitmix64) seeded with `n` picks the
+  next ready process from anywhere in the run queue, and each slice's
+  length (1 to 1,000 calls), so a program can be tried under orders that
+  first in, first out never shows, each the same every time. Picking walks
+  the queue, which is fine at the sizes it's tried on. Every promise the
+  language makes holds in any order (`t/199`).
+- **Tests:** `t/replay.sh` (`make replay`, part of `make test`), since a
+  check of a replay takes two runs: programs with keys, files, the real
+  clock, sockets and a lookup are recorded and replayed with none of them,
+  and must print the same; a record replayed by the wrong program must
+  stop; twenty seeds must give more than one order, each the same twice.
+  The real clock is used there, but nothing depends on how long anything
+  takes, since a replay is compared with its own recording.
+- **Rejected:** recording at the level of messages (above); a record
+  that's portable between machines (it's for debugging where it was
+  made); exploring schedules systematically (PCT, or a model checker),
+  for which seeds are the cheap first step.

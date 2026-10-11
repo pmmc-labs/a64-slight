@@ -14,9 +14,10 @@
 
 #include <stdlib.h>
 #include <string.h>
-#include <sys/ioctl.h>
 #include <termios.h>
 #include <unistd.h>
+
+#include "io.h"
 
 #define ESC 0x1b
 
@@ -30,14 +31,15 @@ static void cook(void) {
 
 // Raw mode as Node's (libuv's): keys arrive as they're typed, unechoed,
 // and Ctrl-C is a byte rather than a signal. Output is still processed,
-// so \n still starts a new line.
+// so \n still starts a new line. Not when replaying a run, whose keys come
+// from its record (D170).
 void rt_tty_raw(int on) {
     static int registered;
     if (!on) {
         cook();
         return;
     }
-    if (raw || !isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &cooked) != 0) return;
+    if (raw || rt_io_replaying() || !isatty(STDIN_FILENO) || tcgetattr(STDIN_FILENO, &cooked) != 0) return;
     struct termios t = cooked;
     t.c_iflag &= ~(tcflag_t)(BRKINT | ICRNL | INPCK | ISTRIP | IXON);
     t.c_cflag |= CS8;
@@ -160,8 +162,8 @@ size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key)) {
 // --- the screen ---------------------------------------------------------------
 
 static rt_value_t screen(int rows) {
-    struct winsize w;
-    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &w) == 0 && w.ws_row && w.ws_col) return rt_int(rows ? w.ws_row : w.ws_col);
+    int r, c;
+    if (rt_io_winsize(&r, &c) == 0) return rt_int(rows ? r : c);
     return rt_int(rows ? 24 : 80);
 }
 

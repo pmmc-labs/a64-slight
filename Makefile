@@ -1,5 +1,6 @@
 # make test     the compiler's unit tests, the runtime header check, then
-#               the golden tests (t/run.sh) for each of $(TARGETS)
+#               the golden tests (t/run.sh) and the record and replay
+#               checks (t/replay.sh) for each of $(TARGETS)
 # make check    type-check the compiler (needs `npm install` first)
 #
 # There are two targets, aarch64 and x86_64. The golden tests run for
@@ -31,7 +32,7 @@ endif
 sketch:
 	node bin/slightc.ts -o "./sketch" "author/sketch.slight"
 
-test: unit headers golden
+test: unit headers golden replay
 
 unit:
 	node --test "compiler/tests/**/*.test.ts"
@@ -39,6 +40,11 @@ unit:
 golden:
 	@fail=0; for target in $(TARGETS); do \
 		echo "# $$target"; TARGET=$$target ./t/run.sh || fail=1; \
+	done; exit $$fail
+
+replay:
+	@fail=0; for target in $(TARGETS); do \
+		echo "# $$target replay"; TARGET=$$target ./t/replay.sh || fail=1; \
 	done; exit $$fail
 
 # rt.h must not collide with the system headers (see t/headers.c)
@@ -59,4 +65,4 @@ clean:
 		rm -rf "./sketch.dSYM"; \
     fi
 
-.PHONY: test unit golden headers check clean
+.PHONY: test unit golden replay headers check clean

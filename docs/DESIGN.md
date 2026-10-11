@@ -631,6 +631,11 @@ Lalloc_N:
   one core. A preempted process goes to the back of the queue, but only
   if another process is ready; otherwise it keeps running (D91). `yield`
   always goes to the back.
+- **A seeded schedule** (D170): with `SLIGHT_SCHED=n`, a generator
+  (splitmix64) seeded with `n` picks which ready process runs next,
+  anywhere in the queue, and how many calls each slice has (1 to
+  1,000). It's for testing: each seed is one order, the same every time,
+  and every promise the language makes holds in any of them.
 - **The clock** is the system's monotonic one. With `SLIGHT_CLOCK=virtual`
   in the environment, it's a **virtual clock** for tests instead: it
   starts at 0, stands still while anything can run, and jumps
@@ -734,6 +739,34 @@ Lalloc_N:
   `vendor/` (as Odin's are), compiled by `slightc` once per target as the
   runtime is, and linked statically into the programs that use them. TLS
   is to be a `:tls` socket device.
+
+### Recording and replaying a run (D170)
+
+Everything a run takes from the world comes through one place,
+`runtime/replay.c`, behind `runtime/io.h`: the clock, `select()`'s
+answers, what reads and receives give, whether files and sockets open
+and what they say, the hosts file and `resolv.conf`, a lookup's query
+ids, and the screen's size. The rest of a run is decided by the runtime
+itself (calls are counted, not timed), so those answers, in order, decide
+the whole run.
+
+- `SLIGHT_RECORD=file`: each call is made, and its result, `errno`, and
+  any bytes it filled in are written to `file`, flushed every time, so a
+  crash leaves a record of everything up to it. The record starts with the
+  settings that change a run (the clock, the seed) and `@ARGV`.
+- `SLIGHT_REPLAY=file`: no call is made; each takes the record's next
+  entry instead, and the record's settings and arguments are the run's.
+  Writes to files and sockets aren't made either, and raw mode isn't
+  set; stdout and stderr, written through stdio, are. An entry of another
+  kind than the call asks for means the run has gone another way (another
+  program, or something left out of the record): it stops, saying so,
+  with exit status 2.
+- A record is native-endian and tied to its program: for replaying where
+  it was made, under a debugger, as often as it takes.
+- Tested by `t/replay.sh` (`make replay`): runs with keys, files, the real
+  clock, sockets and a lookup are recorded, then replayed with none of
+  them, and must print the same; and `SLIGHT_SCHED` gives several orders,
+  each the same every time.
 
 ### Builtins in C
 
@@ -893,6 +926,9 @@ line-by-line translation.
 - **Compiler unit tests** with `node:test`, per pass.
 - **Timing uses the virtual clock** (`t/run.sh` sets
   `SLIGHT_CLOCK=virtual`), never real time.
+- **Record and replay** (`t/replay.sh`, D170): a few programs recorded on
+  the real clock and replayed; each replay is compared with its own
+  recording, never with a fixed output, so nothing depends on timing.
 - **Keys** come from a `; stdin:` line in the test (D116), in printf `%b`'s
   escapes; without one, stdin is empty.
 - `lib/test.slight`, a slight-level test library (TAP: `ok`, `is`,

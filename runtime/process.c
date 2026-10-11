@@ -27,7 +27,6 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <netinet/in.h>
-#include <netinet/tcp.h>
 #include <signal.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -37,6 +36,8 @@
 #include <sys/socket.h>
 #include <time.h>
 #include <unistd.h>
+
+#include "io.h"
 
 #define QUOTA          1000             // reductions between preemptions
 #define STACK_BYTES    (8 << 20)        // every process's stack, mapped lazily
@@ -65,6 +66,7 @@ static void       *free_stacks;         // a list through each stack's first wor
 static size_t      page;
 static int         poison;              // SLIGHT_POISON: fill what the collector frees
 static int64_t     gc_stress;           // SLIGHT_GC_STRESS=n: collect at every nth call (n <= QUOTA), and every recv
+static uint64_t    sched;               // SLIGHT_SCHED's generator, or 0: first in, first out
 
 static void *must(void *p) {
     if (!p) {
@@ -75,6 +77,19 @@ static void *must(void *p) {
 }
 
 // --- the run queue ------------------------------------------------------------
+//
+// First in, first out (D86). With SLIGHT_SCHED=n, a generator seeded with
+// n picks which ready process runs next instead, and how many calls each
+// slice is (D170), so a program can be tried under other orders, each
+// seed the same order every time. Picking walks the queue, which is fine
+// for trying a program out, if not a million processes.
+
+static uint64_t sched_next(void) {      // splitmix64
+    uint64_t z = (sched += 0x9e3779b97f4a7c15u);
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9u;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebu;
+    return z ^ (z >> 31);
+}
 
 static void enqueue(rt_proc_t *p) {
     p->state      = RT_READY;
@@ -85,6 +100,19 @@ static void enqueue(rt_proc_t *p) {
 }
 
 static rt_proc_t *dequeue(void) {
+    if (sched && ready_head) {
+        uint64_t n = 0;
+        for (rt_proc_t *q = ready_head; q; q = q->next_ready) n++;
+        rt_proc_t **link = &ready_head, *prev = NULL;
+        for (uint64_t k = sched_next() % n; k; k--) {
+            prev = *link;
+            link = &prev->next_ready;
+        }
+        rt_proc_t *p = *link;
+        *link = p->next_ready;
+        if (ready_tail == p) ready_tail = prev;
+        return p;
+    }
     rt_proc_t *p = ready_head;
     if (p) {
         ready_head = p->next_ready;
@@ -139,8 +167,9 @@ static void release_stack(rt_proc_t *p) {
 // (slice_rest) till its end, so a process is preempted after the same
 // calls as without it.
 static void refill(rt_proc_t *p) {
-    p->reductions = gc_stress ? gc_stress : QUOTA;
-    p->slice_rest = QUOTA - p->reductions;
+    int64_t calls = sched ? 1 + (int64_t)(sched_next() % QUOTA) : QUOTA;
+    p->reductions = gc_stress && gc_stress < calls ? gc_stress : calls;
+    p->slice_rest = calls - p->reductions;
 }
 
 // A stack, and registers that make the first switch land in rt_trampoline
@@ -767,7 +796,8 @@ void rt_yield(void) {
 // then, as a message to it would be (D92); until then it's something that
 // can still happen, so the program waits for it.
 //
-// The clock is the system's monotonic one, in nanoseconds; or, with
+// The clock is the system's monotonic one, in nanoseconds, read through
+// replay.c like everything else from outside (D170); or, with
 // SLIGHT_CLOCK=virtual (t/run.sh sets it), one for tests that starts at 0
 // and moves only when nothing can run, straight to the next timer. Timer
 // tests are then exact, and take no real time.
@@ -784,10 +814,7 @@ static int       virtual_clock;
 static uint64_t  virtual_now;
 
 static uint64_t now(void) {
-    if (virtual_clock) return virtual_now;
-    struct timespec t;
-    clock_gettime(CLOCK_MONOTONIC, &t);
-    return (uint64_t)t.tv_sec * 1000000000 + (uint64_t)t.tv_nsec;
+    return virtual_clock ? virtual_now : rt_io_clock();
 }
 
 // When a timer set now for ms milliseconds is due. A negative ms counts
@@ -963,7 +990,7 @@ static int wait_for(int64_t us) {
         tv      = (struct timeval){ .tv_sec = (time_t)(us / 1000000), .tv_usec = (suseconds_t)(us % 1000000) };
         timeout = &tv;
     }
-    if (select(max + 1, &in, &out, NULL, timeout) <= 0) return 0;
+    if (rt_io_select(max + 1, &in, &out, timeout) <= 0) return 0;
     int saw = keys && FD_ISSET(STDIN_FILENO, &in) ? IO_KEYS : 0;
     return saw | (socket_events(&in, &out) ? IO_SOCKETS : 0);
 }
@@ -971,7 +998,7 @@ static int wait_for(int64_t us) {
 // Reads what stdin has, once everything read before has been decoded.
 static void read_input(void) {
     if (input_at < input_len) return;
-    ssize_t got = read(STDIN_FILENO, input, sizeof input);
+    ssize_t got = rt_io_read(STDIN_FILENO, input, sizeof input);
     if (got == 0 || (got < 0 && errno != EINTR && errno != EAGAIN)) input_ended = 1;
     input_at  = 0;
     input_len = got > 0 ? (size_t)got : 0;
@@ -1216,7 +1243,7 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
 // Closes d's file descriptor. A socket is freed later (bury), since an
 // event in hand may still refer to it.
 static void close_now(rt_device_t *d) {
-    if (d->fd >= 0) close(d->fd);
+    if (d->fd >= 0) rt_io_close(d->fd);
     if (d->lookup) {
         unset_alarm(&d->alarm);
         rt_lookup_free(d->lookup);
@@ -1360,7 +1387,7 @@ static ssize_t fill(rt_device_t *d) {
         d->buf = must(realloc(d->buf, cap));
     }
     ssize_t got;
-    do got = read(d->fd, d->buf + d->len, d->cap - d->len); while (got < 0 && errno == EINTR);
+    do got = rt_io_read(d->fd, d->buf + d->len, d->cap - d->len); while (got < 0 && errno == EINTR);
     if (got == 0) d->eof = 1;
     if (got > 0)  d->len += (size_t)got;
     return got;
@@ -1575,7 +1602,7 @@ static int read_as(rt_device_t *d, rt_value_t args) {
 // set. (SIGPIPE is ignored, so a closed connection is EPIPE.)
 static int flush(rt_device_t *d) {
     while (d->out_at < d->out_len) {
-        ssize_t n = write(d->fd, d->out + d->out_at, d->out_len - d->out_at);
+        ssize_t n = rt_io_write(d->fd, d->out + d->out_at, d->out_len - d->out_at);
         if (n < 0 && errno == EINTR) continue;
         if (n < 0) return errno == EAGAIN || errno == EWOULDBLOCK ? 0 : -1;
         d->out_at += (size_t)n;
@@ -1615,7 +1642,7 @@ static void command(rt_device_t *d, rt_value_t msg) {
         return;
     }
     for (size_t at = 0; at < b.len; ) {
-        ssize_t n = write(d->fd, b.bytes + at, b.len - at);
+        ssize_t n = rt_io_write(d->fd, b.bytes + at, b.len - at);
         if (n < 0 && errno == EINTR) continue;
         if (n < 0) {
             int err = errno;
@@ -1636,7 +1663,7 @@ rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, c
     const char *bytes = rt_string_bytes(path);
     size_t      len   = rt_string_len(path);
     int         flags = mode == RT_FS_READ ? O_RDONLY : O_WRONLY | O_CREAT | (mode == RT_FS_APPEND ? O_APPEND : O_TRUNC);
-    int         fd    = memchr(bytes, '\0', len) ? (errno = EINVAL, -1) : open(bytes, flags | O_CLOEXEC, 0666);
+    int         fd    = memchr(bytes, '\0', len) ? (errno = EINVAL, -1) : rt_io_open(bytes, flags);
     if (fd < 0) {
         _Alignas(16) rt_value_t cells[4];
         end_other(p, io_reason(cells, errno, path));
@@ -1649,33 +1676,19 @@ rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, c
 // A socket that doesn't block, isn't inherited, and fits in select():
 // 0, or an errno.
 static int setup(int fd) {
-    int flags = fcntl(fd, F_GETFL);
-    if (fd >= FD_SETSIZE) return EMFILE;
-    if (flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 || fcntl(fd, F_SETFD, FD_CLOEXEC) < 0) return errno;
-    int one = 1;
-    setsockopt(fd, IPPROTO_TCP, TCP_NODELAY, &one, sizeof one);  // messages are small; don't wait to fill a packet
-    return 0;
+    return rt_io_setup(fd, 1);
 }
 
 static int tcp_listen(rt_proc_t *p, const char *site, int64_t port) {
-    int fd = socket(AF_INET, SOCK_STREAM, 0);
+    int fd = rt_io_socket(SOCK_STREAM);
     if (fd < 0) return errno;
-    int one = 1, err;
-    setsockopt(fd, SOL_SOCKET, SO_REUSEADDR, &one, sizeof one);
-    struct sockaddr_in a = { 0 };
-    a.sin_family      = AF_INET;
-    a.sin_port        = htons((uint16_t)port);
-    a.sin_addr.s_addr = htonl(INADDR_ANY);
-    socklen_t alen    = sizeof a;
-    if ((err = setup(fd)) != 0
-        || (bind(fd, (struct sockaddr *)&a, sizeof a) < 0 && (err = errno))
-        || (listen(fd, 128) < 0 && (err = errno))
-        || (getsockname(fd, (struct sockaddr *)&a, &alen) < 0 && (err = errno))) {
-        close(fd);
+    int got, err;
+    if ((err = setup(fd)) != 0 || (err = rt_io_listen(fd, (int)port, &got)) != 0) {
+        rt_io_close(fd);
         return err;
     }
     rt_device_t *d = new_device(p, DEV_LISTEN, fd, site, NULL, 0);
-    d->port = ntohs(a.sin_port);
+    d->port = got;
     tell_open(d);
     return 0;
 }
@@ -1687,9 +1700,9 @@ static int open_connection(uint32_t addr, int64_t port, int *fd) {
     a.sin_family      = AF_INET;
     a.sin_port        = htons((uint16_t)port);
     a.sin_addr.s_addr = addr;
-    int s = socket(AF_INET, SOCK_STREAM, 0), err = s < 0 ? errno : setup(s);
-    if (!err && connect(s, (struct sockaddr *)&a, sizeof a) < 0 && errno != EINPROGRESS) err = errno;
-    if (err && s >= 0) close(s);
+    int s = rt_io_socket(SOCK_STREAM), err = s < 0 ? errno : setup(s);
+    if (!err && rt_io_connect(s, (struct sockaddr *)&a, sizeof a) < 0 && errno != EINPROGRESS) err = errno;
+    if (err && s >= 0) rt_io_close(s);
     *fd = err ? -1 : s;
     return err;
 }
@@ -1794,18 +1807,14 @@ rt_value_t rt_disconnect(rt_value_t pid, const char *site) {
 static void accept_all(rt_device_t *l) {
     rt_proc_t *owner = procs[l->owner >> RT_PID_SHIFT].proc;
     for (;;) {
-        struct sockaddr_in a;
-        socklen_t          alen = sizeof a;
-        int                fd   = accept(l->fd, (struct sockaddr *)&a, &alen);
+        char where[INET_ADDRSTRLEN + 8];
+        int  fd = rt_io_accept(l->fd, where, sizeof where);
         if (fd < 0 && errno == EINTR) continue;
         if (fd < 0) return;                     // none left, or none to be had for now
         if (setup(fd) != 0) {
-            close(fd);
+            rt_io_close(fd);
             continue;
         }
-        char where[INET_ADDRSTRLEN + 8];
-        inet_ntop(AF_INET, &a.sin_addr, where, INET_ADDRSTRLEN);
-        snprintf(where + strlen(where), 8, ":%d", ntohs(a.sin_port));
         rt_device_t *c = new_device(owner, DEV_TCP, fd, l->site, where, strlen(where));
         c->waiting = 1;
         _Alignas(16) rt_value_t cell[2];
@@ -1866,9 +1875,7 @@ static void socket_event(rt_device_t *d, int r, int w) {
         return;
     }
     if (d->connecting && w) {
-        int       err = 0;
-        socklen_t len = sizeof err;
-        if (getsockopt(d->fd, SOL_SOCKET, SO_ERROR, &err, &len) < 0) err = errno;
+        int err = rt_io_socket_error(d->fd);
         if (err) {
             if (d->closing) close_now(d);
             else            fail(d, err);
@@ -1971,8 +1978,15 @@ int main(int argc, char **argv) {
     poison = getenv("SLIGHT_POISON") != NULL;
     const char *stress = getenv("SLIGHT_GC_STRESS");
     gc_stress = !stress ? 0 : atoll(stress) < 1 ? 1 : atoll(stress) > QUOTA ? QUOTA : atoll(stress);
-    const char *mode = getenv("SLIGHT_CLOCK");
-    virtual_clock = mode && strcmp(mode, "virtual") == 0;
+    const char *mode = getenv("SLIGHT_CLOCK"), *seed = getenv("SLIGHT_SCHED");
+    if (seed && (!*seed || strspn(seed, "0123456789") != strlen(seed))) {
+        fputs("slight: SLIGHT_SCHED is a number, a seed for the order processes run in\n", stderr);
+        return 2;
+    }
+    rt_io_settings_t settings = { mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0 };
+    rt_io_start(&argc, &argv, &settings);       // replaying, the record's settings and arguments
+    virtual_clock = settings.virtual_clock;
+    sched         = settings.sched_seed;
     rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);
     p->args[0]   = arguments(p, argc, argv);
     rt_run();

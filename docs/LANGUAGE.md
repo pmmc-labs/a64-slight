@@ -75,6 +75,39 @@ function called (n from 1, every call, which is slow, to 1,000), and at
 every `recv`.
 `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` are in "Sockets".
 
+### Replaying a run, and other orders
+
+A run is decided by what it takes from outside: its arguments, the
+keys typed, the clock, what files and sockets give. Everything else the
+runtime decides itself, counting calls rather than time. So (D170):
+
+- `SLIGHT_RECORD=file` writes all it takes from outside, as it takes it,
+  to `file`, a record of the run.
+- `SLIGHT_REPLAY=file` runs the program again from that record: the
+  arguments, keys, times, file contents and network traffic are the
+  record's, and the run goes exactly as the recorded one did, printing
+  what it printed. Nothing is read from the world, and nothing written to
+  it but stdout and stderr: no file is written, no socket opened, and the
+  terminal is left as it is. So a bug that came from the world can be
+  seen again, as often as it takes. The record must be of the same
+  program; where a run goes another way, it stops with `replay: the run
+  goes another way at entry N` and exits 2.
+- `SLIGHT_SCHED=n` runs processes in another order than first in, first
+  out: a generator seeded with the number `n` picks which ready process
+  runs next and how many calls each slice has. Each seed gives the same
+  order every time, so a program that goes wrong under one seed goes
+  wrong the same way again. What the language promises holds in any
+  order: messages from one process to another arrive in the order they
+  were sent, a process takes one message at a time, and timers due
+  together fire in the order they were set. A program that relies on
+  more than that (that one process's message comes before another's, say)
+  can be caught out by trying a few seeds:
+
+      for n in $(seq 1 100); do SLIGHT_SCHED=$n ./prog || echo "seed $n"; done
+
+  A record keeps its run's seed and its clock (real or virtual), so a
+  replay uses them.
+
 ### @ARGV
 
 `@ARGV` is the program's arguments after its name, as a list of strings,
@@ -597,6 +630,8 @@ Processes take turns from a run queue, first in, first out. A running
 process counts a reduction at every call, tail calls included; after
 1,000, it goes to the back of the queue if another process is ready.
 Every loop is a tail call, so no process can hold up the rest.
+`SLIGHT_SCHED` changes the order, for testing (under "Replaying a run,
+and other orders").
 
 ### The heap
 

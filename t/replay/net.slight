@@ -1,0 +1,30 @@
+; A server and a client in one program, over TCP, the client finding the
+; server by a name in the hosts file. t/replay.sh records a run and
+; replays it, with no hosts file and no sockets.
+
+(defun echo ()
+    (recv
+        ((:open c)   (echo))
+        ((:line c s) (send c (list :write "echo " s \n)) (echo))
+        ((:eof c)    (disconnect c))))
+
+(defun server (parent)
+    (recv
+        ((:open l port) (send parent (list :port port)) (server parent))
+        ((:accept l c)  (connect c (echo)) (server parent))))
+
+(defun client (lines got)
+    (recv
+        ((:open c)
+            (map (lambda (s) (send c (list :write s \n))) lines)
+            (client lines got))
+        ((:line c s)
+            (if (== (+ (length got) 1) (length lines))
+                (do (disconnect c) (reverse (cons s got)))
+                (client lines (cons s got))))))
+
+(let me $$)
+(let l (connect :tcp/listen 0 (server me)))
+(let port (recv ((:port p) p)))
+(pprint (join (connect :tcp (concat "echo.test:" port) (client (list "one" "two" "three") ()))))
+(kill l)

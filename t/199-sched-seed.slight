@@ -1,0 +1,37 @@
+; env: SLIGHT_SCHED=42
+; Under a seeded schedule (D170) processes run in another order, and
+; their slices are of other lengths, but what the language promises
+; still holds: messages from one process to another arrive in the order
+; they were sent, an update to a structure is atomic, every process runs,
+; join waits, and timers due together fire in the order they were set. So
+; this prints what it would first in, first out.
+
+(@include :ds)
+
+; ten processes, each adding 1 to a cell a hundred times, atomically
+(let c (cell/new 0))
+(defun adder (c n) (if (== n 0) :done (do (cell/update c inc) (adder c (- n 1)))))
+(let adders (map (lambda (i) (fork (adder c 100))) (range 0 10)))
+(map join adders)
+(pprint (cell/get c))
+
+; each of five senders sends its numbers in order to a collector, and
+; they arrive there in order
+(defun sender (to tag n) (dotimes 0 n (lambda (i) (send to (list tag i)))))
+(defun lookup* (tag seen) (match (lookup tag seen) (:not-found ()) (xs xs)))
+(defun collect (seen n)
+    (if (== n 0)
+        seen
+        (recv
+            ((tag i) (collect (assoc tag (cons i (lookup* tag seen)) seen) (- n 1))))))
+(let col (fork (collect () 250)))
+(map (lambda (tag) (fork (sender col tag 50))) (list :a :b :c :d :e))
+(match (join col)
+    ((:ok seen) (pprint (map (lambda (tag) (eq? (reverse (lookup* tag seen)) (range 0 50))) (list :a :b :c :d :e)))))
+
+(let me $$)
+; timers due at the same time fire in the order they were set
+(after 10 me :first)
+(after 10 me :second)
+(after 5 me :sooner)
+(pprint (list (recv) (recv) (recv)))
