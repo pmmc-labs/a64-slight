@@ -9,9 +9,10 @@ macOS: Stevan runs `make test` on his M2 Max after every step), a
 second target, x86-64 (which passes on the M2 too, under Rosetta 2), and
 UTF-8 builtins (both below, after 10e), tooling (11), and of the
 groundwork HTTP needs (12), ways to read a device (12a), collecting
-outside `recv` (12b) and looking up host names (12d), and where `recv`
-can go (13). Next (D149): the rest of 12 (C libraries and TLS), then
-HTTP (14).
+outside `recv` (12b) and looking up host names (12d), where `recv`
+can go (13), and after it, `match`, tuples, and recording and replaying
+a run (D168–D170). Next (D149): the rest of 12 (C libraries and TLS),
+then HTTP (14).
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -467,6 +468,24 @@ becomes
   without a new special form, and may replace it. It changes the `recv`
   rule, so it's Stevan's decision.
 
+### After 13: patterns, tuples, replay (done, Oct 2026)
+
+Three of the changes Claude listed when Stevan asked what would make
+slight more useful (BACKGROUND.md has Misty, which started the talk);
+Stevan picked these to do at once, and the rest are under "Later",
+below.
+
+- **`match`, and nested patterns for `recv`** (D168): one lowering of
+  patterns to tests and bindings (`compiler/src/pattern.ts`), used by the
+  expander for `match` and by the code generator for `recv`. Golden tests
+  194–196.
+- **Tuples** (D169): `runtime/tuples.c`; copying, the collector,
+  printing and `eq?` know a box that holds values. Golden tests 197 and
+  198.
+- **Recording and replaying a run, and a seeded schedule** (D170):
+  `runtime/replay.c`, `SLIGHT_RECORD`, `SLIGHT_REPLAY` and
+  `SLIGHT_SCHED`; `t/replay.sh` (`make replay`) and golden test 199.
+
 ### 14. HTTP in slight
 
 Was 10f. `lib/http.slight`, opt-in (D140): an HTTP/1.1 client and
@@ -533,6 +552,56 @@ them:
 - Optimizations, when profiling asks for them: the heap pointer in a
   register (D57), captured values read from the closure (D79), denser
   lists (CDR-coding, VLists: D23), reference counting with reuse (D24).
+
+### Later: the rest of the October 2026 list
+
+The other changes from that list (above, "After 13"), for later, before
+self-hosting, since most change the language. Each has points to settle
+with Stevan first.
+
+- **Bit operations on integers.** Hashing (a hash trie of tuples, for a
+  fast dictionary), random number generators (and with them property
+  tests), and binary protocols all need them, and slight has none. And,
+  or and xor work on tagged words as they are, so they can be inline;
+  shifts untag and retag. To settle: the names (`bit/and` and so on, as
+  `utf8/`), what a shift does past 63 bits (fault, as arithmetic
+  does?), and negative counts.
+- **A `recv` with a timeout.** Today it's `after` and a message, and a
+  late timeout can arrive after the answer, to be told apart by hand. A
+  clause such as `(:after ms body...)`, as Erlang's, needs timers that
+  can be cancelled (the runtime has them for its own, `unset_alarm`). To
+  settle: the syntax; that a receive function starts again from the top
+  after each message, dead letters included, so the deadline must be set
+  once per wait, not per start; and how it goes through `split.ts`.
+- **Processes as data.** A waiting process is a function, its arguments
+  and a mailbox (D8), and its data has no cycles, so it can be written
+  out, with functions and closures by name. For: saving and restoring a
+  whole program; upgrading between builds by stopping, rebuilding and
+  going on with the old state, which is the ahead-of-time answer to hot
+  reload (D6); and moving a process to another machine, as Termite
+  Scheme does. To settle: what happens to devices and pids in a saved
+  process; how a closure keeps its identity across builds (a function's
+  name, and a lambda's position, which moves when the source does);
+  and what's saved: one process, a group, or everything.
+- **Large strings shared, not copied.** Sending a 10 MB string copies
+  it (D25); being immutable, it could be shared, off the heaps, with a
+  count of its users, as the BEAM's large binaries are. To settle: the
+  size from which a string is shared, and how the count goes down when a
+  heap is collected or freed.
+- **A `:system` device for looking at the runtime:** the processes,
+  their states, mailboxes and heap sizes, and the run queue, as
+  messages, so a `top`, and a supervisor's health checks, can be written
+  in slight. To settle: what can be asked, and whether any process may
+  ask.
+- **Distribution, as a library first:** a process that stands for one on
+  another machine, forwarding messages as s-expressions over TCP (D155),
+  as Termite Scheme does, with no runtime change until it's proved
+  itself. To settle: what a remote pid looks like, monitoring across
+  machines (the connection ending), and what can't be sent (a closure,
+  between different builds).
+- **Smaller, left out of D168 and D169:** guards in `match` and `recv`;
+  a reader syntax for tuples (`#(1 2)` as a literal, static data as
+  quoted lists are), and with it tuples in `sexp/print` and in patterns.
 
 ### 17. Self-host
 
