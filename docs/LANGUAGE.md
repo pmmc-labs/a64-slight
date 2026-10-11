@@ -197,6 +197,9 @@ forms in order (Files).
   on anything but a list as its second argument.
 - **Strings**: immutable bytes, UTF-8 by convention. `pprint` shows them
   in double quotes, with nothing inside escaped.
+- **Tuples**: a fixed number of values, any of which can be had in one
+  step, where a list takes a step per element (D169). They print as
+  `#(1 "a" b)`. There's no syntax for one: `(tuple 1 "a" :b)` makes it.
 - **Functions**: a `defun` used as a value, a `lambda`, or a builtin used
   as a value. They print as `#<function name>` or
   `#<function lambda at prog.slight:3:9>`.
@@ -415,8 +418,9 @@ arguments can be used as a value:
     (map car pairs)
     (fold/l 0 + xs)
 
-A builtin that takes a varying number (`list`, `concat`, `tty/write`,
-`format-num`) can't, so `(apply list xs)` is a compile error. Nor can a
+A builtin that takes a varying number (`list`, `tuple`, `concat`,
+`tty/write`, `format-num`) can't, so `(apply list xs)` is a compile
+error. Nor can a
 function that waits in `recv`.
 
 `(apply f xs)` calls `f` with the elements of the list `xs` as its
@@ -556,6 +560,7 @@ The fault kinds:
 - `:not-json`: `json/print` given something JSON can't hold
 - `:not-sexp`: `sexp/print` given something that isn't data
 - `:no-match`: a `match` that no clause matched
+- `:not-a-tuple`: a tuple operation given something else
 
 ### Waiting for a process
 
@@ -847,6 +852,7 @@ Each takes one value of any type, and gives `#true` or `#false`.
 - `bool?`: `#true` or `#false`.
 - `int?`, `float?`, and `num?` for either.
 - `str?`: a string.
+- `tuple?`: a tuple.
 - `lambda?`: a function, of any kind.
 - `pid?`: a pid, a device's included.
 
@@ -862,6 +868,35 @@ Each takes one value of any type, and gives `#true` or `#false`.
 - `(list x ...)`: a list of its arguments, any number.
 
 The prelude has the rest (`map`, `filter`, `length`, ...).
+
+### Tuples
+
+A tuple is like a list that can't grow, whose elements are each one step
+away: `tuple/get` takes the same time for the last element as the
+first. Changing one makes a new tuple, copying the rest, so a tuple
+suits a record of a few fields, a row, or a node of a tree; something
+that grows an element at a time suits a list.
+
+- `(tuple x ...)`: a tuple of its arguments, any number.
+- `(tuple/make n x)`: `n` elements, each `x`. A negative `n` faults
+  (`:out-of-range`).
+- `(tuple/len t)`: how many elements.
+- `(tuple/get t i)`: the element at index `i`, counting from 0. An index
+  that isn't an integer faults (`:not-an-int`), and so does one out of
+  range (`:out-of-range`).
+- `(tuple/set t i x)`: a new tuple, `t` with `x` at index `i`; `t` is as
+  it was. The index is checked as `tuple/get` checks it.
+- `(tuple/slice t start end)`: a new tuple of the elements from `start`
+  up to but not including `end`, each clamped to the tuple; empty when
+  `start` isn't before `end`.
+- `(list->tuple xs)`, `(tuple->list t)`.
+
+Anything but a tuple faults (`:not-a-tuple`). `eq?` compares tuples
+element by element, and a tuple is never `eq?` to a list.
+
+    (let p (tuple 3 4))
+    (tuple/get p 1)                      4
+    (tuple/set p 0 5)                    #(5 4)
 
 ### Strings
 
@@ -945,7 +980,7 @@ order, duplicates kept. `{"a": [1, 2.5], "b": null}` is
   pass through.
 - `(json/print v)`: `v` as compact JSON, on one line, so what it gives
   is NDJSON as it is: `(json/print (list 1 "a" :null))` is
-  `"[1,\"a\",null]"`. A float keeps its point or exponent, and a string
+  `"[1,\"a\",null]"`. A tuple is an array too. A float keeps its point or exponent, and a string
   escapes `"`, `\` and the control characters. Anything JSON can't
   hold faults (`:not-json`): any other symbol, a pid, a function, `nan`
   or `inf`, or an object's member that isn't `(key value)` with a string
@@ -977,7 +1012,8 @@ forms, and a program can read slight's own source:
   A string escapes `"`, `\` and the control characters; a float always
   has digits on both sides of its point (`1.0e+21`); a symbol is its
   name, without a colon; `(:symbol "name")` is `name`. Anything that
-  isn't data faults (`:not-sexp`): a pid, a function, `nan` or `inf`.
+  isn't data faults (`:not-sexp`): a pid, a function, a tuple (which the
+  reader has no syntax for), `nan` or `inf`.
   `pprint` stays as it is, its strings unescaped.
 
 A file or socket can be read as s-expressions too: `(:read :sexp)`,

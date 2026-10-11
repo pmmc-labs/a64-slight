@@ -410,10 +410,13 @@ rt_value_t rt_json_parse(rt_value_t s, const char *site) {
 
 // The printer walks with a work stack (D147): for each container it's in,
 // the rest of its list and whether it's an object, and whether anything
-// has been written in it yet.
+// has been written in it yet; or for a tuple (an array too), the tuple,
+// and the index of its next element above those flags.
 #define IN_ARRAY  0
 #define IN_OBJECT 1
 #define WRITTEN   2
+#define IN_TUPLE  4
+#define INDEX     3                         // the shift of a tuple's index
 
 static void put(rt_buf_t *b, const char *s) {
     rt_buf_add(b, s, strlen(s));
@@ -462,6 +465,10 @@ rt_value_t rt_json_print(rt_value_t v, const char *site) {
             put(&b, object ? "{" : "[");
             rt_work_push(&w, object ? rt_cdr(v) : v);
             rt_work_push(&w, object ? IN_OBJECT : IN_ARRAY);
+        } else if (rt_is_tuple(v)) {
+            put(&b, "[");
+            rt_work_push(&w, v);
+            rt_work_push(&w, IN_TUPLE);
         } else if (v == RT_NIL) {
             put(&b, "[]");
         } else if (v == RT_TRUE || v == RT_FALSE) {
@@ -484,6 +491,18 @@ rt_value_t rt_json_print(rt_value_t v, const char *site) {
                 return s;
             }
             rt_value_t rest = w.items[w.n - 2], how = w.items[w.n - 1];
+            if (how & IN_TUPLE) {
+                uint64_t i = how >> INDEX;
+                if (i == rt_tuple_len(rest)) {
+                    put(&b, "]");
+                    w.n -= 2;
+                    continue;
+                }
+                if (how & WRITTEN) put(&b, ",");
+                w.items[w.n - 1] = (i + 1) << INDEX | IN_TUPLE | WRITTEN;
+                v = rt_tuple_get(rest, i);
+                break;
+            }
             if (rest == RT_NIL) {
                 put(&b, how & IN_OBJECT ? "}" : "]");
                 w.n -= 2;

@@ -1,0 +1,51 @@
+; Tuples (D169): immutable, fixed in size, any element in one step. They
+; print as #(...), compare by structure with eq? (never equal to a list),
+; are copied whole into a message, and print as arrays in JSON.
+
+(let t (tuple 1 "a" :b (list 2 3) (tuple) 2.5))
+(pprint t)
+(pprint (list (tuple? t) (tuple? (list 1)) (tuple? ())))
+(pprint (list (tuple/len t) (tuple/len (tuple))))
+(pprint (map (lambda (i) (tuple/get t i)) (range 0 6)))
+
+; tuple/set makes a new tuple, and t is as it was
+(let u (tuple/set t 0 :one))
+(pprint (list (tuple/get u 0) (tuple/get t 0)))
+
+(pprint (tuple/make 3 :x))
+(pprint (tuple/make 0 :x))
+(pprint (list (tuple/slice t 1 3) (tuple/slice t -5 2) (tuple/slice t 4 99) (tuple/slice t 3 1)))
+(pprint (list (list->tuple (list 1 2)) (list->tuple ()) (tuple->list (tuple 1 2)) (tuple->list (tuple))))
+
+; eq? is structural, and a tuple is never a list
+(pprint (list (eq? (tuple 1 (list 2 (tuple "x"))) (tuple 1 (list 2 (tuple "x"))))
+              (eq? (tuple 1 2) (list 1 2))
+              (eq? (tuple 1) (tuple 1 2))
+              (eq? (tuple 1.0) (tuple 1))
+              (eq? (list (tuple) 1) (list (tuple) 1))))
+
+; rendered as pprint shows it, and as JSON arrays
+(pprint (concat "t=" (tuple 1 (tuple 2))))
+(pprint (json/print (tuple 1 (tuple "a" :null) (list 2) (tuple))))
+
+; copied whole into a message, and back
+(defun echo ()
+    (recv
+        ((from v) (send from v) (echo))))
+(let e (fork (echo)))
+(send e (list $$ (tuple "s" 1.5 (tuple (list 1 2)) t)))
+(pprint (recv))
+
+; nested a hundred thousand deep: copying, eq? and the collector keep a
+; work stack, so the depth isn't the C stack's
+(defun nest (n v) (if (== n 0) v (nest (- n 1) (tuple v :pad))))
+(let deep (nest 100000 ()))
+(send e (list $$ deep))
+(pprint (eq? (recv) deep))
+(kill e)
+
+; the faults
+(pprint (join (fork (tuple/get (tuple 1 2) 2))))
+(pprint (join (fork (tuple/len (list 1)))))
+(pprint (join (fork (tuple/get (tuple 1 2) 1.0))))
+(pprint (join (fork (sexp/print (tuple 1)))))

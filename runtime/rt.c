@@ -216,38 +216,72 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
     buf_str(b, num);
 }
 
-// A list, along its cdrs, going down into an element that's a list with
-// the rest of the outer list on the work stack: the stack holds the rests
-// of the lists open around the one being printed. Elements are never raw.
-static void render_list(rt_buf_t *b, rt_value_t v) {
+// A sequence open in a walk over a value: a list, with what's left of it,
+// or a tuple, with the index of its next element. On a work stack it's
+// two words, the list or tuple and the index.
+typedef struct {
+    rt_value_t seq;
+    uint64_t   i;
+} cursor_t;
+
+static int is_seq(rt_value_t v) { return rt_is_cons(v) || rt_is_tuple(v); }
+
+static int at_end(cursor_t c) {
+    return rt_is_tuple(c.seq) ? c.i == rt_tuple_len(c.seq) : c.seq == RT_NIL;
+}
+
+static rt_value_t next(cursor_t *c) {
+    if (rt_is_tuple(c->seq)) return rt_tuple_get(c->seq, c->i++);
+    rt_value_t x = rt_car(c->seq);
+    c->seq = rt_cdr(c->seq);
+    return x;
+}
+
+static void push_cursor(rt_work_t *w, cursor_t c) {
+    rt_work_push(w, c.seq);
+    rt_work_push(w, c.i);
+}
+
+static cursor_t pop_cursor(rt_work_t *w) {
+    cursor_t c;
+    c.i   = rt_work_pop(w);
+    c.seq = rt_work_pop(w);
+    return c;
+}
+
+// A list or a tuple, element by element, going down into an element
+// that's a list or a tuple with the one around it on the work stack: the
+// stack holds the sequences open around the one being printed. Elements
+// are never raw.
+static void render_seq(rt_buf_t *b, rt_value_t v) {
     rt_work_t w;
     rt_work_init(&w);
-    buf_str(b, "(");
+    cursor_t c = { v, 0 };
+    buf_str(b, rt_is_tuple(v) ? "#(" : "(");
     for (;;) {
-        rt_value_t x = rt_car(v);
-        if (rt_is_cons(x)) {
-            rt_work_push(&w, rt_cdr(v));
-            buf_str(b, "(");
-            v = x;
+        if (at_end(c)) {                        // the end of this one, and of any it ends
+            buf_str(b, ")");
+            if (!w.n) break;
+            c = pop_cursor(&w);
+            if (!at_end(c)) buf_str(b, " ");
+            continue;
+        }
+        rt_value_t x = next(&c);
+        if (is_seq(x)) {
+            push_cursor(&w, c);
+            c = (cursor_t){ x, 0 };
+            buf_str(b, rt_is_tuple(x) ? "#(" : "(");
             continue;
         }
         render_atom(b, x, 0);
-        v = rt_cdr(v);
-        while (v == RT_NIL) {                   // the end of this list, and of any it ends
-            buf_str(b, ")");
-            if (!w.n) {
-                rt_work_free(&w);
-                return;
-            }
-            v = rt_work_pop(&w);
-        }
-        buf_str(b, " ");
+        if (!at_end(c)) buf_str(b, " ");
     }
+    rt_work_free(&w);
 }
 
 void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
-    if (rt_is_cons(v)) render_list(b, v);
-    else               render_atom(b, v, raw);
+    if (is_seq(v)) render_seq(b, v);
+    else           render_atom(b, v, raw);
 }
 
 static void print_value(FILE *out, rt_value_t v) {
@@ -276,37 +310,44 @@ static int equal_atoms(rt_value_t a, rt_value_t b) {
     return 0;
 }
 
-// Structural: a loop along the cdrs, and down the cars when both are
-// lists, with the rest of the lists on the work stack, so the stack grows
-// only as deep as the values nest in their cars.
+// Two lists, or two tuples of one length: what equal() goes into.
+static int same_shape(rt_value_t a, rt_value_t b) {
+    return (rt_is_cons(a) && rt_is_cons(b)) || (rt_is_tuple(a) && rt_is_tuple(b) && rt_tuple_len(a) == rt_tuple_len(b));
+}
+
+// Structural: the two values element by element, going down into a pair
+// of lists or tuples with the pair around them on the work stack, so the
+// stack grows only as deep as the values nest. Two lists whose rests are
+// the same are equal from there.
 static int equal(rt_value_t a, rt_value_t b) {
+    if (a == b || !same_shape(a, b)) return equal_atoms(a, b);
     rt_work_t w;
     rt_work_init(&w);
+    cursor_t ca = { a, 0 }, cb = { b, 0 };
     int same = 1;
     for (;;) {
-        if (a != b && rt_is_cons(a) && rt_is_cons(b)) {
-            rt_value_t x = rt_car(a), y = rt_car(b);
-            if (x != y && rt_is_cons(x) && rt_is_cons(y)) {
-                rt_work_push(&w, rt_cdr(a));
-                rt_work_push(&w, rt_cdr(b));
-            } else if (equal_atoms(x, y)) {
-                x = rt_cdr(a);
-                y = rt_cdr(b);
-            } else {
+        if (at_end(ca) || at_end(cb) || (!rt_is_tuple(ca.seq) && ca.seq == cb.seq)) {
+            if (!rt_is_tuple(ca.seq) && ca.seq != cb.seq) {     // one list is longer
                 same = 0;
                 break;
             }
-            a = x;
-            b = y;
+            if (!w.n) break;
+            cb = pop_cursor(&w);
+            ca = pop_cursor(&w);
             continue;
         }
-        if (!equal_atoms(a, b)) {
+        rt_value_t x = next(&ca), y = next(&cb);
+        if (x != y && same_shape(x, y)) {
+            push_cursor(&w, ca);
+            push_cursor(&w, cb);
+            ca = (cursor_t){ x, 0 };
+            cb = (cursor_t){ y, 0 };
+            continue;
+        }
+        if (!equal_atoms(x, y)) {
             same = 0;
             break;
         }
-        if (!w.n) break;
-        b = rt_work_pop(&w);
-        a = rt_work_pop(&w);
     }
     rt_work_free(&w);
     return same;
@@ -348,6 +389,7 @@ static const struct {
     [RT_FAULT_NOT_JSON]   = { "not JSON: ", 1 },
     [RT_FAULT_NOT_SEXP]   = { "not data: ", 1 },
     [RT_FAULT_NO_MATCH]   = { "no pattern matched: ", 1 },
+    [RT_FAULT_NOT_TUPLE]  = { "not a tuple: ", 1 },
 };
 
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {

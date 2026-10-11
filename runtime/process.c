@@ -255,6 +255,7 @@ static size_t box_bytes(rt_value_t v) {
         case RT_BOX_STRING:  return (8 + size + 1 + 15) & ~(size_t)15;
         case RT_BOX_FLOAT:   return 16;
         case RT_BOX_CLOSURE: return (32 + 8 * size + 15) & ~(size_t)15;
+        case RT_BOX_TUPLE:   return (8 + 8 * size + 15) & ~(size_t)15;
         default:             return 0;
     }
 }
@@ -263,14 +264,18 @@ static size_t box_bytes(rt_value_t v) {
 // one adds up the bytes, so that one chunk can hold the copy, and one
 // copies. Each goes along a list's cdrs, dealing with an element that's an
 // atom, a string or a float on the spot, and goes down into an element
-// that's a list or a closure, keeping the rest of the list (and a
-// closure's captured values) on the stack. So the stack grows only as deep
-// as the value nests, and a flat list never touches it. Sharing isn't
-// kept: a DAG is copied as a tree.
+// that's a list or a box of values (a closure or a tuple), keeping the
+// rest of the list (and the box's values) on the stack. So the stack
+// grows only as deep as the value nests, and a flat list never touches
+// it. Sharing isn't kept: a DAG is copied as a tree.
+
+static int holds_values(rt_value_t v) {
+    return (v & RT_TAG_MASK) == RT_TAG_BOXED && rt_box_holds_values(rt_box(v)[0]);
+}
 
 // A string or a float: a box with nothing in it to copy.
 static int is_leaf_box(rt_value_t v) {
-    return is_pointer(v) && !rt_is_cons(v) && !rt_is_closure(v);
+    return is_pointer(v) && !rt_is_cons(v) && !holds_values(v);
 }
 
 static size_t copy_size(rt_value_t v) {
@@ -292,8 +297,9 @@ static size_t copy_size(rt_value_t v) {
         }
         if (is_pointer(v)) {
             n += box_bytes(v);
-            if (rt_is_closure(v)) {
-                for (uint64_t i = 0; i < rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; i++) rt_work_push(&w, rt_box(v)[4 + i]);
+            if (holds_values(v)) {
+                uint64_t first = rt_box_first_value(rt_box(v)[0]);
+                for (uint64_t i = 0; i < rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; i++) rt_work_push(&w, rt_box(v)[first + i]);
             }
         }
         if (!w.n) break;
@@ -341,10 +347,11 @@ static rt_value_t copy(rt_value_t v, char **to) {
         } else {
             uint64_t *box = (uint64_t *)*to;
             *dst = copy_box(v, to);
-            if (rt_is_closure(v)) {
+            if (holds_values(v)) {
+                uint64_t first = rt_box_first_value(box[0]);
                 for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) {
-                    rt_work_push(&w, (rt_value_t)&box[4 + i]);
-                    rt_work_push(&w, box[4 + i]);
+                    rt_work_push(&w, (rt_value_t)&box[first + i]);
+                    rt_work_push(&w, box[first + i]);
                 }
             }
         }
@@ -392,8 +399,9 @@ static rt_value_t copy_here(rt_value_t v) {
 //
 // Copying leaves a forwarding pointer behind, so sharing is kept: a DAG
 // stays a DAG. Cons cells have no header, so to-space can't be scanned in
-// order as Cheney's algorithm would; instead, each copied cons or closure
-// goes on a stack of objects whose fields still point at the old heap.
+// order as Cheney's algorithm would; instead, each copied cons, closure or
+// tuple goes on a stack of objects whose fields still point at the old
+// heap.
 // Taking the cdr first keeps that stack short along a list.
 
 #define GC_MOVED_CONS RT_TAG_BOXED      // in a moved cell's car: a boxed null, which no value is
@@ -443,7 +451,7 @@ static rt_value_t forward(gc_t *g, rt_value_t v) {
     memcpy(new, old, bytes);
     old[0] = GC_MOVED_BOX;
     old[1] = (rt_value_t)new | RT_TAG_BOXED;
-    if ((new[0] & RT_BOX_TYPE_MASK) == RT_BOX_CLOSURE) rt_work_push(&g->todo, old[1]);
+    if (rt_box_holds_values(new[0])) rt_work_push(&g->todo, old[1]);
     return old[1];
 }
 
@@ -463,8 +471,9 @@ static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t
             cell[1] = forward(&g, cell[1]);
             cell[0] = forward(&g, cell[0]);
         } else {
-            uint64_t *box = (uint64_t *)(v - RT_TAG_BOXED);
-            for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) box[4 + i] = forward(&g, box[4 + i]);
+            uint64_t *box   = (uint64_t *)(v - RT_TAG_BOXED);
+            uint64_t  first = rt_box_first_value(box[0]);
+            for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) box[first + i] = forward(&g, box[first + i]);
         }
     }
     rt_work_free(&g.todo);

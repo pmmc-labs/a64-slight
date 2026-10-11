@@ -64,6 +64,7 @@ The reader (`compiler/src/reader.ts`, D37) reads:
 | symbol   | an id assigned at compile time. Not interned at runtime, no `gensym`. |
 | list     | cons cells and `()` |
 | string   | immutable bytes, UTF-8 by convention |
+| tuple    | a fixed number of values, each one load away; prints as `#(1 2)` (D169) |
 | function | a closure, or a reference to a top-level function |
 | pid      | a process id; prints as `#<pid N>`, and the root process is 1 |
 
@@ -317,12 +318,17 @@ defined. A number comes as a string: `(string->int (car @ARGV))`.
   `#true`), structural `eq?`/`ne?` on any values (`(eq? 1 1.0)` is
   `#false`)
 - type predicates: `nil? cons? sym? str? num? int? float? lambda? pid?
-  bool?` (`sym?` is true for `#true` and `#false`: they're symbols)
+  bool? tuple?` (`sym?` is true for `#true` and `#false`: they're symbols)
 - lists: `cons car cdr list`, and `c[ad]r` with up to four letters
   (`cadr`, `cddr`, `caddr`, ...). `car`/`cdr` of anything but a cons
   faults, and so does `cons` onto anything but a list, so every list is
   proper. Inside a quoted list, `:a` reads as `(quote a)`, as it does
   everywhere; write `'(a b)`, not `'(:a :b)`.
+- tuples (`runtime/tuples.c`, D169): `tuple` (variadic), `tuple?`,
+  `tuple/len`, `tuple/get`, `tuple/set` (a copy with one element
+  changed), `tuple/make`, `tuple/slice`, `list->tuple`, `tuple->list`.
+  `eq?`, printing, `json/print` (as an array) and copying know them;
+  `sexp/print` faults, as the reader has no syntax for one.
 - strings: `str?`, `str-len` (bytes), `substring`, `concat`/`~`,
   `index-of`, `str-split`, `str-join`, `string->int`, `string->float`,
   `symbol->string`, `string->symbol`, `byte-at`, `bytes->string`,
@@ -495,7 +501,7 @@ REPL and line editing are slight code over key events.
 |---|---|---|
 | `…0`  | integer | 63-bit, immediate. Add is `adds` + `b.vs`. |
 | `001` | list    | pointer to a 2-word cons cell, no header. `nil` is this tag with a null pointer. |
-| `011` | boxed   | pointer to a header word (type, size) and payload: string, float, closure |
+| `011` | boxed   | pointer to a header word (type, size) and payload: string, float, closure, tuple |
 | `101` | symbol  | compile-time id, immediate |
 | `111` | pid     | immediate: the process's index in the process table, `id << 3 \| 7` |
 
@@ -511,6 +517,10 @@ REPL and line editing are slight code over key events.
   copies its captured values from the closure (in `x9`) into its frame, so
   inside, they're ordinary locals (D79). A lambda that captures nothing,
   and every `defun` used as a value, is a static closure.
+- **Tuples** (D169): header (the number of elements, and the tuple
+  type), then the elements, a word each. Closures and tuples are the
+  boxes that hold values, which copying and the collector go into
+  (`rt_box_holds_values`, `rt_box_first_value` in `rt.h`).
 - **Every heap object is a multiple of 16 bytes**, padded at the end: a
   closure with an odd number of captured values, and most strings. Copying
   and the collector copy whole 16-byte units.

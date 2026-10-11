@@ -1782,3 +1782,36 @@ allowed means what it did.
   would let a clause fall through on a value as well as a shape; matching
   a name's current value (Erlang's bound variables); `match` in `lambda`
   parameters and `let`. Each is small if it's wanted.
+
+**D169. Tuples.** *(User asked for them; the details are defaults.)* An
+immutable value of a fixed number of elements, any of them one load
+away, where a list takes a step per element. What it's for: records of
+a few fields, rows, and the nodes that persistent maps and vectors are
+made of (a hash trie, a balanced tree), which on lists alone cost a walk
+at every level.
+- **Representation:** a box (D23): the header (element count, type 4),
+  then the elements, a word each. Copying a message, the collector,
+  printing and `eq?` already walked closures' captured values; they now
+  ask the header which boxes hold values and where they start
+  (`rt_box_holds_values`, `rt_box_first_value`), so a tuple is just
+  another such box. Printing and `eq?` keep their work stacks (D147),
+  now of cursors that are a list or a tuple and an index, so a tuple
+  nested 100,000 deep is fine (`t/197`).
+- **Builtins, in C** (`runtime/tuples.c`): `tuple`, `tuple?`,
+  `tuple/len`, `tuple/get`, `tuple/set`, `tuple/make`, `tuple/slice`,
+  `list->tuple`, `tuple->list`. `tuple/set` copies the whole tuple; that's
+  what makes it immutable, and is cheap at the sizes a tuple is for. An
+  index out of range faults (`:out-of-range`); anything but a tuple faults
+  `:not-a-tuple`, a new kind. `tuple/slice` clamps, as `substring` does,
+  but doesn't swap: `start` not before `end` is empty, as JavaScript's
+  `slice`.
+- **Printing:** `#(1 2)`, after Scheme's vectors. `eq?` is structural,
+  and a tuple is never `eq?` to a list with the same elements.
+  `json/print` writes a tuple as an array; `json/parse` still makes
+  lists.
+- **Left out for now:** a reader syntax (`#(1 2)` as a literal, which
+  would make constant tuples static data, as quoted lists are), and so
+  `sexp/print` of a tuple faults `:not-sexp`, like a pid's; tuple
+  patterns in `match` (which would follow the syntax); growing a tuple
+  in place, which nothing immutable can do. Rejected: the name "vector",
+  which in Clojure and Scheme suggests something that grows or changes.

@@ -872,11 +872,11 @@ const RT_TAG_LIST = 1;
 // symbols too, so sym? says yes to them.
 const PREDICATES: readonly string[] = ['int?', 'nil?', 'cons?', 'pid?', 'sym?', 'bool?'];
 
-// Builtins written in C (runtime/strings.c, json.c, ...): the C function,
-// and how many arguments it takes. Missing optional arguments are passed
-// as (). The call's site goes in the register after the arguments, for
-// the faults the C code raises. A variadic builtin gets its arguments as
-// one list.
+// Builtins written in C (runtime/strings.c, tuples.c, json.c, ...): the C
+// function, and how many arguments it takes. Missing optional arguments
+// are passed as (). The call's site goes in the register after the
+// arguments, for the faults the C code raises. A variadic builtin gets its
+// arguments as one list.
 type CBuiltin = { readonly fn: string; readonly min: number; readonly max: number; readonly variadic: boolean };
 
 const fixed    = (fn: string, min: number, max = min): CBuiltin => ({ fn, min, max, variadic: false });
@@ -910,6 +910,15 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'json/print':     fixed('rt_json_print', 1),
     'sexp/parse':     fixed('rt_sexp_parse', 1),
     'sexp/print':     fixed('rt_sexp_print', 1),
+    'tuple':          variadic('rt_tuple'),
+    'tuple?':         fixed('rt_is_tuple_p', 1),
+    'tuple/len':      fixed('rt_tuple_len_of', 1),
+    'tuple/get':      fixed('rt_tuple_ref', 2),
+    'tuple/set':      fixed('rt_tuple_set', 3),
+    'tuple/make':     fixed('rt_tuple_make', 2),
+    'tuple/slice':    fixed('rt_tuple_slice', 3),
+    'list->tuple':    fixed('rt_tuple', 1),
+    'tuple->list':    fixed('rt_tuple_to_list', 1),
     '/':              fixed('rt_divide', 2),
     'float?':         fixed('rt_is_flt', 1),
     'num?':           fixed('rt_is_num', 1),

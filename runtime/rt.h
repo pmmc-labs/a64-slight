@@ -28,6 +28,7 @@
 #define RT_BOX_STRING        1
 #define RT_BOX_FLOAT         2    // size 8: an IEEE double
 #define RT_BOX_CLOSURE       3    // size: how many captured values
+#define RT_BOX_TUPLE         4    // size: how many elements, which follow the header (D169)
 
 // A closure's words after the header: the code, its arity, its name (a C
 // string, for printing), then the captured values. Offsets are from a
@@ -65,7 +66,8 @@
 #define RT_FAULT_NOT_JSON   19    // :not-json        json/print was given something JSON can't hold
 #define RT_FAULT_NOT_SEXP   20    // :not-sexp        sexp/print was given something that isn't data
 #define RT_FAULT_NO_MATCH   21    // :no-match        no clause of a match matched
-#define RT_FAULT_COUNT      21
+#define RT_FAULT_NOT_TUPLE  22    // :not-a-tuple     a tuple operation was given something else
+#define RT_FAULT_COUNT      22
 
 // Symbols the runtime makes: every program has them, after #false and
 // #true, in this order (values.ts, RUNTIME_SYMBOLS). The fault kinds
@@ -81,7 +83,7 @@
 // in the order :ctrl :alt :shift. Their symbols follow the fault kinds:
 // RT_KEY_x is symbol RT_SYM_KEYS + x. compiler/tests/values.test.ts reads
 // the names from here.
-#define RT_SYM_KEYS         27    // RT_SYM_FAULTS + RT_FAULT_COUNT
+#define RT_SYM_KEYS         28    // RT_SYM_FAULTS + RT_FAULT_COUNT
 #define RT_KEY_UP            0    // :ArrowUp       the arrows are in the order of
 #define RT_KEY_DOWN          1    // :ArrowDown     their escape sequences, ESC [ A
 #define RT_KEY_RIGHT         2    // :ArrowRight    to ESC [ D
@@ -122,7 +124,7 @@
 // a reader of JSON sends (:json f v), of s-expressions (:sexp f v), and of
 // source (:form f form line) and (:doc f text line). RT_DEV_x is symbol
 // RT_SYM_DEVICE + x.
-#define RT_SYM_DEVICE       57    // RT_SYM_KEYS + RT_KEY_COUNT
+#define RT_SYM_DEVICE       58    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
 #define RT_DEV_LINE          1    // :line
 #define RT_DEV_EOF           2    // :eof
@@ -143,7 +145,7 @@
 // Why a device failed, from errno: a device's owner ends with
 // (:error (name path)), path being the file's, or the socket's "host:port"
 // (a listener's port). RT_ERR_x is symbol RT_SYM_ERRS + x.
-#define RT_SYM_ERRS         72    // RT_SYM_DEVICE + RT_DEV_COUNT
+#define RT_SYM_ERRS         73    // RT_SYM_DEVICE + RT_DEV_COUNT
 #define RT_ERR_ENOENT        0    // :enoent        no such file or directory
 #define RT_ERR_EACCES        1    // :eacces        permission denied
 #define RT_ERR_EPERM         2    // :eperm         operation not permitted
@@ -175,14 +177,14 @@
 
 // The symbols JSON's values need beyond #true and #false (json.c):
 // RT_JSON_x is symbol RT_SYM_JSON + x.
-#define RT_SYM_JSON         99    // RT_SYM_ERRS + RT_ERR_COUNT
+#define RT_SYM_JSON        100    // RT_SYM_ERRS + RT_ERR_COUNT
 #define RT_JSON_NULL         0    // :null
 #define RT_JSON_OBJECT       1    // :object        (:object (key value) ...)
 #define RT_JSON_COUNT        2
 
 // And those the s-expression reader makes (sexp.c): RT_SEXP_x is symbol
 // RT_SYM_SEXP + x.
-#define RT_SYM_SEXP        101    // RT_SYM_JSON + RT_JSON_COUNT
+#define RT_SYM_SEXP        102    // RT_SYM_JSON + RT_JSON_COUNT
 #define RT_SEXP_SYMBOL       0    // :symbol        (:symbol "name"), a name the program doesn't mention
 #define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
 #define RT_SEXP_COUNT        2
@@ -332,6 +334,7 @@ static inline int rt_is_box(rt_value_t v, uint64_t type) {
 static inline int         rt_is_string(rt_value_t v)    { return rt_is_box(v, RT_BOX_STRING); }
 static inline int         rt_is_float(rt_value_t v)     { return rt_is_box(v, RT_BOX_FLOAT); }
 static inline int         rt_is_closure(rt_value_t v)   { return rt_is_box(v, RT_BOX_CLOSURE); }
+static inline int         rt_is_tuple(rt_value_t v)     { return rt_is_box(v, RT_BOX_TUPLE); }
 static inline double      rt_float_value(rt_value_t v) {
     double d;
     __builtin_memcpy(&d, rt_box(v) + 1, sizeof d);
@@ -339,6 +342,19 @@ static inline double      rt_float_value(rt_value_t v) {
 }
 static inline uint64_t    rt_string_len(rt_value_t v)   { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
 static inline const char *rt_string_bytes(rt_value_t v) { return (const char *)(rt_box(v) + 1); }
+static inline uint64_t    rt_tuple_len(rt_value_t v)    { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
+static inline rt_value_t  rt_tuple_get(rt_value_t v, uint64_t i) { return rt_box(v)[1 + i]; }
+
+// The values a box holds, which copying and the collector go into: a
+// closure's captured values, from its fifth word, and a tuple's elements,
+// from its second; size of them, from the header. Strings and floats
+// hold none.
+static inline int rt_box_holds_values(uint64_t header) {
+    return (header & RT_BOX_TYPE_MASK) == RT_BOX_CLOSURE || (header & RT_BOX_TYPE_MASK) == RT_BOX_TUPLE;
+}
+static inline uint64_t rt_box_first_value(uint64_t header) {
+    return (header & RT_BOX_TYPE_MASK) == RT_BOX_CLOSURE ? 4 : 1;
+}
 
 static inline rt_value_t rt_int(int64_t n)        { return (rt_value_t)((uint64_t)n << 1); }
 static inline int64_t    rt_int_value(rt_value_t v) { return (int64_t)v >> 1; }
@@ -452,6 +468,17 @@ rt_value_t rt_utf8_valid(rt_value_t s, const char *site) RT_ASM(rt_utf8_valid);
 // JSON (json.c, D154). The builtins:
 rt_value_t rt_json_parse(rt_value_t s, const char *site) RT_ASM(rt_json_parse);
 rt_value_t rt_json_print(rt_value_t v, const char *site) RT_ASM(rt_json_print);
+
+// Tuples (tuples.c, D169): immutable, fixed in size, an element at any
+// index in one step.
+rt_value_t rt_tuple(rt_value_t xs, const char *site) RT_ASM(rt_tuple);
+rt_value_t rt_is_tuple_p(rt_value_t v) RT_ASM(rt_is_tuple_p);
+rt_value_t rt_tuple_len_of(rt_value_t t, const char *site) RT_ASM(rt_tuple_len_of);
+rt_value_t rt_tuple_ref(rt_value_t t, rt_value_t i, const char *site) RT_ASM(rt_tuple_ref);
+rt_value_t rt_tuple_set(rt_value_t t, rt_value_t i, rt_value_t v, const char *site) RT_ASM(rt_tuple_set);
+rt_value_t rt_tuple_make(rt_value_t n, rt_value_t v, const char *site) RT_ASM(rt_tuple_make);
+rt_value_t rt_tuple_slice(rt_value_t t, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_tuple_slice);
+rt_value_t rt_tuple_to_list(rt_value_t t, const char *site) RT_ASM(rt_tuple_to_list);
 
 // S-expressions as data (sexp.c, D155).
 rt_value_t rt_sexp_parse(rt_value_t s, const char *site) RT_ASM(rt_sexp_parse);
