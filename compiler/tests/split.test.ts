@@ -34,7 +34,7 @@ test('a receive function, and a function with no recv, stay as they are', () => 
 test('what comes before a recv stays, and the recv and the rest become a receive function', () => {
     assert.deepEqual(split('(defun ask (c) (send c 1) (let n (recv ((:count n) n))) (list c n))'), [
         '(defun ask (c) (send c 1) (ask (recv at t:1:34) c))',
-        '(defun ask (recv at t:1:34) (c) (recv (((quote count) n) (let n (do n)) (list c n))))',
+        '(defun ask (recv at t:1:34) (c (before recv at t:1:34)) (recv (((quote count) n) (let c c (before recv at t:1:34)) (let n (do n)) (list c n))))',
     ]);
 });
 
@@ -43,7 +43,8 @@ test('a recv inside a call is taken out in the order things are evaluated', () =
     // name, is the same whenever it's evaluated, so it stays.
     assert.deepEqual(split('(defun k (x) (f (g) x (recv) (h)))'), [
         '(defun k (x) (let (argument 1 of the call at t:1:14) (g)) (k (recv at t:1:23) x (argument 1 of the call at t:1:14)))',
-        '(defun k (recv at t:1:23) (x (argument 1 of the call at t:1:14)) (recv (message (recv at t:1:23)'
+        '(defun k (recv at t:1:23) (x (before recv at t:1:23) (argument 1 of the call at t:1:14))'
+            + ' (recv (message (recv at t:1:23) (let x x (before recv at t:1:23))'
             + ' (let (recv at t:1:23) (do message (recv at t:1:23))) (f (argument 1 of the call at t:1:14) x (recv at t:1:23) (h)))))',
     ]);
 });
@@ -66,8 +67,33 @@ test('more than 8 locals come across as one list', () => {
     const g = defun(src, 'the top level (recv at t:1:91)');
     assert.equal(toArray(g[2]!)!.length, 1);
     assert.doesNotThrow(() => compileProgram(read(src, 't')));
-    assert.throws(() => compileProgram(read(src.replace('(let i 9)', '(let car 9)').replace(' i m', ' car m'), 't')),
+    // a local named car is fine where it comes across under another name,
+    // but not into the function for the rest, whose parameters are the
+    // names themselves
+    const car = src.replace('(let i 9)', '(let car 9)').replace(' i m', ' car m');
+    assert.doesNotThrow(() => compileProgram(read(car, 't')));
+    assert.throws(() => compileProgram(read(car.replace('(recv (m (list', '(let m (recv ((:x x) x) ((:y y) y))) (pprint (list').replace(' m)))', ' m))'), 't')),
         (e: unknown) => e instanceof CompileError && /a local is named car/.test(e.message));
+});
+
+test('a recv after a let in a clause body, with a rest, stays in tail position', () => {
+    // the clause's body is spliced into the generated clause, the call to
+    // the rest's function around its last form, so the inner recv is
+    // split in turn; the clause's y can't reach the rest
+    const src = '(defun f (c) (let v (recv ((:a x) (let y (* x 2)) (recv ((:b z) (+ y z)))))) (list c v))';
+    const g = defun(src, 'f (recv at t:1:21)');
+    assert.deepEqual(toArray(g[2]!)!.map(show), ['c (before recv at t:1:21)']);
+    assert.deepEqual(toArray(g[3]!)!.slice(1).map(show), [
+        '(((quote a) x) (let y (* x 2)) (f (recv at t:1:51) c (before recv at t:1:21) y))',
+    ]);
+    assert.deepEqual(defun(src, 'f (recv at t:1:51)').slice(2).map(show), [
+        '(c (before recv at t:1:21) y (before recv at t:1:51))',
+        '(recv (((quote b) z) (let y y (before recv at t:1:51)) (let (recv at t:1:51) (do (+ y z)))'
+            + ' (f (after recv at t:1:21) c (before recv at t:1:21) (recv at t:1:51))))',
+    ]);
+    for (const s of [src, src.replace('(let v ', '(do ').replace('(list c v)', '(list c)'), src.replace(' ((:b z)', ' ((:c w) w) ((:b z)')]) {
+        assert.doesNotThrow(() => compileProgram(read(s, 't')), s);
+    }
 });
 
 test('@ARGV comes across under another name, since it can\'t be a parameter', () => {

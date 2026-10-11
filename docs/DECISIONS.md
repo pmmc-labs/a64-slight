@@ -1709,10 +1709,13 @@ recommendation that came with it.)*
   before the `recv` rule's classification. A `recv` and the rest of its
   body become a receive function of their own, which the body tail-calls
   with the locals the rest still uses. A `recv` with more than one clause
-  and something after it gets a second function for what's after, which
-  each clause tail-calls with its value, rather than a copy in each. A
-  name a pattern binds that the rest needs from before comes across
-  under another name, and is bound again where it's wanted. More than 8
+  and something after it, or whose clause has a `recv` of its own, gets a
+  second function for what's after, which each clause tail-calls with
+  its value, around its body's last form, rather than a copy in each.
+  The locals come across under other names, with the `recv`'s site in
+  them, so neither a pattern nor a `let` in a clause's body can hide
+  what the rest needs from before, and are bound again under their own
+  names where they're used. More than 8
   locals go across as one list, made with `cons` and taken apart with
   `car` and `cdr`, so then none of them may be named one of those (an
   error). `@ARGV`, which can't be a parameter, is renamed. Generated names

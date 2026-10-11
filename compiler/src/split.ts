@@ -12,9 +12,12 @@
 //     (defun ask (c)                (defun ask (c)
 //         (send c (list :get $$))       (send c (list :get $$))
 //         (let n (recv                  (|ask (recv at f:3:12)| c))
-//             ((:count n) n)))      (defun |ask (recv at f:3:12)| (c)
+//             ((:count n) n)))      (defun |ask (recv at f:3:12)| (|c (before recv at f:3:12)|)
 //         (pprint (list c n)))          (recv
-//                                           ((:count n) (let n (do n)) (pprint (list c n)))))
+//                                           ((:count n)
+//                                               (let c |c (before recv at f:3:12)|)
+//                                               (let n (do n))
+//                                               (pprint (list c n)))))
 //
 // (|...| marks a name with spaces in it, which slight can't write.)
 //
@@ -24,13 +27,16 @@
 // tail-called. A generated name has spaces in it, so no program can
 // write it, and says where the recv is.
 //
-// A recv with more than one clause and something after it gets a second
-// function for what's after (after recv at ...), which each clause
-// tail-calls with its value, rather than a copy of the rest in each. A
-// name a pattern binds that the rest needs from before the recv comes
-// across under another name, and is bound again where it's wanted. More
-// than 8 locals come across as one list. (recv) with no clauses takes the
-// next message, whatever it is.
+// The locals come across under names with the recv's site in them, so
+// that neither a pattern nor a let in a clause's body can hide the value
+// the rest of the function needs, and are bound again under their own
+// names where they're used. A recv with more than one clause and
+// something after it, or whose clause has a recv of its own, gets a
+// second function for what's after (after recv at ...), which each
+// clause tail-calls with its value, around its body's last form, so a
+// recv there is still in tail position. More than 8 locals come across
+// as one list. (recv) with no clauses takes the next message, whatever
+// it is.
 //
 // Not split: a recv in a lambda (a lambda can't wait), or in a cond, do or
 // yield that isn't in tail position; each is an error. A fork's or a
@@ -292,59 +298,66 @@ function waitFor(r: Pair, t: Sym | null, rest: readonly Sexp[], env: readonly st
     const carry = (xs: readonly Sexp[]): readonly Sexp[] => (env.includes('@ARGV') ? xs.map((x) => rename(x, '@ARGV', argv)) : xs);
     const clauses = clauses0.map((c) => form(clauseOf(c), ...carry(toArray(c) ?? [])));
     const after   = carry(rest);
+    const patOf   = (c: Sexp): Sexp => (c as Pair).car;
+    const bodyOf  = (c: Sexp): readonly Sexp[] => (toArray(c) ?? []).slice(1);
+    const binds   = (c: Sexp, v: string): boolean => patternNames(patOf(c)).includes(v);
 
     const restUses   = uses(after, t === null ? [] : [t.name]);
-    const clauseUses = new Set(clauses.flatMap((c) => {
-        const parts = toArray(c) ?? [];
-        return [...uses(parts.slice(1), patternNames(parts[0] ?? NIL))];
-    }));
+    const clauseUses = new Set(clauses.flatMap((c) => [...uses(bodyOf(c), patternNames(patOf(c)))]));
     const outer = [...new Set(env)].map((v) => (v === '@ARGV' ? argv.name : v));
     const live  = outer.filter((v) => restUses.has(v) || clauseUses.has(v));
-    const bound = new Set(clauses.flatMap((c) => patternNames((c as Pair).car)));
-    const alias = (v: string): string => (bound.has(v) ? `${v} (before ${site})` : v);
-    const args  = live.map((v) => sym(v === argv.name ? '@ARGV' : v, r.pos));
-    const name  = sym(`${fn} (${site})`, r.pos);
+    // Each local comes across under a name with the recv's site in it,
+    // which no program can write, so neither a pattern nor a let in a
+    // clause's body can hide what the rest of the function needs; it's
+    // bound again under its own name where it's wanted. A name with a
+    // space in it is one of ours already (@ARGV's, a call's argument, an
+    // earlier recv's), which nothing can hide, so it comes as it is.
+    const alias  = (v: string): string => (v.includes(' ') ? v : `${v} (before ${site})`);
+    const rebind = (vs: readonly string[]): readonly Sexp[] =>
+        vs.filter((v) => alias(v) !== v).map((v) => letForm(sym(v, r.pos), sym(alias(v), r.pos)));
+    const args   = live.map((v) => sym(v === argv.name ? '@ARGV' : v, r.pos));
+    const name   = sym(`${fn} (${site})`, r.pos);
 
-    // In a clause whose pattern doesn't bind it, a name the patterns bind
-    // is bound again to what it was before.
-    const again = (pattern: Sexp, used: Set<string>): readonly Sexp[] =>
-        live.filter((v) => bound.has(v) && !patternNames(pattern).includes(v) && used.has(v))
-            .map((v) => letForm(sym(v, r.pos), sym(alias(v), r.pos)));
+    // At the start of a clause's body: the locals in used that its pattern
+    // doesn't bind.
+    const again = (c: Sexp, used: ReadonlySet<string>): readonly Sexp[] =>
+        rebind(live.filter((v) => !binds(c, v) && used.has(v)));
 
     let bodies: readonly (readonly Sexp[])[];
     let st2: St = st1;
     if (after.length === 0) {
-        bodies = clauses.map((c) => {
-            const parts = toArray(c)!;
-            return [...again(parts[0]!, uses(parts.slice(1), [])), ...parts.slice(1)];
-        });
-    } else if (clauses.length === 1) {
-        // the rest comes after the clause's body, with the names its
-        // pattern hid bound again
-        const parts = toArray(clauses[0]!)!;
-        const value = form(r.pos, sym('do', r.pos), ...parts.slice(1));
-        const back  = live.filter((v) => bound.has(v) && v !== t?.name && restUses.has(v))
-            .map((v) => letForm(sym(v, r.pos), sym(alias(v), r.pos)));
-        bodies = [[t === null ? value : letForm(t, value), ...back, ...after]];
+        bodies = clauses.map((c) => [...again(c, uses(bodyOf(c), [])), ...bodyOf(c)]);
+    } else if (clauses.length === 1 && !bodyOf(clauses[0]!).some(ownRecv)) {
+        // the rest comes after the clause's body, which a do keeps to
+        // itself; a name its pattern hid is bound again after it
+        const c     = clauses[0]!;
+        const value = form(r.pos, sym('do', r.pos), ...bodyOf(c));
+        const pre   = again(c, new Set([...uses(bodyOf(c), []), ...restUses]));
+        const back  = rebind(live.filter((v) => binds(c, v) && v !== t?.name && restUses.has(v)));
+        bodies = [[...pre, t === null ? value : letForm(t, value), ...back, ...after]];
     } else {
+        // the rest becomes a function that each clause tail-calls with
+        // its value: around the body's last form, after the others, so
+        // a recv there is still in tail position (a do around the body
+        // would hide it, and the lets before it)
         const kname = sym(`${fn} (after ${site})`, r.pos);
         const kLive = live.filter((v) => restUses.has(v));
         const kArgs = kLive.map((v) => sym(alias(v), r.pos));
         const [k, s] = makeFunction(kname, [...kLive, ...(t === null ? [] : [t.name])], null, after, env, fn, st2);
         st2 = { ...s, gen: [...s.gen, k] };
         bodies = clauses.map((c) => {
-            const parts = toArray(c)!;
-            const value = form(r.pos, sym('do', r.pos), ...parts.slice(1));
-            const scope = [...live.map(alias), ...patternNames(parts[0]!)];
+            const body  = bodyOf(c);
+            const last  = body[body.length - 1]!;
+            const value = letParts(last)?.[1] ?? last;      // a trailing let's value is the body's (D42)
+            const scope = [...live.map(alias), ...patternNames(patOf(c))];
             const call  = (...extra: readonly Sexp[]): Sexp => {
                 const all = [...kArgs, ...extra];
                 return form(r.pos, kname, ...(all.length > MAX_ARGS ? [bundle(all, scope, r.pos)] : all));
             };
-            return [...again(parts[0]!, uses(parts.slice(1), [])), ...(t === null ? [value, call()] : [call(value)])];
+            return [...again(c, uses(body, [])), ...body.slice(0, -1), ...(t === null ? [value, call()] : [call(value)])];
         });
     }
-    const pats = clauses.map((c) => (c as Pair).car);
-    const [g, st3] = makeFunction(name, live.map(alias), pats, bodies, env, fn, st2);
+    const [g, st3] = makeFunction(name, live.map(alias), clauses.map(patOf), bodies, env, fn, st2);
     return [form(r.pos, name, ...(live.length > MAX_ARGS ? [bundle(args, env, r.pos)] : args)), { ...st3, gen: [...st3.gen, g] }];
 }
 
