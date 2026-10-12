@@ -1,0 +1,21 @@
+; A POST with a body and a header. The handler sees the method, the body
+; and the header, which the client sent in capitals and the server reads in
+; lowercase; its answer is 17 bytes, so the Content-Length says so.
+
+(@include :http)
+
+(defun handler (req)
+    (list 200 ()
+        (concat (if (eq? (lookup :method req) :post) "post" "other")
+                " " (lookup :body req)
+                " " (lookup "x-who" (lookup :headers req)))))
+
+(defun main ()
+    (let server (http/serve 0 handler))
+    (recv
+        ((:listening port)
+            (let r (http/request :post (concat "http://127.0.0.1:" port "/") (list (list "X-Who" "stevan")) "hello"))
+            (kill server)
+            r)))
+
+(main)

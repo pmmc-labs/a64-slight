@@ -1,0 +1,24 @@
+; Ten requests at once, each from a process of its own, and joined in turn.
+; The server answers each by its own path, so every answer must be the one
+; asked for.
+
+(@include :http)
+
+(defun handler (req) (list 200 () (lookup :path req)))
+
+(defun body-of (exit)
+    (match exit
+        ((:ok (:ok (_ _ body))) body)
+        (_                      :failed)))
+
+(defun main ()
+    (let server (http/serve 0 handler))
+    (recv
+        ((:listening port)
+            (let base (concat "http://127.0.0.1:" port "/"))
+            (let pids (map (lambda (i) (fork (http/get (concat base i)))) (range 1 11)))
+            (let r (map (lambda (p) (body-of (join p))) pids))
+            (kill server)
+            r)))
+
+(main)

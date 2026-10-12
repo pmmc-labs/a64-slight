@@ -1,0 +1,18 @@
+; A server and a client in one program. http/get asks the server on port 0
+; for a path and a query; the handler's header name is in capitals, which
+; the client gets in lowercase.
+
+(@include :http)
+
+(defun handler (req)
+    (list 200 (list (list "Content-Type" "text/plain")) (concat (lookup :path req) "?" (lookup :query req))))
+
+(defun main ()
+    (let server (http/serve 0 handler))
+    (recv
+        ((:listening port)
+            (let r (http/get (concat "http://127.0.0.1:" port "/hello?x=1")))
+            (kill server)
+            r)))
+
+(main)

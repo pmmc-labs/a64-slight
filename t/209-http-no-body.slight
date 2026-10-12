@@ -1,0 +1,25 @@
+; Replies without a body, and one read to the end. A HEAD reply has its
+; Content-Length but no body; a 204 has none, whatever its headers say; a
+; reply with no length, and the connection closing, gives its body to the
+; end.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+(defun main ()
+    (let me $$)
+    (let raw (raw-listen :raw (list
+        (list "/head"      "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n")
+        (list "/nocontent" "HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\n")
+        (list "/eof"       "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nabc")) me))
+    (recv
+        ((:raw port)
+            (let base (concat "http://127.0.0.1:" port))
+            (let r (list
+                (http/request :head (concat base "/head") () "")
+                (http/get (concat base "/nocontent"))
+                (http/get (concat base "/eof"))))
+            (kill raw)
+            r)))
+
+(main)

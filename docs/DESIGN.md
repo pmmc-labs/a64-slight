@@ -731,8 +731,8 @@ Lalloc_N:
   names are errno's (`:econnrefused`, `:econnreset`, `:epipe`,
   `:eaddrinuse`, ...), and `:enotfound` (Node's) for a host that can't be
   found, or `:etimedout` when no name server answers; SIGPIPE is ignored, so writing to a closed connection is
-  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. HTTP will
-  be a slight library on top (D132, D140).
+  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. HTTP is a
+  slight library on top, `lib/http.slight` (D132, D140, D173, D174).
 - **`:system` is a device too** (D171). `(connect :system expr)`; its
   owner asks `(:processes)`, `(:process pid)` or `(:runtime)`, and hears
   `(:process s info)` for each live process (one at a time, the next

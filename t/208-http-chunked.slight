@@ -1,0 +1,32 @@
+; Chunked framing both ways. The client reads a chunked reply from a raw
+; server, with a chunk extension and trailers. The server reads a chunked
+; request sent raw, and its handler echoes the body it was given.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+(defun handler (req) (list 200 () (lookup :body req)))
+
+; Waits for both listeners to say which port they got: hp is the http
+; server's, rp the raw server's.
+(defun both (hp rp srv raw)
+    (cond
+        ((and (int? hp) (int? rp)) (run hp rp srv raw))
+        (#true (recv
+            ((:listening p) (both p rp srv raw))
+            ((:raw p)       (both hp p srv raw))))))
+
+(defun run (hp rp srv raw)
+    (let got (http/get (concat "http://127.0.0.1:" rp "/chunked")))
+    (let echoed (talk hp (list "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n")))
+    (kill srv)
+    (kill raw)
+    (list got (cadr (str-split echoed "\r\n\r\n"))))
+
+(defun main ()
+    (let me $$)
+    (let srv (http/serve 0 handler))
+    (let raw (raw-listen :raw (list (list "/chunked" "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6;ext=1\r\n world\r\n0\r\nX-Trailer: yes\r\n\r\n")) me))
+    (both #false #false srv raw))
+
+(main)

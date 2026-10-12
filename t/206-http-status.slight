@@ -1,0 +1,25 @@
+; Three requests: a 404 the handler chooses, a handler that raises, which
+; the server answers with a 500 (its process ends, and the connection's
+; process goes on), and a plain 200.
+
+(@include :http)
+
+(defun handler (req)
+    (let path (lookup :path req))
+    (cond
+        ((eq? path "/nope") (list 404 () "gone"))
+        ((eq? path "/boom") (raise :boom))
+        (#true              (list 200 () "ok"))))
+
+(defun main ()
+    (let server (http/serve 0 handler))
+    (recv
+        ((:listening port)
+            (let base (concat "http://127.0.0.1:" port))
+            (let r1 (http/get (concat base "/nope")))
+            (let r2 (http/get (concat base "/boom")))
+            (let r3 (http/get (concat base "/ok")))
+            (kill server)
+            (list r1 r2 r3))))
+
+(main)

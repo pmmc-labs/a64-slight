@@ -1,0 +1,18 @@
+; A request that comes in pieces, a millisecond apart: the head is cut in
+; the middle of a header name, and the body in the middle of its bytes. The
+; server's reading must not mind where the pieces end.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+(defun handler (req) (list 200 () (lookup :body req)))
+
+(defun main ()
+    (let server (http/serve 0 handler))
+    (recv
+        ((:listening port)
+            (let reply (talk port (list "POST /p HTTP/1.1\r\nContent-Le" "ngth: 5\r\n\r\nhel" "lo")))
+            (kill server)
+            (list (car (str-split reply "\r\n")) (cadr (str-split reply "\r\n\r\n"))))))
+
+(main)

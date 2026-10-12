@@ -1913,3 +1913,73 @@ health checks in a supervisor, and finding where a stuck program waits.
   covers for one process; acting on processes (`kill` already works on
   any pid, so the device only looks); the heap's limit before the next
   collection.
+
+**D172. HTTP before TLS.** *(User.)* D149 put 12c (C libraries, then
+TLS) before HTTP (14). The user chose the other order: HTTP/1.1 on plain
+`:tcp` first, its details worked out before any code, and HTTPS when 12c's
+`:tls` device exists, with the same library. Reason: HTTP's open questions
+are about its API, and HTTP/1.1 over `:tcp` doesn't need TLS. The library
+uses only what a `:tls` device would also send (lines, chunks, counts,
+`:eof`, `:write`), so TLS slots in beneath it (D152). Rejected: TLS first,
+as D149 had it, which would hold HTTP back for questions it doesn't need
+answered. The proposal is in PLAN.md, step 14.
+
+**D173. HTTP's first design: the handler, the head, the request and
+connections.** *(User, asked with Claude's recommendation for each.)*
+- **The handler runs in a process of its own.** The connection's process
+  forks it and joins it, so a fault in the handler is a 500 reply, not a
+  connection that ends with nothing. (The alternative, in the connection's
+  process, saved a process per request.)
+- **The head is read in bounded chunks,** `:chunks` rather than `:lines`,
+  with the library splitting lines itself and refusing a head over 64 KB
+  with 431. The device cuts a line at 64 MB (D160), which is too late to
+  refuse a long header.
+- **A request is a keyed list,** `(:method :get)`, `(:path ...)`,
+  `(:query ...)`, `(:headers ...)`, `(:body ...)`, read with `lookup`, as
+  `:system`'s info is (D171). A response is positional, `(status headers
+  body)`.
+- **Connections close after each response** (`Connection: close`) on both
+  sides. Keep-alive comes later, with no runtime change.
+
+The rest of the proposal in PLAN.md's step 14 is taken as written, with
+one change: there is no default timeout. A timer stays pending until it's
+due and keeps the program running (as `ask-within` does), so a
+30-second default would hold every program's exit for up to 30 seconds
+after its last request. A timeout is asked for with `http/request-within`.
+
+**D174. HTTP as built (step 14).** *(Default, under D173: the details the
+proposal left to the code.)*
+- **Limits:** a head over 64 KB is a 431. A body over 8 MB is a 413, judged
+  by Content-Length before it's read, or as chunks add up. A client's body
+  has no limit of its own, beyond the 64 MB of a count or a line and the
+  process's heap.
+- **Errors:** a server answers 400 to a start line that isn't HTTP, a
+  malformed head or chunk line, or a body that ends early. A client gives
+  `(:error reason)`, with `:closed` for a connection that closed before its
+  reply.
+- **Methods:** a keyword for GET, HEAD, POST, PUT and DELETE, a string for
+  any other. A client writes the name in capitals.
+- **Headers the library writes:** Content-Length on every request, `0` for
+  none; Content-Length and Connection: close on every response. No Date
+  (slight has no calendar time). A request with `Expect: 100-continue` gets
+  `100 Continue` as soon as its head is in, which curl waits for before a
+  big upload.
+- **Chunked bodies** are read the same way on both sides, and trailers are
+  read and dropped. Their bytes are taken with `:chunks`, not counts; only a
+  Content-Length body uses a count.
+- **Processes:** `http/serve` returns the listener's pid, and its owner says
+  `(:listening port)` to the caller. Each accepted connection is a process
+  that runs the handler in a process of its own (D173). A client request is
+  one connection's process, which the caller joins; `request-within` adds a
+  box that kills it when the time is up, as `ask-within` does.
+- **Lines** keep their `\r` from the device, and the library drops one.
+- **Not checked:** a server that answers a request it hasn't fully read may
+  have the connection reset before the client reads the reply. Tests 207's
+  431 case sends nothing after its long line, and its 413 sends only the
+  head, so neither resets. A lingering close needs a timer that can be
+  cancelled, or a way to half-close.
+- **Checked outside the tests:** our client against Python's `http.server`
+  (a file, and a 404), Python's `http.client` against our server (GET,
+  POST, and a chunked POST), and curl against it (GET, a 5 KB POST with
+  Expect, and a chunked upload). Python and curl are not dependencies of
+  the tests.

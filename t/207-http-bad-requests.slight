@@ -1,0 +1,26 @@
+; Requests the server must refuse, sent raw, and the first line of each
+; reply: a start line that isn't HTTP is a 400, a head over 64 KB a 431, and
+; a body over 8 MB a 413, which is answered before the body is read. A
+; client that connects and goes at once is let go. Then a good request.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+(defun handler (req) (list 200 () "fine"))
+
+(defun first-line (reply) (car (str-split reply "\r\n")))
+
+(defun main ()
+    (let server (http/serve 0 handler))
+    (recv
+        ((:listening port)
+            (let r (list
+                (first-line (talk port (list "NOPE\r\n\r\n")))
+                (first-line (talk port (list (concat "GET / HTTP/1.1\r\nX: " (str-repeat "a" 70000) "\r\n"))))
+                (first-line (talk port (list "POST / HTTP/1.1\r\nContent-Length: 9000000\r\n\r\n")))
+                (first-line (talk port (list "GET / HTTP/1.1\r\nHost: x\r\n\r\n")))
+                (quit-at-once port)))
+            (kill server)
+            r)))
+
+(main)

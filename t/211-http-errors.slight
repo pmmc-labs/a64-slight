@@ -1,0 +1,23 @@
+; The ways a request fails before any answer: an https URL (there's no TLS
+; yet), a scheme it doesn't know, a port nobody listens on, and a server
+; that doesn't answer in time. Then how URLs are taken apart.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+(defun main ()
+    (let me $$)
+    (let raw (raw-listen :silent (list (list "/silent" #false)) me))
+    (recv
+        ((:silent port)
+            (let r (list
+                (http/get "https://127.0.0.1/")
+                (http/get "ftp://127.0.0.1/")
+                (http/get "http://127.0.0.1:1/")
+                (http/request-within 100 :get (concat "http://127.0.0.1:" port "/silent") () "")
+                (http/parse-url "http://example.com:8080/a/b?c=d")
+                (http/parse-url "http://example.com")))
+            (kill raw)
+            r)))
+
+(main)
