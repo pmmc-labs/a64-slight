@@ -176,7 +176,10 @@ Syntax (D85):
   (D176). One lowering, to tests and bindings, serves both: the expander
   makes `match` into `cond` with it, and the code generator compiles
   `recv`'s clauses with it, branching on each test. No guards: match the
-  shape, and test the rest with `cond` in the body.
+  shape, and test the rest with `cond` in the body. A tuple pattern's test
+  is one compare of the box's header with the header a tuple of that many
+  elements has, and each element one load, so it costs about what a list
+  pattern does (D178).
 
 Send-then-wait is written in one function, and becomes two:
 

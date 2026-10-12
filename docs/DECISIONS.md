@@ -2073,3 +2073,22 @@ in the mailbox).
   same value goes to many, and needs clearing when the sender collects);
   and copying straight into the receiver's heap, as the BEAM does (the
   collector would have to take queued messages as roots).
+
+**D178. A tuple pattern compiles inline.** *(User chose it from Claude's
+list, after the boids example's profile.)* A tuple pattern of n elements
+was two calls into C to test (`tuple?`, then `tuple/len`) and one for
+each element (`tuple/get`), where a list pattern's tests branch inline
+and its parts are loads (D168). Now its test is one: a tuple's header
+word is exactly n shifted by `RT_BOX_SIZE_SHIFT`, or'd with
+`RT_BOX_TUPLE`, so the lowering makes `(TUPLE_OF v n)`, which the code
+generator compiles as a tag check, a load and one compare (the target's
+`branchUnlessBox`); and an element is `(TUPLE_REF v i)`, one load
+(`tupleRef`), on a tuple the test has passed, as `c[ad]r` on conses the
+tests have passed (`ON_CONSES`). Both are names no program can write. On
+AArch64, an element past the 31st is past `ldur`'s reach and is loaded
+with its offset in a register. Should `TUPLE_OF` ever be compiled as a
+value rather than a test, it's the builtins' `tuple?` and `tuple/len`.
+`values.ts` gains `TAG_BOXED`, `tupleHeader` and `tupleElement`, checked
+against `rt.h`. Boids with 250 birds: 5.9 per cent fewer instructions.
+Rejected: inlining `tuple/get` everywhere, which would need its index
+and bounds checks inline too, for calls where the index isn't known.

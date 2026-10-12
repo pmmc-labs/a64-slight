@@ -10,6 +10,13 @@ export const MAX_ARGS = 8;
 export const intWord    = (n: bigint): bigint => n << 1n;
 export const symbolWord = (id: number): bigint => (BigInt(id) << 3n) | 5n;
 
+// A box's tag; a tuple's header word, for n elements, which a tuple
+// pattern compares with (D178); and where element i is, from a tagged
+// pointer to the tuple.
+export const TAG_BOXED     = 3;
+export const tupleHeader   = (n: number): bigint => (BigInt(n) << 8n) | 4n;
+export const tupleElement  = (i: number): number => 8 * (1 + i) - TAG_BOXED;
+
 // The symbols every program has, in id order (RT_FALSE is symbol 0, RT_TRUE symbol 1).
 export const RESERVED_SYMBOLS: readonly string[] = ['#false', '#true'];
 

@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { DEVICE_WORDS, ERRNO_NAMES, FAULT_KINDS, intWord, JSON_WORDS, KEY_NAMES, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS } from '../src/values.ts';
+import { DEVICE_WORDS, ERRNO_NAMES, FAULT_KINDS, intWord, JSON_WORDS, KEY_NAMES, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS, TAG_BOXED, tupleElement, tupleHeader } from '../src/values.ts';
 
 const RT_H = readFileSync(new URL('../../runtime/rt.h', import.meta.url), 'utf8');
 
@@ -19,6 +19,13 @@ test('integers are n << 1, with a 0 tag bit', () => {
     assert.equal(define('RT_TAG_INT_MASK'), 1n);
     assert.equal(intWord(21n), 42n);
     assert.equal(intWord(-1n) & define('RT_TAG_INT_MASK'), 0n);
+});
+
+test("a tuple's header is n << RT_BOX_SIZE_SHIFT | RT_BOX_TUPLE, and its elements follow it", () => {
+    assert.equal(BigInt(TAG_BOXED), define('RT_TAG_BOXED'));
+    assert.equal(tupleHeader(3), (3n << define('RT_BOX_SIZE_SHIFT')) | define('RT_BOX_TUPLE'));
+    assert.equal(tupleElement(0), 8 - TAG_BOXED);
+    assert.equal(tupleElement(2), 24 - TAG_BOXED);
 });
 
 test('symbols are id << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL', () => {

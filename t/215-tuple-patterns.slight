@@ -58,3 +58,14 @@
 (let tw (fork (twice 1)))
 (send tw (tuple :add 2))
 (pprint (join tw))
+
+; a tuple pattern compiles to one compare of the box's header (D178), so
+; no other box passes for a tuple of two: not a string of two bytes, a
+; float, a function, nor a closure holding two values; and it takes an
+; element anywhere, the fortieth as the first
+(defun two (v) (match v (#(a b) (list a b)) (_ :no)))
+(let p 1)
+(let q 2)
+(pprint (map two (list "ab" 2.5 two (lambda () (+ p q)) $$ :ab 12 () (tuple :a :b))))
+(pprint (match (list->tuple (range 0 40))
+    (#(a _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ z) (list a z))))
