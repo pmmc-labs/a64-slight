@@ -74,20 +74,21 @@
 
 ; --- steering -----------------------------------------------------------------
 
-; A bird is ((x y) (vx vy)).
+; A bird is #(x y vx vy): where it is, and its velocity. A tuple, so a
+; message with one in it is a box and four floats to copy.
 
 ; The others bird me sees, from what it heard of the flock, ((id state)
 ; ...) in the order of the ids: each as (offset velocity distance²), the
 ; offset being the shortest way to it round the sky.
 (defun in-sight (me heard sky)
     (match (list (lookup me heard) sky)
-        ((((x y) _) (w h))
+        ((#(x y _ _) (w h))
             (let seen (map
                 (lambda (said)
                     (match said
-                        ((id ((px py) v))
+                        ((id #(px py vx vy))
                             (let d (list (across x px w) (across y py h)))
-                            (list d v (dot d d)))))
+                            (list d (list vx vy) (dot d d)))))
                 (remove (lambda (said) (== (car said) me)) heard)))
             (filter (lambda (o) (< (caddr o) (* (sight) (sight)))) seen))))
 
@@ -113,11 +114,13 @@
 (defun steer (me heard sky)
     (let others (in-sight me heard sky))
     (match (list (lookup me heard) sky)
-        ((((x y) v) (w h))
+        ((#(x y vx vy) (w h))
+            (let v (list vx vy))
             (let v2 (limit (if (nil? others)
                 v
                 (v+ v (v+ (cohesion others) (v+ (alignment others v) (separation others)))))))
-            (list (list (around (+ x (car v2)) w) (around (+ y (cadr v2)) h)) v2))))
+            (match v2
+                ((nvx nvy) (tuple (around (+ x nvx) w) (around (+ y nvy) h) nvx nvy))))))
 
 ; --- a bird -------------------------------------------------------------------
 
@@ -195,24 +198,22 @@
 
 ; Which way it's going: one of eight arrows. 0.41421356 is tan 22.5°,
 ; halfway between an axis and a diagonal.
-(defun arrow (v)
-    (match v
-        ((vx vy)
-            (cond
-                ((<= (abs vy) (* (abs vx) 0.41421356)) (if (< vx 0) "←" "→"))
-                ((<= (abs vx) (* (abs vy) 0.41421356)) (if (< vy 0) "↑" "↓"))
-                ((< vx 0)                              (if (< vy 0) "↖" "↙"))
-                (#true                                 (if (< vy 0) "↗" "↘"))))))
+(defun arrow (vx vy)
+    (cond
+        ((<= (abs vy) (* (abs vx) 0.41421356)) (if (< vx 0) "←" "→"))
+        ((<= (abs vx) (* (abs vy) 0.41421356)) (if (< vy 0) "↑" "↓"))
+        ((< vx 0)                              (if (< vy 0) "↖" "↙"))
+        (#true                                 (if (< vy 0) "↗" "↘"))))
 
 ; The sky as a tuple of rows, each a tuple of one-character strings, with
 ; a bird put in it. A bird on the far edge, which rounding can leave
 ; exactly there, is put back on the near one.
 (defun put (grid bird)
     (match bird
-        (((x y) v)
+        (#(x y vx vy)
             (let row (% (floor (/ y 2)) (tuple/len grid)))
             (let col (% (floor x) (tuple/len (tuple/get grid 0))))
-            (tuple/set grid row (tuple/set (tuple/get grid row) col (arrow v))))))
+            (tuple/set grid row (tuple/set (tuple/get grid row) col (arrow vx vy))))))
 
 ; Each frame redraws the whole screen from the top left, or, when there's
 ; a number of frames, goes under the one before.
@@ -254,9 +255,9 @@
             (let d (random c))
             (match sky
                 ((w h)
-                    (let pos (list (* (fraction a) w) (* (fraction b) h)))
-                    (let v (list (* (- (* (fraction c) 2) 1) (max-speed)) (* (- (* (fraction d) 2) 1) (max-speed))))
-                    (hatch (dec n) sky d (cons (list pos v) birds)))))))
+                    (let bird (tuple (* (fraction a) w) (* (fraction b) h)
+                        (* (- (* (fraction c) 2) 1) (max-speed)) (* (- (* (fraction d) 2) 1) (max-speed))))
+                    (hatch (dec n) sky d (cons bird birds)))))))
 
 ; The i'th argument as a number, or default if there isn't one.
 (defun arg (i args default)
