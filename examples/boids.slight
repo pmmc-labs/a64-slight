@@ -58,13 +58,14 @@
 (defun dot (a b) (match (list a b) (((ax ay) (bx by)) (+ (* ax bx) (* ay by)))))
 (defun vsum (vs) (fold/l (list 0 0) v+ vs))
 
-; The shortest way from a to b, on a circle size round.
-(defun across (a b size)
+; The shortest way from a to b, on a circle size round (half is half of
+; it, worked out once a tick rather than at every call).
+(defun across (a b size half)
     (let d (- b a))
     (cond
-        ((> d (/ size 2))         (- d size))
-        ((< d (- 0 (/ size 2)))   (+ d size))
-        (#true                    d)))
+        ((> d half)         (- d size))
+        ((< d (- 0 half))   (+ d size))
+        (#true              d)))
 
 (defun around (x size)
     (cond
@@ -77,30 +78,37 @@
 ; A bird is #(x y vx vy): where it is, and its velocity. A tuple, so a
 ; message with one in it is a box and four floats to copy.
 
-; The others bird me sees, from what it heard of the flock, ((id state)
-; ...) in the order of the ids: each as (offset velocity distance²), the
-; offset being the shortest way to it round the sky.
-(defun in-sight (me heard sky)
-    (match (list (lookup me heard) sky)
+; The others a bird at state sees, from what the rest of the flock said,
+; ((id state) ...) in any order: each as (id offset velocity distance²),
+; the offset being the shortest way to it round the sky. Only those in
+; sight are kept, and they're sorted by id, the order the rules sum in,
+; so a bird sorts the few it sees rather than the whole flock.
+(defun in-sight (state heard sky)
+    (match (list state sky)
         ((#(x y _ _) (w h))
-            (let seen (map
-                (lambda (said)
+            (let hw (/ w 2))
+            (let hh (/ h 2))
+            (sort-by car (fold/l ()
+                (lambda (seen said)
                     (match said
                         ((id #(px py vx vy))
-                            (let d (list (across x px w) (across y py h)))
-                            (list d (list vx vy) (dot d d)))))
-                (remove (lambda (said) (== (car said) me)) heard)))
-            (filter (lambda (o) (< (caddr o) (* (sight) (sight)))) seen))))
+                            (let dx (across x px w hw))
+                            (let dy (across y py h hh))
+                            (let d2 (+ (* dx dx) (* dy dy)))
+                            (if (< d2 (* (sight) (sight)))
+                                (cons (list id (list dx dy) (list vx vy) d2) seen)
+                                seen))))
+                heard)))))
 
 (defun cohesion (others)
-    (v* (v/ (vsum (map car others)) (length others)) (cohesion-rate)))
+    (v* (v/ (vsum (map cadr others)) (length others)) (cohesion-rate)))
 
 (defun alignment (others v)
-    (v* (v- (v/ (vsum (map cadr others)) (length others)) v) (alignment-rate)))
+    (v* (v- (v/ (vsum (map caddr others)) (length others)) v) (alignment-rate)))
 
 (defun separation (others)
-    (let close (filter (lambda (o) (< (caddr o) (* (room) (room)))) others))
-    (v* (vsum (map car close)) (- 0 (separation-rate))))
+    (let close (filter (lambda (o) (< (cadddr o) (* (room) (room)))) others))
+    (v* (vsum (map cadr close)) (- 0 (separation-rate))))
 
 ; Not faster than max-speed, nor slower than min-speed unless still.
 (defun limit (v)
@@ -110,10 +118,10 @@
         ((and (< speed (min-speed)) (> speed 0))  (v* v (/ (min-speed) speed)))
         (#true                                    v)))
 
-; Where bird me goes next, from what it heard of the flock.
-(defun steer (me heard sky)
-    (let others (in-sight me heard sky))
-    (match (list (lookup me heard) sky)
+; Where a bird at state goes next, from what the rest of the flock said.
+(defun steer (state heard sky)
+    (let others (in-sight state heard sky))
+    (match (list state sky)
         ((#(x y vx vy) (w h))
             (let v (list vx vy))
             (let v2 (limit (if (nil? others)
@@ -135,35 +143,42 @@
         ((:flock flock)
             (let others (remove (lambda (b) (eq? b $$)) flock))
             (fly (tuple me others shown sky (length flock)) 0 state early))
-        ((:at 0 id s)
-            (bird me state sky shown (cons (list id s) early)))))
+        ((:at 0 & said)
+            (bird me state sky shown (cons said early)))))
 
 ; Tells the display and the rest of the flock where it is on this tick,
-; and listens, with what came early.
+; and listens for the n - 1 others, of whom those in early have spoken.
 (defun fly (ctx tick state early)
     (match ctx
         (#(me others shown sky n)
             (let msg (list :at tick me state))
             (send shown msg)
-            (map (lambda (b) (send b msg)) others)
-            (listen ctx tick (cons (list me state) early) (+ 1 (length early)) ()))))
+            (tell others msg)
+            (listen ctx tick state early (- n (+ 1 (length early))) ()))))
 
-; Listens till it has heard from every bird on this tick, keeping what
-; comes from the next; then steers, sleeps a tick, and flies on.
-(defun listen (ctx tick heard count early)
-    (match ctx
-        (#(me others shown sky n)
-            (cond
-                ((== count n)
-                    (let next (steer me (sort-by car heard) sky))
+(defun tell (pids msg)
+    (match pids
+        (()         ())
+        ((p & rest) (send p msg) (tell rest msg))))
+
+; Listens till it has heard from every other bird on this tick, left
+; being how many it hasn't, and keeping what comes from the next; then
+; steers, sleeps a tick, and flies on. What it heard is the (id state) at
+; the end of each message, as it came.
+(defun listen (ctx tick state heard left early)
+    (cond
+        ((== left 0)
+            (match ctx
+                (#(me others shown sky n)
+                    (let next (steer state heard sky))
                     (sleep (tick-ms))
-                    (fly ctx (inc tick) next early))
-                (#true
-                    (recv
-                        ((:at at id state)
-                            (cond
-                                ((== at tick)       (listen ctx tick (cons (list id state) heard) (inc count) early))
-                                ((== at (inc tick)) (listen ctx tick heard count (cons (list id state) early)))))))))))
+                    (fly ctx (inc tick) next early))))
+        (#true
+            (recv
+                ((:at at & said)
+                    (cond
+                        ((== at tick)       (listen ctx tick state (cons said heard) (dec left) early))
+                        ((== at (inc tick)) (listen ctx tick state heard left (cons said early)))))))))
 
 ; --- the display --------------------------------------------------------------
 
@@ -189,8 +204,8 @@
                         (display ctx (inc tick) () 0 last took)))
                 (#true
                     (recv
-                        ((:at at id state)
-                            (cond ((== at tick) (display ctx tick (cons (list id state) heard) (inc count) last took))))
+                        ((:at at & said)
+                            (cond ((== at tick) (display ctx tick (cons said heard) (inc count) last took))))
                         ((:runtime _ info)
                             (let now (lookup :clock info))
                             (display ctx tick heard count now (if (nil? last) () (- now last))))
