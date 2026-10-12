@@ -1,0 +1,9 @@
+((error no-tls #true))
+((error (bad-url "ftp://127.0.0.1/") #true))
+((error (econnrefused "127.0.0.1:1") #true))
+((error closed #true))
+((error (bad-http "start line") #true))
+((error (bad-http "closed in the head") #true))
+((head 200) (error (bad-http "chunk size") #true))
+((head 200) (line "ok") (error (bad-http "short body") #true))
+done

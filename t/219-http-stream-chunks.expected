@@ -1,0 +1,9 @@
+((head 200 (("transfer-encoding" "chunked"))) (chunk "hello world") (eof))
+((head 200 (("content-length" "11"))) (chunk "hello world") (eof))
+((head 200 ()) (chunk "to the close") (eof))
+((head 200 (("content-length" "5"))) (eof))
+((head 100 ()) (eof))
+((head 204 (("content-length" "5"))) (eof))
+((head 304 ()) (eof))
+((head 200 (("content-length" "10"))) (chunk "hello") (error (bad-http "short body")))
+done

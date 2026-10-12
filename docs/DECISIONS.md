@@ -2117,6 +2117,8 @@ and bounds checks inline too, for calls where the index isn't known.
   skip spatial stuff".)* n² messages a tick; BACKGROUND.md has why
   locality is hard for actors, and the way through that keeps them.
 
+## Step 15: agents
+
 **D180. Agents before TLS, starting with a local model.** *(User agreed,
 Oct 2026, to Claude's suggestion.)* D172 put 12c (C libraries, then TLS)
 next; but nothing in step 15's design needs TLS: a local model (ollama,
@@ -2153,3 +2155,63 @@ lines are `:lines` and `json/parse` on each.
   guard against a fast server, which a model isn't (it can come later, as
   a `how`, if a big download wants it); and a fold run in the
   connection's process, which would show the caller nothing till the end.
+
+**D182. `http/stream` as built.** *(Default, under D181: what it left to
+the code.)*
+- **Lines** are cut at `\n`, and one `\r` at a line's end is dropped,
+  as the head's lines' is (D174), the last line's too, as Go's
+  `bufio.ScanLines` does. An empty line comes as `""`. A last line with
+  no newline still comes, once the body has ended as its framing says;
+  one cut off by an error doesn't, since it may not be whole.
+- **No body:** HEAD, 1xx, 204 and 304 are `:head` and then `:eof`, and
+  so is a body of no bytes.
+- **A line over 64 KB** (65,536 bytes before its `\n`) ends the stream
+  with `(:error s :line-too-big)`, after the lines before it, so a reply
+  with no newlines can't grow a buffer without end. Each line is
+  measured, not the buffer, so where the reads fall doesn't change the
+  outcome.
+- **Chunks** are what the device gives (up to 64 KB), less the chunked
+  encoding's framing: a read holding two of the encoding's chunks gives
+  two messages, and one that ends in the middle of a chunk gives what it
+  has. Never empty; no sizes promised.
+- **Every piece goes as soon as it's in:** bytes that came with the head,
+  or with the end of a chunk's size line, are sent before the next read
+  is waited for, not with it.
+- **How it ends:** `http/stream` forks a watcher that monitors the
+  stream. A device that fails ends its owner at once (D136), so the
+  stream can't say `(:error s reason)` for a refused connection or a
+  reset; the watcher says how every stream ended: `(:eof s)` when it
+  returned, `(:error s reason)` when it ended with an error (the device's,
+  or one the stream raised itself for a reply that isn't HTTP), and
+  nothing when it was killed. So one place sends the last message.
+  Rejected: the stream sending its own `(:eof s)` and HTTP errors, with
+  the watcher only for the device's (two places that end a stream).
+- **A bad URL** still gives a pid: a process that raises the reason, which
+  the watcher reports. So every failure comes the one way.
+- **A kill** says nothing, since the caller asked for it (or someone did;
+  the watcher can't tell who). What the stream sent before is still in
+  the caller's mailbox, and a stream that had already ended may have its
+  last message on the way.
+- **A caller that ends first** has its stream killed, as a device closes
+  when its owner ends; otherwise a stream nobody reads would keep the
+  program running (open sockets do) till the server finished. The watcher
+  monitors the caller for this, a record the caller keeps till it ends: a
+  few bytes a stream, since there's no way to take a monitor back.
+- **A `how`** other than `:lines` or `:chunks` faults (`:no-match`) in the
+  caller, at the call, rather than in the stream later.
+- **One set of readers:** the head, the framing and the body's readers are
+  the client's and the server's too. Each hands every piece of the body to
+  `http/take`, which keeps it for a whole body or sends it on for a
+  stream. So a Content-Length body is now read in chunks, counted down,
+  on every side, rather than as one count (D174), which would have held a
+  stream's body back to the end; a whole one's chunks are joined at the
+  end, as a chunked body's were.
+- **Checked outside the tests:** against Python's `http.server` writing
+  chunked JSON lines 0.4 s apart, on both targets: each line came when it
+  was written, not at the end.
+- **Tests** (217–221): the raw server sends a reply in pieces, a
+  millisecond apart, or holds the connection open after them, to show
+  that what came, came before the end. Their output doesn't depend on
+  where the reads fall (lines; chunks joined), since macOS's loopback can
+  deliver a piece after the virtual clock has moved past the next. Run
+  under `SLIGHT_SCHED` seeds and `SLIGHT_GC_STRESS` too.

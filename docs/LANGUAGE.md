@@ -1367,8 +1367,41 @@ waits for TLS (step 12c).
   length is read to the end of the connection, except for HEAD, 1xx, 204
   and 304, which have no body. `Expect: 100-continue` gets its 100 at
   once.
-- Not yet: keep-alive, bodies streamed in pieces (for agents, step 15),
-  a Date header (slight has no calendar time), and HTTPS. A server that
-  answers a request it hasn't fully read (a 431 or 413) may have its
-  connection reset before the client reads the reply, since there's no
-  lingering close yet.
+- `(http/stream method url headers body how)` makes the same request, and
+  gives the reply to the caller as it comes, in messages, as a device
+  gives a file (D181, D182). It gives the stream's pid, `s`, at once. The
+  caller is sent `(:head s status headers)`; then the body, as `(:line s
+  text)` for each line when `how` is `:lines`, or `(:chunk s bytes)` when
+  it's `:chunks`; then `(:eof s)`. If anything fails, `(:error s reason)`
+  comes in place of whatever hadn't come yet, with `http/request`'s
+  reasons, or `:line-too-big` for a line over 64 KB. Chunked encoding is
+  undone on the way, so the pieces are the body's own bytes. A line is
+  cut at `\n`, and one `\r` at its end is dropped, as in the head; an
+  empty line is `""`, and a last line with no newline still comes. A
+  chunk is never empty, but its size isn't promised: it's what the socket
+  gave. A reply with no body is its head and then `(:eof s)`.
+- `(kill s)` stops a stream and closes its connection; the caller hears
+  nothing more from it, though what it sent before is still in the
+  mailbox. A stream whose caller ends is killed too. A timeout is the
+  caller's own `after`.
+
+  ollama streams a model's answer as JSON lines, each with a piece of the
+  text:
+
+      (defun answer (text)
+          (recv
+              ((:head _ _ _)     (answer text))
+              ((:line _ line)
+                  (match (json/parse line)
+                      ((:ok (:object & fields)) (answer (~ text (lookup "response" fields))))))
+              ((:eof _)          text)
+              ((:error _ reason) (list :error reason))))
+
+      (http/stream :post "http://localhost:11434/api/generate" ()
+          "{\"model\": \"llama3.2\", \"prompt\": \"Why is the sky blue?\"}" :lines)
+      (answer "")
+
+- Not yet: keep-alive, a Date header (slight has no calendar time), and
+  HTTPS. A server that answers a request it hasn't fully read (a 431 or
+  413) may have its connection reset before the client reads the reply,
+  since there's no lingering close yet.

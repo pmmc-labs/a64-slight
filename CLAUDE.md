@@ -85,14 +85,16 @@ step, and reports only failures; x86-64 passes there too, under Rosetta
 (D158–D164), is done, and so are 12b, collecting outside `recv` (D166),
 and 12d, looking up host names in the runtime (D153, D165); and step 13,
 where `recv` can go (D167); and step 14, HTTP (D172–D174), on plain `:tcp`
-as `lib/http.slight`, a server and a client, golden tests 204–213. **Next:
-agents (15)**, before TLS, with a local model over plain HTTP (D180):
-first HTTP bodies streamed to the caller, then `:exec`, then reading the
-environment; then chat as actors and tools as messages. 12c (C libraries
-vendored as source, D151, D152, then TLS, which HTTPS needs: `https://`
-is `:no-tls` till then) comes with the first hosted model. Each has points
-to settle with Stevan first (`docs/PLAN.md`). Self-hosting waits till the
-language settles (17). Update this section as steps land.
+as `lib/http.slight`, a server and a client, golden tests 204–213. Step
+15, agents, has begun, before TLS, with a local model over plain HTTP
+(D180): a reply's body comes to its caller as it arrives, in messages,
+`http/stream` (D181, D182, golden tests 217–221). **Next: `:exec`**,
+then reading the environment; then chat as actors and tools as messages.
+12c (C libraries vendored as source, D151, D152, then TLS, which HTTPS
+needs: `https://` is `:no-tls` till then) comes with the first hosted
+model. Each has points to settle with Stevan first (`docs/PLAN.md`).
+Self-hosting waits till the language settles (17). Update this section as
+steps land.
 
 ## Read first, in this order
 
@@ -197,7 +199,7 @@ to get them back from git (`3fd71e0`).
 | `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `pattern.ts` (`match`'s and `recv`'s patterns, as tests and bindings), `split.ts` (a `recv` anywhere a tail call could go, made the whole body of a generated receive function), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files and sockets, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, for recording and replaying a run) |
-| `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173) |
+| `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |

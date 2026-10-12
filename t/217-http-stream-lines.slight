@@ -1,0 +1,50 @@
+; A reply streamed as lines (D181): chunked JSON lines, as ollama streams a
+; model's answer, from a raw server that writes the reply in pieces a
+; millisecond apart. A line is cut across chunks of the encoding and across
+; the pieces, a chunk holds the end of one line and the whole of the next,
+; and a chunk's size line is cut between pieces too. The caller hears the
+; head, each line as it ends, and the end; each line is a JSON value, and
+; the answer is their "response"s joined.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+; The pieces: the head; a chunk of one line; a chunk ending in the middle
+; of the second line, then the size of the next chunk and its first bytes;
+; the rest of that chunk, which ends the second line and holds the third,
+; and the next chunk's size without its line end; then the last line, and
+; the last chunk.
+(defun pieces () (list
+    "HTTP/1.1 200 OK\r\nContent-Type: application/x-ndjson\r\nTransfer-Encoding: chunked\r\n\r\n"
+    "20\r\n{\"response\":\"Hel\",\"done\":false}\n\r\n"
+    "11\r\n{\"response\":\"lo\",\r\n31\r\n\"done"
+    "\":false}\n{\"response\":\" world\",\"done\":false}\n\r\n1c"
+    "\r\n{\"response\":\"\",\"done\":true}\n\r\n0\r\n\r\n"))
+
+; What the stream says, till it ends, each line parsed as JSON.
+(defun heard (s acc)
+    (recv
+        ((:head _ status headers) (heard s (cons (list :head status headers) acc)))
+        ((:line _ text)           (heard s (cons (list :line (json/parse text)) acc)))
+        ((:eof _)                 (reverse (cons (list :eof) acc)))
+        ((:error _ reason)        (reverse (cons (list :error reason) acc)))))
+
+(defun streamed (url)
+    (cadr (join (fork (heard (http/stream :post url () "{\"prompt\":\"hi\"}" :lines) ())))))
+
+; The "response" of each line, joined.
+(defun answer (said)
+    (str-join "" (map (lambda (m) (lookup "response" (cdr (cadr (cadr m)))))
+                      (filter (lambda (m) (eq? (car m) :line)) said))))
+
+(defun main ()
+    (let me $$)
+    (let raw (raw-listen :raw (list (list "/api/generate" (pieces))) me))
+    (recv
+        ((:raw port)
+            (let said (streamed (concat "http://127.0.0.1:" port "/api/generate")))
+            (kill raw)
+            (map pprint said)
+            (answer said))))
+
+(main)

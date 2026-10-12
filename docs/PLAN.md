@@ -506,7 +506,8 @@ in `t/data/http-raw.slight`. Checked by hand against Python's `http.server`
 and `http.client`, and against curl, outside the tests.
 
 Left for later: keep-alive; bodies streamed in pieces, which agents need
-(15: ollama streams NDJSON over chunked encoding); HTTPS (12c); the limits
+(15: ollama streams NDJSON over chunked encoding; done there, D181, D182);
+HTTPS (12c); the limits
 as parameters; a lingering close, so a server that answers before it has
 read the whole request doesn't reset the connection; and a timeout that a
 reply can cancel, which needs cancellable timers (see "Later").
@@ -532,12 +533,13 @@ settled besides.
 ### 15. Agents
 
 Stevan's aim for slight (Oct 2026), once HTTP (14) and JSON (12a) are
-in: chat, person to agent and agent to agent, written as actors. Next,
+in: chat, person to agent and agent to agent, written as actors. Begun
 before TLS (D180), with a local model over plain HTTP. What it needs
 first, in order: HTTP bodies streamed to the caller as they arrive,
-`http/stream`, its pieces as messages (D181); `:exec` (below); and reading the environment,
-for a model's address or a key (a builtin, to propose). Then, for a
-hosted model: TLS (12c), and a reader of server-sent events.
+`http/stream`, its pieces as messages (D181; done, D182, golden tests
+217–221); next, `:exec` (below); and reading the environment, for a
+model's address or a key (a builtin, to propose). Then, for a hosted
+model: TLS (12c), and a reader of server-sent events.
 
 - An agent is an actor whose state is its context: the conversation so
   far, its tools, its model's settings. A turn comes in as a message,

@@ -741,7 +741,9 @@ Lalloc_N:
   `:eaddrinuse`, ...), and `:enotfound` (Node's) for a host that can't be
   found, or `:etimedout` when no name server answers; SIGPIPE is ignored, so writing to a closed connection is
   `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. HTTP is a
-  slight library on top, `lib/http.slight` (D132, D140, D173, D174).
+  slight library on top, `lib/http.slight` (D132, D140, D173, D174), whose
+  client can also give a reply's body to its caller as it comes, in
+  messages, as a device does (`http/stream`, D181, D182).
 - **`:system` is a device too** (D171). `(connect :system expr)`; its
   owner asks `(:processes)`, `(:process pid)` or `(:runtime)`, and hears
   `(:process s info)` for each live process (one at a time, the next
