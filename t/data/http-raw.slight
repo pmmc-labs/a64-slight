@@ -1,0 +1,74 @@
+; Helpers for the HTTP tests (t/204 to t/213): a raw TCP server that answers
+; by path, and a raw client that sends bytes and gives back what comes.
+
+; A raw server: its listener says (tag port) to told when it's up. replies
+; is a list of (path reply) pairs: the reply sent for a request on that path,
+; whole, and then the connection closes. A reply of #false is no answer at
+; all: the connection stays open, and says nothing.
+(defun raw-listen (tag replies told)
+    (connect :tcp/listen 0 (raw-accept tag replies told)))
+
+(defun raw-accept (tag replies told)
+    (recv
+        ((:open _ port)
+            (send told (list tag port))
+            (raw-accept tag replies told))
+        ((:accept _ conn)
+            (connect conn (raw-serve replies))
+            (raw-accept tag replies told))))
+
+(defun raw-serve (replies)
+    (recv ((:open c) (raw-head c replies #false))))
+
+(defun raw-head (c replies path)
+    (recv
+        ((:line c s)
+            (cond
+                ((eq? s "\r")      (raw-answer c (lookup path replies)))
+                ((eq? path #false) (raw-head c replies (cadr (str-split s " "))))
+                (#true             (raw-head c replies path))))
+        ((:eof c) (disconnect c))))
+
+(defun raw-answer (c reply)
+    (cond
+        ((eq? reply #false) (raw-wait c))
+        (#true              (send c (list :write reply)) (disconnect c))))
+
+(defun raw-wait (c)
+    (recv
+        ((:line c _) (raw-wait c))
+        ((:eof c)    (disconnect c))))
+
+; A raw client: pieces are sent one after another, a millisecond apart, and
+; what the server sends comes back as one string, once it closes.
+(defun talk (port pieces)
+    (reply-of (join (connect :tcp (concat "127.0.0.1:" port) (talk-conn pieces)))))
+
+(defun talk-conn (pieces)
+    (recv
+        ((:open c)
+            (send c (list :read :chunks))
+            (trickle c pieces)
+            (collect c ""))))
+
+(defun trickle (c pieces)
+    (match pieces
+        (()             ())
+        ((piece & rest) (send c (list :write piece)) (sleep 1) (trickle c rest))))
+
+(defun collect (c acc)
+    (recv
+        ((:chunk c s) (collect c (~ acc s)))
+        ((:eof c)     acc)))
+
+(defun reply-of (exit)
+    (match exit
+        ((:ok reply) reply)
+        ((:error e)  e)))
+
+; A client that connects and says nothing, closing at once.
+(defun quit-at-once (port)
+    (reply-of (join (connect :tcp (concat "127.0.0.1:" port) (quit-now)))))
+
+(defun quit-now ()
+    (recv ((:open c) (disconnect c) :quit)))

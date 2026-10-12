@@ -11,8 +11,8 @@ UTF-8 builtins (both below, after 10e), tooling (11), and of the
 groundwork HTTP needs (12), ways to read a device (12a), collecting
 outside `recv` (12b) and looking up host names (12d), where `recv`
 can go (13), and after it, `match`, tuples, and recording and replaying
-a run (D168–D170). Next (D149): the rest of 12 (C libraries and TLS),
-then HTTP (14).
+a run (D168–D170). HTTP (14) on plain `:tcp` is done (D172–D174). Next: the rest of 12
+(C libraries and TLS), which HTTPS needs, then agents (15).
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -371,6 +371,8 @@ changed.
 
 #### 12c. C libraries, and TLS
 
+Next, now that HTTP (14) is in (D172). HTTPS needs this.
+
 Discussed in Oct 2026 (D151, D152; BACKGROUND.md has what Odin does):
 
 - A pure function bounded by its input (a hash) may be a builtin; a
@@ -491,21 +493,22 @@ rest are under "Later", below.
   every compiled function's entry and name, which the deadlock message
   uses too. Golden tests 200–202, and `examples/top.slight`.
 
-### 14. HTTP in slight
+### 14. HTTP in slight (done, Oct 2026)
 
-Was 10f. `lib/http.slight`, opt-in (D140): an HTTP/1.1 client and
-server on `:tcp`, and HTTPS on 12c's TLS. To settle when it starts:
+On plain `:tcp`, before 12c (D172), as `lib/http.slight`, opt-in (D140).
+The details were settled before any code (D173), and D174 has what was
+built: a server (`http/serve`) that runs each handler in a process of its
+own, and a client (`http/get`, `http/request`, `http/request-within`), with
+chunked bodies both ways, one request to each connection, and the limits
+the head and body need. Golden tests 204–213, with a raw server and client
+in `t/data/http-raw.slight`. Checked by hand against Python's `http.server`
+and `http.client`, and against curl, outside the tests.
 
-- What the library looks like to a program: a server as a function of a
-  request that returns a response? A client as a call that gives
-  `(:ok response)` or `(:error reason)`?
-- Bodies are read by their length, with 12a's chunks.
-- `Connection: close` (one request per connection) to begin with, or
-  keep-alive?
-- Keep the API independent of what's underneath: in a browser, HTTP
-  would be a device over `fetch`, not slight on `:tcp` (BACKGROUND.md,
-  WebAssembly), so a program shouldn't see which it's using.
-- JSON: in C, as builtins and as a way to read the body (12a).
+Left for later: keep-alive; bodies streamed in pieces, which agents need
+(15: ollama streams NDJSON over chunked encoding); HTTPS (12c); the limits
+as parameters; a lingering close, so a server that answers before it has
+read the whole request doesn't reset the connection; and a timeout that a
+reply can cancel, which needs cancellable timers (see "Later").
 
 ### 15. Agents
 

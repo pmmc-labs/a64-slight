@@ -132,7 +132,7 @@ be bound or defined (D144).
 `(@include "path")` splices in the forms of another file where it
 stands. The path is relative to the file the include is in, unless it
 starts with `/`. `(@include :name)` is the built-in `lib/name.slight`:
-`:test` and `:fs` (Libraries, below).
+`:test`, `:fs`, `:ds` and `:http` (Libraries, below).
 
 Includes are top-level forms only. A file is included once, however
 often it's asked for, and a file that includes itself, directly or not,
@@ -818,20 +818,10 @@ sockets keep the program running, and so does a host being looked up.
 
     (connect :tcp/listen 7000 (server))
 
-An HTTP request is lines up to a blank one, then a body of
-Content-Length bytes. The server asks for the body while it handles the
-blank line, so none of the body is cut as lines:
-
-    (defun headers (c hs)
-        (recv
-            ((:line c s)
-                (cond
-                    ((eq? s "\r") (send c (list :read (content-length hs))) (body c hs))
-                    (#true        (headers c (cons s hs)))))))
-
-    (defun body (c hs)
-        (recv
-            ((:chunk c s) (respond c hs s) (headers c ()))))
+HTTP is built on these, in `lib/http.slight` (Libraries, below). A
+request's head comes as lines up to a blank one, and its body as a count,
+which the reader asks for while it handles that blank line, so none of
+the body is cut as lines (D159).
 
 To `join`, `monitor` and `kill`, a device is a process that has ended
 with `(:ok ())`.
@@ -1298,3 +1288,57 @@ If the structure ends before it answers, `ask` raises `(:ended pid
 result)`. `(ask-within ms pid msg)` raises `(:timeout pid)` too, if no
 answer comes in time; its timer stays pending till then, and a pending
 timer keeps the program running.
+
+### (@include :http)
+
+`lib/http.slight`: HTTP/1.1 on `:tcp`, a server and a client (D173). One
+request and one reply to each connection, which then closes. HTTPS
+waits for TLS (step 12c).
+
+    (@include :http)
+
+    (defun handler (req)
+        (list 200 (list (list "Content-Type" "text/plain"))
+            (concat "you asked for " (lookup :path req))))
+
+    (let server (http/serve 8080 handler))    ; the listener's pid
+    (http/get "http://localhost:8080/hello")  ; (:ok (200 headers body))
+    (kill server)
+
+- `(http/serve port handler)` listens on all interfaces and gives the
+  listener's pid, which `kill` stops. Port 0 lets the system pick, and
+  the listener sends `(:listening port)` to the caller, which is how a
+  test learns the port. Each connection gets a process of its own, which
+  calls `handler` with the request and writes the response it gives. The
+  handler runs in a process of its own too: if it faults, or raises, the
+  client gets a 500.
+- A request is a keyed list, read with `lookup`: `(:method m)`, `(:path
+  p)`, `(:query q)` (`""` when there's none), `(:headers hs)` and `(:body
+  b)`. A method is a keyword for GET, HEAD, POST, PUT and DELETE, and a
+  string otherwise. Headers are `(name value)` pairs, the names in
+  lowercase, in the order they came, repeats kept.
+- A response is `(status headers body)`, its headers `(name value)` pairs.
+  The library adds Content-Length and Connection: close, so a handler
+  leaves them out. The reason phrase comes from a table of the common
+  statuses.
+- `(http/get url)` and `(http/request method url headers body)` (`""` for
+  no body) give `(:ok response)`, the response in the same shape, or
+  `(:error reason)`. A reason is the device's, such as `(:econnrefused
+  "127.0.0.1:1")`, or one of `(:bad-http what)` for a reply that isn't
+  HTTP, `(:bad-url url)`, `:no-tls` for an `https` URL, and `:closed` for
+  a connection that closed before its reply.
+- `(http/request-within ms method url headers body)` is `http/request`
+  with `(:error :timeout)` if no reply comes in `ms` milliseconds. Its
+  timer keeps the program running till it's due, as `ask-within`'s does,
+  so `http/request` is the one to use unless a timeout is wanted.
+- What a server refuses: a start line that isn't HTTP is a 400, a head
+  over 64 KB a 431, and a body over 8 MB a 413, which is answered before
+  the body is read. Chunked bodies are read both ways. A reply with no
+  length is read to the end of the connection, except for HEAD, 1xx, 204
+  and 304, which have no body. `Expect: 100-continue` gets its 100 at
+  once.
+- Not yet: keep-alive, bodies streamed in pieces (for agents, step 15),
+  a Date header (slight has no calendar time), and HTTPS. A server that
+  answers a request it hasn't fully read (a 431 or 413) may have its
+  connection reset before the client reads the reply, since there's no
+  lingering close yet.

@@ -1,0 +1,18 @@
+; A client that sends Expect: 100-continue, and waits for the go-ahead
+; before its body (curl does this for big uploads). The server sends the
+; 100 as soon as it has the head, and then reads the body that comes after.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+(defun handler (req) (list 200 () (lookup :body req)))
+
+(defun main ()
+    (let server (http/serve 0 handler))
+    (recv
+        ((:listening port)
+            (let reply (talk port (list "POST / HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\n" "hello")))
+            (kill server)
+            (map (lambda (p) (car (str-split p "\r\n"))) (str-split reply "\r\n\r\n")))))
+
+(main)
