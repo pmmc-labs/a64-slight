@@ -1407,3 +1407,36 @@ waits for TLS (step 12c).
   HTTPS. A server that answers a request it hasn't fully read (a 431 or
   413) may have its connection reset before the client reads the reply,
   since there's no lingering close yet.
+
+### (@include :agent)
+
+`lib/agent.slight`: a conversation with a model, as a process (D184). The
+model is ollama's `/api/chat`, over plain HTTP; the agent includes
+`:http` itself.
+
+    (@include :agent)
+
+    (let a (agent/new "http://localhost:11434" "llama3.2" ""))
+    (agent/say a "Why is the sky blue?")
+    ; the caller hears (:piece a text) ..., then (:answer a text)
+
+- `(agent/new url model system)` starts an agent and gives its pid. `url`
+  is the server's, `"http://host:port"`; `system` is the system prompt,
+  `""` for none.
+- `(agent/say a text)` asks `a` a question, and returns at once. The
+  caller is sent `(:piece a text)` for each piece of the answer as the
+  model streams it, then `(:answer a text)`, the whole answer. If the
+  turn fails, `(:error a reason)` comes in place of what hadn't come: the
+  reasons `http/stream` gives, such as `(:econnrefused "localhost:11434")`;
+  `(:http status message)` for a reply that isn't a 200, the message
+  being the server's (ollama's 404 says the model isn't there); or
+  `(:model message)` for an error in the middle of an answer.
+- The agent's state is the conversation, which goes to the model with
+  each question. A question and its answer join it once the answer is
+  whole, so a turn that fails leaves it as it was.
+- One turn at a time: a question asked while another is answered waits
+  for it, and its answer comes after.
+- `(kill a)` ends the agent, and stops an answer on its way.
+
+`examples/chat.slight` is a chat in the terminal, a line at a time, on
+`:keypress`: `chat [model] [url]`.

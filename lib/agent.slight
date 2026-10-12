@@ -1,0 +1,97 @@
+; An agent: a conversation with a model, as an actor (D184). Not part of
+; the prelude, so a program that wants it says (@include :agent).
+;
+;     (let a (agent/new "http://localhost:11434" "llama3.2" ""))
+;     (agent/say a "Why is the sky blue?")
+;     ; then (:piece a text) ... as the model streams, and (:answer a text);
+;     ; or (:error a reason) in their place
+;
+; The model is ollama's /api/chat, over plain HTTP: the whole conversation
+; goes with each turn, and the answer comes back as JSON lines, each with a
+; piece of it (http/stream, D181). The agent's state is the conversation;
+; a turn adds the question and its answer once the answer is whole, so one
+; that fails leaves the conversation as it was. A turn asked for while
+; another is answered waits for it. Killing the agent stops its answer.
+
+(@include :http)
+
+; An agent for model at url ("http://host:port"), its system prompt system
+; ("" for none). Gives its pid.
+(defun agent/new (url model system)
+    (fork (agent/idle (list url model) (if (eq? system "") () (list (agent/message "system" system))) ())))
+
+; Asks a for an answer to text, which comes to the caller.
+(defun agent/say (a text) (send a (list :say text $$)))
+
+; A message of the conversation, as /api/chat takes it.
+(defun agent/message (role content)
+    (list :object (list "role" role) (list "content" content)))
+
+; Between turns. history is the conversation so far, newest first; waiting
+; holds the turns asked for while one was answered, as (text from), oldest
+; first.
+(defun agent/idle (settings history waiting)
+    (match waiting
+        (()                   (recv ((:say text from) (agent/start settings history () text from))))
+        (((text from) & rest) (agent/start settings history rest text from))))
+
+; A turn runs in a process of its own, which ends with the answer or raises
+; why there's none. So its stream's messages never reach the agent, a fault
+; in reading them ends only the turn, and the agent hears how it went from
+; one monitor.
+(defun agent/start (settings history waiting text from)
+    (let a     $$)
+    (let asked (cons (agent/message "user" text) history))
+    (let turn  (fork (agent/turn settings (reverse asked) from a)))
+    (monitor turn)
+    (agent/busy settings asked history waiting from))
+
+(defun agent/busy (settings asked history waiting from)
+    (recv
+        ((:say text who) (agent/busy settings asked history (append waiting (list (list text who))) from))
+        ((:exit _ result)
+            (match result
+                ((:ok answer)
+                    (send from (list :answer $$ answer))
+                    (agent/idle settings (cons (agent/message "assistant" answer) asked) waiting))
+                ((:error reason)
+                    (send from (list :error $$ reason))
+                    (agent/idle settings history waiting))))))
+
+; The turn: the conversation goes to the model, and each piece of the answer
+; to from as it comes. It ends with the answer, or raises the reason: the
+; stream's, (:http status message) for a reply that isn't a 200, or (:model
+; message) for an error in the middle of one. If the agent ends, so does the
+; turn, and with it the stream (D182).
+(defun agent/turn (settings messages from a)
+    (monitor a)
+    (http/stream :post (concat (car settings) "/api/chat")
+        (list (list "Content-Type" "application/json"))
+        (json/print (list :object (list "model" (cadr settings)) (list "messages" messages) (list "stream" #true)))
+        :lines)
+    (agent/reading from a 200 ()))
+
+; parts is the answer so far, last first.
+(defun agent/reading (from a status parts)
+    (recv
+        ((:head _ st _)    (agent/reading from a st parts))
+        ((:line _ line)    (agent/line from a status parts line (json/parse line)))
+        ((:eof _)          (if (== status 200) (str-join "" (reverse parts)) (raise (list :http status ""))))
+        ((:error _ reason) (raise reason))
+        ((:exit _ _)       :agent-ended)))
+
+; A line of the reply: {"message": {"content": piece}, ...}, or {"error":
+; message}, as a 200's last line or the whole of a reply that isn't one.
+(defun agent/line (from a status parts line parsed)
+    (let fields  (match parsed ((:ok (:object & fields)) fields) (_ ())))
+    (let err     (lookup "error" fields))
+    (let message (lookup "message" fields))
+    (let piece   (match message ((:object & m) (lookup "content" m)) (_ :not-found)))
+    (cond
+        ((not (eq? err :not-found)) (raise (if (== status 200) (list :model err) (list :http status err))))
+        ((not (== status 200))      (raise (list :http status line)))
+        ((not (str? piece))         (agent/reading from a status parts))
+        ((== (str-len piece) 0)     (agent/reading from a status parts))
+        (#true
+            (send from (list :piece a piece))
+            (agent/reading from a status (cons piece parts)))))

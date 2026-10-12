@@ -2254,3 +2254,61 @@ dropped anyway.
   `demonitor` builtin, as Erlang has: a new builtin, and code that forgets
   to call it leaks. A supervisor in OTP's sense, written in slight (D3),
   waits till agents need one (step 15).
+
+**D184. A chat agent: a conversation as a process, on ollama's
+`/api/chat`.** *(User agreed to Claude's proposal, before `:exec`, "to
+get the agent working first just for a simple chat".)* Step 15's first
+point to settle (PLAN.md): what a turn and an answer look like as
+messages. `lib/agent.slight`, `(@include :agent)`, and
+`examples/chat.slight`.
+- **The model:** ollama's `/api/chat`: the conversation, as messages with
+  roles, sent whole with each turn, and the answer as chunked JSON lines
+  with a piece in each; so `http/stream` with `:lines`, `json/parse` on
+  each, and the request one `json/print`. Rejected for now: the
+  OpenAI-style `/v1/chat/completions`, which ollama, llama.cpp and LM
+  Studio serve too, but which streams server-sent events, left for hosted
+  models with TLS (D180); and `/api/generate`, whose `context` carries
+  the conversation where the program can't see it.
+- **The messages:** `(agent/new url model system)` gives the agent's pid;
+  `(agent/say a text)` sends it `(:say text from)`, and `from` hears
+  `(:piece a text)` as the model streams, then `(:answer a text)`, the
+  whole answer, or `(:error a reason)` in their place. A caller that
+  doesn't want the pieces waits for the `:answer`.
+- **The conversation is the agent's state.** A question and its answer
+  join it once the answer is whole, so a turn that fails leaves it as it
+  was, and asking again is clean.
+- **One turn at a time:** a `:say` that comes while an answer is on its
+  way waits in the agent's state, oldest first. Rejected: answering
+  `(:busy a)`, which every caller would have to handle.
+- **A turn is a process of its own,** the stream's caller. It sends the
+  pieces, and ends with the answer or raises why there's none; the agent
+  monitors it, and hears how it went in one `(:exit ...)`. So the stream's
+  messages never reach the agent, and a turn stopped early leaves none
+  behind in its mailbox (after a kill, a stream's last message can still
+  be on its way, D182); and a fault reading a reply ends just the turn.
+  The turn monitors the agent, so killing the agent ends the turn, and
+  with it the stream (D182). Rejected: the agent as the stream's caller,
+  which would have to drop an old stream's messages in every state.
+- **Errors:** the stream's reasons; `(:http status message)` for a reply
+  that isn't a 200, with ollama's `{"error": ...}` or else the body's
+  first line; `(:model message)` for an error line in a 200. A line that's
+  neither a piece nor an error is skipped.
+- **The chat** reads keys with `:keypress` and edits a line in slight
+  (D29), since reading the terminal as a file would hold up the whole
+  runtime (D130). The keyboard's process is the agent's caller, so pieces
+  and keys come to one `recv`; keys typed during an answer wait for it.
+  The model and the URL come from `@ARGV` till the environment can be
+  read. Like `top`, it isn't a golden test: it needs a model.
+- **Checked:** golden test 224, against a fake ollama in the program (the
+  history in order, pieces before the answer, two questions at once, an
+  error in the middle of an answer, a 404, a refused connection, and a
+  kill in the middle of an answer that closes the connection), also under
+  `SLIGHT_SCHED` seeds and `SLIGHT_GC_STRESS`. The chat by hand, on both
+  targets, against a Python stand-in for `/api/chat` that checks what it's
+  sent, with keys piped and in a pseudo-terminal (raw mode on while it
+  runs and off after, Backspace, keys typed during an answer). Not yet
+  against a real ollama: this environment can't fetch a model.
+- **Left for later:** tools (and `:exec`), stopping an answer without
+  ending the agent, saving a conversation, agents talking to each other,
+  the model's options (temperature, the context's length), and the
+  figures on the last line (tokens, time).

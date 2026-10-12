@@ -84,13 +84,15 @@ the program's arguments. Every test passes on both targets, on Linux and
 on macOS. A million processes passing a message down a chain take a few
 seconds.
 
-Next is the rest of the groundwork HTTP needs (step 12; reading a
-device in chunks, by length, and as JSON, s-expressions or source is
-done, and so are JSON and s-expressions in C, doc blocks, collecting
-outside `recv`, and looking up host names without stalling the runtime):
-C libraries and TLS. `recv` can go anywhere a tail call could (13).
-Then HTTP, written in slight on top of TCP (14).
-Self-hosting waits until the language settles.
+Steps 12 to 14 are done too, but for C libraries and TLS: reading a
+device in chunks, by length, and as JSON, s-expressions or source; JSON
+and s-expressions in C; `recv` anywhere a tail call could go; and HTTP,
+a server and a client written in slight on top of TCP. Step 15, agents,
+has begun with a local model over plain HTTP: a reply's body streamed
+to its caller as messages, and an agent that holds a conversation with
+ollama (`examples/chat.slight`). Next is `:exec`, for tools, then TLS
+when a hosted model is wanted. Self-hosting waits until the language
+settles.
 
 ## Documents
 

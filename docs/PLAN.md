@@ -537,10 +537,13 @@ in: chat, person to agent and agent to agent, written as actors. Begun
 before TLS (D180), with a local model over plain HTTP. What it needs
 first, in order: HTTP bodies streamed to the caller as they arrive,
 `http/stream`, its pieces as messages (D181; done, D182, golden tests
-217–221; and a monitor now goes when its watcher ends, D183); next,
-`:exec` (below); and reading the environment, for a model's address or
-a key (a builtin, to propose). Then, for a hosted model: TLS (12c), and
-a reader of server-sent events.
+217–221; and a monitor now goes when its watcher ends, D183); then,
+before `:exec`, a chat: an agent whose state is the conversation, on
+ollama's `/api/chat`, and a terminal to talk to it (D184, golden test
+224, `examples/chat.slight`; done). Next, `:exec` (below); and reading
+the environment, for a model's address or a key (a builtin, to
+propose). Then, for a hosted model: TLS (12c), and a reader of
+server-sent events.
 
 - An agent is an actor whose state is its context: the conversation so
   far, its tools, its model's settings. A turn comes in as a message,
@@ -567,10 +570,10 @@ a reader of server-sent events.
   list of arguments, with no shell unless asked for (`(list "sh" "-c"
   cmd)`), so nothing is quoted wrongly.
 
-To settle when it starts: what a turn and an answer look like as
-messages; how a tool says what it takes; how streamed output arrives;
-how `:exec` gives stderr and takes stdin, and when the child is
-reaped; and what limits a tool runs under.
+Settled by the chat (D184): what a turn and an answer look like as
+messages, and how streamed output arrives. Still to settle: how a tool
+says what it takes; how `:exec` gives stderr and takes stdin, and when
+the child is reaped; and what limits a tool runs under.
 
 ### 16. As needed
 

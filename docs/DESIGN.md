@@ -393,6 +393,13 @@ each a process, and `ask` and `reply` for one's own. Writes are sends;
 it, raising `(:ended pid result)` if the structure ends first. Opt-in:
 `(@include :ds)`.
 
+**An agent in slight:** `lib/agent.slight` (D184) is a conversation with a
+model as a process, on ollama's `/api/chat` over `http/stream`. Its state
+is the conversation; `(agent/say a text)` is a turn, and the caller hears
+the answer's pieces as they come, then the whole answer, or an error.
+Each turn runs in a process of its own, which the agent monitors.
+Opt-in: `(@include :agent)`.
+
 ### Strings
 
 - **Level 1:** immutable byte strings. The byte builtins index by byte;
