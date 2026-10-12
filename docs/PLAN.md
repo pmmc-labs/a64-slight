@@ -573,7 +573,9 @@ server-sent events.
 Settled by the chat (D184): what a turn and an answer look like as
 messages, and how streamed output arrives. Still to settle: how a tool
 says what it takes; how `:exec` gives stderr and takes stdin, and when
-the child is reaped; and what limits a tool runs under.
+the child is reaped; what its last message is called, since `(:exit p
+status)` has the shape of `monitor`'s `(:exit pid result)`; and what
+limits a tool runs under.
 
 ### 16. As needed
 
