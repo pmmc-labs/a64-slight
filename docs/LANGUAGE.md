@@ -616,7 +616,9 @@ The fault kinds:
 - `(monitor pid)` asks to be told when `pid` ends: the caller is sent
   `(:exit pid result)` then, or at once if it already has. Monitoring
   twice means two messages. Nothing is sent to a parent unless it asks.
-  Returns `()`.
+  Returns `()`. A monitor lasts while both processes do: if the caller
+  ends first, its monitor goes with it, so short-lived processes can
+  monitor a long-lived one as often as they like, as `ask`'s boxes do.
 - `(kill pid)` ends `pid`, wherever it is: running, waiting in `recv` or
   `join`, or asleep. `(kill $$)` ends the caller. Killing a process that
   has ended does nothing. Returns `()`.

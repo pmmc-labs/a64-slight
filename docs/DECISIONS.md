@@ -2195,8 +2195,8 @@ the code.)*
 - **A caller that ends first** has its stream killed, as a device closes
   when its owner ends; otherwise a stream nobody reads would keep the
   program running (open sockets do) till the server finished. The watcher
-  monitors the caller for this, a record the caller keeps till it ends: a
-  few bytes a stream, since there's no way to take a monitor back.
+  monitors the caller for this; that monitor goes when the watcher does
+  (D183).
 - **A `how`** other than `:lines` or `:chunks` faults (`:no-match`) in the
   caller, at the call, rather than in the stream later.
 - **One set of readers:** the head, the framing and the body's readers are
@@ -2215,3 +2215,42 @@ the code.)*
   where the reads fall (lines; chunks joined), since macOS's loopback can
   deliver a piece after the virtual clock has moved past the next. Run
   under `SLIGHT_SCHED` seeds and `SLIGHT_GC_STRESS` too.
+
+**D183. A monitor goes when either process ends.** *(User chose it from
+three, Claude's recommendation, after asking whether a supervisor could
+handle `http/stream`'s monitors.)* A monitor stayed on the watched
+process's list till that process ended, even after its watcher had, and
+`monitor` walked the list to add to its end. `ask`'s box monitors the
+structure it asks and ends with the answer, so every ask left a monitor
+on a structure that may live as long as the program, and the next ask
+walked them all: 80,000 asks to one cell took 71 seconds on the cloud
+machine, and 0.07 with a box that didn't monitor. (`http/stream`'s
+watcher left one on its caller the same way, a stream at a time.) Now a
+monitor is on two lists, the watched process's, in the order they asked
+(D101), with its last kept so adding is one step, and the watcher's; a
+process that ends takes its monitors off both, telling those that
+watched it, as before. 80,000 asks take 0.10 seconds, and a million 1.2.
+A program sees no change: a notice to a process that had ended was
+dropped anyway.
+- **A process that monitors itself** isn't told of its own end. The
+  notice went with its mail anyway; but if it was killed while it waited
+  in `recv`, delivering the notice put it back on the run queue as it was
+  freed, which valgrind showed as reads and writes of freed memory. Found
+  while doing this.
+- **Cost:** a monitor is 48 bytes where it was 16, but lives only while
+  both processes do; a process struct gains two pointers.
+- **Tests:** 222, watchers that end from the front, the middle and the
+  end of a list, one with two monitors on it and one with monitors on two
+  processes, then a monitor added after them, and a process that
+  monitors itself, killed; 223, 100,000 asks to one cell, which the old
+  runtime is killed over, even on x86-64 natively. Under
+  `SLIGHT_GC_STRESS`, which collects at every `recv`, 223 needs an n of
+  about 1,000 to finish in time (22 seconds under qemu). Valgrind is clean
+  on every golden test that monitors, asks, or uses HTTP.
+- **Rejected:** a supervisor process for all of `http/stream`'s monitors.
+  slight has no process names, so every caller would be handed its pid,
+  or the runtime would need a registry; it would be one point of failure
+  for every stream; and it would fix the streams and not `ask`. A
+  `demonitor` builtin, as Erlang has: a new builtin, and code that forgets
+  to call it leaks. A supervisor in OTP's sense, written in slight (D3),
+  waits till agents need one (step 15).

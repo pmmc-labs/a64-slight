@@ -679,6 +679,15 @@ static void notify(rt_value_t to, rt_value_t pid, const entry_t *e) {
     deliver(w, new_msg(rt_cons_at(cells + 4, rt_symbol(RT_SYM_EXIT), rt_cons_at(cells + 6, pid, rt_cons_at(cells + 8, result, RT_NIL)))));
 }
 
+// Takes w off both its lists, and frees it.
+static void unwatch(rt_watch_t *w) {
+    if (w->prev)      w->prev->next           = w->next;      else w->watched->watchers     = w->next;
+    if (w->next)      w->next->prev           = w->prev;      else w->watched->last_watcher = w->prev;
+    if (w->prev_held) w->prev_held->next_held = w->next_held; else w->watcher->watching     = w->next_held;
+    if (w->next_held) w->next_held->prev_held = w->prev_held;
+    free(w);
+}
+
 // p ends. Its result goes into its exit record, its joiners wake, its
 // monitors hear, and its heap and mail are freed. Its stack and struct are
 // the caller's to free (retire), since p may be running on that stack.
@@ -701,11 +710,17 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
         next = j->next_joiner;
         enqueue(j);
     }
-    for (rt_watch_t *w = p->watchers, *next; w; w = next) {
-        next = w->next;
-        notify(w->pid, p->pid, e);
-        free(w);
+    while (p->watchers) {
+        // Not p itself: its notice would be dropped with its mail, and if
+        // it was killed waiting in recv, it would go back on the run queue
+        // as it's freed.
+        if (p->watchers->watcher != p) notify(p->watchers->watcher->pid, p->pid, e);
+        unwatch(p->watchers);
     }
+    // The monitors p set go too. Their notices would be dropped, and kept,
+    // they'd pile up on a process that lives long: each ask's box left one
+    // on the structure it asked, and each monitor walked them all (D183).
+    while (p->watching) unwatch(p->watching);
     free_heap(p);
     if (p->keypress) disconnect(p);
     close_all(p);
@@ -762,12 +777,14 @@ rt_value_t rt_monitor(rt_value_t pid, const char *site) {
         notify(rt_current->pid, pid, e);
         return RT_NIL;
     }
+    rt_proc_t  *t = e->proc, *me = rt_current;
     rt_watch_t *w = rt_must(malloc(sizeof *w));
-    w->next = NULL;
-    w->pid  = rt_current->pid;
-    rt_watch_t **link = &e->proc->watchers;
-    while (*link) link = &(*link)->next;
-    *link = w;
+    *w = (rt_watch_t){ .prev = t->last_watcher, .next_held = me->watching, .watched = t, .watcher = me };
+    if (t->last_watcher) t->last_watcher->next = w;
+    else                 t->watchers           = w;
+    t->last_watcher = w;
+    if (me->watching) me->watching->prev_held = w;
+    me->watching = w;
     return RT_NIL;
 }
 

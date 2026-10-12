@@ -624,7 +624,8 @@ Lalloc_N:
   queue it to run the entry function.
 - Ending: the Result is copied into a small per-pid **exit record**.
   Processes blocked in `join` on it wake with a copy; later `join`s read
-  the record; monitors get `(:exit pid result)`. Then the heap, the
+  the record; monitors get `(:exit pid result)`, and the monitors it set
+  on others are taken off their lists (D183). Then the heap, the
   mailbox, the stack and the process struct are freed (D102). Nothing
   on a stack needs cleaning up, so `kill` frees a process wherever it is
   (D103).

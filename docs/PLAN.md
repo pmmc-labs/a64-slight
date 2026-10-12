@@ -537,9 +537,10 @@ in: chat, person to agent and agent to agent, written as actors. Begun
 before TLS (D180), with a local model over plain HTTP. What it needs
 first, in order: HTTP bodies streamed to the caller as they arrive,
 `http/stream`, its pieces as messages (D181; done, D182, golden tests
-217–221); next, `:exec` (below); and reading the environment, for a
-model's address or a key (a builtin, to propose). Then, for a hosted
-model: TLS (12c), and a reader of server-sent events.
+217–221; and a monitor now goes when its watcher ends, D183); next,
+`:exec` (below); and reading the environment, for a model's address or
+a key (a builtin, to propose). Then, for a hosted model: TLS (12c), and
+a reader of server-sent events.
 
 - An agent is an actor whose state is its context: the conversation so
   far, its tools, its model's settings. A turn comes in as a message,

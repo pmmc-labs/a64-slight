@@ -312,10 +312,13 @@ typedef struct rt_msg {
 // stack, until its timer wakes it. DONE: ended, about to be freed.
 typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_SLEEPING, RT_DONE } rt_state_t;
 
-// Someone to tell when a process ends: monitor's list.
+// One monitor: someone to tell when a process ends. It's on the watched
+// process's list, in the order they asked, and on the watcher's, so that
+// whichever ends first takes it off both (D183).
 typedef struct rt_watch {
-    struct rt_watch *next;
-    rt_value_t       pid;
+    struct rt_watch *next, *prev;           // on the watched one's list
+    struct rt_watch *next_held, *prev_held; // on the watcher's
+    struct rt_proc  *watched, *watcher;
 } rt_watch_t;
 
 // A process. Compiled code finds the current one in x28 (r15 on x86-64),
@@ -342,7 +345,8 @@ typedef struct rt_proc {
     struct rt_proc *joiners;    // blocked in join on this one, in the order they joined
     struct rt_proc *next_joiner;
     rt_value_t      joining;    // while JOINING: whom
-    rt_watch_t     *watchers;   // monitoring this one, in order
+    rt_watch_t     *watchers, *last_watcher; // monitoring this one, in order
+    rt_watch_t     *watching;   // the monitors it has set on processes still running
     int             keypress;   // connected to :keypress
     struct rt_device *devices;  // the files it has open (process.c)
     rt_value_t      reading;    // the reader whose message it took last, to read on at its next recv; or 0

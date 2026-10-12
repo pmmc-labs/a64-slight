@@ -1,0 +1,67 @@
+; A monitor goes when its watcher ends first (D183). Watchers a to g
+; monitor t, c twice, and g monitors u too; then a and e stop, and c and
+; g are killed, from the front, the middle and the end of t's list. f
+; monitors t after that, at the end of what's left. When t is killed,
+; the watchers still running hear, in the order they asked, so they wake
+; and report in that order: b, d, f (on the run queue's own order; under
+; SLIGHT_SCHED they report in any order, as in t/126). When u is killed,
+; nobody hears, g having ended. And a process that monitors itself and is
+; killed while it waits ends as any other does.
+
+; Monitors each of targets, tells start it has, and then tells told what
+; it hears, till it's told to stop.
+(defun watcher (name targets told start)
+    (map monitor targets)
+    (send start :ready)
+    (listening name told))
+
+(defun listening (name told)
+    (recv
+        ((:exit _ result) (send told (list :heard name result)) (listening name told))
+        (:stop            :stopped)))
+
+; A watcher, once it has set its monitors.
+(defun started (name targets told)
+    (cadr (join (fork (start name targets told)))))
+
+(defun start (name targets told)
+    (let me $$)
+    (let w  (fork (watcher name targets told me)))
+    (recv (:ready w)))
+
+(defun server () (recv (_ (server))))
+
+(defun self-watch ()
+    (monitor $$)
+    (recv (_ :never)))
+
+(defun heard (acc)
+    (recv
+        (:quiet (reverse (cons :quiet acc)))
+        (m      (heard (cons m acc)))))
+
+(defun main ()
+    (let me (fork (heard ())))
+    (let t  (fork (server)))
+    (let u  (fork (server)))
+    (let a  (started :a (list t) me))
+    (let b  (started :b (list t) me))
+    (let c  (started :c (list t t) me))
+    (let d  (started :d (list t) me))
+    (let e  (started :e (list t) me))
+    (let g  (started :g (list u t) me))
+    (send a :stop)
+    (send e :stop)
+    (kill c)
+    (kill g)
+    (let ended (list (list :a (join a)) (list :c (join c)) (list :e (join e)) (list :g (join g))))
+    (let f  (started :f (list t) me))
+    (let s  (fork (self-watch)))
+    (yield (kill s))
+    (kill t)
+    (kill u)
+    (after 10 me :quiet)
+    (list ended (join s) (cadr (join me))))
+
+(map pprint (main))
+:done

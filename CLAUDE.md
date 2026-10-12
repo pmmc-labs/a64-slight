@@ -88,13 +88,14 @@ where `recv` can go (D167); and step 14, HTTP (D172–D174), on plain `:tcp`
 as `lib/http.slight`, a server and a client, golden tests 204–213. Step
 15, agents, has begun, before TLS, with a local model over plain HTTP
 (D180): a reply's body comes to its caller as it arrives, in messages,
-`http/stream` (D181, D182, golden tests 217–221). **Next: `:exec`**,
-then reading the environment; then chat as actors and tools as messages.
-12c (C libraries vendored as source, D151, D152, then TLS, which HTTPS
-needs: `https://` is `:no-tls` till then) comes with the first hosted
-model. Each has points to settle with Stevan first (`docs/PLAN.md`).
-Self-hosting waits till the language settles (17). Update this section as
-steps land.
+`http/stream` (D181, D182, golden tests 217–221), and a monitor goes
+when either process ends, so asks don't pile up on a structure (D183).
+**Next: `:exec`**, then reading the environment; then chat as actors and
+tools as messages. 12c (C libraries vendored as source, D151, D152, then
+TLS, which HTTPS needs: `https://` is `:no-tls` till then) comes with the
+first hosted model. Each has points to settle with Stevan first
+(`docs/PLAN.md`). Self-hosting waits till the language settles (17).
+Update this section as steps land.
 
 ## Read first, in this order
 
