@@ -5,7 +5,9 @@
 # and +, -, *, / and sqrt round the same everywhere; D76). Which order the
 # birds' messages come in doesn't matter, since each bird sums over the
 # others by id. The screen is 24 by 80, as it is when stdout isn't a
-# terminal. The root's value comes last.
+# terminal. On the virtual clock a tick takes just the 100 ms the birds
+# sleep, which the display can say from its third frame on, once it has
+# had the clock after two. The root's value comes last.
 #
 #     python3 t/models/boids.py 30 4 8 > examples/boids.expected
 import sys
@@ -89,7 +91,7 @@ for tick in range(frames):
         grid[floor(y / 2) % (h // 2)][floor(x) % w] = arrow(v)
     edge = '+' + '-' * w + '+'
     out += [edge] + ['|' + ''.join(row) + '|' for row in grid] + [edge]
-    out.append(f'tick {tick}, {n} birds')
+    out.append(f'tick {tick}, {n} birds' + (', 100 ms a tick' if tick >= 2 else ''))
     flock = [steer(i, flock) for i in range(n)]
 out.append(f'"{frames} frames"')
 print('\n'.join(out))

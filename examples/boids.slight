@@ -12,18 +12,27 @@
 ;     ./boids 60                                   (60 birds)
 ;     SLIGHT_CLOCK=virtual ./boids 12 4 </dev/null (four frames, at once)
 ;
-; There's no one place where the flock is. Each bird, and the display,
-; has a round: a process that collects what every bird says on a tick,
-; and hands it over all at once, in the order of the birds' ids. Each
-; tick, every bird tells every round where it is and how it's going; when
-; its own round hands it the tick, it works out its next move, sleeps a
-; tick, and tells them again. The display draws each tick its round hands
-; it. So the waiting for a whole tick, and for what comes early from a
-; bird already on the next, is written once, in the round; and since the
-; rounds are there before any bird is told who's in the flock, nothing a
-; bird says can come too soon. A bird sums over the others in the order
-; of their ids, so where they go doesn't depend on the order the messages
-; came in: any SLIGHT_SCHED gives the same flight.
+; There's no one place where the flock is. Each tick, every bird tells
+; the display and every other bird where it is and how it's going; works
+; out its next move from what it heard; sleeps a tick; and tells them
+; again. A bird that has heard all of a tick can be on the next while
+; another is still waiting for part of it, from a bird that hasn't
+; finished telling everyone. The sleep makes that rare, but not
+; impossible (with no sleep, and SLIGHT_SCHED, it happens all the time).
+; So a bird keeps what comes early for the next tick. Nothing comes from
+; two ticks on, which would need this bird's next tick. What it heard is
+; a list of (id state), which it sorts by id once it has the whole tick,
+; and it sums over the birds in that order, so where they go doesn't
+; depend on the order the messages came in: any SLIGHT_SCHED gives the
+; same flight.
+;
+; The display draws a tick once it has heard from every bird. It never
+; hears of the next tick before it has all of this one: every bird tells
+; the display first, so the last of a tick's messages to it is sent before
+; any bird can have heard all of that tick. Below the sky it says how long
+; a tick takes, from the :system device's clock (slight has no other way
+; to read one): on the virtual clock, the 100 ms the birds sleep; on a
+; real one, that and the flock's work.
 ;
 ; Space is in columns: a column is 1 wide and a row 2 high, about as a
 ; terminal's cells are, so the flock isn't stretched. The expected output
@@ -67,11 +76,11 @@
 
 ; A bird is ((x y) (vx vy)).
 
-; The others bird me sees, from what the flock said, ((id state) ...) in
-; the order of the ids: each as (offset velocity distance²), the offset
-; being the shortest way to it round the sky.
-(defun in-sight (me state heard sky)
-    (match (list state sky)
+; The others bird me sees, from what it heard of the flock, ((id state)
+; ...) in the order of the ids: each as (offset velocity distance²), the
+; offset being the shortest way to it round the sky.
+(defun in-sight (me heard sky)
+    (match (list (lookup me heard) sky)
         ((((x y) _) (w h))
             (let seen (map
                 (lambda (said)
@@ -100,77 +109,89 @@
         ((and (< speed (min-speed)) (> speed 0))  (v* v (/ (min-speed) speed)))
         (#true                                    v)))
 
-; Where bird me goes next, from what the flock said.
-(defun steer (me state heard sky)
-    (let others (in-sight me state heard sky))
-    (match (list state sky)
+; Where bird me goes next, from what it heard of the flock.
+(defun steer (me heard sky)
+    (let others (in-sight me heard sky))
+    (match (list (lookup me heard) sky)
         ((((x y) v) (w h))
             (let v2 (limit (if (nil? others)
                 v
                 (v+ v (v+ (cohesion others) (v+ (alignment others v) (separation others)))))))
             (list (list (around (+ x (car v2)) w) (around (+ y (cadr v2)) h)) v2))))
 
-; --- a round ------------------------------------------------------------------
-
-; What all n birds said on a tick (round-up, since round is a builtin's
-; name). It takes (:at tick id value) from any of them, and once it has
-; one from each, sends its owner (:round tick heard), heard being
-; ((id value) ...) in the order of the ids, and goes on to the next tick.
-; A bird that has its own round's tick can be on the next while this
-; round still waits for part of it, from a bird that hasn't finished
-; telling everyone, so it keeps what comes early. Nothing comes from two
-; ticks on: a bird tells every round all of a tick before it can hear all
-; of it, so every message of a tick is sent before any of the tick after
-; the next. (The cond with no other clause says so: it faults if one
-; came.)
-(defun round-up (n owner tick heard count early)
-    (cond
-        ((== count n)
-            (send owner (list :round tick (sort-by car heard)))
-            (round-up n owner (inc tick) early (length early) ()))
-        (#true
-            (recv
-                ((:at at id value)
-                    (cond
-                        ((== at tick)       (round-up n owner tick (cons (list id value) heard) (inc count) early))
-                        ((== at (inc tick)) (round-up n owner tick heard count (cons (list id value) early)))))))))
-
 ; --- a bird -------------------------------------------------------------------
 
-; It waits to hear the rounds (its own, every other bird's, and the
-; display's), tells them where it starts, and flies.
-(defun bird (me state sky)
+; It waits to hear who's in the flock (every bird's pid, its own
+; included), then flies, knowing #(me others shown sky n): its id, the
+; other birds, the display, the sky, and how many birds there are. The
+; root may not have told every bird before the first it told has told it
+; where it is, so it keeps that for tick 0. (None can be on tick 1 yet:
+; that needs this bird's tick 0.)
+(defun bird (me state sky shown early)
     (recv
-        ((:flock rounds)
-            (tell rounds 0 me state)
-            (fly me state sky rounds))))
+        ((:flock flock)
+            (let others (remove (lambda (b) (eq? b $$)) flock))
+            (fly (tuple me others shown sky (length flock)) 0 state early))
+        ((:at 0 id s)
+            (bird me state sky shown (cons (list id s) early)))))
 
-; Each time its round hands it a tick, it steers by what the flock said,
-; sleeps a tick, and tells the rounds where it is on the next.
-(defun fly (me state sky rounds)
-    (recv
-        ((:round tick heard)
-            (let next (steer me state heard sky))
-            (sleep (tick-ms))
-            (tell rounds (inc tick) me next)
-            (fly me next sky rounds))))
+; Tells the display and the rest of the flock where it is on this tick,
+; and listens, with what came early.
+(defun fly (ctx tick state early)
+    (match ctx
+        (#(me others shown sky n)
+            (let msg (list :at tick me state))
+            (send shown msg)
+            (map (lambda (b) (send b msg)) others)
+            (listen ctx tick (cons (list me state) early) (+ 1 (length early)) ()))))
 
-(defun tell (rounds tick me state)
-    (let msg (list :at tick me state))
-    (map (lambda (r) (send r msg)) rounds))
+; Listens till it has heard from every bird on this tick, keeping what
+; comes from the next; then steers, sleeps a tick, and flies on.
+(defun listen (ctx tick heard count early)
+    (match ctx
+        (#(me others shown sky n)
+            (cond
+                ((== count n)
+                    (let next (steer me (sort-by car heard) sky))
+                    (sleep (tick-ms))
+                    (fly ctx (inc tick) next early))
+                (#true
+                    (recv
+                        ((:at at id state)
+                            (cond
+                                ((== at tick)       (listen ctx tick (cons (list id state) heard) (inc count) early))
+                                ((== at (inc tick)) (listen ctx tick heard count (cons (list id state) early)))))))))))
 
 ; --- the display --------------------------------------------------------------
 
-; Draws each tick its round hands it, till it has drawn frames of them,
-; or forever if frames isn't above 0, or till q. Gives how many it drew.
-(defun display (sky frames drawn)
+; It's connected to the :system device, s, and knows #(n sky frames s).
+(defun display-on (n sky frames)
     (recv
-        ((:round tick heard)
-            (draw sky frames tick (map cadr heard))
-            (if (== (inc drawn) frames)
-                frames
-                (display sky frames (inc drawn))))
-        (:quit drawn)))
+        ((:open s) (display (tuple n sky frames s) 0 () 0 () ()))))
+
+; Draws each tick once it has heard from all n birds, till it has drawn
+; frames of them, or forever if frames isn't above 0, or till q. Gives
+; how many it drew. After each it asks the clock: last is the time it
+; said after the tick before, and took how long that tick took (() till
+; there are two).
+(defun display (ctx tick heard count last took)
+    (match ctx
+        (#(n sky frames s)
+            (cond
+                ((== count n)
+                    (draw sky frames tick took (map cadr (sort-by car heard)))
+                    (send s (list :runtime))
+                    (if (== (inc tick) frames)
+                        frames
+                        (display ctx (inc tick) () 0 last took)))
+                (#true
+                    (recv
+                        ((:at at id state)
+                            (cond ((== at tick) (display ctx tick (cons (list id state) heard) (inc count) last took))))
+                        ((:runtime _ info)
+                            (let now (lookup :clock info))
+                            (display ctx tick heard count now (if (nil? last) () (- now last))))
+                        (:quit tick)))))))
 
 ; Which way it's going: one of eight arrows. 0.41421356 is tan 22.5°,
 ; halfway between an axis and a diagonal.
@@ -195,7 +216,7 @@
 
 ; Each frame redraws the whole screen from the top left, or, when there's
 ; a number of frames, goes under the one before.
-(defun draw (sky frames tick birds)
+(defun draw (sky frames tick took birds)
     (match sky
         ((w h)
             (let live (< frames 1))
@@ -207,6 +228,7 @@
                 (str-join "" (map (lambda (row) (concat "|" (str-join "" (tuple->list row)) "|\n")) (tuple->list grid)))
                 edge
                 "tick " tick ", " (length birds) " birds"
+                (if (nil? took) "" (concat ", " took " ms a tick"))
                 (if live ", q quits" "\n")))))
 
 (defun keys (shown)
@@ -252,16 +274,15 @@
 (let states (hatch n sky (arg 2 args 2026) ()))
 
 (when (< frames 1) (tty/write \e "[?25l" \e "[2J"))
-(let shown (fork (display sky frames 0)))
+(let shown (connect :system (display-on n sky frames)))
 (let birds (map
-    (lambda (b) (match b ((i state) (fork (bird i state sky)))))
+    (lambda (b) (match b ((i state) (fork (bird i state sky shown ())))))
     (zip (range 0 n) states)))
-(let rounds (map (lambda (owner) (fork (round-up n owner 0 () 0 ()))) (cons shown birds)))
-(map (lambda (b) (send b (list :flock rounds))) birds)
+(map (lambda (b) (send b (list :flock birds))) birds)
 (let keyboard (connect :keypress (keys shown)))
 
 (let drawn (join shown))
-(map kill (cons keyboard (append birds rounds)))
+(map kill (cons keyboard birds))
 (when (< frames 1) (tty/write \e "[?25h\n"))
 (match drawn
     ((:ok k) (concat k " frames")))
