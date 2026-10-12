@@ -58,8 +58,10 @@ once); `@ARGV`, the program's arguments, is the top level's parameter
 `cond` (`compiler/src/expand.ts`, a pass between the reader and the
 compiler). `match` and `recv` share patterns that nest, with literals
 anywhere and `&` for the rest of a list (`compiler/src/pattern.ts`,
-D168), and `#(p ...)` for a tuple, which is only ever a pattern (D176). Tuples: immutable, fixed in size, an element in one step,
-printed `#(1 2)` (`runtime/tuples.c`, D169). A run can be recorded and
+D168), and `#(p ...)` for a tuple, which is only ever a pattern (D176),
+compiled inline (D178). A message is copied in one walk, into a chunk
+that holds its record too, so a send is one malloc (D177).
+Tuples: immutable, fixed in size, an element in one step, printed `#(1 2)` (`runtime/tuples.c`, D169). A run can be recorded and
 replayed exactly (`SLIGHT_RECORD`, `SLIGHT_REPLAY`: everything from the
 world goes through `runtime/replay.c`), and tried under seeded orders
 (`SLIGHT_SCHED`) (D170). `connect :system` opens a device that tells

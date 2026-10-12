@@ -2092,3 +2092,27 @@ value rather than a test, it's the builtins' `tuple?` and `tuple/len`.
 against `rt.h`. Boids with 250 birds: 5.9 per cent fewer instructions.
 Rejected: inlining `tuple/get` everywhere, which would need its index
 and bounds checks inline too, for calls where the index isn't known.
+
+**D179. What the boids example settled, besides D175–D178.**
+- **Birds talk to birds.** *(User: "The first version was a nicer example
+  for slight than this round version.")* Each bird tells every other
+  where it is, collects the tick itself, and keeps what comes early, by
+  hand. A version with a round-up process for each bird and the display
+  (a join object: the waiting written once, the race at tick 0 gone,
+  four parameters a bird) was tried and taken back; it also cost 1.2 to
+  1.6 times as much, each state copied twice.
+- **Libraries held off.** *(User.)* A grid (rows of a tuple of tuples,
+  which `game-of-life-actors` and boids each write) and `lib/random`
+  (Park and Miller's generator, which stays inside 63 bits with no bit
+  operations) wait till more programs want them.
+- **Floats stay floats.** *(User, on Claude's recommendation.)* Fixed-point
+  boids would be faster (no float boxes in messages, integer arithmetic
+  inline) but would trade the steering's clarity for it, and hide a cost
+  that belongs to every program using floats; a numerical vector type
+  would make storing floats cheap but reading one costs a box, and it
+  pays only with numpy-style operations on whole arrays. If float speed
+  is wanted, it's the representation's to fix (PLAN.md, "Later"), with
+  boids as the benchmark.
+- **The flock stays all-to-all.** *(User: "keep the birds as actors and
+  skip spatial stuff".)* n² messages a tick; BACKGROUND.md has why
+  locality is hard for actors, and the way through that keeps them.

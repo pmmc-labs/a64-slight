@@ -517,6 +517,40 @@ Sources: [stack switching](https://github.com/WebAssembly/stack-switching),
 [state of WebAssembly 2024–2025](https://platform.uno/blog/state-of-webassembly-2024-2025/),
 [tail calls (Leaning Technologies)](https://labs.leaningtech.com/blog/extreme-webassembly-2-the-sad-state-of-webassembly-tail-calls).
 
+### Actor simulations and locality (from the boids example, Oct 2026)
+
+Boids has every bird tell every other where it is, each tick: n²
+messages, each a copy. Locality (a bird hearing only from those near it)
+would send fewer, but all-to-all gives four things for nothing, and
+locality takes them away:
+
+- **A known count.** Each bird hears from all n each tick, so "I have the
+  tick" is a count. Who's near changes every tick, and a bird that
+  doesn't know how many to wait for either waits forever or goes on with
+  what came, which depends on timing.
+- **Lockstep.** Each depends on all, so none gets more than a tick ahead,
+  and one list of what came early is enough. If a bird waits only for
+  its neighbours, neighbours stay within a tick, but far parts of the
+  sky drift apart, and whatever watches the whole sky (the display) must
+  keep several ticks, keyed by tick; with no selective receive, by hand.
+- **Membership.** A bird moving from one region to the next must count in
+  exactly one of them each tick, so the handoff has to go by a path that
+  region already counts.
+- **Who's an actor.** Regions owning birds as data (as parallel physics
+  codes do: each region swaps its border with eight neighbours, a known
+  count) scale, but the birds stop being processes; birds as processes
+  relayed by regions is two hops and changing membership at once.
+
+And empty sky costs, with regions as processes, and boids clump, which
+takes back what locality saves: in the model, 250 birds on a 233 by 94
+sky had about 3 others within sight each at the start, and 42 by tick
+400. The way through that keeps birds as actors is a neighbour list with
+a margin (molecular dynamics' Verlet lists): every k ticks an
+all-to-all tick, from which each bird lists those within sight plus 2k
+(the most two can close in k ticks), and between them it sends to and
+waits for just its list: a known count, the same flight, and about half
+as many messages at 250 birds once the flock has formed.
+
 ## C libraries (looked at Oct 2026)
 
 What led to D151–D155, for when it comes up again.
@@ -602,3 +636,15 @@ Minefield") is the conformance test: its `y_` files must parse, its
   `time_limit`), from Crockford's Parseq and Pronto; readable patterns in
   place of regexes. slight's runtime could carry Misty's processes,
   heaps, timers and devices much as they are, but not its values.
+- **The join calculus** (Fournet and Gonthier, 1996; JoCaml, Polyphonic
+  C#'s chords, Scala Joins, JErlang; talked over Oct 2026). Channels
+  where slight has mailboxes, and a reaction that fires when a message
+  waits on each channel of its pattern, taking them all at once; a
+  message no pattern takes yet waits; state is a message on a private
+  channel. Good at what actors find awkward: barriers, buffers, taking
+  two resources together. Not for slight's core: messages that wait are
+  selective receive, which D8 removed; patterns on values (a tick equal
+  to mine) need guards; slight's world is pids and one mailbox; and the
+  choice among reactions is nondeterministic where slight promises a run
+  it can repeat (D170). As a library it fits: a join object is a process
+  that turns several messages into one (PLAN.md, "Later").

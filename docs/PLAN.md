@@ -510,6 +510,24 @@ as parameters; a lingering close, so a server that answers before it has
 read the whole request doesn't reset the connection; and a timeout that a
 reply can cancel, which needs cancellable timers (see "Later").
 
+### After 14: what the boids example led to (done, Oct 2026)
+
+`examples/boids.slight` (a flock in the terminal, a process for each
+bird, all-to-all, the same flight under any schedule; `t/models/boids.py`)
+asked for these, and its profile for the last two:
+
+- **`sort`, `sort-by` and `zip`** in the prelude (D175). Golden test 214.
+- **Tuple patterns**, `#(p ...)`, only as patterns; `sexp/parse` and
+  `sexp/print` read and write tuples (D176). Golden tests 215 and 216.
+- **A message copied in one walk, and sent in one malloc** (D177).
+- **A tuple pattern compiled inline**: one compare of the header, a load
+  for each element (D178).
+
+Over this work (the example's own changes, then D177 and D178), 250
+birds went from about 210 ms a tick to about 90 on the cloud machine,
+in wall time, which moves by a tenth from run to run; D179 says what was
+settled besides.
+
 ### 15. Agents
 
 Stevan's aim for slight (Oct 2026), once HTTP (14) and JSON (12a) are
@@ -603,8 +621,31 @@ with Stevan first.
   machines (the connection ending), and what can't be sent (a closure,
   between different builds).
 - **Smaller, left out of D168 and D169:** guards in `match` and `recv`;
-  a reader syntax for tuples (`#(1 2)` as a literal, static data as
-  quoted lists are), and with it tuples in `sexp/print` and in patterns.
+  and what `#(...)` means outside a pattern (D176 left it open): a tuple
+  made of its elements' values, as Clojure's vectors, or a constant, as
+  Scheme's, which needs static tuples.
+- **Selective receive, narrowly, with bound-variable patterns** (talked
+  over after boids, Oct 2026). Boids kept messages for later by hand
+  twice (a tick's, from a bird already on the next; and tick 0's, before
+  a bird knows its flock), which Erlang's `receive {at, Tick, ...}`, the
+  tick bound, does by leaving them in the mailbox. A bound variable
+  alone (`(:at ^tick id s)`) doesn't do it: in slight a message no clause
+  fits is a dead letter, so it would drop what it should keep. Selective
+  receive reopens D8, the decision everything leans on (a mailbox
+  searched, dead letters no longer reported at once), so: wait for a
+  second program that needs it. Join calculus (BACKGROUND.md, "Prior
+  art") goes further still; as a library, a join object is a process,
+  like boids' round-up (D179), and a `barrier` in `lib/ds.slight` is the
+  likely first one.
+- **Faster floats.** Boids spends about a sixth of its time on float
+  arithmetic in C and the boxes it makes. The fix that helps every
+  program is in the representation: floats that need no box (NaN-boxing,
+  or a tagged short float), or a compiler that keeps a float unboxed
+  within a function. Either is a proposal of its own; boids is the
+  benchmark. Not this way (D179): fixed point in the example, or a type
+  of numerical vectors.
+- **Comparing strings**, a builtin, so `sort` can order them without a
+  `less?` written for it (D175).
 
 ### 17. Self-host
 
