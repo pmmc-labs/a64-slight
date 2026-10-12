@@ -48,4 +48,3 @@
 (pprint (join (fork (tuple/get (tuple 1 2) 2))))
 (pprint (join (fork (tuple/len (list 1)))))
 (pprint (join (fork (tuple/get (tuple 1 2) 1.0))))
-(pprint (join (fork (sexp/print (tuple 1)))))

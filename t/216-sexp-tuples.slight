@@ -1,0 +1,34 @@
+; #(...) as data (D176): sexp/parse reads it as a tuple, sexp/print writes
+; a tuple that way (t/181), and a reader with (:read :sexp) or :source
+; reads it as sexp/parse does; so slight's source, with tuple patterns in
+; it, reads as data, each pattern a tuple of what's in it. A # must be
+; followed at once by (, true or false.
+
+(let known '(alpha beta defun match twice))
+
+(pprint (sexp/parse "#(1 \"a\" alpha)"))
+(pprint (sexp/parse "(#(1 #(2 3)) #() '#(beta))"))
+(pprint (sexp/parse " #( 1 ; one\n 2 ) "))
+(pprint (sexp/parse "# (1)"))
+(pprint (sexp/parse "#x(1)"))
+(pprint (sexp/parse "#t(1)"))
+(pprint (sexp/parse "#(1 2"))
+(pprint (sexp/parse "#(1 2))"))
+
+(defun writer (texts)
+    (recv
+        ((:open f) (map (lambda (t) (send f (list :write t))) texts) (disconnect f))))
+(defun write-file (path texts) (join (connect :fs/write path (writer texts))))
+
+(defun reading (how acc)
+    (recv
+        ((:open f)        (send f (list :read how)) (reading how acc))
+        ((:sexp f v)      (pprint v) (reading how (cons v acc)))
+        ((:form f v line) (reading how (cons (list line v) acc)))
+        ((:eof f)         (reverse acc))))
+(defun read-all (path how) (join (connect :fs/read path (reading how ()))))
+
+(write-file "build/t/216-data.sexp" (list "#(alpha 1) (#(beta)) #()\n#(2"))
+(pprint (read-all "build/t/216-data.sexp" :sexp))
+(write-file "build/t/216-prog.slight" (list "(defun twice (t)\n    (match t\n        (#(alpha n) (* 2 n))))\n"))
+(pprint (read-all "build/t/216-prog.slight" :source))

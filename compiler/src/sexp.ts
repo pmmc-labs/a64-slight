@@ -33,6 +33,11 @@ export const fitsInt = (n: bigint): boolean => n >= INT_MIN && n <= INT_MAX;
 
 export const isSym = (x: Sexp, name: string): boolean => x.t === 'sym' && x.name === name;
 
+// The reader reads a tuple pattern, #(p ...), as (TUPLE p ...) (D176): a
+// head with a space in it, which no program can write, so a list pattern
+// can't be taken for one.
+export const TUPLE = '#( (tuple pattern)';
+
 // Whether x is a form headed by the symbol name: (name ...).
 export const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;
 
@@ -81,7 +86,9 @@ export function show(x: Sexp): string {
         case 'nil':   return '()';
         case 'pair': {
             const items = toArray(x);
-            return items === null ? '(<improper list>)' : `(${items.map(show).join(' ')})`;
+            if (items === null) return '(<improper list>)';
+            if (isSym(items[0]!, TUPLE)) return `#(${items.slice(1).map(show).join(' ')})`;
+            return `(${items.map(show).join(' ')})`;
         }
     }
 }

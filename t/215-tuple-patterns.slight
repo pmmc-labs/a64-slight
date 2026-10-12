@@ -1,0 +1,60 @@
+; Tuple patterns (D176): #(p ...) matches a tuple of exactly that many
+; elements, each matching its pattern, in match and recv alike. They nest
+; in list patterns and list patterns in them, take literals (compared with
+; eq?), and bind names as any pattern does: seen after a recv in the
+; middle of a function, by a lambda, and by a fork.
+
+(defun shape (s)
+    (match s
+        (#(:circle r)               (list :circle r))
+        (#(:rect #(x1 y1) #(x2 y2)) (list :rect (* (- x2 x1) (- y2 y1))))
+        (#(_ _)                     :pair)
+        (#()                        :empty)
+        ((:list #(a b) & rest)      (list :list a b (length rest)))
+        (_                          :other)))
+
+(pprint (shape (tuple :circle 2)))
+(pprint (shape (tuple :rect (tuple 1 1) (tuple 4 3))))
+(pprint (shape (tuple :square 3)))
+(pprint (shape (tuple)))
+(pprint (shape (list :list (tuple 1 2) 3 4)))
+(pprint (shape (list :circle 2)))
+(pprint (shape (tuple :circle 2 3)))
+(pprint (shape (list :list (list 1 2))))
+(pprint (shape (tuple :rect (tuple 1 1) (list 4 3))))
+
+(defun kind (t)
+    (match t
+        (#(1 "one" #true () :k) :exact)
+        (#(1.0 _ _ _ _)         :float)
+        (_                      :no)))
+(pprint (list (kind (tuple 1 "one" #true () :k)) (kind (tuple 1.0 2 3 4 5)) (kind (tuple 1 "two" #true () :k))))
+
+; no clause: :no-match, with the tuple
+(pprint (join (fork (match (tuple 1 2) (#(a) a)))))
+
+; in recv, a message no clause fits is a dead letter
+(defun points (seen)
+    (recv
+        ((:point #(x y)) (points (cons (+ x y) seen)))
+        (:done           (reverse seen))))
+(let p (fork (points ())))
+(send p (list :point (tuple 1 2)))
+(send p (list :point (list 3 4)))
+(send p (list :point (tuple 5 6 7)))
+(send p (list :point (tuple 10 20)))
+(send p :done)
+(pprint (join p))
+
+; a whole message that's a tuple; and names from tuple patterns after a
+; recv in the middle of the function, in a lambda, and in a fork
+(defun twice (n)
+    (recv
+        (#(:add x)
+            (send $$ (tuple :add2 (* x 10)))
+            (let y (recv (#(:add2 z) z)))
+            (let f (lambda (k) (+ k (+ x y))))
+            (join (fork (f n))))))
+(let tw (fork (twice 1)))
+(send tw (tuple :add 2))
+(pprint (join tw))

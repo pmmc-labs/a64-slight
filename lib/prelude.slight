@@ -105,6 +105,49 @@
         ((>= start end) ())
         (#true          (f start) (dotimes (+ start 1) end f))))
 
+; (x y) for each x and the y in the same place, as long as the shorter
+; list: an association list, if the xs are keys.
+(defun zip (xs ys) (zip-loop xs ys ()))
+(defun zip-loop (xs ys acc)
+    (match (list xs ys)
+        (((x & xr) (y & yr)) (zip-loop xr yr (cons (list x y) acc)))
+        (_                   (reverse acc))))
+
+; --- sorting ------------------------------------------------------------------
+
+; xs in order: a before b when (less? a b) is #true, so (sort < xs) is
+; ascending. Stable: elements that neither is less than the other keep
+; their order. A merge sort from the bottom up: runs of one, merged in
+; pairs, again and again, till there's one run.
+(defun sort (less? xs) (sort-runs less? (map (lambda (x) (list x)) xs)))
+
+; xs in the order of (key x), a number, ascending; stable too. key is
+; called once for each element.
+(defun sort-by (key xs)
+    (map cadr (sort (lambda (a b) (< (car a) (car b))) (map (lambda (x) (list (key x) x)) xs))))
+
+(defun sort-runs (less? runs)
+    (cond
+        ((nil? runs)       ())
+        ((nil? (cdr runs)) (car runs))
+        (#true             (sort-runs less? (sort-pairs less? runs ())))))
+
+; Each run merged with the one after it, in order.
+(defun sort-pairs (less? runs acc)
+    (cond
+        ((nil? runs)       (reverse acc))
+        ((nil? (cdr runs)) (reverse (cons (car runs) acc)))
+        (#true             (sort-pairs less? (cddr runs) (cons (sort-merge less? (car runs) (cadr runs) ()) acc)))))
+
+; Two sorted runs as one: on a tie, a's element first, which keeps the
+; sort stable. acc is what's merged so far, reversed.
+(defun sort-merge (less? a b acc)
+    (cond
+        ((nil? a)                     (fold/l b (lambda (r x) (cons x r)) acc))
+        ((nil? b)                     (fold/l a (lambda (r x) (cons x r)) acc))
+        ((less? (car b) (car a))      (sort-merge less? a (cdr b) (cons (car b) acc)))
+        (#true                        (sort-merge less? (cdr a) b (cons (car a) acc)))))
+
 ; --- association lists: ((key value) ...) -------------------------------------
 
 (defun assoc (k v table)

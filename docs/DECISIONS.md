@@ -1983,3 +1983,61 @@ proposal left to the code.)*
   POST, and a chunked POST), and curl against it (GET, a 5 KB POST with
   Expect, and a chunked upload). Python and curl are not dependencies of
   the tests.
+
+## After step 14: what the boids example asked for
+
+**D175. `sort`, `sort-by` and `zip` in the prelude.** *(User asked for
+them, after `examples/boids.slight` wanted to put messages in order;
+the details are defaults.)*
+- **`(sort less? xs)`**: the function first and the list last, as `map`
+  and `filter` (D78). `less?` is any function of two values that gives a
+  boolean, so `(sort < xs)` and `(sort > xs)` need nothing more. Stable,
+  since a sort by one key after another relies on it. A merge sort from
+  the bottom up (runs of one, merged in pairs till one is left), so
+  every loop is a tail call and a list of any length is fine, at
+  n log n calls of `less?`. Rejected: a sort with no function that
+  compares any two values (there's no order across types, nor of
+  strings yet), and quicksort (not stable, and n² on a sorted list).
+- **`(sort-by key xs)`**: the elements in the order of `(key x)`, a
+  number, compared with `<`. It pairs each element with its key first,
+  so `key` is called once for each, not at every comparison.
+- **`(zip xs ys)`**: `(x y)` pairs, as long as the shorter list (as `take`
+  stops at the end, D78), so `(zip keys values)` is an association list
+  that `lookup` reads, and `(zip (range 0 n) xs)` numbers a list.
+  Rejected: tuples for the pairs (patterns take lists, and association
+  lists are lists), and faulting when the lengths differ.
+- **Left out:** comparing strings (a builtin, to propose when it's
+  wanted), and `zip` of more than two lists.
+
+**D176. Tuple patterns, `#(p ...)`, and only as patterns.** *(User: "Tuple
+patterns are a good idea"; they chose this syntax from three, Claude's
+recommendation.)* D169 left tuple patterns out until there was a reader
+syntax for tuples. `#(p ...)` in a pattern, `match`'s or `recv`'s,
+matches a tuple of exactly that many elements, each matching its
+pattern; it nests in list patterns and they in it. It's written as
+`pprint` prints a tuple, so a pattern looks like the value it takes
+apart, as a list pattern does.
+- **Only a pattern:** as an expression, or quoted, `#(...)` is a compile
+  error; `(tuple ...)` still makes a tuple, as `(list ...)` makes a list
+  that `(p ...)` takes apart. What `#(...)` would mean as an expression
+  (a tuple made of its elements' values, as Clojure's vectors; or a
+  constant, as Scheme's, which needs static tuples, D169) is left open.
+- **How:** the reader reads `#(` as a list headed by a name no program
+  can write (`TUPLE`, with a space in it, as pattern.ts's hidden names
+  are, D168), so no list pattern can be taken for it. The lowering tests
+  `(tuple? v)`, then that `(tuple/len v)` is `eq?` to the count, then
+  each element at `(tuple/get v i)`; a path is car and cdr steps and
+  tuple indexes in any mix. The expander's walk, which leaves patterns
+  alone, rejects one it comes to elsewhere, and `staticList` rejects a
+  quoted one. No `&` in a tuple pattern: a tuple doesn't grow, and the
+  rest of one would be a `tuple/slice`, which can wait till it's wanted.
+- **As data:** `sexp/parse` (and `:sexp` and `:source` on a device)
+  reads `#(...)` as a tuple, so slight's own source, with tuple patterns
+  in it, still reads as data; and `sexp/print` writes a tuple as
+  `#(...)` where it faulted before (`t/181`, `t/216`).
+- **Rejected:** `(tuple p ...)` as the pattern, with no new syntax (just
+  pattern.ts), because the pattern would look like the call that makes a
+  tuple rather than like the tuple, and `(tuple a b)` would stop being a
+  pattern for a list of three; and `#(...)` as a constructor too, for
+  now, since it would be a second way to make a tuple and would settle
+  the open question above.

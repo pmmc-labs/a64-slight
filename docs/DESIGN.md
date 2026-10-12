@@ -171,8 +171,9 @@ Syntax (D85):
   the next message, or waits.
 - The patterns are `match`'s (D168, `compiler/src/pattern.ts`): they
   nest, a literal (a number, a string, `#true`, `#false`, `()`, anything
-  quoted) can go anywhere, and `(p ... & rest)` binds the rest of a
-  list. One lowering, to tests and bindings, serves both: the expander
+  quoted) can go anywhere, `(p ... & rest)` binds the rest of a
+  list, and `#(p ...)` matches a tuple of exactly that many elements
+  (D176). One lowering, to tests and bindings, serves both: the expander
   makes `match` into `cond` with it, and the code generator compiles
   `recv`'s clauses with it, branching on each test. No guards: match the
   shape, and test the rest with `cond` in the body.
@@ -329,8 +330,9 @@ defined. A number comes as a string: `(string->int (car @ARGV))`.
 - tuples (`runtime/tuples.c`, D169): `tuple` (variadic), `tuple?`,
   `tuple/len`, `tuple/get`, `tuple/set` (a copy with one element
   changed), `tuple/make`, `tuple/slice`, `list->tuple`, `tuple->list`.
-  `eq?`, printing, `json/print` (as an array) and copying know them;
-  `sexp/print` faults, as the reader has no syntax for one.
+  `eq?`, printing, `json/print` (as an array), `sexp/print` and
+  `sexp/parse` (as `#(...)`) and copying know them. In a program,
+  `#(...)` is only a pattern (D176).
 - strings: `str?`, `str-len` (bytes), `substring`, `concat`/`~`,
   `index-of`, `str-split`, `str-join`, `string->int`, `string->float`,
   `symbol->string`, `string->symbol`, `byte-at`, `bytes->string`,

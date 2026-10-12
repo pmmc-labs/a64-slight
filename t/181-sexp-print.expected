@@ -14,4 +14,8 @@ fault in #<pid 5>: not data: inf (sexp/print at t/181-sexp-print.slight:35:28)
 (error (not-sexp inf "sexp/print at t/181-sexp-print.slight:35:28"))
 fault in #<pid 6>: not data: -inf (sexp/print at t/181-sexp-print.slight:35:28)
 (error (not-sexp -inf "sexp/print at t/181-sexp-print.slight:35:28"))
+#(1 "a" alpha #() (#(2.5 #true)))
+#true
+fault in #<pid 7>: not data: #<pid 1> (sexp/print at t/181-sexp-print.slight:35:28)
+(error (not-sexp #<pid 1> "sexp/print at t/181-sexp-print.slight:35:28"))
 ()

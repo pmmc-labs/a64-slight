@@ -56,6 +56,12 @@ test('and and or become cond, stopping at the first operand that decides; the la
     assert.deepEqual(ex('(or a b c)'), ['(cond (a #true) (b #true) (#true c))']);
 });
 
+test('#(...) is only a pattern: in an expression it is an error', () => {
+    fails(() => ex('(f #(1 2))'), 'test.slight:1:4: #(...) is a pattern, for match and recv; (tuple ...) makes a tuple, not #(1 2)');
+    fails(() => ex('(case t (#(1) 1))'), 'test.slight:1:10: #(...) is a pattern, for match and recv; (tuple ...) makes a tuple, not #(1)');
+    assert.equal(ex('(recv (#(a) a))')[0], '(recv (#(a) a))');
+});
+
 test('match binds its topic once, and each clause is its pattern\'s tests, then its lets', () => {
     const t = 'match topic test.slight:1:1';
     const plain = (x: string): string => x.split(' (builtin)').join('').split(' (on conses)').join('');

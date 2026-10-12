@@ -34,7 +34,7 @@
 // prelude keeps using the prelude's (D80).
 
 import { CompileError } from './errors.ts';
-import { float, isForm, list, NIL, posOf, show, str, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { float, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from './values.ts';
 import { isReceiveBody, stateFunctions } from './classify.ts';
 import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE } from './pattern.ts';
@@ -816,6 +816,7 @@ function compileQuote(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St
 // cdr pointing at the next; nested lists first, so their words are known.
 // Returns the label of the first cell.
 function staticList(x: Pair, list: Pair, st: St): [string, St] {
+    if (isForm(list, TUPLE)) throw new CompileError(`a tuple pattern can't be quoted: #(...) is only a pattern, not ${show(list)}`, posOf(list) ?? x.pos);
     const [words, st1] = toArray(list)!.reduce<[readonly string[], St]>(([ws, s], item) => {
         const [w, s1] = staticWord(x, item, s);
         return [[...ws, w], s1];

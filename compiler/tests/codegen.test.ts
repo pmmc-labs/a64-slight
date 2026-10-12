@@ -80,6 +80,11 @@ const fails = (src: string, message: string): void => {
     assert.throws(() => compile(src), (e: unknown) => e instanceof CompileError && e.message === message);
 };
 
+test('a tuple pattern can\'t be quoted', () => {
+    fails("(pprint '#(1 2))", "test.slight:1:10: a tuple pattern can't be quoted: #(...) is only a pattern, not #(1 2)");
+    fails("(pprint '(a #(1)))", "test.slight:1:13: a tuple pattern can't be quoted: #(...) is only a pattern, not #(1)");
+});
+
 test('names must be bound', () => {
     fails('(+ x 1)', "test.slight:1:4: unknown name 'x'");
     fails('(do (let x 1) x) x', "test.slight:1:18: unknown name 'x'");

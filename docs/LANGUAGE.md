@@ -161,7 +161,9 @@ is compiled at once (D141).
 - `:name` is a keyword: a symbol that stands for itself. The reader makes
   it `(quote name)`, so `:ping` and `'ping` are the same symbol. `:12`,
   `::x`, `:#x` and a lone `:` are errors.
-- `#true` and `#false` are the booleans. No other `#` word is allowed.
+- `#true` and `#false` are the booleans. `#(p ...)` is a tuple pattern,
+  which can only be a pattern (Patterns, below). No other `#` word is
+  allowed.
 - `'x` is `(quote x)`.
 - `;` starts a comment, to the end of the line.
 - A doc block, between top-level forms: see Documentation, below.
@@ -234,7 +236,8 @@ forms in order (Files).
   in double quotes, with nothing inside escaped.
 - **Tuples**: a fixed number of values, any of which can be had in one
   step, where a list takes a step per element (D169). They print as
-  `#(1 "a" b)`. There's no syntax for one: `(tuple 1 "a" :b)` makes it.
+  `#(1 "a" b)`. `(tuple 1 "a" :b)` makes one, and a pattern such as
+  `#(n s k)` takes one apart.
 - **Functions**: a `defun` used as a value, a `lambda`, or a builtin used
   as a value. They print as `#<function name>` or
   `#<function lambda at prog.slight:3:9>`.
@@ -429,6 +432,11 @@ one, and so can a `recv`. If no pattern fits, the process faults
 - `(p ... & rest)` matches a list of at least as many, and `rest` (a
   pattern too, usually a name) matches the list of what's left, maybe
   `()`. `(& all)` matches any list.
+- `#(p ...)` matches a tuple of exactly as many elements, each matching
+  its pattern: `#(x y)` matches `(tuple 3 4)`, but not `(list 3 4)`, nor
+  a tuple of three. A tuple pattern has no `&`. It's only a pattern:
+  anywhere else, quoted too, `#(...)` is a compile error, and
+  `(tuple ...)` makes a tuple (D176).
 
 A name can be in a pattern only once, and it can't be a name that can't
 be bound (`$$`, `cond`, ...). There are no guards: match the shape, and
@@ -499,8 +507,9 @@ the clauses in order. Their patterns are `match`'s (Patterns, above):
 - `:tag` matches that symbol.
 - A bare name matches any message, and binds it. `_` matches any message
   and binds nothing.
-- Patterns nest, a literal can go anywhere, and `&` takes the rest:
-  `((:move (x y)) ...)`, `((:write & xs) ...)`.
+- Patterns nest, a literal can go anywhere, `&` takes the rest, and
+  `#(...)` takes a tuple apart: `((:move (x y)) ...)`,
+  `((:write & xs) ...)`, `((:at #(x y)) ...)`.
 
 The matching clause's body runs, in tail position when the `recv` is the
 last thing the function does, and its value is the `recv`'s. To keep
@@ -992,6 +1001,7 @@ element by element, and a tuple is never `eq?` to a list.
     (let p (tuple 3 4))
     (tuple/get p 1)                      4
     (tuple/set p 0 5)                    #(5 4)
+    (match p (#(x y) (+ x y)))           7
 
 ### Strings
 
@@ -1092,7 +1102,8 @@ forms, and a program can read slight's own source:
   `(:error (:bad-sexp at))`, `at` being where it went wrong, as for
   `json/parse`. The text is what the compiler reads: lists, integers and
   floats, strings with the same escapes, symbols and keywords, `#true`
-  and `#false`, `'x` as `(quote x)`, comments, and doc blocks, which it
+  and `#false`, `'x` as `(quote x)`, `#(...)` as a tuple (which in a
+  program is a pattern, D176), comments, and doc blocks, which it
   skips. So, as in a file, a line that starts with `=` and a letter is a
   doc block's, or an error: `(sexp/parse "=x")` is `(:error (:bad-sexp
   1))`, but `" =x"` and `"(=x)"` read `=x` as a name. And `:a` reads as
@@ -1108,9 +1119,9 @@ forms, and a program can read slight's own source:
 - `(sexp/print v)`: `v` as `sexp/parse` reads it back, on one line.
   A string escapes `"`, `\` and the control characters; a float always
   has digits on both sides of its point (`1.0e+21`); a symbol is its
-  name, without a colon; `(:symbol "name")` is `name`. Anything that
-  isn't data faults (`:not-sexp`): a pid, a function, a tuple (which the
-  reader has no syntax for), `nan` or `inf`.
+  name, without a colon; `(:symbol "name")` is `name`; a tuple is
+  `#(...)`. Anything that isn't data faults (`:not-sexp`): a pid, a
+  function, `nan` or `inf`.
   `pprint` stays as it is, its strings unescaped.
 
 A file or socket can be read as s-expressions too: `(:read :sexp)`,
@@ -1168,6 +1179,24 @@ Lists:
   `end`: `(range 0 3)` is `(0 1 2)`.
 - `(dotimes start end f)`: calls `(f i)` for each `i` in
   `(range start end)`, for its effects. Returns `()`.
+- `(zip xs ys)`: `(x y)` for each `x` and the `y` in the same place, as
+  long as the shorter list: `(zip '(a b c) '(1 2))` is `((a 1) (b 2))`.
+  So `(zip keys values)` is an association list, and
+  `(zip (range 0 (length xs)) xs)` numbers the elements.
+
+Sorting:
+
+- `(sort less? xs)`: the elements of `xs` in order, `a` before `b` when
+  `(less? a b)` is `#true`: `(sort < '(3 1 2))` is `(1 2 3)`, and
+  `(sort > xs)` is descending. It's stable: elements neither of which is
+  less than the other keep their order. A merge sort, so it calls
+  `less?` about n log n times.
+- `(sort-by key xs)`: the elements in the order of `(key x)`, which must
+  be a number, ascending, and stable too. `key` is called once for each
+  element. `(sort-by car pairs)` sorts pairs by their first element.
+
+There's no comparison of strings yet, so sorting strings takes a `less?`
+written for it.
 
 Association lists, `((key value) ...)`:
 
@@ -1188,7 +1217,8 @@ Strings:
 - `(ord s)`, `(chr n)`: `utf8/code` and `utf8/char`, under Perl's
   names: `(ord "é")` is 233, and `(chr 233)` is `"é"`.
 
-Its helpers (`take-loop`, `range-loop`, `str-repeat-loop`, `padding` and
+Its helpers (`take-loop`, `range-loop`, `zip-loop`, `sort-runs`,
+`sort-pairs`, `sort-merge`, `str-repeat-loop`, `padding` and
 `bytes-loop`) are visible too, but not meant to be called.
 
 
