@@ -1,0 +1,45 @@
+; How a streamed body is cut into lines (D181, D182). A line's \r is
+; dropped, one, as the head's lines' are, the last line's too; an empty
+; line comes, as ""; a last line with no newline still comes; and a body
+; read to the close is cut the same way. A body of no bytes is no lines. A
+; line can be 64 KB, and no more: a longer one ends the stream with
+; :line-too-big, after the lines before it. Each reply comes in pieces, a
+; millisecond apart, cut in the middle of a line, and between a \r and its
+; \n.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+; What the stream says, till it ends, with each line given to f.
+(defun heard (s f acc)
+    (recv
+        ((:head _ status _) (heard s f (cons (list :head status) acc)))
+        ((:line _ text)     (heard s f (cons (list :line (f text)) acc)))
+        ((:eof _)           (reverse (cons (list :eof) acc)))
+        ((:error _ reason)  (reverse (cons (list :error reason) acc)))))
+
+(defun streamed (url f)
+    (cadr (join (fork (heard (http/stream :get url () "" :lines) f ())))))
+
+(defun same (x) x)
+
+(defun main ()
+    (let me $$)
+    (let raw (raw-listen :raw (list
+        (list "/length" (list "HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\none\r" "\n\r\nthr" "ee\nlast"))
+        (list "/close"  (list "HTTP/1.1 200 OK\r\n\r\nfirst\r\nsec" "ond\r"))
+        (list "/none"   "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+        (list "/long"   (concat "HTTP/1.1 200 OK\r\n\r\nok\n" (str-repeat "x" 65536) "\n" (str-repeat "y" 65537) "\nnever\n"))) me))
+    (recv
+        ((:raw port)
+            (let base (concat "http://127.0.0.1:" port))
+            (let r (list
+                (streamed (concat base "/length") same)
+                (streamed (concat base "/close") same)
+                (streamed (concat base "/none") same)
+                (streamed (concat base "/long") str-len)))
+            (kill raw)
+            (map pprint r)
+            :done)))
+
+(main)

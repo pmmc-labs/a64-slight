@@ -1,0 +1,7 @@
+(head 200 (("content-type" "application/x-ndjson") ("transfer-encoding" "chunked")))
+(line (ok (object ("response" "Hel") ("done" #false))))
+(line (ok (object ("response" "lo") ("done" #false))))
+(line (ok (object ("response" " world") ("done" #false))))
+(line (ok (object ("response" "") ("done" #true))))
+(eof)
+"Hello world"

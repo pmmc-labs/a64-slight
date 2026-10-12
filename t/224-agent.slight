@@ -1,0 +1,95 @@
+; An agent, against a fake ollama (D184). The fake answers /api/chat in
+; JSON lines: the question back, then the roles of the conversation it was
+; sent, so the answer shows the history: the system prompt, then each
+; question and answer in order. Each turn's caller hears the pieces, then
+; the whole answer.
+;
+; Then: two questions asked at once, the second answered after the first,
+; with the first in its history; a turn the model fails in the middle of,
+; after a piece, which then isn't in the history; a model that isn't
+; there (a 404); a refused connection. And an agent killed in the middle
+; of an answer, from a raw server that sends one piece and holds the
+; connection open: the server sees it close, and nothing more comes.
+
+(@include :agent)
+(@include "data/http-raw.slight")
+
+; --- the fake ollama ---------------------------------------------------
+
+(defun handler (req)
+    (match (json/parse (lookup :body req))
+        ((:ok (:object & fields))
+            (let messages (lookup "messages" fields))
+            (let last     (lookup "content" (cdr (car (reverse messages)))))
+            (cond
+                ((eq? (lookup "model" fields) "missing")
+                    (list 404 () (json/print (list :object (list "error" "model 'missing' not found")))))
+                ((eq? last "fail")
+                    (list 200 () (lines (list (piece "so far") (list :object (list "error" "out of memory"))))))
+                (#true
+                    (list 200 () (lines (list (piece last) (piece (roles messages)) (done)))))))))
+
+(defun piece (text)
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" text))) (list "done" #false)))
+
+(defun done ()
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" ""))) (list "done" #true)))
+
+(defun lines (values)
+    (str-join "" (map (lambda (v) (concat (json/print v) "\n")) values)))
+
+(defun roles (messages)
+    (concat " [" (str-join " " (map (lambda (m) (lookup "role" (cdr m))) messages)) "]"))
+
+; --- asking ------------------------------------------------------------
+
+; What the caller hears, till n answers or errors have come.
+(defun heard (n acc)
+    (recv
+        ((:piece _ text)   (heard n (cons (list :piece text) acc)))
+        ((:answer _ text)  (heard-end n (cons (list :answer text) acc)))
+        ((:error _ reason) (heard-end n (cons (list :error reason) acc)))))
+
+(defun heard-end (n acc)
+    (if (== n 1) (reverse acc) (heard (- n 1) acc)))
+
+; Each text asked at once, by a caller of its own, and what it heard.
+(defun ask-all (a texts)
+    (cadr (join (fork (asking a texts)))))
+
+(defun asking (a texts)
+    (map (lambda (text) (agent/say a text)) texts)
+    (heard (length texts) ()))
+
+; --- the run -----------------------------------------------------------
+
+(defun main ()
+    (let me   $$)
+    (let srv  (http/serve 0 handler))
+    (let base (recv ((:listening port) (concat "http://127.0.0.1:" port))))
+    (let raw  (raw-listen :raw (list (list "/api/chat" (list
+                  "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+                  "3f\r\n{\"message\":{\"role\":\"assistant\",\"content\":\"Once\"},\"done\":false}\n\r\n"
+                  #false))) me))
+    (let held (recv ((:raw port) (concat "http://127.0.0.1:" port))))
+    (let a    (agent/new base "fake" "be brief"))
+    (pprint (ask-all a (list "hello")))
+    (pprint (ask-all a (list "again")))
+    (pprint (ask-all a (list "one" "two")))
+    (pprint (ask-all a (list "fail")))
+    (pprint (ask-all a (list "after")))
+    (pprint (ask-all (agent/new base "missing" "") (list "hi")))
+    (pprint (ask-all (agent/new "http://127.0.0.1:1" "fake" "") (list "hi")))
+    (let d    (agent/new held "fake" ""))
+    (agent/say d "a story")
+    (let first (recv ((:piece _ text) (list :piece text))))
+    (kill d)
+    (let seen (recv ((:raw what) (list :server what))))
+    (after 10 me :quiet)
+    (let next (recv (m m)))
+    (pprint (list first seen next))
+    (kill srv)
+    (kill raw)
+    :done)
+
+(main)

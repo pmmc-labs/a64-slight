@@ -1,0 +1,16 @@
+; Many asks to one structure (D183). Each ask forks a box that monitors
+; the structure, and ends once it has the answer, and its monitor goes
+; with it. Before, every box's monitor stayed on the structure, and each
+; new one walked them all to get to the end, so these 100,000 asks took
+; minutes; now they take as long as the asks. A counter in a cell, read
+; and set 100,000 times. (Under SLIGHT_GC_STRESS, which collects at every
+; recv, it needs n of about 1,000 to finish in time.)
+
+(@include :ds)
+
+(defun count-up (c n)
+    (cond
+        ((== n 0) (cell/get c))
+        (#true    (cell/set c (+ (cell/get c) 1)) (count-up c (- n 1)))))
+
+(count-up (cell/new 0) 100000)

@@ -1,10 +1,16 @@
-; Helpers for the HTTP tests (t/204 to t/213): a raw TCP server that answers
-; by path, and a raw client that sends bytes and gives back what comes.
+; Helpers for the HTTP tests (t/204 to t/213, and from t/217 on): a raw TCP
+; server that answers by path, and a raw client that sends bytes and gives
+; back what comes.
 
 ; A raw server: its listener says (tag port) to told when it's up. replies
-; is a list of (path reply) pairs: the reply sent for a request on that path,
-; whole, and then the connection closes. A reply of #false is no answer at
-; all: the connection stays open, and says nothing.
+; is a list of (path reply) pairs, the reply being what's sent for a request
+; on that path:
+; - a string is sent whole, and then the connection closes;
+; - #false is no answer at all: the connection stays open, and says nothing;
+; - a list is sent a piece at a time, a millisecond apart, and then the
+;   connection closes; but a #false among the pieces holds it open from
+;   there, saying nothing more, and when the client closes it, told hears
+;   (tag :closed).
 (defun raw-listen (tag replies told)
     (connect :tcp/listen 0 (raw-accept tag replies told)))
 
@@ -14,25 +20,49 @@
             (send told (list tag port))
             (raw-accept tag replies told))
         ((:accept _ conn)
-            (connect conn (raw-serve replies))
+            (connect conn (raw-serve replies tag told))
             (raw-accept tag replies told))))
 
-(defun raw-serve (replies)
-    (recv ((:open c) (raw-head c replies #false))))
+(defun raw-serve (replies tag told)
+    (recv ((:open c) (raw-head c replies tag told #false))))
 
-(defun raw-head (c replies path)
+(defun raw-head (c replies tag told path)
     (recv
         ((:line c s)
             (cond
-                ((eq? s "\r")      (raw-answer c (lookup path replies)))
-                ((eq? path #false) (raw-head c replies (cadr (str-split s " "))))
-                (#true             (raw-head c replies path))))
+                ((eq? s "\r")      (raw-answer c (lookup path replies) tag told))
+                ((eq? path #false) (raw-head c replies tag told (cadr (str-split s " "))))
+                (#true             (raw-head c replies tag told path))))
         ((:eof c) (disconnect c))))
 
-(defun raw-answer (c reply)
+(defun raw-answer (c reply tag told)
     (cond
         ((eq? reply #false) (raw-wait c))
-        (#true              (send c (list :write reply)) (disconnect c))))
+        ((str? reply)       (send c (list :write reply)) (disconnect c))
+        (#true              (raw-drip c reply tag told))))
+
+; A reply in pieces, a millisecond apart, or held open from a #false on,
+; at once. A client that closes first ends it.
+(defun raw-drip (c pieces tag told)
+    (match pieces
+        (()             (disconnect c))
+        ((#false & _)   (raw-hold c tag told))
+        ((piece & rest)
+            (send c (list :write piece))
+            (match rest
+                ((#false & _) (raw-hold c tag told))
+                (_            (after 1 $$ :next) (raw-next c rest tag told))))))
+
+(defun raw-next (c pieces tag told)
+    (recv
+        (:next       (raw-drip c pieces tag told))
+        ((:line c _) (raw-next c pieces tag told))
+        ((:eof c)    (disconnect c))))
+
+(defun raw-hold (c tag told)
+    (recv
+        ((:line c _) (raw-hold c tag told))
+        ((:eof c)    (send told (list tag :closed)) (disconnect c))))
 
 (defun raw-wait (c)
     (recv

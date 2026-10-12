@@ -1,0 +1,58 @@
+; A reply streamed as chunks (D181): the body's own bytes, whatever its
+; framing. Chunked encoding is undone on the way, a Content-Length body
+; stops at its length, and one with neither runs to the close; each comes
+; in pieces a millisecond apart. A reply with no body (HEAD, 1xx, 204,
+; 304) is its head and then the end. A body that's cut short gives what
+; came, then the error. How a body is cut into chunks isn't promised, so
+; chunks that come one after another are joined here; an empty one would
+; show.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+(defun heard (s acc)
+    (recv
+        ((:head _ status headers) (heard s (cons (list :head status headers) acc)))
+        ((:chunk _ bytes)         (heard s (add-chunk bytes acc)))
+        ((:eof _)                 (reverse (cons (list :eof) acc)))
+        ((:error _ reason)        (reverse (cons (list :error reason) acc)))))
+
+; The bytes, joined to the chunk before if that's what came last.
+(defun add-chunk (bytes acc)
+    (cond
+        ((== (str-len bytes) 0) (cons (list :empty-chunk) acc))
+        (#true (match acc
+            (((:chunk b) & rest) (cons (list :chunk (~ b bytes)) rest))
+            (_                   (cons (list :chunk bytes) acc))))))
+
+(defun streamed (method url)
+    (cadr (join (fork (heard (http/stream method url () "" :chunks) ())))))
+
+(defun main ()
+    (let me $$)
+    (let raw (raw-listen :raw (list
+        (list "/chunked" (list "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhel" "lo\r\n6;x=1\r\n world\r\n" "0\r\nX-Trailer: yes\r\n\r\n"))
+        (list "/length"  (list "HTTP/1.1 200 OK\r\nContent-Length: 11\r\n\r\nhel" "lo wor" "ld and more"))
+        (list "/close"   (list "HTTP/1.1 200 OK\r\n\r\n" "to the " "close"))
+        (list "/head"    "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n")
+        (list "/info"    "HTTP/1.1 100 Continue\r\n\r\n")
+        (list "/none"    "HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\nhello")
+        (list "/same"    "HTTP/1.1 304 Not Modified\r\n\r\n")
+        (list "/short"   (list "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n" "hello"))) me))
+    (recv
+        ((:raw port)
+            (let base (concat "http://127.0.0.1:" port))
+            (let r (list
+                (streamed :get (concat base "/chunked"))
+                (streamed :get (concat base "/length"))
+                (streamed :get (concat base "/close"))
+                (streamed :head (concat base "/head"))
+                (streamed :get (concat base "/info"))
+                (streamed :get (concat base "/none"))
+                (streamed :get (concat base "/same"))
+                (streamed :get (concat base "/short"))))
+            (kill raw)
+            (map pprint r)
+            :done)))
+
+(main)

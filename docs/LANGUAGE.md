@@ -616,7 +616,9 @@ The fault kinds:
 - `(monitor pid)` asks to be told when `pid` ends: the caller is sent
   `(:exit pid result)` then, or at once if it already has. Monitoring
   twice means two messages. Nothing is sent to a parent unless it asks.
-  Returns `()`.
+  Returns `()`. A monitor lasts while both processes do: if the caller
+  ends first, its monitor goes with it, so short-lived processes can
+  monitor a long-lived one as often as they like, as `ask`'s boxes do.
 - `(kill pid)` ends `pid`, wherever it is: running, waiting in `recv` or
   `join`, or asleep. `(kill $$)` ends the caller. Killing a process that
   has ended does nothing. Returns `()`.
@@ -639,9 +641,16 @@ it's due.
 ### Scheduling
 
 Processes take turns from a run queue, first in, first out. A running
-process counts a reduction at every call, tail calls included; after
-1,000, it goes to the back of the queue if another process is ready.
-Every loop is a tail call, so no process can hold up the rest.
+process counts **reductions**, slight's measure of a process's work (the
+word is Erlang's): one each time it enters a function compiled from
+slight, by a call or a tail call alike. That's a `defun`, the prelude's
+included; a lambda; a `fork`'s or `connect`'s body; and a receive
+function, which counts again when it starts over after waiting for a
+message (one already in the mailbox it takes without starting over). A
+builtin, such as `car`, `+` or `send`, runs inline or in C, and counts
+nothing. After 1,000 reductions, a process goes to the back of the queue
+if another is ready. Every loop is a tail call, so no process can hold
+up the rest.
 `SLIGHT_SCHED` changes the order, for testing (under "Replaying a run,
 and other orders").
 
@@ -875,7 +884,8 @@ which `lookup` reads; more keys may come. A process's:
   and a lambda `"lambda at ..."`.
 - `(:mail n)`: the messages waiting for it.
 - `(:heap bytes)`: its heap in use.
-- `(:reductions n)`: the calls it has made (under Scheduling).
+- `(:reductions n)`: the reductions it has made, the functions it has
+  entered (under Scheduling).
 - `(:stack held)`: whether it holds a stack (waiting in `recv`, it gives
   its back).
 - `(:devices pids)`: the devices it owns.
@@ -1367,8 +1377,74 @@ waits for TLS (step 12c).
   length is read to the end of the connection, except for HEAD, 1xx, 204
   and 304, which have no body. `Expect: 100-continue` gets its 100 at
   once.
-- Not yet: keep-alive, bodies streamed in pieces (for agents, step 15),
-  a Date header (slight has no calendar time), and HTTPS. A server that
-  answers a request it hasn't fully read (a 431 or 413) may have its
-  connection reset before the client reads the reply, since there's no
-  lingering close yet.
+- `(http/stream method url headers body how)` makes the same request, and
+  gives the reply to the caller as it comes, in messages, as a device
+  gives a file (D181, D182). It gives the stream's pid, `s`, at once. The
+  caller is sent `(:head s status headers)`; then the body, as `(:line s
+  text)` for each line when `how` is `:lines`, or `(:chunk s bytes)` when
+  it's `:chunks`; then `(:eof s)`. If anything fails, `(:error s reason)`
+  comes in place of whatever hadn't come yet, with `http/request`'s
+  reasons, or `:line-too-big` for a line over 64 KB. Chunked encoding is
+  undone on the way, so the pieces are the body's own bytes. A line is
+  cut at `\n`, and one `\r` at its end is dropped, as in the head; an
+  empty line is `""`, and a last line with no newline still comes. A
+  chunk is never empty, but its size isn't promised: it's what the socket
+  gave. A reply with no body is its head and then `(:eof s)`.
+- `(kill s)` stops a stream and closes its connection; the caller hears
+  nothing more from it, though what it sent before is still in the
+  mailbox. A stream whose caller ends is killed too. A timeout is the
+  caller's own `after`.
+
+  ollama streams a model's answer as JSON lines, each with a piece of the
+  text:
+
+      (defun answer (text)
+          (recv
+              ((:head _ _ _)     (answer text))
+              ((:line _ line)
+                  (match (json/parse line)
+                      ((:ok (:object & fields)) (answer (~ text (lookup "response" fields))))))
+              ((:eof _)          text)
+              ((:error _ reason) (list :error reason))))
+
+      (http/stream :post "http://localhost:11434/api/generate" ()
+          "{\"model\": \"llama3.2\", \"prompt\": \"Why is the sky blue?\"}" :lines)
+      (answer "")
+
+- Not yet: keep-alive, a Date header (slight has no calendar time), and
+  HTTPS. A server that answers a request it hasn't fully read (a 431 or
+  413) may have its connection reset before the client reads the reply,
+  since there's no lingering close yet.
+
+### (@include :agent)
+
+`lib/agent.slight`: a conversation with a model, as a process (D184). The
+model is ollama's `/api/chat`, over plain HTTP; the agent includes
+`:http` itself.
+
+    (@include :agent)
+
+    (let a (agent/new "http://localhost:11434" "llama3.2" ""))
+    (agent/say a "Why is the sky blue?")
+    ; the caller hears (:piece a text) ..., then (:answer a text)
+
+- `(agent/new url model system)` starts an agent and gives its pid. `url`
+  is the server's, `"http://host:port"`; `system` is the system prompt,
+  `""` for none.
+- `(agent/say a text)` asks `a` a question, and returns at once. The
+  caller is sent `(:piece a text)` for each piece of the answer as the
+  model streams it, then `(:answer a text)`, the whole answer. If the
+  turn fails, `(:error a reason)` comes in place of what hadn't come: the
+  reasons `http/stream` gives, such as `(:econnrefused "localhost:11434")`;
+  `(:http status message)` for a reply that isn't a 200, the message
+  being the server's (ollama's 404 says the model isn't there); or
+  `(:model message)` for an error in the middle of an answer.
+- The agent's state is the conversation, which goes to the model with
+  each question. A question and its answer join it once the answer is
+  whole, so a turn that fails leaves it as it was.
+- One turn at a time: a question asked while another is answered waits
+  for it, and its answer comes after.
+- `(kill a)` ends the agent, and stops an answer on its way.
+
+`examples/chat.slight` is a chat in the terminal, a line at a time, on
+`:keypress`: `chat [model] [url]`.

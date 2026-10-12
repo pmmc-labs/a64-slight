@@ -253,7 +253,8 @@ reply refs.
   program's: `error: <reason>`. The program exits 1 if the root ends with
   an error, and otherwise prints the root's value and exits 0.
 - **Preemption.** Every loop is a tail call, so a reduction counter is
-  checked at each function entry and tail call. When it runs out, the
+  checked at each function entry and tail call (a reduction is one entry
+  into a compiled function: LANGUAGE.md, under Scheduling). When it runs out, the
   process pauses where it is, *keeping its stack*, and goes to the back of
   the run queue. `yield` is the same pause, chosen by the program.
 - **Stacks exist only while needed.** A process that is running, paused
@@ -392,6 +393,13 @@ each a process, and `ask` and `reply` for one's own. Writes are sends;
 `ask` forks a box for the answer, which watches the structure, and joins
 it, raising `(:ended pid result)` if the structure ends first. Opt-in:
 `(@include :ds)`.
+
+**An agent in slight:** `lib/agent.slight` (D184) is a conversation with a
+model as a process, on ollama's `/api/chat` over `http/stream`. Its state
+is the conversation; `(agent/say a text)` is a turn, and the caller hears
+the answer's pieces as they come, then the whole answer, or an error.
+Each turn runs in a process of its own, which the agent monitors.
+Opt-in: `(@include :agent)`.
 
 ### Strings
 
@@ -624,7 +632,8 @@ Lalloc_N:
   queue it to run the entry function.
 - Ending: the Result is copied into a small per-pid **exit record**.
   Processes blocked in `join` on it wake with a copy; later `join`s read
-  the record; monitors get `(:exit pid result)`. Then the heap, the
+  the record; monitors get `(:exit pid result)`, and the monitors it set
+  on others are taken off their lists (D183). Then the heap, the
   mailbox, the stack and the process struct are freed (D102). Nothing
   on a stack needs cleaning up, so `kill` frees a process wherever it is
   (D103).
@@ -741,7 +750,9 @@ Lalloc_N:
   `:eaddrinuse`, ...), and `:enotfound` (Node's) for a host that can't be
   found, or `:etimedout` when no name server answers; SIGPIPE is ignored, so writing to a closed connection is
   `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. HTTP is a
-  slight library on top, `lib/http.slight` (D132, D140, D173, D174).
+  slight library on top, `lib/http.slight` (D132, D140, D173, D174), whose
+  client can also give a reply's body to its caller as it comes, in
+  messages, as a device does (`http/stream`, D181, D182).
 - **`:system` is a device too** (D171). `(connect :system expr)`; its
   owner asks `(:processes)`, `(:process pid)` or `(:runtime)`, and hears
   `(:process s info)` for each live process (one at a time, the next

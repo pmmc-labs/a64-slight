@@ -2117,6 +2117,8 @@ and bounds checks inline too, for calls where the index isn't known.
   skip spatial stuff".)* n² messages a tick; BACKGROUND.md has why
   locality is hard for actors, and the way through that keeps them.
 
+## Step 15: agents
+
 **D180. Agents before TLS, starting with a local model.** *(User agreed,
 Oct 2026, to Claude's suggestion.)* D172 put 12c (C libraries, then TLS)
 next; but nothing in step 15's design needs TLS: a local model (ollama,
@@ -2153,3 +2155,160 @@ lines are `:lines` and `json/parse` on each.
   guard against a fast server, which a model isn't (it can come later, as
   a `how`, if a big download wants it); and a fold run in the
   connection's process, which would show the caller nothing till the end.
+
+**D182. `http/stream` as built.** *(Default, under D181: what it left to
+the code.)*
+- **Lines** are cut at `\n`, and one `\r` at a line's end is dropped,
+  as the head's lines' is (D174), the last line's too, as Go's
+  `bufio.ScanLines` does. An empty line comes as `""`. A last line with
+  no newline still comes, once the body has ended as its framing says;
+  one cut off by an error doesn't, since it may not be whole.
+- **No body:** HEAD, 1xx, 204 and 304 are `:head` and then `:eof`, and
+  so is a body of no bytes.
+- **A line over 64 KB** (65,536 bytes before its `\n`) ends the stream
+  with `(:error s :line-too-big)`, after the lines before it, so a reply
+  with no newlines can't grow a buffer without end. Each line is
+  measured, not the buffer, so where the reads fall doesn't change the
+  outcome.
+- **Chunks** are what the device gives (up to 64 KB), less the chunked
+  encoding's framing: a read holding two of the encoding's chunks gives
+  two messages, and one that ends in the middle of a chunk gives what it
+  has. Never empty; no sizes promised.
+- **Every piece goes as soon as it's in:** bytes that came with the head,
+  or with the end of a chunk's size line, are sent before the next read
+  is waited for, not with it.
+- **How it ends:** `http/stream` forks a watcher that monitors the
+  stream. A device that fails ends its owner at once (D136), so the
+  stream can't say `(:error s reason)` for a refused connection or a
+  reset; the watcher says how every stream ended: `(:eof s)` when it
+  returned, `(:error s reason)` when it ended with an error (the device's,
+  or one the stream raised itself for a reply that isn't HTTP), and
+  nothing when it was killed. So one place sends the last message.
+  Rejected: the stream sending its own `(:eof s)` and HTTP errors, with
+  the watcher only for the device's (two places that end a stream).
+- **A bad URL** still gives a pid: a process that raises the reason, which
+  the watcher reports. So every failure comes the one way.
+- **A kill** says nothing, since the caller asked for it (or someone did;
+  the watcher can't tell who). What the stream sent before is still in
+  the caller's mailbox, and a stream that had already ended may have its
+  last message on the way.
+- **A caller that ends first** has its stream killed, as a device closes
+  when its owner ends; otherwise a stream nobody reads would keep the
+  program running (open sockets do) till the server finished. The watcher
+  monitors the caller for this; that monitor goes when the watcher does
+  (D183).
+- **A `how`** other than `:lines` or `:chunks` faults (`:no-match`) in the
+  caller, at the call, rather than in the stream later.
+- **One set of readers:** the head, the framing and the body's readers are
+  the client's and the server's too. Each hands every piece of the body to
+  `http/take`, which keeps it for a whole body or sends it on for a
+  stream. So a Content-Length body is now read in chunks, counted down,
+  on every side, rather than as one count (D174), which would have held a
+  stream's body back to the end; a whole one's chunks are joined at the
+  end, as a chunked body's were.
+- **Checked outside the tests:** against Python's `http.server` writing
+  chunked JSON lines 0.4 s apart, on both targets: each line came when it
+  was written, not at the end.
+- **Tests** (217–221): the raw server sends a reply in pieces, a
+  millisecond apart, or holds the connection open after them, to show
+  that what came, came before the end. Their output doesn't depend on
+  where the reads fall (lines; chunks joined), since macOS's loopback can
+  deliver a piece after the virtual clock has moved past the next. Run
+  under `SLIGHT_SCHED` seeds and `SLIGHT_GC_STRESS` too.
+
+**D183. A monitor goes when either process ends.** *(User chose it from
+three, Claude's recommendation, after asking whether a supervisor could
+handle `http/stream`'s monitors.)* A monitor stayed on the watched
+process's list till that process ended, even after its watcher had, and
+`monitor` walked the list to add to its end. `ask`'s box monitors the
+structure it asks and ends with the answer, so every ask left a monitor
+on a structure that may live as long as the program, and the next ask
+walked them all: 80,000 asks to one cell took 71 seconds on the cloud
+machine, and 0.07 with a box that didn't monitor. (`http/stream`'s
+watcher left one on its caller the same way, a stream at a time.) Now a
+monitor is on two lists, the watched process's, in the order they asked
+(D101), with its last kept so adding is one step, and the watcher's; a
+process that ends takes its monitors off both, telling those that
+watched it, as before. 80,000 asks take 0.10 seconds, and a million 1.2.
+A program sees no change: a notice to a process that had ended was
+dropped anyway.
+- **A process that monitors itself** isn't told of its own end. The
+  notice went with its mail anyway; but if it was killed while it waited
+  in `recv`, delivering the notice put it back on the run queue as it was
+  freed, which valgrind showed as reads and writes of freed memory. Found
+  while doing this.
+- **Cost:** a monitor is 48 bytes where it was 16, but lives only while
+  both processes do; a process struct gains two pointers.
+- **Tests:** 222, watchers that end from the front, the middle and the
+  end of a list, one with two monitors on it and one with monitors on two
+  processes, then a monitor added after them, and a process that
+  monitors itself, killed; 223, 100,000 asks to one cell, which the old
+  runtime is killed over, even on x86-64 natively. Under
+  `SLIGHT_GC_STRESS`, which collects at every `recv`, 223 needs an n of
+  about 1,000 to finish in time (22 seconds under qemu). Valgrind is clean
+  on every golden test that monitors, asks, or uses HTTP.
+- **Rejected:** a supervisor process for all of `http/stream`'s monitors.
+  slight has no process names, so every caller would be handed its pid,
+  or the runtime would need a registry; it would be one point of failure
+  for every stream; and it would fix the streams and not `ask`. A
+  `demonitor` builtin, as Erlang has: a new builtin, and code that forgets
+  to call it leaks. A supervisor in OTP's sense, written in slight (D3),
+  waits till agents need one (step 15).
+
+**D184. A chat agent: a conversation as a process, on ollama's
+`/api/chat`.** *(User agreed to Claude's proposal, before `:exec`, "to
+get the agent working first just for a simple chat".)* Step 15's first
+point to settle (PLAN.md): what a turn and an answer look like as
+messages. `lib/agent.slight`, `(@include :agent)`, and
+`examples/chat.slight`.
+- **The model:** ollama's `/api/chat`: the conversation, as messages with
+  roles, sent whole with each turn, and the answer as chunked JSON lines
+  with a piece in each; so `http/stream` with `:lines`, `json/parse` on
+  each, and the request one `json/print`. Rejected for now: the
+  OpenAI-style `/v1/chat/completions`, which ollama, llama.cpp and LM
+  Studio serve too, but which streams server-sent events, left for hosted
+  models with TLS (D180); and `/api/generate`, whose `context` carries
+  the conversation where the program can't see it.
+- **The messages:** `(agent/new url model system)` gives the agent's pid;
+  `(agent/say a text)` sends it `(:say text from)`, and `from` hears
+  `(:piece a text)` as the model streams, then `(:answer a text)`, the
+  whole answer, or `(:error a reason)` in their place. A caller that
+  doesn't want the pieces waits for the `:answer`.
+- **The conversation is the agent's state.** A question and its answer
+  join it once the answer is whole, so a turn that fails leaves it as it
+  was, and asking again is clean.
+- **One turn at a time:** a `:say` that comes while an answer is on its
+  way waits in the agent's state, oldest first. Rejected: answering
+  `(:busy a)`, which every caller would have to handle.
+- **A turn is a process of its own,** the stream's caller. It sends the
+  pieces, and ends with the answer or raises why there's none; the agent
+  monitors it, and hears how it went in one `(:exit ...)`. So the stream's
+  messages never reach the agent, and a turn stopped early leaves none
+  behind in its mailbox (after a kill, a stream's last message can still
+  be on its way, D182); and a fault reading a reply ends just the turn.
+  The turn monitors the agent, so killing the agent ends the turn, and
+  with it the stream (D182). Rejected: the agent as the stream's caller,
+  which would have to drop an old stream's messages in every state.
+- **Errors:** the stream's reasons; `(:http status message)` for a reply
+  that isn't a 200, with ollama's `{"error": ...}` or else the body's
+  first line; `(:model message)` for an error line in a 200. A line that's
+  neither a piece nor an error is skipped.
+- **The chat** reads keys with `:keypress` and edits a line in slight
+  (D29), since reading the terminal as a file would hold up the whole
+  runtime (D130). The keyboard's process is the agent's caller, so pieces
+  and keys come to one `recv`; keys typed during an answer wait for it.
+  The model and the URL come from `@ARGV` till the environment can be
+  read. Like `top`, it isn't a golden test: it needs a model.
+- **Checked:** golden test 224, against a fake ollama in the program (the
+  history in order, pieces before the answer, two questions at once, an
+  error in the middle of an answer, a 404, a refused connection, and a
+  kill in the middle of an answer that closes the connection), also under
+  `SLIGHT_SCHED` seeds and `SLIGHT_GC_STRESS`. The chat by hand, on both
+  targets, against a Python stand-in for `/api/chat` that checks what it's
+  sent, with keys piped and in a pseudo-terminal (raw mode on while it
+  runs and off after, Backspace, keys typed during an answer). Not yet
+  against a real ollama: this environment can't fetch a model.
+- **Left for later:** tools (and `:exec`), stopping an answer without
+  ending the agent, saving a conversation, agents talking to each other,
+  the model's options (temperature, the context's length), and the
+  figures on the last line (tokens, time).

@@ -1,0 +1,38 @@
+; A stream is stopped by killing it (D181, D182). The raw server sends a
+; head and one chunk, and then holds the connection open, sending nothing
+; more, so what comes has come before the reply's end. The caller takes
+; the head and the chunk's line, and kills the stream: the server sees its
+; connection close, and the caller hears nothing more from the stream,
+; not even how it ended, since it asked for that. Then a caller that ends
+; in the middle of a stream, once it has its first chunk: its stream is
+; killed, as a device closes when its owner ends, and the server sees that
+; connection close too.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+(defun leave (url)
+    (http/stream :get url () "" :chunks)
+    (let status (recv ((:head _ status _) status)))
+    (recv ((:chunk _ bytes) (list status bytes))))
+
+(defun main ()
+    (let me   $$)
+    (let raw  (raw-listen :raw (list
+        (list "/lines"  (list "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" "6\r\nhello\n\r\n" #false))
+        (list "/chunks" (list "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" "5\r\nhello\r\n" #false))) me))
+    (let base (recv ((:raw port) (concat "http://127.0.0.1:" port))))
+    (let s    (http/stream :get (concat base "/lines") () "" :lines))
+    (let head (recv ((:head _ status _) (list :head status))))
+    (let line (recv ((:line _ text) (list :line text))))
+    (kill s)
+    (let seen (recv ((:raw what) (list :server what))))
+    (after 10 $$ :quiet)
+    (let next (recv (m m)))
+    (pprint (list head line seen next))
+    (pprint (join (fork (leave (concat base "/chunks")))))
+    (let seen-too (recv ((:raw what) (list :server what))))
+    (kill raw)
+    seen-too)
+
+(main)
