@@ -2116,3 +2116,18 @@ and bounds checks inline too, for calls where the index isn't known.
 - **The flock stays all-to-all.** *(User: "keep the birds as actors and
   skip spatial stuff".)* n² messages a tick; BACKGROUND.md has why
   locality is hard for actors, and the way through that keeps them.
+
+**D180. Agents before TLS, starting with a local model.** *(User agreed,
+Oct 2026, to Claude's suggestion.)* D172 put 12c (C libraries, then TLS)
+next; but nothing in step 15's design needs TLS: a local model (ollama,
+or a Jev-compatible server) is plain HTTP. So step 15 starts now, with
+what any agent needs, in order: HTTP bodies streamed to the caller as
+they come, where `lib/http.slight` now reads the whole body first (the
+shape to settle first); `:exec`, a device for running a tool's command;
+and a way to read the environment, for a model's address or a key (a
+builtin, to propose). With them, the turn and the tool as messages
+(PLAN.md, 15). TLS (12c) comes when the first hosted model is wanted,
+with a reader of server-sent events, which hosted APIs stream in; it
+needs randomness, which must go through `replay.c` for a run to replay.
+Rejected: TLS first, as planned, since it holds agents back for a model
+they can start without.

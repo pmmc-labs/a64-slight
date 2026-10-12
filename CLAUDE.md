@@ -86,10 +86,12 @@ step, and reports only failures; x86-64 passes there too, under Rosetta
 and 12d, looking up host names in the runtime (D153, D165); and step 13,
 where `recv` can go (D167); and step 14, HTTP (D172–D174), on plain `:tcp`
 as `lib/http.slight`, a server and a client, golden tests 204–213. **Next:
-the rest of step 12**: 12c, C libraries vendored as source (D151, D152),
-then TLS, which HTTPS needs (`https://` is `:no-tls` till then). Then
-agents (15: chat as actors, tools as messages, `:exec`, models over HTTP). Each has points to settle
-with Stevan first (`docs/PLAN.md`). Self-hosting waits till the
+agents (15)**, before TLS, with a local model over plain HTTP (D180):
+first HTTP bodies streamed to the caller, then `:exec`, then reading the
+environment; then chat as actors and tools as messages. 12c (C libraries
+vendored as source, D151, D152, then TLS, which HTTPS needs: `https://`
+is `:no-tls` till then) comes with the first hosted model. Each has points
+to settle with Stevan first (`docs/PLAN.md`). Self-hosting waits till the
 language settles (17). Update this section as steps land.
 
 ## Read first, in this order

@@ -371,7 +371,8 @@ changed.
 
 #### 12c. C libraries, and TLS
 
-Next, now that HTTP (14) is in (D172). HTTPS needs this.
+After agents have started (D180): a local model needs only plain HTTP,
+and TLS waits for the first hosted one. HTTPS needs this.
 
 Discussed in Oct 2026 (D151, D152; BACKGROUND.md has what Odin does):
 
@@ -531,7 +532,12 @@ settled besides.
 ### 15. Agents
 
 Stevan's aim for slight (Oct 2026), once HTTP (14) and JSON (12a) are
-in: chat, person to agent and agent to agent, written as actors.
+in: chat, person to agent and agent to agent, written as actors. Next,
+before TLS (D180), with a local model over plain HTTP. What it needs
+first, in order: HTTP bodies streamed to the caller as they arrive (the
+shape to settle first); `:exec` (below); and reading the environment,
+for a model's address or a key (a builtin, to propose). Then, for a
+hosted model: TLS (12c), and a reader of server-sent events.
 
 - An agent is an actor whose state is its context: the conversation so
   far, its tools, its model's settings. A turn comes in as a message,
