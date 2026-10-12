@@ -641,9 +641,16 @@ it's due.
 ### Scheduling
 
 Processes take turns from a run queue, first in, first out. A running
-process counts a reduction at every call, tail calls included; after
-1,000, it goes to the back of the queue if another process is ready.
-Every loop is a tail call, so no process can hold up the rest.
+process counts **reductions**, slight's measure of a process's work (the
+word is Erlang's): one each time it enters a function compiled from
+slight, by a call or a tail call alike. That's a `defun`, the prelude's
+included; a lambda; a `fork`'s or `connect`'s body; and a receive
+function, which counts again when it starts over after waiting for a
+message (one already in the mailbox it takes without starting over). A
+builtin, such as `car`, `+` or `send`, runs inline or in C, and counts
+nothing. After 1,000 reductions, a process goes to the back of the queue
+if another is ready. Every loop is a tail call, so no process can hold
+up the rest.
 `SLIGHT_SCHED` changes the order, for testing (under "Replaying a run,
 and other orders").
 
@@ -877,7 +884,8 @@ which `lookup` reads; more keys may come. A process's:
   and a lambda `"lambda at ..."`.
 - `(:mail n)`: the messages waiting for it.
 - `(:heap bytes)`: its heap in use.
-- `(:reductions n)`: the calls it has made (under Scheduling).
+- `(:reductions n)`: the reductions it has made, the functions it has
+  entered (under Scheduling).
 - `(:stack held)`: whether it holds a stack (waiting in `recv`, it gives
   its back).
 - `(:devices pids)`: the devices it owns.

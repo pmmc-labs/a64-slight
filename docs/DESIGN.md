@@ -253,7 +253,8 @@ reply refs.
   program's: `error: <reason>`. The program exits 1 if the root ends with
   an error, and otherwise prints the root's value and exits 0.
 - **Preemption.** Every loop is a tail call, so a reduction counter is
-  checked at each function entry and tail call. When it runs out, the
+  checked at each function entry and tail call (a reduction is one entry
+  into a compiled function: LANGUAGE.md, under Scheduling). When it runs out, the
   process pauses where it is, *keeping its stack*, and goes to the back of
   the run queue. `yield` is the same pause, chosen by the program.
 - **Stacks exist only while needed.** A process that is running, paused
