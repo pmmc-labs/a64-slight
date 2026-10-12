@@ -1,7 +1,8 @@
 // The reader: source text to s-expressions with positions (D37).
 //
 //   - `#true` and `#false` read as symbols (booleans are reserved symbols),
-//     and no other `#` word is allowed
+//     and no other `#` word is allowed; `#(p ...)`, a tuple pattern, reads
+//     as (TUPLE p ...) (sexp.ts, D176)
 //   - integers are 63-bit, and a literal out of range is an error
 //   - strings take \" \\ \n \t \r \e (ESC, for terminal escape sequences)
 //     and \u{hex}
@@ -17,14 +18,14 @@
 // now; any other `=word` is kept for later kinds, and is an error.
 
 import { CompileError } from './errors.ts';
-import { NIL, cons, float, fitsInt, int, reverse, str, sym, INT_MAX, INT_MIN, type Pos, type Sexp } from './sexp.ts';
+import { NIL, cons, float, fitsInt, int, reverse, str, sym, INT_MAX, INT_MIN, TUPLE, type Pos, type Sexp } from './sexp.ts';
 
 // ---------------------------------------------------------------------------
 // Tokens
 // ---------------------------------------------------------------------------
 
 type Token =
-    | { readonly kind: 'open' | 'close' | 'quote'; readonly pos: Pos }
+    | { readonly kind: 'open' | 'tuple' | 'close' | 'quote'; readonly pos: Pos }
     | { readonly kind: 'keyword' | 'atom' | 'string'; readonly text: string; readonly pos: Pos };
 
 type Cursor = { readonly src: string; readonly file: string; readonly i: number; readonly line: number; readonly col: number };
@@ -58,7 +59,7 @@ function tokenize(src: string, file: string): readonly Token[] {
         }
         const [token, next] = nextToken(c);
         if (token !== null) tokens.push(token);
-        if (token?.kind === 'open') depth++;
+        if (token?.kind === 'open' || token?.kind === 'tuple') depth++;
         if (token?.kind === 'close') depth--;
         c = next;
     }
@@ -102,6 +103,7 @@ function nextToken(c: Cursor): [Token | null, Cursor] {
     if (isSpace(ch))  return [null, skipWhile(c, isSpace)];
     if (ch === ';')   return [null, skipWhile(c, (x) => x !== '\n')];
     if (ch === '(')   return [{ kind: 'open', pos }, step(c)];
+    if (ch === '#' && c.src[c.i + 1] === '(') return [{ kind: 'tuple', pos }, step(step(c))];
     if (ch === ')')   return [{ kind: 'close', pos }, step(c)];
     if (ch === "'")   return [{ kind: 'quote', pos }, step(c)];
     if (ch === '`' || ch === ',') throw new CompileError(`quasiquote and unquote (${ch}) are not part of slight`, pos);
@@ -203,6 +205,10 @@ function parseDatum(tokens: readonly Token[], i: number): [Sexp, number] {
     switch (t.kind) {
         case 'open':
             return parseList(tokens, i + 1, t.pos);
+        case 'tuple': {
+            const [items, next] = parseList(tokens, i + 1, t.pos);
+            return [cons(sym(TUPLE, t.pos), items, t.pos), next];
+        }
         case 'close':
             throw new CompileError("unexpected ')'", t.pos);
         case 'quote': {

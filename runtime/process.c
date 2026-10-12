@@ -239,9 +239,9 @@ static void free_chunks(rt_chunk_t *c) {
     }
 }
 
+// A message's record is in its chunk (new_msg).
 static void free_msg(rt_msg_t *m) {
     free(m->chunk);
-    free(m);
 }
 
 static void free_heap(rt_proc_t *p) {
@@ -285,117 +285,153 @@ static size_t box_bytes(rt_value_t v) {
     }
 }
 
-// Copying a value is two walks over it, each with a work stack (D147):
-// one adds up the bytes, so that one chunk can hold the copy, and one
-// copies. Each goes along a list's cdrs, dealing with an element that's an
+// Copying a value is one walk over it, with a work stack (D147), into a
+// scratch buffer kept from one copy to the next; then a chunk of just the
+// size the copy came to takes it, so the receiver's heap holds nothing it
+// doesn't use. Scratch can grow, and move, while the copy is made, so the
+// copy refers to itself by offsets into scratch: a pointer in it is an
+// offset with its tag, and slots[] says where each such word is. Moving
+// the copy into its chunk adds the chunk's address to each. (Copying was
+// two walks till the boids example's broadcasts showed the first, which
+// only added up the bytes, to be half the time a send took.)
+//
+// The walk goes along a list's cdrs, dealing with an element that's an
 // atom, a string or a float on the spot, and goes down into an element
 // that's a list or a box of values (a closure or a tuple), keeping the
 // rest of the list (and the box's values) on the stack. So the stack
 // grows only as deep as the value nests, and a flat list never touches
 // it. Sharing isn't kept: a DAG is copied as a tree.
 
-static int holds_values(rt_value_t v) {
-    return (v & RT_TAG_MASK) == RT_TAG_BOXED && rt_box_holds_values(rt_box(v)[0]);
+// What copying does with a value, worked out once for each: keep it as it
+// is (an immediate, (), or static data), or copy a cons cell, a box with
+// nothing in it to copy (a string or a float), or a box of values (a
+// closure or a tuple).
+enum { KEEP, CELL, LEAF, VALUES };
+
+static inline int kind(rt_value_t v) {
+    if (rt_is_cons(v))                      return is_static(v) ? KEEP : CELL;
+    if ((v & RT_TAG_MASK) != RT_TAG_BOXED || is_static(v)) return KEEP;
+    return rt_box_holds_values(rt_box(v)[0]) ? VALUES : LEAF;
 }
 
-// A string or a float: a box with nothing in it to copy.
-static int is_leaf_box(rt_value_t v) {
-    return is_pointer(v) && !rt_is_cons(v) && !holds_values(v);
+static char   *scratch;                 // the copy being made
+static size_t  scratch_used, scratch_cap;
+static size_t *slots;                   // the offsets in scratch of words that point into it
+static size_t  nslots, slots_cap;
+
+#define SCRATCH_KEPT (1 << 20)          // scratch bigger than this is let go after a copy
+
+// The offset of n more bytes at the end of scratch (n a multiple of 16, so
+// every offset is 16-aligned, as a cell or a box must be).
+static inline size_t scratch_take(size_t n) {
+    if (scratch_used + n > scratch_cap) {
+        while (scratch_used + n > scratch_cap) scratch_cap = scratch_cap ? scratch_cap * 2 : 4096;
+        scratch = rt_must(realloc(scratch, scratch_cap));
+    }
+    size_t at = scratch_used;
+    scratch_used += n;
+    return at;
 }
 
-static size_t copy_size(rt_value_t v) {
+// v into the word at offset at; inner says v is an offset into scratch.
+static inline void scratch_put(size_t at, rt_value_t v, int inner) {
+    *(rt_value_t *)(scratch + at) = v;
+    if (!inner) return;
+    if (nslots == slots_cap) {
+        slots_cap = slots_cap ? slots_cap * 2 : 256;
+        slots     = rt_must(realloc(slots, slots_cap * sizeof *slots));
+    }
+    slots[nslots++] = at;
+}
+
+// A copy of the box v in scratch: its offset, tagged. A float, the box
+// most often sent, is two words, copied as such rather than by memcpy.
+static inline rt_value_t copy_box(rt_value_t v) {
+    size_t          bytes = box_bytes(v), at = scratch_take(bytes);
+    uint64_t       *to    = (uint64_t *)(scratch + at);
+    const uint64_t *from  = rt_box(v);
+    if (bytes == 16) to[0] = from[0], to[1] = from[1];
+    else             memcpy(to, from, bytes);
+    return (rt_value_t)at | RT_TAG_BOXED;
+}
+
+// Copies v into scratch, putting it in the word at offset at. The work
+// stack holds pairs: the offset of a word for a copy, and the value to
+// copy there.
+static void copy(rt_value_t v, size_t at) {
     rt_work_t w;
     rt_work_init(&w);
-    size_t n = 0;
     for (;;) {
-        if (is_pointer(v) && rt_is_cons(v)) {
-            rt_value_t x = rt_car(v);
-            n += 16;
-            if (is_pointer(x) && !is_leaf_box(x)) {
+        int k = kind(v);
+        if (k == KEEP) {
+            scratch_put(at, v, 0);
+        } else if (k == CELL) {
+            size_t     cell = scratch_take(16);
+            rt_value_t x    = rt_car(v);
+            int        kx   = kind(x);
+            scratch_put(at, (rt_value_t)cell | RT_TAG_LIST, 1);
+            if (kx == CELL || kx == VALUES) {
+                rt_work_push(&w, cell + 8);
                 rt_work_push(&w, rt_cdr(v));
-                v = x;
+                at = cell;
+                v  = x;
                 continue;
             }
-            if (is_leaf_box(x)) n += box_bytes(x);
-            v = rt_cdr(v);
-            continue;
-        }
-        if (is_pointer(v)) {
-            n += box_bytes(v);
-            if (holds_values(v)) {
-                uint64_t first = rt_box_first_value(rt_box(v)[0]);
-                for (uint64_t i = 0; i < rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; i++) rt_work_push(&w, rt_box(v)[first + i]);
-            }
-        }
-        if (!w.n) break;
-        v = rt_work_pop(&w);
-    }
-    rt_work_free(&w);
-    return n;
-}
-
-// A copy of the box v at *to, moving *to past it.
-static rt_value_t copy_box(rt_value_t v, char **to) {
-    size_t    bytes = box_bytes(v);
-    uint64_t *box   = (uint64_t *)*to;
-    *to += bytes;
-    memcpy(box, rt_box(v), bytes);
-    return (rt_value_t)box | RT_TAG_BOXED;
-}
-
-// Copies v to *to, moving *to past it. The work stack holds pairs: where
-// a copy goes, and the value to copy there.
-static rt_value_t copy(rt_value_t v, char **to) {
-    rt_work_t   w;
-    rt_value_t  out;
-    rt_value_t *dst = &out;
-    rt_work_init(&w);
-    for (;;) {
-        if (!is_pointer(v)) {
-            *dst = v;                           // an immediate, (), or static data
-        } else if (rt_is_cons(v)) {
-            rt_value_t *cell = (rt_value_t *)*to;
-            rt_value_t  x    = rt_car(v);
-            *to += 16;
-            *dst = (rt_value_t)cell | RT_TAG_LIST;
-            dst  = &cell[1];
-            if (is_pointer(x) && !is_leaf_box(x)) {
-                rt_work_push(&w, (rt_value_t)dst);
-                rt_work_push(&w, rt_cdr(v));
-                dst = &cell[0];
-                v   = x;
-                continue;
-            }
-            cell[0] = is_leaf_box(x) ? copy_box(x, to) : x;
-            v       = rt_cdr(v);
+            if (kx == LEAF) scratch_put(cell, copy_box(x), 1);
+            else            scratch_put(cell, x, 0);
+            at = cell + 8;
+            v  = rt_cdr(v);
             continue;
         } else {
-            uint64_t *box = (uint64_t *)*to;
-            *dst = copy_box(v, to);
-            if (holds_values(v)) {
-                uint64_t first = rt_box_first_value(box[0]);
-                for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) {
-                    rt_work_push(&w, (rt_value_t)&box[first + i]);
-                    rt_work_push(&w, box[first + i]);
+            rt_value_t box = copy_box(v);
+            scratch_put(at, box, 1);
+            if (k == VALUES) {
+                size_t   base  = box & ~(rt_value_t)RT_TAG_MASK;
+                uint64_t first = rt_box_first_value(rt_box(v)[0]);
+                for (uint64_t i = 0; i < rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; i++) {
+                    rt_work_push(&w, base + 8 * (first + i));
+                    rt_work_push(&w, rt_box(v)[first + i]);
                 }
             }
         }
         if (!w.n) break;
-        v   = rt_work_pop(&w);
-        dst = (rt_value_t *)rt_work_pop(&w);
+        v  = rt_work_pop(&w);
+        at = (size_t)rt_work_pop(&w);
     }
     rt_work_free(&w);
-    return out;
 }
 
-// Copies n values into one new chunk (NULL if they need none).
-static rt_chunk_t *copy_values(const rt_value_t *from, rt_value_t *into, uint64_t n) {
-    size_t bytes = 0;
-    for (uint64_t i = 0; i < n; i++) bytes += copy_size(from[i]);
-    rt_chunk_t *c  = bytes ? new_chunk(bytes) : NULL;
-    char       *to = c ? (char *)(c + 1) : NULL;
-    for (uint64_t i = 0; i < n; i++) into[i] = copy(from[i], &to);
+// Copies n values into one new chunk, after reserve bytes (a multiple of
+// 16) that the caller fills; NULL if that would be no bytes at all. The
+// values themselves go first in scratch, as words that point into it like
+// any other, and are taken out of it at the end.
+static rt_chunk_t *copy_values_after(const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve) {
+    size_t roots = (8 * n + 15) & ~(size_t)15;
+    scratch_used = nslots = 0;
+    scratch_take(roots);
+    for (uint64_t i = 0; i < n; i++) copy(from[i], 8 * i);
+    size_t      bytes = scratch_used - roots;
+    rt_chunk_t *c     = reserve + bytes ? new_chunk(reserve + bytes) : NULL;
+    if (bytes) {
+        char      *data  = (char *)(c + 1) + reserve;
+        rt_value_t shift = (rt_value_t)data - roots;    // offset + shift: where it is now
+        memcpy(data, scratch + roots, bytes);
+        for (size_t i = 0; i < nslots; i++) {
+            size_t at = slots[i];
+            *(rt_value_t *)(at < roots ? scratch + at : data + (at - roots)) += shift;
+        }
+    }
+    for (uint64_t i = 0; i < n; i++) into[i] = ((rt_value_t *)scratch)[i];
+    if (scratch_cap > SCRATCH_KEPT) {
+        free(scratch), free(slots);
+        scratch = NULL, slots = NULL;
+        scratch_cap = slots_cap = 0;
+    }
     return c;
+}
+
+static rt_chunk_t *copy_values(const rt_value_t *from, rt_value_t *into, uint64_t n) {
+    return copy_values_after(from, into, n, 0);
 }
 
 // A copy of v in the current process's heap.
@@ -551,12 +587,17 @@ rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const c
     return p->pid;
 }
 
-// A message holding a copy of msg, in a chunk of its own.
+// A message holding a copy of msg: the message's record and the copy in
+// one chunk, the record first, so a send is one malloc, and taking the
+// message adopts the chunk and frees nothing. The record is then dead
+// space in the taker's heap till it next collects.
+_Static_assert(sizeof(rt_msg_t) % 16 == 0, "a message's record keeps the copy after it 16-aligned");
+
 static rt_msg_t *new_msg(rt_value_t msg) {
-    rt_msg_t *m = rt_must(malloc(sizeof *m));
-    m->next   = NULL;
-    m->chunk  = copy_values(&msg, &m->value, 1);
-    m->device = 0;
+    rt_value_t  v;
+    rt_chunk_t *c = copy_values_after(&msg, &v, 1, sizeof(rt_msg_t));
+    rt_msg_t   *m = (rt_msg_t *)(c + 1);
+    *m = (rt_msg_t){ .next = NULL, .value = v, .chunk = c, .device = 0 };
     return m;
 }
 
@@ -599,10 +640,9 @@ rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) {
     if (m) {
         p->mail = m->next;
         if (!p->mail) p->mail_last = NULL;
-        if (m->chunk) adopt(p, m->chunk);
         rt_value_t v = m->value;
         p->reading = m->device;
-        free(m);
+        adopt(p, m->chunk);
         return v;
     }
     p->code = code;

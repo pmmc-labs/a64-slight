@@ -12,6 +12,7 @@
 // requires: nothing checks it, and a mistake crashes deep in libc.
 
 import { comment, placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
+import { tupleElement } from './values.ts';
 
 const ARGS = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9', 'r10', 'r11'];
 
@@ -188,6 +189,14 @@ export const X86_64: Target = {
         return [compare, `    jne  ${label}`];
     },
     branchIfSame: (label) => ['    cmp  rcx, rax', `    je   ${label}`],
+    branchUnlessBox: (header, label) => [
+        TAG,
+        '    cmp  edx, RT_TAG_BOXED',
+        `    jne  ${label}`,
+        '    mov  rdx, qword ptr [rax - RT_TAG_BOXED]    // the header',
+        header <= 0x7fffffffn ? `    cmp  rdx, ${header}` : [loadWord('rcx', header), '    cmp  rdx, rcx'],
+        `    jne  ${label}`,
+    ],
 
     predicate: (name) => {
         const [test, cc] = PREDICATES[name]!;
@@ -200,6 +209,7 @@ export const X86_64: Target = {
     divide: (op, zero, overflow) => DIVISION[op](zero, overflow),
 
     cxr: (step) => (step === 'a' ? '    mov  rax, qword ptr [rax - 1]    // car' : '    mov  rax, qword ptr [rax + 7]    // cdr'),
+    tupleRef: (i) => `    mov  rax, qword ptr [rax + ${tupleElement(i)}]    // element ${i}`,
 
     // Bump-allocates into rdx, with rsi for the new heap pointer. When the
     // chunk hasn't room, rt_heap_grow makes a new one (or faults) and the

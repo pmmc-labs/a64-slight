@@ -41,12 +41,13 @@
 // It knows just enough of the special forms to leave alone what isn't an
 // expression: quoted data, the parameters of defun and lambda, and the
 // patterns of recv and match. (Names are atoms, which it leaves alone
-// anyway.)
+// anyway.) So a tuple pattern, #(p ...), that it comes to is in an
+// expression, where it means nothing yet (D176): an error.
 
 import { CompileError } from './errors.ts';
 import { lowerPattern, NO_MATCH } from './pattern.ts';
 import { read } from './reader.ts';
-import { NIL, cons, form, isForm, isSym, list, posOf, show, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { NIL, cons, form, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 
 // The outside world: a key for the file at path that's the same however
 // it's named (its real path), or null if there's no such file; and the
@@ -161,6 +162,7 @@ export function expand(x: Sexp): Sexp {
     switch (x.car.name) {
         case 'quote':    return x;
         case '@include': throw new CompileError('@include is only allowed at the top level', x.pos);
+        case TUPLE:      throw new CompileError(`#(...) is a pattern, for match and recv; (tuple ...) makes a tuple, not ${show(x)}`, x.pos);
         case 'if':       return expand(expandIf(x));
         case 'when':     return expand(expandWhen(x));
         case 'case':     return expand(expandCase(x));

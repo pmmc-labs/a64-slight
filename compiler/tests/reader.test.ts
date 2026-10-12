@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 
 import { CompileError } from '../src/errors.ts';
 import { read } from '../src/reader.ts';
-import { show, toArray, type Sexp } from '../src/sexp.ts';
+import { show, toArray, TUPLE, type Sexp } from '../src/sexp.ts';
 
 const forms = (src: string): readonly Sexp[] => toArray(read(src, 'test.slight'))!;
 const one = (src: string): Sexp => {
@@ -61,6 +61,18 @@ test('#true and #false are symbols', () => {
 
 test('other # literals are errors', () => {
     fails('#maybe', /unknown literal '#maybe'/);
+    fails('# (1)', /unknown literal '#'/);
+});
+
+test('#( ... ) is a tuple pattern, read as a list headed by a name no program can write', () => {
+    const x = one('#(a (b) #() "s")');
+    assert.equal(show(x), '#(a (b) #() "s")');
+    assert.ok(x.t === 'pair' && x.car.t === 'sym' && x.car.name === TUPLE);
+    assert.deepEqual(x.t === 'pair' && x.pos, { file: 'test.slight', line: 1, col: 1 });
+    assert.equal(shows("(recv (#(x y) x)) '#(1)"), "(recv (#(x y) x)) (quote #(1))");
+    fails('#(1 2', /unterminated list/);
+    // inside one, a line that starts with = is a name, not a doc block
+    assert.equal(shows('#(a\n=b)'), '#(a =b)');
 });
 
 test('symbols', () => {

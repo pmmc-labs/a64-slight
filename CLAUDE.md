@@ -17,7 +17,7 @@ predicates, the string and math builtins (C, in `runtime/`), `cond`,
 `let`, `do`, `pprint`, `tty/write`, and top-level `defun`s with calls and
 tail calls (arguments in `x0`–`x7`; stack and reduction checks at every
 function entry). The prelude (`lib/prelude.slight`) is compiled with every
-program; `lib/test.slight` is a TAP library. Processes: `fork`, `send`,
+program (with `sort`, `sort-by` and `zip`, D175); `lib/test.slight` is a TAP library. Processes: `fork`, `send`,
 `recv` (anywhere a tail call could go: `split.ts` splits a function at
 each one into receive functions, D167, and `classify.ts` checks the
 `recv` rule),
@@ -58,7 +58,7 @@ once); `@ARGV`, the program's arguments, is the top level's parameter
 `cond` (`compiler/src/expand.ts`, a pass between the reader and the
 compiler). `match` and `recv` share patterns that nest, with literals
 anywhere and `&` for the rest of a list (`compiler/src/pattern.ts`,
-D168). Tuples: immutable, fixed in size, an element in one step,
+D168), and `#(p ...)` for a tuple, which is only ever a pattern (D176). Tuples: immutable, fixed in size, an element in one step,
 printed `#(1 2)` (`runtime/tuples.c`, D169). A run can be recorded and
 replayed exactly (`SLIGHT_RECORD`, `SLIGHT_REPLAY`: everything from the
 world goes through `runtime/replay.c`), and tried under seeded orders
@@ -72,7 +72,7 @@ interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 beside the byte builtins, the `utf8/` ones count characters (a bad byte
 is a character of its own, as in Go), with `ord` and `chr` in the
 prelude, and `string->float` (D148).
-`examples/` has nineteen example programs (all but `ping-pong-tournament`
+`examples/` has twenty example programs (all but `ping-pong-tournament`
 and `top` are golden tests); new ones are written when they're wanted (D149).
 Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in

@@ -7,7 +7,8 @@
 // The text is what the compiler's reader takes (compiler/src/reader.ts),
 // without positions: lists, integers and floats, strings with the reader's
 // escapes, symbols and keywords, #true and #false, 'x as (quote x), and
-// comments. Unlike the compiler, :a reads as the symbol a, as a does
+// comments; and #(...), which the compiler takes only as a pattern, as a
+// tuple (D176). Unlike the compiler, :a reads as the symbol a, as a does
 // (D52). A symbol the program mentions reads as itself, and any other as
 // (:symbol "name"), so no symbol is made at run time (D14). Numbers read as
 // JSON's do: an integer past 63 bits is the nearest float, and a float too
@@ -24,7 +25,7 @@ enum {
     S_COMMENT,                  // after a ;, to the end of the line
     S_ATOM,                     // in a token that's a number or a name
     S_DOT,                      // in a token that's only "." so far
-    S_HASH,                     // in #true or #false
+    S_HASH,                     // in #true or #false, or a # before a tuple's (
     S_COLON,                    // just after a keyword's :
     S_KEYWORD,                  // in a keyword's name
     S_STRING, S_ESCAPE, S_BRACE, S_HEX,
@@ -74,6 +75,15 @@ void rt_sexp_reset(rt_sexp_t *s) {
 void rt_sexp_free(rt_sexp_t *s) {
     free(s->quoted);
     *s = (rt_sexp_t){ 0 };
+}
+
+// A list or a tuple opens a level, with no ' waiting in it yet.
+static void open_level(rt_sexp_t *s) {
+    if (s->depth + 1 == s->cap) {
+        s->cap   *= 2;
+        s->quoted = rt_must(realloc(s->quoted, s->cap));
+    }
+    s->quoted[++s->depth] = 0;
 }
 
 // A datum has just ended at the current level, which takes any ' waiting
@@ -136,6 +146,11 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
                 }
                 break;
             }
+            if (s->state == S_HASH && !s->word && c == '(') {
+                open_level(s);                  // #( : a tuple
+                s->state = S_SPACE;
+                break;
+            }
             if (!token_ok(s)) goto bad;          // the token ended before byte i
             s->state = S_SPACE;
             if (ended(s)) {
@@ -167,13 +182,8 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
             else if (c == '#')                  s->state = S_HASH, s->word = NULL;
             else if (c == ':')                  s->state = S_COLON;
             else if (c == '.')                  s->state = S_DOT;
-            else if (c == '(') {
-                if (s->depth + 1 == s->cap) {
-                    s->cap   *= 2;
-                    s->quoted = rt_must(realloc(s->quoted, s->cap));
-                }
-                s->quoted[++s->depth] = 0;
-            } else if (c == ')') {
+            else if (c == '(')                  open_level(s);
+            else if (c == ')') {
                 if (s->depth == 0 || s->quoted[s->depth]) goto bad;
                 s->depth--;
                 end = ended(s);
@@ -391,12 +401,24 @@ static int token(const char *p, size_t len, rt_build_alloc_t alloc, void *cx, rt
 }
 
 // A list being built: its cells so far, the quotes waiting inside it for a
-// datum, and the quotes around the list itself.
+// datum, the quotes around the list itself, and whether it's a tuple's
+// elements, to be made a tuple at its ).
 typedef struct {
     rt_value_t  head;
     rt_value_t *last;
     size_t      quotes, wrap;
+    int         tuple;
 } frame_t;
+
+static rt_value_t new_tuple(rt_value_t xs, rt_build_alloc_t alloc, void *cx) {
+    uint64_t n = 0;
+    for (rt_value_t v = xs; v != RT_NIL; v = rt_cdr(v)) n++;
+    uint64_t *box = alloc(cx, 8 + 8 * n);
+    if (!box) return 0;
+    box[0] = n << RT_BOX_SIZE_SHIFT | RT_BOX_TUPLE;
+    for (uint64_t i = 1; xs != RT_NIL; xs = rt_cdr(xs)) box[i++] = rt_car(xs);
+    return (rt_value_t)box | RT_TAG_BOXED;
+}
 
 int rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx, rt_value_t *out) {
     frame_t    *frames = NULL;
@@ -414,21 +436,22 @@ int rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
             p++;
             continue;
         }
-        if (*p == '(') {
+        if (*p == '(' || (*p == '#' && p[1] == '(')) {
             if (depth == cap) {
                 cap    = cap ? cap * 2 : 16;
                 frames = rt_must(realloc(frames, cap * sizeof *frames));
                 quotes = depth ? &frames[depth - 1].quotes : &top_quotes;
             }
-            frames[depth++] = (frame_t){ .head = RT_NIL, .last = NULL, .quotes = 0, .wrap = *quotes };
+            frames[depth++] = (frame_t){ .head = RT_NIL, .last = NULL, .quotes = 0, .wrap = *quotes, .tuple = *p == '#' };
             *quotes = 0;
-            p++;
+            p += *p == '#' ? 2 : 1;
             continue;
         }
         if (*p == ')') {
             frame_t *f = &frames[--depth];
-            v    = f->head;
+            v    = f->tuple ? new_tuple(f->head, alloc, cx) : f->head;
             wrap = f->wrap;
+            if (!v) goto too_big;
             p++;
         } else {
             if (*p == '"') {
@@ -566,7 +589,8 @@ static void not_sexp(rt_buf_t *b, rt_work_t *w, rt_value_t v, const char *site) 
 
 // Data as the reader reads it back, on one line (D155). The printer walks
 // with a work stack (D147): for each list it's in, the rest of it, and
-// whether anything has been written in it yet.
+// whether anything has been written in it yet; for each tuple, the tuple,
+// and the index of its next element.
 rt_value_t rt_sexp_print(rt_value_t v, const char *site) {
     rt_buf_t  b = { 0 };
     rt_work_t w;
@@ -577,6 +601,10 @@ rt_value_t rt_sexp_print(rt_value_t v, const char *site) {
             rt_buf_add(&b, rt_string_bytes(name), rt_string_len(name));
         } else if (rt_is_cons(v)) {
             put(&b, "(");
+            rt_work_push(&w, v);
+            rt_work_push(&w, 0);
+        } else if (rt_is_tuple(v)) {
+            put(&b, "#(");
             rt_work_push(&w, v);
             rt_work_push(&w, 0);
         } else if (v == RT_NIL) {
@@ -611,6 +639,18 @@ rt_value_t rt_sexp_print(rt_value_t v, const char *site) {
                 return s;
             }
             rt_value_t rest = w.items[w.n - 2];
+            if (rt_is_tuple(rest)) {
+                uint64_t k = w.items[w.n - 1];
+                if (k == rt_tuple_len(rest)) {
+                    put(&b, ")");
+                    w.n -= 2;
+                    continue;
+                }
+                if (k) put(&b, " ");
+                w.items[w.n - 1] = k + 1;
+                v = rt_tuple_get(rest, k);
+                break;
+            }
             if (rest == RT_NIL) {
                 put(&b, ")");
                 w.n -= 2;

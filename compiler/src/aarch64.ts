@@ -6,6 +6,7 @@
 // Frame slots are addressed up from sp, under x29/x30.
 
 import { comment, placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
+import { tupleElement } from './values.ts';
 
 const ARGS = ['x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'];
 
@@ -205,6 +206,14 @@ export const AARCH64: Target = {
     branchUnlessNil: (label) => ['    cmp  x0, #RT_NIL', `    b.ne ${label}`],
     branchUnlessIs: (word, label) => [loadWord('x2', word), '    cmp  x0, x2', `    b.ne ${label}`],
     branchIfSame: (label) => ['    cmp  x1, x0', `    b.eq ${label}`],
+    branchUnlessBox: (header, label) => [
+        '    and  x1, x0, #RT_TAG_MASK',
+        '    cmp  x1, #RT_TAG_BOXED',
+        `    b.ne ${label}`,
+        '    ldur x1, [x0, #-RT_TAG_BOXED]     // the header',
+        header <= 4095n ? `    cmp  x1, #${header}` : [loadWord('x2', header), '    cmp  x1, x2'],
+        `    b.ne ${label}`,
+    ],
 
     predicate: (name) => {
         const [test, cond] = PREDICATES[name]!;
@@ -217,6 +226,10 @@ export const AARCH64: Target = {
     divide: (op, zero, overflow) => DIVISION[op](zero, overflow),
 
     cxr: (step) => (step === 'a' ? '    ldur x0, [x0, #-1]    // car' : '    ldur x0, [x0, #7]     // cdr'),
+    // ldur reaches 255 bytes on; past that, the offset is in a register
+    tupleRef: (i) => tupleElement(i) <= 255
+        ? `    ldur x0, [x0, #${tupleElement(i)}]    // element ${i}`
+        : [loadWord('x1', BigInt(tupleElement(i))), `    ldr  x0, [x0, x1]    // element ${i}`],
 
     // Bump-allocates into x2. When the chunk hasn't room, rt_heap_grow makes
     // a new one (or faults, past the heap's limit) and the allocation goes

@@ -1983,3 +1983,112 @@ proposal left to the code.)*
   POST, and a chunked POST), and curl against it (GET, a 5 KB POST with
   Expect, and a chunked upload). Python and curl are not dependencies of
   the tests.
+
+## After step 14: what the boids example asked for
+
+**D175. `sort`, `sort-by` and `zip` in the prelude.** *(User asked for
+them, after `examples/boids.slight` wanted to put messages in order;
+the details are defaults.)*
+- **`(sort less? xs)`**: the function first and the list last, as `map`
+  and `filter` (D78). `less?` is any function of two values that gives a
+  boolean, so `(sort < xs)` and `(sort > xs)` need nothing more. Stable,
+  since a sort by one key after another relies on it. A merge sort from
+  the bottom up (runs of one, merged in pairs till one is left), so
+  every loop is a tail call and a list of any length is fine, at
+  n log n calls of `less?`. Rejected: a sort with no function that
+  compares any two values (there's no order across types, nor of
+  strings yet), and quicksort (not stable, and n² on a sorted list).
+- **`(sort-by key xs)`**: the elements in the order of `(key x)`, a
+  number, compared with `<`. It pairs each element with its key first,
+  so `key` is called once for each, not at every comparison.
+- **`(zip xs ys)`**: `(x y)` pairs, as long as the shorter list (as `take`
+  stops at the end, D78), so `(zip keys values)` is an association list
+  that `lookup` reads, and `(zip (range 0 n) xs)` numbers a list.
+  Rejected: tuples for the pairs (patterns take lists, and association
+  lists are lists), and faulting when the lengths differ.
+- **Left out:** comparing strings (a builtin, to propose when it's
+  wanted), and `zip` of more than two lists.
+
+**D176. Tuple patterns, `#(p ...)`, and only as patterns.** *(User: "Tuple
+patterns are a good idea"; they chose this syntax from three, Claude's
+recommendation.)* D169 left tuple patterns out until there was a reader
+syntax for tuples. `#(p ...)` in a pattern, `match`'s or `recv`'s,
+matches a tuple of exactly that many elements, each matching its
+pattern; it nests in list patterns and they in it. It's written as
+`pprint` prints a tuple, so a pattern looks like the value it takes
+apart, as a list pattern does.
+- **Only a pattern:** as an expression, or quoted, `#(...)` is a compile
+  error; `(tuple ...)` still makes a tuple, as `(list ...)` makes a list
+  that `(p ...)` takes apart. What `#(...)` would mean as an expression
+  (a tuple made of its elements' values, as Clojure's vectors; or a
+  constant, as Scheme's, which needs static tuples, D169) is left open.
+- **How:** the reader reads `#(` as a list headed by a name no program
+  can write (`TUPLE`, with a space in it, as pattern.ts's hidden names
+  are, D168), so no list pattern can be taken for it. The lowering tests
+  `(tuple? v)`, then that `(tuple/len v)` is `eq?` to the count, then
+  each element at `(tuple/get v i)`; a path is car and cdr steps and
+  tuple indexes in any mix. The expander's walk, which leaves patterns
+  alone, rejects one it comes to elsewhere, and `staticList` rejects a
+  quoted one. No `&` in a tuple pattern: a tuple doesn't grow, and the
+  rest of one would be a `tuple/slice`, which can wait till it's wanted.
+- **As data:** `sexp/parse` (and `:sexp` and `:source` on a device)
+  reads `#(...)` as a tuple, so slight's own source, with tuple patterns
+  in it, still reads as data; and `sexp/print` writes a tuple as
+  `#(...)` where it faulted before (`t/181`, `t/216`).
+- **Rejected:** `(tuple p ...)` as the pattern, with no new syntax (just
+  pattern.ts), because the pattern would look like the call that makes a
+  tuple rather than like the tuple, and `(tuple a b)` would stop being a
+  pattern for a list of three; and `#(...)` as a constructor too, for
+  now, since it would be a second way to make a tuple and would settle
+  the open question above.
+
+**D177. A message is copied in one walk, and sent in one malloc.**
+*(User chose these two from Claude's list, after the boids example's
+profile.)* With 250 birds each telling every other where it is, 62,500
+sends a tick, copying was a third of the time and malloc a sixth. A copy
+was two walks over the value (one only adding up its bytes, so that one
+chunk could hold it) and two mallocs (the chunk, and the message's record
+in the mailbox).
+- **One walk:** the value is copied into a scratch buffer kept from one
+  copy to the next, and then moved by memcpy into a chunk of just the
+  size it came to, so the receiver's heap holds what it did before. While
+  the copy is made, scratch can grow and move, so the copy refers to
+  itself by offsets (with their tags), and notes where each such word is;
+  the move adds the chunk's address to each. Fork's values and results
+  go the same way. Each value is sorted out once (kept as it is, a cell,
+  a box with nothing in it to copy, or a box of values), and a float's
+  box is copied as two words.
+- **One malloc:** the message's record is at the front of its chunk.
+  Taking the message adopts the chunk and frees nothing; the record is
+  dead space in the taker's heap until it collects (32 bytes a message).
+- **Measured** in instructions, under callgrind: boids with 250 birds,
+  17.7 per cent fewer; 200,000 small messages, 22.9; the ring benchmark,
+  12.8. In wall time on the cloud machine, boids and the messages are
+  25 to 40 per cent faster, and the ring the same (it's mostly processes
+  and stacks).
+- **Rejected:** copying into a chain of chunks as the walk goes (no size
+  walk, but a small message would get a chunk bigger than it needs, and
+  the waste would count against the receiver's heap); remembering the
+  size of the last value sent, for broadcasts (it helps only when the
+  same value goes to many, and needs clearing when the sender collects);
+  and copying straight into the receiver's heap, as the BEAM does (the
+  collector would have to take queued messages as roots).
+
+**D178. A tuple pattern compiles inline.** *(User chose it from Claude's
+list, after the boids example's profile.)* A tuple pattern of n elements
+was two calls into C to test (`tuple?`, then `tuple/len`) and one for
+each element (`tuple/get`), where a list pattern's tests branch inline
+and its parts are loads (D168). Now its test is one: a tuple's header
+word is exactly n shifted by `RT_BOX_SIZE_SHIFT`, or'd with
+`RT_BOX_TUPLE`, so the lowering makes `(TUPLE_OF v n)`, which the code
+generator compiles as a tag check, a load and one compare (the target's
+`branchUnlessBox`); and an element is `(TUPLE_REF v i)`, one load
+(`tupleRef`), on a tuple the test has passed, as `c[ad]r` on conses the
+tests have passed (`ON_CONSES`). Both are names no program can write. On
+AArch64, an element past the 31st is past `ldur`'s reach and is loaded
+with its offset in a register. Should `TUPLE_OF` ever be compiled as a
+value rather than a test, it's the builtins' `tuple?` and `tuple/len`.
+`values.ts` gains `TAG_BOXED`, `tupleHeader` and `tupleElement`, checked
+against `rt.h`. Boids with 250 birds: 5.9 per cent fewer instructions.
+Rejected: inlining `tuple/get` everywhere, which would need its index
+and bounds checks inline too, for calls where the index isn't known.

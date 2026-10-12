@@ -171,11 +171,15 @@ Syntax (D85):
   the next message, or waits.
 - The patterns are `match`'s (D168, `compiler/src/pattern.ts`): they
   nest, a literal (a number, a string, `#true`, `#false`, `()`, anything
-  quoted) can go anywhere, and `(p ... & rest)` binds the rest of a
-  list. One lowering, to tests and bindings, serves both: the expander
+  quoted) can go anywhere, `(p ... & rest)` binds the rest of a
+  list, and `#(p ...)` matches a tuple of exactly that many elements
+  (D176). One lowering, to tests and bindings, serves both: the expander
   makes `match` into `cond` with it, and the code generator compiles
   `recv`'s clauses with it, branching on each test. No guards: match the
-  shape, and test the rest with `cond` in the body.
+  shape, and test the rest with `cond` in the body. A tuple pattern's test
+  is one compare of the box's header with the header a tuple of that many
+  elements has, and each element one load, so it costs about what a list
+  pattern does (D178).
 
 Send-then-wait is written in one function, and becomes two:
 
@@ -329,8 +333,9 @@ defined. A number comes as a string: `(string->int (car @ARGV))`.
 - tuples (`runtime/tuples.c`, D169): `tuple` (variadic), `tuple?`,
   `tuple/len`, `tuple/get`, `tuple/set` (a copy with one element
   changed), `tuple/make`, `tuple/slice`, `list->tuple`, `tuple->list`.
-  `eq?`, printing, `json/print` (as an array) and copying know them;
-  `sexp/print` faults, as the reader has no syntax for one.
+  `eq?`, printing, `json/print` (as an array), `sexp/print` and
+  `sexp/parse` (as `#(...)`) and copying know them. In a program,
+  `#(...)` is only a pattern (D176).
 - strings: `str?`, `str-len` (bytes), `substring`, `concat`/`~`,
   `index-of`, `str-split`, `str-join`, `string->int`, `string->float`,
   `symbol->string`, `string->symbol`, `byte-at`, `bytes->string`,
@@ -604,6 +609,10 @@ Lalloc_N:
 - `send` deep-copies the value into a fresh message chunk and appends it to
   the target's FIFO mailbox. Static data is not copied. Sharing within a
   message is duplicated (as in the BEAM); that's acceptable at this scale.
+  The copy is one walk over the value, into a scratch buffer, which then
+  moves into a chunk of just its size; the message's record (its place in
+  the mailbox) is at the front of the same chunk, so a send is one malloc
+  (D177).
 - `recv` links the chunk into the receiver's heap. Nothing is copied twice.
 - Mailboxes are unbounded (D88). (Bounded ones would have to drop the
   message or fault the sender, since `send` can't block.)

@@ -10,6 +10,8 @@ import { loadWord } from '../src/aarch64.ts';
 import { CompileError } from '../src/errors.ts';
 import { expand } from '../src/expand.ts';
 import { read } from '../src/reader.ts';
+import { TUPLE_OF } from '../src/pattern.ts';
+import { int, list, sym } from '../src/sexp.ts';
 import { RESERVED_SYMBOLS, RUNTIME_SYMBOLS } from '../src/values.ts';
 
 // Runs a movz/movn/movk sequence and returns the register's value.
@@ -79,6 +81,28 @@ test("a program with no top-level expressions has the value ()", () => {
 const fails = (src: string, message: string): void => {
     assert.throws(() => compile(src), (e: unknown) => e instanceof CompileError && e.message === message);
 };
+
+test('a tuple pattern can\'t be quoted', () => {
+    fails("(pprint '#(1 2))", "test.slight:1:10: a tuple pattern can't be quoted: #(...) is only a pattern, not #(1 2)");
+    fails("(pprint '(a #(1)))", "test.slight:1:13: a tuple pattern can't be quoted: #(...) is only a pattern, not #(1)");
+});
+
+test('a tuple pattern compiles inline: one compare of the header, and a load for each element (D178)', () => {
+    const expanded = (src: string): string => compileProgram(expand(read(src, 'test.slight')));
+    const asm = expanded('(defun f (t) (match t (#(a b) (+ a b)) (_ 0))) (f (tuple 1 2))');
+    assert.doesNotMatch(asm, /rt_is_tuple_p|rt_tuple_len_of|rt_tuple_ref/);
+    assert.match(asm, /ldur x1, \[x0, #-RT_TAG_BOXED\]     \/\/ the header\n    cmp  x1, #516/);
+    assert.match(asm, /ldur x0, \[x0, #5\]    \/\/ element 0/);
+    assert.match(asm, /ldur x0, \[x0, #13\]    \/\/ element 1/);
+    // past ldur's reach, the offset goes in a register
+    const wide = `#(${Array.from({ length: 40 }, (_, i) => (i === 39 ? 'z' : '_')).join(' ')})`;
+    assert.match(expanded(`(defun g (t) (match t (${wide} z) (_ 0))) (g 1)`), /ldr  x0, \[x0, x1\]    \/\/ element 39/);
+});
+
+test("a tuple pattern's test, as a boolean rather than a branch, is the builtins'", () => {
+    const program = list(list(sym('pprint'), list(sym(TUPLE_OF), list(sym('tuple'), int(1n), int(2n)), int(2n))));
+    assert.match(compileProgram(program), /rt_is_tuple_p[^]*rt_tuple_len_of/);
+});
 
 test('names must be bound', () => {
     fails('(+ x 1)', "test.slight:1:4: unknown name 'x'");

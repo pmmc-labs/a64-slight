@@ -115,6 +115,9 @@ export type Target = {
     readonly branchUnlessNil: (label: string) => Code;
     readonly branchUnlessIs: (word: bigint, label: string) => Code;
     readonly branchIfSame: (label: string) => Code;
+    // Unless the accumulator is a box with this header: a tuple of so many
+    // elements, the type and the length in one compare (D178).
+    readonly branchUnlessBox: (header: bigint, label: string) => Code;
 
     // Booleans into the accumulator: a type predicate of it (int? nil?
     // cons? pid? sym? bool?), a comparison of the left operand with it, and
@@ -129,8 +132,10 @@ export type Target = {
     readonly arith: (op: '+' | '-' | '*', overflow: string) => Code;
     readonly divide: (op: 'div' | '%', zero: string, overflow: string) => Code;
 
-    // The accumulator's car or cdr (it's a cons), for car, cdr and c[ad]r.
+    // The accumulator's car or cdr (it's a cons), for car, cdr and c[ad]r;
+    // and its element i (it's a tuple of more than i), for a tuple pattern.
     readonly cxr: (step: 'a' | 'd') => Code;
+    readonly tupleRef: (i: number) => Code;
 
     // Allocation: `bytes` from the process's heap, at the label `again`,
     // into a register the next shapes know, keeping the accumulator and the

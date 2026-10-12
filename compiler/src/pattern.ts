@@ -9,6 +9,8 @@
 //                      its pattern
 //   (p ... & rest)     a list of at least that many; what follows them (a
 //                      list, maybe ()) matches rest
+//   #(p ...)           a tuple of exactly that many elements, each matching
+//                      its pattern (D176); the reader makes it (TUPLE p ...)
 //
 // A name can be bound once in a pattern. There are no guards: match the
 // shape, and test the rest in the body.
@@ -19,14 +21,18 @@
 // cond with them (expand.ts), and the code generator does recv's clauses
 // with them (codegen.ts), so the two can't come to mean different things.
 // The tests are of the shapes the code generator branches on directly:
-// (cons? x), (nil? x), and (eq? x literal); the one other is a list
-// pattern's test that a value is a list, for (& rest). They, and the
-// paths, call the builtins by names that no local can hide (BUILTIN), so
-// a pattern can bind car, say. A path's steps are on what the tests before
-// it have shown to be conses, so its c[ad]r needn't check (ON_CONSES).
+// (cons? x), (nil? x), (eq? x literal), and a tuple pattern's
+// (TUPLE_OF x n), a tuple of exactly n elements, which it makes one
+// compare of the box's header (D178); the one other is a list pattern's
+// test that a value is a list, for (& rest). They, and the paths, call the
+// builtins by names that no local can hide (BUILTIN), so a pattern can
+// bind car, say. A path's steps are on what the tests before it have shown
+// to be conses, so its c[ad]r needn't check (ON_CONSES); and a tuple's
+// element is (TUPLE_REF x i), one load, on a tuple the tests have shown is
+// long enough.
 
 import { CompileError } from './errors.ts';
-import { list, posOf, show, sym, toArray, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { int, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pos, type Sexp, type Sym } from './sexp.ts';
 
 export type Lowered = {
     readonly tests: readonly Sexp[];
@@ -44,6 +50,8 @@ export const BUILTIN      = ' (builtin)';
 export const ON_CONSES    = ' (on conses)';
 export const NO_MATCH     = 'no match (match)';
 export const RECV_MESSAGE = 'message (recv)';
+export const TUPLE_OF     = 'tuple-of? (pattern)';
+export const TUPLE_REF    = 'tuple/get (pattern)';
 
 const prim = (name: string): Sexp => sym(`${name}${BUILTIN}`);
 
@@ -63,9 +71,13 @@ export function lowerPattern(p: Sexp, v: Sexp): Lowered {
 // The names a pattern binds, in order.
 export const patternNames = (p: Sexp): readonly string[] => lowerPattern(p, sym('value')).binds.map(([name]) => name.name);
 
-// steps: the car and cdr steps from v to the part of the value p is
-// matched against, in the order they're taken.
-function lower(p: Sexp, v: Sexp, steps: readonly ('a' | 'd')[], whole: Sexp,
+// A step from a value to a part of it: its car, its cdr, or a tuple's
+// element at an index.
+type Step = 'a' | 'd' | number;
+
+// steps: the steps from v to the part of the value p is matched against,
+// in the order they're taken.
+function lower(p: Sexp, v: Sexp, steps: readonly Step[], whole: Sexp,
                tests: Sexp[], binds: (readonly [Sym, Sexp])[]): void {
     const here = path(v, steps);
     switch (p.t) {
@@ -82,7 +94,14 @@ function lower(p: Sexp, v: Sexp, steps: readonly ('a' | 'd')[], whole: Sexp,
             return;
         case 'pair': {
             const items = toArray(p);
-            if (items === null) throw bad('a pattern is a name, a literal or a list of patterns', p, whole);
+            if (items === null) throw bad('a pattern is a name, a literal, or a list or tuple of patterns', p, whole);
+            if (isForm(p, TUPLE)) {
+                const elements = items.slice(1);
+                if (elements.some((x) => isSym(x, REST))) throw bad(`${REST} can't be in a tuple pattern`, p, whole);
+                tests.push(list(sym(TUPLE_OF), here, int(BigInt(elements.length))));
+                elements.forEach((e, i) => lower(e, v, [...steps, i], whole, tests, binds));
+                return;
+            }
             if (items[0]!.t === 'sym' && items[0]!.name === 'quote') {
                 if (items.length !== 2) throw bad('quote takes 1 argument', p, whole);
                 tests.push(list(prim('eq?'), here, p));
@@ -112,13 +131,23 @@ function lower(p: Sexp, v: Sexp, steps: readonly ('a' | 'd')[], whole: Sexp,
 const isList = (x: Sexp): Sexp =>
     list(sym('cond'), list(list(prim('nil?'), x), sym('#true')), list(sym('#true'), list(prim('cons?'), x)));
 
-// v with the steps taken, four at a time, as c[ad]r's letters: the last
-// step taken is the first letter.
-function path(v: Sexp, steps: readonly ('a' | 'd')[]): Sexp {
+// v with the steps taken: a run of car and cdr steps four at a time, as
+// c[ad]r's letters (the last step taken is the first letter), and a
+// tuple's element as TUPLE_REF.
+function path(v: Sexp, steps: readonly Step[]): Sexp {
     let x = v;
-    for (let i = 0; i < steps.length; i += 4) {
-        const chunk = steps.slice(i, i + 4);
-        x = list(sym(`c${[...chunk].reverse().join('')}r${ON_CONSES}`), x);
+    let i = 0;
+    while (i < steps.length) {
+        const s = steps[i]!;
+        if (typeof s === 'number') {
+            x = list(sym(TUPLE_REF), x, int(BigInt(s)));
+            i += 1;
+            continue;
+        }
+        let j = i;
+        while (j < steps.length && j < i + 4 && typeof steps[j] !== 'number') j += 1;
+        x = list(sym(`c${steps.slice(i, j).reverse().join('')}r${ON_CONSES}`), x);
+        i = j;
     }
     return x;
 }

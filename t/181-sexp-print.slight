@@ -2,8 +2,8 @@
 ; float has digits on both sides of its point, so 1.0e+21, not 1e+21; a
 ; string escapes " and \ and the control characters; a symbol is its
 ; name, without a colon (D52), and (:symbol "name") is name if that reads
-; back as a name. What isn't data faults, :not-sexp: a pid, a function,
-; nan or inf.
+; back as a name; a tuple is #(...) (D176). What isn't data faults,
+; :not-sexp: a pid, a function, nan or inf.
 
 (defun show (v) (tty/write (sexp/print v) "\n"))
 
@@ -38,3 +38,8 @@
 (pprint (try (sqrt -1)))
 (pprint (try (* 1.0e308 10.0)))
 (pprint (try (list (* -1.0e308 10.0))))
+
+; a tuple as #(...), which reads back as the same tuple
+(show (tuple 1 "a" :alpha (tuple) (list (tuple 2.5 #true))))
+(pprint (same? (tuple 1 (tuple 2 (list 3)) "four" (tuple))))
+(pprint (try (tuple 1 $$)))

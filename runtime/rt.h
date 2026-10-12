@@ -303,7 +303,7 @@ typedef struct rt_chunk {
 typedef struct rt_msg {
     struct rt_msg *next;
     rt_value_t     value;
-    rt_chunk_t    *chunk;       // what value lives in; NULL if it needed none
+    rt_chunk_t    *chunk;       // what this record and value live in (new_msg in process.c)
     rt_value_t     device;      // a reader's pid, if it's to read on at the taker's next recv; or 0
 } rt_msg_t;
 

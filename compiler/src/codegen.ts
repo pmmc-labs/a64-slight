@@ -34,10 +34,10 @@
 // prelude keeps using the prelude's (D80).
 
 import { CompileError } from './errors.ts';
-import { float, isForm, list, NIL, posOf, show, str, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
-import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from './values.ts';
+import { float, form, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord, tupleHeader } from './values.ts';
 import { isReceiveBody, stateFunctions } from './classify.ts';
-import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE } from './pattern.ts';
+import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
 import { AARCH64 } from './aarch64.ts';
 import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, type Code, type Cond, type Operand, type Target } from './target.ts';
@@ -448,6 +448,20 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             const [fault, st2] = faultLabel(st1, 'RT_FAULT_NO_MATCH', 'match', x.pos);
             return [[code, st.t.jump(fault)], st2];
         }
+        // A tuple pattern's parts (pattern.ts): an element, one load, on a
+        // tuple its test has passed; and the test, which compileTest makes
+        // a branch, as a boolean here, by the builtins, should it be one.
+        case TUPLE_REF: {
+            const [code, st1] = compileExpr(args[0]!, { ...cx, tail: false }, st);
+            return [[code, st.t.tupleRef(Number((args[1] as Int).v))], st1];
+        }
+        case TUPLE_OF: {
+            const prim = (name: string): Sexp => sym(`${name}${BUILTIN}`, x.pos);
+            const [v, n] = args as [Sexp, Sexp];
+            return compileExpr(form(x.pos, sym('cond', x.pos),
+                list(list(prim('tuple?'), v), list(prim('eq?'), list(prim('tuple/len'), v), n)),
+                list(sym('#true'), sym('#false'))), cx, st);
+        }
     }
     if (SPECIAL_FORMS.includes(head.name)) throw notYet(x);
     // A builtin by a name no local can hide (pattern.ts), or by its own.
@@ -816,6 +830,7 @@ function compileQuote(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St
 // cdr pointing at the next; nested lists first, so their words are known.
 // Returns the label of the first cell.
 function staticList(x: Pair, list: Pair, st: St): [string, St] {
+    if (isForm(list, TUPLE)) throw new CompileError(`a tuple pattern can't be quoted: #(...) is only a pattern, not ${show(list)}`, posOf(list) ?? x.pos);
     const [words, st1] = toArray(list)!.reduce<[readonly string[], St]>(([ws, s], item) => {
         const [w, s1] = staticWord(x, item, s);
         return [[...ws, w], s1];
@@ -1175,6 +1190,10 @@ function compileTest(test: Sexp, ifFalse: string, cx: Cx, st: St, site: Pos | nu
         const [word, st1]  = immediateWord(lit, st);
         const [code, st2]  = compileExpr(other, cx, st1);
         return [[code, st.t.branchUnlessIs(word, ifFalse)], st2];
+    }
+    if (isForm(test, TUPLE_OF) && items!.length === 3) {
+        const [code, st1] = compileExpr(items![1]!, cx, st);
+        return [[code, st.t.branchUnlessBox(tupleHeader(Number((items![2] as Int).v)), ifFalse)], st1];
     }
     if (isForm(test, 'cond') && items!.length === 3) {
         const [first, second] = [toArray(items![1]!), toArray(items![2]!)];
