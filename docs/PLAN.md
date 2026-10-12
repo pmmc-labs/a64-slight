@@ -534,8 +534,8 @@ settled besides.
 Stevan's aim for slight (Oct 2026), once HTTP (14) and JSON (12a) are
 in: chat, person to agent and agent to agent, written as actors. Next,
 before TLS (D180), with a local model over plain HTTP. What it needs
-first, in order: HTTP bodies streamed to the caller as they arrive (the
-shape to settle first); `:exec` (below); and reading the environment,
+first, in order: HTTP bodies streamed to the caller as they arrive,
+`http/stream`, its pieces as messages (D181); `:exec` (below); and reading the environment,
 for a model's address or a key (a builtin, to propose). Then, for a
 hosted model: TLS (12c), and a reader of server-sent events.
 

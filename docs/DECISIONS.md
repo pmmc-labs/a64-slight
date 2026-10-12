@@ -2131,3 +2131,25 @@ with a reader of server-sent events, which hosted APIs stream in; it
 needs randomness, which must go through `replay.c` for a run to replay.
 Rejected: TLS first, as planned, since it holds agents back for a model
 they can start without.
+
+**D181. A streamed HTTP body comes to its caller as messages, as a
+device's do.** *(User chose it from three, Claude's recommendation.)*
+`(http/stream method url headers body how)` gives the stream's pid at
+once, and the process that called it is sent `(:head s status headers)`,
+then the body as it comes, `(:chunk s bytes)` when `how` is `:chunks` or
+`(:line s text)` when it's `:lines`, then `(:eof s)`; if anything fails,
+`(:error s reason)` comes in its place, with the reasons `http/request`
+gives. Chunked encoding is undone on the way, so the pieces are the body's
+own. `(kill s)` stops a stream and closes its connection; a timeout is the
+caller's own `after`. So an agent takes a model's output in its own
+`recv`, among its other messages, as it would read a file; ollama's JSON
+lines are `:lines` and `json/parse` on each.
+- **To settle while building:** a line's `\r`, which the head's lines
+  drop (D174); that a last line with no newline still comes; and that a
+  reply with no body (HEAD, 1xx, 204, 304) is `:head` and then `:eof`.
+- **Rejected:** flow control, the stream sending its next piece only when
+  asked, as a device cuts its next message only when its owner waits
+  (D158): a round trip a piece, and a send wherever a piece is taken, to
+  guard against a fast server, which a model isn't (it can come later, as
+  a `how`, if a big download wants it); and a fold run in the
+  connection's process, which would show the caller nothing till the end.
