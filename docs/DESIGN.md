@@ -606,6 +606,10 @@ Lalloc_N:
 - `send` deep-copies the value into a fresh message chunk and appends it to
   the target's FIFO mailbox. Static data is not copied. Sharing within a
   message is duplicated (as in the BEAM); that's acceptable at this scale.
+  The copy is one walk over the value, into a scratch buffer, which then
+  moves into a chunk of just its size; the message's record (its place in
+  the mailbox) is at the front of the same chunk, so a send is one malloc
+  (D177).
 - `recv` links the chunk into the receiver's heap. Nothing is copied twice.
 - Mailboxes are unbounded (D88). (Bounded ones would have to drop the
   message or fault the sender, since `send` can't block.)

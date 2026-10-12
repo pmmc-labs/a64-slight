@@ -2041,3 +2041,35 @@ apart, as a list pattern does.
   pattern for a list of three; and `#(...)` as a constructor too, for
   now, since it would be a second way to make a tuple and would settle
   the open question above.
+
+**D177. A message is copied in one walk, and sent in one malloc.**
+*(User chose these two from Claude's list, after the boids example's
+profile.)* With 250 birds each telling every other where it is, 62,500
+sends a tick, copying was a third of the time and malloc a sixth. A copy
+was two walks over the value (one only adding up its bytes, so that one
+chunk could hold it) and two mallocs (the chunk, and the message's record
+in the mailbox).
+- **One walk:** the value is copied into a scratch buffer kept from one
+  copy to the next, and then moved by memcpy into a chunk of just the
+  size it came to, so the receiver's heap holds what it did before. While
+  the copy is made, scratch can grow and move, so the copy refers to
+  itself by offsets (with their tags), and notes where each such word is;
+  the move adds the chunk's address to each. Fork's values and results
+  go the same way. Each value is sorted out once (kept as it is, a cell,
+  a box with nothing in it to copy, or a box of values), and a float's
+  box is copied as two words.
+- **One malloc:** the message's record is at the front of its chunk.
+  Taking the message adopts the chunk and frees nothing; the record is
+  dead space in the taker's heap until it collects (32 bytes a message).
+- **Measured** in instructions, under callgrind: boids with 250 birds,
+  17.7 per cent fewer; 200,000 small messages, 22.9; the ring benchmark,
+  12.8. In wall time on the cloud machine, boids and the messages are
+  25 to 40 per cent faster, and the ring the same (it's mostly processes
+  and stacks).
+- **Rejected:** copying into a chain of chunks as the walk goes (no size
+  walk, but a small message would get a chunk bigger than it needs, and
+  the waste would count against the receiver's heap); remembering the
+  size of the last value sent, for broadcasts (it helps only when the
+  same value goes to many, and needs clearing when the sender collects);
+  and copying straight into the receiver's heap, as the BEAM does (the
+  collector would have to take queued messages as roots).

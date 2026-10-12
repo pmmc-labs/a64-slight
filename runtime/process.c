@@ -239,9 +239,9 @@ static void free_chunks(rt_chunk_t *c) {
     }
 }
 
+// A message's record is in its chunk (new_msg).
 static void free_msg(rt_msg_t *m) {
     free(m->chunk);
-    free(m);
 }
 
 static void free_heap(rt_proc_t *p) {
@@ -587,12 +587,17 @@ rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const c
     return p->pid;
 }
 
-// A message holding a copy of msg, in a chunk of its own.
+// A message holding a copy of msg: the message's record and the copy in
+// one chunk, the record first, so a send is one malloc, and taking the
+// message adopts the chunk and frees nothing. The record is then dead
+// space in the taker's heap till it next collects.
+_Static_assert(sizeof(rt_msg_t) % 16 == 0, "a message's record keeps the copy after it 16-aligned");
+
 static rt_msg_t *new_msg(rt_value_t msg) {
-    rt_msg_t *m = rt_must(malloc(sizeof *m));
-    m->next   = NULL;
-    m->chunk  = copy_values(&msg, &m->value, 1);
-    m->device = 0;
+    rt_value_t  v;
+    rt_chunk_t *c = copy_values_after(&msg, &v, 1, sizeof(rt_msg_t));
+    rt_msg_t   *m = (rt_msg_t *)(c + 1);
+    *m = (rt_msg_t){ .next = NULL, .value = v, .chunk = c, .device = 0 };
     return m;
 }
 
@@ -635,10 +640,9 @@ rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) {
     if (m) {
         p->mail = m->next;
         if (!p->mail) p->mail_last = NULL;
-        if (m->chunk) adopt(p, m->chunk);
         rt_value_t v = m->value;
         p->reading = m->device;
-        free(m);
+        adopt(p, m->chunk);
         return v;
     }
     p->code = code;
