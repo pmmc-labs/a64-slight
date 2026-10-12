@@ -20,11 +20,10 @@
 ; finished telling everyone. The sleep makes that rare, but not
 ; impossible (with no sleep, and SLIGHT_SCHED, it happens all the time).
 ; So a bird keeps what comes early for the next tick. Nothing comes from
-; two ticks on, which would need this bird's next tick. What it heard is
-; a list of (id state), which it sorts by id once it has the whole tick,
-; and it sums over the birds in that order, so where they go doesn't
-; depend on the order the messages came in: any SLIGHT_SCHED gives the
-; same flight.
+; two ticks on, which would need this bird's next tick. Once it has the
+; whole tick, it sorts the birds it can see by id, and sums over them in
+; that order, so where they go doesn't depend on the order the messages
+; came in: any SLIGHT_SCHED gives the same flight.
 ;
 ; The display draws a tick once it has heard from every bird. It never
 ; hears of the next tick before it has all of this one: every bird tells
@@ -75,23 +74,23 @@
 
 ; --- steering -----------------------------------------------------------------
 
-; A bird is #(x y vx vy): where it is, and its velocity. A tuple, so a
-; message with one in it is a box and four floats to copy.
+; A bird is #(id x y vx vy): which it is, where it is, and its velocity.
+; A tuple, so a message with one in it is a box and four floats to copy.
 
 ; The others a bird at state sees, from what the rest of the flock said,
-; ((id state) ...) in any order: each as (id offset velocity distance²),
+; their states in any order: each as (id offset velocity distance²),
 ; the offset being the shortest way to it round the sky. Only those in
 ; sight are kept, and they're sorted by id, the order the rules sum in,
 ; so a bird sorts the few it sees rather than the whole flock.
 (defun in-sight (state heard sky)
     (match (list state sky)
-        ((#(x y _ _) (w h))
+        ((#(_ x y _ _) (w h))
             (let hw (/ w 2))
             (let hh (/ h 2))
             (sort-by car (fold/l ()
                 (lambda (seen said)
                     (match said
-                        ((id #(px py vx vy))
+                        (#(id px py vx vy)
                             (let dx (across x px w hw))
                             (let dy (across y py h hh))
                             (let d2 (+ (* dx dx) (* dy dy)))
@@ -122,13 +121,13 @@
 (defun steer (state heard sky)
     (let others (in-sight state heard sky))
     (match (list state sky)
-        ((#(x y vx vy) (w h))
+        ((#(id x y vx vy) (w h))
             (let v (list vx vy))
             (let v2 (limit (if (nil? others)
                 v
                 (v+ v (v+ (cohesion others) (v+ (alignment others v) (separation others)))))))
             (match v2
-                ((nvx nvy) (tuple (around (+ x nvx) w) (around (+ y nvy) h) nvx nvy))))))
+                ((nvx nvy) (tuple id (around (+ x nvx) w) (around (+ y nvy) h) nvx nvy))))))
 
 ; --- a bird -------------------------------------------------------------------
 
@@ -143,7 +142,7 @@
         ((:flock flock)
             (let others (remove (lambda (b) (eq? b $$)) flock))
             (fly (tuple me others shown sky (length flock)) 0 state early))
-        ((:at 0 & said)
+        ((:at 0 said)
             (bird me state sky shown (cons said early)))))
 
 ; Tells the display and the rest of the flock where it is on this tick,
@@ -151,7 +150,7 @@
 (defun fly (ctx tick state early)
     (match ctx
         (#(me others shown sky n)
-            (let msg (list :at tick me state))
+            (let msg (list :at tick state))
             (send shown msg)
             (tell others msg)
             (listen ctx tick state early (- n (+ 1 (length early))) ()))))
@@ -163,8 +162,8 @@
 
 ; Listens till it has heard from every other bird on this tick, left
 ; being how many it hasn't, and keeping what comes from the next; then
-; steers, sleeps a tick, and flies on. What it heard is the (id state) at
-; the end of each message, as it came.
+; steers, sleeps a tick, and flies on. What it heard is the states the
+; messages carried, as they came.
 (defun listen (ctx tick state heard left early)
     (cond
         ((== left 0)
@@ -175,7 +174,7 @@
                     (fly ctx (inc tick) next early))))
         (#true
             (recv
-                ((:at at & said)
+                ((:at at said)
                     (cond
                         ((== at tick)       (listen ctx tick state (cons said heard) (dec left) early))
                         ((== at (inc tick)) (listen ctx tick state heard left (cons said early)))))))))
@@ -197,14 +196,14 @@
         (#(n sky frames s)
             (cond
                 ((== count n)
-                    (draw sky frames tick took (map cadr (sort-by car heard)))
+                    (draw sky frames tick took (sort-by (lambda (b) (match b (#(id _ _ _ _) id))) heard))
                     (send s (list :runtime))
                     (if (== (inc tick) frames)
                         frames
                         (display ctx (inc tick) () 0 last took)))
                 (#true
                     (recv
-                        ((:at at & said)
+                        ((:at at said)
                             (cond ((== at tick) (display ctx tick (cons said heard) (inc count) last took))))
                         ((:runtime _ info)
                             (let now (lookup :clock info))
@@ -225,7 +224,7 @@
 ; exactly there, is put back on the near one.
 (defun put (grid bird)
     (match bird
-        (#(x y vx vy)
+        (#(_ x y vx vy)
             (let row (% (floor (/ y 2)) (tuple/len grid)))
             (let col (% (floor x) (tuple/len (tuple/get grid 0))))
             (tuple/set grid row (tuple/set (tuple/get grid row) col (arrow vx vy))))))
@@ -292,7 +291,7 @@
 (when (< frames 1) (tty/write \e "[?25l" \e "[2J"))
 (let shown (connect :system (display-on n sky frames)))
 (let birds (map
-    (lambda (b) (match b ((i state) (fork (bird i state sky shown ())))))
+    (lambda (b) (match b ((i #(x y vx vy)) (fork (bird i (tuple i x y vx vy) sky shown ())))))
     (zip (range 0 n) states)))
 (map (lambda (b) (send b (list :flock birds))) birds)
 (let keyboard (connect :keypress (keys shown)))
