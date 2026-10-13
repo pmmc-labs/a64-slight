@@ -13,11 +13,23 @@
 
 (@include :agent)
 
+(defun prompt () "❯ ")
+
+(defun divider ()
+    (concat \e "[2m" (str-repeat "─" (tty/screen/cols)) \e "[0m" \n))
+
 (defun main (args)
     (let model (if (cons? args) (car args) "llama3.2"))
     (let url   (if (and (cons? args) (cons? (cdr args))) (cadr args) "http://localhost:11434"))
     (let a     (agent/new url model ""))
-    (tty/write "chatting with " model " at " url "; Ctrl-D to stop\n> ")
+    (tty/write \e "[1;32m" "Slight Agent Chat v0.0" \e "[0m" \n
+               \n
+               \e "[2m"
+               "    model : " model \n
+               "    url   : " url   \n
+               \e "[0m"
+               \n
+               (divider) (prompt))
     (join (connect :keypress (typing a "" ())))
     :bye)
 
@@ -33,7 +45,7 @@
         ((:Enter)
             (if (== (str-len line) 0)
                 (typing a line pending)
-                (do (tty/write "\n")
+                (do (tty/write \n (divider))
                     (agent/say a line)
                     (answering a pending))))
         ((:Backspace)
@@ -51,13 +63,14 @@
                     (typing a (~ line char) pending))
                 (typing a line pending)))))
 
+
 ; An answer coming: its pieces are written as they come, and keys wait.
 (defun answering (a pending)
     (recv
-        ((:piece _ text)   (tty/write text) (answering a pending))
-        ((:answer _ _)     (tty/write "\n> ") (typing a "" pending))
-        ((:error _ reason) (tty/write "[" (trouble reason) "]\n> ") (typing a "" pending))
-        (key               (answering a (append pending (list key))))))
+        ((:piece  _ text)   (tty/write \e "[3;36m" text \e "[0m") (answering a pending))
+        ((:answer _ _)      (tty/write \n (divider) (prompt)) (typing a "" pending))
+        ((:error  _ reason) (tty/write "[" (trouble reason) "]" \n (prompt)) (typing a "" pending))
+        (key                (answering a (append pending (list key))))))
 
 ; What went wrong, for a person: what the server or the model said, or the
 ; reason as it is.
