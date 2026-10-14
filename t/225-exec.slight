@@ -1,0 +1,39 @@
+; A command runs on a device: its owner hears (:open p), then its output,
+; stdout and stderr together in the order they were written, as lines,
+; then (:eof p), and once the command has ended too, (:exited p status):
+; the exit code, or (:signal name) if a signal ended it (its number, for
+; a signal without a name). A command is a list of strings, a name and
+; its arguments, with no shell unless one is asked for. (:exited p status)
+; isn't monitor's (:exit pid result), so a process can have both.
+
+(defun run (out)
+    (recv
+        ((:open p)     (send p (list :eof)) (run out))
+        ((:line p s)   (run (cons s out)))
+        ((:eof p)      (run (cons :eof out)))
+        ((:exited p n) (list n (reverse out)))))
+
+(defun exec (cmd)
+    (join (connect :exec cmd (run ()))))
+
+(pprint (exec (list "printf" "one\\ntwo\\n")))
+(pprint (exec (list "printf" "%s|" "no shell" "$HOME" "*")))
+(pprint (exec (list "sh" "-c" "echo out; echo err >&2; echo out again; exit 3")))
+(pprint (exec (list "sh" "-c" "exit 255")))
+(pprint (exec (list "sh" "-c" "echo bye; kill -TERM $$")))
+(pprint (exec (list "sh" "-c" "kill -KILL $$")))
+(pprint (exec (list "sh" "-c" "kill -VTALRM $$")))
+
+; A monitor's notice and a command's end, told apart.
+(defun both (r n)
+    (cond
+        ((and (not (nil? r)) (not (nil? n))) (list r n))
+        (#true
+            (recv
+                ((:open p)     (send p (list :eof)) (monitor (fork :done)) (both r n))
+                ((:line p s)   (both r n))
+                ((:eof p)      (both r n))
+                ((:exit q x)   (both x n))
+                ((:exited p s) (both r s))))))
+
+(pprint (join (connect :exec (list "sh" "-c" "exit 7") (both () ()))))

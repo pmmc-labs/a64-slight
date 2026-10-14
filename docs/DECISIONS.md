@@ -2312,3 +2312,122 @@ messages. `lib/agent.slight`, `(@include :agent)`, and
   ending the agent, saving a conversation, agents talking to each other,
   the model's options (temperature, the context's length), and the
   figures on the last line (tokens, time).
+
+**D185. `:exec`, a device for running a command.** *(User agreed to
+Claude's proposal, every point as recommended.)* For tools (step 15):
+`(connect :exec (list "ls" "-l") expr)` runs a command, a list of
+strings with no shell unless one is asked for (`(list "sh" "-c" cmd)`),
+on a device the new process owns.
+- **Its messages:** `(:open p)`; its output as a connection's (lines at
+  first, `(:read how)` as for any reader); `(:eof p)`; and once the
+  command has ended too, `(:exited p status)`, after which the device
+  closes. Not PLAN.md's `(:exit p status)`: a pattern doesn't compare a
+  name with one already bound, and `recv` looks only at the first
+  message, so a process that owns a command and monitors anything (an
+  agent's turn monitors the agent, D184) couldn't tell it from
+  `monitor`'s `(:exit pid result)`. Rejected: `(:exited p status)` in
+  place of `(:eof p)` (a clause fewer, but the only reader without
+  `:eof`). The status comes after both ends, so a command that leaves
+  something running with its output (`cmd &`) isn't done till that ends
+  too, as with Python's `subprocess.run`.
+- **Status:** the exit code, or `(:signal name)`, `name` being one of
+  15 (`:hup :int :quit :ill :trap :abrt :bus :fpe :kill :usr1 :segv
+  :usr2 :pipe :alrm :term`: the same on macOS and Linux, where some of
+  their numbers aren't), or the number of any other. Rejected: one
+  integer, 128 + n, as a shell's `$?` (`exit 137` would look like
+  SIGKILL, and n differs between the systems).
+- **stderr goes with stdout,** one pipe for both: a model sees errors
+  where they happened, in the order written, and that order is the
+  command's own, so tests are exact. `sh -c "cmd 2>/dev/null"` gives
+  stdout alone. Rejected: `(:err p s)` messages (a second pipe and
+  buffer, a `:read` that would have to say which, and an order between
+  the two that depends on timing); passed through to the program's
+  stderr (a model wouldn't see it, and it would write over a terminal UI
+  such as the chat).
+- **stdin is a pipe.** `(:write x ...)`, from anyone, rendered as
+  `tty/write` does and kept till the pipe takes it, as a socket's; and
+  `(:eof)` (the word a device says when its input ends, sent the other
+  way) closes it once that's written, while the output still comes. A
+  command that reads its input waits for it till then, so a tool with no
+  input sends `(:eof)` in its `(:open p)` clause. Input the command
+  doesn't take (it has ended, or closed its stdin, as `head -1` does)
+  goes nowhere, and so does what's written after `(:eof)`: not `:epipe`,
+  which would end the owner, who still wants the output and the status.
+  Rejected: input closed from the start unless asked for (another source
+  name, or an argument).
+- **Ending it:** the command runs in a process group of its own.
+  `disconnect`, or the owner ending, kills the group with SIGKILL (so all
+  of `sh -c "a | b"` goes) and the command itself (under qemu, whose
+  `posix_spawn` returns before the child has run, it may not be in its
+  group yet: found by golden test 227 hanging there), then waits for it,
+  which a killed process can't hold up for long; nothing comes after.
+  The program's end, however it ends (a deadlock, Ctrl-C in raw mode,
+  SIGINT, SIGTERM or SIGHUP), kills every group still running: `atexit`,
+  and handlers for the three signals (not one that's ignored, as `nohup`
+  leaves SIGHUP), which then die of the signal as before. Rejected:
+  SIGTERM, then SIGKILL after a grace period (a timer of the runtime's
+  own for each command, which on the virtual clock would have to wait
+  for real). A `(:signal name)` to the device can come if a tool wants
+  to stop a command gently.
+- **Noticing its end:** SIGCHLD's handler, on a signal stack of its own
+  (a process's may be nearly full), writes a byte to a pipe that
+  `select()` waits on while any command runs; then each is asked with
+  `waitpid` and `WNOHANG`. Rejected: polling with `WNOHANG` when the
+  output ends, since on Linux the pipe closes a moment before the
+  command can be waited for, so it would need a timer to poll again.
+- **Starting it:** `posix_spawn`, the same on both systems, with the
+  pipes as file actions, its own group, and SIGPIPE back to its default
+  (the runtime ignores it, D136, and an ignored signal stays ignored
+  across exec, so `yes | head` would misbehave in a command). It inherits
+  the program's environment and working directory (`env K=V cmd`, and
+  `sh -c "cd d && cmd"`, change them). The runtime finds the command in
+  `PATH` itself, as `execvp` would, since under qemu-user `posix_spawnp`
+  reports a command that isn't there as a child that exits 127, not as
+  `ENOENT`, and the targets must agree. One that can't be started ends
+  the owner before it runs: `(:error (:enoent "ls"))`; `:eacces` for one
+  that can't be run (a directory, a file without its x bit); `:io-error`
+  for an argument with a NUL in it, as for a path (D130). A command that
+  isn't a list of strings, at least one, faults in the caller
+  (`:not-a-cons` or `:not-a-string`), as a path that isn't a string does.
+- **Replay:** starting a command (the search, the spawn and its pipes) is
+  one call through `replay.c`, its output's reads are reads, and waiting
+  for it and killing it are calls too; so a replay runs, kills and writes
+  nothing. SIGCHLD's pipe is made through it too, and what `select()`
+  said of it is in the record with the rest.
+- **The virtual clock:** a command's pipes are waited for in `select()`
+  as sockets are, on the same list, and it counts as something that can
+  still happen while there's something to wait for: output its owner
+  waits for, input to write, or its end, once its output has ended. A
+  command whose input is closed can only be working on its own, so on
+  the virtual clock, while its owner waits for its output or its end,
+  nothing else moves, keys or time: the runtime waits for it, for real.
+  One whose input is open may be waiting for the program, so it counts
+  as a socket does (D139). So a tool's timeout around a command that ends
+  doesn't fire first in a test just because `select()` looked before the
+  command had written anything (golden test 230 fails without this).
+  Rejected: always as a socket, which would make any test with a timer
+  around a command race.
+- **Limits:** none for now beyond the caller's own timeout (`after`,
+  then `disconnect`) and `:too-big` for a message of 64 MB or more. No
+  sandbox: a command runs as the program's user. Its total output isn't
+  capped: a tool keeps what fits a model's context, and disconnects past
+  it. `ulimit` in `sh -c` limits CPU and memory with nothing new. Each
+  command takes two descriptors of the 1,024 `select()` can wait on.
+- **Tests** (225–230), on the virtual clock, with commands that behave
+  the same on macOS and Linux (`sh -c`, `printf`, `cat`, `kill`): lines,
+  stderr, statuses and signals, and a monitor beside a command; input
+  all at once, a line at a time, from another process, closed by a
+  timer, to a command that doesn't read it, and a megabyte through `cat`
+  and back; chunks, a count, JSON and `:too-big`; commands that can't be
+  started, dead letters and faults; a command stopped when its owner
+  raises, disconnects or is killed (another command's `kill -0` shows
+  it's gone), and one handed over; the clock. `t/replay.sh` records and
+  replays commands, one stopped early, and checks that the replay runs
+  none. Also run under `SLIGHT_SCHED` seeds and `SLIGHT_GC_STRESS`, and
+  under valgrind, with the file, socket and HTTP tests (the socket code
+  changed too). By hand: SIGINT, SIGTERM and SIGHUP to the runtime, a
+  deadlock and a `disconnect` each kill a command and a grandchild in its
+  group.
+- **Left for later:** a `run` that gives `(:ok (status lines))`, with the
+  tools; a command's own environment and working directory; a signal to
+  a command without closing it; stderr apart from stdout.

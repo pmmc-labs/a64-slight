@@ -1,0 +1,5 @@
+(ok (0 100000))
+(ok (0 ((chunk "abcd") "efg" "hij")))
+(ok (0 ((object ("a" 1)) (#true null) "x")))
+(error (too-big "cat"))
+()

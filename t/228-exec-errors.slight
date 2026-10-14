@@ -1,0 +1,33 @@
+; A command that can't be started ends its owner before it runs, with
+; (:error (name command)): :enoent for one that isn't there (in PATH, or
+; at a path), :eacces for one that can't be run, and :io-error for an
+; argument with a NUL in it. Anything sent to a command but (:write ...),
+; (:eof) or (:read how) is a dead letter. The command must be a list of
+; strings, which connect checks in the caller.
+
+(defun run ()
+    (recv
+        ((:open p)     (pprint :opened) (run))
+        ((:line p s)   (run))
+        ((:eof p)      (run))
+        ((:exited p n) n)))
+
+(pprint (join (connect :exec (list "no-such-command" "-l") (run))))
+(pprint (join (connect :exec (list "t/data/no-such-file") (run))))
+(pprint (join (connect :exec (list "t/data") (run))))
+(pprint (join (connect :exec (list "t/data/lines.txt") (run))))
+(pprint (join (connect :exec (list "echo" (concat "a" (chr 0) "b")) (run))))
+
+(defun poke ()
+    (recv
+        ((:open p)
+            (send p (list :hello))
+            (send p (list :eof 1))
+            (send p (list :read :nope))
+            (run))))
+
+(pprint (join (connect :exec (list "true") (poke))))
+(pprint (join (fork (connect :exec "ls" (run)))))
+(pprint (join (fork (connect :exec () (run)))))
+(connect :exec (list "ls" 1) (run))
+(pprint :not-reached)

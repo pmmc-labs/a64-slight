@@ -17,8 +17,8 @@
 // nothing more can come: no timer is pending, and no process is connected
 // to :keypress, or stdin has ended.
 //
-// A file or a socket opened with connect is a device: a pid that the
-// runtime serves instead of compiled code (see "devices", below).
+// A file, a socket or a command opened with connect is a device: a pid
+// that the runtime serves instead of compiled code (see "devices", below).
 
 #include "rt.h"
 
@@ -34,6 +34,7 @@
 #include <sys/mman.h>
 #include <sys/select.h>
 #include <sys/socket.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -1009,6 +1010,7 @@ static int listening(void) {
 
 static uint64_t nsockets;
 static int      sockets_waiting(void);
+static int      working(void);
 static void     socket_fds(fd_set *in, fd_set *out, int *max);
 static int      socket_events(fd_set *in, fd_set *out);
 
@@ -1017,10 +1019,11 @@ static int      socket_events(fd_set *in, fd_set *out);
 #define SETTLE_US  200000               // how long the virtual clock waits for a lookup's answer, for real
 
 // Waits up to us microseconds (forever, if negative) for stdin to have
-// something to read, if anyone's listening, or for a socket to be ready;
-// handles the sockets that are, and says what it saw.
+// something to read, if anyone's listening and what was read before has
+// been decoded, or for a socket or a command to be ready; handles the
+// sockets and commands that are, and says what it saw.
 static int wait_for(int64_t us) {
-    int    keys = listening(), max = keys ? STDIN_FILENO : -1;
+    int    keys = listening() && input_at == input_len, max = keys ? STDIN_FILENO : -1;
     fd_set in, out;
     FD_ZERO(&in);
     FD_ZERO(&out);
@@ -1072,19 +1075,25 @@ static void events(void) {
     }
 }
 
-// Nothing can run: waits for a key, a socket or the next timer. Returns 0
-// if none of them can come: an open socket counts only while select() can
-// wait on it (wants); one whose owner has its last message and isn't
-// waiting, or that no process has been handed, can't do anything till a
-// process runs, and none can. On the virtual clock, the sockets come
-// first, then a key, then the clock moves; only when nothing else can
-// happen does it wait for real.
+// Nothing can run: waits for a key, a socket, a command or the next
+// timer. Returns 0 if none of them can come: an open socket or a command
+// counts only while select() can wait on it (wants); one whose owner has
+// its last message and isn't waiting, or that no process has been handed,
+// can't do anything till a process runs, and none can. On the virtual
+// clock, the sockets and commands come first; then a command whose input
+// is closed, which can only be working on its own, is waited for, for
+// real, keys and time standing still meanwhile (D185); then a key, then
+// the clock moves; only when nothing else can happen does it wait for real.
 static int idle(void) {
     if (!listening() && !nalarms && !sockets_waiting()) return 0;
     if (virtual_clock) {
         int saw = wait_for(0);
         if ((saw & IO_KEYS) && input_at == input_len) read_input();
         if (saw & IO_SOCKETS) return 1;
+        if (working()) {
+            if (wait_for(-1) & IO_KEYS) read_input();
+            return 1;
+        }
         if (listening() && next_key()) return 1;
         // A lookup's timer is the runtime's, not the program's, so it
         // mustn't beat an answer on its way: from a name server in the same
@@ -1113,7 +1122,7 @@ static int idle(void) {
     return 1;
 }
 
-// --- devices: files and sockets -----------------------------------------------
+// --- devices: files, sockets and commands -------------------------------------
 //
 // connect opens a device: a pid that the runtime serves instead of compiled
 // code, owned by the process connect forks. The device's first message to
@@ -1165,10 +1174,23 @@ static int idle(void) {
 // connection; conn reads nothing until (connect conn expr) hands it to a
 // process. An open socket counts as something that can still happen while
 // select() can wait on it (wants, below). IPv4 only, for now.
+//
+// A command (connect :exec (list name arg ...) expr, D185) runs in a
+// process group of its own, its input and its output (stdout and stderr
+// together) on pipes, which are waited for in select() as sockets are, on
+// the same list. Its output reads as a connection does, then (:eof p);
+// once the command has ended too, (:exited p status), and the device
+// closes. It takes (:write x ...), kept till the pipe takes it, and (:eof),
+// which closes its input once that's written; input the command doesn't
+// take goes nowhere. Closing the device before it has ended kills its
+// group, and waits for it, so nothing is left behind; and so does the
+// program's end, however it ends. SIGCHLD writes a byte to a pipe that
+// select() waits on, which says that one of them may have ended.
 
 #define DEV_TCP      3                  // a device's mode, after RT_FS_READ, _WRITE and _APPEND
 #define DEV_LISTEN   4
 #define DEV_SYSTEM   5                  // :system (below)
+#define DEV_EXEC     6                  // a command
 #define ERR_NOTFOUND (-1)               // no such host, which has no errno
 #define ERR_TOOBIG   (-2)               // a line, count or value of HEAP_MAX or more
 #define ERR_BADJSON  (-3)
@@ -1203,15 +1225,19 @@ typedef struct rt_device {
     int               eof_sent;
     int               closing;          // closed, but still writing what it has; no longer its pid's
     int               dead;             // closed: freed once the events in hand are done
-    char             *out;              // written to it, and not yet taken by the socket...
+    char             *out;              // written to it, and not yet taken by the socket or command...
     size_t            out_at, out_len, out_cap; // ...from out_at to out_len
+    int               in_fd;            // a command's input, till it's closed (-1)...
+    int               in_closing;       // ...which (:eof) asked for, once out is written
+    int               child, group;     // a command, till it's been waited for (0), and its group
+    int               status;           // how it ended, as waitpid says
     struct snapshot  *snap;             // :system's processes, still to be sent...
     uint64_t          snap_at, snap_len, snap_cap;  // ...from snap_at to snap_len
     rt_value_t       *snap_devices;     // ...and the devices they own
     uint64_t          snap_ndevices, snap_devices_cap;
 } rt_device_t;
 
-static rt_device_t *sockets;            // open sockets, and closing ones (nsockets counts them)
+static rt_device_t *sockets;            // open sockets and commands, and closing sockets (nsockets counts them)
 static uint64_t     ndevices;           // open devices
 static rt_device_t *graveyard;          // closed sockets
 
@@ -1262,8 +1288,9 @@ static rt_value_t string_in(uint64_t *space, const char *bytes, size_t len) {
     return (rt_value_t)box | RT_TAG_BOXED;
 }
 
+// A socket or a command: waited for in select(), and on sockets.
 static int is_socket(const rt_device_t *d) {
-    return d->mode == DEV_TCP || d->mode == DEV_LISTEN;
+    return d->mode == DEV_TCP || d->mode == DEV_LISTEN || d->mode == DEV_EXEC;
 }
 
 static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site, const char *path, size_t len) {
@@ -1276,6 +1303,7 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
     d->how   = RT_DEV_LINES;
     d->count = -1;
     d->line  = 1;
+    d->in_fd = -1;
     if (path) {
         d->path     = rt_must(malloc(len + 1));
         d->path_len = len;
@@ -1293,9 +1321,12 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
     return d;
 }
 
+static void end_command(rt_device_t *d);
+
 // Closes d's file descriptor. A socket is freed later (bury), since an
 // event in hand may still refer to it.
 static void close_now(rt_device_t *d) {
+    if (d->mode == DEV_EXEC) end_command(d);
     if (d->fd >= 0) rt_io_close(d->fd);
     if (d->lookup) {
         unset_alarm(&d->alarm);
@@ -1408,7 +1439,7 @@ static void tell_string(rt_device_t *d, uint64_t word, const char *bytes, size_t
 static void tell_open(rt_device_t *d) {
     _Alignas(16) rt_value_t cell[2];
     if (d->mode == DEV_LISTEN) tell_list(d, RT_DEV_OPEN, rt_cons_at(cell, rt_int(d->port), RT_NIL), 0);
-    else                       tell(d, RT_DEV_OPEN, d->mode == RT_FS_READ || d->mode == DEV_TCP || d->mode == DEV_SYSTEM);
+    else                       tell(d, RT_DEV_OPEN, d->mode != RT_FS_WRITE && d->mode != RT_FS_APPEND);
 }
 
 // Takes n bytes of what's been read, counting the lines they end.
@@ -1584,12 +1615,15 @@ static int cut_value(rt_device_t *d) {
     }
 }
 
+static int exited(rt_device_t *d);
+
 // Sends d's next message, if what's been read makes one: 1 if it did, or
-// has nothing more to send (and d may be gone); 0 if it needs more bytes.
+// has nothing more to send (and d may be gone); 0 if it needs more bytes,
+// or a command's end.
 static int cut(rt_device_t *d) {
     size_t      have = d->len - d->at, n;
     const char *line;
-    if (d->eof_sent) return 1;
+    if (d->eof_sent) return d->mode == DEV_EXEC ? exited(d) : 1;
     if (d->count >= HEAP_MAX) {
         fail(d, ERR_TOOBIG);
         return 1;
@@ -1619,8 +1653,8 @@ static int cut(rt_device_t *d) {
     }
     if (d->eof) {
         d->eof_sent = 1;
-        tell(d, RT_DEV_EOF, 0);
-        if (d->mode != DEV_TCP) close_device(d);
+        tell(d, RT_DEV_EOF, d->mode == DEV_EXEC);    // a command's (:exited p status) is next
+        if (d->mode == RT_FS_READ) close_device(d);
         return 1;
     }
     if (have >= HEAP_MAX) {                     // a line with no end in sight
@@ -1631,7 +1665,8 @@ static int cut(rt_device_t *d) {
 }
 
 // p, waiting again, took reader pid's message last: on to its next. A
-// file reads till it has one; a connection waits in select() for more.
+// file reads till it has one; a connection or a command waits in select()
+// for more.
 static void system_next(rt_device_t *d);
 
 static void read_on(rt_proc_t *p, rt_value_t pid) {
@@ -1642,7 +1677,7 @@ static void read_on(rt_proc_t *p, rt_value_t pid) {
         system_next(d);
         return;
     }
-    while (!cut(d) && d->mode != DEV_TCP) {
+    while (!cut(d) && d->mode == RT_FS_READ) {
         if (fill(d) < 0) {
             fail(d, errno);
             return;
@@ -1664,16 +1699,19 @@ static int read_as(rt_device_t *d, rt_value_t args) {
     } else {
         return 0;
     }
-    // A connection waiting in select() may have enough for the new way.
-    if (d->mode == DEV_TCP && !d->sent && !d->connecting && !d->waiting) cut(d);
+    // A connection or command waiting in select() may have enough for the
+    // new way.
+    if ((d->mode == DEV_TCP || d->mode == DEV_EXEC) && !d->sent && !d->connecting && !d->waiting) cut(d);
     return 1;
 }
 
-// Writes what a socket has, as far as it takes it: 0, or -1 with errno
-// set. (SIGPIPE is ignored, so a closed connection is EPIPE.)
+// Writes what a socket or a command's input has, as far as it takes it:
+// 0, or -1 with errno set. (SIGPIPE is ignored, so a closed connection is
+// EPIPE.)
 static int flush(rt_device_t *d) {
+    int fd = d->mode == DEV_EXEC ? d->in_fd : d->fd;
     while (d->out_at < d->out_len) {
-        ssize_t n = rt_io_write(d->fd, d->out + d->out_at, d->out_len - d->out_at);
+        ssize_t n = rt_io_write(fd, d->out + d->out_at, d->out_len - d->out_at);
         if (n < 0 && errno == EINTR) continue;
         if (n < 0) return errno == EAGAIN || errno == EWOULDBLOCK ? 0 : -1;
         d->out_at += (size_t)n;
@@ -1697,21 +1735,34 @@ static void queue(rt_device_t *d, const char *bytes, size_t len) {
 }
 
 static void system_command(rt_device_t *d, rt_value_t msg);
+static void close_input(rt_device_t *d);
 
 static void command(rt_device_t *d, rt_value_t msg) {
     rt_value_t word   = rt_is_cons(msg) ? rt_car(msg) : RT_NIL;
-    int        reader = d->mode == RT_FS_READ || d->mode == DEV_TCP;
+    int        reader = d->mode == RT_FS_READ || d->mode == DEV_TCP || d->mode == DEV_EXEC;
     if (d->mode == DEV_SYSTEM) {
         system_command(d, msg);
         return;
     }
     if (reader && word == rt_symbol(RT_SYM_DEVICE + RT_DEV_READ) && read_as(d, rt_cdr(msg))) return;
+    if (d->mode == DEV_EXEC && word == rt_symbol(RT_SYM_DEVICE + RT_DEV_EOF) && rt_cdr(msg) == RT_NIL) {
+        d->in_closing = 1;
+        if (d->out_at == d->out_len) close_input(d);
+        return;
+    }
     if (d->mode == RT_FS_READ || d->mode == DEV_LISTEN || word != rt_symbol(RT_SYM_DEVICE + RT_DEV_WRITE)) {
         rt_dead_letter(msg, d->site);
         return;
     }
+    if (d->mode == DEV_EXEC && (d->in_fd < 0 || d->in_closing)) return;      // input that goes nowhere
     rt_buf_t b = { 0 };
     for (rt_value_t x = rt_cdr(msg); rt_is_cons(x); x = rt_cdr(x)) rt_render(&b, rt_car(x), 1);
+    if (d->mode == DEV_EXEC) {
+        queue(d, b.bytes, b.len);
+        rt_buf_free(&b);
+        if (flush(d) < 0) close_input(d);       // the command has closed its input, or ended
+        return;
+    }
     if (d->mode == DEV_TCP) {
         queue(d, b.bytes, b.len);
         rt_buf_free(&b);
@@ -1903,10 +1954,18 @@ static void accept_all(rt_device_t *l) {
 // reads; a connection writes while it connects or has output waiting,
 // and reads while its owner waits for what it has (not accepted and not
 // yet handed over, not sent a message it hasn't taken, not at its end,
-// not closing); a lookup waits on its query's socket. A socket that wants
-// nothing can't do anything until a process runs, so it doesn't keep
-// the program alive (idle).
+// not closing); a lookup waits on its query's socket. A command writes
+// its input while it has some, reads its output as a connection does,
+// and once that has ended, while its owner waits, waits for it to end
+// (the SIGCHLD pipe, which select() waits on while any command runs). A
+// socket or command that wants nothing can't do anything until a process
+// runs, so it doesn't keep the program alive (idle).
 static int wants(const rt_device_t *d, int *r, int *w) {
+    if (d->mode == DEV_EXEC) {
+        *r = !d->sent && !d->eof;
+        *w = d->in_fd >= 0 && d->out_len > d->out_at;
+        return *r || *w || (d->child && d->eof_sent && !d->sent);
+    }
     if (d->lookup) {
         int write;
         rt_lookup_fd(d->lookup, &write);
@@ -1927,17 +1986,34 @@ static int sockets_waiting(void) {
     return 0;
 }
 
-// Adds to the sets the sockets that are waiting to read or write, and
-// raises *max to their highest file descriptor.
+static int      child_pipe[2] = { -1, -1 };     // SIGCHLD writes a byte to it
+static uint64_t nchildren;                      // commands not yet waited for
+
+// The file descriptors select() waits on for d: to read, and to write (a
+// command's input).
+static void fds_of(const rt_device_t *d, int *r, int *w) {
+    int write;
+    *r = d->lookup ? rt_lookup_fd(d->lookup, &write) : d->fd;
+    *w = d->mode == DEV_EXEC ? d->in_fd : *r;
+}
+
+// Adds to the sets the sockets and commands that are waiting to read or
+// write, and SIGCHLD's pipe while any command runs, and raises *max to
+// their highest file descriptor.
 static void socket_fds(fd_set *in, fd_set *out, int *max) {
     bury();
     for (rt_device_t *d = sockets; d; d = d->next_socket) {
-        int r, w, write;
+        int r, w, rfd, wfd;
         if (!wants(d, &r, &w)) continue;
-        int fd = d->lookup ? rt_lookup_fd(d->lookup, &write) : d->fd;
-        if (r) FD_SET(fd, in);
-        if (w) FD_SET(fd, out);
-        if (fd > *max) *max = fd;
+        fds_of(d, &rfd, &wfd);
+        if (r) FD_SET(rfd, in);
+        if (w) FD_SET(wfd, out);
+        if (r && rfd > *max) *max = rfd;
+        if (w && wfd > *max) *max = wfd;
+    }
+    if (nchildren) {
+        FD_SET(child_pipe[0], in);
+        if (child_pipe[0] > *max) *max = child_pipe[0];
     }
 }
 
@@ -1951,6 +2027,7 @@ static void socket_event(rt_device_t *d, int r, int w) {
         accept_all(d);
         return;
     }
+    if (d->mode == DEV_EXEC && w && (flush(d) < 0 || (d->in_closing && d->out_at == d->out_len))) close_input(d);
     if (d->connecting && w) {
         int err = rt_io_socket_error(d->fd);
         if (err) {
@@ -1961,7 +2038,7 @@ static void socket_event(rt_device_t *d, int r, int w) {
         d->connecting = 0;
         if (!d->closing) tell_open(d);
     }
-    if (w && !d->connecting && d->out_len > d->out_at) {
+    if (w && d->mode == DEV_TCP && !d->connecting && d->out_len > d->out_at) {
         if (flush(d) < 0) {
             if (d->closing) close_now(d);
             else            fail(d, errno);
@@ -1991,11 +2068,14 @@ static int by_pid(const void *a, const void *b) {
     return x < y ? -1 : x > y;
 }
 
-// Handles the sockets select() says are ready, in the order of their
-// pids; returns whether there were any. An event can end the process
-// running (fail, when events() is called from rt_preempt), and then this
-// never returns: so the list of them is kept for the next time, not
-// freed, and the sockets closed meanwhile are buried then.
+static void reap(void);
+
+// Handles the sockets and commands select() says are ready, in the order
+// of their pids, then the commands that may have ended; returns whether
+// there were any. An event can end the process running (fail, when
+// events() is called from rt_preempt), and then this never returns: so
+// the list of them is kept for the next time, not freed, and the sockets
+// closed meanwhile are buried then.
 static int socket_events(fd_set *in, fd_set *out) {
     static ready_t  *ready;
     static uint64_t  ready_cap;
@@ -2004,17 +2084,188 @@ static int socket_events(fd_set *in, fd_set *out) {
         ready     = rt_must(realloc(ready, ready_cap * sizeof *ready));
     }
     uint64_t n = 0;
+    int      ended = nchildren && FD_ISSET(child_pipe[0], in);
     for (rt_device_t *d = sockets; d; d = d->next_socket) {
-        int write, fd = d->lookup ? rt_lookup_fd(d->lookup, &write) : d->fd;
-        int r = FD_ISSET(fd, in), w = FD_ISSET(fd, out);
+        int rfd, wfd;
+        fds_of(d, &rfd, &wfd);
+        int r = rfd >= 0 && FD_ISSET(rfd, in), w = wfd >= 0 && FD_ISSET(wfd, out);
         if (r || w) ready[n++] = (ready_t){ d, r, w };
     }
     qsort(ready, n, sizeof *ready, by_pid);
     for (uint64_t i = 0; i < n; i++) {
         if (!ready[i].d->dead) socket_event(ready[i].d, ready[i].r, ready[i].w);
     }
+    if (ended) reap();
     bury();
-    return n > 0;
+    return n > 0 || ended;
+}
+
+// --- commands -----------------------------------------------------------------
+//
+// (connect :exec cmd expr), above, under devices (D185).
+
+static volatile sig_atomic_t groups[FD_SETSIZE];   // the groups of commands running, by their output
+
+static void on_child(int sig) {
+    int err = errno;
+    (void)sig;
+    if (write(child_pipe[1], "", 1) < 0) {}    // full: it has a byte already
+    errno = err;
+}
+
+// Kills every command still running: at the program's end, however it
+// ends.
+static void kill_groups(void) {
+    for (int fd = 0; fd < FD_SETSIZE; fd++) {
+        if (groups[fd]) kill(-groups[fd], SIGKILL);
+    }
+}
+
+static void on_end(int sig) {
+    kill_groups();
+    signal(sig, SIG_DFL);
+    raise(sig);
+}
+
+// Before the first command: SIGCHLD's pipe, and the handlers, on a stack
+// of their own, since a process's may be nearly full. 0, or an errno. A
+// replay runs no command, so no signal comes.
+static int start_commands(void) {
+    static char      altstack[64 << 10];
+    struct sigaction sa = { 0 }, old;
+    int              ends[] = { SIGINT, SIGTERM, SIGHUP };
+    if (child_pipe[0] >= 0) return 0;
+    if (rt_io_pipe(child_pipe) < 0) return errno;
+    if (rt_io_replaying()) return 0;
+    stack_t ss = { .ss_sp = altstack, .ss_size = sizeof altstack };
+    sigaltstack(&ss, NULL);
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = on_child;
+    sa.sa_flags   = SA_RESTART | SA_NOCLDSTOP | SA_ONSTACK;
+    sigaction(SIGCHLD, &sa, NULL);
+    sa.sa_handler = on_end;
+    sa.sa_flags   = SA_ONSTACK;
+    for (int i = 0; i < 3; i++) {               // not one that's ignored, as nohup has SIGHUP
+        if (sigaction(ends[i], NULL, &old) == 0 && old.sa_handler == SIG_DFL) sigaction(ends[i], &sa, NULL);
+    }
+    atexit(kill_groups);
+    return 0;
+}
+
+rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+                           rt_value_t cmd) {
+    uint64_t   len = 0;
+    rt_value_t x   = cmd;
+    if (!rt_is_cons(cmd)) rt_fault(RT_FAULT_NOT_CONS, cmd, site);     // a list of a name and its arguments
+    for (; rt_is_cons(x); x = rt_cdr(x), len++) {
+        if (!rt_is_string(rt_car(x))) rt_fault(RT_FAULT_NOT_STRING, rt_car(x), site);
+    }
+    rt_value_t pid  = rt_fork(code, n, values, site);
+    rt_proc_t *p    = procs[pid >> RT_PID_SHIFT].proc;
+    rt_value_t name = rt_car(cmd);
+    char     **argv = rt_must(calloc(len + 1, sizeof *argv));
+    int        err  = 0, child, in, out;
+    x = cmd;
+    for (uint64_t i = 0; i < len; i++, x = rt_cdr(x)) {
+        argv[i] = (char *)rt_string_bytes(rt_car(x));
+        if (memchr(argv[i], '\0', rt_string_len(rt_car(x)))) err = EINVAL;     // :io-error, as a path's (D130)
+    }
+    if (!err) err = start_commands();
+    if (!err) err = rt_io_spawn(argv, &child, &in, &out);
+    free(argv);
+    if (err) {
+        _Alignas(16) rt_value_t cells[4];
+        end_other(p, io_reason(cells, err, name));
+        return pid;
+    }
+    rt_device_t *d = new_device(p, DEV_EXEC, out, site, rt_string_bytes(name), rt_string_len(name));
+    d->in_fd = in;
+    d->child = d->group = child;
+    nchildren++;
+    if (!rt_io_replaying()) groups[out] = child;
+    tell_open(d);
+    return pid;
+}
+
+static const int signals[] = {          // RT_EXEC_HUP and on
+    SIGHUP, SIGINT, SIGQUIT, SIGILL, SIGTRAP, SIGABRT, SIGBUS, SIGFPE, SIGKILL, SIGUSR1, SIGSEGV, SIGUSR2,
+    SIGPIPE, SIGALRM, SIGTERM,
+};
+
+// A command's last message, once its output has ended, its owner has
+// taken (:eof p), and it has ended too: (:exited p status), and the device
+// closes. 0 if it hasn't ended yet.
+static int exited(rt_device_t *d) {
+    if (d->child) return 0;
+    _Alignas(16) rt_value_t cells[6];
+    rt_value_t status = rt_int(WIFEXITED(d->status) ? WEXITSTATUS(d->status) : 0);
+    if (WIFSIGNALED(d->status)) {
+        int k = 0, nsignals = (int)(sizeof signals / sizeof *signals), sig = WTERMSIG(d->status);
+        while (k < nsignals && signals[k] != sig) k++;
+        rt_value_t name = k < nsignals ? rt_symbol(RT_SYM_EXEC + RT_EXEC_HUP + (uint64_t)k) : rt_int(sig);
+        status = rt_cons_at(cells + 2, rt_symbol(RT_SYM_EXEC + RT_EXEC_SIGNAL), rt_cons_at(cells + 4, name, RT_NIL));
+    }
+    tell_sym(d, rt_symbol(RT_SYM_EXEC + RT_EXEC_EXITED), rt_cons_at(cells, status, RT_NIL), 0);
+    close_device(d);
+    return 1;
+}
+
+// SIGCHLD has come since select() last looked: sees which commands have
+// ended. One whose output has ended too, and whose owner is waiting,
+// sends its last message.
+static void reap(void) {
+    char bytes[64];
+    while (rt_io_read(child_pipe[0], bytes, sizeof bytes) > 0) {}
+    for (rt_device_t *d = sockets, *next; d; d = next) {
+        int status;
+        next = d->next_socket;
+        if (d->mode != DEV_EXEC || !d->child || rt_io_wait(d->child, &status, 1) != d->child) continue;
+        d->child  = 0;
+        d->status = status;
+        nchildren--;
+        if (d->eof_sent && !d->sent) exited(d);
+    }
+}
+
+// A command's input closes: (:eof) asked for it, and what it had is
+// written; or the command has closed its end, or ended, and what's left
+// goes nowhere.
+static void close_input(rt_device_t *d) {
+    if (d->in_fd >= 0) rt_io_close(d->in_fd);
+    d->in_fd  = -1;
+    d->out_at = d->out_len = 0;
+}
+
+// A command's device closes. If anything of it may still be running (it
+// hasn't ended, or its output hasn't, so something it started holds
+// that), its group is killed; and it's waited for, which a killed process
+// can't hold up for long. The command is killed itself too, since under
+// qemu, whose posix_spawn returns before the child has run, it may not be
+// in its group yet.
+static void end_command(rt_device_t *d) {
+    int status;
+    if (d->child || !d->eof) rt_io_kill(-d->group);
+    if (d->child) {
+        rt_io_kill(d->child);
+        rt_io_wait(d->child, &status, 0);
+        d->child = 0;
+        nchildren--;
+    }
+    close_input(d);
+    if (d->fd >= 0 && d->fd < FD_SETSIZE) groups[d->fd] = 0;
+}
+
+// Whether a command whose input is closed has something the program
+// waits for: output its owner waits for, or its end. It can only be
+// working on its own, so on the virtual clock nothing else moves till
+// it's said something or ended (idle).
+static int working(void) {
+    int r, w;
+    for (rt_device_t *d = sockets; d; d = d->next_socket) {
+        if (d->mode == DEV_EXEC && (d->in_fd < 0 || d->in_closing) && wants(d, &r, &w)
+            && (r || (d->child && d->eof_sent && !d->sent))) return 1;
+    }
+    return 0;
 }
 
 // --- :system -----------------------------------------------------------------

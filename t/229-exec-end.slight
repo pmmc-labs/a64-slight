@@ -1,0 +1,66 @@
+; Closing a command's device before the command has ended kills it (its
+; process group, with SIGKILL) and waits for it, so it's gone by the
+; time disconnect returns, or its owner has ended, however it ended; and
+; nothing more comes from it. A command is handed to another process as
+; any device is.
+
+(defun run (out)
+    (recv
+        ((:open p)     (run out))
+        ((:line p s)   (run (cons s out)))
+        ((:eof p)      (run out))
+        ((:exited p n) (list n (reverse out)))))
+
+; Whether the process pid is gone (kill -0 fails), asked of another
+; command.
+(defun gone (pid)
+    (join (connect :exec (list "sh" "-c" (concat "kill -0 " pid " 2>/dev/null || echo gone")) (run ()))))
+
+; A command that says its pid, then waits for input that never comes.
+(defun waits ()
+    (list "sh" "-c" "echo $$; exec cat"))
+
+; Its owner raises.
+(defun raises ()
+    (recv
+        ((:open p)   (raises))
+        ((:line p s) (raise (list :pid s)))))
+
+(match (join (connect :exec (waits) (raises)))
+    ((:error (:pid pid)) (pprint (gone pid))))
+
+; Its owner disconnects, and goes on: nothing more comes, and what's
+; written to it goes nowhere.
+(defun disconnects ()
+    (recv
+        ((:open p)   (disconnects))
+        ((:line p s)
+            (disconnect p)
+            (send p (list :write "nowhere" \n))
+            (send $$ :next)
+            (recv
+                (:next (gone s))
+                (m     (list :unexpected m))))))
+
+(pprint (join (connect :exec (waits) (disconnects))))
+
+; Its owner is killed, by the process it told the pid to.
+(defun tells (whom)
+    (recv
+        ((:open p)   (tells whom))
+        ((:line p s) (send whom (list :pid s)) (tells whom))))
+
+(let me $$)
+(let owner (connect :exec (waits) (tells me)))
+(recv
+    ((:pid pid)
+        (kill owner)
+        (pprint (join owner))
+        (pprint (gone pid))))
+
+; Handed over, from the process connect made to another.
+(defun hands ()
+    (recv
+        ((:open p) (join (connect p (run ()))))))
+
+(pprint (join (connect :exec (list "sh" "-c" "echo handed") (hands))))

@@ -59,9 +59,15 @@ export const SYSTEM_WORDS: readonly string[] = [
     'devices', 'joining', 'running', 'ready', 'recv', 'sleeping', 'pids', 'timers', 'stacks', 'clock',
 ];
 
+// How a command ends, and the signals' names, in RT_EXEC_ order (D185).
+export const EXEC_WORDS: readonly string[] = [
+    'exited', 'signal', 'hup', 'int', 'quit', 'ill', 'trap', 'abrt', 'bus', 'fpe', 'kill', 'usr1', 'segv', 'usr2',
+    'pipe', 'alrm', 'term',
+];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
-    ...SYSTEM_WORDS,
+    ...SYSTEM_WORDS, ...EXEC_WORDS,
 ];

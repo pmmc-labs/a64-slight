@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { DEVICE_WORDS, ERRNO_NAMES, FAULT_KINDS, intWord, JSON_WORDS, KEY_NAMES, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS, TAG_BOXED, tupleElement, tupleHeader } from '../src/values.ts';
+import { DEVICE_WORDS, ERRNO_NAMES, EXEC_WORDS, FAULT_KINDS, intWord, JSON_WORDS, KEY_NAMES, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS, TAG_BOXED, tupleElement, tupleHeader } from '../src/values.ts';
 
 const RT_H = readFileSync(new URL('../../runtime/rt.h', import.meta.url), 'utf8');
 
@@ -50,6 +50,7 @@ test("the runtime's symbols follow #true, as rt.h numbers them", () => {
     assert.equal(BigInt(id(JSON_WORDS[0]!)), define('RT_SYM_JSON'));
     assert.equal(BigInt(id(SEXP_WORDS[0]!)), define('RT_SYM_SEXP'));
     assert.equal(BigInt(id(SYSTEM_WORDS[0]!)), define('RT_SYM_SYSTEM'));
+    assert.equal(BigInt(id(EXEC_WORDS[0]!)), define('RT_SYM_EXEC'));
 });
 
 test('no name is in the runtime\'s symbols twice', () => {
@@ -74,7 +75,7 @@ test("a device's words, the errno names and the data's words are rt.h's, in orde
     const groups = [
         ['RT_DEV_', DEVICE_WORDS, 'RT_DEV_COUNT'], ['RT_ERR_', ERRNO_NAMES, 'RT_ERR_COUNT'],
         ['RT_JSON_', JSON_WORDS, 'RT_JSON_COUNT'], ['RT_SEXP_', SEXP_WORDS, 'RT_SEXP_COUNT'],
-        ['RT_SYS_', SYSTEM_WORDS, 'RT_SYS_COUNT'],
+        ['RT_SYS_', SYSTEM_WORDS, 'RT_SYS_COUNT'], ['RT_EXEC_', EXEC_WORDS, 'RT_EXEC_COUNT'],
     ] as const;
     for (const [prefix, names, count] of groups) {
         const found = [...RT_H.matchAll(new RegExp(`^#define ${prefix}\\w+\\s+(\\d+)\\s+// :(\\S+)`, 'gm'))];

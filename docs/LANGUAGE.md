@@ -80,7 +80,7 @@ every `recv`.
 ### Replaying a run, and other orders
 
 A run is decided by what it takes from outside: its arguments, the
-keys typed, the clock, what files and sockets give. Everything else the
+keys typed, the clock, what files, sockets and commands give. Everything else the
 runtime decides itself, counting calls rather than time. So (D170):
 
 - `SLIGHT_RECORD=file` writes all it takes from outside, as it takes it,
@@ -89,8 +89,8 @@ runtime decides itself, counting calls rather than time. So (D170):
   arguments, keys, times, file contents and network traffic are the
   record's, and the run goes exactly as the recorded one did, printing
   what it printed. Nothing is read from the world, and nothing written to
-  it but stdout and stderr: no file is written, no socket opened, and the
-  terminal is left as it is. So a bug that came from the world can be
+  it but stdout and stderr: no file is written, no socket opened, no
+  command run, and the terminal is left as it is. So a bug that came from the world can be
   seen again, as often as it takes. The record must be of the same
   program; where a run goes another way, it stops with `replay: the run
   goes another way at entry N` and exits 2.
@@ -340,6 +340,7 @@ function that waits in `recv`, which is the usual way to start an actor:
     (connect :keypress expr)
     (connect :fs/read path expr)
     (connect :tcp "host:port" expr)
+    (connect :exec (list "ls" "-l") expr)
     (connect :system expr)
     (connect device expr)
 
@@ -843,6 +844,78 @@ the body is cut as lines (D159).
 
 To `join`, `monitor` and `kill`, a device is a process that has ended
 with `(:ok ())`.
+
+### Commands
+
+    (connect :exec (list "ls" "-l") expr)
+
+Runs a command: a list of strings, its name and its arguments. There's
+no shell unless one is asked for, `(list "sh" "-c" "ls -l | wc -l")`, so
+nothing in an argument is expanded, or quoted wrongly. The name is
+looked for in `PATH`, unless it has a `/` in it. The command runs with
+the program's environment and working directory (`env NAME=value ...`
+and `sh -c "cd dir && ..."` change them), in a process group of its own,
+with its input and output on pipes. Its stderr goes where its stdout
+does, so its errors come where they happened, in order (D185).
+
+- Its first message is `(:open p)`. Then its output reads as a
+  socket's does: lines at first, one message at a time, and `(:read
+  how)` changes the way. Then `(:eof p)`, when the output has ended;
+  and once the command has ended too, `(:exited p status)`, after which
+  the device closes. `status` is the exit code, or `(:signal name)` if a
+  signal ended it: `:hup`, `:int`, `:quit`, `:ill`, `:trap`, `:abrt`,
+  `:bus`, `:fpe`, `:kill`, `:usr1`, `:segv`, `:usr2`, `:pipe`, `:alrm`
+  or `:term`, or the number of any other.
+- `(:write x ...)`, from any process, writes to its input, as to a
+  socket: kept till the pipe takes it, so `send` never blocks.
+  `(:eof)` closes the input, once what was written before it has gone,
+  while the output still comes. A command that reads its input waits for
+  it till then, so send `(:eof)` at once to one that has none. Input
+  the command doesn't take, having ended or closed its input, goes
+  nowhere, and so does anything written after `(:eof)`.
+
+      (defun run (out)
+          (recv
+              ((:open p)     (send p (list :eof)) (run out))
+              ((:line p s)   (run (cons s out)))
+              ((:eof p)      (run out))
+              ((:exited p n) (list n (reverse out)))))
+
+      (join (connect :exec (list "sh" "-c" "echo hi; echo oops >&2; exit 3") (run ())))
+      ; (:ok (3 ("hi" "oops")))
+
+`(disconnect p)` stops a command that hasn't ended: its process group is
+killed (SIGKILL), and it's waited for, so it's gone when `disconnect`
+returns, and nothing more comes from it. Its owner ending does the same,
+and so does the program's end, however it ends. A timeout is the owner's
+own `after`, then `disconnect`:
+
+    (defun within (out)
+        (recv
+            ((:open p)     (send p (list :eof)) (after 5000 $$ (list :late p)) (within out))
+            ((:line p s)   (within (cons s out)))
+            ((:eof p)      (within out))
+            ((:exited p n) (list n (reverse out)))
+            ((:late p)     (disconnect p) :timed-out)))
+
+A command that can't be started ends its owner before it runs, with
+`(:error (:enoent "ls"))` for one that isn't there, `:eacces` for one
+that can't be run, or `:io-error` for an argument with a NUL in it. A
+read that fails ends it as a socket's does, and so does a line, count
+or value of 64 MB or more, with `(:error (:too-big "ls"))`. Something
+that isn't a list of strings, at least one, faults in the caller. A
+command keeps the program running while there's something to wait for:
+output its owner waits for, input to write, or its end, once its output
+has ended. Each takes two of the 1,000 or so file descriptors `select()`
+can wait on.
+
+On the virtual clock, a command whose input is closed can only be
+working on its own, so while its owner waits for its output or its end,
+the runtime waits for it, for real, and neither keys nor the clock move
+meanwhile: a timeout around it doesn't fire first. One whose input is
+open may be waiting for the program, so it's looked at as a socket is,
+and the clock moves when it has nothing to say: set a timer around it
+once it has said all it will.
 
 ### The system
 

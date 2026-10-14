@@ -52,6 +52,20 @@ int     rt_io_socket_error(int fd);                 // SO_ERROR, or errno if tha
 ssize_t rt_io_send(int fd, const void *buf, size_t len);
 ssize_t rt_io_recv(int fd, void *buf, size_t len);
 
+// Commands (D185). rt_io_spawn runs argv[0], found as posix_spawnp would
+// find it (but here, so that one that isn't there is ENOENT under qemu
+// too), with its input and its output (stdout and stderr together) on
+// pipes, in a process group of its own: 0, with the child, the input's
+// end to write and the output's end to read (both not blocking, not
+// inherited, and fit for select()), or an errno. rt_io_wait is waitpid,
+// WNOHANG if nohang; rt_io_kill sends SIGKILL to a process, or a group
+// (-pid), and isn't made in a replay. rt_io_pipe makes a pipe whose ends don't block
+// and aren't inherited: 0, or -1 with errno set.
+int rt_io_spawn(char *const argv[], int *child, int *in, int *out);
+int rt_io_wait(int child, int *status, int nohang);
+int rt_io_kill(int pid);
+int rt_io_pipe(int fds[2]);
+
 // A text file read a line at a time (the hosts file, resolv.conf).
 FILE *rt_io_fopen(const char *path);
 char *rt_io_fgets(char *line, int size, FILE *f);

@@ -618,13 +618,15 @@ function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: 
 }
 
 // connect's sources, past :keypress (every key typed, runtime/tty.c):
-// each opens a device, with the runtime's function and its mode.
-const SOURCES: Readonly<Record<string, readonly [string, string]>> = {
+// each opens a device, with the runtime's function and its mode, if it
+// has one.
+const SOURCES: Readonly<Record<string, readonly [string, ...string[]]>> = {
     'fs/read':    ['rt_connect_fs', 'RT_FS_READ'],
     'fs/write':   ['rt_connect_fs', 'RT_FS_WRITE'],
     'fs/append':  ['rt_connect_fs', 'RT_FS_APPEND'],
     'tcp':        ['rt_connect_tcp', 'RT_TCP_CONNECT'],
     'tcp/listen': ['rt_connect_tcp', 'RT_TCP_LISTEN'],
+    'exec':       ['rt_connect_exec'],
 };
 
 // (connect :keypress expr), (connect :fs/read path expr) and the other
@@ -643,11 +645,11 @@ function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, 
     }
     if (name !== null && name in SOURCES) {
         checkArity(x, 'connect', args, 3);
-        const [fn, mode] = SOURCES[name]!;
-        return compileFork(x, 'connect', args[2]!, fn, cx, st, [args[1]!], [mode]);
+        const [fn, ...mode] = SOURCES[name]!;
+        return compileFork(x, 'connect', args[2]!, fn, cx, st, [args[1]!], mode);
     }
     if (quoted) {
-        throw new CompileError(`connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not ${show(source)}`,
+        throw new CompileError(`connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen or :exec, or a device, not ${show(source)}`,
                                posOf(source) ?? x.pos);
     }
     checkArity(x, 'connect', args, 2);

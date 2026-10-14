@@ -540,10 +540,11 @@ first, in order: HTTP bodies streamed to the caller as they arrive,
 217–221; and a monitor now goes when its watcher ends, D183); then,
 before `:exec`, a chat: an agent whose state is the conversation, on
 ollama's `/api/chat`, and a terminal to talk to it (D184, golden test
-224, `examples/chat.slight`; done). Next, `:exec` (below); and reading
-the environment, for a model's address or a key (a builtin, to
-propose). Then, for a hosted model: TLS (12c), and a reader of
-server-sent events.
+224, `examples/chat.slight`; done); then `:exec`, a device for running
+a command (below; D185, golden tests 225–230; done). Next, reading the
+environment, for a model's address or a key (a builtin, to propose);
+then tools as messages. Then, for a hosted model: TLS (12c), and a
+reader of server-sent events.
 
 - An agent is an actor whose state is its context: the conversation so
   far, its tools, its model's settings. A turn comes in as a message,
@@ -566,16 +567,18 @@ server-sent events.
   request on top, a fraction of a millisecond against the model's tens.
 - `:exec`, a device for running commands, for tools: `(connect :exec
   (list "ls" "-l") expr)` runs the command, its owner gets the output as
-  other devices give theirs, then `(:exit p status)`. A command is a
-  list of arguments, with no shell unless asked for (`(list "sh" "-c"
-  cmd)`), so nothing is quoted wrongly.
+  other devices give theirs (stdout and stderr together), then `(:eof
+  p)` and `(:exited p status)` (D185; not `:exit`, which is
+  `monitor`'s). A command is a list of arguments, with no shell unless
+  asked for (`(list "sh" "-c" cmd)`), so nothing is quoted wrongly.
 
 Settled by the chat (D184): what a turn and an answer look like as
-messages, and how streamed output arrives. Still to settle: how a tool
-says what it takes; how `:exec` gives stderr and takes stdin, and when
-the child is reaped; what its last message is called, since `(:exit p
-status)` has the shape of `monitor`'s `(:exit pid result)`; and what
-limits a tool runs under.
+messages, and how streamed output arrives. Settled by `:exec` (D185):
+its stderr (with its stdout), its stdin (a pipe, closed with `(:eof)`),
+when the child is reaped (SIGCHLD, through a pipe `select()` waits on),
+its last message, `(:exited p status)`, and the limits a command runs
+under (none yet, but the caller's timeout and `:too-big`). Still to
+settle: how a tool says what it takes.
 
 ### 16. As needed
 
