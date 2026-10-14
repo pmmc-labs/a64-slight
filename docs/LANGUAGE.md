@@ -79,21 +79,23 @@ every `recv`.
 
 ### Replaying a run, and other orders
 
-A run is decided by what it takes from outside: its arguments, the
-keys typed, the clock, what files, sockets and commands give. Everything else the
-runtime decides itself, counting calls rather than time. So (D170):
+A run is decided by what it takes from outside: its arguments and
+environment, the keys typed, the clock, what files, sockets and commands
+give. Everything else the runtime decides itself, counting calls rather
+than time. So (D170):
 
 - `SLIGHT_RECORD=file` writes all it takes from outside, as it takes it,
-  to `file`, a record of the run.
+  to `file`, a record of the run. That includes the environment, keys and
+  all, so keep a record as you would the environment itself.
 - `SLIGHT_REPLAY=file` runs the program again from that record: the
-  arguments, keys, times, file contents and network traffic are the
-  record's, and the run goes exactly as the recorded one did, printing
-  what it printed. Nothing is read from the world, and nothing written to
-  it but stdout and stderr: no file is written, no socket opened, no
-  command run, and the terminal is left as it is. So a bug that came from the world can be
-  seen again, as often as it takes. The record must be of the same
-  program; where a run goes another way, it stops with `replay: the run
-  goes another way at entry N` and exits 2.
+  arguments, environment, keys, times, file contents and network traffic
+  are the record's, and the run goes exactly as the recorded one did,
+  printing what it printed. Nothing is read from the world, and nothing
+  written to it but stdout and stderr: no file is written, no socket
+  opened, no command run, and the terminal is left as it is. So a bug
+  that came from the world can be seen again, as often as it takes. The
+  record must be of the same program; where a run goes another way, it
+  stops with `replay: the run goes another way at entry N` and exits 2.
 - `SLIGHT_SCHED=n` runs processes in another order than first in, first
   out: a generator seeded with the number `n` picks which ready process
   runs next and how many calls each slice has. Each seed gives the same
@@ -123,6 +125,23 @@ function, and `@ARGV` is that function's parameter. So a lambda or a
 that names it is a compile error; pass it to the functions that need it.
 A number arrives as a string: `(string->int (car @ARGV))`. `@ARGV` can't
 be bound or defined (D144).
+
+### %ENV
+
+`%ENV` is the program's environment, as a list of `(name value)` lists
+of strings, in the environment's order, which `lookup` reads:
+
+    OLLAMA_HOST=127.0.0.1:11434 ./prog
+
+    (lookup "OLLAMA_HOST" %ENV)     ; "127.0.0.1:11434"
+    (lookup "NO_SUCH" %ENV)         ; :not-found
+
+A variable set to nothing is `""`. An entry is cut at its first `=`, so
+a value can have `=` in it. It's the top level's second parameter, as
+`@ARGV` is its first, and only the top level sees it in the same way:
+pass it, or what's needed from it, to the functions that need it, so a
+key reaches only the code it's given to. A command (`:exec`) gets the
+same environment. `%ENV` can't be bound or defined (D186).
 
 ### @include
 
@@ -182,8 +201,8 @@ and `PI` is the float 3.141592653589793. They're constants rather than
 reserved words: a local of the same name hides them.
 
 These names can't be bound or defined: `#true`, `#false`, `$$`, `^$$`,
-`@ARGV`, `@include`, the special forms, and the forms that become
-`cond` (`match` among them).
+`@ARGV`, `%ENV`, `@include`, the special forms, and the forms that
+become `cond` (`match` among them).
 
 ### Documentation
 

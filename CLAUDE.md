@@ -54,7 +54,8 @@ readers skip, and `:source` reads a file's forms and doc blocks in
 order, with their lines.
 `(@include "path")` and `(@include :name)` splice in other files (each
 once); `@ARGV`, the program's arguments, is the top level's parameter
-(D144); and `if`, `when`, `case`, `and`, `or` and `match` are made into
+(D144), and `%ENV`, its environment as an association list, the second
+(D186); and `if`, `when`, `case`, `and`, `or` and `match` are made into
 `cond` (`compiler/src/expand.ts`, a pass between the reader and the
 compiler). `match` and `recv` share patterns that nest, with literals
 anywhere and `&` for the rest of a list (`compiler/src/pattern.ts`,
@@ -98,9 +99,9 @@ device for running a command: `(connect :exec (list "ls" "-l") expr)`,
 stdout and stderr together read as a socket's, input written with
 `(:write ...)` and closed with `(:eof)`, then `(:eof p)` and `(:exited p
 status)`; a command runs in a process group of its own, killed when its
-device closes or the program ends (D185, golden tests 225–230). **Next:
-reading the environment** (a builtin, to propose); then tools as
-messages. 12c (C libraries
+device closes or the program ends (D185, golden tests 225–230); and
+`%ENV` (D186, golden test 231), which the chat reads `OLLAMA_HOST`
+from. **Next: tools as messages.** 12c (C libraries
 vendored as source, D151, D152, then TLS, which HTTPS needs: `https://`
 is `:no-tls` till then) comes with the first hosted model. Each has
 points to settle with Stevan first (`docs/PLAN.md`). Self-hosting waits

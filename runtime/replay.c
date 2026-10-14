@@ -9,8 +9,9 @@
 // order, a run can be made again, exactly: to see a bug that came from
 // the world again, under a debugger, as often as it takes.
 //
-// The record is a line saying what it is, the settings and arguments
-// (rt_io_settings_t), then an entry for each call, in order: what kind of
+// The record is a line saying what it is, the settings, arguments and
+// environment (rt_io_settings_t), then an entry for each call, in order:
+// what kind of
 // call, its result, errno, and the bytes it filled in. Numbers are in the
 // machine's own order: a record is for replaying where it was made. It's
 // flushed after every entry, so a run that crashes leaves a record of all
@@ -36,7 +37,7 @@
 
 #include "io.h"
 
-#define MAGIC "slight record 1\n"
+#define MAGIC "slight record 2\n"
 
 enum { OFF, RECORD, REPLAY };
 
@@ -152,7 +153,30 @@ static int64_t replayed(int kind) {
 
 // --- starting -----------------------------------------------------------------
 
-void rt_io_start(int *argc, char ***argv, rt_io_settings_t *s) {
+// n strings: how many, then each one's length and bytes.
+static void put_strings(uint32_t n, char *const *xs) {
+    put(&n, sizeof n);
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t len = (uint32_t)strlen(xs[i]);
+        put(&len, sizeof len);
+        put(xs[i], len);
+    }
+}
+
+// What put_strings wrote, as a NULL-terminated array, its length in *n.
+static char **get_strings(uint32_t *n) {
+    if (!get(n, sizeof *n)) stop("the record is cut short");
+    char **xs = rt_must(calloc((size_t)*n + 1, sizeof *xs));
+    for (uint32_t i = 0; i < *n; i++) {
+        uint32_t len;
+        if (!get(&len, sizeof len)) stop("the record is cut short");
+        xs[i] = rt_must(calloc(len + 1, 1));
+        if (!get(xs[i], len)) stop("the record is cut short");
+    }
+    return xs;
+}
+
+void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *s) {
     const char *rec = getenv("SLIGHT_RECORD"), *play = getenv("SLIGHT_REPLAY");
     if (rec && play) {
         fputs("slight: SLIGHT_RECORD and SLIGHT_REPLAY can't both be set\n", stderr);
@@ -167,35 +191,25 @@ void rt_io_start(int *argc, char ***argv, rt_io_settings_t *s) {
     fcntl(fileno(record), F_SETFD, FD_CLOEXEC);    // not a command's
     mode = rec ? RECORD : REPLAY;
     uint8_t  clock;
-    uint32_t n;
+    uint32_t n = 0;
     if (mode == RECORD) {
         put(MAGIC, strlen(MAGIC));
         clock = (uint8_t)s->virtual_clock;
         put(&clock, 1);
         put(&s->sched_seed, sizeof s->sched_seed);
-        n = (uint32_t)*argc;
-        put(&n, sizeof n);
-        for (int i = 0; i < *argc; i++) {
-            uint32_t len = (uint32_t)strlen((*argv)[i]);
-            put(&len, sizeof len);
-            put((*argv)[i], len);
-        }
+        put_strings((uint32_t)*argc, *argv);
+        while ((*env)[n]) n++;
+        put_strings(n, *env);
         fflush(record);
         return;
     }
     char magic[sizeof MAGIC - 1];
     if (!get(magic, sizeof magic) || memcmp(magic, MAGIC, sizeof magic) != 0) stop("that isn't a record of a run");
-    if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed) || !get(&n, sizeof n)) stop("the record is cut short");
+    if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed)) stop("the record is cut short");
     s->virtual_clock = clock;
-    char **args = rt_must(calloc((size_t)n + 1, sizeof *args));
-    for (uint32_t i = 0; i < n; i++) {
-        uint32_t len;
-        if (!get(&len, sizeof len)) stop("the record is cut short");
-        args[i] = rt_must(calloc(len + 1, 1));
-        if (!get(args[i], len)) stop("the record is cut short");
-    }
+    *argv = get_strings(&n);
     *argc = (int)n;
-    *argv = args;
+    *env  = get_strings(&n);
 }
 
 int rt_io_replaying(void) {

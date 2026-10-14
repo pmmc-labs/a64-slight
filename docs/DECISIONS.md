@@ -2431,3 +2431,53 @@ on a device the new process owns.
 - **Left for later:** a `run` that gives `(:ok (status lines))`, with the
   tools; a command's own environment and working directory; a signal to
   a command without closing it; stderr apart from stdout.
+
+**D186. `%ENV`: the environment, as the top level's second parameter.**
+*(User chose it from Claude's two, A of A and B, and named it `%ENV`
+"to match the perlish `@ARGV`"; the details are as proposed.)* For a
+model's address or a key (D180). `%ENV` is the program's environment as
+an association list, `(("HOME" "/home/s") ("OLLAMA_HOST" "...") ...)`,
+read with `lookup`, which gives `:not-found` for a variable that isn't
+set; so nothing new for that, and a default is `(if (eq? h :not-found)
+... h)`.
+- **Why a parameter, as `@ARGV` is (D144):** the environment is the
+  program's input, given to the root. Only the top level sees it; a
+  `defun` that names it is a compile error saying to pass it on, and a
+  lambda or a `fork` at the top level captures it as any local. So a key
+  reaches only the code it's handed to: a tool, or a library such as
+  `lib/agent.slight`, can't read `ANTHROPIC_API_KEY` unless its caller
+  passes it. (A command can still run `env`: `:exec` gives every command
+  the whole environment, D185, and that stays till devices are
+  restricted, if they ever are.) Rejected: `(env "NAME")`, a builtin
+  readable anywhere (simpler to build, and a record would hold only what
+  was read, but any process or library could read any key: the shape
+  D144 turned down for `@ARGV`); a device, `(connect :env expr)` (a
+  process and messages for a constant).
+- **What's in it:** every variable, as a `(name value)` list of two
+  strings, in the environment's own order; an entry is cut at its first
+  `=` (a value may have `=` in it), and one with no `=` is left out; a
+  name that's there twice is found first where `getenv` finds it.
+  Nothing for a missing variable but `lookup`'s `:not-found`; a
+  `lookup-or` with a default can come to the prelude if wanted.
+- **How:** `slight_main` takes `@ARGV` and `%ENV`, in that order
+  (`TOP_PARAMS`, `values.ts`), and the runtime's `main` builds both in
+  the root's heap. `split.ts` carries both across a `recv` at the top
+  level, under names no program can write, as it carried `@ARGV`. The
+  top level's frame has a slot more, so a few unit tests' offsets moved
+  by 8 bytes.
+- **Replay:** the record keeps the environment in its header, after
+  `@ARGV`, and a replay's `%ENV` is the record's. So a record holds every
+  variable, keys included: records are made only when asked for, to debug
+  where they were made, and the docs say to keep one as the environment
+  itself. The record's format changed, so its first line is now `slight
+  record 2`, and an older record is refused as not a record.
+- **The chat** takes its URL from its second argument, then from
+  `OLLAMA_HOST`, as ollama reads it (no scheme means http, and no port
+  means 11434), then `http://localhost:11434`. Checked by hand on both
+  targets against a stand-in for `/api/chat`.
+- **Tests:** golden test 231 (`; env:` sets three variables: one set,
+  one empty, one with `=` in its value; one unset; every entry a pair of
+  strings; `%ENV` in a lambda, a `fork`, and across a `recv` at the top
+  level); unit tests for the compile errors, the second slot, and the
+  carrying; `t/replay/world.slight` reads a variable set when recorded
+  and unset when replayed.

@@ -50,8 +50,8 @@ The reader (`compiler/src/reader.ts`, D37) reads:
   emphasis, code, fenced blocks, lists, links); any other `=word` there
   is an error, kept for later kinds.
 - `$$` (self) and `^$$` (parent)
-- `@ARGV`, the program's arguments, at the top level only (Program
-  structure, below)
+- `@ARGV` and `%ENV`, the program's arguments and environment, at the
+  top level only (Program structure, below)
 - the names `\n`, `\r`, `\t` and `\e`, constants for those one-character
   strings, and `PI`
 
@@ -306,6 +306,16 @@ strings (`()` with none). The top-level forms are the body of a function,
 like any local (a lambda or a `fork` there captures it), and a `defun`
 doesn't, so pass it to the functions that need it. It can't be bound or
 defined. A number comes as a string: `(string->int (car @ARGV))`.
+
+**`%ENV`** (D186) is the program's environment, as a list of `(name
+value)` lists of strings, in the environment's order, for `lookup`
+(`:not-found` for a variable that isn't set). It's `slight_main`'s second
+parameter, seen as `@ARGV` is, and for the same reason: the environment is
+the program's input, given to the root, and a key reaches only the code
+it's passed to. The runtime's `main` builds it in the root's heap; an
+entry is cut at its first `=`, and one without an `=` is left out. A
+receive function split from the top level (D167) carries both under
+names no program can write.
 
 ### Builtins and the prelude
 
@@ -815,9 +825,11 @@ the whole run.
 - `SLIGHT_RECORD=file`: each call is made, and its result, `errno`, and
   any bytes it filled in are written to `file`, flushed every time, so a
   crash leaves a record of everything up to it. The record starts with the
-  settings that change a run (the clock, the seed) and `@ARGV`.
+  settings that change a run (the clock, the seed), `@ARGV` and the
+  environment, keys and all.
 - `SLIGHT_REPLAY=file`: no call is made; each takes the record's next
-  entry instead, and the record's settings and arguments are the run's.
+  entry instead, and the record's settings, arguments and environment are
+  the run's.
   Writes to files, sockets and commands aren't made either, no command
   is run or killed, and raw mode isn't set; stdout and stderr, written through stdio, are. An entry of another
   kind than the call asks for means the run has gone another way (another

@@ -47,7 +47,7 @@ import { CompileError } from './errors.ts';
 import { madeFrom } from './expand.ts';
 import { patternNames } from './pattern.ts';
 import { NIL, cons, form, isForm, list, posOf, show, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
-import { MAX_ARGS } from './values.ts';
+import { MAX_ARGS, TOP_PARAMS } from './values.ts';
 
 // The functions generated so far, newest last, and a count for names
 // where a recv has no position.
@@ -66,7 +66,7 @@ export function splitProgram(forms: Sexp): Sexp {
         st = s;
     }
     const top = all.filter((x) => !isForm(x, 'defun'));
-    const [body, st1] = splitFunction(top, ['@ARGV'], 'the top level', false, st);
+    const [body, st1] = splitFunction(top, TOP_PARAMS, 'the top level', false, st);
     return list(...defuns, ...st1.gen, ...body);
 }
 
@@ -294,8 +294,11 @@ function waitFor(r: Pair, t: Sym | null, rest: readonly Sexp[], env: readonly st
     const [clauses0, st0] = recvClauses(r, st);
     const site  = where(r.pos, st0.n);
     const st1   = { ...st0, n: st0.n + 1 };
-    const argv  = sym(`@ARGV (carried across ${site})`, r.pos);
-    const carry = (xs: readonly Sexp[]): readonly Sexp[] => (env.includes('@ARGV') ? xs.map((x) => rename(x, '@ARGV', argv)) : xs);
+    // The top level's parameters can't be named in a function of its own,
+    // so they come across under other names.
+    const carried = (v: string): string => `${v} (carried across ${site})`;
+    const carry   = (xs: readonly Sexp[]): readonly Sexp[] =>
+        TOP_PARAMS.filter((v) => env.includes(v)).reduce((ys, v) => ys.map((x) => rename(x, v, sym(carried(v), r.pos))), xs);
     const clauses = clauses0.map((c) => form(clauseOf(c), ...carry(toArray(c) ?? [])));
     const after   = carry(rest);
     const patOf   = (c: Sexp): Sexp => (c as Pair).car;
@@ -304,18 +307,19 @@ function waitFor(r: Pair, t: Sym | null, rest: readonly Sexp[], env: readonly st
 
     const restUses   = uses(after, t === null ? [] : [t.name]);
     const clauseUses = new Set(clauses.flatMap((c) => [...uses(bodyOf(c), patternNames(patOf(c)))]));
-    const outer = [...new Set(env)].map((v) => (v === '@ARGV' ? argv.name : v));
+    const outer = [...new Set(env)].map((v) => (TOP_PARAMS.includes(v) ? carried(v) : v));
     const live  = outer.filter((v) => restUses.has(v) || clauseUses.has(v));
     // Each local comes across under a name with the recv's site in it,
     // which no program can write, so neither a pattern nor a let in a
     // clause's body can hide what the rest of the function needs; it's
     // bound again under its own name where it's wanted. A name with a
-    // space in it is one of ours already (@ARGV's, a call's argument, an
-    // earlier recv's), which nothing can hide, so it comes as it is.
+    // space in it is one of ours already (@ARGV's or %ENV's, a call's
+    // argument, an earlier recv's), which nothing can hide, so it comes as
+    // it is.
     const alias  = (v: string): string => (v.includes(' ') ? v : `${v} (before ${site})`);
     const rebind = (vs: readonly string[]): readonly Sexp[] =>
         vs.filter((v) => alias(v) !== v).map((v) => letForm(sym(v, r.pos), sym(alias(v), r.pos)));
-    const args   = live.map((v) => sym(v === argv.name ? '@ARGV' : v, r.pos));
+    const args   = live.map((v) => sym(TOP_PARAMS.find((p) => carried(p) === v) ?? v, r.pos));
     const name   = sym(`${fn} (${site})`, r.pos);
 
     // At the start of a clause's body: the locals in used that its pattern

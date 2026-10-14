@@ -7,6 +7,11 @@
 // what a process waiting in recv keeps of them (rt_proc_t.args).
 export const MAX_ARGS = 8;
 
+// The top level's parameters, in the order the runtime's main gives the
+// root them: the program's arguments and its environment (D144, D186).
+// Only the top level can name them.
+export const TOP_PARAMS: readonly string[] = ['@ARGV', '%ENV'];
+
 export const intWord    = (n: bigint): bigint => n << 1n;
 export const symbolWord = (id: number): bigint => (BigInt(id) << 3n) | 5n;
 

@@ -541,10 +541,11 @@ first, in order: HTTP bodies streamed to the caller as they arrive,
 before `:exec`, a chat: an agent whose state is the conversation, on
 ollama's `/api/chat`, and a terminal to talk to it (D184, golden test
 224, `examples/chat.slight`; done); then `:exec`, a device for running
-a command (below; D185, golden tests 225–230; done). Next, reading the
-environment, for a model's address or a key (a builtin, to propose);
-then tools as messages. Then, for a hosted model: TLS (12c), and a
-reader of server-sent events.
+a command (below; D185, golden tests 225–230; done); and reading the
+environment, for a model's address or a key: `%ENV`, the top level's
+second parameter (D186, golden test 231; done). Next, tools as
+messages. Then, for a hosted model: TLS (12c), and a reader of
+server-sent events.
 
 - An agent is an actor whose state is its context: the conversation so
   far, its tools, its model's settings. A turn comes in as a message,

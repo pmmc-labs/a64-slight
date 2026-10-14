@@ -2521,6 +2521,35 @@ static rt_value_t arguments(rt_proc_t *root, int argc, char **argv) {
     return list;
 }
 
+static rt_value_t cons_new(rt_value_t car, rt_value_t cdr, const char *site) {
+    rt_value_t *cell = rt_alloc(16, site);
+    cell[0] = car;
+    cell[1] = cdr;
+    return (rt_value_t)cell | RT_TAG_LIST;
+}
+
+// %ENV: the program's environment, as a list of (name value) lists of
+// strings in the root's heap, in the environment's order, for lookup. An
+// entry is cut at its first =, and one without an = is left out. The
+// root's entry takes it as its second parameter (D186).
+static rt_value_t environment(rt_proc_t *root, char **env) {
+    uint64_t n = 0;
+    while (env[n]) n++;
+    rt_value_t list = RT_NIL;
+    rt_current = root;
+    for (uint64_t i = n; i-- > 0; ) {
+        const char *eq = strchr(env[i], '=');
+        if (!eq) continue;
+        rt_value_t name  = rt_new_string(env[i], (size_t)(eq - env[i]), "%ENV");
+        rt_value_t value = rt_new_string(eq + 1, strlen(eq + 1), "%ENV");
+        list = cons_new(cons_new(name, cons_new(value, RT_NIL, "%ENV"), "%ENV"), list, "%ENV");
+    }
+    rt_current = NULL;
+    return list;
+}
+
+extern char **environ;
+
 int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
@@ -2533,12 +2562,14 @@ int main(int argc, char **argv) {
         return 2;
     }
     rt_io_settings_t settings = { mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0 };
-    rt_io_start(&argc, &argv, &settings);       // replaying, the record's settings and arguments
+    char           **env      = environ;
+    rt_io_start(&argc, &argv, &env, &settings); // replaying, the record's settings, arguments and environment
     virtual_clock = settings.virtual_clock;
     sched         = settings.sched_seed;
     started       = now();
     rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);
     p->args[0]   = arguments(p, argc, argv);
+    p->args[1]   = environment(p, env);
     rt_run();
     const entry_t *root = &procs[1];
     if (root->proc) {

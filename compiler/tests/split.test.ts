@@ -99,6 +99,9 @@ test('a recv after a let in a clause body, with a rest, stays in tail position',
 test('@ARGV comes across under another name, since it can\'t be a parameter', () => {
     const src = '(let m (recv)) (pprint (list m @ARGV))';
     assert.deepEqual(toArray(defun(src, 'the top level (recv at t:1:8)')[2]!)!.map(show), ['@ARGV (carried across recv at t:1:8)']);
+    const both = '(let m (recv)) (pprint (list %ENV m @ARGV))';
+    assert.deepEqual(toArray(defun(both, 'the top level (recv at t:1:8)')[2]!)!.map(show),
+                     ['@ARGV (carried across recv at t:1:8)', '%ENV (carried across recv at t:1:8)']);
     assert.doesNotThrow(() => compileProgram(read(src, 't')));
 });
 

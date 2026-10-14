@@ -25,8 +25,8 @@
 // are bump-allocated in the process's heap; floats, strings, closures and
 // tuples are boxes; literals, and closures that capture nothing, are
 // static data. The top-level forms that aren't defuns are the body of
-// slight_main, whose one parameter is @ARGV, the program's arguments: so
-// only they can see it (D144).
+// slight_main, whose parameters are @ARGV and %ENV, the program's
+// arguments and environment: so only they can see them (D144, D186).
 //
 // The prelude (lib/prelude.slight) is compiled with every program. Its
 // functions are in their own namespace: a program can define a function
@@ -35,7 +35,7 @@
 
 import { CompileError } from './errors.ts';
 import { float, form, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
-import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord, tupleHeader } from './values.ts';
+import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
 import { isReceiveBody, stateFunctions } from './classify.ts';
 import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
@@ -123,8 +123,8 @@ export function compileProgram(forms: Sexp, prelude: Sexp = NIL, t: Target = AAR
         }, [[], st]);
     const [preludeCode, st1] = compileAll(preludeDefuns, preludeFns, 'prelude', st0);
     const [code, st2]        = compileAll(defuns, fns, 'user', st1);
-    const argv: Sym   = { t: 'sym', name: '@ARGV', pos: null };
-    const main: Defun = { name: { t: 'sym', name: 'the top level', pos: null }, params: [argv], body: list(...top, ...(top.length === 0 ? [NIL] : [])), pos: null };
+    const params: Sym[] = TOP_PARAMS.map((name) => ({ t: 'sym', name, pos: null }));
+    const main: Defun   = { name: { t: 'sym', name: 'the top level', pos: null }, params, body: list(...top, ...(top.length === 0 ? [NIL] : [])), pos: null };
     const [mainCode, st3] = compileFunction('slight_main', main, [], fns, 'other', st2);
 
     return flatten([
@@ -335,10 +335,10 @@ function checkLet(form: Pair): [Sym, Sexp] {
     return [name, expr];
 }
 
-// Names that can't be bound or defined: #true, #false, $$, ^$$, @ARGV and
-// the special forms.
+// Names that can't be bound or defined: #true, #false, $$, ^$$, @ARGV,
+// %ENV and the special forms.
 function checkBindable(name: Sym): void {
-    if (RESERVED_SYMBOLS.includes(name.name) || SPECIAL_FORMS.includes(name.name) || ['$$', '^$$', '@ARGV'].includes(name.name)) {
+    if (RESERVED_SYMBOLS.includes(name.name) || SPECIAL_FORMS.includes(name.name) || ['$$', '^$$', ...TOP_PARAMS].includes(name.name)) {
         throw new CompileError(`can't bind ${name.name}`, name.pos);
     }
 }
@@ -375,7 +375,7 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     if (x.name === '#false') return [st.t.loadConst('RT_FALSE'), st];
     const si = lookup(cx.env, x.name);
     if (si !== null) return [st.t.loadSlot(si, x.name), st];
-    if (x.name === '@ARGV') throw new CompileError('@ARGV is only seen at the top level: pass it to the functions that need it', x.pos);
+    if (TOP_PARAMS.includes(x.name)) throw new CompileError(`${x.name} is only seen at the top level: pass it to the functions that need it`, x.pos);
     const constant = CONSTANTS[x.name];
     if (constant !== undefined) return compileExpr(constant, cx, st);
     const fn = lookupFn(cx.fns, x.name);

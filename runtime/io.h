@@ -23,15 +23,16 @@
 #include <sys/types.h>
 
 // What a run's log keeps besides what the world gave it: the settings
-// that change how a run goes, and its arguments. rt_io_start opens the
-// log SLIGHT_RECORD or SLIGHT_REPLAY names, if either does; recording, it
-// writes these, and replaying, it reads them back, over what was given.
+// that change how a run goes, its arguments and its environment.
+// rt_io_start opens the log SLIGHT_RECORD or SLIGHT_REPLAY names, if
+// either does; recording, it writes these, and replaying, it reads them
+// back, over what was given.
 typedef struct {
     int      virtual_clock;
     uint64_t sched_seed;                // SLIGHT_SCHED, or 0
 } rt_io_settings_t;
 
-void rt_io_start(int *argc, char ***argv, rt_io_settings_t *settings);
+void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *settings);
 int  rt_io_replaying(void);
 
 uint64_t rt_io_clock(void);             // the monotonic clock, in nanoseconds
