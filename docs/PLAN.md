@@ -545,8 +545,9 @@ a command (below; D185, golden tests 225–230; done); and reading the
 environment, for a model's address or a key: `%ENV`, the top level's
 second parameter (D186, golden test 231; done); and tools: a function
 of the model's arguments, each call in a process of its own (D187,
-golden test 232; done). Next, the chat with tools to read files and
-run commands. Then, for a hosted model: TLS (12c), and a reader of
+golden test 232; done), and the chat with tools to read files and run
+commands, the person saying yes to each command (`exec/run`, golden test
+233; done). Next, for a hosted model: TLS (12c), and a reader of
 server-sent events.
 
 - An agent is an actor whose state is its context: the conversation so

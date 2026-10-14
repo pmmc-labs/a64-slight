@@ -2550,3 +2550,21 @@ the calls.
   history left as it was), an agent with no tools, and an agent killed
   while a tool runs, which kills the tool. Also under `SLIGHT_SCHED`
   seeds and `SLIGHT_GC_STRESS`, and valgrind.
+- **`exec/run`,** the helper D185 left for later, in an opt-in
+  `lib/exec.slight`: `(exec/run cmd)` runs a command with its input
+  closed and gives `(:ok (status output))`, the output whole, or
+  `(:error reason)`. Golden test 233.
+- **The chat** has two tools: `read_file` (`slurp`), and `run`, a shell
+  command, which asks the keyboard's process first, with `ask`: the
+  person sees the command and answers `y` or `n` (`n` tells the model
+  "the user didn't let it run"), and another command asked about
+  meanwhile waits its turn. The keyboard's process makes the agent, so
+  the tools can name it (`$$` in the `connect`). Calls and results are
+  shown as they happen. The `run` tool has no time limit, unlike what
+  the proposal suggested a tool might set: a timer can't be cancelled
+  yet, so one set for every command would keep the chat running after
+  Ctrl-D till it was due; a command that doesn't end is stopped with
+  Ctrl-C, which ends the chat and kills the command's group (D185).
+  Checked by hand on both targets, in a pseudo-terminal, against a
+  stand-in for `/api/chat` that calls the tools: `y`, `n`, and a file
+  read, with the whole conversation sent each round.

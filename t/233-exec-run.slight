@@ -1,0 +1,11 @@
+; exec/run (lib/exec.slight, D187): a command run to its end, with no
+; input, gives (:ok (status output)), stdout and stderr together; or
+; (:error reason) if it can't be started.
+
+(@include :exec)
+
+(pprint (exec/run (list "printf" "a\\nb\\n")))
+(pprint (exec/run (list "sh" "-c" "echo out; echo err >&2; exit 3")))
+(pprint (exec/run (list "cat")))
+(pprint (exec/run (list "sh" "-c" "kill -TERM $$")))
+(pprint (exec/run (list "no-such-command")))

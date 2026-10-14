@@ -1578,4 +1578,21 @@ what with:
   and the answer, once the answer is whole.
 
 `examples/chat.slight` is a chat in the terminal, a line at a time, on
-`:keypress`: `chat [model] [url]`.
+`:keypress`: `chat [model] [url]`. Its model has two tools, `read_file`
+and `run`, a shell command, which runs only once you've said `y`: the
+tool asks the keyboard's process, with `ask`.
+
+### (@include :exec)
+
+`lib/exec.slight`: a command run to its end (D187).
+
+    (@include :exec)
+
+    (exec/run (list "sh" "-c" "echo hi; exit 3"))    ; (:ok (3 "hi\n"))
+
+- `(exec/run cmd)` runs `cmd`, a list of strings as `:exec` takes it,
+  with its input closed, and waits for it to end. It gives `(:ok (status
+  output))`, `output` being all it printed, stdout and stderr together,
+  and `status` its exit code or `(:signal name)`; or `(:error reason)` if
+  it can't be started, such as `(:error (:enoent "ls"))`. There's no time
+  limit: a command that doesn't end keeps it waiting.
