@@ -2481,3 +2481,72 @@ set; so nothing new for that, and a default is `(if (eq? h :not-found)
   level); unit tests for the compile errors, the second slot, and the
   carrying; `t/replay/world.slight` reads a variable set when recorded
   and unset when replayed.
+
+**D187. Tools: a function of the model's arguments, each call in a
+process of its own.** *(User agreed to Claude's proposal, every point as
+recommended.)* Step 15's "tools as messages", on ollama's tool calling:
+the request carries `tools`, each a name, a description and a JSON
+Schema for its parameters; a reply's message may carry `tool_calls`,
+each a name and an object of arguments, a whole call in one chunk when
+streamed, and no ids; and the results go back as `{"role": "tool",
+"content": ..., "tool_name": ...}` after the assistant's message with
+the calls.
+- **A tool is a function**, `(lambda (args) ...)`, and each call runs in
+  a process of its own: one that faults, raises or is killed ends alone,
+  and its value, rendered as `concat` renders it, is the result. A tool
+  with state is a function that `ask`s a process, and one that runs a
+  command does it with `(join (connect :exec ...))`, since `join` works
+  in a lambda. Rejected: PLAN.md's first sketch, a tool as an actor that
+  takes `(:call args to)` and answers with `reply`, which made every
+  tool, stateless or not, a long-lived process with a loop, and a tool
+  that died in the middle of a call something each call had to guard
+  against; the function covers it with less.
+- **`(tool/new name description params f)`,** `params` a list of `(name
+  type description)`, `type` `:string`, `:number`, `:integer` or
+  `:boolean`, each required; the library builds the JSON Schema, at
+  once, so a bad type faults there. Rejected: the schema written as
+  `json/print` data (four nested `:object`s for one parameter); a schema
+  read from a doc block (a parser for it); a tool that describes itself
+  when asked (a round trip, and the schema written all the same).
+  Optional parameters, enums, arrays and objects can come when a tool
+  wants one.
+- **What a tool is given:** the arguments as `json/parse` makes them,
+  less the `:object`: a list of `(name value)` for `lookup`. Nothing
+  checks them against the parameters: a tool that finds one missing or
+  wrong raises, and the model, told why, can try again.
+- **Results:** `"error: reason"` for a call that raised, faulted or was
+  killed, and `"error: there's no tool called x"` for a name the agent
+  doesn't know; neither ends the turn. A result over 16 KB is cut there,
+  with `[cut: n more bytes]` after it, so a command that prints a
+  megabyte doesn't fill a model's small context; one constant, where
+  every tool would otherwise cap its own.
+- **The caller hears** `(:calling a name args)` for each call before any
+  runs, then `(:called a name result)` for each, in the calls' order,
+  once all have finished; `(:piece a text)` and `(:answer a text)` as
+  before, the answer being the last reply's text.
+- **A turn is rounds:** the reply is streamed as before, its calls
+  collected from any of its lines; with calls, they all run at once,
+  each in a process the turn monitors, and the assistant's message with
+  the calls and a tool message for each go back to the model for
+  another round; without, it's the answer. All at once, since a model
+  that asks for several in one message treats them as independent, and
+  processes make it cheap. If the agent ends while calls run, the turn
+  kills them and ends. A turn is still all or nothing (D184): the
+  question, each round's messages and the answer join the conversation
+  once the answer is whole.
+- **At most 10 rounds a turn:** one whose tenth reply still calls tools
+  fails with `(:rounds 10)`, without running them, since a small model
+  can call tools in a loop for ever. No time limit for a call: a tool
+  that might hang sets its own `after`, as a command's owner does
+  (D185).
+- **The tools are the agent's,** fixed when it starts: `(agent/new url
+  model system tools)`, `()` for none, which sends no `tools` at all.
+  `agent/new` took three arguments before; the chat and test 224 pass
+  `()`.
+- **Tests:** 232, against a fake ollama in the program: the schema the
+  model sees, a call after a piece of text and the history after it, two
+  calls at once, a tool that raises, one that isn't there, a result cut
+  short, a model that keeps calling (stopped at its tenth round, the
+  history left as it was), an agent with no tools, and an agent killed
+  while a tool runs, which kills the tool. Also under `SLIGHT_SCHED`
+  seeds and `SLIGHT_GC_STRESS`, and valgrind.

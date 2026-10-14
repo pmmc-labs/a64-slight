@@ -410,8 +410,12 @@ it, raising `(:ended pid result)` if the structure ends first. Opt-in:
 model as a process, on ollama's `/api/chat` over `http/stream`. Its state
 is the conversation; `(agent/say a text)` is a turn, and the caller hears
 the answer's pieces as they come, then the whole answer, or an error.
-Each turn runs in a process of its own, which the agent monitors.
-Opt-in: `(@include :agent)`.
+Each turn runs in a process of its own, which the agent monitors. A
+tool (D187) is a function of the model's arguments, with a name, a
+description and parameters, from which `tool/new` makes the JSON Schema
+the model reads; a turn runs each call in a process of its own, all at
+once, sends the results back to the model, and goes on, at most 10
+rounds, until the model answers. Opt-in: `(@include :agent)`.
 
 ### Strings
 

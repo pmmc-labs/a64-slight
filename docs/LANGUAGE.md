@@ -1510,19 +1510,20 @@ waits for TLS (step 12c).
 
 ### (@include :agent)
 
-`lib/agent.slight`: a conversation with a model, as a process (D184). The
-model is ollama's `/api/chat`, over plain HTTP; the agent includes
-`:http` itself.
+`lib/agent.slight`: a conversation with a model, as a process, which
+can call tools (D184, D187). The model is ollama's `/api/chat`, over
+plain HTTP; the agent includes `:http` itself.
 
     (@include :agent)
 
-    (let a (agent/new "http://localhost:11434" "llama3.2" ""))
+    (let a (agent/new "http://localhost:11434" "llama3.2" "" ()))
     (agent/say a "Why is the sky blue?")
     ; the caller hears (:piece a text) ..., then (:answer a text)
 
-- `(agent/new url model system)` starts an agent and gives its pid. `url`
-  is the server's, `"http://host:port"`; `system` is the system prompt,
-  `""` for none.
+- `(agent/new url model system tools)` starts an agent and gives its
+  pid. `url` is the server's, `"http://host:port"`; `system` is the
+  system prompt, `""` for none; `tools` is a list of tools (below), `()`
+  for none.
 - `(agent/say a text)` asks `a` a question, and returns at once. The
   caller is sent `(:piece a text)` for each piece of the answer as the
   model streams it, then `(:answer a text)`, the whole answer. If the
@@ -1536,7 +1537,45 @@ model is ollama's `/api/chat`, over plain HTTP; the agent includes
   whole, so a turn that fails leaves it as it was.
 - One turn at a time: a question asked while another is answered waits
   for it, and its answer comes after.
-- `(kill a)` ends the agent, and stops an answer on its way.
+- `(kill a)` ends the agent, and stops an answer on its way, and any
+  tool it was running.
+
+A tool is a function the model can call, with a name, a description,
+and its parameters, which the model reads to know when to call it and
+what with:
+
+    (let weather
+        (tool/new "get_weather" "The weather in a city, now."
+            (list (list "city" :string "The city, such as Tokyo"))
+            (lambda (args) (concat "11 degrees in " (lookup "city" args)))))
+
+    (let a (agent/new url "llama3.2" "" (list weather)))
+    (agent/say a "What's the weather in Tokyo?")
+    ; the caller hears (:calling a "get_weather" (("city" "Tokyo"))),
+    ; (:called a "get_weather" "11 degrees in Tokyo"), then the answer
+
+- `(tool/new name description params f)` makes a tool. `params` is a
+  list of `(name type description)`, `type` being `:string`, `:number`,
+  `:integer` or `:boolean`, every one required (anything else faults
+  here). `f` is a function of the arguments the model gives, as a list
+  of `(name value)` that `lookup` reads; nothing checks them against the
+  parameters, so a tool that finds one missing or wrong can raise, and
+  the model is told why.
+- When the model calls tools, each call runs in a process of its own,
+  all at once. The caller hears `(:calling a name args)` for each call,
+  then `(:called a name result)` for each, in the calls' order, once all
+  have finished. The result is `f`'s value, rendered as `concat` renders
+  it; or `"error: reason"` if it raised, faulted or was killed, or for a
+  tool the agent doesn't have. A result longer than 16 KB is cut there,
+  with `[cut: n more bytes]` at its end. The results go back to the
+  model, and the turn goes on until the model answers without calling
+  any: `(:answer a text)` is the text of that last reply, though the
+  pieces of the replies before it came too.
+- A turn has at most 10 rounds with the model; one still calling tools
+  in its tenth fails with `(:rounds 10)`. A call has no time limit: a
+  tool that might hang sets its own, with `after`.
+- The calls and their results join the conversation with the question
+  and the answer, once the answer is whole.
 
 `examples/chat.slight` is a chat in the terminal, a line at a time, on
 `:keypress`: `chat [model] [url]`.

@@ -1,0 +1,146 @@
+; An agent with tools, against a fake ollama (D187). The fake calls tools
+; when asked to, and when the conversation ends with their results, it
+; answers with them and the conversation's roles: "calls" for the
+; assistant's message with the calls, "tool:name" for a result. The caller
+; hears each call (:calling), then each result (:called), in the calls'
+; order, then the answer's pieces and the answer, which is the last
+; round's text.
+;
+; The tool as the model sees it, its JSON Schema; one call, after a piece,
+; and the history after it; two calls at once; a tool that raises; a tool
+; there isn't; a result cut short; a model that keeps calling, stopped
+; after its tenth round, which leaves the history as it was; an agent
+; with no tools, whose request has none; and an agent killed while a tool
+; runs, which kills the tool.
+
+(@include :agent)
+
+; --- the fake ollama ---------------------------------------------------
+
+(defun handler (req)
+    (match (json/parse (lookup :body req))
+        ((:ok (:object & fields))
+            (let messages (lookup "messages" fields))
+            (let last     (cdr (car (reverse messages))))
+            (let users    (filter (lambda (m) (eq? (lookup "role" (cdr m)) "user")) (reverse messages)))
+            (let asked    (lookup "content" (cdr (car users))))
+            (list 200 () (lines (reply asked last fields messages))))))
+
+(defun reply (asked last fields messages)
+    (cond
+        ((eq? asked "schema")              (list (piece (json/print (car (lookup "tools" fields)))) (done)))
+        ((eq? asked "no tools")            (list (piece (concat (lookup "tools" fields))) (done)))
+        ((eq? asked "loop")                (list (calls (list (call "get_weather" (list (list "city" "Rome"))))) (done)))
+        ((eq? (lookup "role" last) "tool") (list (piece (concat "results: " (results messages))) (piece (roles messages)) (done)))
+        ((eq? asked "weather")             (list (piece "Let me look.") (calls (list (call "get_weather" (list (list "city" "Tokyo"))))) (done)))
+        ((eq? asked "both")                (list (calls (list (call "get_weather" (list (list "city" "Oslo"))) (call "add" (list (list "a" 2) (list "b" 3))))) (done)))
+        ((eq? asked "broken")              (list (calls (list (call "broken" ()))) (done)))
+        ((eq? asked "unknown")             (list (calls (list (call "nosuch" ()))) (done)))
+        ((eq? asked "big")                 (list (calls (list (call "big" ()))) (done)))
+        ((eq? asked "stuck")               (list (calls (list (call "stuck" ()))) (done)))
+        (#true                             (list (piece asked) (piece (roles messages)) (done)))))
+
+(defun piece (text)
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" text))) (list "done" #false)))
+
+(defun calls (cs)
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" "") (list "tool_calls" cs))) (list "done" #false)))
+
+(defun call (name args)
+    (list :object (list "function" (list :object (list "name" name) (list "arguments" (cons :object args))))))
+
+(defun done ()
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" ""))) (list "done" #true)))
+
+(defun lines (values)
+    (str-join "" (map (lambda (v) (concat (json/print v) "\n")) values)))
+
+(defun roles (messages)
+    (concat " [" (str-join " " (map role-of messages)) "]"))
+
+(defun role-of (m)
+    (let f (cdr m))
+    (cond
+        ((not (eq? (lookup "tool_calls" f) :not-found)) "calls")
+        ((eq? (lookup "role" f) "tool")                 (concat "tool:" (lookup "tool_name" f)))
+        (#true                                          (lookup "role" f))))
+
+; The results at the end of the conversation, in order; a long one as its
+; length and its last 22 bytes.
+(defun results (messages)
+    (str-join " | " (map summary (trailing-tools (reverse messages) ()))))
+
+(defun trailing-tools (newest acc)
+    (match newest
+        ((m & rest) (if (eq? (lookup "role" (cdr m)) "tool") (trailing-tools rest (cons (lookup "content" (cdr m)) acc)) acc))
+        (()         acc)))
+
+(defun summary (c)
+    (if (> (str-len c) 100)
+        (concat (str-len c) " bytes, ending " (substring c (- (str-len c) 22) (str-len c)))
+        c))
+
+; --- the tools ---------------------------------------------------------
+
+(defun forever () (recv (:never :never)))
+
+(defun tools (me)
+    (list
+        (tool/new "get_weather" "The weather in a city, now." (list (list "city" :string "The city"))
+            (lambda (args) (concat "11 degrees in " (lookup "city" args))))
+        (tool/new "add" "Adds two integers." (list (list "a" :integer "One") (list "b" :integer "The other"))
+            (lambda (args) (+ (lookup "a" args) (lookup "b" args))))
+        (tool/new "broken" "Fails." () (lambda (args) (raise "the tool broke")))
+        (tool/new "big" "Says a lot." () (lambda (args) (str-repeat "x" 20000)))
+        (tool/new "stuck" "Never answers." () (lambda (args) (send me (list :stuck $$)) (join (fork (forever)))))))
+
+; --- asking ------------------------------------------------------------
+
+; What the caller hears, till an answer or an error has come. A long
+; result is its length.
+(defun heard (acc)
+    (recv
+        ((:piece _ text)        (heard (cons (list :piece text) acc)))
+        ((:calling _ name args) (heard (cons (list :calling name args) acc)))
+        ((:called _ name text)  (heard (cons (list :called name (if (> (str-len text) 100) (str-len text) text)) acc)))
+        ((:answer _ text)       (reverse (cons (list :answer text) acc)))
+        ((:error _ reason)      (reverse (cons (list :error reason) acc)))))
+
+(defun ask (a text)
+    (cadr (join (fork (asking a text)))))
+
+(defun asking (a text)
+    (agent/say a text)
+    (heard ()))
+
+; --- the run -----------------------------------------------------------
+
+(defun main ()
+    (let me   $$)
+    (let srv  (http/serve 0 handler))
+    (let base (recv ((:listening port) (concat "http://127.0.0.1:" port))))
+    (let ts   (tools me))
+    (let a    (agent/new base "fake" "be brief" ts))
+    (pprint (ask a "schema"))
+    (pprint (ask a "weather"))
+    (pprint (ask a "again"))
+    (pprint (ask (agent/new base "fake" "" ts) "both"))
+    (pprint (ask (agent/new base "fake" "" ts) "broken"))
+    (pprint (ask (agent/new base "fake" "" ts) "unknown"))
+    (pprint (ask (agent/new base "fake" "" ts) "big"))
+    (let b    (agent/new base "fake" "" ts))
+    (pprint (ask b "loop"))
+    (pprint (ask b "after"))
+    (pprint (ask (agent/new base "fake" "" ()) "no tools"))
+    (let c    (agent/new base "fake" "" ts))
+    (agent/say c "stuck")
+    (let calling (recv ((:calling _ name args) (list :calling name args))))
+    (let p    (recv ((:stuck p) p)))
+    (monitor p)
+    (kill c)
+    (let ended (recv ((:exit q r) (list (eq? q p) r))))
+    (pprint (list calling ended))
+    (kill srv)
+    :done)
+
+(main)

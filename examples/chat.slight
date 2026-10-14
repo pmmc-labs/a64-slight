@@ -23,7 +23,7 @@
 (defun main (args env)
     (let model (if (cons? args) (car args) "llama3.2"))
     (let url   (if (and (cons? args) (cons? (cdr args))) (cadr args) (ollama-url env)))
-    (let a     (agent/new url model ""))
+    (let a     (agent/new url model "" ()))
     (tty/write \e "[1;32m" "Slight Agent Chat v0.0" \e "[0m" \n
                \n
                \e "[2m"

@@ -543,16 +543,19 @@ ollama's `/api/chat`, and a terminal to talk to it (D184, golden test
 224, `examples/chat.slight`; done); then `:exec`, a device for running
 a command (below; D185, golden tests 225–230; done); and reading the
 environment, for a model's address or a key: `%ENV`, the top level's
-second parameter (D186, golden test 231; done). Next, tools as
-messages. Then, for a hosted model: TLS (12c), and a reader of
+second parameter (D186, golden test 231; done); and tools: a function
+of the model's arguments, each call in a process of its own (D187,
+golden test 232; done). Next, the chat with tools to read files and
+run commands. Then, for a hosted model: TLS (12c), and a reader of
 server-sent events.
 
 - An agent is an actor whose state is its context: the conversation so
   far, its tools, its model's settings. A turn comes in as a message,
   and the answer goes out as one, streamed if the model streams.
-- A tool call is a message to an actor, answered with `reply`
-  (`lib/ds.slight`'s `ask`), so a tool is a process like any other, and
-  one that fails ends alone.
+- A tool call runs in a process of its own, so one that fails ends
+  alone; a tool is a function of the model's arguments, which can ask an
+  actor when it needs state (D187, rather than an actor answering with
+  `reply`, as first planned).
 - Agents talk to each other in messages, and between machines in
   printed s-expressions over TCP (D155).
 - Models run outside slight, behind HTTP: a local server such as ollama
@@ -578,8 +581,10 @@ messages, and how streamed output arrives. Settled by `:exec` (D185):
 its stderr (with its stdout), its stdin (a pipe, closed with `(:eof)`),
 when the child is reaped (SIGCHLD, through a pipe `select()` waits on),
 its last message, `(:exited p status)`, and the limits a command runs
-under (none yet, but the caller's timeout and `:too-big`). Still to
-settle: how a tool says what it takes.
+under (none yet, but the caller's timeout and `:too-big`). Settled by
+tools (D187): how a tool says what it takes, `(tool/new name
+description params f)`, its parameters a list of `(name type
+description)`.
 
 ### 16. As needed
 
