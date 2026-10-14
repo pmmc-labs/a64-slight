@@ -1,0 +1,13 @@
+
+
+
+(defun try/catch (to-try or-catch)
+    (match (join (fork (to-try)))
+        ((:ok    val) val)
+        ((:error err) (or-catch err))))
+
+(pprint (try/catch
+    (lambda ()
+        (/ 10 0))
+    (lambda (e)
+        (list :OH-NOES e))))
