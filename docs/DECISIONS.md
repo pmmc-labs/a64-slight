@@ -2695,3 +2695,34 @@ agents, and `(tools/calc)` around it.
   and the tool through `tool/call`; no libm function but `sqrt` is asked
   for anything but an exact answer (D76). By hand: the chat, with a
   stand-in that calls `calc`, on both targets.
+
+**D191. Notes, kept from one conversation to the next.** *(User asked
+for them, the third of D188's batches with `calc`; the details are
+defaults.)* `remember(key, text)` and `recall(key)`, so an agent can
+keep what it learns: "a tool with state asks a process" (D187), in
+practice.
+- **A store is a process,** `(notes/open path)`, holding the notes as
+  `(key text)` pairs, newest first, and answering `ask`s (`lib/ds`):
+  `notes/get`, `notes/keys` and `notes/put`. One process, so two calls
+  at once can't lose a note.
+- **On disk, an s-expression:** the store reads the file when it starts
+  and writes all of it back after each change (`sexp/print`), so a
+  person can read and edit it, and the program can end at any time
+  without losing a note. A file that isn't there, or is empty, is no
+  notes; one that isn't a list of string pairs ends the store, rather
+  than be written over and lost. A write that fails is an error for the
+  call, and the store goes on as it was, the note not kept.
+- **No asking:** `remember` writes only the notes file, which the
+  program chose, so it doesn't ask `approve`, as `write_file` does.
+- **`recall` of a key with no note gives the keys there are** (or "there
+  are no notes yet"), so a model that guessed a key wrong can see the
+  right one without a tool to list them.
+- **The chat** keeps its notes in `~/.slight-chat-notes` (from
+  `%ENV`'s `HOME`, or the current directory without one), and, when
+  there are some, its system prompt names their keys, since a model
+  doesn't think to recall what it can't know it has.
+- **Tests:** 237: no notes, remembering, replacing, recalling a key that
+  isn't there, the file written, a second store on the same file, a
+  file that isn't notes, and one that can't be written. By hand: two
+  chats, the first remembering, the second, on the other target, told of
+  the key and recalling it.

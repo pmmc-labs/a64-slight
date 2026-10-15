@@ -1,0 +1,16 @@
+(ok "there are no notes yet")
+(ok "remembered lang")
+(ok "remembered todo")
+(ok "slight")
+(ok "there's no note under nope; the keys are: todo, lang")
+(ok "remembered lang")
+("lang" "todo")
+(("lang" "slight, an actor Lisp") ("todo" "one\ntwo \"quoted\" \\ é"))
+(ok "one
+two "quoted" \ é")
+(ok "slight, an actor Lisp")
+(ended (error (not-notes "build/t/237-notes/bad.sexp")))
+"(("a" 1))"
+(error (enoent "build/t/237-notes/no-such-dir/notes.sexp"))
+(ok "there are no notes yet")
+()

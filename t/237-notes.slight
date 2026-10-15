@@ -1,0 +1,46 @@
+; Notes (lib/tools.slight, D191): a store, a process, reads its notes from
+; a file when it starts and writes them all back after each change, as an
+; s-expression, so a second store on the same file has them. remember and
+; recall, called as an agent calls them. A file that isn't notes ends the
+; store rather than be written over; one that can't be written leaves the
+; store as it was, and says why.
+
+(@include :tools)
+
+(defun call (tool args) (join (fork (tool/call tool args))))
+
+(let dir  "build/t/237-notes")
+(let path (concat dir "/notes.sexp"))
+(exec/run (list "rm" "-rf" dir))
+(exec/run (list "mkdir" "-p" dir))
+
+(let store    (notes/open path))
+(let remember (tools/remember store))
+(let recall   (tools/recall store))
+(pprint (call recall (list (list "key" "lang"))))
+(pprint (call remember (list (list "key" "lang") (list "text" "slight"))))
+(pprint (call remember (list (list "key" "todo") (list "text" "one\ntwo \"quoted\" \\ é"))))
+(pprint (call recall (list (list "key" "lang"))))
+(pprint (call recall (list (list "key" "nope"))))
+(pprint (call remember (list (list "key" "lang") (list "text" "slight, an actor Lisp"))))
+(pprint (notes/keys store))
+(tty/write (tools/read path))
+(kill store)
+
+; A second store, on the same file.
+(let again (notes/open path))
+(pprint (call (tools/recall again) (list (list "key" "todo"))))
+(pprint (call (tools/recall again) (list (list "key" "lang"))))
+
+; A file that isn't notes: the store ends, and says why.
+(let bad (concat dir "/bad.sexp"))
+(tools/save bad "((\"a\" 1))")
+(let broken (notes/open bad))
+(pprint (match (call (tools/recall broken) (list (list "key" "a")))
+            ((:error (:ended _ result)) (list :ended result))))
+(pprint (tools/read bad))
+
+; A file that can't be written: remember fails, and the store goes on.
+(let lost (notes/open (concat dir "/no-such-dir/notes.sexp")))
+(pprint (call (tools/remember lost) (list (list "key" "k") (list "text" "v"))))
+(pprint (call (tools/recall lost) (list (list "key" "k"))))

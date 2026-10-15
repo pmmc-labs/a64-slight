@@ -1588,8 +1588,9 @@ tools (below); those that change something do it only once you've said
 ### (@include :tools)
 
 `lib/tools.slight`: tools for an agent, to read, find and change files,
-run commands, fetch from the web, and work out arithmetic (D188–D190).
-It includes `:agent`, `:calc`, `:exec` and `:fs` itself.
+run commands, fetch from the web, work out arithmetic, and keep notes
+from one conversation to the next (D188–D191). It includes `:agent`,
+`:calc`, `:ds`, `:exec` and `:fs` itself.
 
     (@include :tools)
 
@@ -1615,6 +1616,19 @@ argument it needs, or with one that isn't a string.
   binary files, and no `.git`); or "no lines contain it".
 - `(tools/calc)`: `calc(expression)`, arithmetic as `calc/eval` (below)
   works it out, for a model, which is bad at it.
+- `(tools/remember store)` and `(tools/recall store)`: `remember(key,
+  text)` keeps a note, replacing one under the same key, and
+  `recall(key)` gives it back; for a key with no note, the keys there
+  are. They don't ask: the notes are the model's own, in a file the
+  program chose. `store` is a store of notes:
+  - `(notes/open path)` starts one, a process, which reads its notes
+    from the file at `path` (none if it isn't there, or is empty) and
+    writes them all back after each change, as an s-expression, a list
+    of `(key text)`, newest first. A file that isn't notes ends the
+    store, rather than be written over.
+  - `(notes/get store key)`, the text or `:not-found`; `(notes/keys
+    store)`, newest first; `(notes/put store key text)`, which raises
+    why if the file can't be written, the store going on as it was.
 - `(tools/write-file approve)`: `write_file(path, content)`, the whole
   file, made if it isn't there. `approve` is shown the content, each
   line after `+ `.

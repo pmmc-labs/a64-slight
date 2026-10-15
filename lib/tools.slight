@@ -1,7 +1,8 @@
-; Tools for an agent (D187, D188, D189, D190): reading, finding and
-; changing files, running commands, fetching from the web, and arithmetic.
-; Not part of the prelude, so a program that wants them says (@include
-; :tools); this includes :agent, :calc, :exec and :fs itself.
+; Tools for an agent (D187-D191): reading, finding and changing files,
+; running commands, fetching from the web, arithmetic, and notes kept
+; from one conversation to the next. Not part of the prelude, so a program
+; that wants them says (@include :tools); this includes :agent, :calc,
+; :ds, :exec and :fs itself.
 ;
 ;     (let approve (lambda (what) ...))           ; #true to go ahead
 ;     (agent/new url model "" (list (tools/read-file) (tools/list-files) (tools/search)
@@ -15,6 +16,7 @@
 
 (@include :agent)
 (@include :calc)
+(@include :ds)
 (@include :exec)
 (@include :fs)
 
@@ -56,6 +58,29 @@
     (tool/new "calc" "Works out arithmetic exactly: + - * / % and ^ (a power), parentheses, sqrt, abs, floor, ceil, round, sin, cos, tan, exp, min, max, pi and e."
         (list (list "expression" :string "The arithmetic, as you'd write it, such as (2 + 3) * 4^2 / 7"))
         (lambda (args) (calc/eval (tools/string args "expression")))))
+
+; Notes in a store (notes/open, below), which the model keeps without
+; asking: they're its own, in a file the program chose.
+(defun tools/remember (store)
+    (tool/new "remember" "Keeps a note under a key, for later, in this conversation or another. A note already under the key is replaced."
+        (list (list "key" :string "A short name for the note")
+              (list "text" :string "The note"))
+        (lambda (args)
+            (let key (tools/string args "key"))
+            (notes/put store key (tools/string args "text"))
+            (concat "remembered " key))))
+
+(defun tools/recall (store)
+    (tool/new "recall" "Gives the note kept under a key. For a key with no note, it gives the keys there are."
+        (list (list "key" :string "The note's key"))
+        (lambda (args)
+            (let key  (tools/string args "key"))
+            (let text (notes/get store key))
+            (let keys (notes/keys store))
+            (cond
+                ((str? text) text)
+                ((nil? keys) "there are no notes yet")
+                (#true       (concat "there's no note under " key "; the keys are: " (str-join ", " keys)))))))
 
 (defun tools/fetch (approve)
     (tool/new "fetch" "Fetches a URL, http or https, once the user agrees, and gives what's there as text, a web page's HTML made plain."
@@ -350,3 +375,51 @@
                 ((and (eq? l "") blank) (tools/blank-once rest acc #true))
                 ((eq? l "")             (tools/blank-once rest (cons "" acc) #true))
                 (#true                  (tools/blank-once rest (cons l acc) #false))))))
+
+; --- notes -------------------------------------------------------------
+
+; A store of notes, a process holding them as (key text) pairs, newest
+; first. It reads them from the file at path, as an s-expression, when it
+; starts (a file that isn't there, or is empty, is no notes; one that
+; isn't notes ends the store, rather than be written over), and writes
+; them all back after each change, so they outlast the program.
+(defun notes/open (path) (fork (notes/loop path (notes/read path))))
+
+(defun notes/get (store key) (ask store (list :get key)))
+(defun notes/keys (store) (ask store (list :keys)))
+
+; Raises why, if the file can't be written; the store goes on as it was.
+(defun notes/put (store key text)
+    (match (ask store (list :put key text))
+        ((:error reason) (raise reason))
+        (_               ())))
+
+(defun notes/loop (path table)
+    (recv
+        ((:get key to) (reply to (lookup key table)) (notes/loop path table))
+        ((:keys to)    (reply to (map car table)) (notes/loop path table))
+        ((:put key text to)
+            (let new (cons (list key text) (remove (lambda (n) (eq? (car n) key)) table)))
+            (match (join (fork (tools/save path (concat (sexp/print new) \n))))
+                ((:ok _)
+                    (reply to ())
+                    (notes/loop path new))
+                ((:error reason)
+                    (reply to (list :error reason))
+                    (notes/loop path table))))))
+
+(defun notes/read (path)
+    (match (join (fork (tools/read path)))
+        ((:error (:enoent _)) ())
+        ((:error reason)      (raise reason))
+        ((:ok text)
+            (match (if (eq? (tools/lines text) "") (list :ok ()) (sexp/parse text))
+                ((:ok table) (if (notes/table? table) table (raise (list :not-notes path))))
+                (_           (raise (list :not-notes path)))))))
+
+; Whether table is a list of (key text) pairs of strings.
+(defun notes/table? (table)
+    (match table
+        (()                     #true)
+        (((k t) & rest)         (and (str? k) (str? t) (notes/table? rest)))
+        (_                      #false)))
