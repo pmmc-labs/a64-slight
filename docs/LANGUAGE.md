@@ -1588,8 +1588,8 @@ what with:
 `examples/chat.slight` is a chat in the terminal, a line at a time, on
 `:keypress`: `chat [model] [url]`. Its model has `lib/tools.slight`'s
 tools (below); those that change something do it only once you've said
-`y` to what they show you, asking the keyboard's process with `ask`. Its
-notes are kept in `~/.slight-chat-notes`, and with `CHAT_EXPERT` set to
+`y` to what they show you, asking the keyboard's process with `ask`, and
+Escape stops those still running (D193). Its notes are kept in `~/.slight-chat-notes`, and with `CHAT_EXPERT` set to
 another model, it can ask an agent on that one (`ask_expert`).
 
 ### (@include :tools)
@@ -1657,18 +1657,25 @@ argument it needs, or with one that isn't a string.
   (anything else raises), with curl, following redirects, for at most 20
   seconds and 5 MB. `approve` is shown `fetch url`, every time, since a
   URL can carry anything out. A web page comes as plain text, by
-  `tools/html->text` (below); other text (JSON, XML, plain text) as it
+  `tools/html->text` (below), its links resolved against the URL it was
+  fetched from, after any redirects; other text (JSON, XML, plain text) as it
   is; anything else as what it is, `not text: image/png, 5120 bytes`. A
   status that isn't 2xx comes first, `HTTP 404`, then the text. If curl
   fails, the tool raises with curl's message, such as `curl: (6) Could
   not resolve host: example.invalid`.
-- `(tools/html->text html)`: HTML as plain text, for a model. Comments,
-  scripts, styles, SVG and `noscript` go, with what's in them; other
-  tags go, but one that starts a block (a paragraph, a heading, a row, a
-  break, ...) starts a line, a list's item starts one with `- `, and a
-  table's cell starts with ` | `; entities are decoded (the named ones
-  for `&`, `<`, `>`, quotes, a space, dashes and the like, and numbered
-  ones); and space is squeezed, with at most one blank line in a row.
+- `(tools/html->text html base)`: HTML as plain text, for a model.
+  Comments, scripts, styles, SVG and `noscript` go, with what's in them;
+  other tags go, but one that starts a block (a paragraph, a heading, a
+  row, a break, ...) starts a line, a list's item starts one with `- `,
+  and a table's cell starts with ` | `; entities are decoded (the named
+  ones for `&`, `<`, `>`, quotes, a space, dashes and the like, and
+  numbered ones); and space is squeezed, with at most one blank line in a
+  row. A link is `[text](url)`, its text on one line, and its URL
+  resolved against `base`, the page's URL (`""` leaves it as written):
+  `<a href="next">Next</a>` on `https://example.com/docs/a.html` is
+  `[Next](https://example.com/docs/next)`. A link to a place on the same
+  page (`#top`), by a scheme a fetch can't follow (`mailto:`,
+  `javascript:`), or with no text (an image's) is just its text.
 
 The commands these run are given their arguments directly, with no
 shell (but `run`'s), so a path or a text can't be taken for anything
@@ -1714,4 +1721,5 @@ else.
   output))`, `output` being all it printed, stdout and stderr together,
   and `status` its exit code or `(:signal name)`; or `(:error reason)` if
   it can't be started, such as `(:error (:enoent "ls"))`. There's no time
-  limit: a command that doesn't end keeps it waiting.
+  limit: a command that doesn't end keeps it waiting. If the caller ends
+  first, killed, say, the command is killed too (D193).

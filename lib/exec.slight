@@ -6,9 +6,16 @@
 ; Runs cmd, a list of strings, with no input, and gives (:ok (status
 ; output)) once it has ended: output is what it printed, stdout and stderr
 ; together, and status its exit code, or (:signal name). Or (:error
-; reason), if it can't be started: (:error (:enoent "ls")).
+; reason), if it can't be started: (:error (:enoent "ls")). If the caller
+; ends first, killed, say, so does the command (D193).
 (defun exec/run (cmd)
-    (join (connect :exec cmd (exec/collect ()))))
+    (join (connect :exec cmd (exec/collecting))))
+
+; The command's process watches its caller, and ends with it, which closes
+; the device and so kills the command's group.
+(defun exec/collecting ()
+    (monitor ^$$)
+    (exec/collect ()))
 
 ; chunks is the output so far, last first.
 (defun exec/collect (chunks)
@@ -16,4 +23,5 @@
         ((:open p)     (send p (list :read :chunks)) (send p (list :eof)) (exec/collect chunks))
         ((:chunk p s)  (exec/collect (cons s chunks)))
         ((:eof p)      (exec/collect chunks))
-        ((:exited p n) (list n (str-join "" (reverse chunks))))))
+        ((:exited p n) (list n (str-join "" (reverse chunks))))
+        ((:exit _ _)   :caller-ended)))

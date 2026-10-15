@@ -553,11 +553,11 @@ through curl, a page made plain text in slight (D189, golden test 235;
 done), and `calc`, arithmetic parsed and worked out in slight
 (`lib/calc.slight`, D190, golden test 236; done), and notes kept from
 one conversation to the next (D191, golden test 237; done), and other
-agents asked as tools, `agent/ask` (D192, golden test 238; done). Next,
-to settle with the user: links kept when a page is made text; `log`, a
-builtin; stopping a running command with a key in the chat; agents
-talking to each other between machines (s-expressions over TCP, D155);
-or 12c. TLS (12c) and a reader of server-sent events, for a hosted
+agents asked as tools, `agent/ask` (D192, golden test 238; done), and
+a fetched page's links kept, and Escape in the chat stopping a command
+(D193, golden tests 233 and 235; done). Next, to settle with the user:
+`log`, a builtin; agents talking to each other between machines
+(s-expressions over TCP, D155); or 12c. TLS (12c) and a reader of server-sent events, for a hosted
 model, wait (the user, Oct 2026: local models first, and curl for
 HTTPS).
 

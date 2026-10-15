@@ -1,6 +1,9 @@
 ; exec/run (lib/exec.slight, D187): a command run to its end, with no
 ; input, gives (:ok (status output)), stdout and stderr together; or
-; (:error reason) if it can't be started.
+; (:error reason) if it can't be started. And a command whose caller is
+; killed is killed too (D193): sh writes its pid to a file and becomes a
+; sleep that would last a quarter of an hour, which a second command
+; waits to see begin, and a third to see gone.
 
 (@include :exec)
 
@@ -9,3 +12,13 @@
 (pprint (exec/run (list "cat")))
 (pprint (exec/run (list "sh" "-c" "kill -TERM $$")))
 (pprint (exec/run (list "no-such-command")))
+
+(let dir  "build/t/233-exec-run")
+(let file (concat dir "/pid"))
+(exec/run (list "rm" "-rf" dir))
+(exec/run (list "mkdir" "-p" dir))
+(let caller (fork (exec/run (list "sh" "-c" (concat "echo $$ > " file "; exec sleep 900")))))
+(pprint (exec/run (list "sh" "-c" (concat "until [ -s " file " ]; do sleep 0.01; done; kill -0 $(cat " file ") && echo running"))))
+(kill caller)
+(pprint (join caller))
+(pprint (exec/run (list "sh" "-c" (concat "i=0; while [ $i -lt 1000 ]; do kill -0 $(cat " file ") 2>/dev/null || { echo gone; exit; }; sleep 0.01; i=$((i+1)); done; echo running"))))

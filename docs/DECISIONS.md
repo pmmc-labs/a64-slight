@@ -2757,3 +2757,59 @@ one agent as another's tool.
   conversation going on. Also under seeds, `SLIGHT_GC_STRESS` and
   valgrind. By hand: the chat with `CHAT_EXPERT`, on both targets, the
   expert sent its own system prompt and no tools.
+
+**D193. A fetched page's links, and Escape to stop a command.** *(User:
+"keep the links in fetch, and do the escape to stop a running command";
+the details are defaults.)*
+- **Links** are `[text](url)`, as Markdown has them, which models read
+  well: D189 left them out, and a model can't follow what it can't see.
+  The URL is resolved against the page's own, which curl's `-w` now
+  gives too, `%{url_effective}`, after any redirects (the status, the
+  URL and the type a line each, since a type can have a space in it):
+  `//host/x` takes the page's scheme, `/x` its host, `?x` its path, and
+  `x` its directory; a `../` is left in, for the server to take out. A
+  link to a place on the same page (`#top`), or by a scheme a fetch
+  can't follow (`mailto:`, `javascript:`), or with no words (an image's)
+  is its text alone. A link's text is put on one line, since a heading
+  or a paragraph inside one (a card) would break it, with the space or
+  line breaks around it kept outside. `href` is found after a space, so
+  `data-href` isn't it, in any case, its value quoted either way or not,
+  its entities decoded. A new `<a>` ends an open one, as browsers do, and
+  the end of the page ends the last. `tools/html->text` takes the base
+  as a second argument, `""` leaving a URL as it's written. The cost is
+  context: a page of links is longer, and the 16 KB a model is given of
+  a result (D187) holds less of its text. Rejected: numbered links with
+  a list at the end (`[1]`), which a model has to look up; links only
+  when asked for, a second tool or a parameter, more for a model to
+  choose between.
+- **A command ends with the process that ran it.** `exec/run`'s process,
+  the one `connect` starts, monitors its caller (`^$$`) and ends when it
+  does, which closes the device and so kills the command's group (D185).
+  Before, a command whose caller was killed ran to its end, read by a
+  process no one would join. So killing a tool's call stops its command
+  or its fetch, whoever kills it.
+- **Escape, in the chat,** kills the calls the person has said `y` to in
+  this answer: the approve function now sends the asking call's pid with
+  what it's about to do, and the keyboard keeps those it let go ahead.
+  Killing one that has ended does nothing, so the list isn't trimmed as
+  calls end, only emptied by Escape and at the answer's end. The model is
+  told the call's result, `error: killed`, and answers on. Escape at a
+  y/n question is `n`. Escape with nothing running does nothing, and
+  isn't kept as a key typed during the answer. Rejected: Escape stopping
+  the whole answer, which would mean a way to stop a turn without ending
+  its agent; calls that weren't asked about (reading, searching, `calc`,
+  an agent asked) aren't stoppable, since they end on their own, or (an
+  agent asked) are stopped through their own tools.
+- **Tests:** 235, links: as written with no base, and resolved against
+  one (each kind of URL, the cases above, a card, an `<a>` left open);
+  then through curl, from the server in the program, a page reached by
+  a redirect, its relative links resolved against where it ended. 233,
+  a command (`exec sleep 900`, its pid in a file) whose caller is
+  killed, seen running by a second command and gone by a third; without
+  the monitor, the test hangs till its time limit. Also under seeds,
+  `SLIGHT_GC_STRESS` and valgrind. By hand: the chat in a
+  pseudo-terminal on both targets, against a stand-in for `/api/chat`:
+  Escape at the prompt (nothing), Escape while an approved `sleep` runs
+  (killed, the model told), two calls at once with the second answered
+  by Escape (`n`) and the first then stopped by Escape, and a quick
+  command after (unaffected).

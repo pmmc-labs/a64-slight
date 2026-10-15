@@ -191,8 +191,9 @@
 
 ; --- fetching ----------------------------------------------------------
 
-; curl's -w writes the status and the type after what it fetched, after
-; a line no page has.
+; curl's -w writes the status, the URL it ended at (after any redirects)
+; and the type, a line each, after what it fetched, behind a line no page
+; has.
 (defun tools/marker () "@@slight-fetch@@ ")
 
 ; A URL must be http or https: curl reads files and much else too. curl
@@ -205,7 +206,7 @@
         ((not (approve (concat "fetch " url))) "the user didn't let it be fetched")
         (#true
             (match (exec/run (list "curl" "-sSL" "--max-time" "20" "--max-filesize" "5000000"
-                                   "-w" (concat "\\n" (tools/marker) "%{http_code} %{content_type}") "--" url))
+                                   "-w" (concat "\\n" (tools/marker) "%{http_code}\\n%{url_effective}\\n%{content_type}") "--" url))
                 ((:ok (0 output))      (tools/fetched output))
                 ((:ok (status output)) (raise (tools/curl-error output status)))
                 ((:error reason)       (raise reason))))))
@@ -216,17 +217,17 @@
         (concat "curl failed, with status " status)
         (car (str-split (substring output at (str-len output)) \n))))
 
-; What was fetched, as text: a page made plain, text as it is, or what it
-; is if it isn't text; after its status, if that isn't 2xx.
+; What was fetched, as text: a page made plain, its links against the URL
+; it came from, text as it is, or what it is if it isn't text; after its
+; status, if that isn't 2xx.
 (defun tools/fetched (output)
     (let parts   (reverse (str-split output (concat \n (tools/marker)))))
-    (let trailer (if (cons? parts) (car parts) ""))
     (let body    (if (cons? parts) (str-join (concat \n (tools/marker)) (reverse (cdr parts))) ""))
-    (let sp      (index-of trailer " "))
-    (let code    (if (< sp 0) trailer (substring trailer 0 sp)))
-    (let type    (if (< sp 0) "" (lc (substring trailer (+ sp 1) (str-len trailer)))))
+    (let trailer (append (str-split (if (cons? parts) (car parts) "") \n) (list "" "" "")))
+    (let code    (car trailer))
+    (let type    (lc (caddr trailer)))
     (let text    (cond
-                     ((>= (index-of type "html") 0) (tools/html->text body))
+                     ((>= (index-of type "html") 0) (tools/html->text body (cadr trailer)))
                      ((tools/text? type body)       body)
                      (#true                         (concat "not text: " type ", " (str-len body) " bytes"))))
     (if (starts-with? code "2") text (concat "HTTP " code \n text)))
@@ -243,13 +244,15 @@
 ; noscript go, with what's in them; other tags go, but one that starts a
 ; block (a paragraph, a heading, a row, a break) starts a line, and an
 ; item starts one with "- "; entities are decoded; and space is squeezed,
-; with never more than one blank line. The HTML is cut at each <, so each
-; piece is a tag and the text after it, and the whole is read once.
-(defun tools/html->text (html)
+; with never more than one blank line. A link is [text](url), its URL
+; resolved against base, the page's own ("" leaves it as it is). The HTML
+; is cut at each <, so each piece is a tag and the text after it, and the
+; whole is read once.
+(defun tools/html->text (html base)
     (let pieces (str-split (tools/uncomment html) "<"))
     (if (nil? pieces)
         ""
-        (tools/lines (tools/pieces (cdr pieces) () (list (tools/plain (car pieces)))))))
+        (tools/lines (tools/pieces (cdr pieces) () base #false (list (tools/plain (car pieces)))))))
 
 ; html without its comments, which can hold a < of their own.
 (defun tools/uncomment (html)
@@ -263,22 +266,29 @@
     (if (< end 0) "" (substring part (+ end 3) (str-len part))))
 
 ; skip is the tag that ends what's being left out ("/script"), or ().
-(defun tools/pieces (pieces skip acc)
+; open is whether a link is open: its <a> put (:link url) in acc, which
+; its </a>, the next <a> or the end makes [text](url) of, with the pieces
+; since.
+(defun tools/pieces (pieces skip base open acc)
     (match pieces
-        (() (str-join "" (reverse acc)))
+        (() (str-join "" (reverse (tools/shut open acc))))
         ((p & rest)
             (let close (index-of p ">"))
             (let tag   (tools/tag p close))
             (let text  (if (< close 0) "" (substring p (+ close 1) (str-len p))))
             (cond
                 ((not (nil? skip))
-                    (if (eq? tag skip) (tools/pieces rest () (cons (tools/plain text) acc)) (tools/pieces rest skip acc)))
+                    (if (eq? tag skip) (tools/pieces rest () base open (cons (tools/plain text) acc)) (tools/pieces rest skip base open acc)))
                 ((eq? tag "")
-                    (tools/pieces rest () (cons (tools/plain (concat "<" p)) acc)))
+                    (tools/pieces rest () base open (cons (tools/plain (concat "<" p)) acc)))
                 ((member? tag (list "script" "style" "svg" "noscript"))
-                    (tools/pieces rest (concat "/" tag) acc))
+                    (tools/pieces rest (concat "/" tag) base open acc))
+                ((eq? tag "a")
+                    (tools/pieces rest () base #true (cons (tools/plain text) (cons (list :link (tools/href p close base)) (tools/shut open acc)))))
+                ((eq? tag "/a")
+                    (tools/pieces rest () base #false (cons (tools/plain text) (tools/shut open acc))))
                 (#true
-                    (tools/pieces rest () (cons (tools/plain text) (cons (tools/break tag) acc))))))))
+                    (tools/pieces rest () base open (cons (tools/plain text) (cons (tools/break tag) acc))))))))
 
 ; A piece's tag, lower case, with its / if it closes one; or "" if the <
 ; didn't start a tag ("a < b").
@@ -294,14 +304,18 @@
 ; A tag's name: up to a space, a newline, a tab or a /, past a first /.
 (defun tools/name-of (head)
     (let rest (if (starts-with? head "/") (substring head 1 (str-len head)) head))
-    (let end  (tools/name-end rest 0))
+    (let end  (tools/until rest 0 (cons 47 (tools/spaces))))
     (concat (if (starts-with? head "/") "/" "") (substring rest 0 end)))
 
-(defun tools/name-end (s i)
-    (cond
-        ((>= i (str-len s)) i)
-        ((member? (byte-at s i) (list 32 10 13 9 47)) i)
-        (#true (tools/name-end s (+ i 1)))))
+; The first index from i in s whose byte is one of stops, or past the end;
+; and the first whose byte isn't one of skips.
+(defun tools/until (s i stops)
+    (if (or (>= i (str-len s)) (member? (byte-at s i) stops)) i (tools/until s (+ i 1) stops)))
+
+(defun tools/past (s i skips)
+    (if (and (< i (str-len s)) (member? (byte-at s i) skips)) (tools/past s (+ i 1) skips) i))
+
+(defun tools/spaces () (list 32 10 13 9))
 
 ; What a tag puts in the text: a line for a block, an item's dash, a bar
 ; before a cell, or nothing. An item, a row or a term starts a line, and
@@ -387,6 +401,94 @@
                 ((and (eq? l "") blank) (tools/blank-once rest acc #true))
                 ((eq? l "")             (tools/blank-once rest (cons "" acc) #true))
                 (#true                  (tools/blank-once rest (cons l acc) #false))))))
+
+; --- links -------------------------------------------------------------
+
+(defun tools/shut (open acc) (if open (tools/link-close acc ()) acc))
+
+; acc with the pieces since its open link's marker made the link.
+(defun tools/link-close (acc inside)
+    (match acc
+        (((:link url) & rest) (cons (tools/link-text inside url) rest))
+        ((p & rest)           (tools/link-close rest (cons p inside)))))
+
+; A link's text as [words](url), on one line, with the space or line
+; breaks around it kept outside; or the text as it was, if it has no words
+; (an image's link) or goes nowhere a fetch could.
+(defun tools/link-text (inside url)
+    (let raw   (str-join "" inside))
+    (let words (filter (lambda (w) (> (str-len w) 0)) (str-split (str-join " " (str-split raw \n)) " ")))
+    (cond
+        ((or (nil? words) (eq? url :none)) raw)
+        (#true
+            (let start (tools/past raw 0 (list 32 10)))
+            (let end   (tools/back raw (str-len raw)))
+            (concat (substring raw 0 start) "[" (str-join " " words) "](" url ")" (substring raw end (str-len raw))))))
+
+; Where the space and line breaks at the end of s, before i, start.
+(defun tools/back (s i)
+    (if (and (> i 0) (member? (byte-at s (- i 1)) (list 32 10))) (tools/back s (- i 1)) i))
+
+; Where an <a> goes, the piece p after its <: its href, entities decoded
+; and resolved against base; or :none.
+(defun tools/href (p close base)
+    (let head (if (< close 0) p (substring p 0 close)))
+    (let at   (tools/attribute (lc head) "href" 0))
+    (if (< at 0) :none (tools/resolve base (tools/entities (tools/value head at)))))
+
+; Where the value of the attribute name starts in head, lower case: name
+; after a space and before an =, so not data-href; or -1.
+(defun tools/attribute (head name from)
+    (let i (index-of (substring head from (str-len head)) name))
+    (cond
+        ((< i 0) -1)
+        (#true
+            (let at (+ from i))
+            (let eq (tools/past head (+ at (str-len name)) (tools/spaces)))
+            (if (and (> at 0) (member? (byte-at head (- at 1)) (tools/spaces)) (< eq (str-len head)) (== (byte-at head eq) 61))
+                (tools/past head (+ eq 1) (tools/spaces))
+                (tools/attribute head name (+ at 1))))))
+
+; The value at i: in quotes, up to the closing one, or up to a space.
+(defun tools/value (head i)
+    (let q (if (< i (str-len head)) (byte-at head i) 0))
+    (cond
+        ((or (== q 34) (== q 39))
+            (let rest (substring head (+ i 1) (str-len head)))
+            (let end  (index-of rest (if (== q 34) "\"" "'")))
+            (if (< end 0) rest (substring rest 0 end)))
+        (#true (substring head i (tools/until head i (tools/spaces))))))
+
+; href as a whole URL, against base, the page's; or :none for a place on
+; the same page, or a scheme a fetch can't follow (mailto:, javascript:).
+; A ../ is left in, for the server to take out.
+(defun tools/resolve (base href)
+    (let lower (lc (substring href 0 8)))
+    (cond
+        ((or (eq? href "") (starts-with? href "#"))                          :none)
+        ((or (starts-with? lower "http://") (starts-with? lower "https://")) href)
+        ((tools/scheme? href)                                                :none)
+        ((eq? base "")                                                       href)
+        ((starts-with? href "//") (concat (substring base 0 (+ (index-of base ":") 1)) href))
+        ((starts-with? href "/")  (concat (tools/origin base) href))
+        ((starts-with? href "?")  (concat (tools/page base) href))
+        (#true                    (concat (tools/dir base) href))))
+
+; Whether href starts with a scheme: a : before any / ? or #.
+(defun tools/scheme? (href)
+    (let c (tools/until href 0 (list 58 47 63 35)))
+    (and (> c 0) (< c (str-len href)) (== (byte-at href c) 58)))
+
+; A URL's scheme and host (and port); without its query or fragment; and
+; its directory, up to its last /.
+(defun tools/origin (url) (substring url 0 (tools/until url (+ (index-of url "//") 2) (list 47 63 35))))
+(defun tools/page (url) (substring url 0 (tools/until url 0 (list 63 35))))
+
+(defun tools/dir (url)
+    (let page (tools/page url))
+    (if (== (str-len page) (str-len (tools/origin url)))
+        (concat page "/")
+        (concat (str-join "/" (reverse (cdr (reverse (str-split page "/"))))) "/")))
 
 ; --- notes -------------------------------------------------------------
 

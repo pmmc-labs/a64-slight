@@ -418,11 +418,13 @@ once, sends the results back to the model, and goes on, at most 10
 rounds, until the model answers. Opt-in: `(@include :agent)`.
 `lib/tools.slight` (D188, D189) has tools to read, find and change
 files, run commands, fetch URLs with curl (a page made plain text in
-slight), work out arithmetic (`lib/calc.slight`, D190), and keep notes
+slight, its links kept, D193), work out arithmetic (`lib/calc.slight`, D190), and keep notes
 in a store, a process that writes them to a file as an s-expression
 (D191), and ask other agents (`agent/ask`, D192); those that change
 something or reach out ask an `approve`
-function first, which the chat makes ask the person at the keyboard.
+function first, which the chat makes ask the person at the keyboard. A
+command ends with the process that ran it, so a call that's killed takes
+its command with it, which is how Escape in the chat stops one (D193).
 
 ### Strings
 

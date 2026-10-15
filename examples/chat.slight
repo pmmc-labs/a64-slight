@@ -17,8 +17,9 @@
 ; nothing till you've said y to what they show you; and, with CHAT_EXPERT
 ; set to another model (a bigger one, say), ask_expert, which asks an
 ; agent on that model. A call and its result
-; are shown as they happen. A command runs to its end: one that doesn't
-; end is stopped with Ctrl-C, which ends the chat.
+; are shown as they happen. Escape stops the commands and fetches you've
+; said y to that are still running, and the model is told they were
+; killed; at a y/n question, it's n.
 ;
 ; The keyboard's process is the agent's caller too, so an answer's pieces
 ; come to it among the keys, and one recv takes both; and the tools ask it
@@ -72,9 +73,10 @@
         (agent/new url expert "Answer briefly and exactly." ())))
 
 ; The model's tools. me is the keyboard's process, which those that
-; change something ask first.
+; change something ask first, saying which call is asking, so that Escape
+; can stop it.
 (defun chat-tools (me store)
-    (let approve (lambda (what) (ask me (list :approve what))))
+    (let approve (lambda (what) (ask me (list :approve what $$))))
     (list (tools/read-file) (tools/list-files) (tools/search) (tools/calc) (tools/remember store) (tools/recall store)
           (tools/write-file approve) (tools/edit-file approve) (tools/run approve) (tools/fetch approve)))
 
@@ -105,7 +107,7 @@
                 (typing a line pending)
                 (do (tty/write \n (divider))
                     (agent/say a line)
-                    (answering a pending))))
+                    (answering a pending ()))))
         ((:Backspace)
             (if (== (str-len line) 0)
                 (typing a line pending)
@@ -124,33 +126,38 @@
 
 ; An answer coming: its pieces are written as they come, and so are the
 ; tools it calls, and keys wait. A tool that asks waits for y or n.
-(defun answering (a pending)
+; allowed holds the calls let go ahead in this answer, which Escape kills
+; (those that have ended, harmlessly).
+(defun answering (a pending allowed)
     (recv
-        ((:piece  _ text)        (tty/write \e "[3;36m" text \e "[0m") (answering a pending))
-        ((:calling _ name args)  (tty/write \n \e "[2m" "→ " name " " (show-args args) \e "[0m" \n) (answering a pending))
-        ((:called _ name result) (tty/write \e "[2m" "← " name ": " (show-result result) \e "[0m" \n) (answering a pending))
-        ((:approve what box)     (approving a pending what box ()))
+        ((:piece  _ text)        (tty/write \e "[3;36m" text \e "[0m") (answering a pending allowed))
+        ((:calling _ name args)  (tty/write \n \e "[2m" "→ " name " " (show-args args) \e "[0m" \n) (answering a pending allowed))
+        ((:called _ name result) (tty/write \e "[2m" "← " name ": " (show-result result) \e "[0m" \n) (answering a pending allowed))
+        ((:approve what p box)   (approving a pending allowed what p box ()))
         ((:answer _ _)           (tty/write \n (divider) (prompt)) (typing a "" pending))
         ((:error  _ reason)      (tty/write "[" (trouble reason) "]" \n (prompt)) (typing a "" pending))
-        (key                     (answering a (append pending (list key))))))
+        ((:Escape)               (map kill allowed) (answering a pending ()))
+        (key                     (answering a (append pending (list key)) allowed))))
 
-; Asking whether a tool may do what it says: y or n, and only a key typed
-; since the question; anything else asked about meanwhile waits in queued.
-(defun approving (a pending what box queued)
+; Asking whether a tool's call p may do what it says: y or n (Escape is
+; n), and only a key typed since the question; anything else asked about
+; meanwhile waits in queued.
+(defun approving (a pending allowed what p box queued)
     (tty/write \e "[1;33m" what \e "[0m" "  [y/n] ")
-    (deciding a pending box queued))
+    (deciding a pending allowed p box queued))
 
-(defun deciding (a pending box queued)
+(defun deciding (a pending allowed p box queued)
     (recv
-        (("y")          (tty/write "yes" \n) (reply box #true) (decided a pending queued))
-        (("n")          (tty/write "no" \n) (reply box #false) (decided a pending queued))
-        ((:approve w b) (deciding a pending box (append queued (list (list w b)))))
-        (_              (deciding a pending box queued))))
+        (("y")            (tty/write "yes" \n) (reply box #true) (decided a pending (cons p allowed) queued))
+        (("n")            (tty/write "no" \n) (reply box #false) (decided a pending allowed queued))
+        ((:Escape)        (tty/write "no" \n) (reply box #false) (decided a pending allowed queued))
+        ((:approve w q b) (deciding a pending allowed p box (append queued (list (list w q b)))))
+        (_                (deciding a pending allowed p box queued))))
 
-(defun decided (a pending queued)
+(defun decided (a pending allowed queued)
     (match queued
-        (()                     (answering a pending))
-        (((what box) & rest)    (approving a pending what box rest))))
+        (()                     (answering a pending allowed))
+        (((what p box) & rest)  (approving a pending allowed what p box rest))))
 
 ; The arguments, each as its first line, cut at 60 bytes.
 (defun show-args (args)

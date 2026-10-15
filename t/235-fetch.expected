@@ -2,7 +2,7 @@
 
 Hello & welcome
 
-Some bold text, and a link.
+Some bold text, and a [link](/x).
 
 - one
 - two <3 ’s — &bogus; &#0; &#xD800; &
@@ -15,6 +15,16 @@ Some bold text, and a link.
 end"
 ""
 "just text, "quoted""
+[absolute](https://other.org/a), [no scheme](https://cdn.example.com/lib), [root](https://example.com/root), [relative](https://example.com/docs/rel/x.html), [up](https://example.com/docs/../up), [query](https://example.com/docs/page.html?page=2), same page, mail, script, , [upper](https://example.com/Upper?a=1&b=2), [data](https://example.com/yes), [bare](https://example.com/bare), anchor, empty.
+
+- [spaced out](https://example.com/docs/one)
+- after
+
+[Card its text](https://example.com/docs/two)
+
+[first](https://example.com/docs/first) [second](https://example.com/docs/second) after
+
+end [never closed](https://example.com/docs/open)
 (ok "T
 
 Hello, world.")
@@ -28,6 +38,7 @@ Not Found")
 (ok "T
 
 Hello, world.")
+(ok "See [next](BASE/docs/next), [home](BASE/) and here.")
 #true
 (error "the URL must start with http:// or https://")
 #true

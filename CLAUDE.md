@@ -114,7 +114,9 @@ first every time, a page made plain text in slight (D189, golden test
 in slight (`lib/calc.slight`, D190, golden test 236), and notes kept
 from one conversation to the next, a store that writes them to a file
 as an s-expression (D191, golden test 237), and other agents asked as
-tools, `agent/ask` (D192, golden test 238). **Next:** to settle with
+tools, `agent/ask` (D192, golden test 238); and a fetched page's links
+kept, `[text](url)`, and a command ending with the process that ran it,
+so Escape in the chat stops one (D193, golden tests 233 and 235). **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
