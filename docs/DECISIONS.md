@@ -2726,3 +2726,34 @@ practice.
   file that isn't notes, and one that can't be written. By hand: two
   chats, the first remembering, the second, on the other target, told of
   the key and recalling it.
+
+**D192. Agents asking agents: `agent/ask` and `tools/ask-agent`.** *(User
+asked for it, the last of D188's batches; the details are defaults.)*
+PLAN.md's "agents talk to each other in messages", in its simplest form:
+one agent as another's tool.
+- **`(agent/ask a text)`** gives `(:ok answer)` or `(:error reason)`, as
+  `http/request` gives a Result where `http/stream` gives messages. A
+  process of its own asks and waits, so the pieces and the calls it's
+  told of go nowhere else, and since it's `join` underneath it works in a
+  lambda, so in a tool. It monitors `a`, so an agent that has ended, or
+  ends while it answers, is `(:error (:ended a result))`, not a wait
+  for ever.
+- **`(tools/ask-agent name description a)`** makes a tool of an agent,
+  with one parameter, `question`, described as needing to be in full,
+  since the agent asked knows nothing of the conversation it's asked
+  from. Its name and description are the program's, since a program
+  may have several (an expert, a reviewer). It doesn't ask `approve`:
+  the agent asked has its own tools, which ask about what they do. The
+  agent asked keeps its own conversation, from one question to the next.
+- **Not guarded against:** an agent given itself as a tool waits for
+  itself, one turn at a time (D184). The docs say not to; a check would
+  need a tool to know whose it is.
+- **The chat:** with `CHAT_EXPERT` set to a model, an agent on it ("Answer
+  briefly and exactly.", no tools) is the chat's `ask_expert`. A variable,
+  not a third argument, so it needn't come with the URL.
+- **Tests:** 238, against a fake ollama: an answer, nothing else reaching
+  the caller, a model that isn't there, an agent that has ended, an agent
+  as a tool and one whose model isn't there, and the asked agent's
+  conversation going on. Also under seeds, `SLIGHT_GC_STRESS` and
+  valgrind. By hand: the chat with `CHAT_EXPERT`, on both targets, the
+  expert sent its own system prompt and no tools.

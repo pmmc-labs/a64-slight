@@ -1,0 +1,8 @@
+(ok "helper: hello [user]")
+nothing-else
+(error (http 404 "model 'missing' not found"))
+(ended (error killed))
+((calling "ask_expert" (("question" "what is 2+2?"))) (called "ask_expert" "helper: what is 2+2? [user assistant user]") (piece "results: helper: what is 2+2? [user assistant user]") (piece " [user calls tool]") (answer "results: helper: what is 2+2? [user assistant user] [user calls tool]"))
+((calling "ask_broken" (("question" "anything?"))) (called "ask_broken" "error: (http 404 "model 'missing' not found")") (piece "results: error: (http 404 "model 'missing' not found")") (piece " [user calls tool assistant user calls tool]") (answer "results: error: (http 404 "model 'missing' not found") [user calls tool assistant user calls tool]"))
+(ok "helper: and again [user assistant user assistant user]")
+done

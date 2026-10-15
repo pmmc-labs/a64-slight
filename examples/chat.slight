@@ -10,11 +10,13 @@
 ; and then go on the next line. Ctrl-D on an empty line ends the chat, and
 ; Ctrl-C ends it at once.
 ;
-; The model has lib/tools.slight's tools (D187-D191): read_file,
+; The model has lib/tools.slight's tools (D187-D192): read_file,
 ; list_files, search and calc; remember and recall, notes kept in
 ; ~/.slight-chat-notes from one chat to the next, whose keys the model is
-; told of at the start; and write_file, edit_file, run and fetch, which do
-; nothing till you've said y to what they show you. A call and its result
+; told of at the start; write_file, edit_file, run and fetch, which do
+; nothing till you've said y to what they show you; and, with CHAT_EXPERT
+; set to another model (a bigger one, say), ask_expert, which asks an
+; agent on that model. A call and its result
 ; are shown as they happen. A command runs to its end: one that doesn't
 ; end is stopped with Ctrl-C, which ends the chat.
 ;
@@ -32,9 +34,10 @@
 (defun main (args env)
     (let model (if (cons? args) (car args) "llama3.2"))
     (let url   (if (and (cons? args) (cons? (cdr args))) (cadr args) (ollama-url env)))
-    (let path  (notes-path env))
-    (let store (notes/open path))
-    (let keys  (notes/keys store))
+    (let path   (notes-path env))
+    (let store  (notes/open path))
+    (let keys   (notes/keys store))
+    (let expert (lookup "CHAT_EXPERT" env))
     (tty/write \e "[1;32m" "Slight Agent Chat v0.0" \e "[0m" \n
                \n
                \e "[2m"
@@ -42,10 +45,12 @@
                "    url   : " url   \n
                "    tools : read_file, list_files, search, calc, remember, recall, write_file, edit_file, run, fetch" \n
                "    notes : " path " (" (length keys) ")" \n
+               (if (str? expert) (concat "    expert: " expert \n) "")
                \e "[0m"
                \n
                (divider) (prompt))
-    (join (connect :keypress (typing (agent/new url model (system keys) (chat-tools $$ store)) "" ())))
+    (let extra  (if (str? expert) (list (expert-tool url expert)) ()))
+    (join (connect :keypress (typing (agent/new url model (system keys) (append (chat-tools $$ store) extra)) "" ())))
     :bye)
 
 ; The notes go in the home directory, so every chat has them.
@@ -59,6 +64,12 @@
         ""
         (concat "You keep notes with the remember tool, and read them with recall. You have notes under these keys: "
                 (str-join ", " keys) ".")))
+
+; Another agent, on the model called expert, to ask.
+(defun expert-tool (url expert)
+    (tools/ask-agent "ask_expert"
+        (concat "Asks an expert (the model " expert ") a question, and gives its answer. It knows nothing of this conversation, so ask in full.")
+        (agent/new url expert "Answer briefly and exactly." ())))
 
 ; The model's tools. me is the keyboard's process, which those that
 ; change something ask first.

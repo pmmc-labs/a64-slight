@@ -420,7 +420,8 @@ rounds, until the model answers. Opt-in: `(@include :agent)`.
 files, run commands, fetch URLs with curl (a page made plain text in
 slight), work out arithmetic (`lib/calc.slight`, D190), and keep notes
 in a store, a process that writes them to a file as an s-expression
-(D191); those that change something or reach out ask an `approve`
+(D191), and ask other agents (`agent/ask`, D192); those that change
+something or reach out ask an `approve`
 function first, which the chat makes ask the person at the keyboard.
 
 ### Strings

@@ -1,6 +1,6 @@
-; Tools for an agent (D187-D191): reading, finding and changing files,
-; running commands, fetching from the web, arithmetic, and notes kept
-; from one conversation to the next. Not part of the prelude, so a program
+; Tools for an agent (D187-D192): reading, finding and changing files,
+; running commands, fetching from the web, arithmetic, notes kept from
+; one conversation to the next, and other agents to ask. Not part of the prelude, so a program
 ; that wants them says (@include :tools); this includes :agent, :calc,
 ; :ds, :exec and :fs itself.
 ;
@@ -81,6 +81,18 @@
                 ((str? text) text)
                 ((nil? keys) "there are no notes yet")
                 (#true       (concat "there's no note under " key "; the keys are: " (str-join ", " keys)))))))
+
+; Another agent, a, as a tool called name, which description tells the
+; model about: a bigger model, say, or one with a system prompt of its
+; own. It doesn't ask: what a does, its own tools ask about. An agent
+; mustn't be its own tool: it would wait for itself.
+(defun tools/ask-agent (name description a)
+    (tool/new name description
+        (list (list "question" :string "What to ask, in full: it knows nothing of this conversation"))
+        (lambda (args)
+            (match (agent/ask a (tools/string args "question"))
+                ((:ok answer)    answer)
+                ((:error reason) (raise reason))))))
 
 (defun tools/fetch (approve)
     (tool/new "fetch" "Fetches a URL, http or https, once the user agrees, and gives what's there as text, a web page's HTML made plain."

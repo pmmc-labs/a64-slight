@@ -1537,6 +1537,11 @@ plain HTTP; the agent includes `:http` itself.
   whole, so a turn that fails leaves it as it was.
 - One turn at a time: a question asked while another is answered waits
   for it, and its answer comes after.
+- `(agent/ask a text)` asks `a` and waits for the whole answer: `(:ok
+  answer)`, or `(:error reason)` as `(:error a reason)` would have said,
+  or `(:error (:ended a result))` if `a` has ended or ends first. A
+  process of its own asks, so none of the pieces or calls reach the
+  caller, and it works anywhere, a lambda or a tool included (D192).
 - `(kill a)` ends the agent, and stops an answer on its way, and any
   tool it was running.
 
@@ -1583,13 +1588,15 @@ what with:
 `examples/chat.slight` is a chat in the terminal, a line at a time, on
 `:keypress`: `chat [model] [url]`. Its model has `lib/tools.slight`'s
 tools (below); those that change something do it only once you've said
-`y` to what they show you, asking the keyboard's process with `ask`.
+`y` to what they show you, asking the keyboard's process with `ask`. Its
+notes are kept in `~/.slight-chat-notes`, and with `CHAT_EXPERT` set to
+another model, it can ask an agent on that one (`ask_expert`).
 
 ### (@include :tools)
 
 `lib/tools.slight`: tools for an agent, to read, find and change files,
-run commands, fetch from the web, work out arithmetic, and keep notes
-from one conversation to the next (D188–D191). It includes `:agent`,
+run commands, fetch from the web, work out arithmetic, keep notes from
+one conversation to the next, and ask other agents (D188–D192). It includes `:agent`,
 `:calc`, `:ds`, `:exec` and `:fs` itself.
 
     (@include :tools)
@@ -1629,6 +1636,12 @@ argument it needs, or with one that isn't a string.
   - `(notes/get store key)`, the text or `:not-found`; `(notes/keys
     store)`, newest first; `(notes/put store key text)`, which raises
     why if the file can't be written, the store going on as it was.
+- `(tools/ask-agent name description a)`: a tool called `name` that
+  asks the agent `a` a question (`question`), with `agent/ask`, and
+  gives its answer: an agent on a bigger model, say, or with a system
+  prompt of its own. `description` tells the model what it's for. It
+  doesn't ask `approve`: `a`'s own tools ask about what they do. An agent
+  mustn't be given itself, since it would wait for itself.
 - `(tools/write-file approve)`: `write_file(path, content)`, the whole
   file, made if it isn't there. `approve` is shown the content, each
   line after `+ `.

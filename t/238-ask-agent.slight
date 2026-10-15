@@ -1,0 +1,84 @@
+; Agents asking agents (D192), against a fake ollama. agent/ask waits for
+; the whole answer, in a process of its own, so none of the pieces reach
+; the caller: (:ok answer), (:error reason), or (:ended a result) for an
+; agent that has ended. The helper answers with the question and the roles
+; of its own conversation, which goes on from one question to the next.
+; Then a helper as another agent's tool, tools/ask-agent: the main agent
+; calls it, and its answer is the call's result; and one whose model
+; isn't there, whose error is.
+
+(@include :tools)
+
+(defun handler (req)
+    (match (json/parse (lookup :body req))
+        ((:ok (:object & fields))
+            (let messages (lookup "messages" fields))
+            (let last     (cdr (car (reverse messages))))
+            (let asked    (lookup "content" (cdr (car (filter (lambda (m) (eq? (lookup "role" (cdr m)) "user")) (reverse messages))))))
+            (cond
+                ((eq? (lookup "model" fields) "missing")
+                    (list 404 () (json/print (list :object (list "error" "model 'missing' not found")))))
+                ((eq? (lookup "model" fields) "helper")
+                    (list 200 () (lines (list (piece "helper: ") (piece (concat (lookup "content" last) (roles messages))) (done)))))
+                ((eq? (lookup "role" last) "tool")
+                    (list 200 () (lines (list (piece (concat "results: " (lookup "content" last))) (piece (roles messages)) (done)))))
+                ((eq? asked "consult")
+                    (list 200 () (lines (list (calls "ask_expert" "what is 2+2?") (done)))))
+                ((eq? asked "consult the broken one")
+                    (list 200 () (lines (list (calls "ask_broken" "anything?") (done)))))
+                (#true
+                    (list 200 () (lines (list (piece asked) (done)))))))))
+
+(defun piece (text)
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" text))) (list "done" #false)))
+
+(defun calls (name question)
+    (list :object
+        (list "message" (list :object (list "role" "assistant") (list "content" "")
+            (list "tool_calls" (list (list :object (list "function" (list :object (list "name" name)
+                (list "arguments" (list :object (list "question" question))))))))))
+        (list "done" #false)))
+
+(defun done ()
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" ""))) (list "done" #true)))
+
+(defun lines (values)
+    (str-join "" (map (lambda (v) (concat (json/print v) "\n")) values)))
+
+(defun roles (messages)
+    (concat " [" (str-join " " (map (lambda (m) (if (eq? (lookup "tool_calls" (cdr m)) :not-found) (lookup "role" (cdr m)) "calls")) messages)) "]"))
+
+; What a caller of agent/say hears, till the answer or an error.
+(defun heard (acc)
+    (recv
+        ((:piece _ text)        (heard (cons (list :piece text) acc)))
+        ((:calling _ name args) (heard (cons (list :calling name args) acc)))
+        ((:called _ name text)  (heard (cons (list :called name text) acc)))
+        ((:answer _ text)       (reverse (cons (list :answer text) acc)))
+        ((:error _ reason)      (reverse (cons (list :error reason) acc)))))
+
+(defun asking (a text)
+    (agent/say a text)
+    (heard ()))
+
+(defun main ()
+    (let srv    (http/serve 0 handler))
+    (let base   (recv ((:listening port) (concat "http://127.0.0.1:" port))))
+    (let helper (agent/new base "helper" "" ()))
+    (pprint (agent/ask helper "hello"))
+    (send $$ :nothing-else)
+    (pprint (recv (m m)))
+    (pprint (agent/ask (agent/new base "missing" "" ()) "hi"))
+    (let gone   (agent/new base "helper" "" ()))
+    (kill gone)
+    (pprint (match (agent/ask gone "hi") ((:error (:ended _ result)) (list :ended result))))
+    (let boss   (agent/new base "main" ""
+                    (list (tools/ask-agent "ask_expert" "Asks an expert, who knows arithmetic." helper)
+                          (tools/ask-agent "ask_broken" "Asks one who isn't there." (agent/new base "missing" "" ())))))
+    (pprint (cadr (join (fork (asking boss "consult")))))
+    (pprint (cadr (join (fork (asking boss "consult the broken one")))))
+    (pprint (agent/ask helper "and again"))
+    (kill srv)
+    :done)
+
+(main)
