@@ -550,8 +550,9 @@ commands, the person saying yes to each command (`exec/run`, golden test
 233; done); and `lib/tools.slight`, tools to read, find and change files
 and run commands (D188, golden test 234; done), and `fetch`, a URL
 through curl, a page made plain text in slight (D189, golden test 235;
-done). Next, more tools, in order: `calc` and notes in slight, and
-`ask_agent`. TLS (12c) and a reader of server-sent events, for a hosted
+done), and `calc`, arithmetic parsed and worked out in slight
+(`lib/calc.slight`, D190, golden test 236; done). Next, more tools, in
+order: notes in slight, and `ask_agent`. TLS (12c) and a reader of server-sent events, for a hosted
 model, wait (the user, Oct 2026: local models first, and curl for
 HTTPS).
 

@@ -417,8 +417,9 @@ the model reads; a turn runs each call in a process of its own, all at
 once, sends the results back to the model, and goes on, at most 10
 rounds, until the model answers. Opt-in: `(@include :agent)`.
 `lib/tools.slight` (D188, D189) has tools to read, find and change
-files, run commands, and fetch URLs with curl (a page made plain text in
-slight); those that change something or reach out ask an `approve`
+files, run commands, fetch URLs with curl (a page made plain text in
+slight), and work out arithmetic (`lib/calc.slight`, D190); those that
+change something or reach out ask an `approve`
 function first, which the chat makes ask the person at the keyboard.
 
 ### Strings

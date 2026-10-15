@@ -1,7 +1,7 @@
-; Tools for an agent (D187, D188, D189): reading, finding and changing
-; files, running commands, and fetching from the web. Not part of the
-; prelude, so a program that wants them says (@include :tools); this
-; includes :agent, :exec and :fs itself.
+; Tools for an agent (D187, D188, D189, D190): reading, finding and
+; changing files, running commands, fetching from the web, and arithmetic.
+; Not part of the prelude, so a program that wants them says (@include
+; :tools); this includes :agent, :calc, :exec and :fs itself.
 ;
 ;     (let approve (lambda (what) ...))           ; #true to go ahead
 ;     (agent/new url model "" (list (tools/read-file) (tools/list-files) (tools/search)
@@ -14,6 +14,7 @@
 ; do what it's asked raises why, which the model is told too.
 
 (@include :agent)
+(@include :calc)
 (@include :exec)
 (@include :fs)
 
@@ -50,6 +51,11 @@
     (tool/new "run" "Runs a shell command, once the user agrees, and gives what it printed and its exit status."
         (list (list "command" :string "The command, for sh -c"))
         (lambda (args) (tools/command approve (tools/string args "command")))))
+
+(defun tools/calc ()
+    (tool/new "calc" "Works out arithmetic exactly: + - * / % and ^ (a power), parentheses, sqrt, abs, floor, ceil, round, sin, cos, tan, exp, min, max, pi and e."
+        (list (list "expression" :string "The arithmetic, as you'd write it, such as (2 + 3) * 4^2 / 7"))
+        (lambda (args) (calc/eval (tools/string args "expression")))))
 
 (defun tools/fetch (approve)
     (tool/new "fetch" "Fetches a URL, http or https, once the user agrees, and gives what's there as text, a web page's HTML made plain."

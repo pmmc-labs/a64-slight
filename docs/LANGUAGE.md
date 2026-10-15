@@ -1588,13 +1588,13 @@ tools (below); those that change something do it only once you've said
 ### (@include :tools)
 
 `lib/tools.slight`: tools for an agent, to read, find and change files,
-run commands, and fetch from the web (D188, D189). It includes `:agent`,
-`:exec` and `:fs` itself.
+run commands, fetch from the web, and work out arithmetic (D188–D190).
+It includes `:agent`, `:calc`, `:exec` and `:fs` itself.
 
     (@include :tools)
 
     (let approve (lambda (what) #true))           ; yes to everything; the chat asks you
-    (agent/new url model "" (list (tools/read-file) (tools/list-files) (tools/search)
+    (agent/new url model "" (list (tools/read-file) (tools/list-files) (tools/search) (tools/calc)
                                   (tools/write-file approve) (tools/edit-file approve)
                                   (tools/run approve) (tools/fetch approve)))
 
@@ -1613,6 +1613,8 @@ argument it needs, or with one that isn't a string.
   in the file, or in every file under the directory, as
   `file:line:text` (`grep -rnIF`: the text as it is, not a pattern; no
   binary files, and no `.git`); or "no lines contain it".
+- `(tools/calc)`: `calc(expression)`, arithmetic as `calc/eval` (below)
+  works it out, for a model, which is bad at it.
 - `(tools/write-file approve)`: `write_file(path, content)`, the whole
   file, made if it isn't there. `approve` is shown the content, each
   line after `+ `.
@@ -1644,6 +1646,33 @@ argument it needs, or with one that isn't a string.
 The commands these run are given their arguments directly, with no
 shell (but `run`'s), so a path or a text can't be taken for anything
 else.
+
+### (@include :calc)
+
+`lib/calc.slight`: arithmetic, written as people write it, worked out
+(D190).
+
+    (@include :calc)
+
+    (calc/eval "(2 + 3) * 4 ^ 2 / 8")      ; 10
+    (calc/eval "7 / 2")                     ; 3.5
+
+- `(calc/eval s)` gives the value of the expression `s`: numbers
+  (`42`, `3.5`, `.5`, `1.5e3`), `+ - * / %` and `^` (or `**`) for a
+  power, and parentheses. `^` binds first, and from the right (`2^3^2`
+  is 512); then a sign (`-2^2` is -4); then `*`, `/` and `%`; then `+`
+  and `-`. `×`, `÷` and `−` are `*`, `/` and `-`.
+- The functions `sqrt`, `abs`, `floor`, `ceil`, `round`, `sin`, `cos`,
+  `tan`, `exp`, and `min` and `max` of one number or more; the
+  constants `pi` and `e`. Names in any case.
+- Whole numbers stay whole while the answer fits well inside 62 bits
+  (`2^61` is exact), and a division that comes out whole is whole (`6/2`
+  is 3); anything else is a float (`7/2` is 3.5, `2^62` is
+  4611686018427388000.0), rather than an overflow. `%` keeps the sign of
+  its left side, as `%` does, and works on floats too.
+- An expression that can't be read or worked out raises why, and the
+  byte where: `"at byte 3: 3 where an operator or the end should be"`,
+  `"division by zero"`, `"at byte 1: there's no log: ..."`.
 
 ### (@include :exec)
 

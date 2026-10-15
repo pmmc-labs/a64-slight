@@ -2659,3 +2659,39 @@ second batch of D188's tools. HTTPS waits for TLS (12c), so curl, through
 - **Left for later:** a page's links (a model can't follow what it
   can't see: `[text](url)` would show them, at a cost in context); a
   charset other than UTF-8; POST and headers.
+
+**D190. `calc`: arithmetic parsed and worked out in slight.** *(User
+asked for it, the third of D188's batches; the details are defaults.)*
+A small model gets arithmetic wrong, and a tool is the usual cure.
+`lib/calc.slight`, `(calc/eval s)`, since arithmetic is of use beyond
+agents, and `(tools/calc)` around it.
+- **Infix, as people and models write it,** not s-expressions, which a
+  model writes less reliably: numbers (`.5`, `1.5e3`), `+ - * / %`, `^`
+  and `**`, parentheses, and `×`, `÷` and `−`. `^` first and from the
+  right, then a sign (`-2^2` is -4, as in maths and Python), then `* /
+  %`, then `+ -`. Recursive descent, each step giving its value and the
+  tokens left; the expression is short, so nothing is done for speed.
+- **Whole numbers stay whole** while a float's estimate of the answer is
+  under 4×10^18, well inside 62 bits, so `2^61` and `10^18` are exact;
+  past that the answer is a float, rather than slight's `:overflow`,
+  which would end the call with a fault logged to the terminal. A whole
+  power is worked out by squaring; a division that comes out whole is
+  whole (`6/2` is 3), and anything else is a float. `%` is slight's (the
+  sign of its left side), and on floats C's `fmod`. Rounding a float too
+  big for an integer, or one that isn't a number, gives it back as it
+  is, since `floor` and the rest would fault.
+- **Functions:** `sqrt abs floor ceil round sin cos tan exp`, `min` and
+  `max` of one or more, and `pi` and `e`, any case. No `log`: slight has
+  no logarithm, and adding one is a builtin to propose, not a library's
+  to fake.
+- **Errors** raise what's wrong and the byte where, for a model to mend
+  its expression: an empty one, one that ends too soon, a `(` not
+  closed, a token where something else should be, division by zero, a
+  name that isn't one (with the list of those that are), an argument
+  count, a character that isn't arithmetic, a point with no digits, and
+  a number too big. A comma says numbers are written without them,
+  since `1,000` is what a model writes for a thousand.
+- **Tests:** 236: each rule, the functions and constants, the errors,
+  and the tool through `tool/call`; no libm function but `sqrt` is asked
+  for anything but an exact answer (D76). By hand: the chat, with a
+  stand-in that calls `calc`, on both targets.
