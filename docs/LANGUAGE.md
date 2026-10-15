@@ -1571,6 +1571,9 @@ what with:
   model, and the turn goes on until the model answers without calling
   any: `(:answer a text)` is the text of that last reply, though the
   pieces of the replies before it came too.
+- `(tool/name tool)` is a tool's name, and `(tool/call tool args)` calls
+  it here, as the model would, and gives its value or raises as it does:
+  for a test, or a tool built on another.
 - A turn has at most 10 rounds with the model; one still calling tools
   in its tenth fails with `(:rounds 10)`. A call has no time limit: a
   tool that might hang sets its own, with `after`.
@@ -1578,9 +1581,52 @@ what with:
   and the answer, once the answer is whole.
 
 `examples/chat.slight` is a chat in the terminal, a line at a time, on
-`:keypress`: `chat [model] [url]`. Its model has two tools, `read_file`
-and `run`, a shell command, which runs only once you've said `y`: the
-tool asks the keyboard's process, with `ask`.
+`:keypress`: `chat [model] [url]`. Its model has `lib/tools.slight`'s
+tools (below); those that change something do it only once you've said
+`y` to what they show you, asking the keyboard's process with `ask`.
+
+### (@include :tools)
+
+`lib/tools.slight`: tools for an agent, to read, find and change files,
+and run commands (D188). It includes `:agent`, `:exec` and `:fs` itself.
+
+    (@include :tools)
+
+    (let approve (lambda (what) #true))           ; yes to everything; the chat asks you
+    (agent/new url model "" (list (tools/read-file) (tools/list-files) (tools/search)
+                                  (tools/write-file approve) (tools/edit-file approve)
+                                  (tools/run approve)))
+
+Each function makes a tool. Those that change something take `approve`,
+a function of what the tool is about to do, as text for a person to
+read; the tool does it only if `approve` gives `#true`, and otherwise
+tells the model it wasn't let. A tool that can't do what it's asked
+raises why, and the model is told that too, as is one called without an
+argument it needs, or with one that isn't a string.
+
+- `(tools/read-file)`: `read_file(path)`, the file's bytes as they are.
+- `(tools/list-files)`: `list_files(path)`, what's in a directory, one
+  name a line, a directory's ending in `/` (`ls -1Ap`); or "the
+  directory is empty".
+- `(tools/search)`: `search(text, path)`, the lines that contain `text`
+  in the file, or in every file under the directory, as
+  `file:line:text` (`grep -rnIF`: the text as it is, not a pattern; no
+  binary files, and no `.git`); or "no lines contain it".
+- `(tools/write-file approve)`: `write_file(path, content)`, the whole
+  file, made if it isn't there. `approve` is shown the content, each
+  line after `+ `.
+- `(tools/edit-file approve)`: `edit_file(path, old, new)`, `old`
+  replaced with `new`. `old` must be in the file once, exactly as it is
+  there, or the tool raises, before asking; the rest of the file is kept
+  as it was, its last newline included. `approve` is shown the change,
+  `old`'s lines after `- ` and `new`'s after `+ `.
+- `(tools/run approve)`: `run(command)`, a shell command (`sh -c`), run
+  to its end, and what it printed and its exit status. `approve` is shown
+  `run: command`.
+
+The commands these run are given their arguments directly, with no
+shell (but `run`'s), so a path or a text can't be taken for anything
+else.
 
 ### (@include :exec)
 

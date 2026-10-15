@@ -2568,3 +2568,52 @@ the calls.
   Checked by hand on both targets, in a pseudo-terminal, against a
   stand-in for `/api/chat` that calls the tools: `y`, `n`, and a file
   read, with the whole conversation sent each round.
+
+**D188. `lib/tools.slight`: tools to read, find and change files, and
+run commands.** *(User chose these, the first of four batches Claude
+proposed; the details are defaults.)* The chat's two tools (D187), made
+general, and four more, so the chat is a small coding assistant.
+- **A library of constructors,** opt-in: each function makes a tool,
+  and a program gives its agent those it wants. Those that change
+  something take `approve`, a function of what the tool is about to do,
+  as text for a person to read, giving `#true` to go ahead: the chat
+  makes it ask the keyboard's process, a script can say yes to all, and
+  a test records what it was asked. A refusal is a result ("the user
+  didn't let it ..."), not an error, so the model knows to stop.
+- **`read_file`** reads in chunks, so the bytes come as they are;
+  **`list_files`** is `ls -1Ap -- path`, and says "the directory is
+  empty" rather than nothing, which a model reads as no answer;
+  **`search`** is `grep -rnIF --exclude-dir=.git -e text -- path`: `-F`,
+  since a model's text often has a bracket or a dot in it, and a
+  pattern would surprise it; status 1 is "no lines contain it". The
+  commands take their arguments directly, with no shell, and `--`, so
+  a path can't be read as an option.
+- **`write_file`** writes the whole file; `approve` sees the content,
+  each line after `+ `.
+- **`edit_file(path, old, new)`**, as Claude Code's: `old` must be in the
+  file once, exactly (a second, even overlapping the first, would leave
+  which to change to chance), or it raises, before asking; the file is
+  read in chunks and written whole, so the rest stays byte for byte, its
+  last newline included. `approve` sees `old`'s lines after `- ` and
+  `new`'s after `+ `.
+- **`run`** is the chat's, moved here: `sh -c`, run to its end
+  (`exec/run`), with its exit status.
+- **An argument** that's missing or not a string raises, and the model
+  is told which.
+- **`tool/name` and `tool/call`** in `lib/agent.slight`: a tool's name,
+  and a call made here as the model's would be, for tests and for tools
+  built on others.
+- **The chat** has all six, with one `approve`; the question shows what
+  the tool showed it, and a call's arguments are shown as their first
+  line, cut at 60 bytes, so a file's content doesn't fill the screen.
+- **Tests:** 234 calls each tool as the agent does, in a process of its
+  own, with approvers that say yes and no: writing, reading, listing an
+  empty directory and a full one, finding (a bracket matched as itself),
+  editing and its errors, refusals that leave everything as it was,
+  running, and arguments that are missing or not strings. By hand, on
+  both targets: the chat in a pseudo-terminal, against a stand-in that
+  calls each tool, with `y` and `n`.
+- **Next** (the user's order): `fetch`, through curl, which asks before
+  every call, since a URL can carry anything out; then `calc` and notes,
+  in slight; then `ask_agent`. Left for later: reading part of a file,
+  and keeping the tools to one directory.

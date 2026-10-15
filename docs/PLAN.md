@@ -547,8 +547,12 @@ second parameter (D186, golden test 231; done); and tools: a function
 of the model's arguments, each call in a process of its own (D187,
 golden test 232; done), and the chat with tools to read files and run
 commands, the person saying yes to each command (`exec/run`, golden test
-233; done). Next, for a hosted model: TLS (12c), and a reader of
-server-sent events.
+233; done); and `lib/tools.slight`, tools to read, find and change files
+and run commands (D188, golden test 234; done). Next, more tools, in
+order: `fetch` through curl, `calc` and notes in slight, and
+`ask_agent`. TLS (12c) and a reader of server-sent events, for a hosted
+model, wait (the user, Oct 2026: local models first, and curl for
+HTTPS).
 
 - An agent is an actor whose state is its context: the conversation so
   far, its tools, its model's settings. A turn comes in as a message,

@@ -10,19 +10,18 @@
 ; and then go on the next line. Ctrl-D on an empty line ends the chat, and
 ; Ctrl-C ends it at once.
 ;
-; The model has two tools (D187): read_file, and run, a shell command,
-; which it runs only once you've said y. A call and its result are shown
-; as they happen. A command runs to its end: one that doesn't end is
-; stopped with Ctrl-C, which ends the chat.
+; The model has lib/tools.slight's tools (D187, D188): read_file,
+; list_files and search, and write_file, edit_file and run, which do
+; nothing till you've said y to what they show you. A call and its result
+; are shown as they happen. A command runs to its end: one that doesn't
+; end is stopped with Ctrl-C, which ends the chat.
 ;
 ; The keyboard's process is the agent's caller too, so an answer's pieces
-; come to it among the keys, and one recv takes both; and run asks it
-; whether it may.
+; come to it among the keys, and one recv takes both; and the tools ask it
+; whether they may.
 
-(@include :agent)
+(@include :tools)
 (@include :ds)
-(@include :exec)
-(@include :fs)
 
 (defun prompt () "❯ ")
 
@@ -37,39 +36,19 @@
                \e "[2m"
                "    model : " model \n
                "    url   : " url   \n
-               "    tools : read_file, run" \n
+               "    tools : read_file, list_files, search, write_file, edit_file, run" \n
                \e "[0m"
                \n
                (divider) (prompt))
-    (join (connect :keypress (typing (agent/new url model "" (tools $$)) "" ())))
+    (join (connect :keypress (typing (agent/new url model "" (chat-tools $$)) "" ())))
     :bye)
 
-; The model's tools. me is the keyboard's process, which run asks.
-(defun tools (me)
-    (list
-        (tool/new "read_file" "Reads a text file, and gives what's in it."
-            (list (list "path" :string "The file's path"))
-            (lambda (args) (read-file (lookup "path" args))))
-        (tool/new "run" "Runs a shell command, if the user agrees, and gives what it printed and its exit status."
-            (list (list "command" :string "The command, for sh -c"))
-            (lambda (args) (run-command me (lookup "command" args))))))
-
-(defun read-file (path)
-    (cond
-        ((not (str? path)) (raise "the path must be a string"))
-        (#true
-            (match (slurp path)
-                ((:ok lines)     (str-join \n lines))
-                ((:error reason) (raise reason))))))
-
-(defun run-command (me command)
-    (cond
-        ((not (str? command))                 (raise "the command must be a string"))
-        ((not (ask me (list :approve command))) "the user didn't let it run")
-        (#true
-            (match (exec/run (list "sh" "-c" command))
-                ((:ok (status output)) (concat output "[exit status: " status "]"))
-                ((:error reason)       (raise reason))))))
+; The model's tools. me is the keyboard's process, which those that
+; change something ask first.
+(defun chat-tools (me)
+    (let approve (lambda (what) (ask me (list :approve what))))
+    (list (tools/read-file) (tools/list-files) (tools/search)
+          (tools/write-file approve) (tools/edit-file approve) (tools/run approve)))
 
 ; Where OLLAMA_HOST says ollama is: without a scheme it's http, and
 ; without a port, ollama's.
@@ -116,37 +95,42 @@
 
 
 ; An answer coming: its pieces are written as they come, and so are the
-; tools it calls, and keys wait. A command waits to be let run.
+; tools it calls, and keys wait. A tool that asks waits for y or n.
 (defun answering (a pending)
     (recv
         ((:piece  _ text)        (tty/write \e "[3;36m" text \e "[0m") (answering a pending))
         ((:calling _ name args)  (tty/write \n \e "[2m" "→ " name " " (show-args args) \e "[0m" \n) (answering a pending))
         ((:called _ name result) (tty/write \e "[2m" "← " name ": " (show-result result) \e "[0m" \n) (answering a pending))
-        ((:approve command box)  (approving a pending command box ()))
+        ((:approve what box)     (approving a pending what box ()))
         ((:answer _ _)           (tty/write \n (divider) (prompt)) (typing a "" pending))
         ((:error  _ reason)      (tty/write "[" (trouble reason) "]" \n (prompt)) (typing a "" pending))
         (key                     (answering a (append pending (list key))))))
 
-; Asking whether command may run: y or n, and only a key typed since the
-; question; any other command asked about meanwhile waits in queued.
-(defun approving (a pending command box queued)
-    (tty/write \e "[1;33m" "run: " command "  [y/n] " \e "[0m")
-    (deciding a pending command box queued))
+; Asking whether a tool may do what it says: y or n, and only a key typed
+; since the question; anything else asked about meanwhile waits in queued.
+(defun approving (a pending what box queued)
+    (tty/write \e "[1;33m" what \e "[0m" "  [y/n] ")
+    (deciding a pending box queued))
 
-(defun deciding (a pending command box queued)
+(defun deciding (a pending box queued)
     (recv
         (("y")          (tty/write "yes" \n) (reply box #true) (decided a pending queued))
         (("n")          (tty/write "no" \n) (reply box #false) (decided a pending queued))
-        ((:approve c b) (deciding a pending command box (append queued (list (list c b)))))
-        (_              (deciding a pending command box queued))))
+        ((:approve w b) (deciding a pending box (append queued (list (list w b)))))
+        (_              (deciding a pending box queued))))
 
 (defun decided (a pending queued)
     (match queued
         (()                     (answering a pending))
-        (((command box) & rest) (approving a pending command box rest))))
+        (((what box) & rest)    (approving a pending what box rest))))
 
+; The arguments, each as its first line, cut at 60 bytes.
 (defun show-args (args)
-    (str-join ", " (map (lambda (arg) (concat (car arg) ": " (cadr arg))) args)))
+    (str-join ", " (map (lambda (arg) (concat (car arg) ": " (short (concat (cadr arg))))) args)))
+
+(defun short (s)
+    (let line (if (== (str-len s) 0) "" (car (str-split s \n))))
+    (if (or (> (str-len line) 60) (< (str-len line) (str-len s))) (concat (substring line 0 60) "…") line))
 
 ; A result, short: an error's first line, or how long it is.
 (defun show-result (result)

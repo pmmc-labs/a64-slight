@@ -34,6 +34,11 @@
 (defun tool/new (name description params f)
     (list :tool name (agent/schema name description params) f))
 
+; A tool's name; and what it gives for args, called here, as a test or
+; another tool might (it raises as the tool does).
+(defun tool/name (tool) (cadr tool))
+(defun tool/call (tool args) ((cadddr tool) args))
+
 ; A tool as /api/chat takes it: its parameters as a JSON Schema.
 (defun agent/schema (name description params)
     (list :object
