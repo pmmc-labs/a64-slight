@@ -1,0 +1,53 @@
+; env: no_proxy=127.0.0.1 NO_PROXY=127.0.0.1
+; lib/tools.slight's fetch (D189), through curl, from a server in the
+; program: a page made plain text, JSON and text as they are, an image
+; said to be one, a 404 with its status, a redirect followed, a refused
+; connection with curl's message, a URL that isn't http, and one the
+; approver refuses, which isn't fetched. First, HTML as text, without a
+; network: what goes, what makes a line, entities, space.
+
+(@include :tools)
+(@include :http)
+
+(pprint (tools/html->text "<html><head><title>A  Page</title><style>p { color: red }</style><script>if (a < b) { x = '<p>' }</script></head>
+<body><!-- a <b>comment</b> -->
+<h1>Hello &amp; welcome</h1>
+<p>Some <b>bold</b>   text,
+   and a <a href=\"/x\">link</a>.</p>
+<ul><li>one</li><li>two &lt;3 &#8217;s &#x2014; &bogus; &#0; &#xD800; &</li></ul>
+<table><tr><td>a</td><td>b</td></tr><tr><td>c</td><td>d</td></tr></table>
+<P>1 < 2 and 3 > 2</P><svg><text>no</text></svg><BR/>end<!-- never closed <p>gone"))
+(pprint (tools/html->text ""))
+(pprint (tools/html->text "just text, &quot;quoted&quot;"))
+
+(defun handler (req)
+    (match (lookup :path req)
+        ("/page"  (list 200 (list (list "content-type" "text/html; charset=utf-8")) "<title>T</title><p>Hello, <i>world</i>.</p>"))
+        ("/json"  (list 200 (list (list "content-type" "application/json")) "{\"a\": [1, 2]}"))
+        ("/text"  (list 200 (list (list "content-type" "text/plain")) "line one\nline two\n"))
+        ("/image" (list 200 (list (list "content-type" "image/png")) "\u{89}PNG...."))
+        ("/moved" (list 302 (list (list "location" "/page")) ""))
+        (_        (list 404 (list (list "content-type" "text/html")) "<h1>Not Found</h1>"))))
+
+(defun fetch (approve url)
+    (join (fork (tool/call (tools/fetch approve) (list (list "url" url))))))
+
+(let me   $$)
+(let srv  (http/serve 0 handler))
+(let base (recv ((:listening port) (concat "http://127.0.0.1:" port))))
+(let yes  (lambda (what) #true))
+(let no   (lambda (what) (send me (list :asked what)) #false))
+
+(pprint (fetch yes (concat base "/page")))
+(pprint (fetch yes (concat base "/json")))
+(pprint (fetch yes (concat base "/text")))
+(pprint (fetch yes (concat base "/image")))
+(pprint (fetch yes (concat base "/nothing")))
+(pprint (fetch yes (concat base "/moved")))
+(pprint (match (fetch yes "http://127.0.0.1:1/") ((:error message) (starts-with? message "curl: (7)"))))
+(pprint (fetch yes "file:///etc/passwd"))
+(let refused (fetch no (concat base "/page")))
+(recv ((:asked what) (pprint (eq? what (concat "fetch " base "/page")))))
+(pprint refused)
+(kill srv)
+:done

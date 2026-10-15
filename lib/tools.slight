@@ -1,15 +1,16 @@
-; Tools for an agent (D187, D188): reading, finding and changing files, and
-; running commands. Not part of the prelude, so a program that wants them
-; says (@include :tools); this includes :agent, :exec and :fs itself.
+; Tools for an agent (D187, D188, D189): reading, finding and changing
+; files, running commands, and fetching from the web. Not part of the
+; prelude, so a program that wants them says (@include :tools); this
+; includes :agent, :exec and :fs itself.
 ;
 ;     (let approve (lambda (what) ...))           ; #true to go ahead
 ;     (agent/new url model "" (list (tools/read-file) (tools/list-files) (tools/search)
 ;                                   (tools/write-file approve) (tools/edit-file approve)
 ;                                   (tools/run approve)))
 ;
-; A tool that changes a file or runs a command first asks approve, a
-; function of what it's about to do, as text, and does it only if that
-; gives #true; if not, the model is told it wasn't let. A tool that can't
+; A tool that changes a file, runs a command or fetches a URL first asks
+; approve, a function of what it's about to do, as text, and does it only
+; if that gives #true; if not, the model is told it wasn't let. A tool that can't
 ; do what it's asked raises why, which the model is told too.
 
 (@include :agent)
@@ -49,6 +50,11 @@
     (tool/new "run" "Runs a shell command, once the user agrees, and gives what it printed and its exit status."
         (list (list "command" :string "The command, for sh -c"))
         (lambda (args) (tools/command approve (tools/string args "command")))))
+
+(defun tools/fetch (approve)
+    (tool/new "fetch" "Fetches a URL, http or https, once the user agrees, and gives what's there as text, a web page's HTML made plain."
+        (list (list "url" :string "The URL, starting http:// or https://"))
+        (lambda (args) (tools/get approve (tools/string args "url")))))
 
 ; --- what they do ------------------------------------------------------
 
@@ -139,3 +145,202 @@
     (let lines (str-split text \n))
     (let shown (if (and (cons? lines) (cons? (cdr lines)) (eq? (car (reverse lines)) "")) (reverse (cdr (reverse lines))) lines))
     (str-join "" (map (lambda (line) (concat mark line \n)) shown)))
+
+; --- fetching ----------------------------------------------------------
+
+; curl's -w writes the status and the type after what it fetched, after
+; a line no page has.
+(defun tools/marker () "@@slight-fetch@@ ")
+
+; A URL must be http or https: curl reads files and much else too. curl
+; follows redirects, for 20 seconds and 5 MB at most; and a failure is
+; its message, with the trailer and anything it fetched before left out.
+(defun tools/get (approve url)
+    (cond
+        ((not (or (starts-with? url "http://") (starts-with? url "https://")))
+            (raise "the URL must start with http:// or https://"))
+        ((not (approve (concat "fetch " url))) "the user didn't let it be fetched")
+        (#true
+            (match (exec/run (list "curl" "-sSL" "--max-time" "20" "--max-filesize" "5000000"
+                                   "-w" (concat "\\n" (tools/marker) "%{http_code} %{content_type}") "--" url))
+                ((:ok (0 output))      (tools/fetched output))
+                ((:ok (status output)) (raise (tools/curl-error output status)))
+                ((:error reason)       (raise reason))))))
+
+(defun tools/curl-error (output status)
+    (let at (index-of output "curl: ("))
+    (if (< at 0)
+        (concat "curl failed, with status " status)
+        (car (str-split (substring output at (str-len output)) \n))))
+
+; What was fetched, as text: a page made plain, text as it is, or what it
+; is if it isn't text; after its status, if that isn't 2xx.
+(defun tools/fetched (output)
+    (let parts   (reverse (str-split output (concat \n (tools/marker)))))
+    (let trailer (if (cons? parts) (car parts) ""))
+    (let body    (if (cons? parts) (str-join (concat \n (tools/marker)) (reverse (cdr parts))) ""))
+    (let sp      (index-of trailer " "))
+    (let code    (if (< sp 0) trailer (substring trailer 0 sp)))
+    (let type    (if (< sp 0) "" (lc (substring trailer (+ sp 1) (str-len trailer)))))
+    (let text    (cond
+                     ((>= (index-of type "html") 0) (tools/html->text body))
+                     ((tools/text? type body)       body)
+                     (#true                         (concat "not text: " type ", " (str-len body) " bytes"))))
+    (if (starts-with? code "2") text (concat "HTTP " code \n text)))
+
+(defun tools/text? (type body)
+    (cond
+        ((eq? type "")                    (utf8/valid? body))
+        ((starts-with? type "text/")      #true)
+        (#true (or (>= (index-of type "json") 0) (>= (index-of type "xml") 0) (>= (index-of type "javascript") 0)))))
+
+; --- HTML as text ------------------------------------------------------
+
+; HTML as plain text, for a model: comments, scripts, styles, SVG and
+; noscript go, with what's in them; other tags go, but one that starts a
+; block (a paragraph, a heading, a row, a break) starts a line, and an
+; item starts one with "- "; entities are decoded; and space is squeezed,
+; with never more than one blank line. The HTML is cut at each <, so each
+; piece is a tag and the text after it, and the whole is read once.
+(defun tools/html->text (html)
+    (let pieces (str-split (tools/uncomment html) "<"))
+    (if (nil? pieces)
+        ""
+        (tools/lines (tools/pieces (cdr pieces) () (list (tools/plain (car pieces)))))))
+
+; html without its comments, which can hold a < of their own.
+(defun tools/uncomment (html)
+    (let parts (str-split html "<!--"))
+    (if (nil? parts)
+        ""
+        (str-join "" (cons (car parts) (map tools/after-comment (cdr parts))))))
+
+(defun tools/after-comment (part)
+    (let end (index-of part "-->"))
+    (if (< end 0) "" (substring part (+ end 3) (str-len part))))
+
+; skip is the tag that ends what's being left out ("/script"), or ().
+(defun tools/pieces (pieces skip acc)
+    (match pieces
+        (() (str-join "" (reverse acc)))
+        ((p & rest)
+            (let close (index-of p ">"))
+            (let tag   (tools/tag p close))
+            (let text  (if (< close 0) "" (substring p (+ close 1) (str-len p))))
+            (cond
+                ((not (nil? skip))
+                    (if (eq? tag skip) (tools/pieces rest () (cons (tools/plain text) acc)) (tools/pieces rest skip acc)))
+                ((eq? tag "")
+                    (tools/pieces rest () (cons (tools/plain (concat "<" p)) acc)))
+                ((member? tag (list "script" "style" "svg" "noscript"))
+                    (tools/pieces rest (concat "/" tag) acc))
+                (#true
+                    (tools/pieces rest () (cons (tools/plain text) (cons (tools/break tag) acc))))))))
+
+; A piece's tag, lower case, with its / if it closes one; or "" if the <
+; didn't start a tag ("a < b").
+(defun tools/tag (p close)
+    (let head  (if (< close 0) p (substring p 0 close)))
+    (let first (if (== (str-len head) 0) 0 (byte-at head 0)))
+    (cond
+        ((not (or (tools/letter? first) (== first 47) (== first 33) (== first 63))) "")
+        (#true (lc (tools/name-of head)))))
+
+(defun tools/letter? (b) (or (and (>= b 65) (<= b 90)) (and (>= b 97) (<= b 122))))
+
+; A tag's name: up to a space, a newline, a tab or a /, past a first /.
+(defun tools/name-of (head)
+    (let rest (if (starts-with? head "/") (substring head 1 (str-len head)) head))
+    (let end  (tools/name-end rest 0))
+    (concat (if (starts-with? head "/") "/" "") (substring rest 0 end)))
+
+(defun tools/name-end (s i)
+    (cond
+        ((>= i (str-len s)) i)
+        ((member? (byte-at s i) (list 32 10 13 9 47)) i)
+        (#true (tools/name-end s (+ i 1)))))
+
+; What a tag puts in the text: a line for a block, an item's dash, a bar
+; before a cell, or nothing. An item, a row or a term starts a line, and
+; its end doesn't, so a list's items are on lines one after another.
+(defun tools/break (tag)
+    (let name (if (starts-with? tag "/") (substring tag 1 (str-len tag)) tag))
+    (cond
+        ((eq? tag "li")                                                     "\n- ")
+        ((member? tag (list "td" "th"))                                     " | ")
+        ((member? tag (list "/li" "/tr" "/dt" "/dd" "/td" "/th"))           "")
+        ((member? name (list "p" "div" "br" "tr" "title" "h1" "h2" "h3" "h4" "h5" "h6"
+                             "section" "article" "header" "footer" "main" "nav" "aside"
+                             "ul" "ol" "dl" "dt" "dd" "table" "blockquote" "pre" "hr"
+                             "form" "figure" "figcaption"))                 "\n")
+        (#true                                                              "")))
+
+; Text between tags: its entities decoded, and its space squeezed to
+; single spaces, a space at either end kept, since the text next to it
+; may need it.
+(defun tools/plain (text)
+    (let spaced (str-join " " (str-split (str-join " " (str-split (str-join " " (str-split text \n)) \t)) \r)))
+    (let words  (filter (lambda (w) (> (str-len w) 0)) (str-split spaced " ")))
+    (let lead   (if (starts-with? spaced " ") " " ""))
+    (let trail  (if (and (cons? words) (ends-with? spaced " ")) " " ""))
+    (tools/entities (concat lead (str-join " " words) trail)))
+
+(defun tools/entities (s)
+    (let parts (str-split s "&"))
+    (if (or (nil? parts) (nil? (cdr parts)))
+        s
+        (str-join "" (cons (car parts) (map tools/entity (cdr parts))))))
+
+; A piece after an &: an entity it knows, up to its ;, and the rest; or
+; the & back, as it was.
+(defun tools/entity (part)
+    (let semi  (index-of part ";"))
+    (let value (if (and (> semi 0) (< semi 10)) (tools/decode (substring part 0 semi)) :not-found))
+    (if (eq? value :not-found)
+        (concat "&" part)
+        (concat value (substring part (+ semi 1) (str-len part)))))
+
+(defun tools/decode (name)
+    (cond
+        ((starts-with? name "#x") (tools/code (tools/hex (substring name 2 (str-len name)) 0)))
+        ((starts-with? name "#X") (tools/code (tools/hex (substring name 2 (str-len name)) 0)))
+        ((starts-with? name "#")  (tools/code (string->int (substring name 1 (str-len name)))))
+        (#true
+            (lookup name (list (list "amp" "&") (list "lt" "<") (list "gt" ">") (list "quot" "\"")
+                               (list "apos" "'") (list "nbsp" " ") (list "mdash" "—") (list "ndash" "–")
+                               (list "hellip" "…") (list "lsquo" "‘") (list "rsquo" "’")
+                               (list "ldquo" "“") (list "rdquo" "”") (list "copy" "©"))))))
+
+; A code point as its character, if it is one.
+(defun tools/code (n)
+    (if (and (int? n) (> n 0) (< n 1114112) (not (and (>= n 55296) (<= n 57343))))
+        (utf8/char n)
+        :not-found))
+
+(defun tools/hex (s acc)
+    (cond
+        ((== (str-len s) 0) acc)
+        (#true
+            (let b (byte-at s 0))
+            (let d (cond
+                       ((and (>= b 48) (<= b 57))  (- b 48))
+                       ((and (>= b 97) (<= b 102)) (- b 87))
+                       ((and (>= b 65) (<= b 70))  (- b 55))
+                       (#true                      -1)))
+            (if (or (< d 0) (> acc 1114111)) #false (tools/hex (substring s 1 (str-len s)) (+ (* acc 16) d))))))
+
+; The text's lines, each with its space squeezed and none at its ends
+; (pieces next to each other may each have kept a space), and no more than
+; one blank line in a row, none at the start or the end.
+(defun tools/lines (text)
+    (let lines (map (lambda (line) (str-join " " (filter (lambda (w) (> (str-len w) 0)) (str-split line " ")))) (str-split text \n)))
+    (str-join \n (reverse (tools/blank-once lines () #true))))
+
+(defun tools/blank-once (lines acc blank)
+    (match lines
+        (() (if (and (cons? acc) (eq? (car acc) "")) (cdr acc) acc))
+        ((l & rest)
+            (cond
+                ((and (eq? l "") blank) (tools/blank-once rest acc #true))
+                ((eq? l "")             (tools/blank-once rest (cons "" acc) #true))
+                (#true                  (tools/blank-once rest (cons l acc) #false))))))

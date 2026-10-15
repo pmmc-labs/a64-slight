@@ -1,0 +1,35 @@
+"A Page
+
+Hello & welcome
+
+Some bold text, and a link.
+
+- one
+- two <3 ’s — &bogus; &#0; &#xD800; &
+
+| a | b
+| c | d
+
+1 < 2 and 3 > 2
+
+end"
+""
+"just text, "quoted""
+(ok "T
+
+Hello, world.")
+(ok "{"a": [1, 2]}")
+(ok "line one
+line two
+")
+(ok "not text: image/png, 9 bytes")
+(ok "HTTP 404
+Not Found")
+(ok "T
+
+Hello, world.")
+#true
+(error "the URL must start with http:// or https://")
+#true
+(ok "the user didn't let it be fetched")
+done

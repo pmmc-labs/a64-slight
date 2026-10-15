@@ -2617,3 +2617,45 @@ general, and four more, so the chat is a small coding assistant.
   every call, since a URL can carry anything out; then `calc` and notes,
   in slight; then `ask_agent`. Left for later: reading part of a file,
   and keeping the tools to one directory.
+
+**D189. `fetch`: a URL through curl, a page made plain text in slight.**
+*(User: "fetch should ask for each call"; the rest are defaults.)* The
+second batch of D188's tools. HTTPS waits for TLS (12c), so curl, through
+`:exec`, is how a local agent reaches the web for now (the user's call).
+- **`fetch(url)`** takes `http://` and `https://` only, since curl reads
+  `file://` and much else; runs `curl -sSL --max-time 20 --max-filesize
+  5000000 -w ... -- url`; and asks `approve` with `fetch url` before
+  every call, since a URL can carry anything out (`?data=...`).
+- **What came back:** curl's `-w` writes the status and the content type
+  after the body, behind a line no page has (`@@slight-fetch@@`), which
+  is split off. HTML (a type with `html` in it) is made plain text; text,
+  JSON, XML and JavaScript come as they are, and so does a body with no
+  type that's valid UTF-8; anything else is `not text: type, n bytes`. A
+  status that isn't 2xx goes before the text, `HTTP 404`, since an error
+  page can read like an answer. A failure (curl's own status, not the
+  server's) raises curl's message, without the trailer or anything
+  fetched before it.
+- **HTML to text in slight,** `tools/html->text`, for a model's small
+  context: the HTML is split at each `<` (in C, once), so each piece is
+  a tag and the text after it, and the pieces are read in one pass;
+  comments go first, split at `<!--`, since one can hold a `<`; scripts,
+  styles, SVG and `noscript` go with what's in them, till their closing
+  tag; a `<` that doesn't start a tag (`a < b`) stays. A block's tag
+  starts a line (an item's with `- `, a cell with ` | `, and the ends of
+  items and rows don't, so a list is on lines one after another);
+  entities are decoded, named and numbered, a numbered one that isn't a
+  character left as it was; space is squeezed per line, with at most one
+  blank line in a row. About 0.7 seconds for 1.7 MB of HTML on the cloud
+  machine. Rejected: a converter outside slight (`lynx -dump`, `pandoc`),
+  which not every machine has; a full HTML parser, for a model that only
+  needs the words and their order.
+- **Tests:** 235: the conversion, on HTML with each case, empty HTML, and
+  text with no tags; then the tool, through the real curl, from a server
+  in the program (`http/serve`): a page, JSON, plain text, an image, a
+  404, a redirect, a refused connection (curl's message), a URL that
+  isn't http, and one the approver refuses. Also under seeds,
+  `SLIGHT_GC_STRESS` and valgrind. By hand: the chat, in a
+  pseudo-terminal, fetching over HTTPS with `y`, and refused with `n`.
+- **Left for later:** a page's links (a model can't follow what it
+  can't see: `[text](url)` would show them, at a cost in context); a
+  charset other than UTF-8; POST and headers.

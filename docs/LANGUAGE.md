@@ -1588,14 +1588,15 @@ tools (below); those that change something do it only once you've said
 ### (@include :tools)
 
 `lib/tools.slight`: tools for an agent, to read, find and change files,
-and run commands (D188). It includes `:agent`, `:exec` and `:fs` itself.
+run commands, and fetch from the web (D188, D189). It includes `:agent`,
+`:exec` and `:fs` itself.
 
     (@include :tools)
 
     (let approve (lambda (what) #true))           ; yes to everything; the chat asks you
     (agent/new url model "" (list (tools/read-file) (tools/list-files) (tools/search)
                                   (tools/write-file approve) (tools/edit-file approve)
-                                  (tools/run approve)))
+                                  (tools/run approve) (tools/fetch approve)))
 
 Each function makes a tool. Those that change something take `approve`,
 a function of what the tool is about to do, as text for a person to
@@ -1623,6 +1624,22 @@ argument it needs, or with one that isn't a string.
 - `(tools/run approve)`: `run(command)`, a shell command (`sh -c`), run
   to its end, and what it printed and its exit status. `approve` is shown
   `run: command`.
+- `(tools/fetch approve)`: `fetch(url)`, an `http://` or `https://` URL
+  (anything else raises), with curl, following redirects, for at most 20
+  seconds and 5 MB. `approve` is shown `fetch url`, every time, since a
+  URL can carry anything out. A web page comes as plain text, by
+  `tools/html->text` (below); other text (JSON, XML, plain text) as it
+  is; anything else as what it is, `not text: image/png, 5120 bytes`. A
+  status that isn't 2xx comes first, `HTTP 404`, then the text. If curl
+  fails, the tool raises with curl's message, such as `curl: (6) Could
+  not resolve host: example.invalid`.
+- `(tools/html->text html)`: HTML as plain text, for a model. Comments,
+  scripts, styles, SVG and `noscript` go, with what's in them; other
+  tags go, but one that starts a block (a paragraph, a heading, a row, a
+  break, ...) starts a line, a list's item starts one with `- `, and a
+  table's cell starts with ` | `; entities are decoded (the named ones
+  for `&`, `<`, `>`, quotes, a space, dashes and the like, and numbered
+  ones); and space is squeezed, with at most one blank line in a row.
 
 The commands these run are given their arguments directly, with no
 shell (but `run`'s), so a path or a text can't be taken for anything
