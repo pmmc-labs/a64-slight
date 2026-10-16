@@ -252,6 +252,12 @@ export const X86_64: Target = {
         ]),
         '    lea  rax, [rdx + RT_TAG_LIST]',
     ],
+    // A tuple's header fits mov's 32 bits for any tuple a frame can hold.
+    tupleCells: (header, firstSlot, n) => [
+        `    mov  qword ptr [rdx], ${header}`,
+        [...Array(n).keys()].map((i) => [`    mov  rsi, ${slot(firstSlot + i)}`, `    mov  qword ptr [rdx + ${8 * (i + 1)}], rsi`]),
+        '    lea  rax, [rdx + RT_TAG_BOXED]',
+    ],
     // The header (how many values it captured, and the closure type), the
     // code, the arity, the name (for printing), then the captured values.
     makeClosure: (entry, arity, name, free) => [

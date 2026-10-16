@@ -581,8 +581,9 @@ the chain when received. All of a process's chunks together are capped at
 64 MB, and past that the allocation faults (`:heap`). The heap pointer and
 limit live in the process struct
 (`[x28, #RT_PROC_HEAP_PTR]`), so C builtins that allocate can use them with
-nothing to sync (D57). Compiled code allocates inline, and calls the
-runtime only to start a new chunk:
+nothing to sync (D57). Compiled code allocates inline (cons cells,
+lists, tuples, D195, and closures), and calls the runtime only to start a
+new chunk:
 
 ```
 Lalloc_N:

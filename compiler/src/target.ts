@@ -143,11 +143,13 @@ export type Target = {
     // asks the runtime for a new chunk (site says where, for the heap
     // fault). Then fill what was allocated: a cons cell (head in a slot,
     // tail in the accumulator), the cells of a list (its elements in n
+    // slots from firstSlot), a tuple (its header, then its elements in n
     // slots from firstSlot), or a closure's box; each leaves the tagged
     // value in the accumulator.
     readonly allocate: (bytes: number, again: string, site: string) => readonly [Code, Code];
     readonly consCell: (headSlot: number) => Code;
     readonly listCells: (firstSlot: number, n: number) => Code;
+    readonly tupleCells: (header: bigint, firstSlot: number, n: number) => Code;
     readonly makeClosure: (entry: string, arity: number, name: string,
                            free: readonly (readonly [number, string])[]) => Code;
 };

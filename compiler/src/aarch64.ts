@@ -265,6 +265,12 @@ export const AARCH64: Target = {
         ]),
         '    orr  x0, x2, #RT_TAG_LIST',
     ],
+    tupleCells: (header, firstSlot, n) => [
+        loadWord('x3', header),
+        '    str  x3, [x2]',
+        [...Array(n).keys()].map((i) => [`    ldr  x5, ${slot(firstSlot + i)}`, `    str  x5, [x2, #${8 * (i + 1)}]`]),
+        '    orr  x0, x2, #RT_TAG_BOXED',
+    ],
     // The header (how many values it captured, and the closure type), the
     // code, the arity, the name (for printing), then the captured values.
     makeClosure: (entry, arity, name, free) => [

@@ -21,10 +21,10 @@
 // What it compiles is what expand.ts and split.ts leave: the special
 // forms (SPECIAL_FORMS, below), calls and tail calls, closures, and the
 // builtins, inline or as calls to the runtime's C (docs/LANGUAGE.md has
-// them all), with the recv rule (classify.ts) enforced here. Cons cells
-// are bump-allocated in the process's heap; floats, strings, closures and
-// tuples are boxes; literals, and closures that capture nothing, are
-// static data. The top-level forms that aren't defuns are the body of
+// them all), with the recv rule (classify.ts) enforced here. Cons cells,
+// tuples and closures are bump-allocated in the process's heap, inline;
+// floats, strings, closures and tuples are boxes; literals, and closures
+// that capture nothing, are static data. The top-level forms that aren't defuns are the body of
 // slight_main, whose parameters are @ARGV and %ENV, the program's
 // arguments and environment: so only they can see them (D144, D186).
 //
@@ -486,6 +486,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (name === 'eq?' || name === 'ne?') return compileEquality(x, name, args, operand, st);
     if (name === 'cons') return compileCons(x, args, operand, st);
     if (name === 'list') return compileList(x, args, operand, st);
+    if (name === 'tuple') return compileTuple(x, args, operand, st);
     const path = cxrPath(name);
     if (path !== null) return compileCxr(x, name, path, args, operand, st, !known);
     const arith = ARITH[name];
@@ -937,7 +938,6 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'json/print':     fixed('rt_json_print', 1),
     'sexp/parse':     fixed('rt_sexp_parse', 1),
     'sexp/print':     fixed('rt_sexp_print', 1),
-    'tuple':          variadic('rt_tuple'),
     'tuple?':         fixed('rt_is_tuple_p', 1),
     'tuple/len':      fixed('rt_tuple_len_of', 1),
     'tuple/get':      fixed('rt_tuple_ref', 2),
@@ -977,7 +977,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
 
 // The names a defun can't take.
 const BUILTINS: readonly string[] = [
-    'pprint', 'eq?', 'ne?', 'cons', 'list', 'apply',
+    'pprint', 'eq?', 'ne?', 'cons', 'list', 'tuple', 'apply',
     ...DIVISION, ...PREDICATES,
     ...[ARITH, COMPARE, C_BUILTINS].flatMap((table) => Object.keys(table)),
 ];
@@ -1113,16 +1113,32 @@ function compileCons(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St]
     ], st4];
 }
 
+// Each of args in turn into the slots from si, each waiting there while
+// the rest are computed.
+function intoSlots(args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    return args.reduce<[Code, St]>(([acc, s], arg, i) => {
+        const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i }, s);
+        return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
+    }, [[], st]);
+}
+
 // (list a b ...): the elements wait in slots, then one allocation holds
 // all the cells, side by side.
 function compileList(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     if (args.length === 0) return [st.t.loadConst('RT_NIL'), st];
-    const [code, st1] = args.reduce<[Code, St]>(([acc, s], arg, i) => {
-        const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i }, s);
-        return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
-    }, [[], st]);
+    const [code, st1] = intoSlots(args, cx, st);
     const [allocate, st2] = alloc(16 * args.length, 'list', x.pos, st1);
     return [[code, allocate, st.t.listCells(cx.si, args.length)], st2];
+}
+
+// (tuple a b ...): the elements wait in slots, then one allocation holds
+// the header and the elements, as tuples.c lays a tuple out, rounded up to
+// 16 bytes as every heap object is. Not through a list and rt_tuple, which
+// made a list to throw away (D195).
+function compileTuple(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    const [code, st1] = intoSlots(args, cx, st);
+    const [allocate, st2] = alloc(16 * Math.ceil((8 + 8 * args.length) / 16), 'tuple', x.pos, st1);
+    return [[code, allocate, st.t.tupleCells(tupleHeader(args.length), cx.si, args.length)], st2];
 }
 
 // car, cdr, and c[ad]{2,4}r: the letters between c and r, applied right

@@ -2885,3 +2885,28 @@ first.)* `bench/`, `docs/BENCHMARKS.md`.
   and slight's peak memory is higher than on Linux (356 MB on
   `binary-trees`, against 98), probably macOS's allocator keeping freed
   chunks.
+
+**D195. Tuples built in place.** *(User, Oct 2026: the first of the fixes
+phase 2's profiles found, D194, in the order Claude proposed.)*
+- **Before:** `(tuple a b ...)` was a variadic C builtin. The compiler
+  made a list of the elements and called `rt_tuple`, which counted the
+  list and copied it into the tuple: so a `binary-trees` node allocated
+  64 bytes, half of them garbage at once, and called into C, and each of
+  `n-body`'s bodies made a list of seven to throw away.
+- **Now** it's compiled as `list` is: the elements wait in frame slots,
+  then one inline allocation takes the header and the elements (a
+  target's `tupleCells`), rounded up to 16 bytes as `tuples.c` rounds
+  them. `list->tuple` still goes through `rt_tuple`, which is right for a
+  list that's already made.
+- **Measured** on the cloud machine: `binary-trees 14`, 1,590 million
+  instructions to 862 million (46 per cent fewer), and `binary-trees 18`
+  from 3.8 s to 1.95; `n-body 20000`, 642 million to 549 (14 per cent).
+- **Tests:** 239: each size from none to three, and seventeen (an even
+  count of words and an odd one round differently); the elements worked
+  out left to right; tuples in tuples; one whose later elements collect
+  the heap while the earlier ones wait in the frame; one sent and
+  matched. Also under `SLIGHT_GC_STRESS` and seeds.
+- **Not changed:** a two-element tuple is still 32 bytes, against a
+  cons's 16, since every heap object is a multiple of 16 bytes and the
+  collector and copying count on it; so `binary-trees` at depth 19 still
+  doesn't fit in a process's 64 MB.
