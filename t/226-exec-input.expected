@@ -1,0 +1,6 @@
+(ok (0 ("one" "two" "3 four")))
+(ok (0 ("line 1" "line 2" "line 3")))
+(ok (0 ("from a friend")))
+(ok (0 ("deaf")))
+(ok (0 1000 999000))
+()

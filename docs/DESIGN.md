@@ -50,8 +50,8 @@ The reader (`compiler/src/reader.ts`, D37) reads:
   emphasis, code, fenced blocks, lists, links); any other `=word` there
   is an error, kept for later kinds.
 - `$$` (self) and `^$$` (parent)
-- `@ARGV`, the program's arguments, at the top level only (Program
-  structure, below)
+- `@ARGV` and `%ENV`, the program's arguments and environment, at the
+  top level only (Program structure, below)
 - the names `\n`, `\r`, `\t` and `\e`, constants for those one-character
   strings, and `PI`
 
@@ -81,7 +81,7 @@ Booleans are the reserved symbols `#true` and `#false`.
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
 | `(fork expr)` | Runs `expr` in a new process and returns its pid. |
-| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
+| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
 | `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
@@ -224,6 +224,7 @@ reply refs.
 | `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
 | `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
 | `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
+| `(connect :exec cmd expr)` | `fork`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
 | `(connect :system expr)` | `fork`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
 | `(connect dev expr)` | `fork`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
 | `(disconnect f)` | Closes the device `f`. Anything that isn't an open device it ignores. Returns `()`. |
@@ -263,15 +264,16 @@ reply refs.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
   sources, no blocked I/O) is detected and reported. So far (step 10d): if
   the run queue empties, no timer is pending, no process is connected to
-  `:keypress` with stdin still open, no socket can be waited for (below),
-  and the root process hasn't ended,
+  `:keypress` with stdin still open, no socket or command can be waited
+  for (below), and the root process hasn't ended,
   the program prints `deadlock: the root process is waiting in f for a
   message, and nothing else can run` (or `... waiting in f for #<pid N>
   to end, ...`, in `join`) to stderr and exits 1, `f` being the function
   it waits in (D171).
 - **The program ends when nothing can run** and nothing more can come (no
-  timer is pending, no socket can be waited for, and no process is
-  connected to `:keypress` or stdin has ended), not when the root ends: other
+  timer is pending, no socket or command can be waited for, and no
+  process is connected to `:keypress` or stdin has ended), not when the
+  root ends: other
   processes keep running after the root has its value (or its error), and
   the root's value is printed last. Processes
   still waiting in `recv` or `join` at that point are dropped (D93).
@@ -304,6 +306,16 @@ strings (`()` with none). The top-level forms are the body of a function,
 like any local (a lambda or a `fork` there captures it), and a `defun`
 doesn't, so pass it to the functions that need it. It can't be bound or
 defined. A number comes as a string: `(string->int (car @ARGV))`.
+
+**`%ENV`** (D186) is the program's environment, as a list of `(name
+value)` lists of strings, in the environment's order, for `lookup`
+(`:not-found` for a variable that isn't set). It's `slight_main`'s second
+parameter, seen as `@ARGV` is, and for the same reason: the environment is
+the program's input, given to the root, and a key reaches only the code
+it's passed to. The runtime's `main` builds it in the root's heap; an
+entry is cut at its first `=`, and one without an `=` is left out. A
+receive function split from the top level (D167) carries both under
+names no program can write.
 
 ### Builtins and the prelude
 
@@ -398,8 +410,21 @@ it, raising `(:ended pid result)` if the structure ends first. Opt-in:
 model as a process, on ollama's `/api/chat` over `http/stream`. Its state
 is the conversation; `(agent/say a text)` is a turn, and the caller hears
 the answer's pieces as they come, then the whole answer, or an error.
-Each turn runs in a process of its own, which the agent monitors.
-Opt-in: `(@include :agent)`.
+Each turn runs in a process of its own, which the agent monitors. A
+tool (D187) is a function of the model's arguments, with a name, a
+description and parameters, from which `tool/new` makes the JSON Schema
+the model reads; a turn runs each call in a process of its own, all at
+once, sends the results back to the model, and goes on, at most 10
+rounds, until the model answers. Opt-in: `(@include :agent)`.
+`lib/tools.slight` (D188, D189) has tools to read, find and change
+files, run commands, fetch URLs with curl (a page made plain text in
+slight, its links kept, D193), work out arithmetic (`lib/calc.slight`, D190), and keep notes
+in a store, a process that writes them to a file as an s-expression
+(D191), and ask other agents (`agent/ask`, D192); those that change
+something or reach out ask an `approve`
+function first, which the chat makes ask the person at the keyboard. A
+command ends with the process that ran it, so a call that's killed takes
+its command with it, which is how Escape in the chat stops one (D193).
 
 ### Strings
 
@@ -668,14 +693,16 @@ Lalloc_N:
   sp, d8–d15).
 - **Idle**: when nothing is runnable, wait in `select()` (on macOS and
   Linux alike, D113) on stdin, if a process is connected to `:keypress`,
-  and on the sockets (a host's lookup among them), with the timeout set
-  to the next timer. Timers are a
-  binary heap. While processes are busy, stdin and the sockets are looked
-  at every 10 ms (D122). On the virtual clock they're looked at only when
-  nothing can run: the sockets first, then a key, then the clock moves to
-  the next timer; only when nothing else can happen does it wait for real
-  (D139). But before it moves to a lookup's timer, it waits for real, up
-  to 200 ms, for the sockets (D165).
+  and on the sockets (a host's lookup among them) and commands, with the
+  timeout set to the next timer. Timers are a
+  binary heap. While processes are busy, stdin, the sockets and the
+  commands are looked at every 10 ms (D122). On the virtual clock
+  they're looked at only when nothing can run: the sockets and commands
+  first; then a command whose input is closed, which can only be working
+  on its own, is waited for, for real (D185); then a key; then the clock
+  moves to the next timer; only when nothing else can happen does it
+  wait for real (D139). But before it moves to a lookup's timer, it
+  waits for real, up to 200 ms, for the sockets (D165).
 - **`:keypress`** (`runtime/tty.c`) sends each key as `(key mods...)`
   (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style
@@ -753,6 +780,28 @@ Lalloc_N:
   slight library on top, `lib/http.slight` (D132, D140, D173, D174), whose
   client can also give a reply's body to its caller as it comes, in
   messages, as a device does (`http/stream`, D181, D182).
+- **Commands are devices too** (D185). `(connect :exec (list "ls" "-l")
+  expr)` runs a command, a list of strings with no shell unless one is
+  asked for, found in `PATH` by the runtime itself, with `posix_spawn`,
+  in a process group of its own, with SIGPIPE back to its default; its
+  input is a pipe, and its stdout and stderr are another, one pipe for
+  both, so its errors come in order with its output. Both are waited for
+  in `select()`, on the sockets' list. Its first message is `(:open p)`;
+  its output reads as a connection's, then `(:eof p)`; and once it has
+  ended too, `(:exited p status)`, the exit code or `(:signal name)`, and
+  the device closes (not `(:exit ...)`, which is `monitor`'s). It takes
+  `(:write x ...)`, kept till the pipe takes it, and `(:eof)`, which
+  closes its input once that's written; input it doesn't take goes
+  nowhere. SIGCHLD's handler writes a byte to a pipe that `select()`
+  waits on while any command runs, and then each is asked with
+  `waitpid(WNOHANG)`. Closing the device before the command has ended
+  (`disconnect`, or the owner ending) kills its group with SIGKILL and
+  waits for it; so does the program's end, however it ends (`atexit`,
+  and handlers for SIGINT, SIGTERM and SIGHUP). One that can't be
+  started ends the owner with `(:error (:enoent "ls"))` and the like. A
+  command counts as something that can still happen while there's
+  something to wait for: output its owner waits for, input to write, or
+  its end once its output has ended.
 - **`:system` is a device too** (D171). `(connect :system expr)`; its
   owner asks `(:processes)`, `(:process pid)` or `(:runtime)`, and hears
   `(:process s info)` for each live process (one at a time, the next
@@ -781,27 +830,29 @@ Lalloc_N:
 Everything a run takes from the world comes through one place,
 `runtime/replay.c`, behind `runtime/io.h`: the clock, `select()`'s
 answers, what reads and receives give, whether files and sockets open
-and what they say, the hosts file and `resolv.conf`, a lookup's query
-ids, and the screen's size. The rest of a run is decided by the runtime
+and what they say, whether commands start and how they end, the hosts
+file and `resolv.conf`, a lookup's query ids, and the screen's size. The rest of a run is decided by the runtime
 itself (calls are counted, not timed), so those answers, in order, decide
 the whole run.
 
 - `SLIGHT_RECORD=file`: each call is made, and its result, `errno`, and
   any bytes it filled in are written to `file`, flushed every time, so a
   crash leaves a record of everything up to it. The record starts with the
-  settings that change a run (the clock, the seed) and `@ARGV`.
+  settings that change a run (the clock, the seed), `@ARGV` and the
+  environment, keys and all.
 - `SLIGHT_REPLAY=file`: no call is made; each takes the record's next
-  entry instead, and the record's settings and arguments are the run's.
-  Writes to files and sockets aren't made either, and raw mode isn't
-  set; stdout and stderr, written through stdio, are. An entry of another
+  entry instead, and the record's settings, arguments and environment are
+  the run's.
+  Writes to files, sockets and commands aren't made either, no command
+  is run or killed, and raw mode isn't set; stdout and stderr, written through stdio, are. An entry of another
   kind than the call asks for means the run has gone another way (another
   program, or something left out of the record): it stops, saying so,
   with exit status 2.
 - A record is native-endian and tied to its program: for replaying where
   it was made, under a debugger, as often as it takes.
 - Tested by `t/replay.sh` (`make replay`): runs with keys, files, the real
-  clock, sockets and a lookup are recorded, then replayed with none of
-  them, and must print the same; and `SLIGHT_SCHED` gives several orders,
+  clock, sockets, a lookup and commands are recorded, then replayed with
+  none of them, and must print the same; and `SLIGHT_SCHED` gives several orders,
   each the same every time.
 
 ### Builtins in C

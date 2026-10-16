@@ -140,12 +140,12 @@ test('a local that shadows a builtin is called as a closure', () => {
 });
 
 test('a slot is reused once the value in it is dead', () => {
-    // The top level's first slot holds its parameter, @ARGV.
+    // The top level's first slots hold its parameters, @ARGV and %ENV.
     const frame = (src: string): string | undefined => /sub {2}sp, sp, #(\d+)/.exec(compile(src))?.[1];
-    assert.equal(frame('42'), '16');                          // just @ARGV, rounded up to 16 bytes
-    assert.equal(frame('(+ 1 2) (+ 3 4)'), '16');            // and one slot, used twice
-    assert.equal(frame('(+ 1 (+ 2 (+ 3 4)))'), '32');        // and three waiting left operands
-    assert.equal(frame('(let a 1) (let b 2) (+ a b)'), '32'); // and a, b, and +'s left operand
+    assert.equal(frame('42'), '16');                          // just @ARGV and %ENV
+    assert.equal(frame('(+ 1 2) (+ 3 4)'), '32');            // and one slot, used twice, rounded up to 16 bytes
+    assert.equal(frame('(+ 1 (+ 2 (+ 3 4)))'), '48');        // and three waiting left operands
+    assert.equal(frame('(let a 1) (let b 2) (+ a b)'), '48'); // and a, b, and +'s left operand
 });
 
 test('only a function that calls another, not in tail position, zeroes its slots', () => {
@@ -220,6 +220,16 @@ test('@ARGV is the top level\'s parameter: only it sees @ARGV, and nothing can b
     fails('(defun @ARGV () 1)', "test.slight:1:8: can't bind @ARGV");
     assert.match(compile('(car @ARGV)'), /str  x0, \[sp, #0\]    \/\/ @ARGV/);
     assert.doesNotThrow(() => compile('((lambda () @ARGV)) (fork (pprint @ARGV))'));
+});
+
+test('%ENV is the top level\'s second parameter, and only it sees %ENV', () => {
+    const only = '%ENV is only seen at the top level: pass it to the functions that need it';
+    fails('(defun f () %ENV) (f)', `test.slight:1:13: ${only}`);
+    fails('(defun f () (lambda () %ENV)) (f)', `test.slight:1:24: ${only}`);
+    fails('(let %ENV 1)', "test.slight:1:6: can't bind %ENV");
+    fails('(defun f (%ENV) 1) (f 1)', "test.slight:1:11: can't bind %ENV");
+    assert.match(compile('(car %ENV)'), /str  x1, \[sp, #8\]    \/\/ %ENV/);
+    assert.doesNotThrow(() => compile('((lambda () %ENV)) (fork (pprint %ENV))'));
 });
 
 test('a call in tail position is a jump; any other call returns', () => {
@@ -362,12 +372,12 @@ test('a string literal is a box in the read-only data', () => {
 
 test('the control-character names are strings, unless shadowed', () => {
     assert.match(compile('\\e'), /\.quad 1 << RT_BOX_SIZE_SHIFT \| RT_BOX_STRING\n {4}\.asciz "\\033"/);
-    // after @ARGV; a backslash in a comment is escaped (160-backslash-names)
-    assert.match(compile('(let \\n 5) \\n'), /ldr {2}x0, \[sp, #8\] {4}\/\/ \\134n/);
+    // after @ARGV and %ENV; a backslash in a comment is escaped (160-backslash-names)
+    assert.match(compile('(let \\n 5) \\n'), /ldr {2}x0, \[sp, #16\] {4}\/\/ \\134n/);
 });
 
 test('C builtins get their site after their arguments', () => {
-    assert.match(compile('(str-len "a")'), /ldr {2}x0, \[sp, #8\]\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_str_len/);
+    assert.match(compile('(str-len "a")'), /ldr {2}x0, \[sp, #16\]\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_str_len/);
     // a missing optional argument is ()
     assert.match(compile('(format-num 1 2)'), /mov {2}x2, #RT_NIL\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_format_num/);
     // a variadic one gets a list
@@ -441,7 +451,7 @@ test('a lambda that captures nothing is a static closure', () => {
 test('a lambda that captures is allocated, with its values in order of first use', () => {
     const asm = compile('(let a 1) (let b 2) (lambda () (+ b a))');
     assert.match(asm, /mov {2}x3, #2 << RT_BOX_SIZE_SHIFT \| RT_BOX_CLOSURE/);
-    assert.match(asm, /ldr {2}x3, \[sp, #16\] {4}\/\/ b\n {4}str {2}x3, \[x2, #32\]\n {4}ldr {2}x3, \[sp, #8\] {4}\/\/ a\n {4}str {2}x3, \[x2, #40\]/);
+    assert.match(asm, /ldr {2}x3, \[sp, #24\] {4}\/\/ b\n {4}str {2}x3, \[x2, #32\]\n {4}ldr {2}x3, \[sp, #16\] {4}\/\/ a\n {4}str {2}x3, \[x2, #40\]/);
     // inside, they're copied out of the closure (x9) into the frame
     assert.match(asm, /ldur x16, \[x9, #RT_CLOSURE_FREE \+ 0\]\n {4}str {2}x16, \[sp, #0\] {4}\/\/ b/);
     assert.match(asm, /ldur x16, \[x9, #RT_CLOSURE_FREE \+ 8\]\n {4}str {2}x16, \[sp, #8\] {4}\/\/ a/);
@@ -602,7 +612,7 @@ test('join, monitor, kill and raise are builtins in the runtime, and can be valu
 test('connect is a fork whose process gets the keys, from :keypress', () => {
     assert.match(compile('(defun f (n) n) (let n 1) (connect :keypress (f n))'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_connect\n/);
     assert.match(compile('(connect :keypress 1)'), /\.asciz "connect at test\.slight:1:1"/);
-    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not (quote x)");
+    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen or :exec, or a device, not (quote x)");
     fails('(connect :keypress)', 'test.slight:1:1: connect takes 2 arguments, not 1');
     fails('(connect)', 'test.slight:1:1: connect takes 2 arguments, not 0');
     fails('(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (connect :keypress (list a b c d e f g h i))',
@@ -632,13 +642,13 @@ test('after and sleep are builtins in the runtime, and can be values', () => {
 
 test('connect to a file evaluates the path in the parent, and passes it and the mode', () => {
     const asm = compile('(defun f (n) n) (let n 1) (let p "x.txt") (connect :fs/write p (f n))');
-    // the path goes in the first free slot (after @ARGV, n and p), the fork's locals after it
-    assert.match(asm, /\/\/ p\n {4}str {2}x0, \[sp, #24\]\n {4}ldr {2}x16, \[sp, #8\] {4}\/\/ n\n {4}str {2}x16, \[sp, #32\]/);
-    assert.match(asm, /add {2}x2, sp, #32\n {4}LOADADDR x3, Lsite_\d+\n {4}ldr {2}x4, \[sp, #24\]\n {4}mov {2}x5, #RT_FS_WRITE\n {4}bl {3}rt_connect_fs\n/);
+    // the path goes in the first free slot (after @ARGV, %ENV, n and p), the fork's locals after it
+    assert.match(asm, /\/\/ p\n {4}str {2}x0, \[sp, #32\]\n {4}ldr {2}x16, \[sp, #16\] {4}\/\/ n\n {4}str {2}x16, \[sp, #40\]/);
+    assert.match(asm, /add {2}x2, sp, #40\n {4}LOADADDR x3, Lsite_\d+\n {4}ldr {2}x4, \[sp, #32\]\n {4}mov {2}x5, #RT_FS_WRITE\n {4}bl {3}rt_connect_fs\n/);
     assert.match(compile('(connect :fs/read "a" 1)'), /mov {2}x5, #RT_FS_READ\n/);
     assert.match(compile('(connect :fs/append "a" 1)'), /mov {2}x5, #RT_FS_APPEND\n/);
     fails('(connect :fs/read "a")', 'test.slight:1:1: connect takes 3 arguments, not 2');
-    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp or :tcp/listen, or a device, not (quote fs)");
+    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen or :exec, or a device, not (quote fs)");
 });
 
 test('disconnect is a builtin in the runtime', () => {
@@ -653,10 +663,15 @@ test('connect over TCP passes the address or the port, and the mode', () => {
     fails('(connect :tcp/listen 0)', 'test.slight:1:1: connect takes 3 arguments, not 2');
 });
 
+test('connect :exec passes the command, and no mode', () => {
+    assert.match(compile('(connect :exec (list "ls") 1)'), /LOADADDR x3, Lsite_\d+\n {4}ldr {2}x4, \[sp, #\d+\]\n {4}bl {3}rt_connect_exec\n/);
+    fails('(connect :exec (list "ls"))', 'test.slight:1:1: connect takes 3 arguments, not 2');
+});
+
 test('connect given anything but a :keyword hands that device to the new process', () => {
     const asm = compile('(let c 5) (connect c (pprint 1))');
-    assert.match(asm, /\/\/ c\n {4}str {2}x0, \[sp, #16\]\n/);
-    assert.match(asm, /LOADADDR x3, Lsite_\d+\n {4}ldr {2}x4, \[sp, #16\]\n {4}bl {3}rt_connect_device\n/);
+    assert.match(asm, /\/\/ c\n {4}str {2}x0, \[sp, #24\]\n/);
+    assert.match(asm, /LOADADDR x3, Lsite_\d+\n {4}ldr {2}x4, \[sp, #24\]\n {4}bl {3}rt_connect_device\n/);
     fails('(let c 5) (connect c)', 'test.slight:1:11: connect takes 2 arguments, not 1');
     fails('(let c 5) (connect c 1 2)', 'test.slight:1:11: connect takes 2 arguments, not 3');
 });
@@ -670,5 +685,5 @@ test('a long body compiles: its forms are a loop, not a recursion that runs Node
 test('a function with more locals than its frame can hold is a compile error', () => {
     const lets = (n: number): string => Array.from({ length: n }, (_, i) => `(let x${i} ${i})`).join(' ');
     assert.match(compile(`${lets(500)} x0`), /sub {2}sp, sp, #4016\n/);
-    assert.throws(() => compile(`${lets(600)} x0`), /the top level needs too many frame slots \(601\)/);
+    assert.throws(() => compile(`${lets(600)} x0`), /the top level needs too many frame slots \(602\)/);
 });

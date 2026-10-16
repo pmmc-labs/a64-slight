@@ -3,12 +3,12 @@
 # golden test can't show, since each check takes several runs. For $TARGET
 # and $RUN, as t/run.sh has them.
 #
-# Each of t/replay/world.slight and net.slight runs once with
-# SLIGHT_RECORD, on the real clock, with what it reads from outside (keys,
-# a file, a hosts file, sockets); then again with SLIGHT_REPLAY, with
-# other arguments, no stdin and none of those files. The replay must print
-# what the recorded run did, exit as it did, and leave alone the file the
-# recorded run wrote. Nothing here depends on how long anything takes: a
+# Each of t/replay/world.slight, net.slight and exec.slight runs once
+# with SLIGHT_RECORD, on the real clock, with what it reads from outside
+# (keys, a file, a hosts file, sockets, commands); then again with
+# SLIGHT_REPLAY, with other arguments, no stdin and none of those files.
+# The replay must print what the recorded run did, exit as it did, and
+# leave alone the file the recorded run (or its command) wrote. Nothing here depends on how long anything takes: a
 # replay is compared with its own recording, never with a fixed output.
 #
 # t/replay/order.slight runs first in, first out, and then under
@@ -37,7 +37,7 @@ check() {                               # check what ok-or-not
     fi
 }
 
-for name in world net order; do
+for name in world net exec order; do
     if ! node bin/slightc.ts --target "$TARGET" -o "$dir/$name" "t/replay/$name.slight" >"$dir/$name.compile" 2>&1; then
         cat "$dir/$name.compile"
         check "$name (compile)" no
@@ -65,13 +65,14 @@ run() {
     echo "exit: $?"
 }
 
-# world: recorded with keys, a file to read and one to write; replayed
-# with none of them.
+# world: recorded with keys, a variable, a file to read and one to write;
+# replayed with none of them.
 printf 'line one\nline two\n' >"$dir/in.txt"
-printf 'abq' | run SLIGHT_RECORD="$dir/world.record" world "$dir/in.txt" "$dir/out.txt" >"$dir/world.recorded"
+printf 'abq' | run SLIGHT_REPLAY_TEST=recorded SLIGHT_RECORD="$dir/world.record" world "$dir/in.txt" "$dir/out.txt" >"$dir/world.recorded"
 rm -f "$dir/in.txt" "$dir/out.txt"
 run SLIGHT_REPLAY="$dir/world.record" world other args </dev/null >"$dir/world.replayed"
-if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(ok ("line one" "line two"))$' "$dir/world.recorded"; then
+if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(ok ("line one" "line two"))$' "$dir/world.recorded" \
+   && grep -q '^(env "recorded")$' "$dir/world.recorded"; then
     check "world replays as recorded" ok
 else
     diff -u "$dir/world.recorded" "$dir/world.replayed"
@@ -90,6 +91,21 @@ else
     diff -u "$dir/net.recorded" "$dir/net.replayed"
     check "net replays as recorded" no
 fi
+
+# exec: commands, recorded; replayed without running them, so the file
+# the first wrote isn't written again.
+run SLIGHT_RECORD="$dir/exec.record" exec "$dir/exec.out" </dev/null >"$dir/exec.recorded"
+written=$(cat "$dir/exec.out" 2>/dev/null)
+rm -f "$dir/exec.out"
+run SLIGHT_REPLAY="$dir/exec.record" exec other args </dev/null >"$dir/exec.replayed"
+if cmp -s "$dir/exec.recorded" "$dir/exec.replayed" && [ "$written" = written ] \
+   && grep -q '^(ok (3 ("fed in" "[0-9]*")))$' "$dir/exec.recorded" && grep -q '^(ok "first")$' "$dir/exec.recorded"; then
+    check "exec replays as recorded" ok
+else
+    diff -u "$dir/exec.recorded" "$dir/exec.replayed"
+    check "exec replays as recorded" no
+fi
+if [ -e "$dir/exec.out" ]; then check "exec's replay runs no command" no; else check "exec's replay runs no command" ok; fi
 
 # A record of one program, replayed by another, stops where they part.
 run SLIGHT_REPLAY="$dir/world.record" net </dev/null >"$dir/net.wrong"

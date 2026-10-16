@@ -1,0 +1,37 @@
+; On the virtual clock, a command whose input is closed can only be
+; working on its own, so while its owner waits for its output or its end,
+; neither time nor keys move: a timeout around a command that ends doesn't
+; fire first. One whose input is open may be waiting for the program, so
+; the clock moves as it would for a socket.
+
+; A timeout, set at once, around a command that ends.
+(defun timed (out)
+    (recv
+        ((:open p)     (send p (list :eof)) (after 1 $$ :timeout) (timed out))
+        ((:line p s)   (timed (cons s out)))
+        ((:eof p)      (timed out))
+        ((:exited p n) (list n (reverse out)))
+        (:timeout      :timed-out)))
+
+(pprint (join (connect :exec (list "sh" "-c" "echo working; echo still working; exit 4") (timed ()))))
+
+; One around a command that waits for its input, and never says anything.
+(defun waits ()
+    (recv
+        ((:open p) (after 1000 $$ :timeout) (waits))
+        (:timeout  :timed-out)
+        (m         (list :unexpected m))))
+
+(pprint (join (connect :exec (list "cat") (waits))))
+
+; A command that answers, then waits for more: a timer set once it has
+; said all it will closes its input, and it ends.
+(defun prompts (out)
+    (recv
+        ((:open p)     (send p (list :write "hello" \n)) (prompts out))
+        ((:line p s)   (after 50 $$ (list :quiet p)) (prompts (cons s out)))
+        ((:quiet p)    (send p (list :eof)) (prompts out))
+        ((:eof p)      (prompts out))
+        ((:exited p n) (list n (reverse out)))))
+
+(pprint (join (connect :exec (list "cat") (prompts ()))))

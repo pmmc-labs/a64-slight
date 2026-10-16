@@ -116,13 +116,14 @@
 #define RT_KEY_SHIFT        29    // :shift
 #define RT_KEY_COUNT        30
 
-// A device (process.c: a file or a socket, from connect) talks to its
-// owner with these: (:open f) first (a listener's is (:open l port)), a
-// reader's (:line f s), (:chunk f s) and (:eof f), a listener's (:accept l
-// conn); and it takes a writer's (:write x ...), and a reader's (:read how),
-// how being :lines, :chunks, :json, :json/items, :sexp, :source or a count;
-// a reader of JSON sends (:json f v), of s-expressions (:sexp f v), and of
-// source (:form f form line) and (:doc f text line). RT_DEV_x is symbol
+// A device (process.c: a file, a socket or a command, from connect) talks
+// to its owner with these: (:open f) first (a listener's is (:open l
+// port)), a reader's (:line f s), (:chunk f s) and (:eof f), a listener's
+// (:accept l conn); and it takes a writer's (:write x ...), and a reader's
+// (:read how), how being :lines, :chunks, :json, :json/items, :sexp,
+// :source or a count; a reader of JSON sends (:json f v), of s-expressions
+// (:sexp f v), and of source (:form f form line) and (:doc f text line). A
+// command also takes (:eof), which closes its input. RT_DEV_x is symbol
 // RT_SYM_DEVICE + x.
 #define RT_SYM_DEVICE       58    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
@@ -215,6 +216,31 @@
 #define RT_SYS_STACKS       19    // :stacks        stacks held
 #define RT_SYS_CLOCK        20    // :clock         milliseconds since the program started
 #define RT_SYS_COUNT        21
+
+// A command's last message (connect :exec, process.c, D185) is (:exited p
+// status): status is the exit code, or (:signal name) if a signal ended
+// it, name being one of these (the same on macOS and Linux, where some of
+// their numbers aren't), or the number of any other. RT_EXEC_x is symbol
+// RT_SYM_EXEC + x.
+#define RT_SYM_EXEC        125    // RT_SYM_SYSTEM + RT_SYS_COUNT
+#define RT_EXEC_EXITED       0    // :exited
+#define RT_EXEC_SIGNAL       1    // :signal
+#define RT_EXEC_HUP          2    // :hup           the signals' names, without SIG
+#define RT_EXEC_INT          3    // :int
+#define RT_EXEC_QUIT         4    // :quit
+#define RT_EXEC_ILL          5    // :ill
+#define RT_EXEC_TRAP         6    // :trap
+#define RT_EXEC_ABRT         7    // :abrt
+#define RT_EXEC_BUS          8    // :bus
+#define RT_EXEC_FPE          9    // :fpe
+#define RT_EXEC_KILL        10    // :kill
+#define RT_EXEC_USR1        11    // :usr1
+#define RT_EXEC_SEGV        12    // :segv
+#define RT_EXEC_USR2        13    // :usr2
+#define RT_EXEC_PIPE        14    // :pipe
+#define RT_EXEC_ALRM        15    // :alrm
+#define RT_EXEC_TERM        16    // :term
+#define RT_EXEC_COUNT       17
 
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
@@ -448,6 +474,12 @@ rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, 
                           rt_value_t where, uint64_t mode) RT_ASM(rt_connect_tcp);
 rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                              rt_value_t dev) RT_ASM(rt_connect_device);
+
+// Commands (process.c, D185). rt_connect_exec forks, and runs cmd, a list
+// of strings, on a device the new process owns: its input and its output
+// (stdout and stderr together) are pipes.
+rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+                           rt_value_t cmd) RT_ASM(rt_connect_exec);
 rt_value_t rt_disconnect(rt_value_t pid, const char *site) RT_ASM(rt_disconnect);
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
 rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);

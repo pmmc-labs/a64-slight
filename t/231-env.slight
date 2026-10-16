@@ -1,0 +1,29 @@
+; env: SLIGHT_TEST_HOST=127.0.0.1:11434 SLIGHT_TEST_EMPTY= SLIGHT_TEST_EQ=a=b=c
+; args: one two
+; %ENV: the program's environment, a list of (name value) lists of
+; strings, which lookup reads (D186). A variable that isn't set is
+; :not-found, and one set to nothing is "". An entry is cut at its first
+; =. Only the top level sees %ENV, as @ARGV: a lambda or a fork there
+; captures it, it comes across a recv, and a function is passed it.
+
+(defun host-of (env)
+    (let h (lookup "SLIGHT_TEST_HOST" env))
+    (if (eq? h :not-found) "localhost:11434" h))
+
+(pprint (lookup "SLIGHT_TEST_HOST" %ENV))
+(pprint (lookup "SLIGHT_TEST_EMPTY" %ENV))
+(pprint (lookup "SLIGHT_TEST_EQ" %ENV))
+(pprint (lookup "SLIGHT_TEST_UNSET" %ENV))
+(pprint (host-of %ENV))
+(pprint (host-of ()))
+(pprint @ARGV)
+
+; Every entry is a name and a value, both strings; three are the test's.
+(pprint (nil? (remove (lambda (e) (and (str? (car e)) (str? (cadr e)) (nil? (cddr e)))) %ENV)))
+(pprint (length (filter (lambda (e) (starts-with? (car e) "SLIGHT_TEST_")) %ENV)))
+
+(pprint ((lambda () (lookup "SLIGHT_TEST_EQ" %ENV))))
+(pprint (join (fork (lookup "SLIGHT_TEST_HOST" %ENV))))
+(send $$ :go)
+(recv
+    (:go (pprint (list :after-recv (lookup "SLIGHT_TEST_HOST" %ENV) @ARGV))))

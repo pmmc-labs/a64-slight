@@ -1,7 +1,8 @@
-; An agent: a conversation with a model, as an actor (D184). Not part of
-; the prelude, so a program that wants it says (@include :agent).
+; An agent: a conversation with a model, as an actor (D184), which can
+; call tools (D187). Not part of the prelude, so a program that wants it
+; says (@include :agent).
 ;
-;     (let a (agent/new "http://localhost:11434" "llama3.2" ""))
+;     (let a (agent/new "http://localhost:11434" "llama3.2" "" ()))
 ;     (agent/say a "Why is the sky blue?")
 ;     ; then (:piece a text) ... as the model streams, and (:answer a text);
 ;     ; or (:error a reason) in their place
@@ -12,16 +13,83 @@
 ; a turn adds the question and its answer once the answer is whole, so one
 ; that fails leaves the conversation as it was. A turn asked for while
 ; another is answered waits for it. Killing the agent stops its answer.
+;
+; A tool is a function of the arguments the model calls it with, and a
+; name, a description and parameters for the model to read (tool/new).
+; When the model calls tools, each call runs in a process of its own, all
+; at once, and the caller hears (:calling a name args) and then (:called a
+; name result); the results go back to the model, for another round, until
+; it answers without calling any.
 
 (@include :http)
 
+(defun agent/rounds () 10)          ; the most a turn has, so a model can't call tools for ever
+(defun agent/most () 16384)         ; the most bytes of a tool's result the model is given
+
+; A tool, for the model to call. params is a list of (name type
+; description), type being :string, :number, :integer or :boolean, each
+; one required. f is a function of the arguments the model gives, a list
+; of (name value) that lookup reads; its value, rendered as concat renders
+; it, is the result. If it fails, the model is told the reason.
+(defun tool/new (name description params f)
+    (list :tool name (agent/schema name description params) f))
+
+; A tool's name; and what it gives for args, called here, as a test or
+; another tool might (it raises as the tool does).
+(defun tool/name (tool) (cadr tool))
+(defun tool/call (tool args) ((cadddr tool) args))
+
+; A tool as /api/chat takes it: its parameters as a JSON Schema.
+(defun agent/schema (name description params)
+    (list :object
+        (list "type" "function")
+        (list "function"
+            (list :object
+                (list "name" name)
+                (list "description" description)
+                (list "parameters"
+                    (list :object
+                        (list "type" "object")
+                        (list "properties" (cons :object (map agent/property params)))
+                        (list "required" (map car params))))))))
+
+(defun agent/property (param)
+    (match param
+        ((name type description)
+            (list name (list :object (list "type" (agent/type type)) (list "description" description))))))
+
+(defun agent/type (type)
+    (match type
+        (:string  "string")
+        (:number  "number")
+        (:integer "integer")
+        (:boolean "boolean")))
+
 ; An agent for model at url ("http://host:port"), its system prompt system
-; ("" for none). Gives its pid.
-(defun agent/new (url model system)
-    (fork (agent/idle (list url model) (if (eq? system "") () (list (agent/message "system" system))) ())))
+; ("" for none), with tools (() for none). Gives its pid.
+(defun agent/new (url model system tools)
+    (fork (agent/idle (list url model tools) (if (eq? system "") () (list (agent/message "system" system))) ())))
 
 ; Asks a for an answer to text, which comes to the caller.
 (defun agent/say (a text) (send a (list :say text $$)))
+
+; Asks a, and waits for the whole answer: (:ok answer), or (:error reason),
+; (:ended a result) if a ends first. A process of its own asks, so the
+; pieces and calls it's told of go nowhere else, and this can be called
+; anywhere, a lambda or a tool included (D192).
+(defun agent/ask (a text) (join (fork (agent/asking a text))))
+
+(defun agent/asking (a text)
+    (monitor a)
+    (agent/say a text)
+    (agent/answer a))
+
+(defun agent/answer (a)
+    (recv
+        ((:answer _ text)  text)
+        ((:error _ reason) (raise reason))
+        ((:exit _ result)  (raise (list :ended a result)))
+        (_                 (agent/answer a))))
 
 ; A message of the conversation, as /api/chat takes it.
 (defun agent/message (role content)
@@ -46,52 +114,156 @@
     (monitor turn)
     (agent/busy settings asked history waiting from))
 
+; The answer joins the conversation after the question and the messages of
+; the turn's rounds with tools, if it had any.
 (defun agent/busy (settings asked history waiting from)
     (recv
         ((:say text who) (agent/busy settings asked history (append waiting (list (list text who))) from))
         ((:exit _ result)
             (match result
-                ((:ok answer)
+                ((:ok (answer added))
                     (send from (list :answer $$ answer))
-                    (agent/idle settings (cons (agent/message "assistant" answer) asked) waiting))
+                    (agent/idle settings (cons (agent/message "assistant" answer) (append added asked)) waiting))
                 ((:error reason)
                     (send from (list :error $$ reason))
                     (agent/idle settings history waiting))))))
 
-; The turn: the conversation goes to the model, and each piece of the answer
-; to from as it comes. It ends with the answer, or raises the reason: the
-; stream's, (:http status message) for a reply that isn't a 200, or (:model
-; message) for an error in the middle of one. If the agent ends, so does the
-; turn, and with it the stream (D182).
+; --- a turn ------------------------------------------------------------
+
+; The turn: rounds with the model till it answers. It ends with the
+; answer and the messages its rounds with tools added, newest first; or
+; raises the reason: the stream's, (:http status message) for a reply that
+; isn't a 200, (:model message) for an error in the middle of one, or
+; (:rounds n) for a model still calling tools in its last round. If the
+; agent ends, so does the turn, and with it its stream (D182) and its
+; calls.
+;
+; A turn is (settings from a), which its rounds share; a round is
+; (messages added n): the conversation to send, oldest first, what the
+; turn has added to it, newest first, and which round it is.
 (defun agent/turn (settings messages from a)
     (monitor a)
+    (agent/round (list settings from a) (list messages () 1)))
+
+(defun agent/from (turn) (cadr turn))
+(defun agent/of (turn) (caddr turn))
+(defun agent/tools (turn) (caddr (car turn)))
+
+; The conversation goes to the model, and each piece of the reply to from
+; as it comes.
+(defun agent/round (turn round)
+    (let settings (car turn))
+    (let tools    (agent/tools turn))
     (http/stream :post (concat (car settings) "/api/chat")
         (list (list "Content-Type" "application/json"))
-        (json/print (list :object (list "model" (cadr settings)) (list "messages" messages) (list "stream" #true)))
+        (json/print
+            (cons :object
+                (append
+                    (list (list "model" (cadr settings)) (list "messages" (car round)) (list "stream" #true))
+                    (if (nil? tools) () (list (list "tools" (map caddr tools)))))))
         :lines)
-    (agent/reading from a 200 ()))
+    (agent/reading turn round 200 () ()))
 
-; parts is the answer so far, last first.
-(defun agent/reading (from a status parts)
+; parts is the reply's text so far, last first; calls are the tools it
+; calls, as /api/chat gives them, in order.
+(defun agent/reading (turn round status parts calls)
     (recv
-        ((:head _ st _)    (agent/reading from a st parts))
-        ((:line _ line)    (agent/line from a status parts line (json/parse line)))
-        ((:eof _)          (if (== status 200) (str-join "" (reverse parts)) (raise (list :http status ""))))
+        ((:head _ st _)    (agent/reading turn round st parts calls))
+        ((:line _ line)    (agent/line turn round status parts calls line (json/parse line)))
+        ((:eof _)
+            (if (== status 200)
+                (agent/replied turn round (str-join "" (reverse parts)) calls)
+                (raise (list :http status ""))))
         ((:error _ reason) (raise reason))
         ((:exit _ _)       :agent-ended)))
 
-; A line of the reply: {"message": {"content": piece}, ...}, or {"error":
-; message}, as a 200's last line or the whole of a reply that isn't one.
-(defun agent/line (from a status parts line parsed)
+; A line of the reply: {"message": {"content": piece, "tool_calls": [...]},
+; ...}, either or both; or {"error": message}, as a 200's last line or the
+; whole of a reply that isn't one.
+(defun agent/line (turn round status parts calls line parsed)
     (let fields  (match parsed ((:ok (:object & fields)) fields) (_ ())))
     (let err     (lookup "error" fields))
-    (let message (lookup "message" fields))
-    (let piece   (match message ((:object & m) (lookup "content" m)) (_ :not-found)))
+    (let message (match (lookup "message" fields) ((:object & m) m) (_ ())))
+    (let piece   (lookup "content" message))
+    (let more    (match (lookup "tool_calls" message) ((& cs) cs) (_ ())))
     (cond
         ((not (eq? err :not-found)) (raise (if (== status 200) (list :model err) (list :http status err))))
         ((not (== status 200))      (raise (list :http status line)))
-        ((not (str? piece))         (agent/reading from a status parts))
-        ((== (str-len piece) 0)     (agent/reading from a status parts))
+        ((and (str? piece) (> (str-len piece) 0))
+            (send (agent/from turn) (list :piece (agent/of turn) piece))
+            (agent/reading turn round status (cons piece parts) (append calls more)))
         (#true
-            (send from (list :piece a piece))
-            (agent/reading from a status (cons piece parts)))))
+            (agent/reading turn round status parts (append calls more)))))
+
+; The reply is whole. Without calls, it's the answer; with them, they're
+; run, unless this was the last round.
+(defun agent/replied (turn round text calls)
+    (match round
+        ((messages added n)
+            (cond
+                ((nil? calls)          (list text added))
+                ((>= n (agent/rounds)) (raise (list :rounds (agent/rounds))))
+                (#true
+                    (let reply (list :object (list "role" "assistant") (list "content" text) (list "tool_calls" calls)))
+                    (agent/call-all turn (list (append messages (list reply)) (cons reply added) n) calls))))))
+
+; Each call, as (name args), runs in a process of its own, all at once,
+; and the turn watches them.
+(defun agent/call-all (turn round calls)
+    (let named (map agent/named calls))
+    (let tools (agent/tools turn))
+    (map (lambda (c) (send (agent/from turn) (list :calling (agent/of turn) (car c) (cadr c)))) named)
+    (let pids  (map (lambda (c) (agent/spawn tools c)) named))
+    (agent/waiting turn round named pids ()))
+
+; A call as /api/chat gives it, {"function": {"name": name, "arguments":
+; {...}}}, as (name args), args being the arguments as (name value) pairs.
+(defun agent/named (call)
+    (let f (match call ((:object & c) (match (lookup "function" c) ((:object & f) f) (_ ()))) (_ ())))
+    (list (lookup "name" f) (match (lookup "arguments" f) ((:object & args) args) (_ ()))))
+
+(defun agent/spawn (tools call)
+    (let p (fork (agent/run tools (car call) (cadr call))))
+    (monitor p)
+    p)
+
+; A call, in a process of its own: the tool's value, or it raises.
+(defun agent/run (tools name args)
+    (let tool (find (lambda (x) (eq? (cadr x) name)) tools))
+    (if (nil? tool)
+        (raise (concat "there's no tool called " name))
+        ((cadddr tool) args)))
+
+; results holds the calls' results as their processes end, by pid. When
+; all have, they go to from and back to the model, in the calls' order. If
+; the agent ends first, the calls are killed, and the turn ends.
+(defun agent/waiting (turn round named pids results)
+    (cond
+        ((== (length results) (length pids)) (agent/results turn round named pids results))
+        (#true
+            (recv
+                ((:exit p result)
+                    (cond
+                        ((eq? p (agent/of turn)) (map kill pids) :agent-ended)
+                        (#true                   (agent/waiting turn round named pids (cons (list p result) results)))))))))
+
+(defun agent/results (turn round named pids results)
+    (let texts (map (lambda (p) (agent/text (lookup p results))) pids))
+    (let told  (map (lambda (c) (agent/message-tool (car (car c)) (cadr c))) (zip named texts)))
+    (map (lambda (c) (send (agent/from turn) (list :called (agent/of turn) (car (car c)) (cadr c)))) (zip named texts))
+    (match round
+        ((messages added n)
+            (agent/round turn (list (append messages told) (append (reverse told) added) (+ n 1))))))
+
+(defun agent/message-tool (name text)
+    (list :object (list "role" "tool") (list "content" text) (list "tool_name" name)))
+
+; What the model is told of a call: its value as text, cut short past
+; (agent/most) bytes, or why it failed.
+(defun agent/text (result)
+    (let s (match result
+               ((:ok v)         (concat v))
+               ((:error reason) (concat "error: " reason))))
+    (if (> (str-len s) (agent/most))
+        (concat (substring s 0 (agent/most)) "\n[cut: " (- (str-len s) (agent/most)) " more bytes]")
+        s))

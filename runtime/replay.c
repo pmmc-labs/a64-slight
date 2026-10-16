@@ -9,8 +9,9 @@
 // order, a run can be made again, exactly: to see a bug that came from
 // the world again, under a debugger, as often as it takes.
 //
-// The record is a line saying what it is, the settings and arguments
-// (rt_io_settings_t), then an entry for each call, in order: what kind of
+// The record is a line saying what it is, the settings, arguments and
+// environment (rt_io_settings_t), then an entry for each call, in order:
+// what kind of
 // call, its result, errno, and the bytes it filled in. Numbers are in the
 // machine's own order: a record is for replaying where it was made. It's
 // flushed after every entry, so a run that crashes leaves a record of all
@@ -24,21 +25,26 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <signal.h>
+#include <spawn.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
 #include "io.h"
 
-#define MAGIC "slight record 1\n"
+#define MAGIC "slight record 2\n"
 
 enum { OFF, RECORD, REPLAY };
 
 enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
+    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE,
 };
 
 static const char *const names[] = {
@@ -47,7 +53,8 @@ static const char *const names[] = {
     [IO_CONNECT] = "a connect", [IO_LISTEN] = "a listen", [IO_ACCEPT] = "an accept",
     [IO_SOCKET_ERROR] = "a socket's error", [IO_SEND] = "a send", [IO_RECV] = "a receive",
     [IO_FOPEN] = "a text file", [IO_FGETS] = "a line of a text file", [IO_SEED] = "a seed",
-    [IO_WINSIZE] = "the screen's size",
+    [IO_WINSIZE] = "the screen's size", [IO_SPAWN] = "a command", [IO_WAIT] = "a wait for a command",
+    [IO_KILL] = "a kill", [IO_PIPE] = "a pipe",
 };
 
 static int      mode;
@@ -146,7 +153,30 @@ static int64_t replayed(int kind) {
 
 // --- starting -----------------------------------------------------------------
 
-void rt_io_start(int *argc, char ***argv, rt_io_settings_t *s) {
+// n strings: how many, then each one's length and bytes.
+static void put_strings(uint32_t n, char *const *xs) {
+    put(&n, sizeof n);
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t len = (uint32_t)strlen(xs[i]);
+        put(&len, sizeof len);
+        put(xs[i], len);
+    }
+}
+
+// What put_strings wrote, as a NULL-terminated array, its length in *n.
+static char **get_strings(uint32_t *n) {
+    if (!get(n, sizeof *n)) stop("the record is cut short");
+    char **xs = rt_must(calloc((size_t)*n + 1, sizeof *xs));
+    for (uint32_t i = 0; i < *n; i++) {
+        uint32_t len;
+        if (!get(&len, sizeof len)) stop("the record is cut short");
+        xs[i] = rt_must(calloc(len + 1, 1));
+        if (!get(xs[i], len)) stop("the record is cut short");
+    }
+    return xs;
+}
+
+void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *s) {
     const char *rec = getenv("SLIGHT_RECORD"), *play = getenv("SLIGHT_REPLAY");
     if (rec && play) {
         fputs("slight: SLIGHT_RECORD and SLIGHT_REPLAY can't both be set\n", stderr);
@@ -158,37 +188,28 @@ void rt_io_start(int *argc, char ***argv, rt_io_settings_t *s) {
         fprintf(stderr, "slight: can't %s %s: %s\n", rec ? "record to" : "replay", rec ? rec : play, strerror(errno));
         exit(2);
     }
+    fcntl(fileno(record), F_SETFD, FD_CLOEXEC);    // not a command's
     mode = rec ? RECORD : REPLAY;
     uint8_t  clock;
-    uint32_t n;
+    uint32_t n = 0;
     if (mode == RECORD) {
         put(MAGIC, strlen(MAGIC));
         clock = (uint8_t)s->virtual_clock;
         put(&clock, 1);
         put(&s->sched_seed, sizeof s->sched_seed);
-        n = (uint32_t)*argc;
-        put(&n, sizeof n);
-        for (int i = 0; i < *argc; i++) {
-            uint32_t len = (uint32_t)strlen((*argv)[i]);
-            put(&len, sizeof len);
-            put((*argv)[i], len);
-        }
+        put_strings((uint32_t)*argc, *argv);
+        while ((*env)[n]) n++;
+        put_strings(n, *env);
         fflush(record);
         return;
     }
     char magic[sizeof MAGIC - 1];
     if (!get(magic, sizeof magic) || memcmp(magic, MAGIC, sizeof magic) != 0) stop("that isn't a record of a run");
-    if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed) || !get(&n, sizeof n)) stop("the record is cut short");
+    if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed)) stop("the record is cut short");
     s->virtual_clock = clock;
-    char **args = rt_must(calloc((size_t)n + 1, sizeof *args));
-    for (uint32_t i = 0; i < n; i++) {
-        uint32_t len;
-        if (!get(&len, sizeof len)) stop("the record is cut short");
-        args[i] = rt_must(calloc(len + 1, 1));
-        if (!get(args[i], len)) stop("the record is cut short");
-    }
+    *argv = get_strings(&n);
     *argc = (int)n;
-    *argv = args;
+    *env  = get_strings(&n);
 }
 
 int rt_io_replaying(void) {
@@ -381,5 +402,178 @@ int rt_io_winsize(int *rows, int *cols) {
     }
     *rows = size[0];
     *cols = size[1];
+    return r;
+}
+
+// --- commands -----------------------------------------------------------------
+
+extern char **environ;
+
+// Whether path can be run: 0, or the errno that says why not.
+static int runnable(const char *path) {
+    struct stat st;
+    if (stat(path, &st) < 0) return errno;
+    if (!S_ISREG(st.st_mode)) return EACCES;
+    return access(path, X_OK) < 0 ? errno : 0;
+}
+
+// Where the command name is, in path: the name itself if it has a slash
+// in it; or else the first file of that name in a directory of PATH that
+// can be run, an empty entry being the current directory, as execvp looks.
+// 0, or ENOENT, or EACCES if there were only ones that can't be run.
+static int find(const char *name, char *path, size_t size) {
+    if (strchr(name, '/')) return snprintf(path, size, "%s", name) >= (int)size ? ENAMETOOLONG : runnable(path);
+    const char *dirs = getenv("PATH");
+    int         err  = ENOENT;
+    if (!dirs) dirs = "/usr/bin:/bin";
+    for (const char *d = dirs; *name; d++) {
+        const char *end = strchr(d, ':');
+        int         len = end ? (int)(end - d) : (int)strlen(d);
+        int         n   = snprintf(path, size, "%.*s%s%s", len, d, len ? "/" : "", name);
+        int         e   = n < (int)size ? runnable(path) : ENAMETOOLONG;
+        if (e == 0) return 0;
+        if (e == EACCES) err = EACCES;
+        if (!end) break;
+        d = end;
+    }
+    return err;
+}
+
+// Moves fd above stdin, stdout and stderr, which a command's pipes take
+// the place of in the child, so a runtime started without them still
+// passes the right ends on.
+static int above_stdio(int fd) {
+    if (fd > STDERR_FILENO) return fd;
+    int moved = fcntl(fd, F_DUPFD_CLOEXEC, STDERR_FILENO + 1);
+    close(fd);
+    return moved;
+}
+
+// A pipe, neither end inherited.
+static int pipe_of(int fds[2]) {
+    if (pipe(fds) < 0) return -1;
+    fds[0] = above_stdio(fds[0]);
+    fds[1] = above_stdio(fds[1]);
+    if (fds[0] < 0 || fds[1] < 0 || fcntl(fds[0], F_SETFD, FD_CLOEXEC) < 0 || fcntl(fds[1], F_SETFD, FD_CLOEXEC) < 0) {
+        int err = errno;
+        if (fds[0] >= 0) close(fds[0]);
+        if (fds[1] >= 0) close(fds[1]);
+        errno = err;
+        return -1;
+    }
+    return 0;
+}
+
+// The runtime's end of a pipe: it doesn't block, and fits in select().
+static int runtime_end(int fd) {
+    int flags = fcntl(fd, F_GETFL);
+    if (fd >= FD_SETSIZE) return EMFILE;
+    return flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 ? errno : 0;
+}
+
+static int spawn(char *const argv[], int *child, int *in, int *out) {
+    char path[4096];
+    int  err = find(argv[0], path, sizeof path), ip[2], op[2];
+    if (err) return err;
+    if (pipe_of(ip) < 0) return errno;
+    if (pipe_of(op) < 0) {
+        err = errno;
+        close(ip[0]);
+        close(ip[1]);
+        return err;
+    }
+    if ((err = runtime_end(ip[1])) == 0 && (err = runtime_end(op[0])) == 0) {
+        posix_spawn_file_actions_t fa;
+        posix_spawnattr_t          at;
+        sigset_t                   none, def;
+        pid_t                      pid;
+        posix_spawn_file_actions_init(&fa);
+        posix_spawn_file_actions_adddup2(&fa, ip[0], STDIN_FILENO);
+        posix_spawn_file_actions_adddup2(&fa, op[1], STDOUT_FILENO);
+        posix_spawn_file_actions_adddup2(&fa, op[1], STDERR_FILENO);
+        sigemptyset(&none);
+        sigemptyset(&def);
+        sigaddset(&def, SIGPIPE);               // ignored here, and an ignored signal stays so across exec
+        posix_spawnattr_init(&at);
+        posix_spawnattr_setsigmask(&at, &none);
+        posix_spawnattr_setsigdefault(&at, &def);
+        posix_spawnattr_setpgroup(&at, 0);
+        posix_spawnattr_setflags(&at, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
+        err = posix_spawn(&pid, path, &fa, &at, argv, environ);
+        posix_spawnattr_destroy(&at);
+        posix_spawn_file_actions_destroy(&fa);
+        *child = (int)pid;
+    }
+    close(ip[0]);
+    close(op[1]);
+    if (err) {
+        close(ip[1]);
+        close(op[0]);
+        return err;
+    }
+    *in  = ip[1];
+    *out = op[0];
+    return 0;
+}
+
+int rt_io_spawn(char *const argv[], int *child, int *in, int *out) {
+    int32_t got[3] = { 0, -1, -1 };
+    int     err;
+    if (mode == REPLAY) {
+        err = (int)next(IO_SPAWN, got, sizeof got, NULL);
+    } else {
+        int c = 0, i = -1, o = -1;
+        err = spawn(argv, &c, &i, &o);
+        got[0] = c;
+        got[1] = i;
+        got[2] = o;
+        done_with(IO_SPAWN, err, got, sizeof got);
+    }
+    *child = got[0];
+    *in    = got[1];
+    *out   = got[2];
+    return err;
+}
+
+int rt_io_wait(int child, int *status, int nohang) {
+    int32_t st = 0;
+    int     r;
+    if (mode == REPLAY) {
+        r = (int)next(IO_WAIT, &st, sizeof st, NULL);
+    } else {
+        int s = 0;
+        do r = waitpid(child, &s, nohang ? WNOHANG : 0); while (r < 0 && errno == EINTR);
+        st = s;
+        done_with(IO_WAIT, r, &st, sizeof st);
+    }
+    *status = st;
+    return r;
+}
+
+int rt_io_kill(int pid) {
+    if (mode == REPLAY) return (int)replayed(IO_KILL);
+    return (int)done(IO_KILL, kill(pid, SIGKILL));
+}
+
+int rt_io_pipe(int fds[2]) {
+    int32_t got[2] = { -1, -1 };
+    int     r;
+    if (mode == REPLAY) {
+        r = (int)next(IO_PIPE, got, sizeof got, NULL);
+    } else {
+        int p[2] = { -1, -1 }, err = 0;
+        r = pipe_of(p);
+        if (r == 0 && ((err = runtime_end(p[0])) != 0 || (err = runtime_end(p[1])) != 0)) {
+            close(p[0]);
+            close(p[1]);
+            errno = err;
+            r     = -1;
+        }
+        got[0] = r == 0 ? p[0] : -1;
+        got[1] = r == 0 ? p[1] : -1;
+        done_with(IO_PIPE, r, got, sizeof got);
+    }
+    fds[0] = got[0];
+    fds[1] = got[1];
     return r;
 }

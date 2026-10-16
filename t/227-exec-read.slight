@@ -1,0 +1,39 @@
+; A command's output reads as a connection's does: (:read how) changes
+; the way, to chunks of up to 64 KB, a count of bytes for the next message
+; alone, or JSON values; and a count of 64 MB or more ends the owner with
+; (:error (:too-big name)), which kills the command.
+
+(defun size (n)
+    (recv
+        ((:open p)     (send p (list :read :chunks)) (send p (list :eof)) (size n))
+        ((:chunk p s)  (size (+ n (str-len s))))
+        ((:eof p)      (size n))
+        ((:exited p s) (list s n))))
+
+(pprint (join (connect :exec (list "sh" "-c" "i=0; while [ $i -lt 2000 ]; do echo 0123456789012345678901234567890123456789012345678; i=$((i+1)); done") (size 0))))
+
+(defun head (out)
+    (recv
+        ((:open p)     (send p (list :read 4)) (send p (list :eof)) (head out))
+        ((:chunk p s)  (head (cons (list :chunk s) out)))
+        ((:line p s)   (head (cons s out)))
+        ((:eof p)      (head out))
+        ((:exited p n) (list n (reverse out)))))
+
+(pprint (join (connect :exec (list "printf" "abcdefg\\nhij\\n") (head ()))))
+
+(defun json-values (out)
+    (recv
+        ((:open p)     (send p (list :read :json)) (send p (list :eof)) (json-values out))
+        ((:json p v)   (json-values (cons v out)))
+        ((:eof p)      (json-values out))
+        ((:exited p n) (list n (reverse out)))))
+
+(pprint (join (connect :exec (list "printf" "{\"a\": 1}\\n[true, null]\\n\"x\"") (json-values ()))))
+
+(defun big ()
+    (recv
+        ((:open p)    (send p (list :read 67108864)) (big))
+        ((:chunk p s) :never)))
+
+(pprint (join (connect :exec (list "cat") (big))))

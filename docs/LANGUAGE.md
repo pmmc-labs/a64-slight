@@ -79,21 +79,23 @@ every `recv`.
 
 ### Replaying a run, and other orders
 
-A run is decided by what it takes from outside: its arguments, the
-keys typed, the clock, what files and sockets give. Everything else the
-runtime decides itself, counting calls rather than time. So (D170):
+A run is decided by what it takes from outside: its arguments and
+environment, the keys typed, the clock, what files, sockets and commands
+give. Everything else the runtime decides itself, counting calls rather
+than time. So (D170):
 
 - `SLIGHT_RECORD=file` writes all it takes from outside, as it takes it,
-  to `file`, a record of the run.
+  to `file`, a record of the run. That includes the environment, keys and
+  all, so keep a record as you would the environment itself.
 - `SLIGHT_REPLAY=file` runs the program again from that record: the
-  arguments, keys, times, file contents and network traffic are the
-  record's, and the run goes exactly as the recorded one did, printing
-  what it printed. Nothing is read from the world, and nothing written to
-  it but stdout and stderr: no file is written, no socket opened, and the
-  terminal is left as it is. So a bug that came from the world can be
-  seen again, as often as it takes. The record must be of the same
-  program; where a run goes another way, it stops with `replay: the run
-  goes another way at entry N` and exits 2.
+  arguments, environment, keys, times, file contents and network traffic
+  are the record's, and the run goes exactly as the recorded one did,
+  printing what it printed. Nothing is read from the world, and nothing
+  written to it but stdout and stderr: no file is written, no socket
+  opened, no command run, and the terminal is left as it is. So a bug
+  that came from the world can be seen again, as often as it takes. The
+  record must be of the same program; where a run goes another way, it
+  stops with `replay: the run goes another way at entry N` and exits 2.
 - `SLIGHT_SCHED=n` runs processes in another order than first in, first
   out: a generator seeded with the number `n` picks which ready process
   runs next and how many calls each slice has. Each seed gives the same
@@ -123,6 +125,23 @@ function, and `@ARGV` is that function's parameter. So a lambda or a
 that names it is a compile error; pass it to the functions that need it.
 A number arrives as a string: `(string->int (car @ARGV))`. `@ARGV` can't
 be bound or defined (D144).
+
+### %ENV
+
+`%ENV` is the program's environment, as a list of `(name value)` lists
+of strings, in the environment's order, which `lookup` reads:
+
+    OLLAMA_HOST=127.0.0.1:11434 ./prog
+
+    (lookup "OLLAMA_HOST" %ENV)     ; "127.0.0.1:11434"
+    (lookup "NO_SUCH" %ENV)         ; :not-found
+
+A variable set to nothing is `""`. An entry is cut at its first `=`, so
+a value can have `=` in it. It's the top level's second parameter, as
+`@ARGV` is its first, and only the top level sees it in the same way:
+pass it, or what's needed from it, to the functions that need it, so a
+key reaches only the code it's given to. A command (`:exec`) gets the
+same environment. `%ENV` can't be bound or defined (D186).
 
 ### @include
 
@@ -182,8 +201,8 @@ and `PI` is the float 3.141592653589793. They're constants rather than
 reserved words: a local of the same name hides them.
 
 These names can't be bound or defined: `#true`, `#false`, `$$`, `^$$`,
-`@ARGV`, `@include`, the special forms, and the forms that become
-`cond` (`match` among them).
+`@ARGV`, `%ENV`, `@include`, the special forms, and the forms that
+become `cond` (`match` among them).
 
 ### Documentation
 
@@ -340,6 +359,7 @@ function that waits in `recv`, which is the usual way to start an actor:
     (connect :keypress expr)
     (connect :fs/read path expr)
     (connect :tcp "host:port" expr)
+    (connect :exec (list "ls" "-l") expr)
     (connect :system expr)
     (connect device expr)
 
@@ -843,6 +863,78 @@ the body is cut as lines (D159).
 
 To `join`, `monitor` and `kill`, a device is a process that has ended
 with `(:ok ())`.
+
+### Commands
+
+    (connect :exec (list "ls" "-l") expr)
+
+Runs a command: a list of strings, its name and its arguments. There's
+no shell unless one is asked for, `(list "sh" "-c" "ls -l | wc -l")`, so
+nothing in an argument is expanded, or quoted wrongly. The name is
+looked for in `PATH`, unless it has a `/` in it. The command runs with
+the program's environment and working directory (`env NAME=value ...`
+and `sh -c "cd dir && ..."` change them), in a process group of its own,
+with its input and output on pipes. Its stderr goes where its stdout
+does, so its errors come where they happened, in order (D185).
+
+- Its first message is `(:open p)`. Then its output reads as a
+  socket's does: lines at first, one message at a time, and `(:read
+  how)` changes the way. Then `(:eof p)`, when the output has ended;
+  and once the command has ended too, `(:exited p status)`, after which
+  the device closes. `status` is the exit code, or `(:signal name)` if a
+  signal ended it: `:hup`, `:int`, `:quit`, `:ill`, `:trap`, `:abrt`,
+  `:bus`, `:fpe`, `:kill`, `:usr1`, `:segv`, `:usr2`, `:pipe`, `:alrm`
+  or `:term`, or the number of any other.
+- `(:write x ...)`, from any process, writes to its input, as to a
+  socket: kept till the pipe takes it, so `send` never blocks.
+  `(:eof)` closes the input, once what was written before it has gone,
+  while the output still comes. A command that reads its input waits for
+  it till then, so send `(:eof)` at once to one that has none. Input
+  the command doesn't take, having ended or closed its input, goes
+  nowhere, and so does anything written after `(:eof)`.
+
+      (defun run (out)
+          (recv
+              ((:open p)     (send p (list :eof)) (run out))
+              ((:line p s)   (run (cons s out)))
+              ((:eof p)      (run out))
+              ((:exited p n) (list n (reverse out)))))
+
+      (join (connect :exec (list "sh" "-c" "echo hi; echo oops >&2; exit 3") (run ())))
+      ; (:ok (3 ("hi" "oops")))
+
+`(disconnect p)` stops a command that hasn't ended: its process group is
+killed (SIGKILL), and it's waited for, so it's gone when `disconnect`
+returns, and nothing more comes from it. Its owner ending does the same,
+and so does the program's end, however it ends. A timeout is the owner's
+own `after`, then `disconnect`:
+
+    (defun within (out)
+        (recv
+            ((:open p)     (send p (list :eof)) (after 5000 $$ (list :late p)) (within out))
+            ((:line p s)   (within (cons s out)))
+            ((:eof p)      (within out))
+            ((:exited p n) (list n (reverse out)))
+            ((:late p)     (disconnect p) :timed-out)))
+
+A command that can't be started ends its owner before it runs, with
+`(:error (:enoent "ls"))` for one that isn't there, `:eacces` for one
+that can't be run, or `:io-error` for an argument with a NUL in it. A
+read that fails ends it as a socket's does, and so does a line, count
+or value of 64 MB or more, with `(:error (:too-big "ls"))`. Something
+that isn't a list of strings, at least one, faults in the caller. A
+command keeps the program running while there's something to wait for:
+output its owner waits for, input to write, or its end, once its output
+has ended. Each takes two of the 1,000 or so file descriptors `select()`
+can wait on.
+
+On the virtual clock, a command whose input is closed can only be
+working on its own, so while its owner waits for its output or its end,
+the runtime waits for it, for real, and neither keys nor the clock move
+meanwhile: a timeout around it doesn't fire first. One whose input is
+open may be waiting for the program, so it's looked at as a socket is,
+and the clock moves when it has nothing to say: set a timer around it
+once it has said all it will.
 
 ### The system
 
@@ -1418,19 +1510,20 @@ waits for TLS (step 12c).
 
 ### (@include :agent)
 
-`lib/agent.slight`: a conversation with a model, as a process (D184). The
-model is ollama's `/api/chat`, over plain HTTP; the agent includes
-`:http` itself.
+`lib/agent.slight`: a conversation with a model, as a process, which
+can call tools (D184, D187). The model is ollama's `/api/chat`, over
+plain HTTP; the agent includes `:http` itself.
 
     (@include :agent)
 
-    (let a (agent/new "http://localhost:11434" "llama3.2" ""))
+    (let a (agent/new "http://localhost:11434" "llama3.2" "" ()))
     (agent/say a "Why is the sky blue?")
     ; the caller hears (:piece a text) ..., then (:answer a text)
 
-- `(agent/new url model system)` starts an agent and gives its pid. `url`
-  is the server's, `"http://host:port"`; `system` is the system prompt,
-  `""` for none.
+- `(agent/new url model system tools)` starts an agent and gives its
+  pid. `url` is the server's, `"http://host:port"`; `system` is the
+  system prompt, `""` for none; `tools` is a list of tools (below), `()`
+  for none.
 - `(agent/say a text)` asks `a` a question, and returns at once. The
   caller is sent `(:piece a text)` for each piece of the answer as the
   model streams it, then `(:answer a text)`, the whole answer. If the
@@ -1444,7 +1537,189 @@ model is ollama's `/api/chat`, over plain HTTP; the agent includes
   whole, so a turn that fails leaves it as it was.
 - One turn at a time: a question asked while another is answered waits
   for it, and its answer comes after.
-- `(kill a)` ends the agent, and stops an answer on its way.
+- `(agent/ask a text)` asks `a` and waits for the whole answer: `(:ok
+  answer)`, or `(:error reason)` as `(:error a reason)` would have said,
+  or `(:error (:ended a result))` if `a` has ended or ends first. A
+  process of its own asks, so none of the pieces or calls reach the
+  caller, and it works anywhere, a lambda or a tool included (D192).
+- `(kill a)` ends the agent, and stops an answer on its way, and any
+  tool it was running.
+
+A tool is a function the model can call, with a name, a description,
+and its parameters, which the model reads to know when to call it and
+what with:
+
+    (let weather
+        (tool/new "get_weather" "The weather in a city, now."
+            (list (list "city" :string "The city, such as Tokyo"))
+            (lambda (args) (concat "11 degrees in " (lookup "city" args)))))
+
+    (let a (agent/new url "llama3.2" "" (list weather)))
+    (agent/say a "What's the weather in Tokyo?")
+    ; the caller hears (:calling a "get_weather" (("city" "Tokyo"))),
+    ; (:called a "get_weather" "11 degrees in Tokyo"), then the answer
+
+- `(tool/new name description params f)` makes a tool. `params` is a
+  list of `(name type description)`, `type` being `:string`, `:number`,
+  `:integer` or `:boolean`, every one required (anything else faults
+  here). `f` is a function of the arguments the model gives, as a list
+  of `(name value)` that `lookup` reads; nothing checks them against the
+  parameters, so a tool that finds one missing or wrong can raise, and
+  the model is told why.
+- When the model calls tools, each call runs in a process of its own,
+  all at once. The caller hears `(:calling a name args)` for each call,
+  then `(:called a name result)` for each, in the calls' order, once all
+  have finished. The result is `f`'s value, rendered as `concat` renders
+  it; or `"error: reason"` if it raised, faulted or was killed, or for a
+  tool the agent doesn't have. A result longer than 16 KB is cut there,
+  with `[cut: n more bytes]` at its end. The results go back to the
+  model, and the turn goes on until the model answers without calling
+  any: `(:answer a text)` is the text of that last reply, though the
+  pieces of the replies before it came too.
+- `(tool/name tool)` is a tool's name, and `(tool/call tool args)` calls
+  it here, as the model would, and gives its value or raises as it does:
+  for a test, or a tool built on another.
+- A turn has at most 10 rounds with the model; one still calling tools
+  in its tenth fails with `(:rounds 10)`. A call has no time limit: a
+  tool that might hang sets its own, with `after`.
+- The calls and their results join the conversation with the question
+  and the answer, once the answer is whole.
 
 `examples/chat.slight` is a chat in the terminal, a line at a time, on
-`:keypress`: `chat [model] [url]`.
+`:keypress`: `chat [model] [url]`. Its model has `lib/tools.slight`'s
+tools (below); those that change something do it only once you've said
+`y` to what they show you, asking the keyboard's process with `ask`, and
+Escape stops those still running (D193). Its notes are kept in `~/.slight-chat-notes`, and with `CHAT_EXPERT` set to
+another model, it can ask an agent on that one (`ask_expert`).
+
+### (@include :tools)
+
+`lib/tools.slight`: tools for an agent, to read, find and change files,
+run commands, fetch from the web, work out arithmetic, keep notes from
+one conversation to the next, and ask other agents (D188–D192). It includes `:agent`,
+`:calc`, `:ds`, `:exec` and `:fs` itself.
+
+    (@include :tools)
+
+    (let approve (lambda (what) #true))           ; yes to everything; the chat asks you
+    (agent/new url model "" (list (tools/read-file) (tools/list-files) (tools/search) (tools/calc)
+                                  (tools/write-file approve) (tools/edit-file approve)
+                                  (tools/run approve) (tools/fetch approve)))
+
+Each function makes a tool. Those that change something take `approve`,
+a function of what the tool is about to do, as text for a person to
+read; the tool does it only if `approve` gives `#true`, and otherwise
+tells the model it wasn't let. A tool that can't do what it's asked
+raises why, and the model is told that too, as is one called without an
+argument it needs, or with one that isn't a string.
+
+- `(tools/read-file)`: `read_file(path)`, the file's bytes as they are.
+- `(tools/list-files)`: `list_files(path)`, what's in a directory, one
+  name a line, a directory's ending in `/` (`ls -1Ap`); or "the
+  directory is empty".
+- `(tools/search)`: `search(text, path)`, the lines that contain `text`
+  in the file, or in every file under the directory, as
+  `file:line:text` (`grep -rnIF`: the text as it is, not a pattern; no
+  binary files, and no `.git`); or "no lines contain it".
+- `(tools/calc)`: `calc(expression)`, arithmetic as `calc/eval` (below)
+  works it out, for a model, which is bad at it.
+- `(tools/remember store)` and `(tools/recall store)`: `remember(key,
+  text)` keeps a note, replacing one under the same key, and
+  `recall(key)` gives it back; for a key with no note, the keys there
+  are. They don't ask: the notes are the model's own, in a file the
+  program chose. `store` is a store of notes:
+  - `(notes/open path)` starts one, a process, which reads its notes
+    from the file at `path` (none if it isn't there, or is empty) and
+    writes them all back after each change, as an s-expression, a list
+    of `(key text)`, newest first. A file that isn't notes ends the
+    store, rather than be written over.
+  - `(notes/get store key)`, the text or `:not-found`; `(notes/keys
+    store)`, newest first; `(notes/put store key text)`, which raises
+    why if the file can't be written, the store going on as it was.
+- `(tools/ask-agent name description a)`: a tool called `name` that
+  asks the agent `a` a question (`question`), with `agent/ask`, and
+  gives its answer: an agent on a bigger model, say, or with a system
+  prompt of its own. `description` tells the model what it's for. It
+  doesn't ask `approve`: `a`'s own tools ask about what they do. An agent
+  mustn't be given itself, since it would wait for itself.
+- `(tools/write-file approve)`: `write_file(path, content)`, the whole
+  file, made if it isn't there. `approve` is shown the content, each
+  line after `+ `.
+- `(tools/edit-file approve)`: `edit_file(path, old, new)`, `old`
+  replaced with `new`. `old` must be in the file once, exactly as it is
+  there, or the tool raises, before asking; the rest of the file is kept
+  as it was, its last newline included. `approve` is shown the change,
+  `old`'s lines after `- ` and `new`'s after `+ `.
+- `(tools/run approve)`: `run(command)`, a shell command (`sh -c`), run
+  to its end, and what it printed and its exit status. `approve` is shown
+  `run: command`.
+- `(tools/fetch approve)`: `fetch(url)`, an `http://` or `https://` URL
+  (anything else raises), with curl, following redirects, for at most 20
+  seconds and 5 MB. `approve` is shown `fetch url`, every time, since a
+  URL can carry anything out. A web page comes as plain text, by
+  `tools/html->text` (below), its links resolved against the URL it was
+  fetched from, after any redirects; other text (JSON, XML, plain text) as it
+  is; anything else as what it is, `not text: image/png, 5120 bytes`. A
+  status that isn't 2xx comes first, `HTTP 404`, then the text. If curl
+  fails, the tool raises with curl's message, such as `curl: (6) Could
+  not resolve host: example.invalid`.
+- `(tools/html->text html base)`: HTML as plain text, for a model.
+  Comments, scripts, styles, SVG and `noscript` go, with what's in them;
+  other tags go, but one that starts a block (a paragraph, a heading, a
+  row, a break, ...) starts a line, a list's item starts one with `- `,
+  and a table's cell starts with ` | `; entities are decoded (the named
+  ones for `&`, `<`, `>`, quotes, a space, dashes and the like, and
+  numbered ones); and space is squeezed, with at most one blank line in a
+  row. A link is `[text](url)`, its text on one line, and its URL
+  resolved against `base`, the page's URL (`""` leaves it as written):
+  `<a href="next">Next</a>` on `https://example.com/docs/a.html` is
+  `[Next](https://example.com/docs/next)`. A link to a place on the same
+  page (`#top`), by a scheme a fetch can't follow (`mailto:`,
+  `javascript:`), or with no text (an image's) is just its text.
+
+The commands these run are given their arguments directly, with no
+shell (but `run`'s), so a path or a text can't be taken for anything
+else.
+
+### (@include :calc)
+
+`lib/calc.slight`: arithmetic, written as people write it, worked out
+(D190).
+
+    (@include :calc)
+
+    (calc/eval "(2 + 3) * 4 ^ 2 / 8")      ; 10
+    (calc/eval "7 / 2")                     ; 3.5
+
+- `(calc/eval s)` gives the value of the expression `s`: numbers
+  (`42`, `3.5`, `.5`, `1.5e3`), `+ - * / %` and `^` (or `**`) for a
+  power, and parentheses. `^` binds first, and from the right (`2^3^2`
+  is 512); then a sign (`-2^2` is -4); then `*`, `/` and `%`; then `+`
+  and `-`. `×`, `÷` and `−` are `*`, `/` and `-`.
+- The functions `sqrt`, `abs`, `floor`, `ceil`, `round`, `sin`, `cos`,
+  `tan`, `exp`, and `min` and `max` of one number or more; the
+  constants `pi` and `e`. Names in any case.
+- Whole numbers stay whole while the answer fits well inside 62 bits
+  (`2^61` is exact), and a division that comes out whole is whole (`6/2`
+  is 3); anything else is a float (`7/2` is 3.5, `2^62` is
+  4611686018427388000.0), rather than an overflow. `%` keeps the sign of
+  its left side, as `%` does, and works on floats too.
+- An expression that can't be read or worked out raises why, and the
+  byte where: `"at byte 3: 3 where an operator or the end should be"`,
+  `"division by zero"`, `"at byte 1: there's no log: ..."`.
+
+### (@include :exec)
+
+`lib/exec.slight`: a command run to its end (D187).
+
+    (@include :exec)
+
+    (exec/run (list "sh" "-c" "echo hi; exit 3"))    ; (:ok (3 "hi\n"))
+
+- `(exec/run cmd)` runs `cmd`, a list of strings as `:exec` takes it,
+  with its input closed, and waits for it to end. It gives `(:ok (status
+  output))`, `output` being all it printed, stdout and stderr together,
+  and `status` its exit code or `(:signal name)`; or `(:error reason)` if
+  it can't be started, such as `(:error (:enoent "ls"))`. There's no time
+  limit: a command that doesn't end keeps it waiting. If the caller ends
+  first, killed, say, the command is killed too (D193).

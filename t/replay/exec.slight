@@ -1,0 +1,23 @@
+; Commands, for t/replay.sh: run with SLIGHT_RECORD, then with
+; SLIGHT_REPLAY, where what they print and how they end come from the
+; record, and none of them runs: the file the first writes, which @ARGV
+; names, isn't written then. The pid it prints differs from run to run,
+; but not from its record. The last is stopped before it ends, which
+; kills it, and waits for it.
+
+(defun run (out)
+    (recv
+        ((:open p)     (send p (list :write "fed in" \n)) (send p (list :eof)) (run out))
+        ((:line p s)   (run (cons s out)))
+        ((:eof p)      (run out))
+        ((:exited p n) (list n (reverse out)))))
+
+(defun first-line ()
+    (recv
+        ((:open p)   (first-line))
+        ((:line p s) (disconnect p) s)))
+
+(pprint (join (connect :exec (list "sh" "-c" (concat "echo written >" (car @ARGV) "; cat; echo $$ >&2; exit 3")) (run ()))))
+(pprint (join (connect :exec (list "sh" "-c" "kill -TERM $$") (run ()))))
+(pprint (join (connect :exec (list "no-such-command") (run ()))))
+(pprint (join (connect :exec (list "sh" "-c" "echo first; exec cat") (first-line))))

@@ -2312,3 +2312,504 @@ messages. `lib/agent.slight`, `(@include :agent)`, and
   ending the agent, saving a conversation, agents talking to each other,
   the model's options (temperature, the context's length), and the
   figures on the last line (tokens, time).
+
+**D185. `:exec`, a device for running a command.** *(User agreed to
+Claude's proposal, every point as recommended.)* For tools (step 15):
+`(connect :exec (list "ls" "-l") expr)` runs a command, a list of
+strings with no shell unless one is asked for (`(list "sh" "-c" cmd)`),
+on a device the new process owns.
+- **Its messages:** `(:open p)`; its output as a connection's (lines at
+  first, `(:read how)` as for any reader); `(:eof p)`; and once the
+  command has ended too, `(:exited p status)`, after which the device
+  closes. Not PLAN.md's `(:exit p status)`: a pattern doesn't compare a
+  name with one already bound, and `recv` looks only at the first
+  message, so a process that owns a command and monitors anything (an
+  agent's turn monitors the agent, D184) couldn't tell it from
+  `monitor`'s `(:exit pid result)`. Rejected: `(:exited p status)` in
+  place of `(:eof p)` (a clause fewer, but the only reader without
+  `:eof`). The status comes after both ends, so a command that leaves
+  something running with its output (`cmd &`) isn't done till that ends
+  too, as with Python's `subprocess.run`.
+- **Status:** the exit code, or `(:signal name)`, `name` being one of
+  15 (`:hup :int :quit :ill :trap :abrt :bus :fpe :kill :usr1 :segv
+  :usr2 :pipe :alrm :term`: the same on macOS and Linux, where some of
+  their numbers aren't), or the number of any other. Rejected: one
+  integer, 128 + n, as a shell's `$?` (`exit 137` would look like
+  SIGKILL, and n differs between the systems).
+- **stderr goes with stdout,** one pipe for both: a model sees errors
+  where they happened, in the order written, and that order is the
+  command's own, so tests are exact. `sh -c "cmd 2>/dev/null"` gives
+  stdout alone. Rejected: `(:err p s)` messages (a second pipe and
+  buffer, a `:read` that would have to say which, and an order between
+  the two that depends on timing); passed through to the program's
+  stderr (a model wouldn't see it, and it would write over a terminal UI
+  such as the chat).
+- **stdin is a pipe.** `(:write x ...)`, from anyone, rendered as
+  `tty/write` does and kept till the pipe takes it, as a socket's; and
+  `(:eof)` (the word a device says when its input ends, sent the other
+  way) closes it once that's written, while the output still comes. A
+  command that reads its input waits for it till then, so a tool with no
+  input sends `(:eof)` in its `(:open p)` clause. Input the command
+  doesn't take (it has ended, or closed its stdin, as `head -1` does)
+  goes nowhere, and so does what's written after `(:eof)`: not `:epipe`,
+  which would end the owner, who still wants the output and the status.
+  Rejected: input closed from the start unless asked for (another source
+  name, or an argument).
+- **Ending it:** the command runs in a process group of its own.
+  `disconnect`, or the owner ending, kills the group with SIGKILL (so all
+  of `sh -c "a | b"` goes) and the command itself (under qemu, whose
+  `posix_spawn` returns before the child has run, it may not be in its
+  group yet: found by golden test 227 hanging there), then waits for it,
+  which a killed process can't hold up for long; nothing comes after.
+  The program's end, however it ends (a deadlock, Ctrl-C in raw mode,
+  SIGINT, SIGTERM or SIGHUP), kills every group still running: `atexit`,
+  and handlers for the three signals (not one that's ignored, as `nohup`
+  leaves SIGHUP), which then die of the signal as before. Rejected:
+  SIGTERM, then SIGKILL after a grace period (a timer of the runtime's
+  own for each command, which on the virtual clock would have to wait
+  for real). A `(:signal name)` to the device can come if a tool wants
+  to stop a command gently.
+- **Noticing its end:** SIGCHLD's handler, on a signal stack of its own
+  (a process's may be nearly full), writes a byte to a pipe that
+  `select()` waits on while any command runs; then each is asked with
+  `waitpid` and `WNOHANG`. Rejected: polling with `WNOHANG` when the
+  output ends, since on Linux the pipe closes a moment before the
+  command can be waited for, so it would need a timer to poll again.
+- **Starting it:** `posix_spawn`, the same on both systems, with the
+  pipes as file actions, its own group, and SIGPIPE back to its default
+  (the runtime ignores it, D136, and an ignored signal stays ignored
+  across exec, so `yes | head` would misbehave in a command). It inherits
+  the program's environment and working directory (`env K=V cmd`, and
+  `sh -c "cd d && cmd"`, change them). The runtime finds the command in
+  `PATH` itself, as `execvp` would, since under qemu-user `posix_spawnp`
+  reports a command that isn't there as a child that exits 127, not as
+  `ENOENT`, and the targets must agree. One that can't be started ends
+  the owner before it runs: `(:error (:enoent "ls"))`; `:eacces` for one
+  that can't be run (a directory, a file without its x bit); `:io-error`
+  for an argument with a NUL in it, as for a path (D130). A command that
+  isn't a list of strings, at least one, faults in the caller
+  (`:not-a-cons` or `:not-a-string`), as a path that isn't a string does.
+- **Replay:** starting a command (the search, the spawn and its pipes) is
+  one call through `replay.c`, its output's reads are reads, and waiting
+  for it and killing it are calls too; so a replay runs, kills and writes
+  nothing. SIGCHLD's pipe is made through it too, and what `select()`
+  said of it is in the record with the rest.
+- **The virtual clock:** a command's pipes are waited for in `select()`
+  as sockets are, on the same list, and it counts as something that can
+  still happen while there's something to wait for: output its owner
+  waits for, input to write, or its end, once its output has ended. A
+  command whose input is closed can only be working on its own, so on
+  the virtual clock, while its owner waits for its output or its end,
+  nothing else moves, keys or time: the runtime waits for it, for real.
+  One whose input is open may be waiting for the program, so it counts
+  as a socket does (D139). So a tool's timeout around a command that ends
+  doesn't fire first in a test just because `select()` looked before the
+  command had written anything (golden test 230 fails without this).
+  Rejected: always as a socket, which would make any test with a timer
+  around a command race.
+- **Limits:** none for now beyond the caller's own timeout (`after`,
+  then `disconnect`) and `:too-big` for a message of 64 MB or more. No
+  sandbox: a command runs as the program's user. Its total output isn't
+  capped: a tool keeps what fits a model's context, and disconnects past
+  it. `ulimit` in `sh -c` limits CPU and memory with nothing new. Each
+  command takes two descriptors of the 1,024 `select()` can wait on.
+- **Tests** (225–230), on the virtual clock, with commands that behave
+  the same on macOS and Linux (`sh -c`, `printf`, `cat`, `kill`): lines,
+  stderr, statuses and signals, and a monitor beside a command; input
+  all at once, a line at a time, from another process, closed by a
+  timer, to a command that doesn't read it, and a megabyte through `cat`
+  and back; chunks, a count, JSON and `:too-big`; commands that can't be
+  started, dead letters and faults; a command stopped when its owner
+  raises, disconnects or is killed (another command's `kill -0` shows
+  it's gone), and one handed over; the clock. `t/replay.sh` records and
+  replays commands, one stopped early, and checks that the replay runs
+  none. Also run under `SLIGHT_SCHED` seeds and `SLIGHT_GC_STRESS`, and
+  under valgrind, with the file, socket and HTTP tests (the socket code
+  changed too). By hand: SIGINT, SIGTERM and SIGHUP to the runtime, a
+  deadlock and a `disconnect` each kill a command and a grandchild in its
+  group.
+- **Left for later:** a `run` that gives `(:ok (status lines))`, with the
+  tools; a command's own environment and working directory; a signal to
+  a command without closing it; stderr apart from stdout.
+
+**D186. `%ENV`: the environment, as the top level's second parameter.**
+*(User chose it from Claude's two, A of A and B, and named it `%ENV`
+"to match the perlish `@ARGV`"; the details are as proposed.)* For a
+model's address or a key (D180). `%ENV` is the program's environment as
+an association list, `(("HOME" "/home/s") ("OLLAMA_HOST" "...") ...)`,
+read with `lookup`, which gives `:not-found` for a variable that isn't
+set; so nothing new for that, and a default is `(if (eq? h :not-found)
+... h)`.
+- **Why a parameter, as `@ARGV` is (D144):** the environment is the
+  program's input, given to the root. Only the top level sees it; a
+  `defun` that names it is a compile error saying to pass it on, and a
+  lambda or a `fork` at the top level captures it as any local. So a key
+  reaches only the code it's handed to: a tool, or a library such as
+  `lib/agent.slight`, can't read `ANTHROPIC_API_KEY` unless its caller
+  passes it. (A command can still run `env`: `:exec` gives every command
+  the whole environment, D185, and that stays till devices are
+  restricted, if they ever are.) Rejected: `(env "NAME")`, a builtin
+  readable anywhere (simpler to build, and a record would hold only what
+  was read, but any process or library could read any key: the shape
+  D144 turned down for `@ARGV`); a device, `(connect :env expr)` (a
+  process and messages for a constant).
+- **What's in it:** every variable, as a `(name value)` list of two
+  strings, in the environment's own order; an entry is cut at its first
+  `=` (a value may have `=` in it), and one with no `=` is left out; a
+  name that's there twice is found first where `getenv` finds it.
+  Nothing for a missing variable but `lookup`'s `:not-found`; a
+  `lookup-or` with a default can come to the prelude if wanted.
+- **How:** `slight_main` takes `@ARGV` and `%ENV`, in that order
+  (`TOP_PARAMS`, `values.ts`), and the runtime's `main` builds both in
+  the root's heap. `split.ts` carries both across a `recv` at the top
+  level, under names no program can write, as it carried `@ARGV`. The
+  top level's frame has a slot more, so a few unit tests' offsets moved
+  by 8 bytes.
+- **Replay:** the record keeps the environment in its header, after
+  `@ARGV`, and a replay's `%ENV` is the record's. So a record holds every
+  variable, keys included: records are made only when asked for, to debug
+  where they were made, and the docs say to keep one as the environment
+  itself. The record's format changed, so its first line is now `slight
+  record 2`, and an older record is refused as not a record.
+- **The chat** takes its URL from its second argument, then from
+  `OLLAMA_HOST`, as ollama reads it (no scheme means http, and no port
+  means 11434), then `http://localhost:11434`. Checked by hand on both
+  targets against a stand-in for `/api/chat`.
+- **Tests:** golden test 231 (`; env:` sets three variables: one set,
+  one empty, one with `=` in its value; one unset; every entry a pair of
+  strings; `%ENV` in a lambda, a `fork`, and across a `recv` at the top
+  level); unit tests for the compile errors, the second slot, and the
+  carrying; `t/replay/world.slight` reads a variable set when recorded
+  and unset when replayed.
+
+**D187. Tools: a function of the model's arguments, each call in a
+process of its own.** *(User agreed to Claude's proposal, every point as
+recommended.)* Step 15's "tools as messages", on ollama's tool calling:
+the request carries `tools`, each a name, a description and a JSON
+Schema for its parameters; a reply's message may carry `tool_calls`,
+each a name and an object of arguments, a whole call in one chunk when
+streamed, and no ids; and the results go back as `{"role": "tool",
+"content": ..., "tool_name": ...}` after the assistant's message with
+the calls.
+- **A tool is a function**, `(lambda (args) ...)`, and each call runs in
+  a process of its own: one that faults, raises or is killed ends alone,
+  and its value, rendered as `concat` renders it, is the result. A tool
+  with state is a function that `ask`s a process, and one that runs a
+  command does it with `(join (connect :exec ...))`, since `join` works
+  in a lambda. Rejected: PLAN.md's first sketch, a tool as an actor that
+  takes `(:call args to)` and answers with `reply`, which made every
+  tool, stateless or not, a long-lived process with a loop, and a tool
+  that died in the middle of a call something each call had to guard
+  against; the function covers it with less.
+- **`(tool/new name description params f)`,** `params` a list of `(name
+  type description)`, `type` `:string`, `:number`, `:integer` or
+  `:boolean`, each required; the library builds the JSON Schema, at
+  once, so a bad type faults there. Rejected: the schema written as
+  `json/print` data (four nested `:object`s for one parameter); a schema
+  read from a doc block (a parser for it); a tool that describes itself
+  when asked (a round trip, and the schema written all the same).
+  Optional parameters, enums, arrays and objects can come when a tool
+  wants one.
+- **What a tool is given:** the arguments as `json/parse` makes them,
+  less the `:object`: a list of `(name value)` for `lookup`. Nothing
+  checks them against the parameters: a tool that finds one missing or
+  wrong raises, and the model, told why, can try again.
+- **Results:** `"error: reason"` for a call that raised, faulted or was
+  killed, and `"error: there's no tool called x"` for a name the agent
+  doesn't know; neither ends the turn. A result over 16 KB is cut there,
+  with `[cut: n more bytes]` after it, so a command that prints a
+  megabyte doesn't fill a model's small context; one constant, where
+  every tool would otherwise cap its own.
+- **The caller hears** `(:calling a name args)` for each call before any
+  runs, then `(:called a name result)` for each, in the calls' order,
+  once all have finished; `(:piece a text)` and `(:answer a text)` as
+  before, the answer being the last reply's text.
+- **A turn is rounds:** the reply is streamed as before, its calls
+  collected from any of its lines; with calls, they all run at once,
+  each in a process the turn monitors, and the assistant's message with
+  the calls and a tool message for each go back to the model for
+  another round; without, it's the answer. All at once, since a model
+  that asks for several in one message treats them as independent, and
+  processes make it cheap. If the agent ends while calls run, the turn
+  kills them and ends. A turn is still all or nothing (D184): the
+  question, each round's messages and the answer join the conversation
+  once the answer is whole.
+- **At most 10 rounds a turn:** one whose tenth reply still calls tools
+  fails with `(:rounds 10)`, without running them, since a small model
+  can call tools in a loop for ever. No time limit for a call: a tool
+  that might hang sets its own `after`, as a command's owner does
+  (D185).
+- **The tools are the agent's,** fixed when it starts: `(agent/new url
+  model system tools)`, `()` for none, which sends no `tools` at all.
+  `agent/new` took three arguments before; the chat and test 224 pass
+  `()`.
+- **Tests:** 232, against a fake ollama in the program: the schema the
+  model sees, a call after a piece of text and the history after it, two
+  calls at once, a tool that raises, one that isn't there, a result cut
+  short, a model that keeps calling (stopped at its tenth round, the
+  history left as it was), an agent with no tools, and an agent killed
+  while a tool runs, which kills the tool. Also under `SLIGHT_SCHED`
+  seeds and `SLIGHT_GC_STRESS`, and valgrind.
+- **`exec/run`,** the helper D185 left for later, in an opt-in
+  `lib/exec.slight`: `(exec/run cmd)` runs a command with its input
+  closed and gives `(:ok (status output))`, the output whole, or
+  `(:error reason)`. Golden test 233.
+- **The chat** has two tools: `read_file` (`slurp`), and `run`, a shell
+  command, which asks the keyboard's process first, with `ask`: the
+  person sees the command and answers `y` or `n` (`n` tells the model
+  "the user didn't let it run"), and another command asked about
+  meanwhile waits its turn. The keyboard's process makes the agent, so
+  the tools can name it (`$$` in the `connect`). Calls and results are
+  shown as they happen. The `run` tool has no time limit, unlike what
+  the proposal suggested a tool might set: a timer can't be cancelled
+  yet, so one set for every command would keep the chat running after
+  Ctrl-D till it was due; a command that doesn't end is stopped with
+  Ctrl-C, which ends the chat and kills the command's group (D185).
+  Checked by hand on both targets, in a pseudo-terminal, against a
+  stand-in for `/api/chat` that calls the tools: `y`, `n`, and a file
+  read, with the whole conversation sent each round.
+
+**D188. `lib/tools.slight`: tools to read, find and change files, and
+run commands.** *(User chose these, the first of four batches Claude
+proposed; the details are defaults.)* The chat's two tools (D187), made
+general, and four more, so the chat is a small coding assistant.
+- **A library of constructors,** opt-in: each function makes a tool,
+  and a program gives its agent those it wants. Those that change
+  something take `approve`, a function of what the tool is about to do,
+  as text for a person to read, giving `#true` to go ahead: the chat
+  makes it ask the keyboard's process, a script can say yes to all, and
+  a test records what it was asked. A refusal is a result ("the user
+  didn't let it ..."), not an error, so the model knows to stop.
+- **`read_file`** reads in chunks, so the bytes come as they are;
+  **`list_files`** is `ls -1Ap -- path`, and says "the directory is
+  empty" rather than nothing, which a model reads as no answer;
+  **`search`** is `grep -rnIF --exclude-dir=.git -e text -- path`: `-F`,
+  since a model's text often has a bracket or a dot in it, and a
+  pattern would surprise it; status 1 is "no lines contain it". The
+  commands take their arguments directly, with no shell, and `--`, so
+  a path can't be read as an option.
+- **`write_file`** writes the whole file; `approve` sees the content,
+  each line after `+ `.
+- **`edit_file(path, old, new)`**, as Claude Code's: `old` must be in the
+  file once, exactly (a second, even overlapping the first, would leave
+  which to change to chance), or it raises, before asking; the file is
+  read in chunks and written whole, so the rest stays byte for byte, its
+  last newline included. `approve` sees `old`'s lines after `- ` and
+  `new`'s after `+ `.
+- **`run`** is the chat's, moved here: `sh -c`, run to its end
+  (`exec/run`), with its exit status.
+- **An argument** that's missing or not a string raises, and the model
+  is told which.
+- **`tool/name` and `tool/call`** in `lib/agent.slight`: a tool's name,
+  and a call made here as the model's would be, for tests and for tools
+  built on others.
+- **The chat** has all six, with one `approve`; the question shows what
+  the tool showed it, and a call's arguments are shown as their first
+  line, cut at 60 bytes, so a file's content doesn't fill the screen.
+- **Tests:** 234 calls each tool as the agent does, in a process of its
+  own, with approvers that say yes and no: writing, reading, listing an
+  empty directory and a full one, finding (a bracket matched as itself),
+  editing and its errors, refusals that leave everything as it was,
+  running, and arguments that are missing or not strings. By hand, on
+  both targets: the chat in a pseudo-terminal, against a stand-in that
+  calls each tool, with `y` and `n`.
+- **Next** (the user's order): `fetch`, through curl, which asks before
+  every call, since a URL can carry anything out; then `calc` and notes,
+  in slight; then `ask_agent`. Left for later: reading part of a file,
+  and keeping the tools to one directory.
+
+**D189. `fetch`: a URL through curl, a page made plain text in slight.**
+*(User: "fetch should ask for each call"; the rest are defaults.)* The
+second batch of D188's tools. HTTPS waits for TLS (12c), so curl, through
+`:exec`, is how a local agent reaches the web for now (the user's call).
+- **`fetch(url)`** takes `http://` and `https://` only, since curl reads
+  `file://` and much else; runs `curl -sSL --max-time 20 --max-filesize
+  5000000 -w ... -- url`; and asks `approve` with `fetch url` before
+  every call, since a URL can carry anything out (`?data=...`).
+- **What came back:** curl's `-w` writes the status and the content type
+  after the body, behind a line no page has (`@@slight-fetch@@`), which
+  is split off. HTML (a type with `html` in it) is made plain text; text,
+  JSON, XML and JavaScript come as they are, and so does a body with no
+  type that's valid UTF-8; anything else is `not text: type, n bytes`. A
+  status that isn't 2xx goes before the text, `HTTP 404`, since an error
+  page can read like an answer. A failure (curl's own status, not the
+  server's) raises curl's message, without the trailer or anything
+  fetched before it.
+- **HTML to text in slight,** `tools/html->text`, for a model's small
+  context: the HTML is split at each `<` (in C, once), so each piece is
+  a tag and the text after it, and the pieces are read in one pass;
+  comments go first, split at `<!--`, since one can hold a `<`; scripts,
+  styles, SVG and `noscript` go with what's in them, till their closing
+  tag; a `<` that doesn't start a tag (`a < b`) stays. A block's tag
+  starts a line (an item's with `- `, a cell with ` | `, and the ends of
+  items and rows don't, so a list is on lines one after another);
+  entities are decoded, named and numbered, a numbered one that isn't a
+  character left as it was; space is squeezed per line, with at most one
+  blank line in a row. About 0.7 seconds for 1.7 MB of HTML on the cloud
+  machine. Rejected: a converter outside slight (`lynx -dump`, `pandoc`),
+  which not every machine has; a full HTML parser, for a model that only
+  needs the words and their order.
+- **Tests:** 235: the conversion, on HTML with each case, empty HTML, and
+  text with no tags; then the tool, through the real curl, from a server
+  in the program (`http/serve`): a page, JSON, plain text, an image, a
+  404, a redirect, a refused connection (curl's message), a URL that
+  isn't http, and one the approver refuses. Also under seeds,
+  `SLIGHT_GC_STRESS` and valgrind. By hand: the chat, in a
+  pseudo-terminal, fetching over HTTPS with `y`, and refused with `n`.
+- **Left for later:** a page's links (a model can't follow what it
+  can't see: `[text](url)` would show them, at a cost in context); a
+  charset other than UTF-8; POST and headers.
+
+**D190. `calc`: arithmetic parsed and worked out in slight.** *(User
+asked for it, the third of D188's batches; the details are defaults.)*
+A small model gets arithmetic wrong, and a tool is the usual cure.
+`lib/calc.slight`, `(calc/eval s)`, since arithmetic is of use beyond
+agents, and `(tools/calc)` around it.
+- **Infix, as people and models write it,** not s-expressions, which a
+  model writes less reliably: numbers (`.5`, `1.5e3`), `+ - * / %`, `^`
+  and `**`, parentheses, and `×`, `÷` and `−`. `^` first and from the
+  right, then a sign (`-2^2` is -4, as in maths and Python), then `* /
+  %`, then `+ -`. Recursive descent, each step giving its value and the
+  tokens left; the expression is short, so nothing is done for speed.
+- **Whole numbers stay whole** while a float's estimate of the answer is
+  under 4×10^18, well inside 62 bits, so `2^61` and `10^18` are exact;
+  past that the answer is a float, rather than slight's `:overflow`,
+  which would end the call with a fault logged to the terminal. A whole
+  power is worked out by squaring; a division that comes out whole is
+  whole (`6/2` is 3), and anything else is a float. `%` is slight's (the
+  sign of its left side), and on floats C's `fmod`. Rounding a float too
+  big for an integer, or one that isn't a number, gives it back as it
+  is, since `floor` and the rest would fault.
+- **Functions:** `sqrt abs floor ceil round sin cos tan exp`, `min` and
+  `max` of one or more, and `pi` and `e`, any case. No `log`: slight has
+  no logarithm, and adding one is a builtin to propose, not a library's
+  to fake.
+- **Errors** raise what's wrong and the byte where, for a model to mend
+  its expression: an empty one, one that ends too soon, a `(` not
+  closed, a token where something else should be, division by zero, a
+  name that isn't one (with the list of those that are), an argument
+  count, a character that isn't arithmetic, a point with no digits, and
+  a number too big. A comma says numbers are written without them,
+  since `1,000` is what a model writes for a thousand.
+- **Tests:** 236: each rule, the functions and constants, the errors,
+  and the tool through `tool/call`; no libm function but `sqrt` is asked
+  for anything but an exact answer (D76). By hand: the chat, with a
+  stand-in that calls `calc`, on both targets.
+
+**D191. Notes, kept from one conversation to the next.** *(User asked
+for them, the third of D188's batches with `calc`; the details are
+defaults.)* `remember(key, text)` and `recall(key)`, so an agent can
+keep what it learns: "a tool with state asks a process" (D187), in
+practice.
+- **A store is a process,** `(notes/open path)`, holding the notes as
+  `(key text)` pairs, newest first, and answering `ask`s (`lib/ds`):
+  `notes/get`, `notes/keys` and `notes/put`. One process, so two calls
+  at once can't lose a note.
+- **On disk, an s-expression:** the store reads the file when it starts
+  and writes all of it back after each change (`sexp/print`), so a
+  person can read and edit it, and the program can end at any time
+  without losing a note. A file that isn't there, or is empty, is no
+  notes; one that isn't a list of string pairs ends the store, rather
+  than be written over and lost. A write that fails is an error for the
+  call, and the store goes on as it was, the note not kept.
+- **No asking:** `remember` writes only the notes file, which the
+  program chose, so it doesn't ask `approve`, as `write_file` does.
+- **`recall` of a key with no note gives the keys there are** (or "there
+  are no notes yet"), so a model that guessed a key wrong can see the
+  right one without a tool to list them.
+- **The chat** keeps its notes in `~/.slight-chat-notes` (from
+  `%ENV`'s `HOME`, or the current directory without one), and, when
+  there are some, its system prompt names their keys, since a model
+  doesn't think to recall what it can't know it has.
+- **Tests:** 237: no notes, remembering, replacing, recalling a key that
+  isn't there, the file written, a second store on the same file, a
+  file that isn't notes, and one that can't be written. By hand: two
+  chats, the first remembering, the second, on the other target, told of
+  the key and recalling it.
+
+**D192. Agents asking agents: `agent/ask` and `tools/ask-agent`.** *(User
+asked for it, the last of D188's batches; the details are defaults.)*
+PLAN.md's "agents talk to each other in messages", in its simplest form:
+one agent as another's tool.
+- **`(agent/ask a text)`** gives `(:ok answer)` or `(:error reason)`, as
+  `http/request` gives a Result where `http/stream` gives messages. A
+  process of its own asks and waits, so the pieces and the calls it's
+  told of go nowhere else, and since it's `join` underneath it works in a
+  lambda, so in a tool. It monitors `a`, so an agent that has ended, or
+  ends while it answers, is `(:error (:ended a result))`, not a wait
+  for ever.
+- **`(tools/ask-agent name description a)`** makes a tool of an agent,
+  with one parameter, `question`, described as needing to be in full,
+  since the agent asked knows nothing of the conversation it's asked
+  from. Its name and description are the program's, since a program
+  may have several (an expert, a reviewer). It doesn't ask `approve`:
+  the agent asked has its own tools, which ask about what they do. The
+  agent asked keeps its own conversation, from one question to the next.
+- **Not guarded against:** an agent given itself as a tool waits for
+  itself, one turn at a time (D184). The docs say not to; a check would
+  need a tool to know whose it is.
+- **The chat:** with `CHAT_EXPERT` set to a model, an agent on it ("Answer
+  briefly and exactly.", no tools) is the chat's `ask_expert`. A variable,
+  not a third argument, so it needn't come with the URL.
+- **Tests:** 238, against a fake ollama: an answer, nothing else reaching
+  the caller, a model that isn't there, an agent that has ended, an agent
+  as a tool and one whose model isn't there, and the asked agent's
+  conversation going on. Also under seeds, `SLIGHT_GC_STRESS` and
+  valgrind. By hand: the chat with `CHAT_EXPERT`, on both targets, the
+  expert sent its own system prompt and no tools.
+
+**D193. A fetched page's links, and Escape to stop a command.** *(User:
+"keep the links in fetch, and do the escape to stop a running command";
+the details are defaults.)*
+- **Links** are `[text](url)`, as Markdown has them, which models read
+  well: D189 left them out, and a model can't follow what it can't see.
+  The URL is resolved against the page's own, which curl's `-w` now
+  gives too, `%{url_effective}`, after any redirects (the status, the
+  URL and the type a line each, since a type can have a space in it):
+  `//host/x` takes the page's scheme, `/x` its host, `?x` its path, and
+  `x` its directory; a `../` is left in, for the server to take out. A
+  link to a place on the same page (`#top`), or by a scheme a fetch
+  can't follow (`mailto:`, `javascript:`), or with no words (an image's)
+  is its text alone. A link's text is put on one line, since a heading
+  or a paragraph inside one (a card) would break it, with the space or
+  line breaks around it kept outside. `href` is found after a space, so
+  `data-href` isn't it, in any case, its value quoted either way or not,
+  its entities decoded. A new `<a>` ends an open one, as browsers do, and
+  the end of the page ends the last. `tools/html->text` takes the base
+  as a second argument, `""` leaving a URL as it's written. The cost is
+  context: a page of links is longer, and the 16 KB a model is given of
+  a result (D187) holds less of its text. Rejected: numbered links with
+  a list at the end (`[1]`), which a model has to look up; links only
+  when asked for, a second tool or a parameter, more for a model to
+  choose between.
+- **A command ends with the process that ran it.** `exec/run`'s process,
+  the one `connect` starts, monitors its caller (`^$$`) and ends when it
+  does, which closes the device and so kills the command's group (D185).
+  Before, a command whose caller was killed ran to its end, read by a
+  process no one would join. So killing a tool's call stops its command
+  or its fetch, whoever kills it.
+- **Escape, in the chat,** kills the calls the person has said `y` to in
+  this answer: the approve function now sends the asking call's pid with
+  what it's about to do, and the keyboard keeps those it let go ahead.
+  Killing one that has ended does nothing, so the list isn't trimmed as
+  calls end, only emptied by Escape and at the answer's end. The model is
+  told the call's result, `error: killed`, and answers on. Escape at a
+  y/n question is `n`. Escape with nothing running does nothing, and
+  isn't kept as a key typed during the answer. Rejected: Escape stopping
+  the whole answer, which would mean a way to stop a turn without ending
+  its agent; calls that weren't asked about (reading, searching, `calc`,
+  an agent asked) aren't stoppable, since they end on their own, or (an
+  agent asked) are stopped through their own tools.
+- **Tests:** 235, links: as written with no base, and resolved against
+  one (each kind of URL, the cases above, a card, an `<a>` left open);
+  then through curl, from the server in the program, a page reached by
+  a redirect, its relative links resolved against where it ended. 233,
+  a command (`exec sleep 900`, its pid in a file) whose caller is
+  killed, seen running by a second command and gone by a third; without
+  the monitor, the test hangs till its time limit. Also under seeds,
+  `SLIGHT_GC_STRESS` and valgrind. By hand: the chat in a
+  pseudo-terminal on both targets, against a stand-in for `/api/chat`:
+  Escape at the prompt (nothing), Escape while an approved `sleep` runs
+  (killed, the model told), two calls at once with the second answered
+  by Escape (`n`) and the first then stopped by Escape, and a quick
+  command after (unaffected).

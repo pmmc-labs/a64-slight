@@ -1,0 +1,73 @@
+; A command's input: (:write x ...), from any process, is rendered as
+; tty/write renders it and written to the command, kept till the pipe
+; takes it, and (:eof) closes it once that's written, while the output
+; still comes. A command that reads its input waits for it till then, and
+; one that doesn't is no worse for being written to: what it doesn't take
+; goes nowhere, as does what's written after (:eof).
+
+(defun run (out)
+    (recv
+        ((:open p)     (run out))
+        ((:line p s)   (run (cons s out)))
+        ((:eof p)      (run out))
+        ((:exited p n) (list n (reverse out)))))
+
+; All at once, then (:eof).
+(defun feed ()
+    (recv
+        ((:open p)
+            (send p (list :write "one" \n "two" \n))
+            (send p (list :write 3 " " :four))
+            (send p (list :eof))
+            (send p (list :write "after (:eof): nowhere"))
+            (run ()))))
+
+(pprint (join (connect :exec (list "cat") (feed))))
+
+; A line at a time, each back before the next is written.
+(defun echo (n out)
+    (recv
+        ((:open p)     (send p (list :write "line " n \n)) (echo n out))
+        ((:line p s)
+            (cond
+                ((== n 3) (send p (list :eof)) (echo n (cons s out)))
+                (#true    (send p (list :write "line " (+ n 1) \n)) (echo (+ n 1) (cons s out)))))
+        ((:eof p)      (echo n out))
+        ((:exited p s) (list s (reverse out)))))
+
+(pprint (join (connect :exec (list "cat") (echo 1 ()))))
+
+; From another process, and closed by a timer.
+(defun relay ()
+    (recv
+        ((:open p)
+            (fork (send p (list :write "from a friend" \n)))
+            (after 10 p (list :eof))
+            (run ()))))
+
+(pprint (join (connect :exec (list "cat") (relay))))
+
+; Written to, but it doesn't read: before its end and after.
+(defun deaf (out)
+    (recv
+        ((:open p)     (send p (list :write "unread" \n)) (deaf out))
+        ((:line p s)   (deaf (cons s out)))
+        ((:eof p)      (send p (list :write "after its end" \n)) (deaf out))
+        ((:exited p n) (list n (reverse out)))))
+
+(pprint (join (connect :exec (list "sh" "-c" "echo deaf") (deaf ()))))
+
+; More than a pipe holds, through cat and back, a chunk at a time.
+(defun pour (p i n)
+    (cond
+        ((== i n) (send p (list :eof)))
+        (#true    (send p (list :write (str-repeat "x" 999) \n)) (pour p (+ i 1) n))))
+
+(defun tally (lines bytes)
+    (recv
+        ((:open p)     (pour p 0 1000) (tally lines bytes))
+        ((:line p s)   (tally (+ lines 1) (+ bytes (str-len s))))
+        ((:eof p)      (tally lines bytes))
+        ((:exited p n) (list n lines bytes))))
+
+(pprint (join (connect :exec (list "cat") (tally 0 0))))
