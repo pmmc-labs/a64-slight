@@ -2813,3 +2813,64 @@ the details are defaults.)*
   (killed, the model told), two calls at once with the second answered
   by Escape (`n`) and the first then stopped by Escape, and a quick
   command after (unaffected).
+
+## Benchmarks
+
+**D194. Benchmarks: slight against C, Go, Erlang, Node, Perl and
+Python.** *(User, Oct 2026: on Claude's proposal, with Perl and Python
+added, "it will be interesting to see"; Go and Erlang on every core too,
+"to see what it gains"; everything committed, results included; phase 1
+first.)* `bench/`, `docs/BENCHMARKS.md`.
+- **Three questions:** how good the compiled code is (calls, integers,
+  allocating, floats); what the actor runtime's operations cost (a
+  message, a switch, a process started, a process waiting); and, later,
+  slight against itself over time, on programs (boids, `html->text`,
+  JSON, HTTP) that would mostly compare libraries across languages.
+- **Against:** C, the floor; Go, compiled, with goroutines; Erlang, the
+  same model as slight; Node, the everyday reference; Perl and Python.
+  Chez Scheme, a native Lisp, in phase 2. Not Rust (about C), Java (its
+  warming up makes it hard to time fairly), Elixir (Erlang's VM), or
+  more Lisps than Chez.
+- **Phase 1's programs:** `startup`; `fib`, `binary-trees` and `n-body`
+  in all seven; `ping-pong`, `thread-ring`, `spawn`, `idle-memory` and
+  `parallel-fib` in slight, Go and Erlang. Phase 2: Chez, more of the
+  Gabriel and Benchmarks Game programs, Savina's fan-in, and profiling
+  slight's worst ratios.
+- **Fair, and checked:** each program is written as its language usually
+  is, doing the same work, and prints only numbers (slight's last line is
+  its root's value), which the harness checks against what it works out
+  itself, or, for `n-body`, against C. slight's bend to slight (D84):
+  nothing was added to the language for them, and the ones that need
+  what it hasn't got (arrays that change, hash tables, bignums, regular
+  expressions) are left out. `binary-trees` runs at 18, not its usual 21,
+  for every language, since a bigger tree doesn't fit in one slight
+  process's 64 MB.
+- **Two programs changed** when their first numbers looked wrong, so as
+  to measure what they meant to: Erlang's `spawn` was quadratic (its
+  mailbox, holding up to a million messages on its heap, walked at every
+  collection: 36 s), so it keeps them off its heap, as Erlang's
+  documentation says for a long queue (1.3 s); and Go's `spawn` and
+  `idle-memory` sent on unbuffered channels, which kept every goroutine
+  alive and waiting, so their channels hold every answer, as a mailbox
+  would (15 s to 0.8, and 9.4 to 7.0). Erlang's `idle-memory` keeps its
+  queue on its heap, where it's faster (4 s, not 7).
+- **Measured** by `wait4`, from `bench/rusage.c`, a small process that
+  starts each program: on Linux a process forked from Python starts with
+  Python's 15 MB counted in its peak. Built once, checked once, then 5
+  timed runs taking turns (fewer, never under 3, for a slow one); the
+  median and the fastest, CPU time, peak memory. Go and Erlang run on one
+  core (`GOMAXPROCS=1`, `+S 1:1`) and with their defaults (`-mc`).
+  Erlang's process limit is raised only for `spawn` and `idle-memory`,
+  and only as far as they need: a limit of 4 million costs 47 MB from
+  the start.
+- **Results on the cloud machine** (x86-64; BENCHMARKS.md has them):
+  slight is the fastest at sending (106 ns a message), starting a process
+  (250 ns) and keeping one waiting (431 bytes, a sixth of Go's or
+  Erlang's); between Go and Erlang on calls and the ring; and slowest of
+  the compiled ones at allocating (`binary-trees`, 4.2 times Erlang) and
+  with floats (`n-body`, 52 times C, 1.3 Erlang). On 4 cores Go gains
+  3.7 times on `parallel-fib`, Erlang 2.7.
+- **Found, for later** (not changed here): `GC_MIN` lets each busy
+  process keep up to 256 KB of garbage, so `thread-ring`'s 503 take 266
+  MB; and one structure can't be much over 25 MB. The M2 Max's numbers,
+  natively on AArch64, are the reference, and are to come.

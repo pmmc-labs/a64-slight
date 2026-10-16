@@ -1,0 +1,16 @@
+; idle-memory: n processes, all waiting for a message at once, then each
+; asked for 1 and ending; the answers summed. Its peak memory, less
+; startup's, over n is what a waiting process costs (with its pid kept in
+; a list, as the other languages keep theirs).
+
+(defun idle () (recv ((:ping from) (send from 1))))
+
+(defun start (n acc)
+    (if (== n 0) acc (start (- n 1) (cons (fork (idle)) acc))))
+
+(defun gather (n acc)
+    (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
+
+(let n (string->int (car @ARGV)))
+(map (lambda (p) (send p (list :ping $$))) (start n ()))
+(gather n 0)

@@ -1,0 +1,94 @@
+; n-body, the Benchmarks Game's: floats. A body is a tuple #(x y z vx vy
+; vz mass), and the five a list. The arithmetic is done in the order the C
+; program does it, so the energies agree to the last digit printed. Prints
+; the energy before and after, times 10^9, rounded.
+
+(defun solar-mass () (* (* 4.0 PI) PI))
+(defun year () 365.24)
+
+(defun planet (x y z vx vy vz m)
+    (tuple x y z (* vx (year)) (* vy (year)) (* vz (year)) (* m (solar-mass))))
+
+(defun system ()
+    (list (tuple 0.0 0.0 0.0 0.0 0.0 0.0 (solar-mass))
+          (planet 4.84143144246472090 -1.16032004402742839 -0.103622044471123109
+                  0.00166007664274403694 0.00769901118419740425 -0.0000690460016972063023
+                  0.000954791938424326609)
+          (planet 8.34336671824457987 4.12479856412430479 -0.403523417114321381
+                  -0.00276742510726862411 0.00499852801234917238 0.0000230417297573763929
+                  0.000285885980666130812)
+          (planet 12.8943695621391310 -15.1111514016986312 -0.223307578892655734
+                  0.00296460137564761618 0.00237847173959480950 -0.0000296589568540237556
+                  0.0000436624404335156298)
+          (planet 15.3796971148509165 -25.9193146099879641 0.179258772950371181
+                  0.00268067772490389322 0.00162824170038242295 -0.0000951592254519715870
+                  0.0000515138902046611451)))
+
+; The sun moves so that the system's momentum is 0.
+(defun offset (bodies)
+    (let p (fold/l (list 0.0 0.0 0.0)
+               (lambda (acc b)
+                   (match (list acc b)
+                       (((px py pz) #(_ _ _ vx vy vz m))
+                           (list (+ px (* vx m)) (+ py (* vy m)) (+ pz (* vz m))))))
+               bodies))
+    (match (list p (car bodies))
+        (((px py pz) #(x y z _ _ _ m))
+            (cons (tuple x y z (- 0.0 (/ px (solar-mass))) (- 0.0 (/ py (solar-mass))) (- 0.0 (/ pz (solar-mass))) m)
+                  (cdr bodies)))))
+
+(defun advance (bodies dt)
+    (map (lambda (b) (move b dt)) (interact bodies dt)))
+
+(defun move (b dt)
+    (match b
+        (#(x y z vx vy vz m)
+            (tuple (+ x (* dt vx)) (+ y (* dt vy)) (+ z (* dt vz)) vx vy vz m))))
+
+; Each body with each after it, in turn, as the C program's two loops.
+(defun interact (bodies dt)
+    (match bodies
+        (() ())
+        ((b & rest)
+            (match (pull b rest dt ())
+                ((moved others) (cons moved (interact others dt)))))))
+
+; b and each of others pull on each other: b as it ends up, and the others.
+(defun pull (b others dt done)
+    (match (list b others)
+        ((_ ()) (list b (reverse done)))
+        ((#(x y z vx vy vz m) (#(ox oy oz ovx ovy ovz om) & rest))
+            (let dx   (- x ox))
+            (let dy   (- y oy))
+            (let dz   (- z oz))
+            (let dist (sqrt (+ (+ (* dx dx) (* dy dy)) (* dz dz))))
+            (let mag  (/ dt (* (* dist dist) dist)))
+            (pull (tuple x y z (- vx (* (* dx om) mag)) (- vy (* (* dy om) mag)) (- vz (* (* dz om) mag)) m)
+                  rest dt
+                  (cons (tuple ox oy oz (+ ovx (* (* dx m) mag)) (+ ovy (* (* dy m) mag)) (+ ovz (* (* dz m) mag)) om) done)))))
+
+(defun energy (bodies e)
+    (match bodies
+        (() e)
+        ((b & rest)
+            (match b
+                (#(_ _ _ vx vy vz m)
+                    (energy rest (potential b rest (+ e (* (* 0.5 m) (+ (+ (* vx vx) (* vy vy)) (* vz vz)))))))))))
+
+(defun potential (b others e)
+    (match (list b others)
+        ((_ ()) e)
+        ((#(x y z _ _ _ m) (#(ox oy oz _ _ _ om) & rest))
+            (let dx (- x ox))
+            (let dy (- y oy))
+            (let dz (- z oz))
+            (potential b rest (- e (/ (* m om) (sqrt (+ (+ (* dx dx) (* dy dy)) (* dz dz)))))))))
+
+(defun steps (bodies n)
+    (if (== n 0) bodies (steps (advance bodies 0.01) (- n 1))))
+
+(defun shown (e) (floor (+ (* e 1000000000.0) 0.5)))
+
+(let start (offset (system)))
+(tty/write (shown (energy start 0.0)) \n)
+(shown (energy (steps start (string->int (car @ARGV))) 0.0))

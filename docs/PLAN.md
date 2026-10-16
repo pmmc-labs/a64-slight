@@ -614,6 +614,17 @@ them:
   register (D57), captured values read from the closure (D79), denser
   lists (CDR-coding, VLists: D23), reference counting with reuse (D24).
 
+### Benchmarks (phase 1 done, Oct 2026)
+
+slight against C, Go, Erlang, Node, Perl and Python (D194,
+`docs/BENCHMARKS.md`, `make bench`). Phase 1: `fib`, `binary-trees`,
+`n-body`, `ping-pong`, `thread-ring`, `spawn`, `idle-memory` and
+`parallel-fib`, on the cloud machine; the M2 Max's run, the reference,
+to come. Phase 2: Chez Scheme; `tak`, `nqueens`, `deriv`,
+`spectral-norm` and Savina's fan-in; and profiling slight's worst
+ratios: allocating and collecting (`binary-trees`), floats (`n-body`,
+with "Faster floats" below), and a busy process's garbage (`GC_MIN`).
+
 ### Later: the rest of the October 2026 list
 
 The other changes from that list (above, "After 13"), for later, before
