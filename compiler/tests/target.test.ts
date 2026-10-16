@@ -63,8 +63,9 @@ test('x86-64: a program includes its header, and a frame keeps rsp 16-aligned', 
     const asm = x86('(defun f (a b c) (+ a (+ b c))) (f 1 2 3)');
     assert.match(asm, /#include "asm_x86_64.h"/);
     assert.match(asm, /^FUNC slight_main$/m);
-    // f: rbp pushed, then slots a multiple of 16 (a, b, c and two waiting operands)
-    assert.match(asm, /fn_f: {4}\/\/ f\n {4}push rbp\n {4}mov {2}rbp, rsp\n {4}sub {2}rsp, 48\n/);
+    // f: rbp pushed, then slots a multiple of 16 (a, b and c, rounded up;
+    // the operands, all locals, wait nowhere: D197)
+    assert.match(asm, /fn_f: {4}\/\/ f\n {4}push rbp\n {4}mov {2}rbp, rsp\n {4}sub {2}rsp, 32\n/);
     assert.match(asm, /mov {2}qword ptr \[rsp \+ 16\], rdx {4}\/\/ c/);
 });
 

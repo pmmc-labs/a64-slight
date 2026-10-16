@@ -11,7 +11,7 @@
 // addressed up from rsp, so rsp is 16-aligned for every call, as System V
 // requires: nothing checks it, and a mistake crashes deep in libc.
 
-import { comment, placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
+import { comment, NOT, placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
 import { tupleElement } from './values.ts';
 
 const ARGS = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9', 'r10', 'r11'];
@@ -34,6 +34,12 @@ function loadWord(reg: string, word: bigint): string {
         ? `    mov  ${reg}, ${w}`
         : `    movabs ${reg}, 0x${BigInt.asUintN(64, w).toString(16)}`;
 }
+
+// Whether a word fits an instruction's 32 bits, which it sign-extends.
+const fits32 = (word: bigint): boolean => {
+    const w = BigInt.asIntN(64, word);
+    return w >= -0x80000000n && w <= 0x7fffffffn;
+};
 
 // The tag of rax, in edx.
 const TAG: Code = ['    mov  edx, eax', '    and  edx, RT_TAG_MASK'];
@@ -94,6 +100,7 @@ function move(dst: string, op: Operand): Code {
     switch (op.t) {
         case 'slot':     return `    mov  ${dst}, ${slot(op.si)}`;
         case 'imm':      return `    mov  ${dst}, ${op.v}`;
+        case 'word':     return loadWord(dst, op.v);
         case 'addr':     return `    lea  ${dst}, [rip + ${op.label}]`;
         case 'frame':    return `    mov  ${dst}, rsp`;
         case 'slotAddr': return `    lea  ${dst}, [rsp + ${8 * op.si}]`;
@@ -171,6 +178,8 @@ export const X86_64: Target = {
     storeSlot: (si, text) => `    mov  ${slot(si)}, rax${comment(text)}`,
     copySlot: (from, to, text) => [`    mov  r11, ${slot(from)}${comment(text)}`, `    mov  ${slot(to)}, r11`],
     loadLeft: (si) => `    mov  rcx, ${slot(si)}`,
+    load: (dst, op) => move(dst === 'acc' ? 'rax' : 'rcx', op),
+    accToLeft: '    mov  rcx, rax',
 
     testBool: (ifFalse, notBool) => [
         '    cmp  rax, RT_FALSE',
@@ -189,6 +198,12 @@ export const X86_64: Target = {
         return [compare, `    jne  ${label}`];
     },
     branchIfSame: (label) => ['    cmp  rcx, rax', `    je   ${label}`],
+    branchUnlessCompare: (cond, label) => ['    cmp  rcx, rax', `    j${CC[NOT[cond]].padEnd(3)} ${label}`],
+    branchUnlessCompareWord: (cond, word, label) => [
+        fits32(word) ? `    cmp  rax, ${BigInt.asIntN(64, word)}` : [loadWord('rdx', word), '    cmp  rax, rdx'],
+        `    j${CC[NOT[cond]].padEnd(3)} ${label}`,
+    ],
+    branchIfFalse: (label) => ['    cmp  rax, RT_FALSE', `    je   ${label}`],
     branchUnlessBox: (header, label) => [
         TAG,
         '    cmp  edx, RT_TAG_BOXED',
@@ -206,6 +221,12 @@ export const X86_64: Target = {
     notBool: ['    cmp  rax, RT_TRUE', boolIf('ne')],
 
     arith: (op, overflow) => ARITH[op](overflow),
+    arithWord: (op, word, overflow) => [
+        fits32(word)
+            ? `    ${op === '+' ? 'add ' : 'sub '} rax, ${BigInt.asIntN(64, word)}`
+            : [loadWord('rdx', word), `    ${op === '+' ? 'add ' : 'sub '} rax, rdx`],
+        `    jo   ${overflow}`,
+    ],
     divide: (op, zero, overflow) => DIVISION[op](zero, overflow),
 
     cxr: (step) => (step === 'a' ? '    mov  rax, qword ptr [rax - 1]    // car' : '    mov  rax, qword ptr [rax + 7]    // cdr'),

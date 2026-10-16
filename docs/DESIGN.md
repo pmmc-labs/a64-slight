@@ -990,8 +990,13 @@ that's just a walk over every function.
    nothing from the compiler: `recv` already passes its function's
    arguments to the runtime, to restart it after waiting. A test that
    can only be a boolean (`cons?`, `nil?`, `eq?` with an immediate
-   literal, and what `and` becomes) branches without making one, which
-   is what keeps a pattern's tests cheap (D168).
+   literal, a comparison, and what `and` becomes) branches without making
+   one, which is what keeps a pattern's tests cheap (D168, D197). An
+   operand that needs no code (a local, or a literal integer, `()`,
+   `#true` or `#false`) is read straight into its register when it's
+   wanted, rather than waiting in a slot; and an integer literal added,
+   subtracted or compared with is an immediate where the target has one
+   (D197).
 9. **Emit data**: string literals, quoted constants, static closures, the
    symbol name table.
 

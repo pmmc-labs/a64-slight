@@ -30,17 +30,22 @@ export function comment(text: string | undefined): string {
 // The conditions a comparison can ask for, of left against the accumulator.
 export type Cond = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge';
 
+// Each condition's opposite, for a branch taken when it doesn't hold.
+export const NOT: Readonly<Record<Cond, Cond>> = { eq: 'ne', ne: 'eq', lt: 'ge', le: 'gt', gt: 'le', ge: 'lt' };
+
 // What a call passes, in order: the accumulator, the left operand, the
-// current process, a frame slot, an assembler constant (a number or an
-// rt.h name), the address of a label, the frame's slots (a receive
-// function's arguments, for rt_recv), the address of slot si, or the frame
-// pointer (for rt_preempt, to find the frames below).
+// current process, a frame slot, an assembler constant (a small number or
+// an rt.h name), a word (any 64 bits: a literal's), the address of a
+// label, the frame's slots (a receive function's arguments, for rt_recv),
+// the address of slot si, or the frame pointer (for rt_preempt, to find
+// the frames below).
 export type Operand =
     | { readonly t: 'acc' }
     | { readonly t: 'left' }
     | { readonly t: 'proc' }
     | { readonly t: 'slot'; readonly si: number }
     | { readonly t: 'imm'; readonly v: string }
+    | { readonly t: 'word'; readonly v: bigint }
     | { readonly t: 'addr'; readonly label: string }
     | { readonly t: 'frame' }
     | { readonly t: 'slotAddr'; readonly si: number }
@@ -53,6 +58,7 @@ export const FRAME: Operand = { t: 'frame' };
 export const FP: Operand    = { t: 'fp' };
 export const inSlot   = (si: number): Operand => ({ t: 'slot', si });
 export const imm      = (v: string | number): Operand => ({ t: 'imm', v: `${v}` });
+export const word     = (v: bigint): Operand => ({ t: 'word', v });
 export const addr     = (label: string): Operand => ({ t: 'addr', label });
 export const slotAddr = (si: number): Operand => ({ t: 'slotAddr', si });
 
@@ -98,6 +104,10 @@ export type Target = {
     readonly copySlot: (from: number, to: number, note: string) => Code;
     // The left operand, from a slot.
     readonly loadLeft: (si: number) => Code;
+    // Into the accumulator or the left operand: a slot, an imm or a word.
+    readonly load: (dst: 'acc' | 'left', op: Operand) => Code;
+    // The accumulator into the left operand, keeping both.
+    readonly accToLeft: Code;
 
     // Tests that branch, leaving the accumulator as it was: to ifFalse on
     // #false and to notBool on anything but #true; unless an integer;
@@ -115,6 +125,12 @@ export type Target = {
     readonly branchUnlessNil: (label: string) => Code;
     readonly branchUnlessIs: (word: bigint, label: string) => Code;
     readonly branchIfSame: (label: string) => Code;
+    // A comparison as a branch, taken unless it holds: of the left operand
+    // with the accumulator, or of the accumulator with a word (both
+    // integers); and to label if the accumulator, a boolean, is #false.
+    readonly branchUnlessCompare: (cond: Cond, label: string) => Code;
+    readonly branchUnlessCompareWord: (cond: Cond, word: bigint, label: string) => Code;
+    readonly branchIfFalse: (label: string) => Code;
     // Unless the accumulator is a box with this header: a tuple of so many
     // elements, the type and the length in one compare (D178).
     readonly branchUnlessBox: (header: bigint, label: string) => Code;
@@ -130,6 +146,9 @@ export type Target = {
     // branching to overflow when the result doesn't fit; div and %,
     // branching to zero when the accumulator is 0 (and div to overflow).
     readonly arith: (op: '+' | '-' | '*', overflow: string) => Code;
+    // The accumulator + or - a word (both integers), into the accumulator,
+    // branching to overflow when it doesn't fit. The left operand may go.
+    readonly arithWord: (op: '+' | '-', word: bigint, overflow: string) => Code;
     readonly divide: (op: 'div' | '%', zero: string, overflow: string) => Code;
 
     // The accumulator's car or cdr (it's a cons), for car, cdr and c[ad]r;

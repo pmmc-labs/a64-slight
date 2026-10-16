@@ -2941,3 +2941,50 @@ for now, for the memory it costs.)*
   have made room.
 - **Tests:** 240: 38 MB kept, then 48 MB of garbage, which failed before
   and passes now, on both targets.
+
+**D197. Better code for calls, arithmetic and tests.** *(User, Oct 2026:
+the third of phase 2's fixes, D194, in the order Claude proposed.)* Each
+value used to wait in a frame slot, and each integer operation checked
+both operands, a constant's too: fib's recursive path was 61
+instructions on AArch64. Now, in `codegen.ts`, with new shapes from each
+target:
+- **A simple operand waits nowhere.** A local (in its slot, which
+  nothing changes), or a literal integer, `()`, `#true`, `#false` or
+  quoted symbol (a word), is read straight into the register it's wanted
+  in, when it's wanted: a binary operation's left or right operand, a
+  call's argument (a compiled function's or a C builtin's). The last
+  argument that does need working out stays in the accumulator, and the
+  call's register moves take it from there. A left operand that's
+  simple is read after the right is worked out; it has no effects, so
+  the order can't be seen. `div` and `%`, which check each operand as it
+  comes, read only a right one late, so a left that isn't an integer
+  still faults before the right is worked out.
+- **An integer literal is an immediate** for `+`, `-` and the
+  comparisons, so only the other operand is checked: `adds x0, x0, #2`,
+  turned round for a negative one, or a word in a register past twelve
+  bits (32 on x86-64). Out of line it's the runtime's right operand, as
+  before. `*` keeps its two-register path, which untags one side.
+- **A comparison as a test branches**: a compare and a branch to the
+  next clause, with no `#true` or `#false` made and tested; a literal on
+  the left is turned round (`(< 2 n)` is `(> n 2)`). Out of line,
+  `rt_compare` gives a boolean (or faults), which is branched on.
+- **A cond whose last test is `#true`**, as an `if`'s is, has no jump to
+  the no-clause fault, and its last body runs on into the end.
+- **Measured** (instructions, on the cloud machine): fib 30, 131 million
+  to 79 (40 per cent fewer), and fib 38's time 0.44 s to 0.36 (medians
+  of ten, interleaved; the stores and loads taken out were cheap ones);
+  `binary-trees 14`, 8.5 per cent fewer; `n-body`, 3.3, its time being in
+  float arithmetic in C; `ping-pong`, 1.3, its time being in the
+  runtime. fib's path on AArch64 is 39 instructions.
+- **Turned down: the reduction count in a register.** It would save two
+  of those 39 on AArch64 and none on x86-64, where it's one subtraction
+  from memory already; but the runtime reads and writes the count in
+  four places (refilling it, `rt_heap_grow` cutting a slice short for a
+  collection, which C builtins reach too, `SLIGHT_GC_STRESS`'s counting,
+  and `:system`), which would all have to go through each process's
+  saved registers.
+- **Tests:** 241: each comparison as a test agreeing with it as a value,
+  on integers, floats, mixed and NaN, with literals on either side, past
+  an immediate's reach on each target, and near the edges of 63 bits;
+  `+` and `-` with literals on integers and floats. The unit tests check
+  the new shapes, and that a simple operand takes no slot.
