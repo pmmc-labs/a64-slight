@@ -143,6 +143,36 @@ Two things the Mac shows that Linux didn't:
   allocator keeping the collector's freed 1 MB chunks resident, and its
   16 KB pages; not checked yet.
 
+### Where the time goes (phase 2's profiles)
+
+Instructions counted by callgrind, on x86-64 (counts don't depend on the
+machine's noise; the generated code is alike on both targets):
+
+- **`binary-trees 14`:** collecting is about 60 per cent (`forward`,
+  `collect`, and the copying). The collector copies everything live at
+  each collection, and collects when the heap reaches twice what was
+  live after the last one, so the long-lived tree is copied over and
+  over: about a byte copied for each byte allocated. Building tuples is
+  13 per cent: `(tuple a b)` makes a list of `a` and `b` and calls
+  `rt_tuple`, which counts it and copies it, so each node allocates 64
+  bytes, half of them garbage at once. A two-element tuple is 32 bytes
+  (allocations are rounded to 16), a cons 16. The program's own code is
+  about a quarter.
+- **`fib 25`:** all in the program's own code, 48 instructions a call
+  (about 61 on AArch64's longer path): every value goes through the
+  stack, every arithmetic operation tag-checks both operands, a
+  constant's included, `(< n 2)` makes `#true` or `#false` and then tests
+  it twice, and the reduction count is a load, a subtraction and a store.
+- **`n-body 20000`:** float arithmetic in C (`rt_add`, `rt_mul`...), 27
+  per cent; boxing each result (`rt_new_float`), 14; collecting, 11;
+  building tuples (as above), 8; the program's own code, the rest.
+
+Two more things the experiments showed: a process with more than 32 MB
+live never collects before the 64 MB cap (its next collection would be
+at twice what's live), so it fails there even if most of its heap is
+garbage; and letting the heap grow three times what's live, not twice,
+makes `binary-trees` about 30 per cent faster.
+
 ### The cloud machine, x86-64 (Oct 2026)
 
 `bench/results/2026-10-16-0554-linux-intel-xeon-processor-2-10ghz.md`:
