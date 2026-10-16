@@ -2993,3 +2993,42 @@ target:
   their output, at 7 or at 100, but the three that fill a heap with tens
   of MB of live data (059, 130, 240), which can't finish under stress,
   each collection copying all of it.
+
+**D198. Float arithmetic in the compiled code.** *(User, Oct 2026: the
+fourth of phase 2's fixes, D194, in the order Claude proposed.)*
+- **Before:** `+`, `-` and `*` on anything but two integers called
+  `rt_add`, `rt_sub` or `rt_mul`, and `/` always called `rt_divide`: a
+  call into C, a conversion, and `rt_new_float` through `rt_alloc`.
+  `n-body` spent 27 per cent of its time in those calls and 14 in
+  `rt_new_float`.
+- **Now** the integers' path is as it was, and the out-of-line path
+  first tries floats: two float boxes (each told by its tag, then its
+  whole header word, as a tuple pattern's test does, D178), or a float
+  box when the right operand is an integer literal (made a double as C's
+  `(double)` makes it); then the result's box allocated inline, the IEEE
+  operation done in `d0` or `xmm0`, and the double stored. Anything else
+  (an integer operand that isn't a literal, a string) calls C as before.
+  `/` has no integer path, so its float path is inline: two floats, or a
+  float and a literal integer that isn't 0, the divisor checked for
+  either zero first; anything else, and a zero, is `rt_divide`'s, which
+  faults on the zero as it did.
+- **To the bit:** the same IEEE operation on the same doubles, with no
+  multiply-add fused. Boids flies the same flight, byte for byte.
+- `*` got an integer-literal path too (the literal in a register, and
+  only the other operand checked), which is what lets a float times a
+  literal take the float path.
+- **Measured** on the cloud machine: `n-body 20000`, 531 million
+  instructions to 378 million (29 per cent fewer), and `n-body 1000000`
+  2.4 s to 1.25; boids (60 birds, 30 frames), 4.4 per cent fewer, its
+  time being mostly in messages.
+- **Not done:** comparisons on floats still ask `rt_compare` (with a NaN
+  each target's branches differ: AArch64's condition codes, x86's parity
+  flag); `sqrt` and the other math builtins are still C; and floats are
+  still boxed, each result a 16-byte allocation. Unboxed floats (PLAN.md's
+  "Faster floats") are still a proposal of their own.
+- **Tests:** 242: the four operations on floats, signs, zeros,
+  infinities and NaN, with literals, and long runs that collect, the
+  expected output from Python's IEEE arithmetic; and what still goes to
+  C, which must agree: integer operands that aren't literals, an integer
+  divided by one, zero divisors and a string, with their faults. Also
+  under `SLIGHT_GC_STRESS`, with boids. Unit tests for the shapes.

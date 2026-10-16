@@ -5,8 +5,8 @@
 // D47).
 // Frame slots are addressed up from sp, under x29/x30.
 
-import { comment, NOT, placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
-import { tupleElement } from './values.ts';
+import { comment, NOT, placeArgs, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
+import { FLOAT_HEADER, FLOAT_VALUE, tupleElement } from './values.ts';
 
 const ARGS = ['x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'];
 
@@ -99,6 +99,27 @@ function compareWord(word: bigint): Code {
     if (w < 0n && w >= -4095n) return `    cmn  x0, #${-w}`;
     return [loadWord('x2', word), '    cmp  x0, x2'];
 }
+
+// Floats: whether reg is a float's box, by its tag and then its header,
+// which fits cmp's twelve bits; and the box just allocated (x2) made to
+// hold d0, into x0. Only d0 and d1, which nothing keeps across a call.
+const FLOAT_OPS: Readonly<Record<FloatOp, string>> = { '+': 'fadd', '-': 'fsub', '*': 'fmul', '/': 'fdiv' };
+
+const isFloat = (reg: string, label: string): Code => [
+    `    and  x16, ${reg}, #RT_TAG_MASK`,
+    '    cmp  x16, #RT_TAG_BOXED',
+    `    b.ne ${label}`,
+    `    ldur x16, [${reg}, #-RT_TAG_BOXED]`,
+    `    cmp  x16, #${FLOAT_HEADER}`,
+    `    b.ne ${label}`,
+];
+
+const BOX_D0: Code = [
+    `    mov  x3, #${FLOAT_HEADER}`,
+    '    str  x3, [x2]',
+    '    str  d0, [x2, #8]',
+    '    orr  x0, x2, #RT_TAG_BOXED',
+];
 
 // dst = src + n, for any n.
 function addImm(dst: string, src: string, n: number, scratch: string): Code {
@@ -236,6 +257,24 @@ export const AARCH64: Target = {
     },
     compareBool: (cond: Cond) => ['    cmp  x1, x0', boolIf(cond)],
     notBool: ['    cmp  x0, #RT_TRUE', boolIf('ne')],
+
+    branchUnlessFloat: (label) => isFloat('x0', label),
+    branchUnlessFloats: (label) => [isFloat('x0', label), isFloat('x1', label)],
+    branchIfZeroFloat: (label) => [`    ldur d1, [x0, #${FLOAT_VALUE}]`, '    fcmp d1, #0.0', `    b.eq ${label}`],
+    floatArith: (op) => [
+        `    ldur d0, [x1, #${FLOAT_VALUE}]`,
+        `    ldur d1, [x0, #${FLOAT_VALUE}]`,
+        `    ${FLOAT_OPS[op]} d0, d0, d1`,
+        BOX_D0,
+    ],
+    // n to a double as C's (double) makes it, rounding to nearest
+    floatArithInt: (op, n) => [
+        `    ldur d0, [x0, #${FLOAT_VALUE}]`,
+        loadWord('x16', n),
+        '    scvtf d1, x16',
+        `    ${FLOAT_OPS[op]} d0, d0, d1`,
+        BOX_D0,
+    ],
 
     arith: (op, overflow) => ARITH[op](overflow),
     // adds or subs with the word as an immediate when it fits twelve bits,

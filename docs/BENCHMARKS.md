@@ -233,10 +233,14 @@ are instructions on the cloud machine, which don't depend on its noise:
   as branches. fib 40 per cent fewer (its path on AArch64 39
   instructions, not 61), and 20 per cent less time; `binary-trees` 8.5
   per cent fewer.
+- **Float arithmetic inline** (D198): `+ - * /` on floats in the compiled
+  code, the result's box allocated inline, bit for bit what C made.
+  `n-body` 29 per cent fewer, and half the time (2.4 s to 1.25); boids
+  4.4 per cent fewer.
 
 Together: `binary-trees 14` takes half the instructions it did (1,590
-million to 789), fib 30 40 per cent fewer (131 to 79), `n-body 20000` 17
-per cent fewer (642 to 531). The cloud machine's times are too noisy to
+million to 789), fib 30 40 per cent fewer (131 to 79), `n-body 20000` 41
+per cent fewer (642 to 378). The cloud machine's times are too noisy to
 say more than that `binary-trees 18` went from 3.8 s to 2 or so; the
 M2's run after them is to come.
 
@@ -248,7 +252,8 @@ M2's run after them is to come.
   copies everything live at each collection, is the rest: a
   generational one is next on the list.
 - **Floats** (`n-body`): PLAN.md's "Faster floats", with this as a second
-  benchmark beside boids.
+  benchmark beside boids. Their arithmetic is inline now (D198); each
+  result is still a 16-byte box, and comparisons and `sqrt` are still C.
 - **A busy process's garbage:** a heap under 256 KB (`GC_MIN`) is never
   collected, so each of `thread-ring`'s 503 processes keeps up to that
   much of its messages' chunks: 266 MB, where Erlang needs 37.

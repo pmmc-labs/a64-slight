@@ -867,8 +867,12 @@ the whole run.
 ### Builtins in C
 
 Arithmetic and comparisons on two integers are inline: one `orr` and one
-`tst` check both tag bits, and anything else branches out of line to the
-runtime (`rt_add`, `rt_compare`, ...), which promotes to float or faults.
+`tst` check both tag bits, and anything else branches out of line. There,
+`+`, `-` and `*` on two floats, or on a float and a literal integer, are
+done inline too, the result's box allocated inline (D198), and so is `/`
+(whose divisor is checked for zero first); anything else goes to the
+runtime (`rt_add`, `rt_divide`, `rt_compare`, ...), which promotes to
+float or faults. Comparisons on floats are the runtime's.
 
 A builtin written in C is an ordinary C function (AAPCS64, or System V
 on x86-64). The compiler

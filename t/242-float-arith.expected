@@ -1,0 +1,20 @@
+(0.30000000000000004 -0.1 0.020000000000000004 0.5)
+(-0.75 3.75 -3.375 -0.6666666666666666)
+(1e+200 1e+200 2.9999999999999996e+300 3.333333333333333e+99)
+(1.0 -1.0 -0.0 -0.0)
+(inf inf inf inf)
+(inf nan inf nan)
+(nan nan nan nan)
+(3.5 -0.5 5.0 0.625 -4.5 2500000.0 0.8333333333333334)
+(1.0 -3.0 -0.0 -0.0 -7.0 -0.0 -0.0)
+(100000.0 1.1051653926032188)
+(5.5 7.5 9.5 3.5 2.0 2.0)
+fault in #<pid 2>: division by zero (/ at t/242-float-arith.slight:31:27)
+div-by-zero
+fault in #<pid 3>: division by zero (/ at t/242-float-arith.slight:32:27)
+div-by-zero
+fault in #<pid 4>: division by zero (/ at t/242-float-arith.slight:33:27)
+div-by-zero
+fault in #<pid 5>: not a number: "a" (+ at t/242-float-arith.slight:34:27)
+not-a-number
+done

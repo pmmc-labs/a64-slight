@@ -624,9 +624,10 @@ slight against C, Go, Erlang, Node, Perl and Python (D194,
 ratios: allocating and collecting (`binary-trees`), floats (`n-body`,
 with "Faster floats" below), and a busy process's garbage (`GC_MIN`).
 Done so far: tuples built in place (D195), collecting before the heap's
-cap (D196), and better code for calls, arithmetic and tests (D197).
-Next, in the order agreed: float arithmetic inline, then a generational
-collector (a design note first); the other programs and Chez after.
+cap (D196), better code for calls, arithmetic and tests (D197), and
+float arithmetic inline (D198). Next, in the order agreed: a
+generational collector (a design note first); the other programs and
+Chez after.
 
 ### Later: the rest of the October 2026 list
 
@@ -687,7 +688,8 @@ with Stevan first.
   like boids' round-up (D179), and a `barrier` in `lib/ds.slight` is the
   likely first one.
 - **Faster floats.** Boids spends about a sixth of its time on float
-  arithmetic in C and the boxes it makes. The fix that helps every
+  arithmetic in C and the boxes it makes. (The arithmetic is inline now,
+  D198, and the boxes allocated inline; the boxes themselves remain.) The fix that helps every
   program is in the representation: floats that need no box (NaN-boxing,
   or a tagged short float), or a compiler that keeps a float unboxed
   within a function. Either is a proposal of its own; boids is the

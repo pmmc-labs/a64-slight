@@ -30,6 +30,9 @@ export function comment(text: string | undefined): string {
 // The conditions a comparison can ask for, of left against the accumulator.
 export type Cond = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge';
 
+// The float operations compiled code does itself (D198).
+export type FloatOp = '+' | '-' | '*' | '/';
+
 // Each condition's opposite, for a branch taken when it doesn't hold.
 export const NOT: Readonly<Record<Cond, Cond>> = { eq: 'ne', ne: 'eq', lt: 'ge', le: 'gt', gt: 'le', ge: 'lt' };
 
@@ -149,6 +152,17 @@ export type Target = {
     // The accumulator + or - a word (both integers), into the accumulator,
     // branching to overflow when it doesn't fit. The left operand may go.
     readonly arithWord: (op: '+' | '-', word: bigint, overflow: string) => Code;
+
+    // Floats (D198): branch unless the accumulator is a float's box, or it
+    // and the left operand both are; branch if the accumulator's float is
+    // zero (either sign; a NaN may branch too); and, into the box just
+    // allocated, which goes to the accumulator, the left operand's float
+    // op the accumulator's, or the accumulator's op an integer n.
+    readonly branchUnlessFloat: (label: string) => Code;
+    readonly branchUnlessFloats: (label: string) => Code;
+    readonly branchIfZeroFloat: (label: string) => Code;
+    readonly floatArith: (op: FloatOp) => Code;
+    readonly floatArithInt: (op: FloatOp, n: bigint) => Code;
     readonly divide: (op: 'div' | '%', zero: string, overflow: string) => Code;
 
     // The accumulator's car or cdr (it's a cons), for car, cdr and c[ad]r;

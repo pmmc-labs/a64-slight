@@ -12,7 +12,7 @@ symbols, lists (a heap per process of chunks, capped at 64 MB, and
 collected when a receive function waits for a message, or at a
 function's entry, with the frames as roots: D166), strings, closures
 (`lambda`, functions and builtins as values, `apply`), arithmetic
-(integers inline; floats and mixed in C), structural `eq?`, type
+(integers inline; floats inline too, D198, and mixed in C), structural `eq?`, type
 predicates, the string and math builtins (C, in `runtime/`), `cond`,
 `let`, `do`, `pprint`, `tty/write`, and top-level `defun`s with calls and
 tail calls (arguments in `x0`–`x7`; stack and reduction checks at every
@@ -121,8 +121,8 @@ Benchmarks, phase 1 (D194, `docs/BENCHMARKS.md`): slight against C,
 Go, Erlang, Node, Perl and Python, on the cloud machine and the M2 Max
 (the reference); phase 2, fixing what the profiles found: tuples built
 in place (D195, golden test 239), collecting before the heap's cap
-(D196, 240), and better code for calls, arithmetic and tests (D197,
-241). **Next:** to settle with
+(D196, 240), better code for calls, arithmetic and tests (D197,
+241), and float arithmetic inline (D198, 242). **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan

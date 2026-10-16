@@ -8,7 +8,8 @@
 // code to work out (a local, or a literal integer, (), #true or #false)
 // doesn't wait: it's loaded where it's wanted when it's wanted; and an
 // integer literal added, subtracted or compared with is an immediate when
-// the target has one (D197).
+// the target has one (D197). + - * and / on floats are done inline, out
+// of the integers' way, with the result's box allocated inline (D198).
 //
 // Functions take up to eight arguments in registers and return their result
 // in the accumulator. The registers are the platform C calling convention's
@@ -44,7 +45,7 @@ import { isReceiveBody, stateFunctions } from './classify.ts';
 import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
 import { AARCH64 } from './aarch64.ts';
-import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, word, type Code, type Cond, type Operand, type Target } from './target.ts';
+import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, word, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
 
 // The locals in scope, innermost first: an association list from name to
 // frame slot.
@@ -519,19 +520,23 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (name === 'cons') return compileCons(x, args, operand, st);
     if (name === 'list') return compileList(x, args, operand, st);
     if (name === 'tuple') return compileTuple(x, args, operand, st);
+    if (name === '/') return compileDivide(x, args, operand, st);
     const path = cxrPath(name);
     if (path !== null) return compileCxr(x, name, path, args, operand, st, !known);
     const arith = ARITH[name];
     if (arith !== undefined) {
         const op = name as '+' | '-' | '*';
-        const withWord = op === '*' ? undefined : (s: St, w: bigint): [Code, St] => {
+        const float = (s: St, notFloats: string, done: string, n?: bigint): [Code, St] => floatPath(x, op, notFloats, done, n, s);
+        // * has no immediate form, since it untags one side: the literal
+        // goes in a register, but still only the other operand is checked
+        const withWord = (s: St, w: bigint): [Code, St] => {
             const [overflow, s1] = faultLabel(s, 'RT_FAULT_OVERFLOW', name, x.pos);
-            return [s.t.arithWord(op, w, overflow), s1];
+            return [op === '*' ? [s.t.accToLeft, s.t.load('acc', word(w)), s.t.arith('*', overflow)] : s.t.arithWord(op, w, overflow), s1];
         };
         return compileNumeric(x, name, args, operand, st, arith, [], (s) => {
             const [overflow, s1] = faultLabel(s, 'RT_FAULT_OVERFLOW', name, x.pos);
             return [s.t.arith(op, overflow), s1];
-        }, withWord);
+        }, withWord, float);
     }
     const cmp = COMPARE[name];
     if (cmp !== undefined) {
@@ -843,7 +848,7 @@ function builtinWrapper(x: Sym, st: St): [string, St] {
 }
 
 function builtinArity(name: string): number | null {
-    if (name in ARITH || name in COMPARE || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply'].includes(name)) return 2;
+    if (name in ARITH || name in COMPARE || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply', '/'].includes(name)) return 2;
     if (PREDICATES.includes(name) || name === 'pprint' || cxrPath(name) !== null) return 1;
     const c = C_BUILTINS[name];
     return c !== undefined && !c.variadic && c.min === c.max ? c.min : null;
@@ -982,7 +987,6 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'tuple/slice':    fixed('rt_tuple_slice', 3),
     'list->tuple':    fixed('rt_tuple', 1),
     'tuple->list':    fixed('rt_tuple_to_list', 1),
-    '/':              fixed('rt_divide', 2),
     'float?':         fixed('rt_is_flt', 1),
     'num?':           fixed('rt_is_num', 1),
     'ceil':           fixed('rt_ceil', 1),
@@ -1013,7 +1017,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
 
 // The names a defun can't take.
 const BUILTINS: readonly string[] = [
-    'pprint', 'eq?', 'ne?', 'cons', 'list', 'tuple', 'apply',
+    'pprint', 'eq?', 'ne?', 'cons', 'list', 'tuple', 'apply', '/',
     ...DIVISION, ...PREDICATES,
     ...[ARITH, COMPARE, C_BUILTINS].flatMap((table) => Object.keys(table)),
 ];
@@ -1026,9 +1030,13 @@ const isBuiltin = (name: string): boolean => BUILTINS.includes(name) || cxrPath(
 // fn(left, right, ...extra, site), which promotes to float or faults "not a
 // number". With withWord, a right operand that's an integer literal is a
 // word: only the left needs checking, and withWord makes the inline path.
+// With float, the out-of-line path first tries floats (floatPath) before
+// the runtime: float(st, notFloats, done, n) gets n when the right operand
+// is the integer literal n.
 function compileNumeric(x: Pair, name: string, args: readonly Sexp[], cx: Cx, st: St,
                         fn: string, extra: readonly Operand[], inline: (st: St) => [Code, St],
-                        withWord?: (st: St, w: bigint) => [Code, St]): [Code, St] {
+                        withWord?: (st: St, w: bigint) => [Code, St],
+                        float?: (st: St, notFloats: string, done: string, n?: bigint) => [Code, St]): [Code, St] {
     checkArity(x, name, args, 2);
     const t = st.t;
     const [l, r] = args as [Sexp, Sexp];
@@ -1038,15 +1046,56 @@ function compileNumeric(x: Pair, name: string, args: readonly Sexp[], cx: Cx, st
         const [slow, st2] = label(st1, 'slow');
         const [site, st3] = siteLabel(st2, name, x.pos);
         const [fast, st4] = withWord(st3, w);
-        const stub = [`${slow}:`, t.call(fn, [ACC, word(w), ...extra, addr(site)], false), t.jump(`${slow}_done`)];
-        return [[left, t.branchUnlessInt(slow), fast, `${slow}_done:`], { ...st4, stubs: [st4.stubs, stub] }];
+        const [floats, st5] = float === undefined ? [[], st4] : float(st4, `${slow}_c`, `${slow}_done`, r.v);
+        const stub = [`${slow}:`, floats, `${slow}_c:`, t.call(fn, [ACC, word(w), ...extra, addr(site)], false), t.jump(`${slow}_done`)];
+        return [[left, t.branchUnlessInt(slow), fast, `${slow}_done:`], { ...st5, stubs: [st5.stubs, stub] }];
     }
     const [both, st1] = operands(l, r, cx, st);
     const [slow, st2] = label(st1, 'slow');
     const [site, st3] = siteLabel(st2, name, x.pos);
     const [fast, st4] = inline(st3);
-    const stub = [`${slow}:`, t.call(fn, [LEFT, ACC, ...extra, addr(site)], false), t.jump(`${slow}_done`)];
-    return [[both, t.branchUnlessInts(slow), fast, `${slow}_done:`], { ...st4, stubs: [st4.stubs, stub] }];
+    const [floats, st5] = float === undefined ? [[], st4] : float(st4, `${slow}_c`, `${slow}_done`);
+    const stub = [`${slow}:`, floats, `${slow}_c:`, t.call(fn, [LEFT, ACC, ...extra, addr(site)], false), t.jump(`${slow}_done`)];
+    return [[both, t.branchUnlessInts(slow), fast, `${slow}_done:`], { ...st5, stubs: [st5.stubs, stub] }];
+}
+
+// Floats, inline (D198): unless the operands are floats (the left and the
+// accumulator, or, given n, the accumulator, n being the right operand's
+// integer), on to notFloats; then a box allocated, the operation done, and
+// on to done. The result is the double C would have made, to the bit: the
+// same IEEE operation, on the same doubles.
+function floatPath(x: Pair, op: FloatOp, notFloats: string, done: string, n: bigint | undefined, st: St): [Code, St] {
+    const t = st.t;
+    const [allocate, st1] = alloc(16, op, x.pos, st);
+    return [[
+        n === undefined ? t.branchUnlessFloats(notFloats) : t.branchUnlessFloat(notFloats),
+        allocate,
+        n === undefined ? t.floatArith(op) : t.floatArithInt(op, n),
+        t.jump(done),
+    ], st1];
+}
+
+// (/ a b), always a float: two floats, or a float and a literal integer
+// that isn't 0, inline (D198), the divisor checked for zero first; anything
+// else, a zero included, is rt_divide's, which faults on it.
+function compileDivide(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    checkArity(x, '/', args, 2);
+    const t = st.t;
+    const [l, r] = args as [Sexp, Sexp];
+    const [slow, st1] = label(st, 'slow');
+    const [site, st2] = siteLabel(st1, '/', x.pos);
+    const literal = r.t === 'int' && r.v !== 0n;
+    const [first, st3] = literal ? compileExpr(l, cx, st2) : operands(l, r, cx, st2);
+    const [allocate, st4] = alloc(16, '/', x.pos, st3);
+    const stub = [`${slow}:`, t.call('rt_divide', literal ? [ACC, word(intWord((r as Int).v)), addr(site)] : [LEFT, ACC, addr(site)], false),
+                  t.jump(`${slow}_done`)];
+    return [[
+        first,
+        literal ? t.branchUnlessFloat(slow) : [t.branchUnlessFloats(slow), t.branchIfZeroFloat(slow)],
+        allocate,
+        literal ? t.floatArithInt('/', (r as Int).v) : t.floatArith('/'),
+        `${slow}_done:`,
+    ], { ...st4, stubs: [st4.stubs, stub] }];
 }
 
 // Whether x needs no code to work out (simple, below), without anything

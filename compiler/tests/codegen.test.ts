@@ -420,8 +420,9 @@ test('+ and < on two integers are inline; anything else goes out of line', () =>
     // b into the accumulator, a into the left operand, each from its slot (D197)
     assert.match(add, /ldr {2}x0, \[sp, #24\]    \/\/ b\n {4}ldr {2}x1, \[sp, #16\]\n {4}orr {2}x2, x0, x1\n {4}tst {2}x2, #1\n {4}b\.ne (Lslow_\d+)\n {4}adds x0, x1, x0/);
     const slow = /b\.ne (Lslow_\d+)/.exec(add)![1]!;
-    // out of line: left back in x0, right in x1, then the site
-    assert.ok(add.includes(`${slow}:\n    mov  x2, x0\n    mov  x0, x1\n    mov  x1, x2\n    LOADADDR x2, Lsite_`));
+    // out of line: floats first (D198), then the runtime, with the left back
+    // in x0, the right in x1, then the site
+    assert.ok(add.includes(`${slow}_c:\n    mov  x2, x0\n    mov  x0, x1\n    mov  x1, x2\n    LOADADDR x2, Lsite_`));
     assert.ok(add.includes(`bl   rt_add\n    b    ${slow}_done`));
     assert.match(compile('(< 1 2)'), /mov {2}x2, #RT_CMP_LT\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_compare/);
 });
@@ -434,8 +435,8 @@ test('+ or - an integer literal is an immediate, and only the other operand is c
     assert.match(asm, /movz x2, #0x2710, lsl #0\n {4}subs x0, x0, x2/);  // past twelve bits
     // out of line, the literal is the right operand
     assert.match(asm, /movz x1, #0x4, lsl #0\n {4}LOADADDR x2, Lsite_\d+\n {4}bl {3}rt_add/);
-    // * isn't: it untags one side
-    assert.match(compile('(let a 1) (* a 2)'), /smulh/);
+    // * has no immediate, since it untags one side, but only a is checked
+    assert.match(compile('(let a 1) (* a 2)'), /tst {2}x0, #1\n {4}b\.ne Lslow_\d+\n {4}mov {2}x1, x0\n {4}movz x0, #0x4, lsl #0\n {4}asr {2}x2, x0, #1\n {4}smulh/);
 });
 
 test('a comparison as a test branches, without making a boolean', () => {
@@ -456,6 +457,21 @@ test('a comparison as a test branches, without making a boolean', () => {
 test('a cond whose last test is #true never runs out of clauses', () => {
     assert.doesNotMatch(compile('(defun f (n) (cond ((== n 0) 1) (#true 2))) (f 1)'), /RT_FAULT_NO_CLAUSE/);
     assert.match(compile('(defun f (n) (cond ((== n 0) 1))) (f 1)'), /RT_FAULT_NO_CLAUSE/);
+});
+
+test('+ - * and / on floats are inline, out of the integers\' way', () => {
+    const asm = compile('(let a 1.5) (let b 2.5) (+ a b) (* a 3) (/ a b) (/ a 4) (/ a 0) (< a b)');
+    // + two floats: both boxes' headers checked, a box allocated, fadd, stored
+    assert.match(asm, /cmp {2}x16, #2050\n {4}b\.ne (Lslow_\d+)_c\n(.*\n){1,12}? {4}ldur d0, \[x1, #5\]\n {4}ldur d1, \[x0, #5\]\n {4}fadd d0, d0, d1\n {4}mov {2}x3, #2050\n {4}str {2}x3, \[x2\]\n {4}str {2}d0, \[x2, #8\]/);
+    // * an integer literal: it becomes a double
+    assert.match(asm, /movz x16, #0x3, lsl #0\n {4}scvtf d1, x16\n {4}fmul d0, d0, d1/);
+    // / two floats: the divisor checked for zero, and no rt_divide on the way
+    assert.match(asm, /fcmp d1, #0\.0\n {4}b\.eq Lslow_\d+\n(.*\n){1,12}? {4}fdiv d0, d0, d1/);
+    // / by a literal integer that isn't 0 needs no check; by 0, always rt_divide
+    assert.match(asm, /movz x16, #0x4, lsl #0\n {4}scvtf d1, x16\n {4}fdiv d0, d0, d1/);
+    assert.equal(asm.match(/bl {3}rt_divide/g)!.length, 3);   // out of line, once for each
+    // comparisons still ask rt_compare
+    assert.match(asm, /bl {3}rt_compare/);
 });
 
 test('div and % are integers only, and check for zero', () => {
