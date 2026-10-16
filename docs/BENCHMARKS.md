@@ -96,6 +96,53 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, AArch64 (Oct 2026): the reference
+
+`bench/results/2026-10-16-0849-macos-apple-m2-max.md`: 12 cores (8 for
+performance, 4 for efficiency), macOS 15.7, OTP 29, Go 1.27, Node 26. A
+quiet machine: each one's runs are within a few per cent of each other.
+Each one's start is taken off its times below; and Erlang's are on every
+core, for the reason under "Two things the Mac shows".
+
+Sequential, slight's time against each:
+
+- **`fib`:** 0.30 s. C is 2.9 times faster (Apple's clang doesn't turn
+  the recursion into a loop, as GCC did on Linux), Go 2.5, Node 1.2 and
+  Erlang 1.1; Python is 15 times slower, Perl 42.
+- **`binary-trees`:** 2.5 s, the weak spot. Erlang is 6.2 times faster,
+  Node 5.1, Go on every core 3.8, C 2.6, Go on one core 1.9; Python is
+  2.3 times slower, Perl 7.1.
+- **`n-body`:** 2.1 s. C is 57 times faster, Go 45, Node 32, Erlang 1.8;
+  Python is 2.8 times slower, Perl 3.6.
+
+Actors, slight on one core:
+
+- **`ping-pong`:** 79 ns a message; Go 97 (one core), Erlang 239.
+- **`thread-ring`:** 85 ns a hop; Go 106, Erlang 231. The fastest here
+  too, as it wasn't on Linux, but still at 210 MB (Go 5, Erlang 61).
+- **`spawn`:** 135 ns a process; Go 426, Erlang 828.
+- **`idle-memory`:** 554 bytes a waiting process; Go 2,886, Erlang
+  2,741: a fifth.
+- **`parallel-fib`:** 0.43 s; Go on one core 0.17.
+
+What 12 cores gain: `parallel-fib` is 8.7 times faster in Go, and about
+8.9 in Erlang (against its time on a core on one scheduler), so Go is 22
+times faster than slight there, and Erlang 8.8. Passing a message between
+cores costs Go more than on one (`ping-pong` 1.4 times slower).
+
+Two things the Mac shows that Linux didn't:
+
+- **Erlang on one scheduler waits.** With `+S 1:1` it's on a core only
+  37 to 60 per cent of the time it takes, in every run (`ping-pong`: 3.4
+  s, 1.2 of them on a core), where on Linux it's on one all the time; so
+  its one-core numbers here aren't its speed on one core. Not explained
+  yet; until it is, Erlang's Mac numbers are its `-mc` ones, which flatter
+  it where more cores help (`spawn`, `idle-memory`).
+- **slight's peak memory is higher than on Linux:** `binary-trees` 356 MB
+  (98 on Linux), a waiting process 554 bytes (431). Probably macOS's
+  allocator keeping the collector's freed 1 MB chunks resident, and its
+  16 KB pages; not checked yet.
+
 ### The cloud machine, x86-64 (Oct 2026)
 
 `bench/results/2026-10-16-0554-linux-intel-xeon-processor-2-10ghz.md`:
@@ -152,9 +199,11 @@ and 9.4 to 7.0).
 - **One structure's size:** the 64 MB cap on a heap, with a copying
   collector, holds a structure of about 25 MB at most (the stretch tree
   of depth 19 doesn't fit), which is why `binary-trees` is 18 here.
-- **Calls** (`fib`): 1.8 times Go, which checks its stack at every call
-  too; slight also counts reductions, and checks for overflow.
+- **Calls** (`fib`): 2.5 times Go on the M2 (1.8 on Linux), which checks
+  its stack at every call too; slight also counts reductions, and checks
+  for overflow. Erlang's JIT, which counts reductions as well, is a
+  little faster than slight on the M2 (1.1 times).
+- **Memory on macOS** (above): whether the collector should keep and
+  reuse its chunks rather than free them, which might also make
+  `binary-trees` faster.
 
-### The M2 Max
-
-To come: the reference, AArch64 natively.

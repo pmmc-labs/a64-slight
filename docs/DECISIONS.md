@@ -2872,5 +2872,16 @@ first.)* `bench/`, `docs/BENCHMARKS.md`.
   3.7 times on `parallel-fib`, Erlang 2.7.
 - **Found, for later** (not changed here): `GC_MIN` lets each busy
   process keep up to 256 KB of garbage, so `thread-ring`'s 503 take 266
-  MB; and one structure can't be much over 25 MB. The M2 Max's numbers,
-  natively on AArch64, are the reference, and are to come.
+  MB; and one structure can't be much over 25 MB.
+- **On the M2 Max** (Stevan's run, the same day; the reference): slight
+  is the fastest of the three at every actor benchmark on one core, the
+  ring included (79 ns a message, 85 a hop, 135 a process started, 554
+  bytes a process waiting); a little behind Node and Erlang on `fib`
+  (1.2 and 1.1 times), 2.5 times Go; 6 times Erlang on `binary-trees`
+  and 1.8 on `n-body`. On 12 cores, Go gains 8.7 times on
+  `parallel-fib`. Erlang on one scheduler
+  (`+S 1:1`) is on a core only 37 to 60 per cent of the time there,
+  unexplained, so the Mac's Erlang numbers are its `-mc` ones for now;
+  and slight's peak memory is higher than on Linux (356 MB on
+  `binary-trees`, against 98), probably macOS's allocator keeping freed
+  chunks.
