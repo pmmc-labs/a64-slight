@@ -613,7 +613,15 @@ Lalloc_N:
   that only tail-calls is never under a collection, and doesn't.
 - It runs once the heap in use (its chunks, less what's free in the
   current one) reaches twice what survived the last collection, and never
-  below 256 KB, so a short-lived or small process never collects (D106).
+  below 256 KB, so a short-lived or small process never collects (D106);
+  but never within 8 MB of the 64 MB cap, so a process with more than
+  half the cap live still collects before it reaches the cap, rather than
+  failing there with a heap of garbage (D196). The 8 MB is room for a new
+  chunk and for what's allocated before the next function's entry, where
+  a collection can happen. When more than that is live, the next is
+  halfway from what's live to the cap, so it's always above what's live
+  (or every slice's end would collect), and a heap that's all live data
+  collects a few times more before it fails.
   `rt_preempt` checks that at the end of each slice; and when
   `rt_heap_grow` finds it so, it cuts the slice short, so the next call's
   entry goes to `rt_preempt`, keeping the rest of the slice for after:

@@ -2910,3 +2910,34 @@ phase 2's profiles found, D194, in the order Claude proposed.)*
   cons's 16, since every heap object is a multiple of 16 bytes and the
   collector and copying count on it; so `binary-trees` at depth 19 still
   doesn't fit in a process's 64 MB.
+
+**D196. Collecting before the heap's cap.** *(User, Oct 2026: "just do
+the cap fix for now", of Claude's two changes to when a heap is
+collected; growing to three times what's live, not two, was turned down
+for now, for the memory it costs.)*
+- **Before:** the next collection came when the heap in use reached
+  twice what survived the last (D106). A process with more than 32 MB
+  live would only collect past the 64 MB cap, so it failed there with
+  `:heap`, even with most of its heap garbage. A collection can only run
+  at a function's entry (or a `recv`), where every live value is in a
+  frame, so it can't simply happen when an allocation finds the cap.
+- **Now:** twice what's live, but never within 8 MB of the cap
+  (`GC_ROOM`): room for a new chunk (up to 1 MB) and for what's allocated
+  before the next function's entry. And never at or below what's live:
+  with more than 56 MB live, the next is halfway from there to the cap.
+  Otherwise `rt_preempt`, which collects whenever the heap in use has
+  reached the threshold, would collect at every slice's end, copying
+  the whole heap each time, which is what the first version of this did
+  to tests 059 and 130 (each filling the heap with live data).
+- **Turned down:** halfway to the cap whenever that's sooner than twice
+  what's live. It's never at or below what's live, but it collects
+  sooner than needed whenever more than 21 MB is live: 6.2 per cent more
+  instructions on `binary-trees 18`, whose stretch tree is 33 MB.
+  This rule costs 0.8 per cent there.
+- **Costs:** a heap that's all live data collects a few times more
+  before it fails (test 059 takes 3.9 s under qemu, not 1.3). A single C
+  builtin that allocates more than the 8 MB at once near the cap (a
+  `str-join` of big strings) can still fail where a collection would
+  have made room.
+- **Tests:** 240: 38 MB kept, then 48 MB of garbage, which failed before
+  and passes now, on both targets.

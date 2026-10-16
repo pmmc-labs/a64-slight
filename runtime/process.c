@@ -47,6 +47,7 @@
 #define CHUNK_MAX      (1 << 20)        // ...doubling up to this
 #define HEAP_MAX       (64 << 20)       // all of a process's chunks
 #define GC_MIN         (256 << 10)      // a heap smaller than this is never collected
+#define GC_ROOM        (8 << 20)        // a heap this near HEAP_MAX is collected, whatever's live
 
 // A pid's entry in the table: the process while it runs, then its exit
 // record: (:ok value) or (:error value). Or a device while it's open; to
@@ -548,7 +549,15 @@ static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t
     p->heap_bytes = g.bytes;
     p->heap_ptr   = g.ptr;
     p->heap_limit = g.limit;
-    p->gc_at      = 2 * g.live > GC_MIN ? 2 * g.live : GC_MIN;
+    // Next at twice what's live, but never nearer the cap than GC_ROOM: at
+    // twice, a process with more than half the cap live would reach the
+    // cap first, and fail there with a heap of garbage (D196). Nor at or
+    // below what's live, or it would collect at every slice's end: when
+    // that's nearer the cap than GC_ROOM, halfway from there to the cap.
+    size_t next    = 2 * g.live > GC_MIN ? 2 * g.live : GC_MIN;
+    size_t half    = g.live < HEAP_MAX ? g.live + (HEAP_MAX - g.live) / 2 : HEAP_MAX;
+    size_t ceiling = HEAP_MAX - GC_ROOM > half ? HEAP_MAX - GC_ROOM : half;
+    p->gc_at       = next < ceiling ? next : ceiling;
 }
 
 // --- processes ----------------------------------------------------------------
