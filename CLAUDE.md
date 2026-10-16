@@ -119,7 +119,10 @@ kept, `[text](url)`, and a command ending with the process that ran it,
 so Escape in the chat stops one (D193, golden tests 233 and 235).
 Benchmarks, phase 1 (D194, `docs/BENCHMARKS.md`): slight against C,
 Go, Erlang, Node, Perl and Python, on the cloud machine and the M2 Max
-(the reference). **Next:** to settle with
+(the reference); phase 2, fixing what the profiles found: tuples built
+in place (D195, golden test 239), collecting before the heap's cap
+(D196, 240), and better code for calls, arithmetic and tests (D197,
+241). **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan

@@ -2987,4 +2987,9 @@ target:
   on integers, floats, mixed and NaN, with literals on either side, past
   an immediate's reach on each target, and near the edges of 63 bits;
   `+` and `-` with literals on integers and floats. The unit tests check
-  the new shapes, and that a simple operand takes no slot.
+  the new shapes, and that a simple operand takes no slot. Since a
+  simple operand is read late and the last argument waits in a register,
+  every golden test ran under `SLIGHT_GC_STRESS` too (x86-64): all give
+  their output, at 7 or at 100, but the three that fill a heap with tens
+  of MB of live data (059, 130, 240), which can't finish under stress,
+  each collection copying all of it.

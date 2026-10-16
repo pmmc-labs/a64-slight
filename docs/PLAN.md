@@ -623,6 +623,10 @@ slight against C, Go, Erlang, Node, Perl and Python (D194,
 `spectral-norm` and Savina's fan-in; and profiling slight's worst
 ratios: allocating and collecting (`binary-trees`), floats (`n-body`,
 with "Faster floats" below), and a busy process's garbage (`GC_MIN`).
+Done so far: tuples built in place (D195), collecting before the heap's
+cap (D196), and better code for calls, arithmetic and tests (D197).
+Next, in the order agreed: float arithmetic inline, then a generational
+collector (a design note first); the other programs and Chez after.
 
 ### Later: the rest of the October 2026 list
 

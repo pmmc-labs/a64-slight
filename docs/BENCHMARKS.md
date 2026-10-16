@@ -217,10 +217,36 @@ mailbox off its heap (36 s to 1.3), and Go's `spawn` and `idle-memory`
 send on channels that hold every answer, as a mailbox would (15 s to 0.8,
 and 9.4 to 7.0).
 
+### What phase 2 has changed
+
+The fixes the profiles led to, so far, each its own decision; numbers
+are instructions on the cloud machine, which don't depend on its noise:
+
+- **Tuples built in place** (D195): `(tuple ...)` allocates once, inline,
+  with no list made and copied in C. `binary-trees 14` 46 per cent fewer
+  instructions; `n-body` 14.
+- **Collecting before the cap** (D196): a process with more than 32 MB
+  live collects before its heap reaches 64 MB, rather than failing there.
+  `binary-trees 18` 0.8 per cent more.
+- **Better code for calls, arithmetic and tests** (D197): operands read
+  straight into registers, integer literals as immediates, comparisons
+  as branches. fib 40 per cent fewer (its path on AArch64 39
+  instructions, not 61), and 20 per cent less time; `binary-trees` 8.5
+  per cent fewer.
+
+Together: `binary-trees 14` takes half the instructions it did (1,590
+million to 789), fib 30 40 per cent fewer (131 to 79), `n-body 20000` 17
+per cent fewer (642 to 531). The cloud machine's times are too noisy to
+say more than that `binary-trees 18` went from 3.8 s to 2 or so; the
+M2's run after them is to come.
+
 ### What slight should look at (phase 2)
 
 - **Allocating and collecting** (`binary-trees`): four times Erlang,
-  whose heaps are per-process and copied as slight's are.
+  whose heaps are per-process and copied as slight's are. Building
+  tuples in place (D195) halved the allocation; the collector, which
+  copies everything live at each collection, is the rest: a
+  generational one is next on the list.
 - **Floats** (`n-body`): PLAN.md's "Faster floats", with this as a second
   benchmark beside boids.
 - **A busy process's garbage:** a heap under 256 KB (`GC_MIN`) is never
@@ -228,11 +254,15 @@ and 9.4 to 7.0).
   much of its messages' chunks: 266 MB, where Erlang needs 37.
 - **One structure's size:** the 64 MB cap on a heap, with a copying
   collector, holds a structure of about 25 MB at most (the stretch tree
-  of depth 19 doesn't fit), which is why `binary-trees` is 18 here.
+  of depth 19 doesn't fit: 2 million two-element tuples of 32 bytes),
+  which is why `binary-trees` is 18 here. A process with more live than
+  half the cap now collects before the cap (D196).
 - **Calls** (`fib`): 2.5 times Go on the M2 (1.8 on Linux), which checks
   its stack at every call too; slight also counts reductions, and checks
   for overflow. Erlang's JIT, which counts reductions as well, is a
-  little faster than slight on the M2 (1.1 times).
+  little faster than slight on the M2 (1.1 times). D197 took a third of
+  fib's instructions out; the rest is the frame (every local in a slot,
+  zeroed when the function calls another) and the checks.
 - **Memory on macOS** (above): whether the collector should keep and
   reuse its chunks rather than free them, which might also make
   `binary-trees` faster.
