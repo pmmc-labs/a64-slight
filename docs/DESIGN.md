@@ -657,6 +657,11 @@ Lalloc_N:
   fresh chunks, and frees the old ones; it comes right after a minor
   one when what that promoted takes the old generation to its
   threshold.
+- **The cap** is checked as the heap grows, in `rt_heap_grow`, and not
+  as a collection promotes; so a heap that's past it after a collection
+  gets no room in its nursery, and its next allocation faults (D202).
+  A major collection with a few hundred MB live takes a quarter of a
+  second or so, during which nothing else runs.
 - `rt_preempt` checks both at the end of each slice; and when
   `rt_heap_grow` finds the nursery full, or a chunk adopted takes the
   old generation to its threshold, it cuts the slice short, so the next

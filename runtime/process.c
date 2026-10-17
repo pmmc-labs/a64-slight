@@ -685,8 +685,12 @@ static void restart(rt_proc_t *p) {
         p->heap_bytes += size;
         size          *= 2;
     }
+    // What's promoted isn't checked against the cap as it's copied, and
+    // under SLIGHT_GC_STRESS the nursery may never overflow, where the cap
+    // is checked. So a heap past its cap gets no room: its next allocation
+    // goes to rt_heap_grow, and faults there, with its own site.
     p->heap_ptr   = (uintptr_t)(p->nursery + 1);
-    p->heap_limit = p->heap_ptr + size;
+    p->heap_limit = p->heap_bytes > heap_max ? p->heap_ptr : p->heap_ptr + size;
 }
 
 // SLIGHT_GC_VERIFY=1: before a minor collection, a walk over all that's

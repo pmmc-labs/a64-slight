@@ -3207,5 +3207,19 @@ hold a big file's data.
   so those that fill a heap or read 64 MB stay as they were, and quick.
   Test 245: at `2M`, a process keeping 256 KB ends and one keeping 3.2
   MB faults; 246: `512K` is refused.
+- **A hole from D200, closed:** the cap was checked only where the heap
+  grows through `rt_heap_grow` (the nursery overflowing, a big string),
+  never as a collection promotes; normally a minor collection comes only
+  after an overflow, which checks, but under `SLIGHT_GC_STRESS` the
+  nursery need never overflow, and test 245's process kept 3.2 MB
+  under a 2 MB cap. Now a heap past its cap after a collection gets no
+  room in its nursery, so its next allocation goes to `rt_heap_grow` and
+  faults there, with its own site, as before.
+- **Measured** on the cloud machine: `binary-trees 21`, its usual size,
+  now runs (16.4 s, 676 MB at its peak; at `64M` it faults, as before).
+  Its major collections take 0.5 to 1 ms for each MB live: 264 ms with
+  267 MB live, 108 to 161 with 200, and 4.8 s of the 16.4 in all. So a
+  process with a few hundred MB live can hold everything up for a
+  quarter of a second; at 64 MB the most was about 50 ms.
 - Not changed: a mailbox still isn't counted in its process's cap
   (D201's `fan-in`).
