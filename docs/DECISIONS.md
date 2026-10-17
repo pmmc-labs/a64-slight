@@ -3050,3 +3050,77 @@ thousand integers leave an empty heap, where before they left 32 KB;
 shown so as not to depend on when a heap is collected, and so also under
 `SLIGHT_GC_STRESS`. On the M2 Max: 0.88 s and 210 MB to 0.54 s and 2.0
 MB, 54 ns a hop, where Go takes 106 and Erlang 229; nothing else moved.
+
+**D200. A generational collector.** *(User, Oct 2026: the design note's
+five points, each as Claude recommended; the fifth came first, as
+D199.)* Every collection copied everything live, so what lived long was
+copied again at each one, about a byte copied for each allocated:
+`binary-trees` spent 63 per cent of its instructions collecting, `n-body`
+11. Now a process's heap has two generations (DESIGN.md, "Process heaps
+and GC"):
+
+- **The young one** is a nursery, one chunk, allocated in as the heap
+  was (`heap_ptr` and `heap_limit`, so compiled code doesn't change): 4
+  KB at first, twice that at each collection that finds it overflowed,
+  up to 1 MB. Once it's full, overflow chunks, listed after it, till the
+  next function's entry, which `rt_heap_grow` brings at once by cutting
+  the slice short, as for D196.
+- **A minor collection**, at a function's entry or a `recv` once the
+  nursery has overflowed, copies what's young and reachable into the old
+  generation, all of it (promotion en masse, point 1), following only
+  pointers into the young generation (a range check), so it costs what
+  survives; then the nursery starts again.
+- **A major collection**, once the old generation is twice what was live
+  after the last (D106, with D196's room), is the collection there was:
+  everything live, in both, copied into fresh chunks.
+- **No barrier**: nothing old ever points at anything young, since an
+  object only points at objects made before it (nothing changes once
+  made; compiled code and C builtins fill an object before any
+  collection can come; adopted chunks point only into themselves). So
+  nothing in the compiler or the C builtins changed.
+- **The old generation** is the chunk list as it was: what's promoted
+  goes into its first chunk, messages, a fork's values and joined
+  results are adopted behind it, and strings of 64 KB or more (point 3)
+  are allocated straight into it, a chunk each. The 64 MB cap counts
+  both generations, and so does `:system`'s `:heap`.
+- **A nursery that grows** (point 2), not a fixed one, which every
+  process that allocates at all would hold, and which on Linux would be
+  a mapping of its own at 256 KB.
+- **Fields:** a first version added five to `rt_proc_t`, and a waiting
+  process cost 36 bytes more (`idle-memory`, a million: 433 MB to 469).
+  Now the overflow chunks hang off the nursery, one count of bytes
+  covers both generations, the chunk promoted into is kept first in the
+  old list so only how far it's filled is stored, and `keypress` sits in
+  the padding after `state`: 352 bytes, as before.
+- **Testing** (point 4): `SLIGHT_GC_VERIFY=1` walks everything reachable
+  before each minor collection, and aborts at an old object pointing at
+  a young one. Promotion broken on purpose (a cell's car left
+  unforwarded) stopped there with its message; with only
+  `SLIGHT_POISON`, a segfault. The golden tests pass on both targets
+  under VERIFY, and under `SLIGHT_GC_STRESS=7` (a minor collection at
+  every seventh entry and every `recv`, every eighth of them a major
+  one) but for timeouts, 10 on x86-64 and 14 under qemu, which pass at
+  100, except 059, 130 and 240, which fill the heap with live data and
+  never finish under stress, as before. No test sets VERIFY: a walk of
+  the heap at each minor collection takes test 244 under
+  `SLIGHT_GC_STRESS=100` from 4 seconds to 96. Test 244: a kept list
+  built across minor collections, young cells over old ones, a big
+  string, a list bigger than the nursery ever is made in one call,
+  messages and a joined result under young cells, all checked after the
+  rest has been collected round them; small, since under stress every
+  eighth collection copies all that's live.
+- **Measured** on the cloud machine: instructions, `binary-trees 14`
+  789 million to 450 (collecting 3.2 times less, 63 per cent to 35),
+  `binary-trees 16` 3,712 to 2,661, `n-body 20000` 378 to 328
+  (collecting from 11 per cent to under 2). Times, noisy there:
+  `binary-trees 18` 2.2 s to 1.7, `n-body` 1.41 to 1.16, the actor
+  benchmarks the same. Peak memory the same, but `n-body`'s 2.9 MB is
+  4.7, its 1 MB nursery. Less than the note's guess of one and a half to
+  two times for `binary-trees`: its trees of depth 14 and more are
+  bigger than the nursery, so each is promoted as it's made and left to
+  major collections, which copy the long-lived tree each time.
+
+Turned down, for now: aging (point 1; it wouldn't help those trees,
+which outlive a nursery anyway); a write barrier and a remembered set
+(nothing needs them); mark-sweep or mark-compact for the old generation;
+and a pool of nurseries that waiting processes give back.

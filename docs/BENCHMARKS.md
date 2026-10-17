@@ -269,20 +269,38 @@ are instructions on the cloud machine, which don't depend on its noise:
   code, the result's box allocated inline, bit for bit what C made.
   `n-body` 29 per cent fewer, and half the time (2.4 s to 1.25); boids
   4.4 per cent fewer.
+- **A message with nothing to copy leaves nothing behind** (D199): its
+  chunk is freed as it's taken. `thread-ring` 3.3 s and 266 MB to 0.74 s
+  and 2.6 MB.
+- **A generational collector** (D200): a nursery per process, minor
+  collections that copy only what survives it, and major ones, as
+  collections were, when the old generation has doubled; no write
+  barrier, since nothing old can point at anything young.
+  `binary-trees 14` 43 per cent fewer (collecting 3.2 times less), 16
+  28 per cent fewer; `n-body 20000` 13 per cent fewer, its collecting
+  nearly gone. Times: `binary-trees 18` 2.2 s to 1.7, `n-body` 1.41 to
+  1.16. The bigger trees are bigger than the nursery (1 MB at most), so
+  they're promoted as they're made, and their garbage left to major
+  collections, which copy the long-lived tree each time: collecting is
+  still about half of `binary-trees 16`.
 
-Together: `binary-trees 14` takes half the instructions it did (1,590
-million to 789), fib 30 40 per cent fewer (131 to 79), `n-body 20000` 41
-per cent fewer (642 to 378). The cloud machine's times are too noisy to
-say more than that `binary-trees 18` went from 3.8 s to 2 or so; the
-M2's run after them is to come.
+Together: `binary-trees 14` takes 28 per cent of the instructions it
+did (1,590 million to 450), fib 30 40 per cent fewer (131 to 79),
+`n-body 20000` 49 per cent fewer (642 to 328). The cloud machine's times
+are too noisy to say more than that `binary-trees 18` went from 3.8 s
+to under 2. The M2's runs after D195–D198 and after D199 are above; its
+run after D200 is to come.
 
 ### What slight should look at (phase 2)
 
-- **Allocating and collecting** (`binary-trees`): four times Erlang,
-  whose heaps are per-process and copied as slight's are. Building
-  tuples in place (D195) halved the allocation; the collector, which
-  copies everything live at each collection, is the rest: a
-  generational one is next on the list.
+- **Allocating and collecting** (`binary-trees`): 3.3 times Erlang on
+  the M2 before D200, whose heaps are per-process and copied as slight's
+  are. Building tuples in place (D195) halved the allocation, and the
+  generational collector (D200) copies what dies young no more; what's
+  left is the trees bigger than the nursery, and major collections
+  copying the long-lived tree. A bigger nursery for a process that
+  promotes a lot, or an old generation that isn't copied whole, would be
+  the next steps, if it's wanted.
 - **Floats** (`n-body`): PLAN.md's "Faster floats", with this as a second
   benchmark beside boids. Their arithmetic is inline now (D198); each
   result is still a 16-byte box, and comparisons and `sqrt` are still C.

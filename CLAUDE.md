@@ -8,9 +8,10 @@ assembly. The compiler is TypeScript for now and should self-host later.
 
 **Steps 0–9, 10a–10e and 11 of [`docs/PLAN.md`](docs/PLAN.md) are done**:
 the reader, and a compiler for integers, floats, `#true`/`#false`, `()`,
-symbols, lists (a heap per process of chunks, capped at 64 MB, and
-collected when a receive function waits for a message, or at a
-function's entry, with the frames as roots: D166), strings, closures
+symbols, lists (a heap per process of chunks, capped at 64 MB, in two
+generations, D200, and collected when a receive function waits for a
+message, or at a function's entry, with the frames as roots: D166),
+strings, closures
 (`lambda`, functions and builtins as values, `apply`), arithmetic
 (integers inline; floats inline too, D198, and mixed in C), structural `eq?`, type
 predicates, the string and math builtins (C, in `runtime/`), `cond`,
@@ -122,7 +123,10 @@ Go, Erlang, Node, Perl and Python, on the cloud machine and the M2 Max
 (the reference); phase 2, fixing what the profiles found: tuples built
 in place (D195, golden test 239), collecting before the heap's cap
 (D196, 240), better code for calls, arithmetic and tests (D197,
-241), and float arithmetic inline (D198, 242). **Next:** to settle with
+241), float arithmetic inline (D198, 242), a message with nothing to
+copy freed as it's taken (D199, 243), and a generational collector,
+with no write barrier, since nothing old can point at anything young
+(D200, 244). **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
@@ -266,13 +270,21 @@ to get them back from git (`3fd71e0`).
 - Exit codes from `slightc`: 0 ok, 1 compile error, 2 usage or toolchain
   error. `SLIGHT_CC` overrides the C compiler command.
 - `SLIGHT_POISON=1` when running a compiled program makes the collector
-  fill what it frees with garbage, so a pointer it missed fails at once.
-  `t/run.sh` sets it.
-- `SLIGHT_GC_STRESS=n` when running a compiled program collects at the
-  entry of every nth function called (n from 1 to 1,000), and at every
-  `recv`, without changing when processes are preempted (D166). `SLIGHT_GC_STRESS=1
-  make golden` checks the collector against every golden test; a few
-  then take too long and are killed, and pass with a larger n.
+  fill what it frees (a nursery started again included) with garbage, so
+  a pointer it missed fails at once. `t/run.sh` sets it.
+- `SLIGHT_GC_STRESS=n` when running a compiled program makes a minor
+  collection at the entry of every nth function called (n from 1 to
+  1,000), and at every `recv`, and every eighth of those a major one,
+  without changing when processes are preempted (D166, D200).
+  `SLIGHT_GC_STRESS=7 make golden` checks the collector against every
+  golden test; a few then take too long and are killed, and pass with a
+  larger n (059, 130 and 240, which fill the heap, never finish).
+- `SLIGHT_GC_VERIFY=1` when running a compiled program walks everything
+  reachable before each minor collection, and aborts at an old object
+  pointing at a young one, which the collector depends on never
+  happening (D200). `SLIGHT_GC_VERIFY=1 make golden` after changing the
+  collector or how anything is allocated; no test sets it, since it's
+  slow.
 - `SLIGHT_CLOCK=virtual` when running a compiled program swaps the real
   clock for a virtual one: it starts at 0 and moves only when nothing can
   run, straight to the next timer. `t/run.sh` sets it too.

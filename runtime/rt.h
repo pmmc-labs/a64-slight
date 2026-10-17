@@ -320,7 +320,7 @@ typedef struct rt_ctx {
 #endif
 
 // A chunk of a process's heap; the chunks are a list, newest first. A
-// message arrives as a chunk of its own, and joins the list.
+// message arrives as a chunk of its own, and joins the old generation's.
 typedef struct rt_chunk {
     struct rt_chunk *next;
     size_t           size;      // bytes after this header
@@ -361,11 +361,13 @@ typedef struct rt_proc {
     rt_ctx_t    ctx;
 
     rt_state_t      state;
+    int             keypress;   // connected to :keypress
     void           *stack;      // the bottom of its stack (above the guard page), or NULL
-    rt_chunk_t     *chunks;
-    size_t          heap_bytes; // in all its chunks
-    size_t          next_chunk; // the size of the next chunk it allocates in
-    size_t          gc_at;      // collect at recv once this much of the heap is in use
+    rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c)
+    rt_chunk_t     *chunks;     // the old generation, newest first, the messages it's taken among them
+    uintptr_t       old_ptr;    // where the next promotion goes, in the first of chunks; or 0
+    size_t          heap_bytes; // in all its chunks, both generations
+    size_t          gc_at;      // a major collection once this much of the old generation is in use
     rt_msg_t       *mail, *mail_last;
     struct rt_proc *next_ready;
     struct rt_proc *joiners;    // blocked in join on this one, in the order they joined
@@ -373,7 +375,6 @@ typedef struct rt_proc {
     rt_value_t      joining;    // while JOINING: whom
     rt_watch_t     *watchers, *last_watcher; // monitoring this one, in order
     rt_watch_t     *watching;   // the monitors it has set on processes still running
-    int             keypress;   // connected to :keypress
     struct rt_device *devices;  // the files it has open (process.c)
     rt_value_t      reading;    // the reader whose message it took last, to read on at its next recv; or 0
     int64_t         slice_rest; // calls left in its slice after reductions run out (process.c)
@@ -626,6 +627,7 @@ extern rt_proc_t *rt_current;
 // Allocates from the current process's heap, in 16-byte units; faults at
 // `site` when the heap is full.
 void *rt_alloc(size_t bytes, const char *site);
+void *rt_alloc_old(size_t bytes, const char *site); // for what points at nothing: straight into the old generation
 
 // p, from malloc, calloc or realloc; if it's NULL, the program ends, with
 // exit status 2, since the runtime can't go on without memory.

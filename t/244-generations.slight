@@ -1,0 +1,53 @@
+; Two generations (D200). What's kept is copied out of the nursery once,
+; at the minor collection after it's made, and is old after that; what
+; dies young is never copied. Each part makes more than the nursery
+; holds, so it runs through minor collections, and major ones as the old
+; generation grows: a kept list built across them, young cells over old
+; ones, a big string (which goes straight into the old generation), a
+; list made in one call that's bigger than the nursery ever is (into a
+; chunk it overflows into), and messages and a joined result (adopted
+; into the old generation) under young cells. All of it is checked at
+; the end, after the rest has been collected round it.
+; `SLIGHT_GC_VERIFY=1` checks, at each minor collection, that nothing old
+; points at anything young.
+
+(defun garbage (n acc)
+    (if (== n 0) acc (garbage (- n 1) (+ acc (length (range 0 100))))))
+
+(let keep (range 0 25000))
+(pprint (garbage 5000 0))
+(pprint (sum keep))
+
+(defun grow (n acc)
+    (if (== n 0) acc (grow (- n 1) (cons (tuple n (length (range 0 50))) acc))))
+
+(let grown (grow 12500 ()))
+(pprint (fold/l 0 (lambda (a t) (match t (#(i k) (+ a (+ i k))))) grown))
+
+(let big (str-join "," keep))
+(pprint (str-len big))
+(let pieces (str-split big ","))
+(pprint (list (length pieces) (sum (map string->int pieces))))
+(let cells (tuple->list (list->tuple (range 0 70000))))
+(pprint (garbage 1000 0))
+(pprint (list (substring big 0 9) (substring big (- (str-len big) 11) (str-len big))))
+
+(defun keeper (kept)
+    (recv
+        ((:add xs)   (keeper (cons (tuple (length (range 0 (length xs))) xs) kept)))
+        ((:sum from) (send from (fold/l 0 (lambda (a t) (match t (#(n xs) (+ a (+ n (sum xs)))))) kept)))))
+
+(defun ask-sum (k)
+    (send k (list :sum $$))
+    (let n (recv (n n)))
+    n)
+
+(let k (fork (keeper ())))
+(dotimes 0 100 (lambda (i) (send k (list :add (range 0 1000)))))
+(pprint (join (fork (ask-sum k))))
+(match (join (fork (range 0 10000)))
+    ((:ok xs) (pprint (sum xs))))
+
+(pprint (list (length keep) (length grown) (str-len big)))
+(pprint (list (sum keep) (length pieces) (sum cells)))
+:done

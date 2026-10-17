@@ -439,8 +439,12 @@ void *rt_heap_alloc(void *site, size_t bytes) {
     return rt_alloc(bytes, site);
 }
 
+// A string this long goes straight into the old generation, so no minor
+// collection copies it (D200).
+#define BIG_STRING (64 << 10)
+
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site) {
-    uint64_t *box = rt_alloc(8 + len + 1, site);
+    uint64_t *box = len >= BIG_STRING ? rt_alloc_old(8 + len + 1, site) : rt_alloc(8 + len + 1, site);
     box[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
     if (len) memcpy(box + 1, bytes, len);       // bytes may be an empty buffer's NULL
     ((char *)(box + 1))[len] = '\0';
