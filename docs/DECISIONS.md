@@ -3323,11 +3323,39 @@ review's list, as Claude recommended, the rest to be talked over.)*
 - **Keys are decoded in a loop.** Each ESC before a key (Alt) was a
   level of recursion, 48 bytes each, so a few thousand in one read,
   decoded on a process's stack near its limit, ran off it. Not a golden
-  test: keys come that way only on the real clock; checked by hand,
-  before and after.
+  test: keys come that way only on the real clock; `t/live.py` checks
+  it (D206).
 - **A lookup's query ids are random**, each its own, from
   `getentropy`, recorded like any seed. They came from xorshift on the
   clock and the pid, so one id told the next.
 - **`format-num` makes its string whole first**, so a width past what
   the heap holds faults `:heap` at once, instead of building that much
   outside the heap a byte at a time. Test 253.
+
+**D206. Live checks, for what a golden test can't see.** *(User, Oct
+2026: "add new tests that the golden tests do not cover".)* `t/live.py`
+(Python 3, as the models and the benchmarks are), run by `make live` and
+`make test` for each target, with its programs in `t/live/`:
+
+- **Keys on a stack all but full,** on the real clock, where a busy
+  process reads stdin itself (D122): the one place D205's recursion
+  could run off a stack. The process connects to `:keypress` only at
+  the bottom, so the keys can't be read before it gets there.
+- **Peak memory,** from `wait4`, under 400 MB for an endless JSON value
+  (D204), thirty million arrays deep (D205), and `format-num` to 4 GB
+  (D205), where the code before held 514 MB, 1.1 GB and 2 GB on its way
+  to the same outcomes.
+- **The chat, in a terminal** (a pty), against a model of its own,
+  which streams a terminal escape, asks to run a command with one in it
+  and fetches a redirect: the escapes are shown escaped, the command is
+  refused and not run, and the redirect is told, not followed. The
+  chat had no test before.
+
+Each check waits for what it expects to see, never for a time, so
+nothing depends on how long anything takes, as in `t/replay.sh`, which
+is on the real clock too; a deadline only says when to give up. Against
+the code before D204, eight of the ten fail; the other two (the chat
+ends, a refused command isn't run) are there so that a failure of the
+rest can't be the chat not working at all. Rejected: these as golden
+tests, which can't measure a run, put keys in at a moment, or run a
+second program; and pexpect, which isn't in Python's standard library.

@@ -1,0 +1,30 @@
+; For t/live.py: keys decoded on a stack all but full (D205). A process
+; recurses to a hundred frames short of the most that fit (found by
+; trying, each try in a process of its own), and only there connects to
+; :keypress and spins. So stdin's keys, a few thousand ESCs and then a
+; key, are read and decoded on the little that's left of its stack: on
+; the real clock, a busy process looks at stdin itself (D122). Until D205
+; each ESC was a level of recursion in C, which ran off the stack.
+
+(defun listener ()
+    (recv
+        (k (pprint k) (listener))))
+
+(defun spin (n) (if (== n 0) 0 (spin (- n 1))))
+
+; n frames down, then bottom, in the last one's place
+(defun down (n bottom) (if (== n 0) (bottom) (+ 1 (down (- n 1) bottom))))
+
+(defun fits? (n) (match (join (fork (down n (lambda () 0)))) ((:ok _) #true) (_ #false)))
+
+(defun most (lo hi)
+    (cond
+        ((>= lo (- hi 1)) lo)
+        (#true
+            (let mid (div (+ lo hi) 2))
+            (if (fits? mid) (most mid hi) (most lo mid)))))
+
+(let d (most 1 10000000))
+(pprint (match (join (fork (down (- d 100) (lambda () (connect :keypress (listener)) (spin 100000)))))
+            ((:ok n) (list :ok (> n 0)))
+            (other   other)))

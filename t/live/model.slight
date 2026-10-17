@@ -1,0 +1,45 @@
+; For t/live.py: a model for the chat (examples/chat.slight), ollama's
+; /api/chat as far as the chat uses it, and pages for it to fetch. Its
+; first answer is a piece with a terminal escape in it, and calls to run
+; and fetch: run's command has an escape in it too, and fetch's URL is a
+; redirect. Once it's told what they gave, it writes that to stdout, and
+; answers "done". A fetch of where the redirect goes says so, which
+; shouldn't happen (D205). It writes its port first.
+
+(@include :http)
+
+(defun line (fields) (concat (json/print (cons :object fields)) \n))
+
+(defun message (fields) (list "message" (cons :object (cons (list "role" "assistant") fields))))
+
+(defun call (name args)
+    (list :object (list "function" (list :object (list "name" name) (list "arguments" (cons :object args))))))
+
+(defun first-answer (host)
+    (concat
+        (line (list (message (list (list "content" (concat "Hello, " \e "[8mhidden" \e "[28m world.")))) (list "done" #false)))
+        (line (list (message (list (list "content" "")
+                                   (list "tool_calls" (list (call "run" (list (list "command" (concat "echo shown" \e "[8m; echo hidden"))))
+                                                            (call "fetch" (list (list "url" (concat "http://" host "/moved"))))))))
+                    (list "done" #false)))
+        (line (list (message (list (list "content" ""))) (list "done" #true)))))
+
+(defun answer (host body)
+    (let messages (match (json/parse body) ((:ok (:object & fields)) (lookup "messages" fields)) (_ ())))
+    (let told     (filter (lambda (m) (eq? (lookup "role" (cdr m)) "tool")) messages))
+    (cond
+        ((nil? told) (first-answer host))
+        (#true
+            (map (lambda (m) (tty/write "told: " (lookup "content" (cdr m)) \n)) told)
+            (line (list (message (list (list "content" "done"))) (list "done" #true))))))
+
+(defun handler (req)
+    (let host (lookup "host" (lookup :headers req)))
+    (match (lookup :path req)
+        ("/api/chat" (list 200 (list (list "content-type" "application/x-ndjson")) (answer host (lookup :body req))))
+        ("/moved"    (list 302 (list (list "location" "/page")) ""))
+        ("/page"     (tty/write "the page was fetched" \n) (list 200 (list (list "content-type" "text/plain")) "a page"))
+        (_           (list 404 () ""))))
+
+(http/serve 0 handler)
+(recv ((:listening port) (tty/write port \n)))
