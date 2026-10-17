@@ -3220,6 +3220,8 @@ hold a big file's data.
   Its major collections take 0.5 to 1 ms for each MB live: 264 ms with
   267 MB live, 108 to 161 with 200, and 4.8 s of the 16.4 in all. So a
   process with a few hundred MB live can hold everything up for a
-  quarter of a second; at 64 MB the most was about 50 ms.
+  quarter of a second; at 64 MB the most was about 50 ms. The benchmark
+  stays at 18 (Stevan): its runs then compare with every one before,
+  and a full run doesn't take ten minutes more.
 - Not changed: a mailbox still isn't counted in its process's cap
   (D201's `fan-in`).
