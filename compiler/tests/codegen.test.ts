@@ -142,10 +142,13 @@ test('a local that shadows a builtin is called as a closure', () => {
 test('a slot is reused once the value in it is dead', () => {
     // The top level's first slots hold its parameters, @ARGV and %ENV.
     const frame = (src: string): string | undefined => /sub {2}sp, sp, #(\d+)/.exec(compile(src))?.[1];
+    const len = (s: string): string => `(str-len "${s}")`;
     assert.equal(frame('42'), '16');                          // just @ARGV and %ENV
-    assert.equal(frame('(+ 1 2) (+ 3 4)'), '32');            // and one slot, used twice, rounded up to 16 bytes
-    assert.equal(frame('(+ 1 (+ 2 (+ 3 4)))'), '48');        // and three waiting left operands
-    assert.equal(frame('(let a 1) (let b 2) (+ a b)'), '48'); // and a, b, and +'s left operand
+    assert.equal(frame(`(+ ${len('a')} ${len('b')}) (+ ${len('c')} ${len('d')})`), '32'); // and one slot, used twice, rounded up
+    assert.equal(frame(`(+ ${len('a')} (+ ${len('b')} (+ ${len('c')} ${len('d')})))`), '48'); // and three waiting left operands
+    // a local or a literal operand waits nowhere: it's read when it's wanted (D197)
+    assert.equal(frame('(+ 1 (+ 2 (+ 3 4)))'), '16');
+    assert.equal(frame('(let a 1) (let b 2) (+ a b)'), '32'); // a and b, and no more
 });
 
 test('only a function that calls another, not in tail position, zeroes its slots', () => {
@@ -377,7 +380,10 @@ test('the control-character names are strings, unless shadowed', () => {
 });
 
 test('C builtins get their site after their arguments', () => {
-    assert.match(compile('(str-len "a")'), /ldr {2}x0, \[sp, #16\]\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_str_len/);
+    // the last argument worked out stays in the accumulator, which is x0
+    assert.match(compile('(str-len "a")'), /orr {2}x0, x0, #RT_TAG_BOXED\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_str_len/);
+    // a local is read from its slot, straight into its register
+    assert.match(compile('(let s "a") (substring s 0 1)'), /ldr {2}x0, \[sp, #16\]\n {4}movz x1, #0\n {4}movz x2, #0x2, lsl #0\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_substring/);
     // a missing optional argument is ()
     assert.match(compile('(format-num 1 2)'), /mov {2}x2, #RT_NIL\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_format_num/);
     // a variadic one gets a list
@@ -410,13 +416,62 @@ test('a float literal is a box holding the double', () => {
 });
 
 test('+ and < on two integers are inline; anything else goes out of line', () => {
-    const add = compile('(+ 1 2)');
-    assert.match(add, /orr {2}x2, x0, x1\n {4}tst {2}x2, #1\n {4}b\.ne (Lslow_\d+)\n {4}adds x0, x1, x0/);
+    const add = compile('(let a 1) (let b 2) (+ a b)');
+    // b into the accumulator, a into the left operand, each from its slot (D197)
+    assert.match(add, /ldr {2}x0, \[sp, #24\]    \/\/ b\n {4}ldr {2}x1, \[sp, #16\]\n {4}orr {2}x2, x0, x1\n {4}tst {2}x2, #1\n {4}b\.ne (Lslow_\d+)\n {4}adds x0, x1, x0/);
     const slow = /b\.ne (Lslow_\d+)/.exec(add)![1]!;
-    // out of line: left back in x0, right in x1, then the site
-    assert.ok(add.includes(`${slow}:\n    mov  x2, x0\n    mov  x0, x1\n    mov  x1, x2\n    LOADADDR x2, Lsite_`));
+    // out of line: floats first (D198), then the runtime, with the left back
+    // in x0, the right in x1, then the site
+    assert.ok(add.includes(`${slow}_c:\n    mov  x2, x0\n    mov  x0, x1\n    mov  x1, x2\n    LOADADDR x2, Lsite_`));
     assert.ok(add.includes(`bl   rt_add\n    b    ${slow}_done`));
     assert.match(compile('(< 1 2)'), /mov {2}x2, #RT_CMP_LT\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_compare/);
+});
+
+test('+ or - an integer literal is an immediate, and only the other operand is checked', () => {
+    const asm = compile('(let a 1) (+ a 2) (- a 3) (+ a -4) (- a 5000)');
+    assert.match(asm, /tst {2}x0, #1\n {4}b\.ne (Lslow_\d+)\n {4}adds x0, x0, #4\n {4}b\.vs Lfault_/);
+    assert.match(asm, /subs x0, x0, #6\n {4}b\.vs Lfault_/);
+    assert.match(asm, /subs x0, x0, #8\n {4}b\.vs Lfault_/);      // + -4 is - 4
+    assert.match(asm, /movz x2, #0x2710, lsl #0\n {4}subs x0, x0, x2/);  // past twelve bits
+    // out of line, the literal is the right operand
+    assert.match(asm, /movz x1, #0x4, lsl #0\n {4}LOADADDR x2, Lsite_\d+\n {4}bl {3}rt_add/);
+    // * has no immediate, since it untags one side, but only a is checked
+    assert.match(compile('(let a 1) (* a 2)'), /tst {2}x0, #1\n {4}b\.ne Lslow_\d+\n {4}mov {2}x1, x0\n {4}movz x0, #0x4, lsl #0\n {4}asr {2}x2, x0, #1\n {4}smulh/);
+});
+
+test('a comparison as a test branches, without making a boolean', () => {
+    const body = (src: string): string => compile(src).split('fn_f:')[1]!.split('    ret')[0]!;
+    const iff = (test: string, args = 'n', call = '(f 1)'): string => `(defun f (${args}) (cond (${test} 0) (#true 1))) ${call}`;
+    const lit = body(iff('(< n 2)'));
+    assert.match(lit, /tst {2}x0, #1\n {4}b\.ne (Lslow_\d+)\n {4}cmp {2}x0, #4\n {4}b\.ge Lcond_next_/);
+    assert.doesNotMatch(lit, /csel/);
+    // a literal on the left is turned round: 2 < n is n > 2
+    assert.match(body(iff('(< 2 n)')), /cmp {2}x0, #4\n {4}b\.le Lcond_next_/);
+    assert.match(body(iff('(>= n -3)')), /cmn {2}x0, #6\n {4}b\.lt Lcond_next_/);
+    assert.match(body(iff('(== a b)', 'a b', '(f 1 2)')), /cmp {2}x1, x0\n {4}b\.ne Lcond_next_/);
+    // out of line, rt_compare's answer is branched on
+    const asm = compile(iff('(< n 2)'));
+    assert.match(asm, /bl {3}rt_compare\n {4}cmp {2}x0, #RT_FALSE\n {4}b\.eq Lcond_next_\d+\n {4}b {4}Lslow_\d+_done/);
+});
+
+test('a cond whose last test is #true never runs out of clauses', () => {
+    assert.doesNotMatch(compile('(defun f (n) (cond ((== n 0) 1) (#true 2))) (f 1)'), /RT_FAULT_NO_CLAUSE/);
+    assert.match(compile('(defun f (n) (cond ((== n 0) 1))) (f 1)'), /RT_FAULT_NO_CLAUSE/);
+});
+
+test('+ - * and / on floats are inline, out of the integers\' way', () => {
+    const asm = compile('(let a 1.5) (let b 2.5) (+ a b) (* a 3) (/ a b) (/ a 4) (/ a 0) (< a b)');
+    // + two floats: both boxes' headers checked, a box allocated, fadd, stored
+    assert.match(asm, /cmp {2}x16, #2050\n {4}b\.ne (Lslow_\d+)_c\n(.*\n){1,12}? {4}ldur d0, \[x1, #5\]\n {4}ldur d1, \[x0, #5\]\n {4}fadd d0, d0, d1\n {4}mov {2}x3, #2050\n {4}str {2}x3, \[x2\]\n {4}str {2}d0, \[x2, #8\]/);
+    // * an integer literal: it becomes a double
+    assert.match(asm, /movz x16, #0x3, lsl #0\n {4}scvtf d1, x16\n {4}fmul d0, d0, d1/);
+    // / two floats: the divisor checked for zero, and no rt_divide on the way
+    assert.match(asm, /fcmp d1, #0\.0\n {4}b\.eq Lslow_\d+\n(.*\n){1,12}? {4}fdiv d0, d0, d1/);
+    // / by a literal integer that isn't 0 needs no check; by 0, always rt_divide
+    assert.match(asm, /movz x16, #0x4, lsl #0\n {4}scvtf d1, x16\n {4}fdiv d0, d0, d1/);
+    assert.equal(asm.match(/bl {3}rt_divide/g)!.length, 3);   // out of line, once for each
+    // comparisons still ask rt_compare
+    assert.match(asm, /bl {3}rt_compare/);
 });
 
 test('div and % are integers only, and check for zero', () => {
@@ -509,6 +564,18 @@ test("the prelude's functions are in their own namespace", () => {
         (e: unknown) => e instanceof CompileError && /quad is already defined/.test(e.message));
     assert.throws(() => compileWith('1', '(pprint 1)'),
         (e: unknown) => e instanceof CompileError && /the prelude can only define functions/.test(e.message));
+});
+
+test("the prelude's not is inline, as a value and as a test; a program's own not is called (D203)", () => {
+    const prelude = '(defun not (a) (cond (a #false) (#true #true)))';
+    const main  = (asm: string) => asm.slice(asm.indexOf('FUNC slight_main'));
+    const calls = /\bbl? +pf_not\b/;                   // a call or a tail call; its stub and table entry follow main too
+    assert.doesNotMatch(main(compileWith('(not (cons? 1))', prelude)), calls);
+    const test = main(compileWith('(cond ((not (< 1 2)) 1) (#true 2))', prelude));
+    assert.doesNotMatch(test, calls);
+    assert.match(test, /b\.ge/);                      // (< 1 2)'s own compare and branch
+    assert.match(main(compileWith('(defun not (a) a) (not #true)', prelude)), /b {4}fn_not/);
+    assert.match(main(compileWith('(map not (list #true))', prelude + ' (defun map (f xs) xs)')), /pf_not/);
 });
 
 // --- processes ----------------------------------------------------------------

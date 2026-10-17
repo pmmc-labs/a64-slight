@@ -1,0 +1,15 @@
+; The prelude's not compiles inline (D203): as a value; as a test, in if
+; and and; in a lambda; and still as a function, given to map. On
+; anything but a boolean it faults as before, the cond test being its
+; argument.
+
+(defun kind (pid) (car (cadr (join pid))))
+
+(pprint (list (not #true) (not #false)))
+(pprint (if (not (< 2 1)) :yes :no))
+(pprint (and (not (== 1 2)) (not (cons? ()))))
+(pprint (filter (lambda (x) (not (== x 2))) (list 1 2 3)))
+(pprint (map not (list #true #false)))
+(pprint (kind (fork (not 5))))
+(pprint (kind (fork (if (not 6) 1 2))))
+:done

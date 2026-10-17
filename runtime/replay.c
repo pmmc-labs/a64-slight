@@ -37,7 +37,7 @@
 
 #include "io.h"
 
-#define MAGIC "slight record 2\n"
+#define MAGIC "slight record 3\n"
 
 enum { OFF, RECORD, REPLAY };
 
@@ -197,6 +197,7 @@ void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *s) {
         clock = (uint8_t)s->virtual_clock;
         put(&clock, 1);
         put(&s->sched_seed, sizeof s->sched_seed);
+        put(&s->heap_max, sizeof s->heap_max);
         put_strings((uint32_t)*argc, *argv);
         while ((*env)[n]) n++;
         put_strings(n, *env);
@@ -205,7 +206,9 @@ void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *s) {
     }
     char magic[sizeof MAGIC - 1];
     if (!get(magic, sizeof magic) || memcmp(magic, MAGIC, sizeof magic) != 0) stop("that isn't a record of a run");
-    if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed)) stop("the record is cut short");
+    if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed) || !get(&s->heap_max, sizeof s->heap_max)) {
+        stop("the record is cut short");
+    }
     s->virtual_clock = clock;
     *argv = get_strings(&n);
     *argc = (int)n;

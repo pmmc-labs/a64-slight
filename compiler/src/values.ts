@@ -22,6 +22,12 @@ export const TAG_BOXED     = 3;
 export const tupleHeader   = (n: number): bigint => (BigInt(n) << 8n) | 4n;
 export const tupleElement  = (i: number): number => 8 * (1 + i) - TAG_BOXED;
 
+// A float's box: its header (8 bytes of double, and the float type), which
+// a float is told by, all of it compared at once; and where the double is,
+// from a tagged pointer to the box (D198).
+export const FLOAT_HEADER = (8n << 8n) | 2n;
+export const FLOAT_VALUE  = 8 - TAG_BOXED;
+
 // The symbols every program has, in id order (RT_FALSE is symbol 0, RT_TRUE symbol 1).
 export const RESERVED_SYMBOLS: readonly string[] = ['#false', '#true'];
 

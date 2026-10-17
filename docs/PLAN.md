@@ -614,6 +614,46 @@ them:
   register (D57), captured values read from the closure (D79), denser
   lists (CDR-coding, VLists: D23), reference counting with reuse (D24).
 
+### Benchmarks (phases 1 to 3 done, Oct 2026)
+
+slight against C, Go, Erlang, Node, Perl and Python (D194,
+`docs/BENCHMARKS.md`, `make bench`), and Chez Scheme (D201).
+
+- **Phase 1:** `fib`, `binary-trees`, `n-body`, `ping-pong`,
+  `thread-ring`, `spawn`, `idle-memory` and `parallel-fib`, on the cloud
+  machine and the M2 Max, the reference.
+- **Phase 2:** fixing slight's worst ratios, as the profiles found them:
+  tuples built in place (D195), collecting before the heap's cap (D196),
+  better code for calls, arithmetic and tests (D197), float arithmetic
+  inline (D198), a message with nothing to copy freed as it's taken
+  (D199), and a generational collector (D200). On the M2
+  (BENCHMARKS.md, "Phase 2 on the M2 Max"): `binary-trees` 2.4 times
+  faster, fib, `n-body` and `parallel-fib` 1.5, `thread-ring` 1.6 and a
+  hundredth of the memory.
+- **Phase 3** (D201), planned as part of phase 2 and put after its fixes:
+  Chez Scheme, `tak`, `nqueens`, `deriv`, `spectral-norm` and `fan-in`;
+  and what its profiles found: the prelude's list functions as loops,
+  and its `not` inline (D203).
+- **What the numbers point at next** (none started; BENCHMARKS.md, "What
+  slight should look at next", and the "Where slight lands" dashboard):
+  unboxed floats, the widest gap (10 to 36 times C, Go and Node, level
+  with Chez and Erlang), which changes how values are represented and
+  starts with a design note; smaller objects, a two-element tuple 24
+  bytes rather than 32 (`binary-trees`); slowing a sender whose
+  receiver's queue is long, or counting a mailbox in its heap's cap
+  (`fan-in`); and more than one core (`parallel-fib`), a design of its
+  own.
+- **Later, to look into: compiler-known folds** (D203's option B).
+  `fold/l` or `fold/r` given a literal lambda compiled to a loop
+  specialised to its call site, the lambda's body inlined and its free
+  variables passed as arguments, as ts-slight's fold continuations were
+  the fast path all its list functions went through. The prelude could
+  then be written over folds again, and programs' own folds would gain
+  too. It needs a pass of its own: free variables, generated functions
+  named for `:system`, D80's namespaces, and the eight argument
+  registers. Worth it once programs show folds with lambdas on their hot
+  paths.
+
 ### Later: the rest of the October 2026 list
 
 The other changes from that list (above, "After 13"), for later, before
@@ -673,7 +713,8 @@ with Stevan first.
   like boids' round-up (D179), and a `barrier` in `lib/ds.slight` is the
   likely first one.
 - **Faster floats.** Boids spends about a sixth of its time on float
-  arithmetic in C and the boxes it makes. The fix that helps every
+  arithmetic in C and the boxes it makes. (The arithmetic is inline now,
+  D198, and the boxes allocated inline; the boxes themselves remain.) The fix that helps every
   program is in the representation: floats that need no box (NaN-boxing,
   or a tagged short float), or a compiler that keeps a float unboxed
   within a function. Either is a proposal of its own; boids is the

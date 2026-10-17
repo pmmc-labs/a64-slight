@@ -1,0 +1,25 @@
+; deriv, Gabriel's: symbolic derivatives, with lists and symbols:
+; allocating, and walking lists. The derivative of 3x^2 + ax^2 + bx + 5,
+; n times; prints the derivatives' lengths, summed, and the atoms in the
+; last.
+
+(defun deriv (a)
+    (cond
+        ((not (cons? a))  (if (eq? a 'x) 1 0))
+        ((eq? (car a) '+) (cons '+ (map deriv (cdr a))))
+        ((eq? (car a) '-) (cons '- (map deriv (cdr a))))
+        ((eq? (car a) '*) (list '* a (cons '+ (map (lambda (e) (list '/ (deriv e) e)) (cdr a)))))
+        ((eq? (car a) '/) (list '- (list '/ (deriv (cadr a)) (caddr a))
+                                   (list '/ (cadr a) (list '* (caddr a) (caddr a) (deriv (caddr a))))))))
+
+(defun atoms (a)
+    (if (cons? a) (fold/l 0 (lambda (n e) (+ n (atoms e))) a) 1))
+
+(defun run (n e total last)
+    (cond
+        ((== n 0) (tty/write total \n) (atoms last))
+        (#true
+            (let d (deriv e))
+            (run (- n 1) e (+ total (length d)) d))))
+
+(run (string->int (car @ARGV)) '(+ (* 3 x x) (* a x x) (* b x) 5) 0 ())

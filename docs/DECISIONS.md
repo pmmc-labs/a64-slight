@@ -2813,3 +2813,457 @@ the details are defaults.)*
   (killed, the model told), two calls at once with the second answered
   by Escape (`n`) and the first then stopped by Escape, and a quick
   command after (unaffected).
+
+## Benchmarks
+
+**D194. Benchmarks: slight against C, Go, Erlang, Node, Perl and
+Python.** *(User, Oct 2026: on Claude's proposal, with Perl and Python
+added, "it will be interesting to see"; Go and Erlang on every core too,
+"to see what it gains"; everything committed, results included; phase 1
+first.)* `bench/`, `docs/BENCHMARKS.md`.
+- **Three questions:** how good the compiled code is (calls, integers,
+  allocating, floats); what the actor runtime's operations cost (a
+  message, a switch, a process started, a process waiting); and, later,
+  slight against itself over time, on programs (boids, `html->text`,
+  JSON, HTTP) that would mostly compare libraries across languages.
+- **Against:** C, the floor; Go, compiled, with goroutines; Erlang, the
+  same model as slight; Node, the everyday reference; Perl and Python.
+  Chez Scheme, a native Lisp, in phase 2. Not Rust (about C), Java (its
+  warming up makes it hard to time fairly), Elixir (Erlang's VM), or
+  more Lisps than Chez.
+- **Phase 1's programs:** `startup`; `fib`, `binary-trees` and `n-body`
+  in all seven; `ping-pong`, `thread-ring`, `spawn`, `idle-memory` and
+  `parallel-fib` in slight, Go and Erlang. Phase 2: Chez, more of the
+  Gabriel and Benchmarks Game programs, Savina's fan-in, and profiling
+  slight's worst ratios.
+- **Fair, and checked:** each program is written as its language usually
+  is, doing the same work, and prints only numbers (slight's last line is
+  its root's value), which the harness checks against what it works out
+  itself, or, for `n-body`, against C. slight's bend to slight (D84):
+  nothing was added to the language for them, and the ones that need
+  what it hasn't got (arrays that change, hash tables, bignums, regular
+  expressions) are left out. `binary-trees` runs at 18, not its usual 21,
+  for every language, since a bigger tree doesn't fit in one slight
+  process's 64 MB.
+- **Two programs changed** when their first numbers looked wrong, so as
+  to measure what they meant to: Erlang's `spawn` was quadratic (its
+  mailbox, holding up to a million messages on its heap, walked at every
+  collection: 36 s), so it keeps them off its heap, as Erlang's
+  documentation says for a long queue (1.3 s); and Go's `spawn` and
+  `idle-memory` sent on unbuffered channels, which kept every goroutine
+  alive and waiting, so their channels hold every answer, as a mailbox
+  would (15 s to 0.8, and 9.4 to 7.0). Erlang's `idle-memory` keeps its
+  queue on its heap, where it's faster (4 s, not 7).
+- **Measured** by `wait4`, from `bench/rusage.c`, a small process that
+  starts each program: on Linux a process forked from Python starts with
+  Python's 15 MB counted in its peak. Built once, checked once, then 5
+  timed runs taking turns (fewer, never under 3, for a slow one); the
+  median and the fastest, CPU time, peak memory. Go and Erlang run on one
+  core (`GOMAXPROCS=1`, `+S 1:1`) and with their defaults (`-mc`).
+  Erlang's process limit is raised only for `spawn` and `idle-memory`,
+  and only as far as they need: a limit of 4 million costs 47 MB from
+  the start.
+- **Results on the cloud machine** (x86-64; BENCHMARKS.md has them):
+  slight is the fastest at sending (106 ns a message), starting a process
+  (250 ns) and keeping one waiting (431 bytes, a sixth of Go's or
+  Erlang's); between Go and Erlang on calls and the ring; and slowest of
+  the compiled ones at allocating (`binary-trees`, 4.2 times Erlang) and
+  with floats (`n-body`, 52 times C, 1.3 Erlang). On 4 cores Go gains
+  3.7 times on `parallel-fib`, Erlang 2.7.
+- **Found, for later** (not changed here): `GC_MIN` lets each busy
+  process keep up to 256 KB of garbage, so `thread-ring`'s 503 take 266
+  MB; and one structure can't be much over 25 MB.
+- **On the M2 Max** (Stevan's run, the same day; the reference): slight
+  is the fastest of the three at every actor benchmark on one core, the
+  ring included (79 ns a message, 85 a hop, 135 a process started, 554
+  bytes a process waiting); a little behind Node and Erlang on `fib`
+  (1.2 and 1.1 times), 2.5 times Go; 6 times Erlang on `binary-trees`
+  and 1.8 on `n-body`. On 12 cores, Go gains 8.7 times on
+  `parallel-fib`. Erlang on one scheduler
+  (`+S 1:1`) is on a core only 37 to 60 per cent of the time there,
+  unexplained, so the Mac's Erlang numbers are its `-mc` ones for now;
+  and slight's peak memory is higher than on Linux (356 MB on
+  `binary-trees`, against 98), probably macOS's allocator keeping freed
+  chunks.
+
+**D195. Tuples built in place.** *(User, Oct 2026: the first of the fixes
+phase 2's profiles found, D194, in the order Claude proposed.)*
+- **Before:** `(tuple a b ...)` was a variadic C builtin. The compiler
+  made a list of the elements and called `rt_tuple`, which counted the
+  list and copied it into the tuple: so a `binary-trees` node allocated
+  64 bytes, half of them garbage at once, and called into C, and each of
+  `n-body`'s bodies made a list of seven to throw away.
+- **Now** it's compiled as `list` is: the elements wait in frame slots,
+  then one inline allocation takes the header and the elements (a
+  target's `tupleCells`), rounded up to 16 bytes as `tuples.c` rounds
+  them. `list->tuple` still goes through `rt_tuple`, which is right for a
+  list that's already made.
+- **Measured** on the cloud machine: `binary-trees 14`, 1,590 million
+  instructions to 862 million (46 per cent fewer), and `binary-trees 18`
+  from 3.8 s to 1.95; `n-body 20000`, 642 million to 549 (14 per cent).
+- **Tests:** 239: each size from none to three, and seventeen (an even
+  count of words and an odd one round differently); the elements worked
+  out left to right; tuples in tuples; one whose later elements collect
+  the heap while the earlier ones wait in the frame; one sent and
+  matched. Also under `SLIGHT_GC_STRESS` and seeds.
+- **Not changed:** a two-element tuple is still 32 bytes, against a
+  cons's 16, since every heap object is a multiple of 16 bytes and the
+  collector and copying count on it; so `binary-trees` at depth 19 still
+  doesn't fit in a process's 64 MB.
+
+**D196. Collecting before the heap's cap.** *(User, Oct 2026: "just do
+the cap fix for now", of Claude's two changes to when a heap is
+collected; growing to three times what's live, not two, was turned down
+for now, for the memory it costs.)*
+- **Before:** the next collection came when the heap in use reached
+  twice what survived the last (D106). A process with more than 32 MB
+  live would only collect past the 64 MB cap, so it failed there with
+  `:heap`, even with most of its heap garbage. A collection can only run
+  at a function's entry (or a `recv`), where every live value is in a
+  frame, so it can't simply happen when an allocation finds the cap.
+- **Now:** twice what's live, but never within 8 MB of the cap
+  (`GC_ROOM`): room for a new chunk (up to 1 MB) and for what's allocated
+  before the next function's entry. And never at or below what's live:
+  with more than 56 MB live, the next is halfway from there to the cap.
+  Otherwise `rt_preempt`, which collects whenever the heap in use has
+  reached the threshold, would collect at every slice's end, copying
+  the whole heap each time, which is what the first version of this did
+  to tests 059 and 130 (each filling the heap with live data).
+- **Turned down:** halfway to the cap whenever that's sooner than twice
+  what's live. It's never at or below what's live, but it collects
+  sooner than needed whenever more than 21 MB is live: 6.2 per cent more
+  instructions on `binary-trees 18`, whose stretch tree is 33 MB.
+  This rule costs 0.8 per cent there.
+- **Costs:** a heap that's all live data collects a few times more
+  before it fails (test 059 takes 3.9 s under qemu, not 1.3). A single C
+  builtin that allocates more than the 8 MB at once near the cap (a
+  `str-join` of big strings) can still fail where a collection would
+  have made room.
+- **Tests:** 240: 38 MB kept, then 48 MB of garbage, which failed before
+  and passes now, on both targets.
+
+**D197. Better code for calls, arithmetic and tests.** *(User, Oct 2026:
+the third of phase 2's fixes, D194, in the order Claude proposed.)* Each
+value used to wait in a frame slot, and each integer operation checked
+both operands, a constant's too: fib's recursive path was 61
+instructions on AArch64. Now, in `codegen.ts`, with new shapes from each
+target:
+- **A simple operand waits nowhere.** A local (in its slot, which
+  nothing changes), or a literal integer, `()`, `#true`, `#false` or
+  quoted symbol (a word), is read straight into the register it's wanted
+  in, when it's wanted: a binary operation's left or right operand, a
+  call's argument (a compiled function's or a C builtin's). The last
+  argument that does need working out stays in the accumulator, and the
+  call's register moves take it from there. A left operand that's
+  simple is read after the right is worked out; it has no effects, so
+  the order can't be seen. `div` and `%`, which check each operand as it
+  comes, read only a right one late, so a left that isn't an integer
+  still faults before the right is worked out.
+- **An integer literal is an immediate** for `+`, `-` and the
+  comparisons, so only the other operand is checked: `adds x0, x0, #2`,
+  turned round for a negative one, or a word in a register past twelve
+  bits (32 on x86-64). Out of line it's the runtime's right operand, as
+  before. `*` keeps its two-register path, which untags one side.
+- **A comparison as a test branches**: a compare and a branch to the
+  next clause, with no `#true` or `#false` made and tested; a literal on
+  the left is turned round (`(< 2 n)` is `(> n 2)`). Out of line,
+  `rt_compare` gives a boolean (or faults), which is branched on.
+- **A cond whose last test is `#true`**, as an `if`'s is, has no jump to
+  the no-clause fault, and its last body runs on into the end.
+- **Measured** (instructions, on the cloud machine): fib 30, 131 million
+  to 79 (40 per cent fewer), and fib 38's time 0.44 s to 0.36 (medians
+  of ten, interleaved; the stores and loads taken out were cheap ones);
+  `binary-trees 14`, 8.5 per cent fewer; `n-body`, 3.3, its time being in
+  float arithmetic in C; `ping-pong`, 1.3, its time being in the
+  runtime. fib's path on AArch64 is 39 instructions.
+- **Turned down: the reduction count in a register.** It would save two
+  of those 39 on AArch64 and none on x86-64, where it's one subtraction
+  from memory already; but the runtime reads and writes the count in
+  four places (refilling it, `rt_heap_grow` cutting a slice short for a
+  collection, which C builtins reach too, `SLIGHT_GC_STRESS`'s counting,
+  and `:system`), which would all have to go through each process's
+  saved registers.
+- **Tests:** 241: each comparison as a test agreeing with it as a value,
+  on integers, floats, mixed and NaN, with literals on either side, past
+  an immediate's reach on each target, and near the edges of 63 bits;
+  `+` and `-` with literals on integers and floats. The unit tests check
+  the new shapes, and that a simple operand takes no slot. Since a
+  simple operand is read late and the last argument waits in a register,
+  every golden test ran under `SLIGHT_GC_STRESS` too (x86-64): all give
+  their output, at 7 or at 100, but the three that fill a heap with tens
+  of MB of live data (059, 130, 240), which can't finish under stress,
+  each collection copying all of it.
+
+**D198. Float arithmetic in the compiled code.** *(User, Oct 2026: the
+fourth of phase 2's fixes, D194, in the order Claude proposed.)*
+- **Before:** `+`, `-` and `*` on anything but two integers called
+  `rt_add`, `rt_sub` or `rt_mul`, and `/` always called `rt_divide`: a
+  call into C, a conversion, and `rt_new_float` through `rt_alloc`.
+  `n-body` spent 27 per cent of its time in those calls and 14 in
+  `rt_new_float`.
+- **Now** the integers' path is as it was, and the out-of-line path
+  first tries floats: two float boxes (each told by its tag, then its
+  whole header word, as a tuple pattern's test does, D178), or a float
+  box when the right operand is an integer literal (made a double as C's
+  `(double)` makes it); then the result's box allocated inline, the IEEE
+  operation done in `d0` or `xmm0`, and the double stored. Anything else
+  (an integer operand that isn't a literal, a string) calls C as before.
+  `/` has no integer path, so its float path is inline: two floats, or a
+  float and a literal integer that isn't 0, the divisor checked for
+  either zero first; anything else, and a zero, is `rt_divide`'s, which
+  faults on the zero as it did.
+- **To the bit:** the same IEEE operation on the same doubles, with no
+  multiply-add fused. Boids flies the same flight, byte for byte.
+- `*` got an integer-literal path too (the literal in a register, and
+  only the other operand checked), which is what lets a float times a
+  literal take the float path.
+- **Measured** on the cloud machine: `n-body 20000`, 531 million
+  instructions to 378 million (29 per cent fewer), and `n-body 1000000`
+  2.4 s to 1.25; boids (60 birds, 30 frames), 4.4 per cent fewer, its
+  time being mostly in messages.
+- **Not done:** comparisons on floats still ask `rt_compare` (with a NaN
+  each target's branches differ: AArch64's condition codes, x86's parity
+  flag); `sqrt` and the other math builtins are still C; and floats are
+  still boxed, each result a 16-byte allocation. Unboxed floats (PLAN.md's
+  "Faster floats") are still a proposal of their own.
+- **Tests:** 242: the four operations on floats, signs, zeros,
+  infinities and NaN, with literals, and long runs that collect, the
+  expected output from Python's IEEE arithmetic; and what still goes to
+  C, which must agree: integer operands that aren't literals, an integer
+  divided by one, zero divisors and a string, with their faults. Also
+  under `SLIGHT_GC_STRESS`, with boids. Unit tests for the shapes.
+
+**D199. A message with nothing to copy leaves nothing behind.** *(User,
+Oct 2026: point 5 of the generational collector's note, which can come
+first, on Claude's recommendation.)* A message is a chunk holding its
+record and the copy of its value (D177), and taking it linked the chunk
+into the taker's heap, where the record was dead space till the next
+collection. For a message with nothing to copy (an integer, a keyword,
+static data) the chunk is just the record, 32 bytes, so a process taking
+many such messages filled its heap with them, up to the 256 KB a heap
+reaches before it's ever collected (D106): `thread-ring`'s 503 processes,
+266 MB. Now `recv` frees such a chunk as it takes the message, having
+read its value and device first. `thread-ring` on the cloud machine: 3.3
+s and 266 MB to 0.74 s and 2.6 MB, the memory having been most of the
+time too. A message with something to copy is as before. Test 243: a
+thousand integers leave an empty heap, where before they left 32 KB;
+shown so as not to depend on when a heap is collected, and so also under
+`SLIGHT_GC_STRESS`. On the M2 Max: 0.88 s and 210 MB to 0.54 s and 2.0
+MB, 54 ns a hop, where Go takes 106 and Erlang 229; nothing else moved.
+
+**D200. A generational collector.** *(User, Oct 2026: the design note's
+five points, each as Claude recommended; the fifth came first, as
+D199.)* Every collection copied everything live, so what lived long was
+copied again at each one, about a byte copied for each allocated:
+`binary-trees` spent 63 per cent of its instructions collecting, `n-body`
+11. Now a process's heap has two generations (DESIGN.md, "Process heaps
+and GC"):
+
+- **The young one** is a nursery, one chunk, allocated in as the heap
+  was (`heap_ptr` and `heap_limit`, so compiled code doesn't change): 4
+  KB at first, twice that at each collection that finds it overflowed,
+  up to 1 MB. Once it's full, overflow chunks, listed after it, till the
+  next function's entry, which `rt_heap_grow` brings at once by cutting
+  the slice short, as for D196.
+- **A minor collection**, at a function's entry or a `recv` once the
+  nursery has overflowed, copies what's young and reachable into the old
+  generation, all of it (promotion en masse, point 1), following only
+  pointers into the young generation (a range check), so it costs what
+  survives; then the nursery starts again.
+- **A major collection**, once the old generation is twice what was live
+  after the last (D106, with D196's room), is the collection there was:
+  everything live, in both, copied into fresh chunks.
+- **No barrier**: nothing old ever points at anything young, since an
+  object only points at objects made before it (nothing changes once
+  made; compiled code and C builtins fill an object before any
+  collection can come; adopted chunks point only into themselves). So
+  nothing in the compiler or the C builtins changed.
+- **The old generation** is the chunk list as it was: what's promoted
+  goes into its first chunk, messages, a fork's values and joined
+  results are adopted behind it, and strings of 64 KB or more (point 3)
+  are allocated straight into it, a chunk each. The 64 MB cap counts
+  both generations, and so does `:system`'s `:heap`.
+- **A nursery that grows** (point 2), not a fixed one, which every
+  process that allocates at all would hold, and which on Linux would be
+  a mapping of its own at 256 KB.
+- **Fields:** a first version added five to `rt_proc_t`, and a waiting
+  process cost 36 bytes more (`idle-memory`, a million: 433 MB to 469).
+  Now the overflow chunks hang off the nursery, one count of bytes
+  covers both generations, the chunk promoted into is kept first in the
+  old list so only how far it's filled is stored, and `keypress` sits in
+  the padding after `state`: 352 bytes, as before.
+- **Testing** (point 4): `SLIGHT_GC_VERIFY=1` walks everything reachable
+  before each minor collection, and aborts at an old object pointing at
+  a young one. Promotion broken on purpose (a cell's car left
+  unforwarded) stopped there with its message; with only
+  `SLIGHT_POISON`, a segfault. The golden tests pass on both targets
+  under VERIFY, and under `SLIGHT_GC_STRESS=7` (a minor collection at
+  every seventh entry and every `recv`, every eighth of them a major
+  one) but for timeouts, 10 on x86-64 and 14 under qemu, which pass at
+  100, except 059, 130 and 240, which fill the heap with live data and
+  never finish under stress, as before. No test sets VERIFY: a walk of
+  the heap at each minor collection takes test 244 under
+  `SLIGHT_GC_STRESS=100` from 4 seconds to 96. Test 244: a kept list
+  built across minor collections, young cells over old ones, a big
+  string, a list bigger than the nursery ever is made in one call,
+  messages and a joined result under young cells, all checked after the
+  rest has been collected round them; small, since under stress every
+  eighth collection copies all that's live.
+- **Measured** on the cloud machine: instructions, `binary-trees 14`
+  789 million to 450 (collecting 3.2 times less, 63 per cent to 35),
+  `binary-trees 16` 3,712 to 2,661, `n-body 20000` 378 to 328
+  (collecting from 11 per cent to under 2). Times, noisy there:
+  `binary-trees 18` 2.2 s to 1.7, `n-body` 1.41 to 1.16, the actor
+  benchmarks the same. Peak memory the same, but `n-body`'s 2.9 MB is
+  4.7, its 1 MB nursery. Less than the note's guess of one and a half to
+  two times for `binary-trees`: its trees of depth 14 and more are
+  bigger than the nursery, so each is promoted as it's made and left to
+  major collections, which copy the long-lived tree each time. On the
+  M2 Max: `binary-trees` 1.35 s to 1.07, `n-body` 1.45 to 1.35, the rest
+  the same, `idle-memory`'s 556 MB included.
+
+Turned down, for now: aging (point 1; it wouldn't help those trees,
+which outlive a nursery anyway); a write barrier and a remembered set
+(nothing needs them); mark-sweep or mark-compact for the old generation;
+and a pool of nurseries that waiting processes give back.
+
+**D201. Phase 3: Chez Scheme and five more programs.** *(User, Oct 2026:
+"lets add Chez and the other programs now": D194's phase 2 programs,
+put after phase 2's fixes.)*
+
+- **Chez Scheme**, a native Lisp, the nearest thing to slight's compiled
+  code: compiled ahead of time (`compile-program`, in
+  `bench/chez-compile.ss`) and run with `--program`; at its default
+  optimize level, which is safe, as slight is; with Scheme's ordinary
+  arithmetic, as Scheme is usually written, not `fl+` or `fx+`. Found as
+  `chez` (Homebrew), `chezscheme` or `scheme` (Debian), a `scheme` only
+  if its `--version` is a bare version, as Chez's is (MIT Scheme's
+  isn't). In every sequential benchmark; none of the actor ones, since
+  it has no processes of that kind.
+- **The programs:** `tak 10` (Gabriel's, of 30, 20 and 10: 101 million
+  calls), `nqueens 13` (Gabriel's, as in the R7RS benchmarks), `deriv
+  2000000` (Gabriel's) and `spectral-norm 1000` (the Benchmarks Game's,
+  on one core), in all eight languages; `fan-in 10000000` (100 senders,
+  one receiver) in slight, Go and Erlang. Sized so that slight takes
+  about a second on the cloud machine, and Python and Perl no more than
+  about 20.
+- **Each language's own data**, D194's rule: `nqueens`'s lists are
+  arrays in C, Go, Node, Perl and Python, copied where the list version
+  makes a new list; `deriv`'s s-expressions are each language's own (in
+  C, cells from an arena emptied after each derivative, a symbol a cell);
+  `spectral-norm`'s vectors are lists in slight and Erlang, made again
+  each step, and arrays changed in place elsewhere. `deriv` prints its
+  derivatives' lengths, summed, so that no compiler can skip one.
+- **Checked:** `tak`'s and `deriv`'s results are worked out in the
+  harness, `nqueens`'s are OEIS A000170's, `spectral-norm`'s are C's
+  (at 100, the Benchmarks Game's 1.274219991). Python's sums are loops:
+  from 3.12 its `sum` of floats compensates its rounding, and would
+  differ from the others in the last bits.
+- **`fan-in`'s choices:** Go's channel holds 1,024: unbuffered, every
+  message is a switch between goroutines, 4.7 times slower, and from 100
+  up the size makes no difference. Erlang's receiver keeps its queue off
+  its heap, as `spawn`'s does: 4.9 s to 4.5 on one core, 4.7 to 1.0 on
+  every core.
+- **Found:** on one core nothing slows `fan-in`'s senders, so in slight
+  and in Erlang nearly every message waits in the receiver's mailbox at
+  once: 640 MB at ten million (Erlang 637), where Go's channel blocks
+  its senders (2 MB). slight's time there is mostly the system's (3.0 s
+  of 3.7 on the cloud machine), for that memory; at a million, 0.09 s.
+  A mailbox isn't counted in its process's 64 MB. Slowing a sender
+  whose receiver's queue is long, or counting a mailbox in the cap,
+  would be changes to the runtime, for later if they're wanted.
+- The harness reads a version from stderr when stdout has none, as
+  Chez's `--version` prints it there.
+
+**D202. A heap's cap is 1 GB, or what `SLIGHT_HEAP_MAX` says.** *(User,
+Oct 2026: the second of three options, as Claude recommended; the
+others were keeping 64 MB, and no cap, as in Erlang and Go, where one
+runaway process takes the program down when `malloc` fails.)* The 64 MB
+came from D58's one mapping per process, which D89's chunks replaced;
+D106 kept the figure. A cap costs nothing till it's used now, since
+chunks come as they're needed, but 64 MB held a structure of 56 MB at
+most: `binary-trees` ran at 18, not its usual 21, and no process could
+hold a big file's data.
+
+- **1 GB by default.** `SLIGHT_HEAP_MAX` sets it per run: a number of
+  bytes, or with `K`, `M` or `G` after it, and at least `1M`, a
+  nursery's most; anything else stops the program at its start with
+  exit 2.
+- **The room kept below the cap** for its last collection (D196) is an
+  eighth of it: 8 MB at 64 MB, as before, 128 MB at 1 GB.
+- **What it costs:** a process that does hold hundreds of MB makes
+  everything wait through each of its major collections, since they
+  copy everything live, on the one core; and while one runs, the
+  process's memory can be twice what's live. With 64 MB, neither could
+  be large.
+- **A device's limit stays 64 MB** (D160), its own constant now: a line,
+  a count or a value read from a device of 64 MB or more is `:too-big`
+  however big the heap, so an endless line still can't take a server's
+  memory.
+- **Replay:** the cap is one of the settings a record keeps, as a
+  different one could fault where the recorded run didn't; the record's
+  format is 3.
+- **Tests:** `t/run.sh` sets `64M`, the cap the tests were written for,
+  so those that fill a heap or read 64 MB stay as they were, and quick.
+  Test 245: at `2M`, a process keeping 256 KB ends and one keeping 3.2
+  MB faults; 246: `512K` is refused.
+- **A hole from D200, closed:** the cap was checked only where the heap
+  grows through `rt_heap_grow` (the nursery overflowing, a big string),
+  never as a collection promotes; normally a minor collection comes only
+  after an overflow, which checks, but under `SLIGHT_GC_STRESS` the
+  nursery need never overflow, and test 245's process kept 3.2 MB
+  under a 2 MB cap. Now a heap past its cap after a collection gets no
+  room in its nursery, so its next allocation goes to `rt_heap_grow` and
+  faults there, with its own site, as before.
+- **Measured** on the cloud machine: `binary-trees 21`, its usual size,
+  now runs (16.4 s, 676 MB at its peak; at `64M` it faults, as before).
+  Its major collections take 0.5 to 1 ms for each MB live: 264 ms with
+  267 MB live, 108 to 161 with 200, and 4.8 s of the 16.4 in all. So a
+  process with a few hundred MB live can hold everything up for a
+  quarter of a second; at 64 MB the most was about 50 ms. The benchmark
+  stays at 18 (Stevan): its runs then compare with every one before,
+  and a full run doesn't take ten minutes more.
+- Not changed: a mailbox still isn't counted in its process's cap
+  (D201's `fan-in`).
+
+**D203. The prelude's list functions as loops, and its `not` inline.**
+*(User, Oct 2026: option A of three, as Claude recommended, with B to be
+looked into later.)* Phase 3's profiles (D201) put about 80 per cent of
+`deriv`'s instructions in the prelude's `map`, `fold/l`, the closures
+they call, `length` and `not`, and `not` alone at 18 per cent of
+`nqueens`'.
+
+- **Loops:** `reverse`, `length`, `append`, `sum`, `product`, `map`,
+  `filter`, `remove` and `fold/r` are each a tail-recursive loop of
+  their own, with a helper (`reverse-onto`, `map-loop` and so on), not
+  `fold/l` with a lambda: the same results, `f` called in the same
+  order, and every loop still a tail call, so long lists are as before.
+  `fold/l` stays as it was.
+- **`not`:** a call to the prelude's `not` compiles inline: as a value,
+  the `cond` the prelude says it is; as a test, its argument's test with
+  the branches the other way round, so `(not (== a b))` is a compare and
+  a branch (D197). A program's own `not` (D80), or a local called `not`,
+  is called as before, and `not` as a value is still the prelude's
+  function. Anything but a boolean faults `:not-a-bool`, as before; the
+  cond test it names is now the argument, at its own place, not a line
+  of the prelude.
+- **Measured** on the cloud machine, in instructions: `deriv 200000` 924
+  million to 592 (36 per cent fewer), `nqueens 11` 383 to 247 (35),
+  `n-body 20000` 328 to 310; `spectral-norm` the same. Tests 247 and
+  248. On the M2 Max: `deriv` 0.575 s to 0.380, `nqueens` 0.841 to
+  0.703.
+- **Turned down:** folds as C builtins, which would have to call
+  compiled code, which C never does (the collector's roots are the
+  frames, D166). **B, for later:** `fold/l` or `fold/r` given a literal
+  lambda compiled to a loop specialised to its call site, the lambda's
+  body inlined and its free variables passed as arguments (lambda
+  lifting), as ts-slight's fold continuations were the fast path all
+  its list functions went through; the prelude could then be written
+  over folds again, and a program's own folds would gain too, for a
+  pass of its own (free variables, generated functions named for
+  `:system`, D80, and the eight argument registers). **C:** B, and the
+  list functions inlined at each call site, so what `map` is given is
+  called directly or inlined: a `deriv` specialised by hand that way
+  took 574 million instructions, 38 per cent fewer, against 28 for the
+  loops alone (both before `not` was inline); not worth the pass for
+  now.

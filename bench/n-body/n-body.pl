@@ -1,0 +1,90 @@
+# n-body, after the C version: a body is a hash ref.
+use strict;
+use warnings;
+use POSIX qw(floor);
+
+use constant PI         => 3.141592653589793;
+use constant SOLAR_MASS => 4 * PI * PI;
+use constant YEAR       => 365.24;
+
+sub planet {
+    my ($x, $y, $z, $vx, $vy, $vz, $mass) = @_;
+    return { x => $x, y => $y, z => $z, vx => $vx * YEAR, vy => $vy * YEAR, vz => $vz * YEAR, mass => $mass * SOLAR_MASS };
+}
+
+my @bodies = (
+    { x => 0, y => 0, z => 0, vx => 0, vy => 0, vz => 0, mass => SOLAR_MASS },
+    planet(4.84143144246472090e+00, -1.16032004402742839e+00, -1.03622044471123109e-01,
+           1.66007664274403694e-03, 7.69901118419740425e-03, -6.90460016972063023e-05,
+           9.54791938424326609e-04),
+    planet(8.34336671824457987e+00, 4.12479856412430479e+00, -4.03523417114321381e-01,
+           -2.76742510726862411e-03, 4.99852801234917238e-03, 2.30417297573763929e-05,
+           2.85885980666130812e-04),
+    planet(1.28943695621391310e+01, -1.51111514016986312e+01, -2.23307578892655734e-01,
+           2.96460137564761618e-03, 2.37847173959480950e-03, -2.96589568540237556e-05,
+           4.36624404335156298e-05),
+    planet(1.53796971148509165e+01, -2.59193146099879641e+01, 1.79258772950371181e-01,
+           2.68067772490389322e-03, 1.62824170038242295e-03, -9.51592254519715870e-05,
+           5.15138902046611451e-05),
+);
+
+sub advance {
+    my $dt = shift;
+    for my $i (0 .. $#bodies) {
+        my $b = $bodies[$i];
+        for my $j ($i + 1 .. $#bodies) {
+            my $o    = $bodies[$j];
+            my $dx   = $b->{x} - $o->{x};
+            my $dy   = $b->{y} - $o->{y};
+            my $dz   = $b->{z} - $o->{z};
+            my $dist = sqrt($dx * $dx + $dy * $dy + $dz * $dz);
+            my $mag  = $dt / ($dist * $dist * $dist);
+            $b->{vx} -= $dx * $o->{mass} * $mag;
+            $b->{vy} -= $dy * $o->{mass} * $mag;
+            $b->{vz} -= $dz * $o->{mass} * $mag;
+            $o->{vx} += $dx * $b->{mass} * $mag;
+            $o->{vy} += $dy * $b->{mass} * $mag;
+            $o->{vz} += $dz * $b->{mass} * $mag;
+        }
+    }
+    for my $b (@bodies) {
+        $b->{x} += $dt * $b->{vx};
+        $b->{y} += $dt * $b->{vy};
+        $b->{z} += $dt * $b->{vz};
+    }
+}
+
+sub energy {
+    my $e = 0;
+    for my $i (0 .. $#bodies) {
+        my $b = $bodies[$i];
+        $e += 0.5 * $b->{mass} * ($b->{vx} * $b->{vx} + $b->{vy} * $b->{vy} + $b->{vz} * $b->{vz});
+        for my $j ($i + 1 .. $#bodies) {
+            my $o  = $bodies[$j];
+            my $dx = $b->{x} - $o->{x};
+            my $dy = $b->{y} - $o->{y};
+            my $dz = $b->{z} - $o->{z};
+            $e -= ($b->{mass} * $o->{mass}) / sqrt($dx * $dx + $dy * $dy + $dz * $dz);
+        }
+    }
+    return $e;
+}
+
+sub offset {
+    my ($px, $py, $pz) = (0, 0, 0);
+    for my $b (@bodies) {
+        $px += $b->{vx} * $b->{mass};
+        $py += $b->{vy} * $b->{mass};
+        $pz += $b->{vz} * $b->{mass};
+    }
+    $bodies[0]{vx} = -$px / SOLAR_MASS;
+    $bodies[0]{vy} = -$py / SOLAR_MASS;
+    $bodies[0]{vz} = -$pz / SOLAR_MASS;
+}
+
+sub shown { return floor($_[0] * 1e9 + 0.5) }
+
+offset();
+print shown(energy()), "\n";
+advance(0.01) for 1 .. $ARGV[0];
+print shown(energy()), "\n";

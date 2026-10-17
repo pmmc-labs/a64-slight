@@ -5,8 +5,8 @@
 // D47).
 // Frame slots are addressed up from sp, under x29/x30.
 
-import { comment, placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
-import { tupleElement } from './values.ts';
+import { comment, NOT, placeArgs, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
+import { FLOAT_HEADER, FLOAT_VALUE, tupleElement } from './values.ts';
 
 const ARGS = ['x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'];
 
@@ -91,6 +91,36 @@ export function loadWord(reg: string, word: bigint): readonly string[] {
     return [head, ...rest.map((c) => `    movk ${reg}, ${hex(c.v)}, lsl #${16 * c.k}`)];
 }
 
+// Compares x0 with a word: as an immediate when it fits cmp's (or, for a
+// negative one, cmn's) twelve bits, which most small integers' words do.
+function compareWord(word: bigint): Code {
+    const w = BigInt.asIntN(64, word);
+    if (w >= 0n && w <= 4095n) return `    cmp  x0, #${w}`;
+    if (w < 0n && w >= -4095n) return `    cmn  x0, #${-w}`;
+    return [loadWord('x2', word), '    cmp  x0, x2'];
+}
+
+// Floats: whether reg is a float's box, by its tag and then its header,
+// which fits cmp's twelve bits; and the box just allocated (x2) made to
+// hold d0, into x0. Only d0 and d1, which nothing keeps across a call.
+const FLOAT_OPS: Readonly<Record<FloatOp, string>> = { '+': 'fadd', '-': 'fsub', '*': 'fmul', '/': 'fdiv' };
+
+const isFloat = (reg: string, label: string): Code => [
+    `    and  x16, ${reg}, #RT_TAG_MASK`,
+    '    cmp  x16, #RT_TAG_BOXED',
+    `    b.ne ${label}`,
+    `    ldur x16, [${reg}, #-RT_TAG_BOXED]`,
+    `    cmp  x16, #${FLOAT_HEADER}`,
+    `    b.ne ${label}`,
+];
+
+const BOX_D0: Code = [
+    `    mov  x3, #${FLOAT_HEADER}`,
+    '    str  x3, [x2]',
+    '    str  d0, [x2, #8]',
+    '    orr  x0, x2, #RT_TAG_BOXED',
+];
+
 // dst = src + n, for any n.
 function addImm(dst: string, src: string, n: number, scratch: string): Code {
     return n <= 4095 ? `    add  ${dst}, ${src}, #${n}` : [loadWord(scratch, BigInt(n)), `    add  ${dst}, ${src}, ${scratch}`];
@@ -118,6 +148,7 @@ function move(dst: string, op: Operand): Code {
     switch (op.t) {
         case 'slot':     return `    ldr  ${dst}, ${slot(op.si)}`;
         case 'imm':      return `    mov  ${dst}, #${op.v}`;
+        case 'word':     return loadWord(dst, op.v);
         case 'addr':     return `    LOADADDR ${dst}, ${op.label}`;
         case 'frame':    return `    mov  ${dst}, sp`;
         case 'slotAddr': return addImm(dst, 'sp', 8 * op.si, 'x5');
@@ -192,6 +223,8 @@ export const AARCH64: Target = {
     storeSlot: (si, note) => `    str  x0, ${slot(si)}${comment(note)}`,
     copySlot: (from, to, note) => [`    ldr  x16, ${slot(from)}${comment(note)}`, `    str  x16, ${slot(to)}`],
     loadLeft: (si) => `    ldr  x1, ${slot(si)}`,
+    load: (dst, op) => move(dst === 'acc' ? 'x0' : 'x1', op),
+    accToLeft: '    mov  x1, x0',
 
     testBool: (ifFalse, notBool) => [
         '    cmp  x0, #RT_FALSE',
@@ -206,6 +239,9 @@ export const AARCH64: Target = {
     branchUnlessNil: (label) => ['    cmp  x0, #RT_NIL', `    b.ne ${label}`],
     branchUnlessIs: (word, label) => [loadWord('x2', word), '    cmp  x0, x2', `    b.ne ${label}`],
     branchIfSame: (label) => ['    cmp  x1, x0', `    b.eq ${label}`],
+    branchUnlessCompare: (cond, label) => ['    cmp  x1, x0', `    b.${NOT[cond]} ${label}`],
+    branchUnlessCompareWord: (cond, word, label) => [compareWord(word), `    b.${NOT[cond]} ${label}`],
+    branchIfFalse: (label) => ['    cmp  x0, #RT_FALSE', `    b.eq ${label}`],
     branchUnlessBox: (header, label) => [
         '    and  x1, x0, #RT_TAG_MASK',
         '    cmp  x1, #RT_TAG_BOXED',
@@ -222,7 +258,35 @@ export const AARCH64: Target = {
     compareBool: (cond: Cond) => ['    cmp  x1, x0', boolIf(cond)],
     notBool: ['    cmp  x0, #RT_TRUE', boolIf('ne')],
 
+    branchUnlessFloat: (label) => isFloat('x0', label),
+    branchUnlessFloats: (label) => [isFloat('x0', label), isFloat('x1', label)],
+    branchIfZeroFloat: (label) => [`    ldur d1, [x0, #${FLOAT_VALUE}]`, '    fcmp d1, #0.0', `    b.eq ${label}`],
+    floatArith: (op) => [
+        `    ldur d0, [x1, #${FLOAT_VALUE}]`,
+        `    ldur d1, [x0, #${FLOAT_VALUE}]`,
+        `    ${FLOAT_OPS[op]} d0, d0, d1`,
+        BOX_D0,
+    ],
+    // n to a double as C's (double) makes it, rounding to nearest
+    floatArithInt: (op, n) => [
+        `    ldur d0, [x0, #${FLOAT_VALUE}]`,
+        loadWord('x16', n),
+        '    scvtf d1, x16',
+        `    ${FLOAT_OPS[op]} d0, d0, d1`,
+        BOX_D0,
+    ],
+
     arith: (op, overflow) => ARITH[op](overflow),
+    // adds or subs with the word as an immediate when it fits twelve bits,
+    // turned round for a negative one: x + -2 is x - 2, which overflows
+    // when x + -2 does.
+    arithWord: (op, word, overflow) => {
+        const w     = BigInt.asIntN(64, word);
+        const n     = w < 0n ? -w : w;
+        const ins   = (op === '+') === (w >= 0n) ? 'adds' : 'subs';
+        const apply = n <= 4095n ? `    ${ins} x0, x0, #${n}` : [loadWord('x2', word), `    ${op === '+' ? 'adds' : 'subs'} x0, x0, x2`];
+        return [apply, `    b.vs ${overflow}`];
+    },
     divide: (op, zero, overflow) => DIVISION[op](zero, overflow),
 
     cxr: (step) => (step === 'a' ? '    ldur x0, [x0, #-1]    // car' : '    ldur x0, [x0, #7]     // cdr'),
@@ -264,6 +328,12 @@ export const AARCH64: Target = {
             `    str  x6, [x2, #${16 * i + 8}]`,
         ]),
         '    orr  x0, x2, #RT_TAG_LIST',
+    ],
+    tupleCells: (header, firstSlot, n) => [
+        loadWord('x3', header),
+        '    str  x3, [x2]',
+        [...Array(n).keys()].map((i) => [`    ldr  x5, ${slot(firstSlot + i)}`, `    str  x5, [x2, #${8 * (i + 1)}]`]),
+        '    orr  x0, x2, #RT_TAG_BOXED',
     ],
     // The header (how many values it captured, and the closure type), the
     // code, the arity, the name (for printing), then the captured values.

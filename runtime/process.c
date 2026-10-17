@@ -43,10 +43,11 @@
 #define QUOTA          1000             // reductions between preemptions
 #define STACK_BYTES    (8 << 20)        // every process's stack, mapped lazily
 #define STACK_HEADROOM (64 << 10)       // room left below the limit for one frame and a C call
-#define CHUNK_FIRST    (4 << 10)        // a process's first heap chunk...
-#define CHUNK_MAX      (1 << 20)        // ...doubling up to this
-#define HEAP_MAX       (64 << 20)       // all of a process's chunks
-#define GC_MIN         (256 << 10)      // a heap smaller than this is never collected
+#define CHUNK_FIRST    (4 << 10)        // a process's nursery at first, and its first old chunk...
+#define CHUNK_MAX      (1 << 20)        // ...each doubling up to this
+#define HEAP_DEFAULT   (1 << 30)        // all of a process's chunks, both generations, unless SLIGHT_HEAP_MAX says
+#define GC_MIN         (256 << 10)      // an old generation smaller than this is never collected whole
+#define READ_MAX       (64 << 20)       // a line, a count or a value read from a device must be less (D160)
 
 // A pid's entry in the table: the process while it runs, then its exit
 // record: (:ok value) or (:error value). Or a device while it's open; to
@@ -67,6 +68,9 @@ static void       *free_stacks;         // a list through each stack's first wor
 static size_t      page;
 static int         poison;              // SLIGHT_POISON: fill what the collector frees
 static int64_t     gc_stress;           // SLIGHT_GC_STRESS=n: collect at every nth call (n <= QUOTA), and every recv
+static uint64_t    stressed;            // the collections SLIGHT_GC_STRESS has made, every eighth a major one
+static int         gc_verify;           // SLIGHT_GC_VERIFY: check that nothing old points at anything young
+static size_t      heap_max;            // the most a process's chunks can hold (D202)
 static uint64_t    sched;               // SLIGHT_SCHED's generator, or 0: first in, first out
 
 // --- the run queue ------------------------------------------------------------
@@ -195,6 +199,16 @@ static void start(rt_proc_t *p) {
 }
 
 // --- heaps --------------------------------------------------------------------
+//
+// Two generations (D200). Everything is allocated in the young one: the
+// nursery, a chunk of 4 KB at first, twice that at each collection that
+// finds it overflowed, up to 1 MB; and once it's full, overflow chunks,
+// listed after it, till the next call's entry, where it's collected. The
+// old generation is a list of chunks: what collections have kept, the
+// messages taken, a fork's values, joined results, and big strings. The
+// first is the one collections promote into, once there's been one, and
+// old_ptr says how far it's filled. A waiting process costs its struct,
+// so these are as few fields as will do.
 
 static rt_chunk_t *new_chunk(size_t bytes) {
     rt_chunk_t *c = rt_must(malloc(sizeof *c + bytes));
@@ -203,34 +217,78 @@ static rt_chunk_t *new_chunk(size_t bytes) {
     return c;
 }
 
-// The bytes p's heap has used: its chunks, less what's left in the last.
+static size_t young_bytes(const rt_proc_t *p) {
+    size_t bytes = 0;
+    for (const rt_chunk_t *c = p->nursery; c; c = c->next) bytes += c->size;
+    return bytes;
+}
+
+// What's left in the old chunk that collections promote into.
+static size_t old_left(const rt_proc_t *p) {
+    return p->old_ptr ? (uintptr_t)(p->chunks + 1) + p->chunks->size - p->old_ptr : 0;
+}
+
+// The bytes p's heap has used, and its old generation: their chunks, less
+// what's left in those allocated in.
 static size_t in_use(const rt_proc_t *p) {
-    return p->heap_bytes - (p->heap_limit - p->heap_ptr);
+    return p->heap_bytes - (p->heap_limit - p->heap_ptr) - old_left(p);
 }
 
-static void adopt(rt_proc_t *p, rt_chunk_t *c) {
-    c->next        = p->chunks;
-    p->chunks      = c;
-    p->heap_bytes += c->size;
+static size_t old_in_use(const rt_proc_t *p) {
+    return p->heap_bytes - young_bytes(p) - old_left(p);
 }
 
-void rt_heap_grow(uint64_t bytes, const char *site) {
-    rt_proc_t *p    = rt_current;
-    size_t     size = p->next_chunk ? p->next_chunk : CHUNK_FIRST;
-    p->next_chunk   = size * 2 > CHUNK_MAX ? CHUNK_MAX : size * 2;
-    if (size < bytes) size = (bytes + 15) & ~(size_t)15;
-    if (p->heap_bytes + size > HEAP_MAX) rt_fault(RT_FAULT_HEAP, 0, site);
-    rt_chunk_t *c = new_chunk(size);
-    adopt(p, c);
-    p->heap_ptr   = (uintptr_t)(c + 1);
-    p->heap_limit = p->heap_ptr + size;
-    // Time to collect: at the next call's entry, in rt_preempt, where every
-    // live value is in a frame. The rest of the slice is kept for after, so
-    // collecting doesn't change when the process is preempted.
-    if (p->reductions > 1 && in_use(p) >= p->gc_at) {
+// Collect at the next call's entry, in rt_preempt, where every live value
+// is in a frame. The rest of the slice is kept for after, so collecting
+// doesn't change when the process is preempted.
+static void cut_slice(rt_proc_t *p) {
+    if (p->reductions > 1) {
         p->slice_rest += p->reductions - 1;
         p->reductions  = 1;
     }
+}
+
+// Into the old generation, after the chunk promoted into: nothing in c
+// points at anything outside it but static data.
+static void adopt(rt_proc_t *p, rt_chunk_t *c) {
+    rt_chunk_t **at = p->old_ptr ? &p->chunks->next : &p->chunks;
+    c->next        = *at;
+    *at            = c;
+    p->heap_bytes += c->size;
+    if (old_in_use(p) >= p->gc_at) cut_slice(p);
+}
+
+void rt_heap_grow(uint64_t bytes, const char *site) {
+    rt_proc_t *p = rt_current;
+    if (!p->nursery) {
+        if (p->heap_bytes + CHUNK_FIRST > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
+        p->nursery     = new_chunk(CHUNK_FIRST);
+        p->heap_bytes += CHUNK_FIRST;
+        p->heap_ptr    = (uintptr_t)(p->nursery + 1);
+        p->heap_limit  = p->heap_ptr + CHUNK_FIRST;
+        if (bytes <= CHUNK_FIRST) return;
+    }
+    size_t young = young_bytes(p), size = young < CHUNK_MAX ? young : CHUNK_MAX;
+    if (size < bytes) size = (bytes + 15) & ~(size_t)15;
+    if (p->heap_bytes + size > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
+    rt_chunk_t *c = new_chunk(size);
+    c->next          = p->nursery->next;
+    p->nursery->next = c;
+    p->heap_bytes   += size;
+    p->heap_ptr      = (uintptr_t)(c + 1);
+    p->heap_limit    = p->heap_ptr + size;
+    cut_slice(p);
+}
+
+// A big string points at nothing, so it can go straight into the old
+// generation, in a chunk of its own, and no minor collection copies it.
+void *rt_alloc_old(size_t bytes, const char *site) {
+    rt_proc_t *p = rt_current;
+    bytes = (bytes + 15) & ~(size_t)15;
+    if (p->heap_bytes + bytes > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
+    rt_chunk_t *c = new_chunk(bytes);
+    adopt(p, c);
+    return c + 1;
 }
 
 static void free_chunks(rt_chunk_t *c) {
@@ -247,8 +305,9 @@ static void free_msg(rt_msg_t *m) {
 
 static void free_heap(rt_proc_t *p) {
     free_chunks(p->chunks);
-    p->chunks     = NULL;
-    p->heap_ptr   = p->heap_limit = 0;
+    free_chunks(p->nursery);
+    p->chunks     = p->nursery = NULL;
+    p->heap_ptr   = p->heap_limit = p->old_ptr = 0;
     p->heap_bytes = 0;
     for (rt_msg_t *m = p->mail, *next; m; m = next) {
         next = m->next;
@@ -457,7 +516,20 @@ static rt_value_t copy_here(rt_value_t v) {
 // never calls compiled code (apply jumps), so C code never sees anything
 // move. At recv, the recv rule means the stack is empty.
 //
-// The live data is copied into fresh chunks and the old ones freed.
+// Two kinds (D200). A minor collection, once the nursery has overflowed,
+// copies what's young and reachable into the old generation, all of it,
+// and starts the young one again. It follows only pointers into the young
+// generation, and never looks inside an old object, which works because
+// nothing old points at anything young. An object points only at objects
+// made before it, since nothing changes once it's made: compiled code
+// fills an object before anything else runs, and a C builtin fills what it
+// allocates before it returns, with no collection between. A minor
+// collection rewrites every pointer into the young generation there is
+// (the roots', and the young objects' own), and what's adopted points only
+// into itself. So there's no write barrier and no remembered set. A major
+// collection, once the old generation is twice what was live after the
+// last one (D106, D196), copies everything live, in both, into fresh
+// chunks, and frees the old ones.
 //
 // Copying leaves a forwarding pointer behind, so sharing is kept: a DAG
 // stays a DAG. Cons cells have no header, so to-space can't be scanned in
@@ -470,10 +542,11 @@ static rt_value_t copy_here(rt_value_t v) {
 #define GC_MOVED_BOX  0                 // in a moved box's header: no box has type 0
 
 typedef struct {
-    rt_chunk_t *chunks;                 // to-space, newest first
-    uintptr_t   ptr, limit;
-    size_t      bytes, live, size;      // to-space's capacity, what's in it, the size of a new chunk
-    rt_work_t   todo;                   // copied, with fields still to forward
+    const rt_proc_t *young;             // whose young generation it's promoting, or NULL in a major collection
+    rt_chunk_t      *chunks;            // to-space, newest first: in a minor collection, the old generation
+    uintptr_t        ptr, limit;
+    size_t           bytes, live, size; // to-space's capacity, what's been copied, the size of a new chunk
+    rt_work_t        todo;              // copied, with fields still to forward
 } gc_t;
 
 static void *gc_alloc(gc_t *g, size_t bytes) {
@@ -485,6 +558,7 @@ static void *gc_alloc(gc_t *g, size_t bytes) {
         g->bytes += size;
         g->ptr    = (uintptr_t)(c + 1);
         g->limit  = g->ptr + size;
+        g->size   = g->size * 2 < CHUNK_MAX ? g->size * 2 : CHUNK_MAX;
     }
     void *at = (void *)g->ptr;
     g->ptr  += bytes;
@@ -492,9 +566,21 @@ static void *gc_alloc(gc_t *g, size_t bytes) {
     return at;
 }
 
-// Where v lives now, copying it there if it hasn't been yet.
+// Whether v, a pointer, is into p's nursery or what it overflowed into
+// (usually nothing).
+static int is_young(const rt_proc_t *p, rt_value_t v) {
+    uintptr_t a = v & ~(uintptr_t)RT_TAG_MASK;
+    for (const rt_chunk_t *c = p->nursery; c; c = c->next) {
+        if (a - (uintptr_t)(c + 1) < c->size) return 1;
+    }
+    return 0;
+}
+
+// Where v lives now, copying it there if it hasn't been yet. In a minor
+// collection, only what's young moves.
 static rt_value_t forward(gc_t *g, rt_value_t v) {
-    if (!is_pointer(v)) return v;
+    if (!rt_is_cons(v) && (v & RT_TAG_MASK) != RT_TAG_BOXED) return v;
+    if (g->young ? !is_young(g->young, v) : is_static(v)) return v;
     if (rt_is_cons(v)) {
         rt_value_t *old = (rt_value_t *)(v - RT_TAG_LIST);
         if (old[0] == GC_MOVED_CONS) return old[1];
@@ -517,38 +603,177 @@ static rt_value_t forward(gc_t *g, rt_value_t v) {
     return old[1];
 }
 
-// With roots[0..n), and the frames below fp, if it's given.
-static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
-    if (!p->chunks) return;
-    gc_t g = { .size = p->heap_bytes < CHUNK_MAX ? p->heap_bytes : CHUNK_MAX };
-    rt_work_init(&g.todo);
-    for (uint64_t i = 0; i < n; i++) roots[i] = forward(&g, roots[i]);
+// Forwards roots[0..n), and the frames below fp, if it's given, and then
+// all they lead to.
+static void trace(gc_t *g, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+    rt_work_init(&g->todo);
+    for (uint64_t i = 0; i < n; i++) roots[i] = forward(g, roots[i]);
     for (; fp && fp[0]; fp = (const uintptr_t *)fp[0]) {
-        for (rt_value_t *s = (rt_value_t *)(fp + 2); s < (rt_value_t *)fp[0]; s++) *s = forward(&g, *s);
+        for (rt_value_t *s = (rt_value_t *)(fp + 2); s < (rt_value_t *)fp[0]; s++) *s = forward(g, *s);
     }
-    while (g.todo.n) {
-        rt_value_t v = rt_work_pop(&g.todo);
+    while (g->todo.n) {
+        rt_value_t v = rt_work_pop(&g->todo);
         if (rt_is_cons(v)) {
             rt_value_t *cell = (rt_value_t *)(v - RT_TAG_LIST);
-            cell[1] = forward(&g, cell[1]);
-            cell[0] = forward(&g, cell[0]);
+            cell[1] = forward(g, cell[1]);
+            cell[0] = forward(g, cell[0]);
         } else {
             uint64_t *box   = (uint64_t *)(v - RT_TAG_BOXED);
             uint64_t  first = rt_box_first_value(box[0]);
-            for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) box[first + i] = forward(&g, box[first + i]);
+            for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) box[first + i] = forward(g, box[first + i]);
         }
     }
-    rt_work_free(&g.todo);
+    rt_work_free(&g->todo);
+}
+
+static size_t chunk_size(size_t bytes) {
+    return bytes < CHUNK_FIRST ? CHUNK_FIRST : bytes < CHUNK_MAX ? bytes : CHUNK_MAX;
+}
+
+// A minor collection and a major one, named for what they collect, since
+// macOS's <sys/types.h> has major() and minor() macros. The minor one
+// copies what's young and reachable into the old chunk promoted into, and
+// new ones before it, as big as the old generation is, up to 1 MB.
+static void collect_young(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+    gc_t g = {
+        .young = p, .chunks = p->chunks, .ptr = p->old_ptr, .limit = p->old_ptr + old_left(p),
+        .bytes = p->heap_bytes, .size = chunk_size(p->heap_bytes - young_bytes(p)),
+    };
+    trace(&g, roots, n, fp);
+    p->chunks     = g.chunks;
+    p->heap_bytes = g.bytes;
+    p->old_ptr    = g.ptr;
+}
+
+static void collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+    gc_t g = { .size = chunk_size(p->heap_bytes) };
+    trace(&g, roots, n, fp);
     // With SLIGHT_POISON set (t/run.sh sets it), a pointer the collector
     // missed finds garbage at once instead of memory that looks fine
     // until it's reused: 0xabab... is a boxed pointer to nowhere.
     for (rt_chunk_t *c = p->chunks; c && poison; c = c->next) memset(c + 1, 0xab, c->size);
     free_chunks(p->chunks);
     p->chunks     = g.chunks;
-    p->heap_bytes = g.bytes;
-    p->heap_ptr   = g.ptr;
-    p->heap_limit = g.limit;
-    p->gc_at      = 2 * g.live > GC_MIN ? 2 * g.live : GC_MIN;
+    p->heap_bytes = g.bytes + young_bytes(p);
+    p->old_ptr    = g.ptr;
+    // Next at twice what's live, but never nearer the cap than an eighth
+    // of it: at twice, a process with more than half the cap live would
+    // reach the cap first, and fail there with a heap of garbage (D196).
+    // Nor at or below what's live, or it would collect at every slice's
+    // end: when that's nearer the cap than the eighth, halfway from there
+    // to the cap.
+    size_t next    = 2 * g.live > GC_MIN ? 2 * g.live : GC_MIN;
+    size_t half    = g.live < heap_max ? g.live + (heap_max - g.live) / 2 : heap_max;
+    size_t ceiling = heap_max - heap_max / 8 > half ? heap_max - heap_max / 8 : half;
+    p->gc_at       = next < ceiling ? next : ceiling;
+}
+
+// The young generation starts again, empty: its overflow chunks are freed,
+// and the nursery is allocated in from its beginning, and is twice the size
+// if it overflowed, up to 1 MB.
+static void restart(rt_proc_t *p) {
+    if (!p->nursery) return;
+    size_t size = p->nursery->size;
+    int    grow = p->nursery->next && size < CHUNK_MAX;
+    for (rt_chunk_t *c = p->nursery; c && poison; c = c->next) memset(c + 1, 0xab, c->size);
+    for (rt_chunk_t *c = p->nursery->next; c; c = c->next) p->heap_bytes -= c->size;
+    free_chunks(p->nursery->next);
+    p->nursery->next = NULL;
+    if (grow && p->heap_bytes + size <= heap_max) {
+        free(p->nursery);
+        p->nursery     = new_chunk(2 * size);
+        p->heap_bytes += size;
+        size          *= 2;
+    }
+    // What's promoted isn't checked against the cap as it's copied, and
+    // under SLIGHT_GC_STRESS the nursery may never overflow, where the cap
+    // is checked. So a heap past its cap gets no room: its next allocation
+    // goes to rt_heap_grow, and faults there, with its own site.
+    p->heap_ptr   = (uintptr_t)(p->nursery + 1);
+    p->heap_limit = p->heap_bytes > heap_max ? p->heap_ptr : p->heap_ptr + size;
+}
+
+// SLIGHT_GC_VERIFY=1: before a minor collection, a walk over all that's
+// reachable, which ends the program at an old object pointing at a young
+// one, since the collection wouldn't see that pointer, and would leave it
+// pointing into a nursery started again. It's a walk over the whole heap,
+// with a table of what it's seen so as not to walk what's shared twice,
+// so only when asked for.
+typedef struct {
+    uintptr_t *slots;                   // addresses, 0 for none
+    size_t     cap, n;
+} seen_t;
+
+// Whether a was seen before; it has been now.
+static int seen(seen_t *s, uintptr_t a) {
+    if (2 * (s->n + 1) > s->cap) {
+        seen_t bigger = { 0, s->cap ? 2 * s->cap : 1024, 0 };
+        bigger.slots  = rt_must(calloc(bigger.cap, sizeof *bigger.slots));
+        for (size_t i = 0; i < s->cap; i++) {
+            if (s->slots[i]) seen(&bigger, s->slots[i]);
+        }
+        free(s->slots);
+        *s = bigger;
+    }
+    size_t i = (size_t)((a >> 4) * 0x9e3779b97f4a7c15u >> 32) & (s->cap - 1);
+    for (; s->slots[i]; i = (i + 1) & (s->cap - 1)) {
+        if (s->slots[i] == a) return 1;
+    }
+    s->slots[i] = a;
+    s->n++;
+    return 0;
+}
+
+static void check(const rt_proc_t *p, const rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+    seen_t    s = { 0 };
+    rt_work_t todo;
+    rt_work_init(&todo);
+    for (uint64_t i = 0; i < n; i++) rt_work_push(&todo, roots[i]);
+    for (; fp && fp[0]; fp = (const uintptr_t *)fp[0]) {
+        for (const rt_value_t *slot = (const rt_value_t *)(fp + 2); slot < (const rt_value_t *)fp[0]; slot++) rt_work_push(&todo, *slot);
+    }
+    while (todo.n) {
+        rt_value_t v = rt_work_pop(&todo);
+        if (!is_pointer(v) || seen(&s, v & ~(uintptr_t)RT_TAG_MASK)) continue;
+        const rt_value_t *field = (const rt_value_t *)(v & ~(uintptr_t)RT_TAG_MASK);
+        uint64_t          count = 2;
+        if (!rt_is_cons(v)) {
+            if (!rt_box_holds_values(field[0])) continue;
+            count  = field[0] >> RT_BOX_SIZE_SHIFT;
+            field += rt_box_first_value(field[0]);
+        }
+        int old = !is_young(p, v);
+        for (uint64_t i = 0; i < count; i++) {
+            if (old && is_pointer(field[i]) && is_young(p, field[i])) {
+                fflush(stdout);
+                fprintf(stderr, "slight: SLIGHT_GC_VERIFY: an old object in #<pid %llu> points at a young one\n",
+                        (unsigned long long)(p->pid >> RT_PID_SHIFT));
+                abort();
+            }
+            rt_work_push(&todo, field[i]);
+        }
+    }
+    rt_work_free(&todo);
+    free(s.slots);
+}
+
+// A minor collection once the nursery has overflowed; a major one once the
+// old generation has reached gc_at, or reaches it with what the minor one
+// promotes. SLIGHT_GC_STRESS makes one at every nth call's entry and every
+// recv, and every eighth of those a major one.
+static int due(const rt_proc_t *p) {
+    return gc_stress || (p->nursery && p->nursery->next) || old_in_use(p) >= p->gc_at;
+}
+
+static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+    int whole = old_in_use(p) >= p->gc_at || (gc_stress && ++stressed % 8 == 0);
+    if (!whole && p->nursery) {
+        if (gc_verify) check(p, roots, n, fp);
+        collect_young(p, roots, n, fp);
+        whole = old_in_use(p) >= p->gc_at;
+    }
+    if (whole && (p->chunks || p->nursery)) collect_all(p, roots, n, fp);
+    restart(p);
 }
 
 // --- processes ----------------------------------------------------------------
@@ -591,7 +816,9 @@ rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const c
 // A message holding a copy of msg: the message's record and the copy in
 // one chunk, the record first, so a send is one malloc, and taking the
 // message adopts the chunk and frees nothing. The record is then dead
-// space in the taker's heap till it next collects.
+// space in the taker's heap till it next collects; but a message with
+// nothing to copy (an integer, a keyword, static data) is a chunk of just
+// its record, which is freed as it's taken (D199).
 _Static_assert(sizeof(rt_msg_t) % 16 == 0, "a message's record keeps the copy after it 16-aligned");
 
 static rt_msg_t *new_msg(rt_value_t msg) {
@@ -636,14 +863,15 @@ rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) {
         p->reading = 0;
         read_on(p, device);                     // which may end p, if reading fails
     }
-    if (gc_stress || in_use(p) >= p->gc_at) collect(p, args, n, NULL);
+    if (due(p)) collect(p, args, n, NULL);
     rt_msg_t  *m = p->mail;
     if (m) {
         p->mail = m->next;
         if (!p->mail) p->mail_last = NULL;
         rt_value_t v = m->value;
         p->reading = m->device;
-        adopt(p, m->chunk);
+        if (m->chunk->size == sizeof *m) free_msg(m);
+        else                             adopt(p, m->chunk);
         return v;
     }
     p->code = code;
@@ -815,7 +1043,7 @@ static void events(void);
 
 void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t entry) {
     p->at = entry;
-    if (gc_stress || in_use(p) >= p->gc_at) collect(p, frame, n, fp);
+    if (due(p)) collect(p, frame, n, fp);
     if (p->slice_rest > 0) {                    // here before the slice's end, to collect
         p->reductions  = gc_stress && gc_stress < p->slice_rest ? gc_stress : p->slice_rest;
         p->slice_rest -= p->reductions;
@@ -1192,7 +1420,7 @@ static int idle(void) {
 #define DEV_SYSTEM   5                  // :system (below)
 #define DEV_EXEC     6                  // a command
 #define ERR_NOTFOUND (-1)               // no such host, which has no errno
-#define ERR_TOOBIG   (-2)               // a line, count or value of HEAP_MAX or more
+#define ERR_TOOBIG   (-2)               // a line, count or value of READ_MAX or more
 #define ERR_BADJSON  (-3)
 #define ERR_BADSEXP  (-4)
 #define READ_CHUNK   (64 << 10)         // the most a chunk holds
@@ -1499,7 +1727,7 @@ typedef struct {
 static void *arena_alloc(void *cx, size_t bytes) {
     arena_t *a = cx;
     bytes = (bytes + 15) & ~(size_t)15;
-    if (a->total + bytes >= HEAP_MAX) return NULL;
+    if (a->total + bytes >= READ_MAX) return NULL;
     if (a->left < bytes) {
         size_t      size = bytes > CHUNK_MAX ? bytes : CHUNK_MAX;
         rt_chunk_t *c    = new_chunk(size);
@@ -1624,7 +1852,7 @@ static int cut(rt_device_t *d) {
     size_t      have = d->len - d->at, n;
     const char *line;
     if (d->eof_sent) return d->mode == DEV_EXEC ? exited(d) : 1;
-    if (d->count >= HEAP_MAX) {
+    if (d->count >= READ_MAX) {
         fail(d, ERR_TOOBIG);
         return 1;
     }
@@ -1657,7 +1885,7 @@ static int cut(rt_device_t *d) {
         if (d->mode == RT_FS_READ) close_device(d);
         return 1;
     }
-    if (have >= HEAP_MAX) {                     // a line with no end in sight
+    if (have >= READ_MAX) {                     // a line with no end in sight
         fail(d, ERR_TOOBIG);
         return 1;
     }
@@ -2550,22 +2778,41 @@ static rt_value_t environment(rt_proc_t *root, char **env) {
 
 extern char **environ;
 
+// SLIGHT_HEAP_MAX's bytes: digits, with K, M or G (2^10, 2^20, 2^30) after
+// them, or nothing; or 0 if it isn't that.
+static size_t bytes_of(const char *s) {
+    size_t digits = strspn(s, "0123456789");
+    int    shift  = !s[digits] ? 0 : s[digits + 1] ? -1
+                  : s[digits] == 'K' ? 10 : s[digits] == 'M' ? 20 : s[digits] == 'G' ? 30 : -1;
+    if (digits == 0 || digits > 18 || shift < 0) return 0;     // 18 digits fit strtoull
+    unsigned long long n = strtoull(s, NULL, 10);
+    return n > (SIZE_MAX >> shift) ? 0 : (size_t)n << shift;
+}
+
 int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
-    poison = getenv("SLIGHT_POISON") != NULL;
+    poison    = getenv("SLIGHT_POISON") != NULL;
+    gc_verify = getenv("SLIGHT_GC_VERIFY") != NULL;
     const char *stress = getenv("SLIGHT_GC_STRESS");
     gc_stress = !stress ? 0 : atoll(stress) < 1 ? 1 : atoll(stress) > QUOTA ? QUOTA : atoll(stress);
-    const char *mode = getenv("SLIGHT_CLOCK"), *seed = getenv("SLIGHT_SCHED");
+    const char *mode = getenv("SLIGHT_CLOCK"), *seed = getenv("SLIGHT_SCHED"), *cap = getenv("SLIGHT_HEAP_MAX");
     if (seed && (!*seed || strspn(seed, "0123456789") != strlen(seed))) {
         fputs("slight: SLIGHT_SCHED is a number, a seed for the order processes run in\n", stderr);
         return 2;
     }
-    rt_io_settings_t settings = { mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0 };
+    if (cap && bytes_of(cap) < CHUNK_MAX) {
+        fputs("slight: SLIGHT_HEAP_MAX is the most a process's heap holds, in bytes or with K, M or G after it, and at least 1M\n", stderr);
+        return 2;
+    }
+    rt_io_settings_t settings = {
+        mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0, cap ? bytes_of(cap) : HEAP_DEFAULT,
+    };
     char           **env      = environ;
     rt_io_start(&argc, &argv, &env, &settings); // replaying, the record's settings, arguments and environment
     virtual_clock = settings.virtual_clock;
     sched         = settings.sched_seed;
+    heap_max      = settings.heap_max;
     started       = now();
     rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);
     p->args[0]   = arguments(p, argc, argv);

@@ -1,0 +1,16 @@
+; thread-ring, the Benchmarks Game's: 503 processes in a ring pass a token
+; on n times, one less each time; the one handed 0 says who it is (from 1).
+
+(defun member (id root)
+    (recv ((:next next) (relay id next root))))
+
+(defun relay (id next root)
+    (recv
+        (0 (send root id))
+        (n (send next (- n 1)) (relay id next root))))
+
+(let me   $$)
+(let ring (map (lambda (id) (fork (member id me))) (range 1 504)))
+(map (lambda (pair) (send (car pair) (list :next (cadr pair)))) (zip ring (append (cdr ring) (list (car ring)))))
+(send (car ring) (string->int (car @ARGV)))
+(recv (id id))

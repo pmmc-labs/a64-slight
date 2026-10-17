@@ -8,11 +8,12 @@ assembly. The compiler is TypeScript for now and should self-host later.
 
 **Steps 0–9, 10a–10e and 11 of [`docs/PLAN.md`](docs/PLAN.md) are done**:
 the reader, and a compiler for integers, floats, `#true`/`#false`, `()`,
-symbols, lists (a heap per process of chunks, capped at 64 MB, and
-collected when a receive function waits for a message, or at a
-function's entry, with the frames as roots: D166), strings, closures
+symbols, lists (a heap per process of chunks, capped at 1 GB or what
+`SLIGHT_HEAP_MAX` says, D202, in two generations, D200, and collected when a receive function waits for a
+message, or at a function's entry, with the frames as roots: D166),
+strings, closures
 (`lambda`, functions and builtins as values, `apply`), arithmetic
-(integers inline; floats and mixed in C), structural `eq?`, type
+(integers inline; floats inline too, D198, and mixed in C), structural `eq?`, type
 predicates, the string and math builtins (C, in `runtime/`), `cond`,
 `let`, `do`, `pprint`, `tty/write`, and top-level `defun`s with calls and
 tail calls (arguments in `x0`–`x7`; stack and reduction checks at every
@@ -116,7 +117,19 @@ from one conversation to the next, a store that writes them to a file
 as an s-expression (D191, golden test 237), and other agents asked as
 tools, `agent/ask` (D192, golden test 238); and a fetched page's links
 kept, `[text](url)`, and a command ending with the process that ran it,
-so Escape in the chat stops one (D193, golden tests 233 and 235). **Next:** to settle with
+so Escape in the chat stops one (D193, golden tests 233 and 235).
+Benchmarks, phase 1 (D194, `docs/BENCHMARKS.md`): slight against C,
+Go, Erlang, Node, Perl and Python, on the cloud machine and the M2 Max
+(the reference); phase 2, fixing what the profiles found: tuples built
+in place (D195, golden test 239), collecting before the heap's cap
+(D196, 240), better code for calls, arithmetic and tests (D197,
+241), float arithmetic inline (D198, 242), a message with nothing to
+copy freed as it's taken (D199, 243), and a generational collector,
+with no write barrier, since nothing old can point at anything young
+(D200, 244); and phase 3, Chez Scheme and five more programs (`tak`,
+`nqueens`, `deriv`, `spectral-norm`, `fan-in`, D201), and what its
+profiles found: the prelude's list functions as loops, and its `not`
+compiled inline (D203, golden tests 247 and 248). **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
@@ -184,7 +197,11 @@ to get them back from git (`3fd71e0`).
   never mutate shared data. Prefer character tests to regexes, since slight
   has no regexes.
 - In C headers shared with assembly, prefix every name `RT_`/`rt_` (macOS's
-  `<stdlib.h>` pulls in `<sys/wait.h>`, which has a `P_PID`).
+  `<stdlib.h>` pulls in `<sys/wait.h>`, which has a `P_PID`). macOS's
+  `<sys/types.h>` also defines `major()` and `minor()` as macros, so no
+  function in the runtime can have either name; `clang -include
+  sys/sysmacros.h -fsyntax-only -Iruntime runtime/process.c` shows such
+  a clash on Linux.
 - Comments explain why, not what. Match the density of the runtime's code.
 
 ## Toolchain
@@ -228,6 +245,7 @@ to get them back from git (`3fd71e0`).
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
+| `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, and `.ss` for Chez Scheme); `run.py`, the harness, which builds, checks, times and summarizes them; `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
@@ -245,6 +263,10 @@ to get them back from git (`3fd71e0`).
   come at the end. A golden test that runs longer than `TIMEOUT` seconds
   (default 60) is killed and fails.
 - `make check`: `tsc --noEmit`.
+- `make bench`: the benchmarks, slight against C, Go, Erlang, Node, Perl,
+  Python and Chez Scheme (`bench/run.py`; `BENCH=--quick` for small sizes, and see
+  `--help`). Not part of `make test`. Measure on the Mac: timings under
+  qemu mean nothing, and the cloud machine's are noisy.
 - `node bin/slightc.ts -o out file.slight ...`: compile and link. It writes
   `out.S` next to `out`. `-S` writes only the assembly. `--target x86_64`
   compiles for x86-64 (the default is `aarch64`). On x86, run an AArch64
@@ -255,13 +277,26 @@ to get them back from git (`3fd71e0`).
 - Exit codes from `slightc`: 0 ok, 1 compile error, 2 usage or toolchain
   error. `SLIGHT_CC` overrides the C compiler command.
 - `SLIGHT_POISON=1` when running a compiled program makes the collector
-  fill what it frees with garbage, so a pointer it missed fails at once.
-  `t/run.sh` sets it.
-- `SLIGHT_GC_STRESS=n` when running a compiled program collects at the
-  entry of every nth function called (n from 1 to 1,000), and at every
-  `recv`, without changing when processes are preempted (D166). `SLIGHT_GC_STRESS=1
-  make golden` checks the collector against every golden test; a few
-  then take too long and are killed, and pass with a larger n.
+  fill what it frees (a nursery started again included) with garbage, so
+  a pointer it missed fails at once. `t/run.sh` sets it.
+- `SLIGHT_GC_STRESS=n` when running a compiled program makes a minor
+  collection at the entry of every nth function called (n from 1 to
+  1,000), and at every `recv`, and every eighth of those a major one,
+  without changing when processes are preempted (D166, D200).
+  `SLIGHT_GC_STRESS=7 make golden` checks the collector against every
+  golden test; a few then take too long and are killed, and pass with a
+  larger n (059, 130 and 240, which fill a 64 MB heap, never finish).
+- `SLIGHT_GC_VERIFY=1` when running a compiled program walks everything
+  reachable before each minor collection, and aborts at an old object
+  pointing at a young one, which the collector depends on never
+  happening (D200). `SLIGHT_GC_VERIFY=1 make golden` after changing the
+  collector or how anything is allocated; no test sets it, since it's
+  slow.
+- `SLIGHT_HEAP_MAX=n` (bytes, or with `K`, `M` or `G` after it, at least
+  `1M`) when running a compiled program caps each process's heap there,
+  in place of 1 GB (D202). `t/run.sh` sets `64M`, the cap the tests were
+  written for. A device's line, count or value is held to 64 MB however
+  big the heap.
 - `SLIGHT_CLOCK=virtual` when running a compiled program swaps the real
   clock for a virtual one: it starts at 0 and moves only when nothing can
   run, straight to the next timer. `t/run.sh` sets it too.

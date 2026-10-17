@@ -1,0 +1,40 @@
+; A message with nothing to copy (an integer, a keyword) leaves nothing in
+; its taker's heap once it's taken (D199): its record's chunk is freed as
+; it's taken, where before it stayed till the next collection (1,001
+; records, 32 KB, here). A process that takes a thousand integers and
+; allocates nothing has an empty heap; one that keeps the thousand lists
+; it's sent doesn't. Only that is shown, since how much is in a heap
+; depends on when it was last collected (SLIGHT_GC_STRESS collects at
+; every recv).
+
+(defun ints (me n)
+    (recv
+        (:done (send me n) (ints me n))
+        (i     (ints me (+ n i)))))
+
+(defun lists (me n kept)
+    (recv
+        (:done (send me n) (lists me n kept))
+        ((i)   (lists me (+ n i) (cons i kept)))))
+
+(defun check ()
+    (let s  (recv ((:open s) s)))
+    (let me $$)
+    (let a  (fork (ints me 0)))
+    (let b  (fork (lists me 0 ())))
+    (map (lambda (i) (send a i) (send b (list i))) (range 1 1001))
+    (send a :done)
+    (send b :done)
+    (let sums (list (recv (n n)) (recv (n n))))
+    (pprint sums)
+    (send s (list :process a))
+    (let ha (recv ((:process _ info) (lookup :heap info))))
+    (send s (list :process b))
+    (let hb (recv ((:process _ info) (lookup :heap info))))
+    (pprint (list ha (> hb 0)))
+    (kill a)
+    (kill b)
+    (disconnect s))
+
+(join (connect :system (check)))
+:done

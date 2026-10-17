@@ -1,0 +1,2 @@
+slight: SLIGHT_HEAP_MAX is the most a process's heap holds, in bytes or with K, M or G after it, and at least 1M
+exit: 2

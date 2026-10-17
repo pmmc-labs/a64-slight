@@ -1,0 +1,29 @@
+; binary-trees, the Benchmarks Game's, without its workers: allocation
+; and collection. A node is a tuple of its children, a leaf's (). Prints
+; the stretch tree's check, each depth's checks summed, and the
+; long-lived tree's.
+
+(defun make (d)
+    (if (== d 0) (tuple () ()) (tuple (make (- d 1)) (make (- d 1)))))
+
+(defun check (t)
+    (match t
+        (#(() ()) 1)
+        (#(l r)   (+ 1 (+ (check l) (check r))))))
+
+(defun pow2 (k) (if (== k 0) 1 (* 2 (pow2 (- k 1)))))
+
+; The checks of n trees of depth d, summed.
+(defun trees (n d acc)
+    (if (== n 0) acc (trees (- n 1) d (+ acc (check (make d))))))
+
+(defun depths (d top)
+    (when (<= d top)
+        (tty/write (trees (pow2 (+ (- top d) 4)) d 0) \n)
+        (depths (+ d 2) top)))
+
+(let top  (max 6 (string->int (car @ARGV))))
+(tty/write (check (make (+ top 1))) \n)
+(let long (make top))
+(depths 4 top)
+(check long)

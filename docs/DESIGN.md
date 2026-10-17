@@ -573,16 +573,25 @@ REPL and line editing are slight code over key events.
 
 ### Process heaps and GC
 
-Each process has its own heap: a chain of `malloc`ed chunks (D89), with
-bump allocation and ordinary absolute pointers. The first chunk, 4 KB,
-comes with the first allocation (so a process that allocates nothing has
-no heap); each new one is twice the last, up to 1 MB. Message chunks join
-the chain when received. All of a process's chunks together are capped at
-64 MB, and past that the allocation faults (`:heap`). The heap pointer and
-limit live in the process struct
-(`[x28, #RT_PROC_HEAP_PTR]`), so C builtins that allocate can use them with
-nothing to sync (D57). Compiled code allocates inline, and calls the
-runtime only to start a new chunk:
+Each process has its own heap, in two generations (D200), each made of
+`malloc`ed chunks (D89), with bump allocation and ordinary absolute
+pointers. Everything is allocated in the young one, a **nursery**: one
+chunk, 4 KB at first, which comes with the first allocation (so a
+process that allocates nothing has no heap), and twice the size at each
+collection that finds it overflowed, up to 1 MB. Once it's full, what's
+allocated goes into overflow chunks, listed after it, till the next
+function's entry, where it's collected. The **old generation** is a list
+of chunks too: what collections have kept, the messages taken, a fork's
+values, joined results, and big strings. All of a process's chunks
+together, in both, are capped, at 1 GB unless `SLIGHT_HEAP_MAX` says
+otherwise (D202), and past that the allocation faults (`:heap`). The
+cap costs nothing till it's used, since chunks come as they're needed;
+it keeps a runaway process from taking the program's memory, ending it
+instead, where its monitor sees it. The heap pointer and limit live in the process struct
+(`[x28, #RT_PROC_HEAP_PTR]`), so C builtins that allocate can use them
+with nothing to sync (D57). Compiled code allocates inline (cons cells,
+lists, tuples, D195, and closures), and calls the runtime only to start
+a new chunk:
 
 ```
 Lalloc_N:
@@ -594,15 +603,15 @@ Lalloc_N:
     str  x4, [x28, #RT_PROC_HEAP_PTR]       // x2 = the new cell
 ```
 
-**Collection** (step 9, and step 12b):
+**Collection** (step 9, step 12b, and D200):
 
 - **It runs when a receive function asks for its next message** (D105),
   in `rt_recv`, before it takes one. The `recv` rule means the stack is
   empty then, so the roots are just the receive function's arguments, in
   its frame. Nothing outside the process's heap points into it.
 - **And at a function's entry** (D166), in `rt_preempt`, so the root and
-  a process that never waits collect too, and the 64 MB limit is on
-  what's live. The roots are the frames: the function's parameters and
+  a process that never waits collect too, and the cap is on what's
+  live. The roots are the frames: the function's parameters and
   captured values, all it has stored yet, and every slot of each frame
   below, found by the frame pointers (the first frame's saved one is 0).
   That works because nothing lives in a register across a call, a slot
@@ -610,32 +619,100 @@ Lalloc_N:
   comes between. A function that calls another other than in tail
   position zeroes its slots at entry, so none holds a stale word; one
   that only tail-calls is never under a collection, and doesn't.
-- It runs once the heap in use (its chunks, less what's free in the
-  current one) reaches twice what survived the last collection, and never
-  below 256 KB, so a short-lived or small process never collects (D106).
-  `rt_preempt` checks that at the end of each slice; and when
-  `rt_heap_grow` finds it so, it cuts the slice short, so the next call's
-  entry goes to `rt_preempt`, keeping the rest of the slice for after:
-  collecting never changes when a process is preempted.
-- The live data is copied into fresh chunks (of up to 1 MB each), and the
-  old ones are freed. Copying leaves a forwarding pointer, so sharing is
-  kept: a DAG stays a DAG. Cons cells have no header, so to-space can't be
-  scanned in order as in Cheney's algorithm; a stack of copied objects
-  whose fields still need forwarding takes its place (D107).
+- **Nothing old points at anything young**, which is what the two kinds
+  of collection rest on. Elsewhere that's the hard part of a
+  generational collector, an old object changed to point at a young one,
+  which a write barrier and a remembered set have to catch. In slight
+  nothing changes once it's made, so an object only points at objects
+  made before it: compiled code fills a cons, a list, a tuple or a
+  closure before anything else runs; a C builtin fills what it allocates
+  before it returns, and no collection comes between, since one only
+  runs at a function's entry or a `recv`; and what comes from outside (a
+  message, a fork's values, a joined result) is a chunk of its own,
+  pointing only into itself and at static data. So no barrier, no
+  remembered set, and nothing in compiled code or the C builtins knows
+  there are generations.
+- **A minor collection** runs once the nursery has overflowed. It copies
+  what's young and reachable from the roots into the old generation, all
+  of it (promotion en masse), following only pointers into the young
+  generation, so it costs what survives, not what's live; then the
+  overflow chunks are freed and the nursery is allocated in again from
+  its beginning. Whether a pointer is young is a range check: the
+  nursery's, then the overflow chunks' (usually none). What's promoted
+  goes into the old generation's first chunk, which collections keep
+  for that, and new ones as big as the old generation, up to 1 MB;
+  adopted chunks go in behind it.
+- **A major collection** runs once the old generation in use (its
+  chunks, less what's free in the one promoted into) reaches twice what
+  was live after the last major one, and never below 256 KB, so a small
+  process's old generation is never collected (D106); but never within
+  an eighth of the cap (128 MB at 1 GB, 8 at 64), so a process with more
+  than half the cap live still collects before it reaches the cap,
+  rather than failing there with a heap of garbage (D196). The eighth is
+  room for the nursery and for what's allocated before the next
+  function's entry. When more than that is live, the next is halfway from what's live to the cap, so it's
+  always above what's live (or every slice's end would collect), and a
+  heap that's all live data collects a few times more before it fails.
+  A major collection copies everything live, in both generations, into
+  fresh chunks, and frees the old ones; it comes right after a minor
+  one when what that promoted takes the old generation to its
+  threshold.
+- **The cap** is checked as the heap grows, in `rt_heap_grow`, and not
+  as a collection promotes; so a heap that's past it after a collection
+  gets no room in its nursery, and its next allocation faults (D202).
+  A major collection with a few hundred MB live takes a quarter of a
+  second or so, during which nothing else runs.
+- `rt_preempt` checks both at the end of each slice; and when
+  `rt_heap_grow` finds the nursery full, or a chunk adopted takes the
+  old generation to its threshold, it cuts the slice short, so the next
+  call's entry goes to `rt_preempt`, keeping the rest of the slice for
+  after: collecting never changes when a process is preempted.
+- **Big strings** (64 KB or more), which point at nothing, are allocated
+  straight into the old generation, each in a chunk of its own, so no
+  minor collection copies them.
+- Copying leaves a forwarding pointer, so sharing is kept: a DAG stays a
+  DAG. Cons cells have no header, so to-space can't be scanned in order
+  as in Cheney's algorithm; a stack of copied objects whose fields still
+  need forwarding takes its place (D107).
 - **C builtins never see an object move.** No handles, no rooting API, no
   stack maps, no write barrier.
 - **A frame keeps everything in its slots** until it returns, so a `let`
   in the root's body lives till the program ends.
-- `SLIGHT_POISON=1` in the environment fills what the collector frees with
-  garbage, so a pointer it missed fails at once; `t/run.sh` sets it.
-  `SLIGHT_GC_STRESS=n` collects at every nth call's entry (n up to
-  1,000) and every `recv`, without changing when processes are preempted.
+- **A waiting process keeps its nursery**, as it keeps its old chunks;
+  one that has never allocated has neither. The process struct holds as
+  few fields for the generations as will do (the overflow chunks are
+  listed after the nursery, one count of bytes covers both generations,
+  and only how far the chunk promoted into is filled is kept), since a
+  waiting process costs its struct: 352 bytes, as before them.
+- `SLIGHT_POISON=1` in the environment fills what the collector frees, a
+  nursery started again included, with garbage, so a pointer it missed
+  fails at once; `t/run.sh` sets it. `SLIGHT_GC_STRESS=n` makes every nth
+  call's entry (n up to 1,000) and every `recv` a minor collection, and
+  every eighth of those a major one, without changing when processes are
+  preempted. `SLIGHT_GC_VERIFY=1` walks everything reachable before each
+  minor collection, and ends the program at an old object pointing at a
+  young one: the rule above, checked directly, where poison only hopes
+  to trip over a break in it. It's a walk of the whole heap at each minor
+  collection, so it's for running the golden tests under, not something
+  a test sets.
 - **No walk over a value recurses in C** (D147): the collector, printing,
   copying (a message, a fork's values, a result) and `eq?` keep a work
   stack (`rt_work_t`) instead, which grows only as deep as the value nests
   in its cars. So a value can nest as deep as the heap allows, and
   nothing about it depends on the size of a C frame on one target or
   another.
+
+Turned down (D200): aging, keeping survivors in the nursery till they
+survive a second minor collection, as the BEAM does (what en masse costs,
+objects promoted just before they die, falls on major collections; aging
+can follow if a benchmark shows it's wanted); a nursery of a fixed size
+(every process that allocates at all would hold it, and on Linux a block
+of 256 KB is a mapping of its own, so a million of them run past the
+kernel's limit on mappings); growing the heap to three times what's live
+(D196, for the memory); mark-sweep or mark-compact for the old
+generation (copying it is the code there was); and a pool of nurseries
+that waiting processes give back, as they do their stacks (later, if
+processes that allocate and then wait turn out to hold too much).
 
 ### Messages
 
@@ -647,6 +724,8 @@ Lalloc_N:
   the mailbox) is at the front of the same chunk, so a send is one malloc
   (D177).
 - `recv` links the chunk into the receiver's heap. Nothing is copied twice.
+  A message with nothing to copy (an integer, a keyword, static data) is
+  a chunk of just its record, which `recv` frees instead (D199).
 - Mailboxes are unbounded (D88). (Bounded ones would have to drop the
   message or fault the sender, since `send` can't block.)
 - A message to a process that has ended disappears, as in Erlang (D92).
@@ -733,7 +812,8 @@ Lalloc_N:
   `:source` (under JSON, s-expressions and source, above). Then
   `(:eof f)`, and it closes; nothing comes after it. A line, count,
   value or datum of 64 MB or more ends the owner with `(:error (:too-big
-  path))` (D160). `:fs/write`
+  path))` (D160), whatever the heap's cap: that limit is the reader's,
+  so that an endless line can't take a server's memory (D202). `:fs/write`
   (creating the file, or emptying it) and `:fs/append` (creating it)
   take `(:write x ...)` from anyone, render the `x`s as `tty/write` does,
   and write them at once. Anything else sent to a device is a dead
@@ -858,8 +938,12 @@ the whole run.
 ### Builtins in C
 
 Arithmetic and comparisons on two integers are inline: one `orr` and one
-`tst` check both tag bits, and anything else branches out of line to the
-runtime (`rt_add`, `rt_compare`, ...), which promotes to float or faults.
+`tst` check both tag bits, and anything else branches out of line. There,
+`+`, `-` and `*` on two floats, or on a float and a literal integer, are
+done inline too, the result's box allocated inline (D198), and so is `/`
+(whose divisor is checked for zero first); anything else goes to the
+runtime (`rt_add`, `rt_divide`, `rt_compare`, ...), which promotes to
+float or faults. Comparisons on floats are the runtime's.
 
 A builtin written in C is an ordinary C function (AAPCS64, or System V
 on x86-64). The compiler
@@ -981,8 +1065,16 @@ that's just a walk over every function.
    nothing from the compiler: `recv` already passes its function's
    arguments to the runtime, to restart it after waiting. A test that
    can only be a boolean (`cons?`, `nil?`, `eq?` with an immediate
-   literal, and what `and` becomes) branches without making one, which
-   is what keeps a pattern's tests cheap (D168).
+   literal, a comparison, and what `and` becomes) branches without making
+   one, which is what keeps a pattern's tests cheap (D168, D197); and so
+   does a call to the prelude's `not`, as its argument's test with the
+   branches swapped, which as a value is the `cond` the prelude says it
+   is (D203). An
+   operand that needs no code (a local, or a literal integer, `()`,
+   `#true` or `#false`) is read straight into its register when it's
+   wanted, rather than waiting in a slot; and an integer literal added,
+   subtracted or compared with is an immediate where the target has one
+   (D197).
 9. **Emit data**: string literals, quoted constants, static closures, the
    symbol name table.
 

@@ -1,0 +1,35 @@
+; Floats inline (D198): + - * and / on two floats, or on a float and a
+; literal integer, done in the compiled code, each result the double C
+; would have made, to the bit. Signs, zeros, infinities and NaN; long runs
+; that collect as they go; and what still goes to the runtime, which must
+; agree: an integer operand that isn't a literal, an integer divided by
+; one, a zero divisor (a fault), and what isn't a number (a fault).
+
+(defun ops (a b) (list (+ a b) (- a b) (* a b) (/ a b)))
+(defun with-ints (a) (list (+ a 1) (- a 3) (* a 2) (/ a 4) (+ a -7) (* a 1000000) (/ a 3)))
+(defun fsum (i acc) (if (== i 0) acc (fsum (- i 1) (+ acc 0.5))))
+(defun fprod (i acc) (if (== i 0) acc (fprod (- i 1) (* acc 1.0001))))
+(defun kind (r) (match r ((:ok v) v) ((:error (k _ _)) k)))
+
+(let nan (sqrt -1))
+(let big (string->float "1e200"))
+(let inf (* big big))
+(pprint (ops 0.1 0.2))
+(pprint (ops 1.5 -2.25))
+(pprint (ops big (string->float "3e100")))
+(pprint (ops -0.0 1.0))
+(pprint (ops inf 1.0))
+(pprint (ops inf inf))
+(pprint (ops nan 1.0))
+(pprint (with-ints 2.5))
+(pprint (with-ints -0.0))
+(pprint (list (fsum 200000 0.0) (fprod 1000 1.0)))
+
+(let n 3)
+(pprint (list (+ 2.5 n) (* n 2.5) (- 10 0.5) (/ 7 2) (/ 6 3) (/ n 1.5)))
+(let z 0.0)
+(pprint (kind (join (fork (/ 1.5 z)))))
+(pprint (kind (join (fork (/ 1.5 0)))))
+(pprint (kind (join (fork (/ 1.5 -0.0)))))
+(pprint (kind (join (fork (+ "a" 1.5)))))
+:done

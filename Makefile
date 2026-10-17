@@ -2,6 +2,8 @@
 #               the golden tests (t/run.sh) and the record and replay
 #               checks (t/replay.sh) for each of $(TARGETS)
 # make check    type-check the compiler (needs `npm install` first)
+# make bench    the benchmarks, against other languages (bench/run.py,
+#               docs/BENCHMARKS.md); BENCH passes it options: BENCH=--quick
 #
 # There are two targets, aarch64 and x86_64. The golden tests run for
 # aarch64 everywhere, and for x86_64 too on an x86-64 machine; on an M2,
@@ -57,6 +59,9 @@ endif
 check:
 	npx tsc --noEmit
 
+bench:
+	python3 bench/run.py $(BENCH)
+
 clean:
 	rm -rf build
 	@if [ -f "./sketch" ]; then \
@@ -65,4 +70,4 @@ clean:
 		rm -rf "./sketch.dSYM"; \
     fi
 
-.PHONY: test unit golden replay headers check clean
+.PHONY: test unit golden replay headers check bench clean

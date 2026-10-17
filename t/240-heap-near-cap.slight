@@ -1,0 +1,13 @@
+; A process with more than half its 64 MB cap live collects before it
+; reaches the cap (D196), rather than failing there with a heap of
+; garbage: 2.4 million cells (38 MB) kept, then 3,000 lists of a thousand
+; cells (48 MB) made and dropped. Collecting at twice what's live, its
+; next collection would have been past the cap.
+
+(defun garbage (n acc)
+    (if (== n 0) acc (garbage (- n 1) (+ acc (length (range 0 1000))))))
+
+(let keep (range 0 2400000))
+(pprint (garbage 3000 0))
+(pprint (length keep))
+:done

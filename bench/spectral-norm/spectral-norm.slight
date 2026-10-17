@@ -1,0 +1,38 @@
+; spectral-norm, the Benchmarks Game's: floats, and a vector in a list,
+; since in slight a vector is made again rather than changed. Each sum is
+; taken in the C program's order. Prints the norm times 10^9, rounded.
+
+(defun a (i j)
+    (let ij (+ i j))
+    (/ 1.0 (+ (+ (div (* ij (+ ij 1)) 2) i) 1)))
+
+; The sum over j of A(i, j) u_j, or of A(j, i) u_j, u's elements from j.
+(defun row (i j u s)
+    (match u
+        (()         s)
+        ((x & rest) (row i (+ j 1) rest (+ s (* (a i j) x))))))
+
+(defun column (i j u s)
+    (match u
+        (()         s)
+        ((x & rest) (column i (+ j 1) rest (+ s (* (a j i) x))))))
+
+(defun times-ata (u n)
+    (let w (map (lambda (i) (row i 0 u 0.0)) (range 0 n)))
+    (map (lambda (i) (column i 0 w 0.0)) (range 0 n)))
+
+; Ten times, v from u and then u from v, as the C program does; the last
+; of each.
+(defun power (u n k)
+    (let v  (times-ata u n))
+    (let u2 (times-ata v n))
+    (if (== k 1) (list u2 v) (power u2 n (- k 1))))
+
+(defun dot (xs ys s)
+    (match (list xs ys)
+        ((() ())             s)
+        (((x & xr) (y & yr)) (dot xr yr (+ s (* x y))))))
+
+(let n (string->int (car @ARGV)))
+(match (power (map (lambda (i) 1.0) (range 0 n)) n 10)
+    ((u v) (floor (+ (* (sqrt (/ (dot u v 0.0) (dot v v 0.0))) 1000000000.0) 0.5))))

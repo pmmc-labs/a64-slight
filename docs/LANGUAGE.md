@@ -416,7 +416,8 @@ A `case` on a message's tag:
         (:zero 0)
         (#true n))
 
-`not` is a function, in the prelude, on booleans only.
+`not` is a function, in the prelude, on booleans only; a call to it
+compiles inline, as a test where it's one (D203).
 
 ### match
 
@@ -676,12 +677,19 @@ and other orders").
 
 ### The heap
 
-Each process's heap holds up to 64 MB of live data; past that, an
-allocation faults (`:heap`). It's collected once the heap in use is at
-least 256 KB and twice what survived the last collection: when a receive
-function asks for its next message, or at the entry of the next function
-called (D166). Every loop is a call, so any process collects, the root
-included, whether it waits for messages or not.
+Each process's heap holds up to 1 GB, unless `SLIGHT_HEAP_MAX` in the
+program's environment says otherwise (a number of bytes, or with `K`,
+`M` or `G` after it, and at least `1M`); past that, an allocation faults
+(`:heap`), and just that process ends. It's collected when a receive function asks
+for its next message, or at the entry of the next function called
+(D166), in two generations (D200): what's new is allocated in a nursery
+(from 4 KB, growing to 1 MB), and once that's full, what's still
+reachable in it is moved to the old generation and the nursery starts
+again; the old generation is collected once it's at least 256 KB and
+twice what survived its last collection. So what dies young costs
+little, and what lives long is copied rarely. Every loop is a call, so
+any process collects, the root included, whether it waits for messages
+or not.
 
 What's live is what the process can still reach, and that includes
 whatever a function that hasn't returned has bound with `let`, until it
@@ -793,8 +801,9 @@ If the file can't be opened, the owner ends before it runs, with
 `(:error (name path))`, `name` being errno's: `:enoent`, `:eacces`,
 `:eisdir`, `:enotdir`, `:enospc`, and so on, or `:io-error`. A read or a
 write that fails ends it the same way, when it happens; and so does a
-line, a count, a JSON value or a datum of 64 MB or more, too big for a
-process's heap, with `(:error (:too-big path))`.
+line, a count, a JSON value or a datum of 64 MB or more, with `(:error
+(:too-big path))`, whatever the heap holds, so that an endless line
+can't take all the memory.
 
     (defun reader (lines)
         (recv
@@ -975,7 +984,7 @@ which `lookup` reads; more keys may come. A process's:
   body `"fork at prog.slight:3:9"` (a `connect`'s, `"connect at ..."`),
   and a lambda `"lambda at ..."`.
 - `(:mail n)`: the messages waiting for it.
-- `(:heap bytes)`: its heap in use.
+- `(:heap bytes)`: its heap in use, both generations.
 - `(:reductions n)`: the reductions it has made, the functions it has
   entered (under Scheduling).
 - `(:stack held)`: whether it holds a stack (waiting in `recv`, it gives
@@ -1319,9 +1328,11 @@ Strings:
 - `(ord s)`, `(chr n)`: `utf8/code` and `utf8/char`, under Perl's
   names: `(ord "é")` is 233, and `(chr 233)` is `"é"`.
 
-Its helpers (`take-loop`, `range-loop`, `zip-loop`, `sort-runs`,
-`sort-pairs`, `sort-merge`, `str-repeat-loop`, `padding` and
-`bytes-loop`) are visible too, but not meant to be called.
+Its helpers (`fold/r-loop`, `reverse-onto`, `length-loop`, `sum-loop`,
+`product-loop`, `map-loop`, `filter-loop`, `remove-loop`, `take-loop`,
+`range-loop`, `zip-loop`, `sort-runs`, `sort-pairs`, `sort-merge`,
+`str-repeat-loop`, `padding` and `bytes-loop`) are visible too, but not
+meant to be called.
 
 
 ## Libraries

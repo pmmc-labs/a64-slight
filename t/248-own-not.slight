@@ -1,0 +1,9 @@
+; A program's own not is the one its code calls (D80), and gives as a
+; value, not the prelude's, which would compile inline (D203).
+
+(defun not (a) :mine)
+
+(pprint (not #true))
+(pprint (if (eq? (not #false) :mine) :own :other))
+(pprint (map not (list 1 2)))
+:done

@@ -1,0 +1,14 @@
+; spawn: n processes started one after another, each sending its number
+; back and ending; their numbers summed.
+
+(defun start (i n me)
+    (when (< i n)
+        (fork (send me i))
+        (start (+ i 1) n me)))
+
+(defun gather (n acc)
+    (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
+
+(let n (string->int (car @ARGV)))
+(start 0 n $$)
+(gather n 0)

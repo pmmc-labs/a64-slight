@@ -4,7 +4,12 @@
 // Ghuloum-style: every expression leaves its value in the accumulator, and
 // values that have to wait (arguments, a binary op's left operand, a let's
 // value) go to slots in the function's frame. No register allocation, and
-// nothing lives in a register across a call.
+// nothing lives in a register across a call. But an operand that needs no
+// code to work out (a local, or a literal integer, (), #true or #false)
+// doesn't wait: it's loaded where it's wanted when it's wanted; and an
+// integer literal added, subtracted or compared with is an immediate when
+// the target has one (D197). + - * and / on floats are done inline, out
+// of the integers' way, with the result's box allocated inline (D198).
 //
 // Functions take up to eight arguments in registers and return their result
 // in the accumulator. The registers are the platform C calling convention's
@@ -21,10 +26,10 @@
 // What it compiles is what expand.ts and split.ts leave: the special
 // forms (SPECIAL_FORMS, below), calls and tail calls, closures, and the
 // builtins, inline or as calls to the runtime's C (docs/LANGUAGE.md has
-// them all), with the recv rule (classify.ts) enforced here. Cons cells
-// are bump-allocated in the process's heap; floats, strings, closures and
-// tuples are boxes; literals, and closures that capture nothing, are
-// static data. The top-level forms that aren't defuns are the body of
+// them all), with the recv rule (classify.ts) enforced here. Cons cells,
+// tuples and closures are bump-allocated in the process's heap, inline;
+// floats, strings, closures and tuples are boxes; literals, and closures
+// that capture nothing, are static data. The top-level forms that aren't defuns are the body of
 // slight_main, whose parameters are @ARGV and %ENV, the program's
 // arguments and environment: so only they can see them (D144, D186).
 //
@@ -40,7 +45,7 @@ import { isReceiveBody, stateFunctions } from './classify.ts';
 import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
 import { AARCH64 } from './aarch64.ts';
-import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, type Code, type Cond, type Operand, type Target } from './target.ts';
+import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, word, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
 
 // The locals in scope, innermost first: an association list from name to
 // frame slot.
@@ -271,17 +276,46 @@ function compileFunction(entry: string, d: Defun, free: readonly string[], fns: 
 // frame comes down first, and the call is a jump.
 function compileCall(x: Pair, fn: Fn, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     checkArity(x, fn.name, args, fn.arity);
+    if (isPreludeNot(x, cx)) return compileCond(x, [list(args[0]!, sym('#false')), list(sym('#true'), sym('#true'))], cx, st);
     if (fn.state && cx.inLambda) {
         throw new CompileError(`a lambda can't call ${fn.name}, which waits for messages (it reaches a recv)`, x.pos);
     }
     if (fn.state && !cx.tail) {
         throw new CompileError(`${fn.name} waits for messages (it reaches a recv), so it can only be called in tail position`, x.pos);
     }
-    const [code, st1] = args.reduce<[Code, St]>(([acc, s], arg, i) => {
-        const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i, tail: false }, s);
-        return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
-    }, [[], st]);
-    return [[code, st.t.call(fn.label, args.map((_, i) => inSlot(cx.si + i)), cx.tail)], called(st1, cx)];
+    const [code, ops, st1] = callOperands(args, { ...cx, tail: false }, st);
+    return [[code, st.t.call(fn.label, ops, cx.tail)], called(st1, cx)];
+}
+
+// A call's arguments, as operands for the target's call: each simple one
+// as it is, read when the call is made; the others worked out in order,
+// each waiting in a slot from si while the rest are, except the last of
+// them, which stays in the accumulator.
+function callOperands(args: readonly Sexp[], cx: Cx, st: St): [Code, readonly Operand[], St] {
+    const last = args.reduce((at, arg, i) => (isSimple(arg, cx) ? at : i), -1);
+    const code: Code[] = [];
+    const ops: Operand[] = [];
+    let si = cx.si;
+    args.forEach((arg, i) => {
+        const s = simple(arg, cx, st);
+        if (s !== null) {
+            ops.push(s[0]);
+            st = s[1];
+            return;
+        }
+        const [c, st1] = compileExpr(arg, { ...cx, si }, st);
+        if (i === last) {
+            code.push(c);
+            ops.push(ACC);
+            st = st1;
+            return;
+        }
+        code.push(c, st.t.storeSlot(si));
+        ops.push(inSlot(si));
+        st = useSlot(st1, si);
+        si += 1;
+    });
+    return [code, ops, st];
 }
 
 // The assembler label for a function: fn_ and the name, with anything but
@@ -486,15 +520,24 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (name === 'eq?' || name === 'ne?') return compileEquality(x, name, args, operand, st);
     if (name === 'cons') return compileCons(x, args, operand, st);
     if (name === 'list') return compileList(x, args, operand, st);
+    if (name === 'tuple') return compileTuple(x, args, operand, st);
+    if (name === '/') return compileDivide(x, args, operand, st);
     const path = cxrPath(name);
     if (path !== null) return compileCxr(x, name, path, args, operand, st, !known);
     const arith = ARITH[name];
     if (arith !== undefined) {
         const op = name as '+' | '-' | '*';
+        const float = (s: St, notFloats: string, done: string, n?: bigint): [Code, St] => floatPath(x, op, notFloats, done, n, s);
+        // * has no immediate form, since it untags one side: the literal
+        // goes in a register, but still only the other operand is checked
+        const withWord = (s: St, w: bigint): [Code, St] => {
+            const [overflow, s1] = faultLabel(s, 'RT_FAULT_OVERFLOW', name, x.pos);
+            return [op === '*' ? [s.t.accToLeft, s.t.load('acc', word(w)), s.t.arith('*', overflow)] : s.t.arithWord(op, w, overflow), s1];
+        };
         return compileNumeric(x, name, args, operand, st, arith, [], (s) => {
             const [overflow, s1] = faultLabel(s, 'RT_FAULT_OVERFLOW', name, x.pos);
             return [s.t.arith(op, overflow), s1];
-        });
+        }, withWord, float);
     }
     const cmp = COMPARE[name];
     if (cmp !== undefined) {
@@ -806,7 +849,7 @@ function builtinWrapper(x: Sym, st: St): [string, St] {
 }
 
 function builtinArity(name: string): number | null {
-    if (name in ARITH || name in COMPARE || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply'].includes(name)) return 2;
+    if (name in ARITH || name in COMPARE || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply', '/'].includes(name)) return 2;
     if (PREDICATES.includes(name) || name === 'pprint' || cxrPath(name) !== null) return 1;
     const c = C_BUILTINS[name];
     return c !== undefined && !c.variadic && c.min === c.max ? c.min : null;
@@ -937,7 +980,6 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'json/print':     fixed('rt_json_print', 1),
     'sexp/parse':     fixed('rt_sexp_parse', 1),
     'sexp/print':     fixed('rt_sexp_print', 1),
-    'tuple':          variadic('rt_tuple'),
     'tuple?':         fixed('rt_is_tuple_p', 1),
     'tuple/len':      fixed('rt_tuple_len_of', 1),
     'tuple/get':      fixed('rt_tuple_ref', 2),
@@ -946,7 +988,6 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'tuple/slice':    fixed('rt_tuple_slice', 3),
     'list->tuple':    fixed('rt_tuple', 1),
     'tuple->list':    fixed('rt_tuple_to_list', 1),
-    '/':              fixed('rt_divide', 2),
     'float?':         fixed('rt_is_flt', 1),
     'num?':           fixed('rt_is_num', 1),
     'ceil':           fixed('rt_ceil', 1),
@@ -977,48 +1018,155 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
 
 // The names a defun can't take.
 const BUILTINS: readonly string[] = [
-    'pprint', 'eq?', 'ne?', 'cons', 'list', 'apply',
+    'pprint', 'eq?', 'ne?', 'cons', 'list', 'tuple', 'apply', '/',
     ...DIVISION, ...PREDICATES,
     ...[ARITH, COMPARE, C_BUILTINS].flatMap((table) => Object.keys(table)),
 ];
 
 const isBuiltin = (name: string): boolean => BUILTINS.includes(name) || cxrPath(name) !== null;
 
-// Arithmetic and comparisons. The left operand waits in slot si while the
-// right one is computed. Two integers (both tag bits clear) take the inline
-// path; anything else goes out of line to the runtime's fn(left, right,
-// ...extra, site), which promotes to float or faults "not a number".
+// Arithmetic and comparisons: the left operand into LEFT and the right
+// into the accumulator (operands). Two integers (both tag bits clear) take
+// the inline path; anything else goes out of line to the runtime's
+// fn(left, right, ...extra, site), which promotes to float or faults "not a
+// number". With withWord, a right operand that's an integer literal is a
+// word: only the left needs checking, and withWord makes the inline path.
+// With float, the out-of-line path first tries floats (floatPath) before
+// the runtime: float(st, notFloats, done, n) gets n when the right operand
+// is the integer literal n.
 function compileNumeric(x: Pair, name: string, args: readonly Sexp[], cx: Cx, st: St,
-                        fn: string, extra: readonly Operand[], inline: (st: St) => [Code, St]): [Code, St] {
+                        fn: string, extra: readonly Operand[], inline: (st: St) => [Code, St],
+                        withWord?: (st: St, w: bigint) => [Code, St],
+                        float?: (st: St, notFloats: string, done: string, n?: bigint) => [Code, St]): [Code, St] {
     checkArity(x, name, args, 2);
-    const [left, st1]  = compileExpr(args[0]!, cx, st);
-    const [right, st2] = compileExpr(args[1]!, { ...cx, si: cx.si + 1 }, useSlot(st1, cx.si));
-    const [slow, st3]  = label(st2, 'slow');
-    const [site, st4]  = siteLabel(st3, name, x.pos);
-    const [fast, st5]  = inline(st4);
-    const t    = st.t;
-    const stub = [`${slow}:`, t.call(fn, [LEFT, ACC, ...extra, addr(site)], false), t.jump(`${slow}_done`)];
-    return [[
-        left, t.storeSlot(cx.si),
-        right, t.loadLeft(cx.si),
-        t.branchUnlessInts(slow),
-        fast,
-        `${slow}_done:`,
-    ], { ...st5, stubs: [st5.stubs, stub] }];
+    const t = st.t;
+    const [l, r] = args as [Sexp, Sexp];
+    if (withWord !== undefined && r.t === 'int') {
+        const w = intWord(r.v);
+        const [left, st1] = compileExpr(l, cx, st);
+        const [slow, st2] = label(st1, 'slow');
+        const [site, st3] = siteLabel(st2, name, x.pos);
+        const [fast, st4] = withWord(st3, w);
+        const [floats, st5] = float === undefined ? [[], st4] : float(st4, `${slow}_c`, `${slow}_done`, r.v);
+        const stub = [`${slow}:`, floats, `${slow}_c:`, t.call(fn, [ACC, word(w), ...extra, addr(site)], false), t.jump(`${slow}_done`)];
+        return [[left, t.branchUnlessInt(slow), fast, `${slow}_done:`], { ...st5, stubs: [st5.stubs, stub] }];
+    }
+    const [both, st1] = operands(l, r, cx, st);
+    const [slow, st2] = label(st1, 'slow');
+    const [site, st3] = siteLabel(st2, name, x.pos);
+    const [fast, st4] = inline(st3);
+    const [floats, st5] = float === undefined ? [[], st4] : float(st4, `${slow}_c`, `${slow}_done`);
+    const stub = [`${slow}:`, floats, `${slow}_c:`, t.call(fn, [LEFT, ACC, ...extra, addr(site)], false), t.jump(`${slow}_done`)];
+    return [[both, t.branchUnlessInts(slow), fast, `${slow}_done:`], { ...st5, stubs: [st5.stubs, stub] }];
 }
 
-// The left operand waits in slot si while the right one is computed; then
-// op combines them (left and the accumulator). With ints, both must be
-// integers.
+// Floats, inline (D198): unless the operands are floats (the left and the
+// accumulator, or, given n, the accumulator, n being the right operand's
+// integer), on to notFloats; then a box allocated, the operation done, and
+// on to done. The result is the double C would have made, to the bit: the
+// same IEEE operation, on the same doubles.
+function floatPath(x: Pair, op: FloatOp, notFloats: string, done: string, n: bigint | undefined, st: St): [Code, St] {
+    const t = st.t;
+    const [allocate, st1] = alloc(16, op, x.pos, st);
+    return [[
+        n === undefined ? t.branchUnlessFloats(notFloats) : t.branchUnlessFloat(notFloats),
+        allocate,
+        n === undefined ? t.floatArith(op) : t.floatArithInt(op, n),
+        t.jump(done),
+    ], st1];
+}
+
+// (/ a b), always a float: two floats, or a float and a literal integer
+// that isn't 0, inline (D198), the divisor checked for zero first; anything
+// else, a zero included, is rt_divide's, which faults on it.
+function compileDivide(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    checkArity(x, '/', args, 2);
+    const t = st.t;
+    const [l, r] = args as [Sexp, Sexp];
+    const [slow, st1] = label(st, 'slow');
+    const [site, st2] = siteLabel(st1, '/', x.pos);
+    const literal = r.t === 'int' && r.v !== 0n;
+    const [first, st3] = literal ? compileExpr(l, cx, st2) : operands(l, r, cx, st2);
+    const [allocate, st4] = alloc(16, '/', x.pos, st3);
+    const stub = [`${slow}:`, t.call('rt_divide', literal ? [ACC, word(intWord((r as Int).v)), addr(site)] : [LEFT, ACC, addr(site)], false),
+                  t.jump(`${slow}_done`)];
+    return [[
+        first,
+        literal ? t.branchUnlessFloat(slow) : [t.branchUnlessFloats(slow), t.branchIfZeroFloat(slow)],
+        allocate,
+        literal ? t.floatArithInt('/', (r as Int).v) : t.floatArith('/'),
+        `${slow}_done:`,
+    ], { ...st4, stubs: [st4.stubs, stub] }];
+}
+
+// Whether x needs no code to work out (simple, below), without anything
+// simple would add to St.
+function isSimple(x: Sexp, cx: Cx): boolean {
+    if (x.t === 'int' || x.t === 'nil') return true;
+    if (x.t === 'sym') return x.name === '#true' || x.name === '#false' || (x.name !== '$$' && x.name !== '^$$' && lookup(cx.env, x.name) !== null);
+    return isForm(x, 'quote') && isImmediateLiteral(x);
+}
+
+// An operand that needs no code to work out, so it can be read where it's
+// wanted when it's wanted: a local, in its slot (which nothing changes);
+// an integer, (), #true or #false, or a quoted symbol, as its word. Not
+// $$ or ^$$, which are loads from the process; and not a name that isn't
+// a local (a constant, a function).
+function simple(x: Sexp, cx: Cx, st: St): [Operand, St] | null {
+    if (!isSimple(x, cx)) return null;
+    if (x.t === 'int') return [word(intWord(x.v)), st];
+    if (x.t === 'nil') return [imm('RT_NIL'), st];
+    if (x.t === 'sym' && x.name === '#true') return [imm('RT_TRUE'), st];
+    if (x.t === 'sym' && x.name === '#false') return [imm('RT_FALSE'), st];
+    if (x.t === 'sym') return [inSlot(lookup(cx.env, x.name)!), st];
+    const [w, st1] = immediateWord(x, st);
+    return [word(w), st1];
+}
+
+// A binary operation's operands: the left into LEFT and the right into the
+// accumulator, the left worked out first. A simple one is read when it's
+// wanted, so it needn't wait in a slot; otherwise the left waits in slot
+// si while the right is worked out.
+function operands(left: Sexp, right: Sexp, cx: Cx, st: St): [Code, St] {
+    const t = st.t;
+    const l = simple(left, cx, st);
+    if (l !== null) {
+        const [rc, st1] = compileExpr(right, cx, l[1]);
+        return [[rc, t.load('left', l[0])], st1];
+    }
+    const [lc, st1] = compileExpr(left, cx, st);
+    const r = simple(right, cx, st1);
+    if (r !== null) return [[lc, t.accToLeft, t.load('acc', r[0])], r[1]];
+    const [rc, st2] = compileExpr(right, { ...cx, si: cx.si + 1 }, useSlot(st1, cx.si));
+    return [[lc, t.storeSlot(cx.si), rc, t.loadLeft(cx.si)], st2];
+}
+
+// The left operand, then the right, each checked as it comes when ints
+// says both must be integers (so a left that isn't faults before the
+// right is worked out); then op combines them (left and the accumulator).
+// A simple right operand is read when it's wanted; a left one only
+// without ints, since reading it later would check it after the right.
 function compileBinary(x: Pair, name: string, args: readonly Sexp[], cx: Cx, st: St,
                        op: (st: St) => [Code, St], ints = true): [Code, St] {
     checkArity(x, name, args, 2);
-    const [left, st1]    = compileExpr(args[0]!, cx, st);
-    const [right, st2]   = compileExpr(args[1]!, { ...cx, si: cx.si + 1 }, useSlot(st1, cx.si));
-    const [notInt, st3]  = ints ? faultLabel(st2, 'RT_FAULT_NOT_INT', name, x.pos) : ['', st2];
-    const [combine, st4] = op(st3);
+    const [notInt, st1]  = ints ? faultLabel(st, 'RT_FAULT_NOT_INT', name, x.pos) : ['', st];
     const t     = st.t;
     const isInt = ints ? t.branchUnlessInt(notInt) : [];
+    const [l, r] = args as [Sexp, Sexp];
+    const rs = simple(r, cx, st1);
+    if (!ints || rs !== null) {
+        if (!ints && rs === null) {
+            const [both, st2]    = operands(l, r, cx, st1);
+            const [combine, st3] = op(st2);
+            return [[both, combine], st3];
+        }
+        const [left, st2]    = compileExpr(l, cx, rs![1]);
+        const [combine, st3] = op(st2);
+        return [[left, isInt, t.accToLeft, t.load('acc', rs![0]), isInt, combine], st3];
+    }
+    const [left, st2]    = compileExpr(l, cx, st1);
+    const [right, st3]   = compileExpr(r, { ...cx, si: cx.si + 1 }, useSlot(st2, cx.si));
+    const [combine, st4] = op(st3);
     return [[
         left, isInt, t.storeSlot(cx.si),
         right, isInt, t.loadLeft(cx.si),
@@ -1068,13 +1216,10 @@ function compileCBuiltin(x: Pair, name: string, b: CBuiltin, args: readonly Sexp
         const n = b.min === b.max ? `${b.min}` : `${b.min} or ${b.max}`;
         throw new CompileError(`${name} takes ${n} argument${n === '1' ? '' : 's'}, not ${args.length}`, x.pos);
     }
-    const [code, st1] = args.reduce<[Code, St]>(([acc, s], arg, i) => {
-        const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i }, s);
-        return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
-    }, [[], st]);
+    const [code, ops, st1] = callOperands(args, cx, st);
     const [site, st2] = siteLabel(st1, name, x.pos);
-    const operands = [...Array(b.max).keys()].map((i) => (i < args.length ? inSlot(cx.si + i) : imm('RT_NIL')));
-    return [[code, st.t.call(b.fn, [...operands, addr(site)], false)], st2];
+    const missing = [...Array(b.max - args.length).keys()].map(() => imm('RT_NIL'));
+    return [[code, st.t.call(b.fn, [...ops, ...missing, addr(site)], false)], st2];
 }
 
 function checkArity(x: Pair, name: string, args: readonly Sexp[], n: number): void {
@@ -1113,16 +1258,32 @@ function compileCons(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St]
     ], st4];
 }
 
+// Each of args in turn into the slots from si, each waiting there while
+// the rest are computed.
+function intoSlots(args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    return args.reduce<[Code, St]>(([acc, s], arg, i) => {
+        const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i }, s);
+        return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
+    }, [[], st]);
+}
+
 // (list a b ...): the elements wait in slots, then one allocation holds
 // all the cells, side by side.
 function compileList(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     if (args.length === 0) return [st.t.loadConst('RT_NIL'), st];
-    const [code, st1] = args.reduce<[Code, St]>(([acc, s], arg, i) => {
-        const [c, s1] = compileExpr(arg, { ...cx, si: cx.si + i }, s);
-        return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
-    }, [[], st]);
+    const [code, st1] = intoSlots(args, cx, st);
     const [allocate, st2] = alloc(16 * args.length, 'list', x.pos, st1);
     return [[code, allocate, st.t.listCells(cx.si, args.length)], st2];
+}
+
+// (tuple a b ...): the elements wait in slots, then one allocation holds
+// the header and the elements, as tuples.c lays a tuple out, rounded up to
+// 16 bytes as every heap object is. Not through a list and rt_tuple, which
+// made a list to throw away (D195).
+function compileTuple(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    const [code, st1] = intoSlots(args, cx, st);
+    const [allocate, st2] = alloc(16 * Math.ceil((8 + 8 * args.length) / 16), 'tuple', x.pos, st1);
+    return [[code, allocate, st.t.tupleCells(tupleHeader(args.length), cx.si, args.length)], st2];
 }
 
 // car, cdr, and c[ad]{2,4}r: the letters between c and r, applied right
@@ -1150,21 +1311,26 @@ function compileCxr(x: Pair, name: string, path: readonly string[], args: readon
 // Each test must be #true or #false; anything else faults, and so does
 // running out of clauses. A test that is literally #true needs no check.
 // The clause bodies are in tail position if the cond is.
+// When the last test is #true, as an if's is, nothing runs out of clauses,
+// and the last body runs on into the end.
 function compileCond(x: Pair, clauses: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     if (clauses.length === 0) throw new CompileError('cond needs at least one clause', x.pos);
+    const lastClause = clauses[clauses.length - 1]!;
+    const always     = lastClause.t === 'pair' && isSym(lastClause.car, '#true');
     const [end, st1]     = label(st, 'cond_end');
-    const [noMatch, st2] = faultLabel(st1, 'RT_FAULT_NO_CLAUSE', 'cond', x.pos);
-    const [code, st3]    = clauses.reduce<[Code, St]>(([acc, s], clause) => {
-        const [c, s1] = compileClause(x, clause, end, cx, s);
+    const [noMatch, st2] = always ? ['', st1] : faultLabel(st1, 'RT_FAULT_NO_CLAUSE', 'cond', x.pos);
+    const [code, st3]    = clauses.reduce<[Code, St]>(([acc, s], clause, i) => {
+        const [c, s1] = compileClause(x, clause, end, cx, s, always && i === clauses.length - 1);
         return [[acc, c], s1];
     }, [[], st2]);
-    return [[code, st.t.jump(noMatch), `${end}:`], st3];
+    return [[code, always ? [] : st.t.jump(noMatch), `${end}:`], st3];
 }
 
-function compileClause(x: Pair, clause: Sexp, end: string, cx: Cx, st: St): [Code, St] {
+function compileClause(x: Pair, clause: Sexp, end: string, cx: Cx, st: St, last = false): [Code, St] {
     if (clause.t !== 'pair' || clause.cdr.t !== 'pair') {
         throw new CompileError(`a cond clause is (test body...), not ${show(clause)}`, posOf(clause) ?? x.pos);
     }
+    if (last) return compileBody(clause.cdr, cx, st);
     const [next, st1] = label(st, 'cond_next');
     const [code, st2] = compileTest(clause.car, next, { ...cx, tail: false }, st1, posOf(clause.car) ?? clause.pos);
     const [body, st3] = compileBody(clause.cdr, cx, st2);
@@ -1180,6 +1346,11 @@ function compileClause(x: Pair, clause: Sexp, end: string, cx: Cx, st: St): [Cod
 // a test that isn't a boolean is said to be: for b there, the and's.
 function compileTest(test: Sexp, ifFalse: string, cx: Cx, st: St, site: Pos | null = posOf(test)): [Code, St] {
     if (test.t === 'sym' && test.name === '#true') return [[], st];
+    if (isPreludeNot(test, cx)) {
+        const [passed, st1] = label(st, 'not');
+        const [code, st2]   = compileTest(toArray(test)![1]!, passed, cx, st1);
+        return [[code, st.t.jump(ifFalse), `${passed}:`], st2];
+    }
     const items = test.t === 'pair' ? toArray(test) : null;
     const head  = items !== null && items[0]!.t === 'sym' ? builtinName(items[0] as Sym, cx) : null;
     if ((head === 'cons?' || head === 'nil?') && items!.length === 2) {
@@ -1193,6 +1364,7 @@ function compileTest(test: Sexp, ifFalse: string, cx: Cx, st: St, site: Pos | nu
         const [code, st2]  = compileExpr(other, cx, st1);
         return [[code, st.t.branchUnlessIs(word, ifFalse)], st2];
     }
+    if (head !== null && Object.hasOwn(COMPARE, head) && items!.length === 3) return compileCompareTest(head, items!.slice(1), ifFalse, cx, st, posOf(test));
     if (isForm(test, TUPLE_OF) && items!.length === 3) {
         const [code, st1] = compileExpr(items![1]!, cx, st);
         return [[code, st.t.branchUnlessBox(tupleHeader(Number((items![2] as Int).v)), ifFalse)], st1];
@@ -1210,6 +1382,46 @@ function compileTest(test: Sexp, ifFalse: string, cx: Cx, st: St, site: Pos | nu
     const [code, st1]    = compileExpr(test, cx, st);
     const [notBool, st2] = faultLabel(st1, 'RT_FAULT_NOT_BOOL', 'cond test', site);
     return [[code, st.t.testBool(ifFalse, notBool)], st2];
+}
+
+// The comparison that holds with its operands the other way round.
+const MIRROR: Readonly<Record<string, string>> = { '==': '==', '!=': '!=', '<': '>', '<=': '>=', '>': '<', '>=': '<=' };
+
+// A comparison as a test: for two integers, a compare and a branch to
+// ifFalse unless it holds, with no boolean made; anything else asks
+// rt_compare out of line, which gives one (or faults), and branches on it.
+// An integer literal is a word, on the right: (< 0 x) is (> x 0).
+function compileCompareTest(name: string, args: readonly Sexp[], ifFalse: string, cx: Cx, st: St, pos: Pos | null): [Code, St] {
+    const [a, b]  = args as [Sexp, Sexp];
+    const swap    = a.t === 'int' && b.t !== 'int';
+    const op      = swap ? MIRROR[name]! : name;
+    const [cond, rtOp] = COMPARE[op]!;
+    const [l, r]  = swap ? [b, a] : [a, b];
+    const t = st.t;
+    const [slow, st1] = label(st, 'slow');
+    const [site, st2] = siteLabel(st1, name, pos);
+    const done = [t.branchIfFalse(ifFalse), t.jump(`${slow}_done`)];
+    if (r.t === 'int') {
+        const w = intWord(r.v);
+        const [left, st3] = compileExpr(l, cx, st2);
+        const stub = [`${slow}:`, t.call('rt_compare', [ACC, word(w), imm(rtOp), addr(site)], false), done];
+        return [[left, t.branchUnlessInt(slow), t.branchUnlessCompareWord(cond, w, ifFalse), `${slow}_done:`],
+                { ...st3, stubs: [st3.stubs, stub] }];
+    }
+    const [both, st3] = operands(l, r, cx, st2);
+    const stub = [`${slow}:`, t.call('rt_compare', [LEFT, ACC, imm(rtOp), addr(site)], false), done];
+    return [[both, t.branchUnlessInts(slow), t.branchUnlessCompare(cond, ifFalse), `${slow}_done:`],
+            { ...st3, stubs: [st3.stubs, stub] }];
+}
+
+// A call to the prelude's not, with its one argument, which compiles inline
+// (D203): as a value, the cond the prelude says it is; as a test, its
+// argument's, with the branches the other way round. Not a program's own
+// not (D80), nor a local called not.
+function isPreludeNot(x: Sexp, cx: Cx): boolean {
+    if (!isForm(x, 'not') || lookup(cx.env, 'not') !== null || toArray(x)?.length !== 2) return false;
+    const fn = lookupFn(cx.fns, 'not');
+    return fn !== null && fn.module === 'prelude';
 }
 
 // The builtin a call's head names, if it names one: by a name no local can

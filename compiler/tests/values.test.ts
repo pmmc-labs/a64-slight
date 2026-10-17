@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { DEVICE_WORDS, ERRNO_NAMES, EXEC_WORDS, FAULT_KINDS, intWord, JSON_WORDS, KEY_NAMES, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS, TAG_BOXED, tupleElement, tupleHeader } from '../src/values.ts';
+import { DEVICE_WORDS, ERRNO_NAMES, EXEC_WORDS, FAULT_KINDS, FLOAT_HEADER, FLOAT_VALUE, intWord, JSON_WORDS, KEY_NAMES, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS, TAG_BOXED, tupleElement, tupleHeader } from '../src/values.ts';
 
 const RT_H = readFileSync(new URL('../../runtime/rt.h', import.meta.url), 'utf8');
 
@@ -26,6 +26,11 @@ test("a tuple's header is n << RT_BOX_SIZE_SHIFT | RT_BOX_TUPLE, and its element
     assert.equal(tupleHeader(3), (3n << define('RT_BOX_SIZE_SHIFT')) | define('RT_BOX_TUPLE'));
     assert.equal(tupleElement(0), 8 - TAG_BOXED);
     assert.equal(tupleElement(2), 24 - TAG_BOXED);
+});
+
+test("a float's header is 8 << RT_BOX_SIZE_SHIFT | RT_BOX_FLOAT, and its double follows it", () => {
+    assert.equal(FLOAT_HEADER, (8n << define('RT_BOX_SIZE_SHIFT')) | define('RT_BOX_FLOAT'));
+    assert.equal(FLOAT_VALUE, 8 - Number(define('RT_TAG_BOXED')));
 });
 
 test('symbols are id << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL', () => {

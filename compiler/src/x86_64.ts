@@ -11,8 +11,8 @@
 // addressed up from rsp, so rsp is 16-aligned for every call, as System V
 // requires: nothing checks it, and a mistake crashes deep in libc.
 
-import { comment, placeArgs, type Code, type Cond, type Operand, type Target } from './target.ts';
-import { tupleElement } from './values.ts';
+import { comment, NOT, placeArgs, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
+import { FLOAT_HEADER, FLOAT_VALUE, tupleElement } from './values.ts';
 
 const ARGS = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9', 'r10', 'r11'];
 
@@ -34,6 +34,32 @@ function loadWord(reg: string, word: bigint): string {
         ? `    mov  ${reg}, ${w}`
         : `    movabs ${reg}, 0x${BigInt.asUintN(64, w).toString(16)}`;
 }
+
+// Whether a word fits an instruction's 32 bits, which it sign-extends.
+const fits32 = (word: bigint): boolean => {
+    const w = BigInt.asIntN(64, word);
+    return w >= -0x80000000n && w <= 0x7fffffffn;
+};
+
+// Floats: whether reg is a float's box, by its tag (in edx) and then its
+// header; and the box just allocated (rdx) made to hold xmm0, into rax.
+// Only xmm0 and xmm1, which nothing keeps across a call.
+const FLOAT_OPS: Readonly<Record<FloatOp, string>> = { '+': 'addsd', '-': 'subsd', '*': 'mulsd', '/': 'divsd' };
+
+const isFloat = (reg: string, reg32: string, label: string): Code => [
+    `    mov  edx, ${reg32}`,
+    '    and  edx, RT_TAG_MASK',
+    '    cmp  edx, RT_TAG_BOXED',
+    `    jne  ${label}`,
+    `    cmp  qword ptr [${reg} - RT_TAG_BOXED], ${FLOAT_HEADER}`,
+    `    jne  ${label}`,
+];
+
+const BOX_XMM0: Code = [
+    `    mov  qword ptr [rdx], ${FLOAT_HEADER}`,
+    '    movsd qword ptr [rdx + 8], xmm0',
+    '    lea  rax, [rdx + RT_TAG_BOXED]',
+];
 
 // The tag of rax, in edx.
 const TAG: Code = ['    mov  edx, eax', '    and  edx, RT_TAG_MASK'];
@@ -94,6 +120,7 @@ function move(dst: string, op: Operand): Code {
     switch (op.t) {
         case 'slot':     return `    mov  ${dst}, ${slot(op.si)}`;
         case 'imm':      return `    mov  ${dst}, ${op.v}`;
+        case 'word':     return loadWord(dst, op.v);
         case 'addr':     return `    lea  ${dst}, [rip + ${op.label}]`;
         case 'frame':    return `    mov  ${dst}, rsp`;
         case 'slotAddr': return `    lea  ${dst}, [rsp + ${8 * op.si}]`;
@@ -171,6 +198,8 @@ export const X86_64: Target = {
     storeSlot: (si, text) => `    mov  ${slot(si)}, rax${comment(text)}`,
     copySlot: (from, to, text) => [`    mov  r11, ${slot(from)}${comment(text)}`, `    mov  ${slot(to)}, r11`],
     loadLeft: (si) => `    mov  rcx, ${slot(si)}`,
+    load: (dst, op) => move(dst === 'acc' ? 'rax' : 'rcx', op),
+    accToLeft: '    mov  rcx, rax',
 
     testBool: (ifFalse, notBool) => [
         '    cmp  rax, RT_FALSE',
@@ -189,6 +218,12 @@ export const X86_64: Target = {
         return [compare, `    jne  ${label}`];
     },
     branchIfSame: (label) => ['    cmp  rcx, rax', `    je   ${label}`],
+    branchUnlessCompare: (cond, label) => ['    cmp  rcx, rax', `    j${CC[NOT[cond]].padEnd(3)} ${label}`],
+    branchUnlessCompareWord: (cond, word, label) => [
+        fits32(word) ? `    cmp  rax, ${BigInt.asIntN(64, word)}` : [loadWord('rdx', word), '    cmp  rax, rdx'],
+        `    j${CC[NOT[cond]].padEnd(3)} ${label}`,
+    ],
+    branchIfFalse: (label) => ['    cmp  rax, RT_FALSE', `    je   ${label}`],
     branchUnlessBox: (header, label) => [
         TAG,
         '    cmp  edx, RT_TAG_BOXED',
@@ -205,7 +240,36 @@ export const X86_64: Target = {
     compareBool: (cond) => ['    cmp  rcx, rax', boolIf(CC[cond])],
     notBool: ['    cmp  rax, RT_TRUE', boolIf('ne')],
 
+    branchUnlessFloat: (label) => isFloat('rax', 'eax', label),
+    branchUnlessFloats: (label) => [isFloat('rax', 'eax', label), isFloat('rcx', 'ecx', label)],
+    // ucomisd says equal for a NaN too, which then goes the slow way
+    branchIfZeroFloat: (label) => [
+        `    movsd xmm1, qword ptr [rax + ${FLOAT_VALUE}]`,
+        '    xorpd xmm0, xmm0',
+        '    ucomisd xmm1, xmm0',
+        `    je   ${label}`,
+    ],
+    floatArith: (op) => [
+        `    movsd xmm0, qword ptr [rcx + ${FLOAT_VALUE}]`,
+        `    ${FLOAT_OPS[op]} xmm0, qword ptr [rax + ${FLOAT_VALUE}]`,
+        BOX_XMM0,
+    ],
+    // n to a double as C's (double) makes it, rounding to nearest
+    floatArithInt: (op, n) => [
+        `    movsd xmm0, qword ptr [rax + ${FLOAT_VALUE}]`,
+        loadWord('rsi', n),
+        '    cvtsi2sd xmm1, rsi',
+        `    ${FLOAT_OPS[op]} xmm0, xmm1`,
+        BOX_XMM0,
+    ],
+
     arith: (op, overflow) => ARITH[op](overflow),
+    arithWord: (op, word, overflow) => [
+        fits32(word)
+            ? `    ${op === '+' ? 'add ' : 'sub '} rax, ${BigInt.asIntN(64, word)}`
+            : [loadWord('rdx', word), `    ${op === '+' ? 'add ' : 'sub '} rax, rdx`],
+        `    jo   ${overflow}`,
+    ],
     divide: (op, zero, overflow) => DIVISION[op](zero, overflow),
 
     cxr: (step) => (step === 'a' ? '    mov  rax, qword ptr [rax - 1]    // car' : '    mov  rax, qword ptr [rax + 7]    // cdr'),
@@ -251,6 +315,12 @@ export const X86_64: Target = {
             `    mov  qword ptr [rdx + ${16 * i + 8}], rsi`,
         ]),
         '    lea  rax, [rdx + RT_TAG_LIST]',
+    ],
+    // A tuple's header fits mov's 32 bits for any tuple a frame can hold.
+    tupleCells: (header, firstSlot, n) => [
+        `    mov  qword ptr [rdx], ${header}`,
+        [...Array(n).keys()].map((i) => [`    mov  rsi, ${slot(firstSlot + i)}`, `    mov  qword ptr [rdx + ${8 * (i + 1)}], rsi`]),
+        '    lea  rax, [rdx + RT_TAG_BOXED]',
     ],
     // The header (how many values it captured, and the closure type), the
     // code, the arity, the name (for printing), then the captured values.

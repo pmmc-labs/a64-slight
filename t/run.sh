@@ -27,6 +27,9 @@ export TARGET RUN TIMEOUT
 
 # The collector poisons what it frees, so a pointer it missed fails loudly.
 export SLIGHT_POISON=1
+# The tests that fill a heap, or read a line too long for one, were
+# written for 64 MB, the cap before D202, and are quick at that.
+export SLIGHT_HEAP_MAX=64M
 # Time starts at 0 and moves only when nothing can run, straight to the
 # next timer, so timer tests are exact and take no real time.
 export SLIGHT_CLOCK=virtual
