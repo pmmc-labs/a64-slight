@@ -3267,3 +3267,25 @@ they call, `length` and `not`, and `not` alone at 18 per cent of
   took 574 million instructions, 38 per cent fewer, against 28 for the
   loops alone (both before `not` was inline); not worth the pass for
   now.
+
+**D204. A value is held to 64 MB while it's read, and nothing a program
+gives is copied onto a stack.** *(User, Oct 2026: two findings of a
+review of the runtime, fixed as found.)*
+
+- D160 held a value to 64 MB only once it had ended: the cap was what
+  building it took. Until it ended, the reader went on reading, holding
+  all of it, so an endless value (a string opened and never closed, from
+  a socket) grew the device's buffer without limit, as an endless line
+  did before D160. Now a reader with 64 MB and no end to the value, the
+  datum or the doc block ends its owner with `:too-big`, as it does for a
+  line. Test 249.
+- `connect :tcp` copied the host of its "host:port" onto the C stack,
+  and a device that failed copied its path there for the reason, each as
+  long as the program made it (a port may have any number of zeros in
+  front). A process's stack is 8 MB, with one guard page under it, and C
+  runs with 64 KB of it. Now the host goes in a buffer of 256 bytes, a
+  host longer than that (than any name can be, 253) isn't found, and a
+  device keeps its path as a string from the start, which the reason
+  uses as it is. Test 250.
+- **For later:** building the runtime with `-fstack-clash-protection`
+  too, once it's checked that Xcode's clang takes it for both targets.

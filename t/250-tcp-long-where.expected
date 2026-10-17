@@ -1,0 +1,5 @@
+(error enotfound #true)
+(ok connected)
+(error enotfound #true)
+(ok (error econnrefused #true))
+()

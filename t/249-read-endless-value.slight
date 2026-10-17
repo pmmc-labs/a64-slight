@@ -1,0 +1,39 @@
+; A JSON value or a datum that hasn't ended by 64 MB is too big, as a
+; line is (D160, D204): the reader doesn't keep reading, holding all of
+; it, in case it ends. The file is a string that opens and never closes,
+; 64 MB and a little more, which until D204 was read to its end, and
+; then was bad JSON.
+
+(defun double-up (s n)
+    (cond
+        ((== n 0) s)
+        (#true    (double-up (~ s s) (- n 1)))))
+
+(defun write-times (f s n)
+    (cond
+        ((== n 0) (disconnect f))
+        (#true    (send f (list :write s)) (write-times f s (- n 1)))))
+
+(defun writer (s n)
+    (recv
+        ((:open f) (send f (list :write "\"")) (write-times f s n))))
+
+(defun reading (how)
+    (recv
+        ((:open f)   (send f (list :read how)) (reading how))
+        ((:json f v) :a-value)
+        ((:sexp f v) :a-datum)
+        ((:eof f)    :eof)))
+
+(defun emptied ()
+    (recv
+        ((:open f) (disconnect f))))
+
+; 1025 pieces of 64 KB
+(let path "build/t/249-read-endless.txt")
+(join (connect :fs/write path (writer (double-up "a" 16) 1025)))
+(pprint (join (connect :fs/read path (reading :json))))
+(pprint (join (connect :fs/read path (reading :sexp))))
+
+; the file emptied, so it doesn't keep its 64 MB
+(pprint (join (connect :fs/write path (emptied))))

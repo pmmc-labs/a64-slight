@@ -1430,8 +1430,8 @@ typedef struct rt_device {
     rt_value_t        pid, owner;
     int               fd, mode;
     const char       *site;             // the connect's, for dead letters
-    char             *path;             // a file's path, a connection's "host:port"; NUL-terminated
-    size_t            path_len;
+    rt_value_t        path;             // a file's path, a connection's "host:port", a command's name, as a
+    uint64_t         *path_space;       // string in path_space (string_in), for (:error (name path)); or 0
     int64_t           port;             // a listener's, or the port a connection is to be made to
     rt_lookup_t      *lookup;           // while a connection's host is looked up...
     uint64_t          alarm;            // ...the timer for its query (own_alarm)
@@ -1533,10 +1533,8 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
     d->line  = 1;
     d->in_fd = -1;
     if (path) {
-        d->path     = rt_must(malloc(len + 1));
-        d->path_len = len;
-        memcpy(d->path, path, len);
-        d->path[len] = '\0';
+        d->path_space = rt_must(malloc((len / 8 + 6) * sizeof *d->path_space));
+        d->path       = string_in(d->path_space, path, len);
     }
     d->next    = p->devices;
     p->devices = d;
@@ -1565,7 +1563,7 @@ static void close_now(rt_device_t *d) {
         rt_json_free(&d->json);
         rt_sexp_free(&d->sexp);
         free(d->buf);
-        free(d->path);
+        free(d->path_space);
         free(d->snap);
         free(d->snap_devices);
         free(d);
@@ -1588,7 +1586,7 @@ static void bury(void) {
         rt_sexp_free(&d->sexp);
         free(d->buf);
         free(d->out);
-        free(d->path);
+        free(d->path_space);
         free(d);
     }
 }
@@ -1625,13 +1623,13 @@ static void close_device(rt_device_t *d) {
 // d's owner ends with (:error (name path)), which closes d. If the owner
 // is the process running, this doesn't return; if not, d is freed (a
 // file) or buried (a socket) by the time it does, so the caller returns
-// at once, and doesn't touch d again.
+// at once, and doesn't touch d again. The path is d's own string, not a
+// copy on this stack, since it's as long as the program made it; the
+// reason is copied before d closes.
 static void fail(rt_device_t *d, int err) {
     rt_proc_t *owner = procs[d->owner >> RT_PID_SHIFT].proc;
-    uint64_t   space[d->path_len / 8 + 6];
     _Alignas(16) rt_value_t cells[4];
-    rt_value_t path   = d->path ? string_in(space, d->path, d->path_len) : rt_int(d->port);
-    rt_value_t reason = io_reason(cells, err, path);
+    rt_value_t reason = io_reason(cells, err, d->path ? d->path : rt_int(d->port));
     if (owner == rt_current) rt_end(0, reason, 0);
     end_other(owner, reason);
 }
@@ -1808,6 +1806,10 @@ static int cut_value(rt_device_t *d) {
         int         r    = sexp ? rt_sexp_scan(&d->sexp, p, have - d->scanned, d->eof, &used)
                                 : rt_json_scan(&d->json, p, have - d->scanned, d->eof, &used);
         if (r == RT_SCAN_MORE) {
+            if (have >= READ_MAX) {             // a value with no end in sight, as a line can be (cut)
+                fail(d, ERR_TOOBIG);
+                return 1;
+            }
             d->scanned = have;
             return 0;
         }
@@ -2068,15 +2070,16 @@ static void lookup_step(rt_device_t *d, int r, uint32_t addr);
 // Starts connecting to "host:port" (split at the last colon; the port is a
 // number). Even if it has connected already, (:open c) comes from the
 // event loop, so it always comes in the same order; and a host that has to
-// be asked about is looked up first, the device waiting for that.
+// be asked about is looked up first, the device waiting for that. A host
+// of more than 255 bytes, longer than any name (253, dns.c), isn't found.
 static int tcp_connect(rt_proc_t *p, const char *site, const char *where, size_t len) {
+    char   host[256];
     size_t colon = len;
     while (colon > 0 && where[colon - 1] != ':') colon--;
-    if (colon == 0 || colon == len || memchr(where, '\0', len)) return ERR_NOTFOUND;
+    if (colon == 0 || colon == len || colon > sizeof host || memchr(where, '\0', len)) return ERR_NOTFOUND;
     int64_t port = 0;
     for (size_t i = colon; i < len && port <= 65535; i++) port = where[i] >= '0' && where[i] <= '9' ? port * 10 + where[i] - '0' : 65536;
     if (port > 65535) return ERR_NOTFOUND;
-    char host[len + 1];
     memcpy(host, where, colon - 1);
     host[colon - 1] = '\0';
     rt_lookup_t *l;
