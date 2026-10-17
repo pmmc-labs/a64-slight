@@ -96,6 +96,19 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max after D199
+
+`bench/results/2026-10-17-0830-macos-apple-m2-max.md`, at `9ab66e5`:
+freeing the chunk of a message with nothing to copy as it's taken.
+`thread-ring` 1.6 times faster, 0.88 s to 0.54, and 2.0 MB where it was
+210: 54 ns a hop, Go 106 (one core), Erlang 229 (every core). The rest
+within a per cent or two of the run before, as they should be.
+
+`binary-trees`' peak memory went from 303 MB to 143 in the medians, but
+that's noise: its five runs in each of the three Mac files range from
+about 90 MB to 380, so its memory on macOS isn't worth comparing till
+that's understood (below, "Two things the Mac shows").
+
 ### The M2 Max after phase 2's first fixes (D195–D198)
 
 `bench/results/2026-10-17-0814-macos-apple-m2-max.md`, at `6f53b39`.
@@ -108,7 +121,8 @@ Each one's start taken off, and Erlang on every core as before:
   now faster than Node (1.3 times) and Erlang (1.4), which it trailed.
 - **`binary-trees`:** Erlang 3.3 times faster (6.2), Node 2.7 (5.1), Go
   on every core 2.0 (3.8), C 1.3 (2.6); Go on one core is now slower
-  than slight. Still 303 MB, against 356.
+  than slight. 303 MB, against 356, but that varies from run to run
+  (see the run after D199).
 - **`n-body`:** C 39 times faster (57), Go 31 (45), Node 22 (32), Erlang
   1.3 (1.8).
 - **Actors:** 82 ns a message, 88 a hop, 131 a process started, as
@@ -273,8 +287,9 @@ M2's run after them is to come.
   benchmark beside boids. Their arithmetic is inline now (D198); each
   result is still a 16-byte box, and comparisons and `sqrt` are still C.
 - **A busy process's garbage:** a heap under 256 KB (`GC_MIN`) is never
-  collected, so each of `thread-ring`'s 503 processes keeps up to that
-  much of its messages' chunks: 266 MB, where Erlang needs 37.
+  collected, so each of `thread-ring`'s 503 processes kept up to that
+  much of its messages' chunks: 266 MB, where Erlang needs 37. Done for
+  messages with nothing to copy (D199): 2.6 MB.
 - **One structure's size:** the 64 MB cap on a heap, with a copying
   collector, holds a structure of about 25 MB at most (the stretch tree
   of depth 19 doesn't fit: 2 million two-element tuples of 32 bytes),

@@ -3048,4 +3048,5 @@ s and 266 MB to 0.74 s and 2.6 MB, the memory having been most of the
 time too. A message with something to copy is as before. Test 243: a
 thousand integers leave an empty heap, where before they left 32 KB;
 shown so as not to depend on when a heap is collected, and so also under
-`SLIGHT_GC_STRESS`.
+`SLIGHT_GC_STRESS`. On the M2 Max: 0.88 s and 210 MB to 0.54 s and 2.0
+MB, 54 ns a hop, where Go takes 106 and Erlang 229; nothing else moved.
