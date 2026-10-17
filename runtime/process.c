@@ -541,7 +541,7 @@ static rt_value_t copy_here(rt_value_t v) {
 #define GC_MOVED_BOX  0                 // in a moved box's header: no box has type 0
 
 typedef struct {
-    const rt_proc_t *minor;             // whose young generation it's promoting, or NULL in a major collection
+    const rt_proc_t *young;             // whose young generation it's promoting, or NULL in a major collection
     rt_chunk_t      *chunks;            // to-space, newest first: in a minor collection, the old generation
     uintptr_t        ptr, limit;
     size_t           bytes, live, size; // to-space's capacity, what's been copied, the size of a new chunk
@@ -579,7 +579,7 @@ static int is_young(const rt_proc_t *p, rt_value_t v) {
 // collection, only what's young moves.
 static rt_value_t forward(gc_t *g, rt_value_t v) {
     if (!rt_is_cons(v) && (v & RT_TAG_MASK) != RT_TAG_BOXED) return v;
-    if (g->minor ? !is_young(g->minor, v) : is_static(v)) return v;
+    if (g->young ? !is_young(g->young, v) : is_static(v)) return v;
     if (rt_is_cons(v)) {
         rt_value_t *old = (rt_value_t *)(v - RT_TAG_LIST);
         if (old[0] == GC_MOVED_CONS) return old[1];
@@ -629,11 +629,13 @@ static size_t chunk_size(size_t bytes) {
     return bytes < CHUNK_FIRST ? CHUNK_FIRST : bytes < CHUNK_MAX ? bytes : CHUNK_MAX;
 }
 
-// What's young and reachable, into the old chunk promoted into, and new
-// ones before it, as big as the old generation is, up to 1 MB.
-static void minor(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+// A minor collection and a major one, named for what they collect, since
+// macOS's <sys/types.h> has major() and minor() macros. The minor one
+// copies what's young and reachable into the old chunk promoted into, and
+// new ones before it, as big as the old generation is, up to 1 MB.
+static void collect_young(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
     gc_t g = {
-        .minor = p, .chunks = p->chunks, .ptr = p->old_ptr, .limit = p->old_ptr + old_left(p),
+        .young = p, .chunks = p->chunks, .ptr = p->old_ptr, .limit = p->old_ptr + old_left(p),
         .bytes = p->heap_bytes, .size = chunk_size(p->heap_bytes - young_bytes(p)),
     };
     trace(&g, roots, n, fp);
@@ -642,7 +644,7 @@ static void minor(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *
     p->old_ptr    = g.ptr;
 }
 
-static void major(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+static void collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
     gc_t g = { .size = chunk_size(p->heap_bytes) };
     trace(&g, roots, n, fp);
     // With SLIGHT_POISON set (t/run.sh sets it), a pointer the collector
@@ -761,10 +763,10 @@ static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t
     int whole = old_in_use(p) >= p->gc_at || (gc_stress && ++stressed % 8 == 0);
     if (!whole && p->nursery) {
         if (gc_verify) check(p, roots, n, fp);
-        minor(p, roots, n, fp);
+        collect_young(p, roots, n, fp);
         whole = old_in_use(p) >= p->gc_at;
     }
-    if (whole && (p->chunks || p->nursery)) major(p, roots, n, fp);
+    if (whole && (p->chunks || p->nursery)) collect_all(p, roots, n, fp);
     restart(p);
 }
 

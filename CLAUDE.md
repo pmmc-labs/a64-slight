@@ -194,7 +194,11 @@ to get them back from git (`3fd71e0`).
   never mutate shared data. Prefer character tests to regexes, since slight
   has no regexes.
 - In C headers shared with assembly, prefix every name `RT_`/`rt_` (macOS's
-  `<stdlib.h>` pulls in `<sys/wait.h>`, which has a `P_PID`).
+  `<stdlib.h>` pulls in `<sys/wait.h>`, which has a `P_PID`). macOS's
+  `<sys/types.h>` also defines `major()` and `minor()` as macros, so no
+  function in the runtime can have either name; `clang -include
+  sys/sysmacros.h -fsyntax-only -Iruntime runtime/process.c` shows such
+  a clash on Linux.
 - Comments explain why, not what. Match the density of the runtime's code.
 
 ## Toolchain
