@@ -646,6 +646,111 @@ Lalloc_N:
   nothing about it depends on the size of a C frame on one target or
   another.
 
+#### A generational collector **(open)**
+
+Proposed after phase 2's profiles (D194, D195–D198), not built; the
+points to settle are at the end. Every collection copies everything
+live, so a structure that lives long is copied again at each one, about
+a byte copied for each byte allocated: `binary-trees` spends 58 per cent
+of its instructions collecting, `n-body` 13.
+
+- **What immutability buys.** A generational collector collects young
+  objects often and old ones rarely. Elsewhere its hard part is an old
+  object changed to point at a young one, which a write barrier and a
+  remembered set have to catch. In slight nothing changes once it's
+  made, so an object only points at objects as old as it or older:
+  compiled code fills a cons, a list, a tuple or a closure before
+  anything else runs; a C builtin fills what it allocates before it
+  returns, and no collection comes between, since one only runs at a
+  function's entry or a `recv`; and what comes from outside (a message,
+  a fork's values, a joined result) is a chunk of its own, pointing only
+  into itself and at static data. So a minor collection needs no roots
+  but the frames (or a receive function's arguments), and never looks
+  inside the old generation: no barrier, no remembered set, and no
+  change to compiled code.
+- **The young generation**, a nursery: one block per process, allocated
+  from as a chunk is now (`heap_ptr`, `heap_limit`, so compiled code
+  doesn't change). It starts at 4 KB, a first chunk's size now, and
+  doubles at each minor collection that finds it overflowed, up to 1
+  MB. A process that fills it before it can collect gets overflow
+  chunks, young too, till its next function's entry, where it collects
+  (as `rt_heap_grow` cuts the slice short now). Whether a pointer is
+  young is a range check: the nursery's, then the overflow chunks'
+  (usually none).
+- **The old generation** is the chunk list as it is now. What a minor
+  collection promotes goes into its newest chunk, and a new one when
+  that's full; messages, a fork's values and joined results are adopted
+  into it as now, since nothing in them is young.
+- **A minor collection** runs at a function's entry or a `recv` once the
+  nursery has overflowed. It copies what's young and reachable from the
+  roots into the old generation, all of it (promotion en masse),
+  following only young pointers, so it costs what survives, not what's
+  live; then the nursery starts again from its beginning, and the
+  overflow chunks are freed. The copying is today's (forwarding
+  pointers, the work stack, D107), with a range check before each copy.
+- **A major collection** runs when the old generation reaches twice what
+  was live after the last major one (never below 256 KB, and with D196's
+  room below the cap), and is today's collection: everything live, young
+  and old, copied into fresh chunks.
+- **Big strings** (64 KB or more), which hold no pointers, are allocated
+  straight into the old generation, so no minor collection copies them.
+- **The cap** (64 MB) counts both generations, the nursery and its
+  overflow included; `:system` reports both.
+- **Testing:** `SLIGHT_GC_STRESS=n` makes every nth function's entry a
+  minor collection, and every eighth of those a major one;
+  `SLIGHT_POISON` fills a nursery that's starting again, and freed
+  chunks, with garbage; and a new `SLIGHT_GC_VERIFY=1` walks the old
+  generation after each minor collection and faults at any pointer into
+  the young one, which is the one thing all of this depends on. The
+  golden tests run under each.
+- **Expected:** `binary-trees` copies its long-lived tree once, at the
+  minor collection after it's made, not at every collection; the trees
+  it makes and drops mostly die in the nursery, never copied; those
+  bigger than the nursery are promoted, copied once, and their garbage
+  is left to major collections, which come far less often. From the
+  copying that saves, two to four times less collecting there, so
+  `binary-trees` perhaps one and a half to two times faster; `n-body` a
+  few per cent. Messages, processes and waiting processes as now: a
+  waiting process keeps its nursery, as it keeps its chunks now, and one
+  that never allocates has none.
+- **The work:** in `process.c` (the nursery, the two collections, the
+  young check, the thresholds), and a few fields in `rt_proc_t`; nothing
+  in the compiler, nor in the C builtins.
+
+To settle:
+
+1. **Promotion en masse**, everything that survives one minor
+   collection, or **aging**, keeping survivors in the nursery till they
+   survive a second, as the BEAM does? En masse is simpler, and what it
+   costs (objects promoted just before they die) falls on major
+   collections, which are rare; aging can follow if a benchmark shows
+   it's wanted. Recommended: en masse.
+2. **A nursery that grows, from 4 KB to 1 MB**, or a fixed size? A fixed
+   256 KB would be simpler, but every process that allocates at all
+   would hold that much address space, and on Linux a block that big is
+   a mapping of its own, and a million of them run past the kernel's
+   limit on mappings. Recommended: growing.
+3. **Big strings straight into the old generation**, from 64 KB? A
+   string points at nothing, so it's safe; a big tuple or list can point
+   at young objects, so it stays young.
+4. **`SLIGHT_GC_VERIFY`**, which costs a walk of the old generation at
+   every minor collection, so only when asked for. Recommended: yes; it
+   tests the invariant directly, where the stress and poison runs only
+   hope to trip over a break in it.
+5. **Not in this, and can come first:** a message that's an integer or
+   a keyword leaves its 32-byte record in the heap after it's taken,
+   till the next collection, and those, in their own chunks, are most
+   of `thread-ring`'s 266 MB.
+   Freeing such a message's chunk as it's taken is a separate small
+   change.
+
+Turned down, for now: growing the heap to three times what's live (D196,
+for the memory); a write barrier and a remembered set (nothing needs
+them); mark-sweep or mark-compact for the old generation (copying it is
+today's code); and a pool of nurseries that waiting processes give back,
+as they do their stacks (later, if processes that allocate and then wait
+turn out to hold too much).
+
 ### Messages
 
 - `send` deep-copies the value into a fresh message chunk and appends it to

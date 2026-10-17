@@ -626,8 +626,9 @@ with "Faster floats" below), and a busy process's garbage (`GC_MIN`).
 Done so far: tuples built in place (D195), collecting before the heap's
 cap (D196), better code for calls, arithmetic and tests (D197), and
 float arithmetic inline (D198). Next, in the order agreed: a
-generational collector (a design note first); the other programs and
-Chez after.
+generational collector, whose design note is in DESIGN.md ("A
+generational collector", open, with its points to settle); the other
+programs and Chez after.
 
 ### Later: the rest of the October 2026 list
 
