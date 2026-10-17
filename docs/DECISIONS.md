@@ -3250,7 +3250,8 @@ they call, `length` and `not`, and `not` alone at 18 per cent of
 - **Measured** on the cloud machine, in instructions: `deriv 200000` 924
   million to 592 (36 per cent fewer), `nqueens 11` 383 to 247 (35),
   `n-body 20000` 328 to 310; `spectral-norm` the same. Tests 247 and
-  248.
+  248. On the M2 Max: `deriv` 0.575 s to 0.380, `nqueens` 0.841 to
+  0.703.
 - **Turned down:** folds as C builtins, which would have to call
   compiled code, which C never does (the collector's roots are the
   frames, D166). **B, for later:** `fold/l` or `fold/r` given a literal

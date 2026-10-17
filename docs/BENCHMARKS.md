@@ -130,6 +130,18 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max after D203
+
+`bench/results/2026-10-17-1311-macos-apple-m2-max.md`, at `448aa6d`: a
+steady run, every other implementation within a few per cent of the run
+before, and Node's start back at 0.053 s. slight's `deriv` 0.575 s to
+0.380 (1.5 times faster), `nqueens` 0.841 to 0.703 (1.2), `n-body` and
+`spectral-norm` a few per cent; the rest the same. Now, each one's time
+over slight's: `deriv` Chez 0.40, Erlang (every core) 0.62, Node 1.49,
+Go 2.81; `nqueens` Chez 0.50, Erlang 0.55, Go 0.82, Node 3.19. A page of
+charts of this run, by category and benchmark, is the "Where slight
+lands" dashboard.
+
 ### Phase 3 on the M2 Max: Chez Scheme and five more programs (D201)
 
 `bench/results/2026-10-17-1043-macos-apple-m2-max.md`, at `51893a0`
