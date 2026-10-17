@@ -130,6 +130,49 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### Phase 3 on the M2 Max: Chez Scheme and five more programs (D201)
+
+`bench/results/2026-10-17-1043-macos-apple-m2-max.md`, at `51893a0`
+(slight's code as at `c242a27`; phase 3 changed only `bench/`), with
+Chez Scheme 10.4.1. A steady run: every benchmark that was there before
+is within 4 per cent of the run before. Node's start has been 0.15 s
+(half of it waiting) since the 09:54 run, against 0.053 before, so its
+start is taken as 0.053 here. Each one's time less its start, over
+slight's (under 1 is faster than slight); Go on one core, Erlang on
+every core (under "Two things the Mac shows"):
+
+| | slight | C | Go | Chez | Node | Erlang | Python | Perl |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `fib` | 0.199 s | 0.55 | 0.62 | 0.94 | 1.33 | 1.39 | 23 | 64 |
+| `tak` | 0.140 s | 0.58 | 0.72 | 1.08 | 1.69 | 1.39 | 26 | 100 |
+| `binary-trees` | 1.051 s | 0.94 | 1.30 | 0.29 | 0.62 | 0.39 | 5.6 | 17 |
+| `nqueens` | 0.841 s | 0.37 | 0.68 | 0.42 | 2.64 | 0.46 | 8.3 | 16 |
+| `deriv` | 0.575 s | 0.23 | 1.85 | 0.26 | 1.00 | 0.41 | 7.1 | 14 |
+| `n-body` | 1.338 s | 0.03 | 0.03 | 0.84 | 0.05 | 0.83 | 4.3 | 5.5 |
+| `spectral-norm` | 0.451 s | 0.10 | 0.10 | 1.19 | 0.15 | 0.89 | 11 | 17 |
+
+- **Against Chez**, the nearest thing to slight: calls level (fib 0.94,
+  `tak` 1.08), floats either way (`n-body` 0.84, `spectral-norm` 1.19:
+  Chez boxes them too, at its default arithmetic); but where lists are
+  made and dropped, 2.4 to 3.9 times faster (`nqueens`, `deriv`,
+  `binary-trees`).
+- **Where slight's time goes there** (callgrind, cloud machine): in
+  `deriv`, about 80 per cent of the instructions are the prelude's
+  `map` (22), `fold/l` (18), the closures they call (27), `length` (8)
+  and `not` (5); `deriv` itself is 18. In `nqueens`, the prelude's `not`
+  alone is 18 per cent, `append` and `reverse` 12. `map` and `append`
+  are `fold/l` and `reverse`, with a closure called for each element;
+  `not` is a function call. Collecting hardly shows in either.
+- **`fan-in`:** slight 0.374 s, with 484 MB at its peak; Go on one core
+  0.75 (4 MB: its channel blocks the senders), Erlang 2.7 times slower
+  on every core (658 MB), and Go on every core 9.3 (the senders fight
+  over the channel's lock). In slight and Erlang nearly every message
+  waits in the receiver's mailbox at once.
+- **The cloud machine** (`bench/results/2026-10-17-0842-linux-intel-xeon-processor-2-10ghz.md`,
+  Chez 9.5.8) agrees: Chez 0.25 of slight's time on `binary-trees`,
+  0.31 on `deriv`, 0.55 on `nqueens` and `tak`, 0.93 on fib; 1.26
+  times slower on `n-body`, 1.86 on `spectral-norm`.
+
 ### Phase 2 on the M2 Max: what it did (D195–D200)
 
 `bench/results/2026-10-17-0954-macos-apple-m2-max.md`, at `c242a27`,
@@ -377,6 +420,13 @@ to under 2. The M2's runs after each are above.
 
 ### What slight should look at next
 
+- **Lists in the prelude** (`deriv`, `nqueens`): `map`, `append`,
+  `filter`, `length` and the rest go through `fold/l` and `reverse`,
+  with a closure called for each element, and `not` is a call; about
+  80 per cent of `deriv`'s instructions. Chez, whose list functions are
+  compiled loops, is 2.4 to 3.9 times faster on these. Plain loops in
+  the prelude, and `not` compiled inline (a test, as D197 made the
+  comparisons), would change no program's meaning.
 - **Floats** (`n-body`): now the widest gap by far, 20 to 36 times the
   compiled languages. PLAN.md's "Faster floats", with this as a second
   benchmark beside boids. Their arithmetic is inline (D198); each
