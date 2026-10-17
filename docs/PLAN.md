@@ -627,8 +627,10 @@ Done so far: tuples built in place (D195), collecting before the heap's
 cap (D196), better code for calls, arithmetic and tests (D197), float
 arithmetic inline (D198), a message with nothing to copy freed as it's
 taken (D199), and a generational collector (D200), the last of the
-fixes agreed. Next: the M2's numbers for D200, then the other programs
-and Chez.
+fixes agreed, all measured on the M2 (BENCHMARKS.md, "Phase 2 on the M2
+Max"): `binary-trees` 2.4 times faster, fib, `n-body` and
+`parallel-fib` 1.5, `thread-ring` 1.6 and a hundredth of the memory.
+Next: the other programs and Chez.
 
 ### Later: the rest of the October 2026 list
 

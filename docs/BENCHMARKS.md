@@ -96,6 +96,57 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### Phase 2 on the M2 Max: what it did (D195–D200)
+
+`bench/results/2026-10-17-0954-macos-apple-m2-max.md`, at `c242a27`,
+against the first run (`2026-10-16-0849`), slight's times, each less
+its start:
+
+| | first | now | faster |
+|---|---:|---:|---:|
+| `fib` | 0.304 s | 0.201 s | 1.5 times |
+| `binary-trees` | 2.540 s | 1.073 s | 2.4 times |
+| `n-body` | 2.071 s | 1.344 s | 1.5 times |
+| `thread-ring` | 0.851 s, 210 MB | 0.532 s, 2.1 MB | 1.6 times |
+| `parallel-fib` | 0.428 s | 0.283 s | 1.5 times |
+| `ping-pong`, `spawn`, `idle-memory` | | | the same |
+
+On the cloud machine, in instructions: `binary-trees 14` 1,590 million
+to 450 (3.5 times fewer), fib 30 131 to 79, `n-body 20000` 642 to 328.
+Memory is the same everywhere but `thread-ring` (D199) and `n-body`
+(4 MB to 6, its nursery); a waiting process still costs about 555
+bytes, a fifth of Go's or Erlang's. `binary-trees`' peak memory on macOS still
+ranges from about 90 MB to 370 from run to run (89 to 90 MB on Linux).
+
+D200 alone, against the run before it: `binary-trees` 1.35 s to 1.07
+(1.26 times), `n-body` 1.45 to 1.35 (1.08), the rest the same.
+
+Where slight stands now, each language's start taken off, Erlang and Go
+on every core where that's said, one core otherwise:
+
+- **`fib`:** C 1.85 times faster (2.9 at first), Go 1.6 (2.5). slight
+  is now 1.3 times faster than Node and 1.4 than Erlang, where at first
+  both were faster than slight; Python 23 times slower, Perl 64.
+- **`binary-trees`:** Erlang 2.6 times faster (6.2 at first), Node 2.1
+  (5.1), Go on every core 1.6 (3.8), C 1.08 (2.6), which mallocs and
+  frees each node; Go on one core is 1.3 times slower than slight.
+- **`n-body`:** the widest gap left. C 36 times faster (57), Go 27
+  (45), Node 20 (32), Erlang 1.2 (1.8). Every float is a 16-byte box.
+- **Actors:** slight is the fastest at all four, as before: 82 ns a
+  message (Go on one core 1.2 times slower, Erlang 3.0), 53 a hop round
+  the ring (Go 2.0, Erlang 4.3), 130 a process started (Go 3.2, Erlang
+  6.3), and a million waiting in 0.36 s and 556 MB (Go 4.3 times slower
+  and 2.9 GB, Erlang 5.1 and 2.8 GB).
+- **`parallel-fib`:** one core against twelve: Go on every core 15
+  times faster, Erlang 5.6; Go on one core 1.7.
+
+This run's start was disturbed: `startup`'s medians for Go, Node and C
+are two to three times their usual (Node 0.15 s of wall time on 0.07 of
+CPU), and three of Node's five `binary-trees` runs are a quarter slower
+than the other two. The figures above take their starts, and Node's
+`binary-trees`, from the run before (`2026-10-17-0830`); every other
+implementation's times are within a few per cent of that run's.
+
 ### The M2 Max after D199
 
 `bench/results/2026-10-17-0830-macos-apple-m2-max.md`, at `9ab66e5`:
@@ -288,22 +339,25 @@ Together: `binary-trees 14` takes 28 per cent of the instructions it
 did (1,590 million to 450), fib 30 40 per cent fewer (131 to 79),
 `n-body 20000` 49 per cent fewer (642 to 328). The cloud machine's times
 are too noisy to say more than that `binary-trees 18` went from 3.8 s
-to under 2. The M2's runs after D195–D198 and after D199 are above; its
-run after D200 is to come.
+to under 2. The M2's runs after each are above.
 
-### What slight should look at (phase 2)
+### What slight should look at next
 
-- **Allocating and collecting** (`binary-trees`): 3.3 times Erlang on
-  the M2 before D200, whose heaps are per-process and copied as slight's
-  are. Building tuples in place (D195) halved the allocation, and the
+- **Floats** (`n-body`): now the widest gap by far, 20 to 36 times the
+  compiled languages. PLAN.md's "Faster floats", with this as a second
+  benchmark beside boids. Their arithmetic is inline (D198); each
+  result is still a 16-byte box, allocated and later collected, and
+  comparisons and `sqrt` are still C. Erlang, which boxes them too, is
+  only 1.2 times faster.
+- **Allocating and collecting** (`binary-trees`): 2.6 times Erlang on
+  the M2, whose heaps are per-process and copied as slight's are.
+  Building tuples in place (D195) halved the allocation, and the
   generational collector (D200) copies what dies young no more; what's
   left is the trees bigger than the nursery, and major collections
-  copying the long-lived tree. A bigger nursery for a process that
-  promotes a lot, or an old generation that isn't copied whole, would be
-  the next steps, if it's wanted.
-- **Floats** (`n-body`): PLAN.md's "Faster floats", with this as a second
-  benchmark beside boids. Their arithmetic is inline now (D198); each
-  result is still a 16-byte box, and comparisons and `sqrt` are still C.
+  copying the long-lived tree, about half of `binary-trees 16`'s
+  instructions. A bigger nursery for a process that promotes a lot, or
+  an old generation that isn't copied whole, would be the next steps,
+  if it's wanted.
 - **A busy process's garbage:** a heap under 256 KB (`GC_MIN`) is never
   collected, so each of `thread-ring`'s 503 processes kept up to that
   much of its messages' chunks: 266 MB, where Erlang needs 37. Done for
@@ -313,12 +367,15 @@ run after D200 is to come.
   of depth 19 doesn't fit: 2 million two-element tuples of 32 bytes),
   which is why `binary-trees` is 18 here. A process with more live than
   half the cap now collects before the cap (D196).
-- **Calls** (`fib`): 2.5 times Go on the M2 (1.8 on Linux), which checks
+- **Calls** (`fib`): 1.6 times Go on the M2 (2.5 at first), which checks
   its stack at every call too; slight also counts reductions, and checks
-  for overflow. Erlang's JIT, which counts reductions as well, is a
-  little faster than slight on the M2 (1.1 times). D197 took a third of
-  fib's instructions out; the rest is the frame (every local in a slot,
+  for overflow. Erlang's JIT, which counts reductions as well, is now
+  1.4 times slower than slight. D197 took 40 per cent of fib's
+  instructions out; the rest is the frame (every local in a slot,
   zeroed when the function calls another) and the checks.
+- **One core** (`parallel-fib`): Go on every core is 15 times faster,
+  Erlang 5.6. Running on more than one is a design question of its own
+  (BACKGROUND.md, multiple cores), not a fix.
 - **Memory on macOS** (above): whether the collector should keep and
   reuse its chunks rather than free them, which might also make
   `binary-trees` faster.

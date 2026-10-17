@@ -3118,7 +3118,9 @@ and GC"):
   4.7, its 1 MB nursery. Less than the note's guess of one and a half to
   two times for `binary-trees`: its trees of depth 14 and more are
   bigger than the nursery, so each is promoted as it's made and left to
-  major collections, which copy the long-lived tree each time.
+  major collections, which copy the long-lived tree each time. On the
+  M2 Max: `binary-trees` 1.35 s to 1.07, `n-body` 1.45 to 1.35, the rest
+  the same, `idle-memory`'s 556 MB included.
 
 Turned down, for now: aging (point 1; it wouldn't help those trees,
 which outlive a nursery anyway); a write barrier and a remembered set
