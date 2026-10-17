@@ -600,7 +600,9 @@ rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const c
 // A message holding a copy of msg: the message's record and the copy in
 // one chunk, the record first, so a send is one malloc, and taking the
 // message adopts the chunk and frees nothing. The record is then dead
-// space in the taker's heap till it next collects.
+// space in the taker's heap till it next collects; but a message with
+// nothing to copy (an integer, a keyword, static data) is a chunk of just
+// its record, which is freed as it's taken (D199).
 _Static_assert(sizeof(rt_msg_t) % 16 == 0, "a message's record keeps the copy after it 16-aligned");
 
 static rt_msg_t *new_msg(rt_value_t msg) {
@@ -652,7 +654,8 @@ rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) {
         if (!p->mail) p->mail_last = NULL;
         rt_value_t v = m->value;
         p->reading = m->device;
-        adopt(p, m->chunk);
+        if (m->chunk->size == sizeof *m) free_msg(m);
+        else                             adopt(p, m->chunk);
         return v;
     }
     p->code = code;

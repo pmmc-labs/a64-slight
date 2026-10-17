@@ -761,6 +761,8 @@ turn out to hold too much).
   the mailbox) is at the front of the same chunk, so a send is one malloc
   (D177).
 - `recv` links the chunk into the receiver's heap. Nothing is copied twice.
+  A message with nothing to copy (an integer, a keyword, static data) is
+  a chunk of just its record, which `recv` frees instead (D199).
 - Mailboxes are unbounded (D88). (Bounded ones would have to drop the
   message or fault the sender, since `send` can't block.)
 - A message to a process that has ended disappears, as in Erlang (D92).

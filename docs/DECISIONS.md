@@ -3032,3 +3032,20 @@ fourth of phase 2's fixes, D194, in the order Claude proposed.)*
   C, which must agree: integer operands that aren't literals, an integer
   divided by one, zero divisors and a string, with their faults. Also
   under `SLIGHT_GC_STRESS`, with boids. Unit tests for the shapes.
+
+**D199. A message with nothing to copy leaves nothing behind.** *(User,
+Oct 2026: point 5 of the generational collector's note, which can come
+first, on Claude's recommendation.)* A message is a chunk holding its
+record and the copy of its value (D177), and taking it linked the chunk
+into the taker's heap, where the record was dead space till the next
+collection. For a message with nothing to copy (an integer, a keyword,
+static data) the chunk is just the record, 32 bytes, so a process taking
+many such messages filled its heap with them, up to the 256 KB a heap
+reaches before it's ever collected (D106): `thread-ring`'s 503 processes,
+266 MB. Now `recv` frees such a chunk as it takes the message, having
+read its value and device first. `thread-ring` on the cloud machine: 3.3
+s and 266 MB to 0.74 s and 2.6 MB, the memory having been most of the
+time too. A message with something to copy is as before. Test 243: a
+thousand integers leave an empty heap, where before they left 32 KB;
+shown so as not to depend on when a heap is collected, and so also under
+`SLIGHT_GC_STRESS`.
