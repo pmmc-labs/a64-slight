@@ -1066,7 +1066,10 @@ that's just a walk over every function.
    arguments to the runtime, to restart it after waiting. A test that
    can only be a boolean (`cons?`, `nil?`, `eq?` with an immediate
    literal, a comparison, and what `and` becomes) branches without making
-   one, which is what keeps a pattern's tests cheap (D168, D197). An
+   one, which is what keeps a pattern's tests cheap (D168, D197); and so
+   does a call to the prelude's `not`, as its argument's test with the
+   branches swapped, which as a value is the `cond` the prelude says it
+   is (D203). An
    operand that needs no code (a local, or a literal integer, `()`,
    `#true` or `#false`) is read straight into its register when it's
    wanted, rather than waiting in a slot; and an integer literal added,

@@ -127,7 +127,9 @@ in place (D195, golden test 239), collecting before the heap's cap
 copy freed as it's taken (D199, 243), and a generational collector,
 with no write barrier, since nothing old can point at anything young
 (D200, 244); and phase 3, Chez Scheme and five more programs (`tak`,
-`nqueens`, `deriv`, `spectral-norm`, `fan-in`, D201). **Next:** to settle with
+`nqueens`, `deriv`, `spectral-norm`, `fan-in`, D201), and what its
+profiles found: the prelude's list functions as loops, and its `not`
+compiled inline (D203, golden tests 247 and 248). **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan

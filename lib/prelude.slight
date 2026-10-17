@@ -29,36 +29,64 @@
         ((x & rest) (fold/l (f acc x) f rest))))
 
 ; (f x acc) for each x, from the right.
-(defun fold/r (acc f xs)
-    (fold/l acc (lambda (acc x) (f x acc)) (reverse xs)))
+(defun fold/r (acc f xs) (fold/r-loop f (reverse xs) acc))
+(defun fold/r-loop (f xs acc)
+    (match xs
+        (()         acc)
+        ((x & rest) (fold/r-loop f rest (f x acc)))))
 
 ; --- lists --------------------------------------------------------------------
+;
+; Each its own loop, not fold/l with a lambda: a closure called for each
+; element was most of the time a program spent in these (D203).
 
-(defun reverse (xs)
-    (fold/l () (lambda (acc x) (cons x acc)) xs))
+(defun reverse (xs) (reverse-onto xs ()))
 
-(defun length (xs)
-    (fold/l 0 (lambda (n x) (+ n 1)) xs))
+; xs reversed, in front of ys.
+(defun reverse-onto (xs ys)
+    (match xs
+        (()         ys)
+        ((x & rest) (reverse-onto rest (cons x ys)))))
 
-(defun append (xs ys)
-    (fold/l ys (lambda (acc x) (cons x acc)) (reverse xs)))
+(defun length (xs) (length-loop xs 0))
+(defun length-loop (xs n)
+    (match xs
+        (()         n)
+        ((_ & rest) (length-loop rest (+ n 1)))))
 
-(defun sum (xs)
-    (fold/l 0 (lambda (acc n) (+ acc n)) xs))
+(defun append (xs ys) (reverse-onto (reverse xs) ys))
 
-(defun product (xs)
-    (fold/l 1 (lambda (acc n) (* acc n)) xs))
+(defun sum (xs) (sum-loop xs 0))
+(defun sum-loop (xs acc)
+    (match xs
+        (()         acc)
+        ((x & rest) (sum-loop rest (+ acc x)))))
 
-(defun map (f xs)
-    (reverse (fold/l () (lambda (acc x) (cons (f x) acc)) xs)))
+(defun product (xs) (product-loop xs 1))
+(defun product-loop (xs acc)
+    (match xs
+        (()         acc)
+        ((x & rest) (product-loop rest (* acc x)))))
+
+(defun map (f xs) (map-loop f xs ()))
+(defun map-loop (f xs acc)
+    (match xs
+        (()         (reverse acc))
+        ((x & rest) (map-loop f rest (cons (f x) acc)))))
 
 ; The elements for which (f x) is #true.
-(defun filter (f xs)
-    (reverse (fold/l () (lambda (acc x) (cond ((f x) (cons x acc)) (#true acc))) xs)))
+(defun filter (f xs) (filter-loop f xs ()))
+(defun filter-loop (f xs acc)
+    (match xs
+        (()         (reverse acc))
+        ((x & rest) (filter-loop f rest (if (f x) (cons x acc) acc)))))
 
 ; The elements for which (f x) is #false.
-(defun remove (f xs)
-    (reverse (fold/l () (lambda (acc x) (cond ((f x) acc) (#true (cons x acc)))) xs)))
+(defun remove (f xs) (remove-loop f xs ()))
+(defun remove-loop (f xs acc)
+    (match xs
+        (()         (reverse acc))
+        ((x & rest) (remove-loop f rest (if (f x) acc (cons x acc))))))
 
 ; The first n elements, or all of them if there are fewer.
 (defun take (n xs) (take-loop n xs ()))

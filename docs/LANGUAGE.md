@@ -416,7 +416,8 @@ A `case` on a message's tag:
         (:zero 0)
         (#true n))
 
-`not` is a function, in the prelude, on booleans only.
+`not` is a function, in the prelude, on booleans only; a call to it
+compiles inline, as a test where it's one (D203).
 
 ### match
 
@@ -1327,9 +1328,11 @@ Strings:
 - `(ord s)`, `(chr n)`: `utf8/code` and `utf8/char`, under Perl's
   names: `(ord "é")` is 233, and `(chr 233)` is `"é"`.
 
-Its helpers (`take-loop`, `range-loop`, `zip-loop`, `sort-runs`,
-`sort-pairs`, `sort-merge`, `str-repeat-loop`, `padding` and
-`bytes-loop`) are visible too, but not meant to be called.
+Its helpers (`fold/r-loop`, `reverse-onto`, `length-loop`, `sum-loop`,
+`product-loop`, `map-loop`, `filter-loop`, `remove-loop`, `take-loop`,
+`range-loop`, `zip-loop`, `sort-runs`, `sort-pairs`, `sort-merge`,
+`str-repeat-loop`, `padding` and `bytes-loop`) are visible too, but not
+meant to be called.
 
 
 ## Libraries

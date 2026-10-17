@@ -631,7 +631,19 @@ slight against C, Go, Erlang, Node, Perl and Python (D194,
   faster, fib, `n-body` and `parallel-fib` 1.5, `thread-ring` 1.6 and a
   hundredth of the memory.
 - **Phase 3** (D201), planned as part of phase 2 and put after its fixes:
-  Chez Scheme, `tak`, `nqueens`, `deriv`, `spectral-norm` and `fan-in`.
+  Chez Scheme, `tak`, `nqueens`, `deriv`, `spectral-norm` and `fan-in`;
+  and what its profiles found: the prelude's list functions as loops,
+  and its `not` inline (D203).
+- **Later, to look into: compiler-known folds** (D203's option B).
+  `fold/l` or `fold/r` given a literal lambda compiled to a loop
+  specialised to its call site, the lambda's body inlined and its free
+  variables passed as arguments, as ts-slight's fold continuations were
+  the fast path all its list functions went through. The prelude could
+  then be written over folds again, and programs' own folds would gain
+  too. It needs a pass of its own: free variables, generated functions
+  named for `:system`, D80's namespaces, and the eight argument
+  registers. Worth it once programs show folds with lambdas on their hot
+  paths.
 
 ### Later: the rest of the October 2026 list
 

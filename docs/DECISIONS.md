@@ -3225,3 +3225,44 @@ hold a big file's data.
   and a full run doesn't take ten minutes more.
 - Not changed: a mailbox still isn't counted in its process's cap
   (D201's `fan-in`).
+
+**D203. The prelude's list functions as loops, and its `not` inline.**
+*(User, Oct 2026: option A of three, as Claude recommended, with B to be
+looked into later.)* Phase 3's profiles (D201) put about 80 per cent of
+`deriv`'s instructions in the prelude's `map`, `fold/l`, the closures
+they call, `length` and `not`, and `not` alone at 18 per cent of
+`nqueens`'.
+
+- **Loops:** `reverse`, `length`, `append`, `sum`, `product`, `map`,
+  `filter`, `remove` and `fold/r` are each a tail-recursive loop of
+  their own, with a helper (`reverse-onto`, `map-loop` and so on), not
+  `fold/l` with a lambda: the same results, `f` called in the same
+  order, and every loop still a tail call, so long lists are as before.
+  `fold/l` stays as it was.
+- **`not`:** a call to the prelude's `not` compiles inline: as a value,
+  the `cond` the prelude says it is; as a test, its argument's test with
+  the branches the other way round, so `(not (== a b))` is a compare and
+  a branch (D197). A program's own `not` (D80), or a local called `not`,
+  is called as before, and `not` as a value is still the prelude's
+  function. Anything but a boolean faults `:not-a-bool`, as before; the
+  cond test it names is now the argument, at its own place, not a line
+  of the prelude.
+- **Measured** on the cloud machine, in instructions: `deriv 200000` 924
+  million to 592 (36 per cent fewer), `nqueens 11` 383 to 247 (35),
+  `n-body 20000` 328 to 310; `spectral-norm` the same. Tests 247 and
+  248.
+- **Turned down:** folds as C builtins, which would have to call
+  compiled code, which C never does (the collector's roots are the
+  frames, D166). **B, for later:** `fold/l` or `fold/r` given a literal
+  lambda compiled to a loop specialised to its call site, the lambda's
+  body inlined and its free variables passed as arguments (lambda
+  lifting), as ts-slight's fold continuations were the fast path all
+  its list functions went through; the prelude could then be written
+  over folds again, and a program's own folds would gain too, for a
+  pass of its own (free variables, generated functions named for
+  `:system`, D80, and the eight argument registers). **C:** B, and the
+  list functions inlined at each call site, so what `map` is given is
+  called directly or inlined: a `deriv` specialised by hand that way
+  took 574 million instructions, 38 per cent fewer, against 28 for the
+  loops alone (both before `not` was inline); not worth the pass for
+  now.

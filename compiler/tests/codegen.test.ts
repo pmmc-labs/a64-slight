@@ -566,6 +566,18 @@ test("the prelude's functions are in their own namespace", () => {
         (e: unknown) => e instanceof CompileError && /the prelude can only define functions/.test(e.message));
 });
 
+test("the prelude's not is inline, as a value and as a test; a program's own not is called (D203)", () => {
+    const prelude = '(defun not (a) (cond (a #false) (#true #true)))';
+    const main  = (asm: string) => asm.slice(asm.indexOf('FUNC slight_main'));
+    const calls = /\bbl? +pf_not\b/;                   // a call or a tail call; its stub and table entry follow main too
+    assert.doesNotMatch(main(compileWith('(not (cons? 1))', prelude)), calls);
+    const test = main(compileWith('(cond ((not (< 1 2)) 1) (#true 2))', prelude));
+    assert.doesNotMatch(test, calls);
+    assert.match(test, /b\.ge/);                      // (< 1 2)'s own compare and branch
+    assert.match(main(compileWith('(defun not (a) a) (not #true)', prelude)), /b {4}fn_not/);
+    assert.match(main(compileWith('(map not (list #true))', prelude + ' (defun map (f xs) xs)')), /pf_not/);
+});
+
 // --- processes ----------------------------------------------------------------
 
 const W = '(defun w () (recv (m m))) ';

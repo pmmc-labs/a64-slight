@@ -421,12 +421,13 @@ to under 2. The M2's runs after each are above.
 ### What slight should look at next
 
 - **Lists in the prelude** (`deriv`, `nqueens`): `map`, `append`,
-  `filter`, `length` and the rest go through `fold/l` and `reverse`,
-  with a closure called for each element, and `not` is a call; about
-  80 per cent of `deriv`'s instructions. Chez, whose list functions are
-  compiled loops, is 2.4 to 3.9 times faster on these. Plain loops in
-  the prelude, and `not` compiled inline (a test, as D197 made the
-  comparisons), would change no program's meaning.
+  `filter`, `length` and the rest went through `fold/l` and `reverse`,
+  with a closure called for each element, and `not` was a call; about
+  80 per cent of `deriv`'s instructions. Done (D203): each its own loop,
+  and `not` inline, `deriv` and `nqueens` 35 per cent fewer
+  instructions. What's left there is mostly the call, through a
+  closure, to what `map` is given; folds the compiler specialises to
+  their lambdas (PLAN.md, D203's B) are for later.
 - **Floats** (`n-body`): now the widest gap by far, 20 to 36 times the
   compiled languages. PLAN.md's "Faster floats", with this as a second
   benchmark beside boids. Their arithmetic is inline (D198); each

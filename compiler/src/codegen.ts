@@ -276,6 +276,7 @@ function compileFunction(entry: string, d: Defun, free: readonly string[], fns: 
 // frame comes down first, and the call is a jump.
 function compileCall(x: Pair, fn: Fn, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     checkArity(x, fn.name, args, fn.arity);
+    if (isPreludeNot(x, cx)) return compileCond(x, [list(args[0]!, sym('#false')), list(sym('#true'), sym('#true'))], cx, st);
     if (fn.state && cx.inLambda) {
         throw new CompileError(`a lambda can't call ${fn.name}, which waits for messages (it reaches a recv)`, x.pos);
     }
@@ -1345,6 +1346,11 @@ function compileClause(x: Pair, clause: Sexp, end: string, cx: Cx, st: St, last 
 // a test that isn't a boolean is said to be: for b there, the and's.
 function compileTest(test: Sexp, ifFalse: string, cx: Cx, st: St, site: Pos | null = posOf(test)): [Code, St] {
     if (test.t === 'sym' && test.name === '#true') return [[], st];
+    if (isPreludeNot(test, cx)) {
+        const [passed, st1] = label(st, 'not');
+        const [code, st2]   = compileTest(toArray(test)![1]!, passed, cx, st1);
+        return [[code, st.t.jump(ifFalse), `${passed}:`], st2];
+    }
     const items = test.t === 'pair' ? toArray(test) : null;
     const head  = items !== null && items[0]!.t === 'sym' ? builtinName(items[0] as Sym, cx) : null;
     if ((head === 'cons?' || head === 'nil?') && items!.length === 2) {
@@ -1406,6 +1412,16 @@ function compileCompareTest(name: string, args: readonly Sexp[], ifFalse: string
     const stub = [`${slow}:`, t.call('rt_compare', [LEFT, ACC, imm(rtOp), addr(site)], false), done];
     return [[both, t.branchUnlessInts(slow), t.branchUnlessCompare(cond, ifFalse), `${slow}_done:`],
             { ...st3, stubs: [st3.stubs, stub] }];
+}
+
+// A call to the prelude's not, with its one argument, which compiles inline
+// (D203): as a value, the cond the prelude says it is; as a test, its
+// argument's, with the branches the other way round. Not a program's own
+// not (D80), nor a local called not.
+function isPreludeNot(x: Sexp, cx: Cx): boolean {
+    if (!isForm(x, 'not') || lookup(cx.env, 'not') !== null || toArray(x)?.length !== 2) return false;
+    const fn = lookupFn(cx.fns, 'not');
+    return fn !== null && fn.module === 'prelude';
 }
 
 // The builtin a call's head names, if it names one: by a name no local can
