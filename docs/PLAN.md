@@ -634,6 +634,15 @@ slight against C, Go, Erlang, Node, Perl and Python (D194,
   Chez Scheme, `tak`, `nqueens`, `deriv`, `spectral-norm` and `fan-in`;
   and what its profiles found: the prelude's list functions as loops,
   and its `not` inline (D203).
+- **What the numbers point at next** (none started; BENCHMARKS.md, "What
+  slight should look at next", and the "Where slight lands" dashboard):
+  unboxed floats, the widest gap (10 to 36 times C, Go and Node, level
+  with Chez and Erlang), which changes how values are represented and
+  starts with a design note; smaller objects, a two-element tuple 24
+  bytes rather than 32 (`binary-trees`); slowing a sender whose
+  receiver's queue is long, or counting a mailbox in its heap's cap
+  (`fan-in`); and more than one core (`parallel-fib`), a design of its
+  own.
 - **Later, to look into: compiler-known folds** (D203's option B).
   `fold/l` or `fold/r` given a literal lambda compiled to a loop
   specialised to its call site, the lambda's body inlined and its free

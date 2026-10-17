@@ -397,7 +397,7 @@ the non-device golden tests.
 
 **Microcontrollers** (STM32, RP2040 and RP2350, ESP32, nRF) are 32-bit,
 so they need the 32-bit target above, and budgets of a few hundred KB of
-RAM rather than 64 MB heaps and 8 MB stacks. A bigger project.
+RAM rather than heaps of up to 1 GB and 8 MB stacks. A bigger project.
 
 **One caveat everywhere:** there's no memory protection between slight
 processes; isolation comes from the language (no pointers, immutable

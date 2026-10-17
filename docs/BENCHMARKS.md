@@ -49,9 +49,10 @@ itself (or, for `n-body`, against C's).
   each of three arguments, with little arithmetic between.
 - **`binary-trees 18`:** the Benchmarks Game's, without its workers:
   trees made and checked, allocation and collection. Its usual size is
-  21, but the stretch tree of depth 22 has 8 million nodes, and the
-  largest that fits in one slight process (its heap is capped at 64 MB,
-  and collecting copies) is the stretch tree of depth 19, so 18.
+  21, which a slight process can hold now that its heap's cap is 1 GB
+  (D202: 16.4 s and 676 MB on the cloud machine); 18 is kept so that
+  every run compares with those before it, and a full run doesn't take
+  ten minutes more.
 - **`nqueens 13`:** Gabriel's, as in the R7RS benchmarks: the 73,712
   ways to place 13 queens, found by trying each row in turn with three
   lists (to try, passed over, placed): calls, and short lists made and
@@ -140,7 +141,8 @@ before, and Node's start back at 0.053 s. slight's `deriv` 0.575 s to
 over slight's: `deriv` Chez 0.40, Erlang (every core) 0.62, Node 1.49,
 Go 2.81; `nqueens` Chez 0.50, Erlang 0.55, Go 0.82, Node 3.19. A page of
 charts of this run, by category and benchmark, is the "Where slight
-lands" dashboard.
+lands" dashboard (https://claude.ai/artifact/BvHTJx4PfxJSZBcTARniCh,
+private to Stevan till he shares it).
 
 ### Phase 3 on the M2 Max: Chez Scheme and five more programs (D201)
 
@@ -454,16 +456,21 @@ to under 2. The M2's runs after each are above.
   copying the long-lived tree, about half of `binary-trees 16`'s
   instructions. A bigger nursery for a process that promotes a lot, or
   an old generation that isn't copied whole, would be the next steps,
-  if it's wanted.
+  if it's wanted. And the objects are bigger than they need be: a
+  two-element tuple is 32 bytes (a header and two words, padded to a
+  multiple of 16), where a pair is 16 and Erlang's tuple 24.
+  `binary-trees 14` with pairs in place of tuples takes 30 per cent
+  fewer instructions (318 million to 453); objects in multiples of 8
+  bytes would make a two-element tuple 24.
 - **A busy process's garbage:** a heap under 256 KB (`GC_MIN`) is never
   collected, so each of `thread-ring`'s 503 processes kept up to that
   much of its messages' chunks: 266 MB, where Erlang needs 37. Done for
   messages with nothing to copy (D199): 2.6 MB.
-- **One structure's size:** the 64 MB cap on a heap, with a copying
-  collector, holds a structure of about 25 MB at most (the stretch tree
-  of depth 19 doesn't fit: 2 million two-element tuples of 32 bytes),
-  which is why `binary-trees` is 18 here. A process with more live than
-  half the cap now collects before the cap (D196).
+- **One structure's size:** done (D202). A heap's cap is 1 GB, or what
+  `SLIGHT_HEAP_MAX` says, where it was 64 MB, which held a structure of
+  about 56 MB at most. The cost: a major collection takes 0.5 to 1 ms
+  for each MB live, everything else waiting, so a process with a few
+  hundred MB live holds the rest up for a quarter of a second.
 - **Calls** (`fib`): 1.6 times Go on the M2 (2.5 at first), which checks
   its stack at every call too; slight also counts reductions, and checks
   for overflow. Erlang's JIT, which counts reductions as well, is now
