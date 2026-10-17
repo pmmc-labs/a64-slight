@@ -8,8 +8,8 @@ assembly. The compiler is TypeScript for now and should self-host later.
 
 **Steps 0–9, 10a–10e and 11 of [`docs/PLAN.md`](docs/PLAN.md) are done**:
 the reader, and a compiler for integers, floats, `#true`/`#false`, `()`,
-symbols, lists (a heap per process of chunks, capped at 64 MB, in two
-generations, D200, and collected when a receive function waits for a
+symbols, lists (a heap per process of chunks, capped at 1 GB or what
+`SLIGHT_HEAP_MAX` says, D202, in two generations, D200, and collected when a receive function waits for a
 message, or at a function's entry, with the frames as roots: D166),
 strings, closures
 (`lambda`, functions and builtins as values, `apply`), arithmetic
@@ -283,13 +283,18 @@ to get them back from git (`3fd71e0`).
   without changing when processes are preempted (D166, D200).
   `SLIGHT_GC_STRESS=7 make golden` checks the collector against every
   golden test; a few then take too long and are killed, and pass with a
-  larger n (059, 130 and 240, which fill the heap, never finish).
+  larger n (059, 130 and 240, which fill a 64 MB heap, never finish).
 - `SLIGHT_GC_VERIFY=1` when running a compiled program walks everything
   reachable before each minor collection, and aborts at an old object
   pointing at a young one, which the collector depends on never
   happening (D200). `SLIGHT_GC_VERIFY=1 make golden` after changing the
   collector or how anything is allocated; no test sets it, since it's
   slow.
+- `SLIGHT_HEAP_MAX=n` (bytes, or with `K`, `M` or `G` after it, at least
+  `1M`) when running a compiled program caps each process's heap there,
+  in place of 1 GB (D202). `t/run.sh` sets `64M`, the cap the tests were
+  written for. A device's line, count or value is held to 64 MB however
+  big the heap.
 - `SLIGHT_CLOCK=virtual` when running a compiled program swaps the real
   clock for a virtual one: it starts at 0 and moves only when nothing can
   run, straight to the next timer. `t/run.sh` sets it too.

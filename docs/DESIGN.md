@@ -583,8 +583,11 @@ allocated goes into overflow chunks, listed after it, till the next
 function's entry, where it's collected. The **old generation** is a list
 of chunks too: what collections have kept, the messages taken, a fork's
 values, joined results, and big strings. All of a process's chunks
-together, in both, are capped at 64 MB, and past that the allocation
-faults (`:heap`). The heap pointer and limit live in the process struct
+together, in both, are capped, at 1 GB unless `SLIGHT_HEAP_MAX` says
+otherwise (D202), and past that the allocation faults (`:heap`). The
+cap costs nothing till it's used, since chunks come as they're needed;
+it keeps a runaway process from taking the program's memory, ending it
+instead, where its monitor sees it. The heap pointer and limit live in the process struct
 (`[x28, #RT_PROC_HEAP_PTR]`), so C builtins that allocate can use them
 with nothing to sync (D57). Compiled code allocates inline (cons cells,
 lists, tuples, D195, and closures), and calls the runtime only to start
@@ -607,8 +610,8 @@ Lalloc_N:
   empty then, so the roots are just the receive function's arguments, in
   its frame. Nothing outside the process's heap points into it.
 - **And at a function's entry** (D166), in `rt_preempt`, so the root and
-  a process that never waits collect too, and the 64 MB limit is on
-  what's live. The roots are the frames: the function's parameters and
+  a process that never waits collect too, and the cap is on what's
+  live. The roots are the frames: the function's parameters and
   captured values, all it has stored yet, and every slot of each frame
   below, found by the frame pointers (the first frame's saved one is 0).
   That works because nothing lives in a register across a call, a slot
@@ -642,12 +645,12 @@ Lalloc_N:
 - **A major collection** runs once the old generation in use (its
   chunks, less what's free in the one promoted into) reaches twice what
   was live after the last major one, and never below 256 KB, so a small
-  process's old generation is never collected (D106); but never within 8
-  MB of the 64 MB cap, so a process with more than half the cap live
-  still collects before it reaches the cap, rather than failing there
-  with a heap of garbage (D196). The 8 MB is room for the nursery and
-  for what's allocated before the next function's entry. When more than
-  that is live, the next is halfway from what's live to the cap, so it's
+  process's old generation is never collected (D106); but never within
+  an eighth of the cap (128 MB at 1 GB, 8 at 64), so a process with more
+  than half the cap live still collects before it reaches the cap,
+  rather than failing there with a heap of garbage (D196). The eighth is
+  room for the nursery and for what's allocated before the next
+  function's entry. When more than that is live, the next is halfway from what's live to the cap, so it's
   always above what's live (or every slice's end would collect), and a
   heap that's all live data collects a few times more before it fails.
   A major collection copies everything live, in both generations, into
@@ -804,7 +807,8 @@ processes that allocate and then wait turn out to hold too much).
   `:source` (under JSON, s-expressions and source, above). Then
   `(:eof f)`, and it closes; nothing comes after it. A line, count,
   value or datum of 64 MB or more ends the owner with `(:error (:too-big
-  path))` (D160). `:fs/write`
+  path))` (D160), whatever the heap's cap: that limit is the reader's,
+  so that an endless line can't take a server's memory (D202). `:fs/write`
   (creating the file, or emptying it) and `:fs/append` (creating it)
   take `(:write x ...)` from anyone, render the `x`s as `tty/write` does,
   and write them at once. Anything else sent to a device is a dead

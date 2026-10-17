@@ -3174,3 +3174,38 @@ put after phase 2's fixes.)*
   would be changes to the runtime, for later if they're wanted.
 - The harness reads a version from stderr when stdout has none, as
   Chez's `--version` prints it there.
+
+**D202. A heap's cap is 1 GB, or what `SLIGHT_HEAP_MAX` says.** *(User,
+Oct 2026: the second of three options, as Claude recommended; the
+others were keeping 64 MB, and no cap, as in Erlang and Go, where one
+runaway process takes the program down when `malloc` fails.)* The 64 MB
+came from D58's one mapping per process, which D89's chunks replaced;
+D106 kept the figure. A cap costs nothing till it's used now, since
+chunks come as they're needed, but 64 MB held a structure of 56 MB at
+most: `binary-trees` ran at 18, not its usual 21, and no process could
+hold a big file's data.
+
+- **1 GB by default.** `SLIGHT_HEAP_MAX` sets it per run: a number of
+  bytes, or with `K`, `M` or `G` after it, and at least `1M`, a
+  nursery's most; anything else stops the program at its start with
+  exit 2.
+- **The room kept below the cap** for its last collection (D196) is an
+  eighth of it: 8 MB at 64 MB, as before, 128 MB at 1 GB.
+- **What it costs:** a process that does hold hundreds of MB makes
+  everything wait through each of its major collections, since they
+  copy everything live, on the one core; and while one runs, the
+  process's memory can be twice what's live. With 64 MB, neither could
+  be large.
+- **A device's limit stays 64 MB** (D160), its own constant now: a line,
+  a count or a value read from a device of 64 MB or more is `:too-big`
+  however big the heap, so an endless line still can't take a server's
+  memory.
+- **Replay:** the cap is one of the settings a record keeps, as a
+  different one could fault where the recorded run didn't; the record's
+  format is 3.
+- **Tests:** `t/run.sh` sets `64M`, the cap the tests were written for,
+  so those that fill a heap or read 64 MB stay as they were, and quick.
+  Test 245: at `2M`, a process keeping 256 KB ends and one keeping 3.2
+  MB faults; 246: `512K` is refused.
+- Not changed: a mailbox still isn't counted in its process's cap
+  (D201's `fan-in`).

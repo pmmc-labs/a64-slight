@@ -1,0 +1,4 @@
+(ok 16000)
+fault in #<pid 3>: heap exhausted (cons at t/245-heap-max.slight:6:52)
+heap
+done

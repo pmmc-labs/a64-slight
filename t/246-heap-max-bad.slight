@@ -1,0 +1,5 @@
+; env: SLIGHT_HEAP_MAX=512K
+; SLIGHT_HEAP_MAX is at least 1M, a nursery at its biggest (D202), so 512K
+; is refused before the program starts.
+
+(pprint :started)

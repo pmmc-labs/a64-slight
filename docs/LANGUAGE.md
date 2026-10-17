@@ -676,8 +676,10 @@ and other orders").
 
 ### The heap
 
-Each process's heap holds up to 64 MB of live data; past that, an
-allocation faults (`:heap`). It's collected when a receive function asks
+Each process's heap holds up to 1 GB, unless `SLIGHT_HEAP_MAX` in the
+program's environment says otherwise (a number of bytes, or with `K`,
+`M` or `G` after it, and at least `1M`); past that, an allocation faults
+(`:heap`), and just that process ends. It's collected when a receive function asks
 for its next message, or at the entry of the next function called
 (D166), in two generations (D200): what's new is allocated in a nursery
 (from 4 KB, growing to 1 MB), and once that's full, what's still
@@ -798,8 +800,9 @@ If the file can't be opened, the owner ends before it runs, with
 `(:error (name path))`, `name` being errno's: `:enoent`, `:eacces`,
 `:eisdir`, `:enotdir`, `:enospc`, and so on, or `:io-error`. A read or a
 write that fails ends it the same way, when it happens; and so does a
-line, a count, a JSON value or a datum of 64 MB or more, too big for a
-process's heap, with `(:error (:too-big path))`.
+line, a count, a JSON value or a datum of 64 MB or more, with `(:error
+(:too-big path))`, whatever the heap holds, so that an endless line
+can't take all the memory.
 
     (defun reader (lines)
         (recv

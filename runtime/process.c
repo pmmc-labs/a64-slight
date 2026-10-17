@@ -45,9 +45,9 @@
 #define STACK_HEADROOM (64 << 10)       // room left below the limit for one frame and a C call
 #define CHUNK_FIRST    (4 << 10)        // a process's nursery at first, and its first old chunk...
 #define CHUNK_MAX      (1 << 20)        // ...each doubling up to this
-#define HEAP_MAX       (64 << 20)       // all of a process's chunks, both generations
+#define HEAP_DEFAULT   (1 << 30)        // all of a process's chunks, both generations, unless SLIGHT_HEAP_MAX says
 #define GC_MIN         (256 << 10)      // an old generation smaller than this is never collected whole
-#define GC_ROOM        (8 << 20)        // an old generation this near HEAP_MAX is collected whole, whatever's live
+#define READ_MAX       (64 << 20)       // a line, a count or a value read from a device must be less (D160)
 
 // A pid's entry in the table: the process while it runs, then its exit
 // record: (:ok value) or (:error value). Or a device while it's open; to
@@ -70,6 +70,7 @@ static int         poison;              // SLIGHT_POISON: fill what the collecto
 static int64_t     gc_stress;           // SLIGHT_GC_STRESS=n: collect at every nth call (n <= QUOTA), and every recv
 static uint64_t    stressed;            // the collections SLIGHT_GC_STRESS has made, every eighth a major one
 static int         gc_verify;           // SLIGHT_GC_VERIFY: check that nothing old points at anything young
+static size_t      heap_max;            // the most a process's chunks can hold (D202)
 static uint64_t    sched;               // SLIGHT_SCHED's generator, or 0: first in, first out
 
 // --- the run queue ------------------------------------------------------------
@@ -260,7 +261,7 @@ static void adopt(rt_proc_t *p, rt_chunk_t *c) {
 void rt_heap_grow(uint64_t bytes, const char *site) {
     rt_proc_t *p = rt_current;
     if (!p->nursery) {
-        if (p->heap_bytes + CHUNK_FIRST > HEAP_MAX) rt_fault(RT_FAULT_HEAP, 0, site);
+        if (p->heap_bytes + CHUNK_FIRST > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
         p->nursery     = new_chunk(CHUNK_FIRST);
         p->heap_bytes += CHUNK_FIRST;
         p->heap_ptr    = (uintptr_t)(p->nursery + 1);
@@ -269,7 +270,7 @@ void rt_heap_grow(uint64_t bytes, const char *site) {
     }
     size_t young = young_bytes(p), size = young < CHUNK_MAX ? young : CHUNK_MAX;
     if (size < bytes) size = (bytes + 15) & ~(size_t)15;
-    if (p->heap_bytes + size > HEAP_MAX) rt_fault(RT_FAULT_HEAP, 0, site);
+    if (p->heap_bytes + size > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
     rt_chunk_t *c = new_chunk(size);
     c->next          = p->nursery->next;
     p->nursery->next = c;
@@ -284,7 +285,7 @@ void rt_heap_grow(uint64_t bytes, const char *site) {
 void *rt_alloc_old(size_t bytes, const char *site) {
     rt_proc_t *p = rt_current;
     bytes = (bytes + 15) & ~(size_t)15;
-    if (p->heap_bytes + bytes > HEAP_MAX) rt_fault(RT_FAULT_HEAP, 0, site);
+    if (p->heap_bytes + bytes > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
     rt_chunk_t *c = new_chunk(bytes);
     adopt(p, c);
     return c + 1;
@@ -655,14 +656,15 @@ static void collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintp
     p->chunks     = g.chunks;
     p->heap_bytes = g.bytes + young_bytes(p);
     p->old_ptr    = g.ptr;
-    // Next at twice what's live, but never nearer the cap than GC_ROOM: at
-    // twice, a process with more than half the cap live would reach the
-    // cap first, and fail there with a heap of garbage (D196). Nor at or
-    // below what's live, or it would collect at every slice's end: when
-    // that's nearer the cap than GC_ROOM, halfway from there to the cap.
+    // Next at twice what's live, but never nearer the cap than an eighth
+    // of it: at twice, a process with more than half the cap live would
+    // reach the cap first, and fail there with a heap of garbage (D196).
+    // Nor at or below what's live, or it would collect at every slice's
+    // end: when that's nearer the cap than the eighth, halfway from there
+    // to the cap.
     size_t next    = 2 * g.live > GC_MIN ? 2 * g.live : GC_MIN;
-    size_t half    = g.live < HEAP_MAX ? g.live + (HEAP_MAX - g.live) / 2 : HEAP_MAX;
-    size_t ceiling = HEAP_MAX - GC_ROOM > half ? HEAP_MAX - GC_ROOM : half;
+    size_t half    = g.live < heap_max ? g.live + (heap_max - g.live) / 2 : heap_max;
+    size_t ceiling = heap_max - heap_max / 8 > half ? heap_max - heap_max / 8 : half;
     p->gc_at       = next < ceiling ? next : ceiling;
 }
 
@@ -677,7 +679,7 @@ static void restart(rt_proc_t *p) {
     for (rt_chunk_t *c = p->nursery->next; c; c = c->next) p->heap_bytes -= c->size;
     free_chunks(p->nursery->next);
     p->nursery->next = NULL;
-    if (grow && p->heap_bytes + size <= HEAP_MAX) {
+    if (grow && p->heap_bytes + size <= heap_max) {
         free(p->nursery);
         p->nursery     = new_chunk(2 * size);
         p->heap_bytes += size;
@@ -1414,7 +1416,7 @@ static int idle(void) {
 #define DEV_SYSTEM   5                  // :system (below)
 #define DEV_EXEC     6                  // a command
 #define ERR_NOTFOUND (-1)               // no such host, which has no errno
-#define ERR_TOOBIG   (-2)               // a line, count or value of HEAP_MAX or more
+#define ERR_TOOBIG   (-2)               // a line, count or value of READ_MAX or more
 #define ERR_BADJSON  (-3)
 #define ERR_BADSEXP  (-4)
 #define READ_CHUNK   (64 << 10)         // the most a chunk holds
@@ -1721,7 +1723,7 @@ typedef struct {
 static void *arena_alloc(void *cx, size_t bytes) {
     arena_t *a = cx;
     bytes = (bytes + 15) & ~(size_t)15;
-    if (a->total + bytes >= HEAP_MAX) return NULL;
+    if (a->total + bytes >= READ_MAX) return NULL;
     if (a->left < bytes) {
         size_t      size = bytes > CHUNK_MAX ? bytes : CHUNK_MAX;
         rt_chunk_t *c    = new_chunk(size);
@@ -1846,7 +1848,7 @@ static int cut(rt_device_t *d) {
     size_t      have = d->len - d->at, n;
     const char *line;
     if (d->eof_sent) return d->mode == DEV_EXEC ? exited(d) : 1;
-    if (d->count >= HEAP_MAX) {
+    if (d->count >= READ_MAX) {
         fail(d, ERR_TOOBIG);
         return 1;
     }
@@ -1879,7 +1881,7 @@ static int cut(rt_device_t *d) {
         if (d->mode == RT_FS_READ) close_device(d);
         return 1;
     }
-    if (have >= HEAP_MAX) {                     // a line with no end in sight
+    if (have >= READ_MAX) {                     // a line with no end in sight
         fail(d, ERR_TOOBIG);
         return 1;
     }
@@ -2772,6 +2774,17 @@ static rt_value_t environment(rt_proc_t *root, char **env) {
 
 extern char **environ;
 
+// SLIGHT_HEAP_MAX's bytes: digits, with K, M or G (2^10, 2^20, 2^30) after
+// them, or nothing; or 0 if it isn't that.
+static size_t bytes_of(const char *s) {
+    size_t digits = strspn(s, "0123456789");
+    int    shift  = !s[digits] ? 0 : s[digits + 1] ? -1
+                  : s[digits] == 'K' ? 10 : s[digits] == 'M' ? 20 : s[digits] == 'G' ? 30 : -1;
+    if (digits == 0 || digits > 18 || shift < 0) return 0;     // 18 digits fit strtoull
+    unsigned long long n = strtoull(s, NULL, 10);
+    return n > (SIZE_MAX >> shift) ? 0 : (size_t)n << shift;
+}
+
 int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
@@ -2779,16 +2792,23 @@ int main(int argc, char **argv) {
     gc_verify = getenv("SLIGHT_GC_VERIFY") != NULL;
     const char *stress = getenv("SLIGHT_GC_STRESS");
     gc_stress = !stress ? 0 : atoll(stress) < 1 ? 1 : atoll(stress) > QUOTA ? QUOTA : atoll(stress);
-    const char *mode = getenv("SLIGHT_CLOCK"), *seed = getenv("SLIGHT_SCHED");
+    const char *mode = getenv("SLIGHT_CLOCK"), *seed = getenv("SLIGHT_SCHED"), *cap = getenv("SLIGHT_HEAP_MAX");
     if (seed && (!*seed || strspn(seed, "0123456789") != strlen(seed))) {
         fputs("slight: SLIGHT_SCHED is a number, a seed for the order processes run in\n", stderr);
         return 2;
     }
-    rt_io_settings_t settings = { mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0 };
+    if (cap && bytes_of(cap) < CHUNK_MAX) {
+        fputs("slight: SLIGHT_HEAP_MAX is the most a process's heap holds, in bytes or with K, M or G after it, and at least 1M\n", stderr);
+        return 2;
+    }
+    rt_io_settings_t settings = {
+        mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0, cap ? bytes_of(cap) : HEAP_DEFAULT,
+    };
     char           **env      = environ;
     rt_io_start(&argc, &argv, &env, &settings); // replaying, the record's settings, arguments and environment
     virtual_clock = settings.virtual_clock;
     sched         = settings.sched_seed;
+    heap_max      = settings.heap_max;
     started       = now();
     rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);
     p->args[0]   = arguments(p, argc, argv);

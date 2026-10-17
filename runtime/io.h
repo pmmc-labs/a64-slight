@@ -30,6 +30,7 @@
 typedef struct {
     int      virtual_clock;
     uint64_t sched_seed;                // SLIGHT_SCHED, or 0
+    uint64_t heap_max;                  // SLIGHT_HEAP_MAX, or the default: where a heap faults
 } rt_io_settings_t;
 
 void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *settings);

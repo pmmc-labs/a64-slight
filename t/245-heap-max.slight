@@ -1,0 +1,11 @@
+; env: SLIGHT_HEAP_MAX=2M
+; A process's heap holds what SLIGHT_HEAP_MAX says (D202): here 2 MB,
+; where every other test has 64 (t/run.sh sets that). A process that
+; keeps 16,000 cells (256 KB) ends; one that keeps 200,000 (3.2 MB) faults.
+
+(defun keep (n acc) (if (== n 0) acc (keep (- n 1) (cons n acc))))
+(defun kind (pid) (car (cadr (join pid))))
+
+(pprint (join (fork (length (keep 16000 ())))))
+(pprint (kind (fork (length (keep 200000 ())))))
+:done
