@@ -614,23 +614,24 @@ them:
   register (D57), captured values read from the closure (D79), denser
   lists (CDR-coding, VLists: D23), reference counting with reuse (D24).
 
-### Benchmarks (phase 1 done, Oct 2026)
+### Benchmarks (phases 1 to 3 done, Oct 2026)
 
 slight against C, Go, Erlang, Node, Perl and Python (D194,
-`docs/BENCHMARKS.md`, `make bench`). Phase 1: `fib`, `binary-trees`,
-`n-body`, `ping-pong`, `thread-ring`, `spawn`, `idle-memory` and
-`parallel-fib`, on the cloud machine and the M2 Max, the reference. Phase 2: Chez Scheme; `tak`, `nqueens`, `deriv`,
-`spectral-norm` and Savina's fan-in; and profiling slight's worst
-ratios: allocating and collecting (`binary-trees`), floats (`n-body`,
-with "Faster floats" below), and a busy process's garbage (`GC_MIN`).
-Done so far: tuples built in place (D195), collecting before the heap's
-cap (D196), better code for calls, arithmetic and tests (D197), float
-arithmetic inline (D198), a message with nothing to copy freed as it's
-taken (D199), and a generational collector (D200), the last of the
-fixes agreed, all measured on the M2 (BENCHMARKS.md, "Phase 2 on the M2
-Max"): `binary-trees` 2.4 times faster, fib, `n-body` and
-`parallel-fib` 1.5, `thread-ring` 1.6 and a hundredth of the memory.
-Next: the other programs and Chez.
+`docs/BENCHMARKS.md`, `make bench`), and Chez Scheme (D201).
+
+- **Phase 1:** `fib`, `binary-trees`, `n-body`, `ping-pong`,
+  `thread-ring`, `spawn`, `idle-memory` and `parallel-fib`, on the cloud
+  machine and the M2 Max, the reference.
+- **Phase 2:** fixing slight's worst ratios, as the profiles found them:
+  tuples built in place (D195), collecting before the heap's cap (D196),
+  better code for calls, arithmetic and tests (D197), float arithmetic
+  inline (D198), a message with nothing to copy freed as it's taken
+  (D199), and a generational collector (D200). On the M2
+  (BENCHMARKS.md, "Phase 2 on the M2 Max"): `binary-trees` 2.4 times
+  faster, fib, `n-body` and `parallel-fib` 1.5, `thread-ring` 1.6 and a
+  hundredth of the memory.
+- **Phase 3** (D201), planned as part of phase 2 and put after its fixes:
+  Chez Scheme, `tak`, `nqueens`, `deriv`, `spectral-norm` and `fan-in`.
 
 ### Later: the rest of the October 2026 list
 

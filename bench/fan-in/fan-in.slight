@@ -1,0 +1,15 @@
+; fan-in: 100 processes each send their number n/100 times to one, which
+; sums what it's sent: many senders, one mailbox.
+
+(defun sender (to s m)
+    (when (> m 0)
+        (send to s)
+        (sender to s (- m 1))))
+
+(defun gather (n sum)
+    (if (== n 0) sum (recv (s (gather (- n 1) (+ sum s))))))
+
+(let n  (string->int (car @ARGV)))
+(let me $$)
+(dotimes 1 101 (lambda (s) (fork (sender me s (div n 100)))))
+(gather n 0)

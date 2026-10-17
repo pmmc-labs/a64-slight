@@ -8,10 +8,11 @@ run worth keeping, as JSON and as a Markdown summary.
     make bench BENCH=--quick    # small sizes, to see that everything works
     python3 bench/run.py --only fib,n-body --langs slight,c --runs 10
 
-A full run takes about half an hour, mostly Perl and Python. Languages
-whose tools aren't installed are left out, and said to be. On a Mac,
-`brew install go erlang`; Node, Perl and Python are there already
-(Node for the compiler, the others with Xcode's tools).
+A full run takes about an hour, mostly Perl and Python. Languages whose
+tools aren't installed are left out, and said to be. On a Mac, `brew
+install go erlang chezscheme`; Node, Perl and Python are there already
+(Node for the compiler, the others with Xcode's tools). On Debian or
+Ubuntu, `apt-get install chezscheme`.
 
 ## What's measured
 
@@ -19,7 +20,9 @@ Three questions, which need different programs:
 
 1. **Sequential code:** how good the compiled code is at calls, integer
    arithmetic, allocating and collecting, and floats. Against C, the
-   floor; Go and Erlang; Node, the everyday reference; Perl and Python.
+   floor; Go and Erlang; Node, the everyday reference; Perl and Python;
+   and Chez Scheme, a native Lisp, the nearest thing to slight's
+   compiled code (D201).
 2. **The actor runtime:** what a message, a switch between processes, a
    process started, and a process waiting cost. Against Erlang, the same
    model (per-process heaps, copied messages, preemption by reductions),
@@ -28,9 +31,9 @@ Three questions, which need different programs:
    (boids), `html->text`, JSON and HTTP: comparing those across
    languages would mostly compare libraries.
 
-Chez Scheme, a native Lisp, comes in phase 2, with more of the Gabriel and
-Benchmarks Game programs (`tak`, `nqueens`, `deriv`, `spectral-norm`) and
-Savina's fan-in.
+Phase 3 (D201) added Chez Scheme, three of Gabriel's programs (`tak`,
+`nqueens`, `deriv`), one more of the Benchmarks Game's
+(`spectral-norm`), and `fan-in`, many senders to one mailbox.
 
 ## The programs
 
@@ -42,17 +45,43 @@ itself (or, for `n-body`, against C's).
   VM's start is about 0.15 seconds of each Erlang time, and Node's 0.03.
 - **`fib 38`:** doubly recursive Fibonacci: calls and integer
   arithmetic.
+- **`tak 10`:** Gabriel's `tak`, of 30, 20 and 10: 101 million calls,
+  each of three arguments, with little arithmetic between.
 - **`binary-trees 18`:** the Benchmarks Game's, without its workers:
   trees made and checked, allocation and collection. Its usual size is
   21, but the stretch tree of depth 22 has 8 million nodes, and the
   largest that fits in one slight process (its heap is capped at 64 MB,
   and collecting copies) is the stretch tree of depth 19, so 18.
+- **`nqueens 13`:** Gabriel's, as in the R7RS benchmarks: the 73,712
+  ways to place 13 queens, found by trying each row in turn with three
+  lists (to try, passed over, placed): calls, and short lists made and
+  dropped. slight, Erlang and Chez use lists; C, Go, Node, Perl and
+  Python their arrays, copied where the list version makes a new list.
+- **`deriv 2000000`:** Gabriel's: the symbolic derivative of
+  3x² + ax² + bx + 5, two million times: allocating, and walking lists
+  and symbols. Each language's own way to hold an s-expression: lists and
+  symbols in slight, Erlang and Chez; arrays and strings in Node, Perl
+  and Python, slices and a string type in Go; in C, cells from an arena
+  emptied after each derivative, with each symbol one cell. Prints the
+  derivatives' lengths, summed (so none can be skipped), and the atoms in
+  the last.
 - **`n-body 1000000`:** the Benchmarks Game's, five bodies' orbits: float
   arithmetic, which slight boxes. Each version does the arithmetic in
   the C version's order, so the energies agree, printed times 10^9.
+- **`spectral-norm 1000`:** the Benchmarks Game's, on one core: a
+  matrix's norm by the power method, 40 million products of floats.
+  slight's and Erlang's vectors are lists, made again each step; the
+  others' arrays, changed in place. Each sum in the C version's order
+  (Python's in loops, since its `sum` of floats rounds differently from
+  3.12 on); the norm printed times 10^9.
 - **`ping-pong 2000000`:** round trips between two processes.
 - **`thread-ring 10000000`:** the Benchmarks Game's: 503 processes in a
   ring pass a token on, 10 million times.
+- **`fan-in 10000000`:** 100 processes each send their number 100,000
+  times to one, which sums them: many senders, one mailbox. Go's channel
+  holds 1,024 (unbuffered, every message is a switch, 4.7 times slower;
+  from 100 up the size makes no difference); Erlang's receiver keeps its
+  queue off its heap, as `spawn`'s does.
 - **`spawn 1000000`:** processes started one after another, each sending
   its number back and ending.
 - **`idle-memory 1000000`:** a million processes all waiting for a
@@ -62,7 +91,7 @@ itself (or, for `n-body`, against C's).
 - **`parallel-fib 30`:** 64 processes each work out `fib(30)`: work more
   than one core can share.
 
-The sequential ones are in all seven languages, the actor ones in slight,
+The sequential ones are in all eight languages, the actor ones in slight,
 Go and Erlang. Each is written the way its language is usually written,
 and does the same work: the same algorithm, the same output. slight's
 bend to slight (D84): nothing was added to the language for them, and
@@ -71,7 +100,8 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 ## How it's measured
 
-- Each program is built once (slight's for the machine's own target),
+- Each program is built once (slight's for the machine's own target,
+  Chez's with `compile-program`, so its runs don't include compiling),
   run once to check it, then timed 5 times; the programs take turns, so
   the machine's drift falls on all of them alike. One that takes long
   gets fewer runs, never under 3. The summary gives the median, the
@@ -89,6 +119,10 @@ change, hash tables, bignums, regular expressions) aren't here.
 - Erlang allows 262,144 processes unless told otherwise, and a higher
   limit costs memory from the start, so `spawn` and `idle-memory` raise
   it as far as they need (`+P`), and nothing else does.
+- Chez runs at its default optimize level, which is safe (as slight is:
+  every operation checks its operands), and its programs use Scheme's
+  ordinary arithmetic, as Scheme is usually written, not `fl+` or
+  `fx+`.
 - Timings under qemu mean nothing, so AArch64 is measured on a Mac. The
   cloud machine's x86-64 numbers are noisy, but fine for ratios.
 
@@ -373,6 +407,10 @@ to under 2. The M2's runs after each are above.
   1.4 times slower than slight. D197 took 40 per cent of fib's
   instructions out; the rest is the frame (every local in a slot,
   zeroed when the function calls another) and the checks.
+- **A mailbox under many senders** (`fan-in`, D201): nothing slows a
+  sender whose receiver is behind, so on one core nearly every message
+  waits at once, 640 MB at ten million, as in Erlang; Go's channel
+  blocks its senders. And a mailbox isn't counted in the heap's cap.
 - **One core** (`parallel-fib`): Go on every core is 15 times faster,
   Erlang 5.6. Running on more than one is a design question of its own
   (BACKGROUND.md, multiple cores), not a fix.

@@ -3126,3 +3126,51 @@ Turned down, for now: aging (point 1; it wouldn't help those trees,
 which outlive a nursery anyway); a write barrier and a remembered set
 (nothing needs them); mark-sweep or mark-compact for the old generation;
 and a pool of nurseries that waiting processes give back.
+
+**D201. Phase 3: Chez Scheme and five more programs.** *(User, Oct 2026:
+"lets add Chez and the other programs now": D194's phase 2 programs,
+put after phase 2's fixes.)*
+
+- **Chez Scheme**, a native Lisp, the nearest thing to slight's compiled
+  code: compiled ahead of time (`compile-program`, in
+  `bench/chez-compile.ss`) and run with `--program`; at its default
+  optimize level, which is safe, as slight is; with Scheme's ordinary
+  arithmetic, as Scheme is usually written, not `fl+` or `fx+`. Found as
+  `chez` (Homebrew), `chezscheme` or `scheme` (Debian), a `scheme` only
+  if its `--version` is a bare version, as Chez's is (MIT Scheme's
+  isn't). In every sequential benchmark; none of the actor ones, since
+  it has no processes of that kind.
+- **The programs:** `tak 10` (Gabriel's, of 30, 20 and 10: 101 million
+  calls), `nqueens 13` (Gabriel's, as in the R7RS benchmarks), `deriv
+  2000000` (Gabriel's) and `spectral-norm 1000` (the Benchmarks Game's,
+  on one core), in all eight languages; `fan-in 10000000` (100 senders,
+  one receiver) in slight, Go and Erlang. Sized so that slight takes
+  about a second on the cloud machine, and Python and Perl no more than
+  about 20.
+- **Each language's own data**, D194's rule: `nqueens`'s lists are
+  arrays in C, Go, Node, Perl and Python, copied where the list version
+  makes a new list; `deriv`'s s-expressions are each language's own (in
+  C, cells from an arena emptied after each derivative, a symbol a cell);
+  `spectral-norm`'s vectors are lists in slight and Erlang, made again
+  each step, and arrays changed in place elsewhere. `deriv` prints its
+  derivatives' lengths, summed, so that no compiler can skip one.
+- **Checked:** `tak`'s and `deriv`'s results are worked out in the
+  harness, `nqueens`'s are OEIS A000170's, `spectral-norm`'s are C's
+  (at 100, the Benchmarks Game's 1.274219991). Python's sums are loops:
+  from 3.12 its `sum` of floats compensates its rounding, and would
+  differ from the others in the last bits.
+- **`fan-in`'s choices:** Go's channel holds 1,024: unbuffered, every
+  message is a switch between goroutines, 4.7 times slower, and from 100
+  up the size makes no difference. Erlang's receiver keeps its queue off
+  its heap, as `spawn`'s does: 4.9 s to 4.5 on one core, 4.7 to 1.0 on
+  every core.
+- **Found:** on one core nothing slows `fan-in`'s senders, so in slight
+  and in Erlang nearly every message waits in the receiver's mailbox at
+  once: 640 MB at ten million (Erlang 637), where Go's channel blocks
+  its senders (2 MB). slight's time there is mostly the system's (3.0 s
+  of 3.7 on the cloud machine), for that memory; at a million, 0.09 s.
+  A mailbox isn't counted in its process's 64 MB. Slowing a sender
+  whose receiver's queue is long, or counting a mailbox in the cap,
+  would be changes to the runtime, for later if they're wanted.
+- The harness reads a version from stderr when stdout has none, as
+  Chez's `--version` prints it there.

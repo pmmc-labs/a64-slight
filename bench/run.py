@@ -13,7 +13,9 @@ check took long gets fewer runs, but at least 3 (or --runs, if that's
 fewer), to keep each to about --budget seconds.
 
 Go and Erlang run twice: on one core, as slight does (GOMAXPROCS=1, +S
-1:1), and with their defaults, every core (go-mc, erlang-mc).
+1:1), and with their defaults, every core (go-mc, erlang-mc). Chez Scheme
+is found as chez, chezscheme or scheme, and its programs are compiled
+ahead of time, as slight's are.
 
 The results go to bench/results/, as JSON and as a Markdown summary, named
 for the date and the machine.
@@ -40,7 +42,7 @@ BUILD = os.path.join(ROOT, 'build', 'bench')
 
 # --- what's run --------------------------------------------------------------
 
-ALL    = ('slight', 'c', 'go', 'erlang', 'node', 'perl', 'python')
+ALL    = ('slight', 'c', 'go', 'erlang', 'node', 'perl', 'python', 'chez')
 ACTORS = ('slight', 'go', 'erlang')
 
 Benchmark = collections.namedtuple('Benchmark', 'langs quick full expected')
@@ -60,18 +62,62 @@ def binary_trees(n):
             + [2 ** (top + 1) - 1])
 
 
-# What each prints, worked out here; n-body's is whatever C prints (or,
-# without C, what most print), since there's no shorter way to it.
+# Gabriel's tak, of 3n, 2n and n, remembering what it's worked out, as
+# the programs don't.
+def tak(n):
+    known = {}
+
+    def t(x, y, z):
+        if not y < x:
+            return z
+        if (x, y, z) not in known:
+            known[(x, y, z)] = t(t(x - 1, y, z), t(y - 1, z, x), t(z - 1, x, y))
+        return known[(x, y, z)]
+    return [t(3 * n, 2 * n, n)]
+
+
+# The ways n queens can be placed (OEIS A000170).
+QUEENS = [1, 1, 0, 0, 2, 10, 4, 40, 92, 352, 724, 2680, 14200, 73712, 365596, 2279184]
+
+
+# Gabriel's deriv, done here too: what the programs print is the length of
+# each derivative, summed, and how many atoms the last one has.
+DERIV_OF = ['+', ['*', 3, 'x', 'x'], ['*', 'a', 'x', 'x'], ['*', 'b', 'x'], 5]
+
+
+def deriv(n):
+    def d(a):
+        if not isinstance(a, list):
+            return 1 if a == 'x' else 0
+        if a[0] in ('+', '-'):
+            return [a[0]] + [d(e) for e in a[1:]]
+        if a[0] == '*':
+            return ['*', a, ['+'] + [['/', d(e), e] for e in a[1:]]]
+        return ['-', ['/', d(a[1]), a[2]], ['/', a[1], ['*', a[2], a[2], d(a[2])]]]
+
+    def atoms(a):
+        return sum(atoms(e) for e in a) if isinstance(a, list) else 1
+    return [n * len(d(DERIV_OF)), atoms(d(DERIV_OF))]
+
+
+# What each prints, worked out here; n-body's and spectral-norm's are
+# whatever C prints (or, without C, what most print), since there's no
+# shorter way to them.
 BENCHMARKS = {
-    'startup':      Benchmark(ALL,    '0',     '0',        lambda n: [0]),
-    'fib':          Benchmark(ALL,    '25',    '38',       lambda n: [fib(n)]),
-    'binary-trees': Benchmark(ALL,    '12',    '18',       binary_trees),
-    'n-body':       Benchmark(ALL,    '1000',  '1000000',  None),
-    'ping-pong':    Benchmark(ACTORS, '10000', '2000000',  lambda n: [n]),
-    'thread-ring':  Benchmark(ACTORS, '10000', '10000000', lambda n: [n % 503 + 1]),
-    'spawn':        Benchmark(ACTORS, '10000', '1000000',  lambda n: [n * (n - 1) // 2]),
-    'idle-memory':  Benchmark(ACTORS, '10000', '1000000',  lambda n: [n]),
-    'parallel-fib': Benchmark(ACTORS, '15',    '30',       lambda k: [64 * fib(k)]),
+    'startup':       Benchmark(ALL,    '0',     '0',        lambda n: [0]),
+    'fib':           Benchmark(ALL,    '25',    '38',       lambda n: [fib(n)]),
+    'tak':           Benchmark(ALL,    '6',     '10',       tak),
+    'binary-trees':  Benchmark(ALL,    '12',    '18',       binary_trees),
+    'nqueens':       Benchmark(ALL,    '8',     '13',       lambda n: [QUEENS[n]]),
+    'deriv':         Benchmark(ALL,    '1000',  '2000000',  deriv),
+    'n-body':        Benchmark(ALL,    '1000',  '1000000',  None),
+    'spectral-norm': Benchmark(ALL,    '100',   '1000',     None),
+    'ping-pong':     Benchmark(ACTORS, '10000', '2000000',  lambda n: [n]),
+    'thread-ring':   Benchmark(ACTORS, '10000', '10000000', lambda n: [n % 503 + 1]),
+    'fan-in':        Benchmark(ACTORS, '10000', '10000000', lambda n: [n // 100 * 5050]),
+    'spawn':         Benchmark(ACTORS, '10000', '1000000',  lambda n: [n * (n - 1) // 2]),
+    'idle-memory':   Benchmark(ACTORS, '10000', '1000000',  lambda n: [n]),
+    'parallel-fib':  Benchmark(ACTORS, '15',    '30',       lambda k: [64 * fib(k)]),
 }
 
 Impl = collections.namedtuple('Impl', 'lang env flags')
@@ -86,7 +132,26 @@ IMPLS = {
     'node':      Impl('node', {}, []),
     'perl':      Impl('perl', {}, []),
     'python':    Impl('python', {}, []),
+    'chez':      Impl('chez', {}, []),
 }
+
+
+# Chez Scheme's command: Homebrew's is chez, Debian's scheme (and
+# chezscheme). MIT Scheme is a scheme too, so a scheme counts only if it
+# says it's Chez, whose --version is just its version.
+def chez():
+    for name in ('chez', 'chezscheme', 'scheme'):
+        if shutil.which(name):
+            try:
+                done = subprocess.run([name, '--version'], capture_output=True, text=True, timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if re.match(r'\d+\.\d+', (done.stdout + done.stderr).strip()):
+                return name
+    return 'chez'
+
+
+CHEZ = chez()
 
 # The commands each language needs, and the one that says its version.
 TOOLS = {
@@ -98,9 +163,10 @@ TOOLS = {
     'node':   (['node'], ['node', '--version']),
     'perl':   (['perl'], ['perl', '-e', 'print "perl $^V"']),
     'python': (['python3'], ['python3', '--version']),
+    'chez':   ([CHEZ], [CHEZ, '--version']),
 }
 
-EXT = {'slight': 'slight', 'c': 'c', 'go': 'go', 'erlang': 'erl', 'node': 'js', 'perl': 'pl', 'python': 'py'}
+EXT = {'slight': 'slight', 'c': 'c', 'go': 'go', 'erlang': 'erl', 'node': 'js', 'perl': 'pl', 'python': 'py', 'chez': 'ss'}
 
 
 def slight_target():
@@ -127,6 +193,8 @@ def build_command(bench, lang):
         return ['go', 'build', '-o', out, src]
     if lang == 'erlang':
         return ['erlc', '-o', os.path.join(BUILD, 'erlang'), src]
+    if lang == 'chez':
+        return [CHEZ, '--script', os.path.join(ROOT, 'bench', 'chez-compile.ss'), src, out]
     return None
 
 
@@ -147,6 +215,8 @@ def run_command(bench, name, arg):
     impl = IMPLS[name]
     if impl.lang in ('slight', 'c', 'go'):
         return [output_of(bench, impl.lang), arg]
+    if impl.lang == 'chez':
+        return [CHEZ, '--program', output_of(bench, 'chez'), arg]
     if impl.lang == 'erlang':
         limit = ['+P', str(process_limit(int(arg)))] if bench in MANY else []
         return (['erl'] + impl.flags + limit + ['-noshell', '-pa', os.path.join(BUILD, 'erlang'),
@@ -194,9 +264,12 @@ def lines(text):
     return [line.rstrip() for line in text.strip().split('\n')]
 
 
+# The first line a command prints: on stdout, or on stderr if it prints
+# nothing there (as Chez's --version).
 def capture(cmd):
     try:
-        return subprocess.run(cmd, capture_output=True, text=True, timeout=60).stdout.strip().split('\n')[0]
+        done = subprocess.run(cmd, capture_output=True, text=True, timeout=60)
+        return (done.stdout.strip() or done.stderr.strip()).split('\n')[0]
     except (OSError, subprocess.SubprocessError):
         return ''
 
@@ -263,6 +336,8 @@ def main():
     found    = {lang: all(shutil.which(c) for c in TOOLS[lang][0]) for lang in TOOLS}
     versions = {lang: capture(TOOLS[lang][1]) for lang in TOOLS if found[lang]}
     versions['slight'] = commit() + ', its runtime built by ' + versions.get('slight', '')
+    if 'chez' in versions:
+        versions['chez'] = 'Chez Scheme ' + versions['chez']
     missing  = sorted({IMPLS[n].lang for n in names if not found[IMPLS[n].lang]})
     if missing:
         print('not found, so left out: ' + ', '.join(missing))
