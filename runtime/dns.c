@@ -45,7 +45,7 @@ struct rt_lookup {
 // --- the files ----------------------------------------------------------------
 
 static FILE *open_file(const char *env, const char *path) {
-    const char *p = getenv(env);
+    const char *p = rt_io_getenv(env);
     return rt_io_fopen(p ? p : path);
 }
 
@@ -138,13 +138,10 @@ static void read_resolv_conf(rt_lookup_t *l, const char *name) {
 
 // --- queries ------------------------------------------------------------------
 
+// Each query's id is random bits of its own, so one seen doesn't tell
+// the next.
 static uint16_t next_id(void) {
-    static uint32_t x;
-    if (!x) x = rt_io_seed() | 1;
-    x ^= x << 13;
-    x ^= x >> 17;
-    x ^= x << 5;
-    return (uint16_t)x;
+    return (uint16_t)rt_io_seed();
 }
 
 // The query for name's A record, with a length in front for TCP: 0, or -1

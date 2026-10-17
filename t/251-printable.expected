@@ -1,0 +1,11 @@
+"plain text, a tab	and
+a newline, é, 日本, 😀"
+"colour \u{1b}[31mred\u{1b}[0m, and \u{1b}[8mhidden\u{1b}[28m"
+"back\u{d}over, bell\u{7}, delete\u{7f}, nul\u{0}"
+"C1: \u{9b}31m and \u{85}"
+"a\x9bb\xff \xe2\x82A"
+"bidi: \u{202a}abc\u{202e}fed\u{2069} \u{2066}x\u{2069}"
+"\u{1b}[1m"
+"the user didn't let it run"
+"run: echo shown\u{1b}[8m; echo hidden\u{1b}[28m"
+()

@@ -633,7 +633,8 @@ void *rt_alloc_old(size_t bytes, const char *site); // for what points at nothin
 // exit status 2, since the runtime can't go on without memory.
 void *rt_must(void *p);
 
-// A new string holding a copy of len bytes.
+// A new string holding a copy of len bytes; or, if bytes is NULL, len
+// bytes for the caller to fill before anything else runs.
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site);
 
 // A new float.

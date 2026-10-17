@@ -3289,3 +3289,45 @@ review of the runtime, fixed as found.)*
   uses as it is. Test 250.
 - **For later:** building the runtime with `-fstack-clash-protection`
   too, once it's checked that Xcode's clang takes it for both targets.
+
+**D205. What the model says is shown as it is, and other hardening
+from the review.** *(User, Oct 2026: the first two groups of the
+review's list, as Claude recommended, the rest to be talked over.)*
+
+- **`tools/printable`.** A terminal takes control characters as
+  commands, so a model, or a page or file it has read, could make what
+  the person is asked to approve differ from what's done: a command
+  with part of it hidden, say. Each tool that asks `approve` now gives
+  it the text made printable: control characters but newline and tab,
+  DEL, the C1 controls, Unicode's bidirectional embeddings, overrides
+  and isolates, and stray bytes, written as escapes. The chat writes
+  everything from the model through it too. In slight, in
+  `lib/tools.slight`; not a builtin. Test 251.
+- **A fetch doesn't follow redirects.** Approval covered only the first
+  URL, and curl's `-L` went wherever a page sent it, the machine's own
+  services included. Now a redirect is told to the model, and fetching
+  where it goes is asked about in turn; and `--proto =http,https` holds
+  curl to those. Test 235.
+- **The parsers' open lists count.** Building a JSON value or a datum
+  needs a frame for each list or object still open in it, which came
+  from `malloc`, outside any limit: 64 MB of `[` took a gigabyte. Now
+  the frames are allocated as the value is, from the arena a device
+  builds in (D160) or the heap, so they count against the same limit.
+  Test 252.
+- **A record is its owner's alone.** `SLIGHT_RECORD`'s file holds all
+  a run read and its environment: it's made 0600 (even over a file that
+  was there), not through a symbolic link; and a set-user-ID or
+  set-group-ID program ignores `SLIGHT_RECORD`, `SLIGHT_REPLAY`,
+  `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` (`rt_io_getenv`). `t/replay.sh`
+  checks the first two.
+- **Keys are decoded in a loop.** Each ESC before a key (Alt) was a
+  level of recursion, 48 bytes each, so a few thousand in one read,
+  decoded on a process's stack near its limit, ran off it. Not a golden
+  test: keys come that way only on the real clock; checked by hand,
+  before and after.
+- **A lookup's query ids are random**, each its own, from
+  `getentropy`, recorded like any seed. They came from xorshift on the
+  clock and the pid, so one id told the next.
+- **`format-num` makes its string whole first**, so a width past what
+  the heap holds faults `:heap` at once, instead of building that much
+  outside the heap a byte at a time. Test 253.

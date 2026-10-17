@@ -422,7 +422,10 @@ slight, its links kept, D193), work out arithmetic (`lib/calc.slight`, D190), an
 in a store, a process that writes them to a file as an s-expression
 (D191), and ask other agents (`agent/ask`, D192); those that change
 something or reach out ask an `approve`
-function first, which the chat makes ask the person at the keyboard. A
+function first, which the chat makes ask the person at the keyboard,
+with the text made printable (`tools/printable`), so the model can't
+work the terminal; and a fetch doesn't follow a redirect, which is
+another fetch to ask about (D205). A
 command ends with the process that ran it, so a call that's killed takes
 its command with it, which is how Escape in the chat stops one (D193).
 
@@ -919,7 +922,9 @@ the whole run.
   any bytes it filled in are written to `file`, flushed every time, so a
   crash leaves a record of everything up to it. The record starts with the
   settings that change a run (the clock, the seed), `@ARGV` and the
-  environment, keys and all.
+  environment, keys and all; so the file is its owner's alone (0600),
+  and isn't written through a symbolic link, and a set-user-ID or
+  set-group-ID program ignores this and `SLIGHT_REPLAY` (D205).
 - `SLIGHT_REPLAY=file`: no call is made; each takes the record's next
   entry instead, and the record's settings, arguments and environment are
   the run's.

@@ -214,19 +214,24 @@ rt_value_t rt_bytes_to_string(rt_value_t xs, const char *site) {
 }
 
 // n as text, padded at the start to `width` bytes with fill (default " "),
-// repeated and cut to fit, as JavaScript's padStart does.
+// repeated and cut to fit, as JavaScript's padStart does. The string is
+// made whole before it's filled, so a width past what the heap holds
+// faults at once (D205).
 rt_value_t rt_format_num(rt_value_t n, rt_value_t width, rt_value_t fill, const char *site) {
     if ((n & RT_TAG_INT_MASK) && !rt_is_float(n)) rt_fault(RT_FAULT_NOT_NUMBER, n, site);
     int64_t w = rt_need_int(width, site);
     if (fill == RT_NIL) fill = rt_new_string(" ", 1, site);
     need_string(fill, site);
-    rt_buf_t text = { 0 }, b = { 0 };
+    rt_buf_t text = { 0 };
     rt_render(&text, n, 1);
-    size_t flen = rt_string_len(fill);
-    for (size_t i = 0; flen > 0 && (int64_t)(text.len + i) < w; i++) rt_buf_add(&b, rt_string_bytes(fill) + i % flen, 1);
-    rt_buf_add(&b, text.bytes, text.len);
+    size_t     flen = rt_string_len(fill);
+    size_t     pad  = flen > 0 && w > 0 && (uint64_t)w > text.len ? (size_t)w - text.len : 0;
+    rt_value_t s    = rt_new_string(NULL, pad + text.len, site);
+    char      *out  = (char *)rt_string_bytes(s);
+    for (size_t i = 0; i < pad; i++) out[i] = rt_string_bytes(fill)[i % flen];
+    if (text.len) memcpy(out + pad, text.bytes, text.len);
     rt_buf_free(&text);
-    return buf_to_string(&b, site);
+    return s;
 }
 
 // Writes its arguments, rendered as concat does, straight to the terminal.

@@ -446,7 +446,7 @@ void *rt_heap_alloc(void *site, size_t bytes) {
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site) {
     uint64_t *box = len >= BIG_STRING ? rt_alloc_old(8 + len + 1, site) : rt_alloc(8 + len + 1, site);
     box[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
-    if (len) memcpy(box + 1, bytes, len);       // bytes may be an empty buffer's NULL
+    if (len && bytes) memcpy(box + 1, bytes, len);
     ((char *)(box + 1))[len] = '\0';
     return (rt_value_t)box | RT_TAG_BOXED;
 }

@@ -126,24 +126,27 @@
 
 ; An answer coming: its pieces are written as they come, and so are the
 ; tools it calls, and keys wait. A tool that asks waits for y or n.
+; Whatever the model gave goes through tools/printable first, so it can't
+; work the terminal: hide part of a command it asks to run, say.
 ; allowed holds the calls let go ahead in this answer, which Escape kills
 ; (those that have ended, harmlessly).
 (defun answering (a pending allowed)
     (recv
-        ((:piece  _ text)        (tty/write \e "[3;36m" text \e "[0m") (answering a pending allowed))
-        ((:calling _ name args)  (tty/write \n \e "[2m" "→ " name " " (show-args args) \e "[0m" \n) (answering a pending allowed))
-        ((:called _ name result) (tty/write \e "[2m" "← " name ": " (show-result result) \e "[0m" \n) (answering a pending allowed))
+        ((:piece  _ text)        (tty/write \e "[3;36m" (tools/printable text) \e "[0m") (answering a pending allowed))
+        ((:calling _ name args)  (tty/write \n \e "[2m" "→ " (tools/printable (concat name " " (show-args args))) \e "[0m" \n) (answering a pending allowed))
+        ((:called _ name result) (tty/write \e "[2m" "← " (tools/printable (concat name ": " (show-result result))) \e "[0m" \n) (answering a pending allowed))
         ((:approve what p box)   (approving a pending allowed what p box ()))
         ((:answer _ _)           (tty/write \n (divider) (prompt)) (typing a "" pending))
-        ((:error  _ reason)      (tty/write "[" (trouble reason) "]" \n (prompt)) (typing a "" pending))
+        ((:error  _ reason)      (tty/write "[" (tools/printable (trouble reason)) "]" \n (prompt)) (typing a "" pending))
         ((:Escape)               (map kill allowed) (answering a pending ()))
         (key                     (answering a (append pending (list key)) allowed))))
 
 ; Asking whether a tool's call p may do what it says: y or n (Escape is
 ; n), and only a key typed since the question; anything else asked about
-; meanwhile waits in queued.
+; meanwhile waits in queued. The tools make what printable already; this
+; is for any that don't.
 (defun approving (a pending allowed what p box queued)
-    (tty/write \e "[1;33m" what \e "[0m" "  [y/n] ")
+    (tty/write \e "[1;33m" (tools/printable what) \e "[0m" "  [y/n] ")
     (deciding a pending allowed p box queued))
 
 (defun deciding (a pending allowed p box queued)
@@ -159,13 +162,13 @@
         (()                     (answering a pending allowed))
         (((what p box) & rest)  (approving a pending allowed what p box rest))))
 
-; The arguments, each as its first line, cut at 60 bytes.
+; The arguments, each as its first line, cut at 60 characters.
 (defun show-args (args)
     (str-join ", " (map (lambda (arg) (concat (car arg) ": " (short (concat (cadr arg))))) args)))
 
 (defun short (s)
     (let line (if (== (str-len s) 0) "" (car (str-split s \n))))
-    (if (or (> (str-len line) 60) (< (str-len line) (str-len s))) (concat (substring line 0 60) "…") line))
+    (if (or (> (utf8/len line) 60) (< (str-len line) (str-len s))) (concat (utf8/substring line 0 60) "…") line))
 
 ; A result, short: an error's first line, or how long it is.
 (defun show-result (result)

@@ -1,0 +1,8 @@
+fault in #<pid 2>: heap exhausted (format-num at t/253-format-num-wide.slight:10:27)
+heap
+"000042"
+"ababa3.5"
+"12345"
+"7"
+100000
+()

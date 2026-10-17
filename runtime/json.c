@@ -292,6 +292,9 @@ static int number(const char **p, const char *end, rt_build_alloc_t alloc, void 
 
 // A container being built: its list so far, its last cell (whose cdr the
 // next element goes in), and in an object the key waiting for its value.
+// The frames are allocated as the value is, so they count against the
+// same limit: a value nested a million deep takes more to build than to
+// hold (D205).
 typedef struct {
     rt_value_t  head, key;
     rt_value_t *last;
@@ -307,8 +310,11 @@ int rt_json_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
         while (rt_is_space(*p) || *p == ',' || *p == ':') p++;     // separators, in valid text
         if (*p == '[' || *p == '{') {
             if (depth == cap) {
+                frame_t *more = alloc(cx, (cap ? cap * 2 : 16) * sizeof *frames);
+                if (!more) goto too_big;
+                if (depth) memcpy(more, frames, depth * sizeof *frames);
+                frames = more;
                 cap    = cap ? cap * 2 : 16;
-                frames = rt_must(realloc(frames, cap * sizeof *frames));
             }
             frame_t *f = &frames[depth++];
             f->object  = *p++ == '{';
@@ -352,11 +358,9 @@ int rt_json_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
         else         f->head    = (rt_value_t)c | RT_TAG_LIST;
         f->last = c;
     }
-    free(frames);
     *out = v;
     return 0;
 too_big:
-    free(frames);
     return -1;
 }
 

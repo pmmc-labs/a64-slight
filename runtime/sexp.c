@@ -402,7 +402,8 @@ static int token(const char *p, size_t len, rt_build_alloc_t alloc, void *cx, rt
 
 // A list being built: its cells so far, the quotes waiting inside it for a
 // datum, the quotes around the list itself, and whether it's a tuple's
-// elements, to be made a tuple at its ).
+// elements, to be made a tuple at its ). The frames are allocated as the
+// datum is, so they count against the same limit, as JSON's do (D205).
 typedef struct {
     rt_value_t  head;
     rt_value_t *last;
@@ -438,8 +439,11 @@ int rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
         }
         if (*p == '(' || (*p == '#' && p[1] == '(')) {
             if (depth == cap) {
+                frame_t *more = alloc(cx, (cap ? cap * 2 : 16) * sizeof *frames);
+                if (!more) goto too_big;
+                if (depth) memcpy(more, frames, depth * sizeof *frames);
+                frames = more;
                 cap    = cap ? cap * 2 : 16;
-                frames = rt_must(realloc(frames, cap * sizeof *frames));
                 quotes = depth ? &frames[depth - 1].quotes : &top_quotes;
             }
             frames[depth++] = (frame_t){ .head = RT_NIL, .last = NULL, .quotes = 0, .wrap = *quotes, .tuple = *p == '#' };
@@ -485,11 +489,9 @@ int rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
         else         f->head    = (rt_value_t)c | RT_TAG_LIST;
         f->last = c;
     }
-    free(frames);
     *out = v;
     return 0;
 too_big:
-    free(frames);
     return -1;
 }
 
