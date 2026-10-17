@@ -96,6 +96,24 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max after phase 2's first fixes (D195–D198)
+
+`bench/results/2026-10-17-0814-macos-apple-m2-max.md`, at `6f53b39`.
+Against the first run, slight's times: fib 1.5 times faster (0.31 s to
+0.20), `binary-trees` 1.9 (2.5 to 1.35), `n-body` 1.4 (2.1 to 1.45),
+`parallel-fib` 1.5; the actor benchmarks the same, as they should be.
+Each one's start taken off, and Erlang on every core as before:
+
+- **`fib`:** C 1.9 times faster (2.9 before), Go 1.6 (2.5); slight is
+  now faster than Node (1.3 times) and Erlang (1.4), which it trailed.
+- **`binary-trees`:** Erlang 3.3 times faster (6.2), Node 2.7 (5.1), Go
+  on every core 2.0 (3.8), C 1.3 (2.6); Go on one core is now slower
+  than slight. Still 303 MB, against 356.
+- **`n-body`:** C 39 times faster (57), Go 31 (45), Node 22 (32), Erlang
+  1.3 (1.8).
+- **Actors:** 82 ns a message, 88 a hop, 131 a process started, as
+  before; `thread-ring` still at 210 MB, D199 coming after this run.
+
 ### The M2 Max, AArch64 (Oct 2026): the reference
 
 `bench/results/2026-10-16-0849-macos-apple-m2-max.md`: 12 cores (8 for
