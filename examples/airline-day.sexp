@@ -47,6 +47,15 @@
 (:wind "SL404" 8)
 (:closed "DEN" 600 615)
 
+; The what-ifs, each a branch, its parent, and its change: a flight that
+; leaves late; the hub closed for two and a half hours; an aircraft out
+; of service from 10:00; and, on top of the closure, quicker turns at the
+; hub after it.
+(:branch "b1" "base" (:delay "SL201" 55))
+(:branch "b2" "base" (:close "ORD" 690 840))
+(:branch "b3" "base" (:out-of-service "N104" 600))
+(:branch "b4" "b2" (:quick-turn "ORD" 780 900 20))
+
 ; The record: when each flight left and landed.
 (:flew "SL101" 360 510)
 (:flew "SL102" 600 750)

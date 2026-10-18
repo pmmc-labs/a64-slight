@@ -12,6 +12,10 @@ program, or the system to measure the run.
   its model: what the model sends with terminal escapes in it is shown
   escaped, approvals included; a refused command isn't run; and a fetch
   that's redirected says where, and goes no further (D205).
+- airline: a day the size of a small airline's, from
+  examples/airline-gen.slight, too big for a golden test: every leg
+  lands in the base's record, which is the same in a seeded order
+  (D210).
 
 Nothing here depends on how long anything takes: each step waits for
 what it expects to see, and DEADLINE seconds is only how long it waits
@@ -210,9 +214,29 @@ def chat():
           f'the model was told {told!r}')
 
 
+def airline():
+    gen  = build('airline-gen', 'examples/airline-gen.slight')
+    prog = build('airline', 'examples/airline.slight')
+    day  = os.path.join(DIR, 'airline-day.sexp')
+    made = subprocess.run(RUN + [gen], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=ENV, timeout=DEADLINE)
+    with open(day, 'wb') as f:
+        f.write(made.stdout)
+    legs = sum(1 for line in made.stdout.splitlines() if line.startswith(b'(:leg '))
+    runs = [subprocess.run(RUN + [prog, '--record', day], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=env,
+                           timeout=DEADLINE)
+            for env in (ENV, dict(ENV, SLIGHT_SCHED='3'))]
+    first, again = runs[0].stdout, runs[1].stdout
+    landed = sum(1 for line in first.splitlines() if line.startswith(b'(:flew '))
+    check(f'a day of {legs} legs from airline-gen: {landed} land in the base, the same in a seeded order',
+          made.returncode == 0 and all(r.returncode == 0 for r in runs) and legs > 1000 and landed == legs
+          and first.endswith(f'(recorded {legs})\n'.encode()) and first == again,
+          f'made {made.returncode}, recorded {[r.returncode for r in runs]}, the record ends {first[-200:]!r}')
+
+
 os.makedirs(DIR, exist_ok=True)
 keys()
 memory()
 chat()
+airline()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

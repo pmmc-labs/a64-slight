@@ -1189,6 +1189,13 @@ rt_value_t rt_sleep(rt_value_t ms, const char *site) {
     return RT_NIL;
 }
 
+// Read through now(), so a recorded run replays with the same readings,
+// and on the virtual clock it moves only as the timers do.
+rt_value_t rt_clock_us(const char *site) {
+    (void)site;
+    return rt_int((int64_t)((now() - started) / 1000));
+}
+
 // --- the keyboard -------------------------------------------------------------
 //
 // Every process connected to :keypress gets every key as a message, in

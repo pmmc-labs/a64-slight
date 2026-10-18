@@ -1,0 +1,169 @@
+; airline-gen: a made-up day for examples/airline.slight, the size of a
+; small airline's: 300 aircraft, 100 airports, four of them hubs, and
+; about 1,500 legs, with the passengers changing planes at the hubs, the
+; weather, and what-ifs. It's written to stdout, the same for a seed on
+; every machine; a made-up day has no record of its own, so its record is
+; the base's, appended:
+;
+;     node bin/slightc.ts -o airline-gen examples/airline-gen.slight
+;     ./airline-gen > day.sexp          (seed 1; or ./airline-gen 7)
+;     ./airline --record day.sexp >> day.sexp
+;     ./airline --time day.sexp
+;
+; Each aircraft belongs to a hub, and flies out to a spoke and back, five
+; legs, from between 06:00 and 08:00, each after the last has landed and
+; turned, with some slack; none lands after 23:00. A leg's block minutes
+; come from how far apart its airports are. Passengers change planes at
+; a hub from a flight that lands to one that leaves 35 minutes to two
+; hours later, from about one in eight of those.
+;
+; Its value, which the runtime prints last, is a record nothing reads:
+; (day seed legs connections).
+;
+; Its random numbers are hashes (D209): the number for something is
+; (hash (list seed what which)), so nothing is carried from one number to
+; the next, and each is the same whatever else is made.
+
+(defun aircraft-count () 300)
+(defun airport-count () 100)
+(defun hub-count () 4)
+(defun legs-each () 5)
+(defun last-landing () 1380)            ; 23:00
+
+; A number from 0 below n.
+(defun roll (seed what which n) (% (hash (list seed what which)) n))
+
+; --- airports -----------------------------------------------------------------
+
+; Each #(code x y), x and y in miles; the hubs first, nearer the middle.
+(defun airports (seed)
+    (list->tuple (map (lambda (p)
+                          (match p
+                              ((i code)
+                                  (if (< i (hub-count))
+                                      (tuple code (+ 300 (roll seed :x i 800)) (+ 200 (roll seed :y i 400)))
+                                      (tuple code (roll seed :x i 1400) (roll seed :y i 800))))))
+                      (zip (range 0 (airport-count)) (codes seed 0 (airport-count) ())))))
+
+; n codes of three letters, none twice.
+(defun codes (seed k n acc)
+    (cond
+        ((== n 0) (reverse acc))
+        (#true
+            (let x (roll seed :code k 17576))
+            (let code (concat (chr (+ 65 (div x 676))) (chr (+ 65 (% (div x 26) 26))) (chr (+ 65 (% x 26)))))
+            (if (member? code acc)
+                (codes seed (inc k) n acc)
+                (codes seed (inc k) (dec n) (cons code acc))))))
+
+; At eight miles a minute, and 25 minutes of taxiing and climbing.
+(defun block-of (ports from to)
+    (match (list (tuple/get ports from) (tuple/get ports to))
+        ((#(_ x1 y1) #(_ x2 y2))
+            (let dx (- x2 x1))
+            (let dy (- y2 y1))
+            (+ 25 (div (round (sqrt (+ (* dx dx) (* dy dy)))) 8)))))
+
+; --- the schedule -------------------------------------------------------------
+
+; Aircraft a's kth stop: its hub, every other one, and a spoke between.
+(defun stop-of (seed a k)
+    (if (== (% k 2) 1) (% a (hub-count)) (+ (hub-count) (roll seed :spoke (list a k) (- (airport-count) (hub-count))))))
+
+; Aircraft a's legs, each #(aircraft from to departure block), its kth
+; leaving at dep.
+(defun legs-for (seed ports a k dep acc)
+    (let from (stop-of seed a k))
+    (let to (stop-of seed a (inc k)))
+    (let block (block-of ports from to))
+    (if (or (== k (legs-each)) (> (+ dep block) (last-landing)))
+        (reverse acc)
+        (legs-for seed ports a (inc k) (on-five (+ (+ dep block) (+ 40 (* 5 (roll seed :slack (list a k) 10)))))
+                  (cons (tuple a from to dep block) acc))))
+
+(defun on-five (m) (* 5 (div (+ m 4) 5)))
+
+; Every leg, numbered, each #(n aircraft from to departure block).
+(defun schedule (seed ports)
+    (let legs (fold/r () (lambda (a acc) (append (legs-for seed ports a 0 (+ 360 (* 5 (roll seed :first a 25))) ()) acc))
+                      (range 0 (aircraft-count))))
+    (map (lambda (p) (match p ((n #(a from to dep block)) (tuple n a from to dep block)))) (zip (range 0 (length legs)) legs)))
+
+(defun leg/n (l) (tuple/get l 0))
+(defun leg/aircraft (l) (tuple/get l 1))
+(defun leg/from (l) (tuple/get l 2))
+(defun leg/to (l) (tuple/get l 3))
+(defun leg/dep (l) (tuple/get l 4))
+(defun leg/block (l) (tuple/get l 5))
+
+(defun flight (l) (concat "SL" (+ 1000 (leg/n l))))
+(defun tail (a) (concat "N" (+ 100 a)))
+
+; Each (in out passengers): from a leg that lands at a hub to one of
+; another aircraft that leaves there 35 to 120 minutes after it's due.
+(defun connections (seed legs)
+    (let leaving (lambda (hub) (filter (lambda (l) (== (leg/from l) hub)) legs)))
+    (let hubs (list->tuple (map leaving (range 0 (hub-count)))))
+    (fold/r () (lambda (in acc)
+                   (if (< (leg/to in) (hub-count))
+                       (append (connections-of seed in (tuple/get hubs (leg/to in))) acc)
+                       acc))
+            legs))
+
+(defun connections-of (seed in leaving)
+    (let due (+ (leg/dep in) (leg/block in)))
+    (let picked (filter (lambda (out)
+                            (and (ne? (leg/aircraft out) (leg/aircraft in))
+                                 (<= (+ due 35) (leg/dep out)) (<= (leg/dep out) (+ due 120))
+                                 (< (roll seed :connect (list (leg/n in) (leg/n out)) 8) 1)))
+                        leaving))
+    (map (lambda (out) (list in out (+ 4 (roll seed :changing (list (leg/n in) (leg/n out)) 24)))) picked))
+
+; The first leg, in the file's order, for which (f l), and its flight.
+(defun first-flight (f legs) (flight (find f legs)))
+
+; --- writing it ---------------------------------------------------------------
+
+(defun q (s) (concat "\"" s "\""))
+
+(defun write-day (seed)
+    (let ports (airports seed))
+    (let code (lambda (i) (q (tuple/get (tuple/get ports i) 0))))
+    (let legs (schedule seed ports))
+    (let connects (connections seed legs))
+    (tty/write "; A day made by examples/airline-gen.slight, seed " seed ": " (aircraft-count) " aircraft, "
+               (airport-count) " airports, " (length legs) " legs, " (length connects) " connections.\n"
+               "; The hubs: " (str-join " " (map (lambda (i) (tuple/get (tuple/get ports i) 0)) (range 0 (hub-count)))) ".\n\n")
+    (dotimes 0 (aircraft-count) (lambda (a) (tty/write "(:aircraft " (q (tail a)) " " (code (stop-of seed a 0)) ")\n")))
+    (tty/write \n)
+    (map (lambda (l)
+             (tty/write "(:leg " (q (flight l)) " " (q (tail (leg/aircraft l))) " " (code (leg/from l)) " " (code (leg/to l)) " "
+                        (leg/dep l) " " (leg/block l) " " (+ 90 (roll seed :passengers (leg/n l) 90)) ")\n"))
+         legs)
+    (tty/write \n)
+    (map (lambda (c) (match c ((in out n) (tty/write "(:connect " (q (flight in)) " " (q (flight out)) " " n ")\n")))) connects)
+    (tty/write \n)
+    (map (lambda (l) (when (< (roll seed :wind (leg/n l) 100) 12)
+                         (tty/write "(:wind " (q (flight l)) " " (+ 3 (roll seed :gust (leg/n l) 12)) ")\n")))
+         legs)
+    (tty/write "(:closed " (code 0) " 600 630)\n"
+               "(:closed " (code (+ (hub-count) 6)) " 840 860)\n\n")
+    ; The what-ifs: flights late, by a little and a lot; a hub closed for
+    ; two hours, and quicker turns there after it; an aircraft out of
+    ; service; a storm at a hub in the evening, and quicker turns after
+    ; it; a second delay on top of the first; and a spoke closed.
+    (let into-0 (first-flight (lambda (l) (and (== (leg/to l) 0) (>= (leg/dep l) 540))) legs))
+    (tty/write "(:branch \"b1\" \"base\" (:delay " (q into-0) " 45))\n"
+               "(:branch \"b2\" \"base\" (:delay " (q (first-flight (lambda (l) (and (== (leg/from l) 1) (>= (leg/dep l) 720))) legs)) " 120))\n"
+               "(:branch \"b3\" \"base\" (:close " (code 1) " 660 780))\n"
+               "(:branch \"b4\" \"b3\" (:quick-turn " (code 1) " 780 900 25))\n"
+               "(:branch \"b5\" \"base\" (:out-of-service " (q (tail 7)) " 600))\n"
+               "(:branch \"b6\" \"base\" (:close " (code 0) " 1020 1050))\n"
+               "(:branch \"b7\" \"b6\" (:quick-turn " (code 0) " 1050 1140 30))\n"
+               "(:branch \"b8\" \"base\" (:delay " (q (flight (car legs))) " 15))\n"
+               "(:branch \"b9\" \"b1\" (:delay "
+               (q (first-flight (lambda (l) (and (== (leg/to l) 0) (>= (leg/dep l) 560) (ne? (flight l) into-0))) legs)) " 60))\n"
+               "(:branch \"b10\" \"base\" (:close " (code (+ (hub-count) 11)) " 720 780))\n\n")
+    (list :day seed (length legs) (length connects)))
+
+(write-day (match @ARGV ((s & _) (string->int s)) (_ 1)))

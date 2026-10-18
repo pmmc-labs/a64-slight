@@ -1,0 +1,20 @@
+; clock/us (D208): the microseconds since the program started, on the
+; clock the timers go by. On the virtual clock (t/run.sh sets it) it
+; moves only as the timers do, straight to the next one due, so it's
+; exact here: 0 till the first sleep.
+
+(defun spin (n) (if (== n 0) (clock/us) (spin (dec n))))
+
+(pprint (clock/us))
+(pprint (spin 100000))                  ; work takes no time on this clock
+(sleep 50)
+(pprint (clock/us))
+
+; A process sees the same clock; its timer moves it for everyone.
+(let p (fork (do (sleep 20) (clock/us))))
+(pprint (join p))
+(after 5 $$ :tick)
+(recv (:tick (pprint (clock/us))))
+
+; A builtin like any other, as a value.
+(pprint (apply clock/us ()))

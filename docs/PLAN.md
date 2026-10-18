@@ -661,7 +661,10 @@ run, branch it at a point with something changed, and keep only what the
 branch changed (`new-vision.md` in ts-cpi: "record only what cannot be
 recomputed"). Begun with `examples/airline.slight` (D207), which does it
 in slight on today's runtime, each branch run again from the start of
-the day. Next, each a proposal first: an input journal of values beside
+the day. At the size of a small airline (D210: 300 aircraft, 1,499
+legs, ten what-ifs), the whole run is under 3 s on the cloud machine,
+and half the branches' time is the minutes before their changes, which
+forking at the change would save. Next, each a proposal first: an input journal of values beside
 `SLIGHT_RECORD`'s log of system calls, its requests checked so that a
 replay finds the first real difference; replaying to a point and then
 going on live; forking a run at a point with `fork(2)`, a branch to a
@@ -676,7 +679,10 @@ with Stevan first.
 
 - **Bit operations on integers.** Hashing (a hash trie of tuples, for a
   fast dictionary), random number generators (and with them property
-  tests), and binary protocols all need them, and slight has none. And,
+  tests), and binary protocols all need them, and slight has none.
+  `hash` (D209) covers hashing a value, and random numbers made as
+  hashes (`examples/airline-gen.slight`); a hash trie, a generator
+  that's fast, and binary protocols still want them. And,
   or and xor work on tagged words as they are, so they can be inline;
   shifts untag and retag. To settle: the names (`bit/and` and so on, as
   `utf8/`), what a shift does past 63 bits (fault, as arithmetic

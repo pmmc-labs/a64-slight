@@ -504,6 +504,10 @@ rt_value_t rt_raise(rt_value_t reason, const char *site) RT_ASM(rt_raise);
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_after);
 rt_value_t rt_sleep(rt_value_t ms, const char *site) RT_ASM(rt_sleep);
 
+// (clock/us): the microseconds since the program started, on the clock
+// the timers go by (D208).
+rt_value_t rt_clock_us(const char *site) RT_ASM(rt_clock_us);
+
 // Makes room for `bytes` in the current process's heap: a new chunk.
 // Faults at `site` when the heap would pass its limit.
 void rt_heap_grow(uint64_t bytes, const char *site) RT_ASM(rt_heap_grow);
@@ -523,6 +527,10 @@ rt_value_t rt_pprint(rt_value_t v) RT_ASM(rt_pprint);
 // eq? for two values that aren't the same word: RT_TRUE if they're
 // structurally equal, RT_FALSE if not.
 rt_value_t rt_equal(rt_value_t a, rt_value_t b) RT_ASM(rt_equal);
+
+// (hash v): a non-negative integer, the same for values that are eq?, and
+// the same on every run, target and machine (D209).
+rt_value_t rt_hash(rt_value_t v, const char *site) RT_ASM(rt_hash);
 
 // Builtins written in C (strings.c). Each takes the call's site last, for
 // its faults. The variadic ones (concat, tty/write) take their arguments

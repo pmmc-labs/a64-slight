@@ -3406,3 +3406,111 @@ changes and those of the branches they're on. Golden, from
   model's to say; rejoining within a tolerance, which is a judgment, not
   a guarantee; and airports as processes, which this model doesn't need,
   the desk keeping the passengers' books.
+
+**D208. `clock/us`.** *(Stevan, Oct 2026: "let's make sure we capture
+timing information", for the airline at the size of a small airline;
+`clock/us` agreed, after options.)* `(clock/us)` is the microseconds
+since the program started, an integer, on the clock the timers go by:
+`now()` in `process.c`, the monotonic clock read through `replay.c`, so
+a recorded run replays with the same readings; or, on the virtual clock,
+the virtual one, which moves only as the timers do, so a golden test can
+check it exactly (`t/255`). Before it, the only clock a program could
+read was `:system`'s `(:clock ms)`: a device's answer, so only where a
+`recv` can go, and in milliseconds. Rejected: nanoseconds, which claim
+more than macOS's monotonic clock gives, where a part of a run worth
+timing takes tens of microseconds or more; milliseconds as a float, the
+timers' unit, but a float where everything else about time is an
+integer; CPU time, which on one core, for work that never waits, is
+the time the clock gives, and which `bench/rusage.c` measures from
+outside; and the time of day, which nothing has needed (`lib/http.slight`
+still sends no Date).
+
+**D209. `hash`.** *(Stevan, Oct 2026: "hash", after options, for the
+airline's digests at the size of a small airline: three hundred
+aircraft make a minute's digest some 20 KB with integer ids, 23 MB a
+day, copied into every branch that compares with it, and a history of
+dozens of branches would pass the heap's cap.)* `(hash v)` is a
+non-negative integer for any value, the same for values that are `eq?`,
+and the same on every run, target and machine: the value's words, as
+`eq?` walks it, through splitmix64's mixer (DESIGN.md says the words).
+A symbol and a function are hashed by name and a pid by its number,
+never by an address, which differs from run to run and moves with the
+collector. Pinned in `t/254`, from `t/models/hash.py`.
+
+- **What it costs:** equal hashes don't prove equal values. At 62 bits,
+  a false match in a thousand branches compared at a thousand minutes
+  each is about one chance in 10^12; it's the bargain git makes for its
+  objects' names, and LANGUAGE.md says it.
+- **Not seeded,** so that a hash kept in a file still means the same
+  value; so it's no defense against keys picked to collide, and a table
+  keyed by them shouldn't use it.
+- **Rejected:** keeping exact digests, which fit for a handful of
+  branches and not for the history the airline is for; and keeping only
+  what changes each minute, with the aircraft that differ from the run
+  compared with counted, which is exact and small but more machinery in
+  every simulation that wants it; a seeded hash, which a file couldn't
+  keep; and a cryptographic one, slower, for an adversary there isn't.
+
+**D210. The airline at the size of a small airline.** *(Stevan, Oct
+2026: "300 airplanes, 100 airports, and around 1500 daily flights ...
+I just want to see how slight might perform", with timing, no Python
+model, and builtins added rather than worked around: `clock/us` (D208)
+and `hash` (D209); string sorting later; where the what-ifs live left to
+Claude.)* `examples/airline-gen.slight` makes such a day: 300 aircraft,
+each of a hub's, out to spokes and back, five legs; 100 airports, four
+of them hubs; 1,499 legs and 2,287 connections for seed 1, and ten
+what-ifs naming its flights. Its random numbers are hashes of (seed what
+which), so nothing is threaded from one to the next. A made-up day has
+no record, so `airline --record` prints the base's, to append. The
+example itself, rewritten for the size, prints what it printed for the
+five aircraft (`t/models/airline.py` still makes the expected output):
+
+- **Numbers, not names:** aircraft, legs and connections are numbered
+  in the file's order, and each leg's connections in and out are tuples
+  by number, so a minute's work is what happens in it.
+- **A digest that doesn't depend on order:** each aircraft hashes its
+  number and state, each waiting connection its number and how long
+  till boarding, and the parts are added modulo 2^61 - 1, so nothing is
+  sorted. The first version sorted the 300 answers and the waiting
+  passengers every minute, for a canonical order: 28 per cent of the
+  instructions. Two minutes that differ add up alike only by chance, as
+  with `hash`.
+- **The what-ifs in the data file,** `(:branch name parent change)`,
+  so a generated day names its own flights; the small day's moved there
+  too, and the model reads them from it.
+- **`--time`** prints, to stdout (slight can't write to stderr), how
+  long the day took to read, and each run: its milliseconds, its
+  microseconds a minute, and its messages a second; and how much of the
+  branches' time was the minutes before their changes. No golden test
+  has it; timings vary.
+- **Measured** on the cloud machine, x86-64, three runs: reading the
+  day 54 ms; the base 311 to 346 ms, about 300 µs a minute, so a
+  microsecond for an aircraft's minute, its tick and its answer, about
+  1.9 million messages a second; the ten branches 2.2 to 2.5 s, 1.15 to
+  1.35 of it the minutes before their changes; the whole run 2.6 to 2.9
+  s, at most 84 MB. The same output on AArch64 under qemu, and under
+  `SLIGHT_SCHED` seeds 1 to 5.
+- **What it found,** biggest first. A fork copies whole each local its
+  expression names, and `simulate` named the day in each aircraft's: the
+  day 300 times a run, 6.6 s and 247 MB to 4.3 s and 82 MB once each
+  aircraft was given only its part; LANGUAGE.md now says so. The sort,
+  above: 4.3 s to 2.9. Then memory: a message with something to copy is
+  dead space in its taker's old generation, and so is what a minor
+  collection promoted and was dropped after, till a major collection,
+  which a heap under 256 KB never has (D106, `GC_MIN`); so each aircraft
+  can keep up to that much. Bare integers for ticks (freed as taken,
+  D199) make the 84 MB 61; and a program of the same shape and nothing
+  else, 300 processes ticked 1,080 times, holds 56 MB with ticks that
+  are lists and 20 with integers. So most of it is the collector's
+  policy, which is left for Stevan; the example keeps `(:tick t)`, as a
+  tick would be written. And reading the day: association lists searched by
+  name, a string compare at each step, about a quarter of the
+  instructions of the day read and the base flown, which an ordering of
+  strings or a map would cut.
+- **Checked** by `t/live.py` (`make live`), on both targets: the
+  generator's day, its 1,499 legs all landing in the base's record, the
+  same record in a seeded order.
+- **Rejected:** the generator as a golden test (300 KB of output, which
+  the live check runs instead); timings in a golden test, on the
+  virtual clock, where work takes no time; and the day in `bench/`,
+  whose programs are each written in several languages.

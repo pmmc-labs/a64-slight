@@ -72,7 +72,8 @@ printf 'abq' | run SLIGHT_REPLAY_TEST=recorded SLIGHT_RECORD="$dir/world.record"
 rm -f "$dir/in.txt" "$dir/out.txt"
 run SLIGHT_REPLAY="$dir/world.record" world other args </dev/null >"$dir/world.replayed"
 if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(ok ("line one" "line two"))$' "$dir/world.recorded" \
-   && grep -q '^(env "recorded")$' "$dir/world.recorded"; then
+   && grep -q '^(env "recorded")$' "$dir/world.recorded" \
+   && grep -q '^(clock #true [0-9]*)$' "$dir/world.recorded"; then
     check "world replays as recorded" ok
 else
     diff -u "$dir/world.recorded" "$dir/world.replayed"

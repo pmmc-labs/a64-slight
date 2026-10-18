@@ -353,8 +353,11 @@ by every process.
 
 Starts a new process that evaluates `expr`, and returns its pid. The
 locals `expr` uses are deep-copied into the new process, at most 8 of
-them. Inside `expr`, `$$` is the new process. `expr` may tail-call a
-function that waits in `recv`, which is the usual way to start an actor:
+them. A local is copied whole, however little of it `expr` uses, so a
+big one is worth narrowing first: `(let mine (part-of big i))`, then
+`(fork (worker mine))`. Inside `expr`, `$$` is the new process. `expr`
+may tail-call a function that waits in `recv`, which is the usual way to
+start an actor:
 
     (let c (fork (counter 0)))
 
@@ -662,6 +665,13 @@ Both take an integer, and a negative one counts as 0. Timers due at the
 same time fire in the order they were set. A pending timer keeps the
 program running, and one for a process that has ended is dropped when
 it's due.
+
+- `(clock/us)`: the microseconds since the program started, an integer,
+  on the clock the timers go by. It's for timing a part of a program:
+  `(let t0 (clock/us))`, then `(- (clock/us) t0)` after it. It isn't the
+  time of day. On the virtual clock (Running a program) it moves only
+  as the timers do, so work takes no time on it; and a recorded run
+  replays with the same readings.
 
 ### Scheduling
 
@@ -1062,6 +1072,16 @@ Integers and floats mix: if either operand is a float, so is the result.
   lists element by element, strings byte by byte, floats by value.
   An integer is never `eq?` to a float, so `(eq? 1 1.0)` is `#false`.
   Functions are `eq?` only to themselves, and pids to the same pid.
+- `(hash v)`: a non-negative integer for any value, the same for values
+  that are `eq?` (`0.0` and `-0.0` included), and the same on every run,
+  target and machine, so a hash kept in a file means the same value
+  later. Two values that aren't `eq?` hash alike only by chance, about
+  once in 2^62: a hash can stand in for a big value where that chance
+  will do, as git's names for its objects do, to keep and compare
+  digests of a simulation's state, say. A symbol and a function hash by
+  their names, so two closures of one `lambda` hash alike, and a pid by
+  its number. It isn't seeded, so it's no help against keys picked to
+  collide.
 
 ### Predicates
 

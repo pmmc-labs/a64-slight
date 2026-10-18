@@ -1,0 +1,48 @@
+; hash (D209): values that are eq? hash alike, and two that aren't hash
+; alike only by chance, about once in 2^62. A hash is the same on every
+; run, target and machine, so the numbers here are pinned: they come from
+; t/models/hash.py, which hashes the same values from the encoding
+; docs/DESIGN.md gives, not from this program.
+
+(defun twice (x) (* 2 x))
+
+(defun nest (n v) (if (== n 0) v (nest (dec n) (list v))))
+
+; An atom of each kind, () and #() among them, a list, a tuple and a nest
+; of them, a function and the root's pid.
+(map pprint (map hash (list 0 -1 4611686018427387903 -4611686018427387904 1.5 -0.0 "" "slight" "eight by"
+                            :ok #true () (tuple) (list 1 2 3) (tuple 1 2 3) (list (tuple "a" ()) 2.0 "b")
+                            twice $$)))
+
+; Nested 100000 deep, walked without the C stack.
+(pprint (hash (nest 100000 7)))
+
+; eq?, and so hashed alike: 0.0 and -0.0, a string made two ways, a list
+; made two ways.
+(pprint (list (== (hash 0.0) (hash -0.0))
+              (== (hash (concat "sl" "ight")) (hash "slight"))
+              (== (hash (list 1 (list 2) 3)) (hash (cons 1 (cons (cons 2 ()) (cons 3 ())))))))
+
+; Not eq?, and hashed apart: an integer and a float, a string and a
+; symbol, () and #(), a list and a tuple, the same atoms nested
+; differently, the same bytes cut differently.
+(pprint (list (== (hash 1) (hash 1.0))
+              (== (hash "ok") (hash :ok))
+              (== (hash ()) (hash (tuple)))
+              (== (hash (list 1 2)) (hash (tuple 1 2)))
+              (== (hash (list (list 1) 2)) (hash (list 1 (list 2))))
+              (== (hash (list "ab" "c")) (hash (list "a" "bc")))))
+
+; The same after the value is copied in a message, and after the
+; collector has moved it.
+(defun hasher ()
+    (recv ((from v) (send from (hash v)) (hasher))))
+
+(let v (list (tuple "a" 1.5 twice) :ok (list 2 3)))
+(let before (hash v))
+(let h (fork (hasher)))
+(send h (list $$ v))
+(pprint (recv (n (== n before))))
+(dotimes 0 20 (lambda (i) (length (range 0 100000))))
+(pprint (== (hash v) before))
+(kill h)

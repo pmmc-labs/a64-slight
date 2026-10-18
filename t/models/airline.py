@@ -7,7 +7,8 @@
 # each branch, rerun from the start with its change and those of its
 # ancestors, compared minute by minute with each ancestor, oldest first,
 # from the end of the changes between them, and stopped at the first
-# match. Everything is an integer: minutes, kilograms, passengers.
+# match. Everything is an integer: minutes, kilograms, passengers. The
+# branches, the what-ifs, are in the file too.
 #
 # With --record it prints the (:flew flight off on) lines the base gives,
 # which is where the data file's record came from: a made-up day has no
@@ -17,14 +18,6 @@ import sys
 
 TURN, CONNECT, START, END = 40, 30, 360, 1440
 FUEL_OFF, FUEL_MINUTE = 300, 40
-
-BRANCHES = [
-    ('b1', 'base', ['delay', 'SL201', 55]),
-    ('b2', 'base', ['close', 'ORD', 690, 840]),
-    ('b3', 'base', ['out-of-service', 'N104', 600]),
-    ('b4', 'b2', ['quick-turn', 'ORD', 780, 900, 20]),
-]
-
 
 def parse(text):
     """The s-expressions in text, as lists, strings and ints; a keyword is
@@ -81,6 +74,7 @@ class Day:
         self.wind = {r[1]: r[2] for r in records if r[0] == 'wind'}
         self.closed = [(r[1], r[2], r[3]) for r in records if r[0] == 'closed']
         self.flew = {r[1]: (r[2], r[3]) for r in records if r[0] == 'flew'}
+        self.branches = [(r[1], r[2], r[3]) for r in records if r[0] == 'branch']
 
 
 def window(change, day):
@@ -213,7 +207,7 @@ def main():
     # being its ancestor's (the totals moved by what it had changed)
     runs = {'base': dict(changes=[], parent=None, digests=digests, totals=by_minute)}
     history, simulated, own = [], 0, 0
-    for name, parent, change in BRANCHES:
+    for name, parent, change in day.branches:
         path = [parent]
         while runs[path[-1]]['parent'] is not None:
             path.append(runs[path[-1]]['parent'])
@@ -223,7 +217,7 @@ def main():
         for a in ancestors:
             # the changes between a and this branch: those of the runs after
             # a on the path, and this one's
-            between = [b for b in BRANCHES if b[0] in ancestors[ancestors.index(a) + 1:]] + [(name, parent, change)]
+            between = [b for b in day.branches if b[0] in ancestors[ancestors.index(a) + 1:]] + [(name, parent, change)]
             targets.append((a, runs[a]['digests'], max(window(b[2], day)[1] for b in between)))
         changes = runs[parent]['changes'] + [change]
         mine, totals, _, stop, rejoined = run(day, changes, targets)

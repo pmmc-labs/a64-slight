@@ -131,6 +131,34 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The airline at a small airline's size (D210)
+
+Not a benchmark of the others' kind, since it's only in slight:
+`examples/airline.slight --time` on a day from
+`examples/airline-gen.slight` (seed 1: 300 aircraft, 1,499 legs, 2,287
+connections, ten what-ifs). Each minute the desk ticks every aircraft and
+hears from each, so a run of the day is 324,000 aircraft-minutes and
+648,000 messages. On the cloud machine, x86-64, three runs:
+
+- reading the day: 54 ms;
+- the base: 311 to 346 ms, about 300 µs a minute, a microsecond an
+  aircraft-minute, 1.9 million messages a second;
+- the ten branches: 2.2 to 2.5 s, of which 1.15 to 1.35 s on the
+  minutes before their changes, which forking at the change would save;
+- the whole run: 2.6 to 2.9 s, at most 84 MB.
+
+A program of the same shape with nothing else, 300 processes ticked
+1,080 times, takes 80 to 270 ms and 56 MB, so the model is about half
+of a minute's time. The M2 Max's numbers are to come.
+
+```
+node bin/slightc.ts -o build/airline-gen examples/airline-gen.slight
+node bin/slightc.ts -o build/airline examples/airline.slight
+build/airline-gen > build/day.sexp
+build/airline --record build/day.sexp >> build/day.sexp
+build/airline --time build/day.sexp
+```
+
 ### The M2 Max after D203
 
 `bench/results/2026-10-17-1311-macos-apple-m2-max.md`, at `448aa6d`: a
@@ -465,7 +493,10 @@ to under 2. The M2's runs after each are above.
 - **A busy process's garbage:** a heap under 256 KB (`GC_MIN`) is never
   collected, so each of `thread-ring`'s 503 processes kept up to that
   much of its messages' chunks: 266 MB, where Erlang needs 37. Done for
-  messages with nothing to copy (D199): 2.6 MB.
+  messages with nothing to copy (D199): 2.6 MB. Not for messages with
+  something in them, nor for what minor collections promote and is
+  dropped after: the airline's 300 aircraft, ticked with `(:tick t)`
+  each minute, hold 84 MB, 61 with bare integers (D210).
 - **One structure's size:** done (D202). A heap's cap is 1 GB, or what
   `SLIGHT_HEAP_MAX` says, where it was 64 MB, which held a structure of
   about 56 MB at most. The cost: a major collection takes 0.5 to 1 ms
