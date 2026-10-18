@@ -3874,6 +3874,28 @@ the program each.
   7.1 times as fast on 8 cores, 13 on 16, 22 on 32, 39 on 64 and 57 on
   128, the slowest share setting the pace. The model said 77.1 s for
   two shares and 39.4 s for four, where they took 74.7 and 38.0.
+- **Measured on the M2 Max** (Stevan's run, 12 cores, 8 of them
+  performance cores and 4 efficiency): 63.2 s in one copy, 34.0 in two
+  (1.86 times as fast), 19.3 in four (3.27), 11.0 in eight (5.77) and
+  9.9 in twelve (6.37), every set the same as one copy. The model's
+  split holds; what it leaves out is that the copies slow each other as
+  the cores fill: their CPU together grows 1.07 times with two, 1.19
+  with four, 1.27 with eight and 1.58 with twelve, and the model's
+  speed-up divided by that is 1.85, 3.25, 5.58 and 6.36, as measured.
+  Eight copies on the performance cores take 1.27 times as long each
+  as one alone; on an efficiency core a share takes about 2.2 times as
+  long. Dealing many small shares to whichever core is free, from one
+  base kept beforehand, would gain about a tenth (a model: 7.1 times
+  with 96 shares), since macOS already moves copies off the efficiency
+  cores as the others finish; so it isn't done.
+- **Memory on the M2 Max:** a copy peaks at about 820 MB and 0.95 MB a
+  run it holds, where on Linux it's 46 MB and 0.77 MB a run, so twelve
+  copies peak at 8 GB in all. The stacks aren't it (pooled, a page or
+  two of each touched). Likely, though not yet checked, macOS's
+  allocator: the heaps of each run's 301 processes are freed when it
+  ends, and freed memory there stays counted as resident until the
+  system wants it. `/usr/bin/time -l` gives the peak memory footprint
+  beside the peak resident set, which would tell.
 - **Checked:** `t/260` (`--random 40 --seed 7 --shard 2/3`), from
   `t/models/airline.py`, which shares the what-ifs by its own reading of
   the rule; the program and the model agree on other shares; and a live
@@ -3881,7 +3903,8 @@ the program each.
   does, and simulate as many minutes.
 - **Not yet:** the recovery in shares, which needs a step after them,
   since the rounds and the services want every remedy's measures at
-  once; and the Mac's cores (12) measured.
+  once; and why the copies slow each other on the M2 Max, and what its
+  memory really is.
 - **Rejected for now:** forking the runtime itself at a branch (fork(2)),
   which shares the base without running it again but needs the runtime
   to know about it; and the runtime on many cores, whose own step is

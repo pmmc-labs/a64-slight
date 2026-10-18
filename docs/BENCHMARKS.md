@@ -213,8 +213,22 @@ the cloud machine's 4 cores:
 - 8, more copies than cores: 40.2 s.
 
 Modelled from each what-if's measured time, the slowest share setting
-the pace: 7.1 times as fast on 8 cores, 13 on 16, 22 on 32, 39 on 64. The
-M2 Max's 12 cores are to come.
+the pace: 7.1 times as fast on 8 cores, 13 on 16, 22 on 32, 39 on 64.
+
+On the M2 Max (12 cores: 8 performance, 4 efficiency), Stevan's run:
+
+| Copies | Wall | Speed-up | CPU in all | Peak a copy | In all |
+|---|---|---|---|---|---|
+| 1 | 63.2 s | 1.00 | 63.0 s | 1,696 MB | 1,696 MB |
+| 2 | 34.0 s | 1.86 | 67.4 s | 1,428 MB | 2,754 MB |
+| 4 | 19.3 s | 3.27 | 75.1 s | 1,172 MB | 4,420 MB |
+| 8 | 11.0 s | 5.77 | 80.0 s | 895 MB | 6,512 MB |
+| 12 | 9.9 s | 6.37 | 99.7 s | 788 MB | 8,066 MB |
+
+One copy is 2.4 times as fast as the cloud machine's. The copies slow
+each other as the cores fill (the CPU in all grows), and the model's
+speed-up divided by that growth is what was measured (D218). A copy's
+memory there is about 820 MB more than on Linux, whatever its share.
 
 ```
 bench/airline.py --random 10,100,1000
