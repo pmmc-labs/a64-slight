@@ -3586,3 +3586,68 @@ included. So `examples/airline.slight` keeps what it works out:
   keeping a rejoined run's checkpoints past its rejoining, which are its
   target's; and replaying a record with its branches edited, which is
   only running it again.
+
+**D213. The airline recovering from a disruption, with services.**
+*(Stevan, Oct 2026: when a disruption happens, "run the simulation with
+many branches, find the best ones, check them against crews, maint
+schedules ... then rank the choices", the checking and ranking by
+outside models or web services, "This keeps the PII out of slight";
+then "Yes, lets get started" on Claude's first step.)* Slight stays an
+operational simulator; crews, maintenance and passengers stay with the
+systems that know them.
+
+- **Two changes and a rule in the model.** `(:cancel flight)`, at the
+  flight's departure; `(:swap a b minute)`, the two aircraft taking each
+  other's legs ahead at that minute, the desk asking each for its legs
+  and giving them to the other before the minute's tick. And a leg is
+  cancelled at its departure if its aircraft isn't where it leaves from,
+  or is withdrawn, so cancelling a leg out cancels the leg back. Both
+  changes make a difference only at their minute. Each leg flown keeps
+  the aircraft that flew it, `(off on aircraft)`, and the model is at
+  version 2, so older histories aren't used.
+- **The digest now holds every aircraft's next leg,** in the air too,
+  and withdrawn. Before swaps an aircraft's legs ahead followed from
+  which it was and the leg it was on; a swap broke that, and a swap with
+  both aircraft in the air rejoined the base a minute later, wrongly.
+  The next leg says what's ahead: the rest of the legs it was planned
+  with, which a swap moves together. The report didn't change.
+- **`--recover file`:** the disruption a branch of the base; remedies,
+  each a branch of the disruption from when it's known, asked for in
+  the file or made: holds of 15, 30 and 45 minutes for each flight
+  leaving later that passengers connect to, a cancellation of each such
+  flight, and a swap for each two aircraft at the first minute they're
+  both on the ground at one airport. Then rounds: the candidates, doing
+  nothing among them, that no other left is better than in all of
+  passenger-minutes late, connections missed and seats cancelled go to
+  the crew and maintenance services, till the budget (`(:check n)`) has
+  been sent; those that pass go to the ranking service. Rounds, not one
+  front: in the test's disruption, holding SL102 15 minutes, the best
+  that passes, is bettered by swaps that fail, and a single front
+  never sent it.
+- **What a service is sent** is every leg's flight, aircraft, times and
+  fate, as JSON; nothing of anyone. It answers with reasons, about
+  flights and aircraft, or with a cost and what makes it up.
+- **Stand-ins,** in slight, in `examples/airline-services.slight`, as
+  HTTP handlers knowing the plan: crews, each aircraft's first two legs
+  and its rest, at the same airport, with 30 minutes between, and on
+  duty at most 470 minutes from 45 before to 15 after; maintenance,
+  each aircraft ending the day where its plan does; a cost of refunds,
+  missed connections, compensation and minutes late. `--recover` starts
+  them itself, on ports the system picks, unless `(:services crew
+  maintenance rank)` gives URLs.
+- **Checked:** `t/256`, the whole of it on the small day over HTTP, from
+  `t/models/airline.py --recover`, which runs every candidate from the
+  start of the day and has the stand-ins' rules too; the same under
+  `SLIGHT_SCHED` seeds 1 to 6, `SLIGHT_GC_STRESS=7` and
+  `SLIGHT_GC_VERIFY`; the new changes against the model on branches of
+  their own; and the report and the record unchanged. On the real clock
+  the whole recovery takes 0.15 s.
+- **Not yet:** the remedies made are every one of their kind, which
+  suits a small day; a big one would make tens of thousands, so they
+  need choosing, near the disruption or sampled, and running on more
+  than one core. HTTPS waits for TLS (12c), so a service is plain HTTP
+  or reached through curl.
+- **Rejected:** crews, maintenance and passengers in the simulation
+  (Stevan's call: they stay with their systems); one front of the
+  measures, for the reason above; and a cost of the simulator's own to
+  rank by, which is the ranking service's to say.

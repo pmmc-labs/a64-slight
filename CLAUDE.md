@@ -80,14 +80,19 @@ is a character of its own, as in Go), with `ord` and `chr` in the
 prelude, and `string->float` (D148).
 `examples/` has twenty-three example programs (all but
 `ping-pong-tournament`, `top`, `chat` and `airline-gen` are golden
-tests); new ones are written when they're wanted (D149), the latest
+tests), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149), the latest
 `airline`, a simulated day branched with what-ifs, each run till it
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it
 runs, timed with `--time`, in under 3 s (D210); with `--json` it
 writes every run's minutes and flights out, for charts (D211); and it
 starts each branch from a checkpoint, and keeps its runs in a file for
-a later round of branches to start from (`--keep`, `--from`, D212).
+a later round of branches to start from (`--keep`, `--from`, D212); and
+with `--recover`, tries remedies for a disruption, cancellations and
+swaps among them, has services check the best and rank those that pass,
+over HTTP, with stand-ins for the services in
+`examples/airline-services.slight`, which it includes (D213, golden test
+256).
 Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
