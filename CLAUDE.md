@@ -76,9 +76,11 @@ interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 beside the byte builtins, the `utf8/` ones count characters (a bad byte
 is a character of its own, as in Go), with `ord` and `chr` in the
 prelude, and `string->float` (D148).
-`examples/` has twenty-one example programs (all but
+`examples/` has twenty-two example programs (all but
 `ping-pong-tournament`, `top` and `chat` are golden tests); new ones are
-written when they're wanted (D149).
+written when they're wanted (D149), the latest `airline`, a simulated day
+branched with what-ifs, each run till it rejoins the run it came from
+(D207).
 Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,

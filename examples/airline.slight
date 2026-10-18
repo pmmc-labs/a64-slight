@@ -1,0 +1,415 @@
+; airline: a day of a small airline, simulated from its record, then
+; branched. What if a flight had left late, the hub had closed for a
+; while, an aircraft had broken down? Each branch is the day again with
+; one change, and those of the branches it's on, compared minute by minute
+; with the runs it branched from. Once it's the same as one of them, after
+; its change has stopped making a difference to what comes in, the rest
+; of its day is that run's, so it stops there. What's kept of a branch is
+; small: its change, where it rejoined, and what it came to. Kept for each,
+; that's a history like git's, printed at the end, which the next round of
+; what-ifs could start from.
+;
+;     node bin/slightc.ts -o airline examples/airline.slight
+;     ./airline                 (reads examples/airline-day.sexp)
+;     ./airline day.sexp
+;
+; The day, in examples/airline-day.sexp: five aircraft, their twenty legs
+; through a hub at ORD, the passengers changing planes there, the weather
+; (legs that flew long, an airport closed for a while), and the record of
+; when each flight left and landed. The base is the day as it was, and the
+; program checks that it flies every leg as the record says. (The record
+; is made up, from the model; a real one would be what the model is
+; calibrated against.)
+;
+; The model is in whole numbers (minutes from midnight, kilograms,
+; passengers), so that two runs that are the same are the same exactly.
+;
+; - An aircraft is a process, and a minute is a tick. Each minute the
+;   desk, the run's own process, tells every aircraft, and waits to hear
+;   from all of them, so between minutes nothing is in flight, and the
+;   whole day can be compared there.
+; - At its minute, an aircraft in the air lands if it's due and the
+;   airport is open, and otherwise holds; one going out of service is
+;   withdrawn once it's on the ground, its legs cancelled; and one at the
+;   gate leaves on its next leg once that's due, it's ready (40 minutes
+;   after landing), any delay is over, and the airport is open. A leg
+;   takes its block minutes, and any the wind added.
+; - Fuel: 300 kg a departure, and 40 for each minute in the air, holding
+;   included. Passengers: the minutes each flight lands late, times its
+;   passengers; connections missed, those whose first flight hadn't
+;   landed 30 minutes before the second left; and seats on legs
+;   cancelled.
+; - What the day is at a minute, its digest, is all that decides the rest
+;   of it: where each aircraft is, its next leg, and how long till it's
+;   ready or due; and the passengers waiting to change planes, and how
+;   long till they can. The totals aren't in it: what's been burnt, and
+;   who was late, don't change what happens next. So a branch that's the
+;   same as the base at a minute, with its change over, flies the rest of
+;   the day as the base does, and its totals stay what they were apart.
+; - A change makes a difference to what comes in for a while: a delay
+;   till the flight may leave, a closure while it lasts, quick turns while
+;   they apply, and an aircraft out of service till the end of the day.
+;   Before that a branch is its parent, minute for minute, which the
+;   program checks; after it, the branch is compared with each run it's
+;   on, oldest first.
+;
+; Each branch runs again from the start of the day. Forked from a copy of
+; its parent kept at that minute, it would run only its own part; the
+; last line says how much that would save. The expected output comes from
+; t/models/airline.py.
+
+; --- the model ----------------------------------------------------------------
+
+(defun start () 360)                    ; 06:00, the day's first minute
+(defun end () 1440)                     ; midnight, after its last
+(defun turn-minutes () 40)              ; from landing to ready to leave
+(defun change-minutes () 30)            ; from landing to boarding another flight
+(defun fuel-off () 300)
+(defun fuel-minute () 40)
+
+(defun within? (t from to) (and (<= from t) (< t to)))
+
+(defun open? (closed airport t)
+    (nil? (find (lambda (c) (match c ((a from to) (and (eq? a airport) (within? t from to))))) closed)))
+
+(defun turn (quick airport t)
+    (match (find (lambda (q) (match q ((a from to _) (and (eq? a airport) (within? t from to))))) quick)
+        (()        (turn-minutes))
+        ((_ _ _ m) m)))
+
+; --- the day's data -----------------------------------------------------------
+
+(defun reading (records)
+    (recv
+        ((:open f)   (send f (list :read :sexp)) (reading records))
+        ((:sexp f r) (reading (cons r records)))
+        ((:eof f)    (reverse records))))
+
+; The day: #(aircraft legs connects wind closed flew), each the records
+; of that kind, in the file's order, without their keyword. A leg is
+; #(flight aircraft from to departure block passengers).
+(defun day-of (records)
+    (let of (lambda (kind) (map cdr (filter (lambda (r) (eq? (car r) kind)) records))))
+    (tuple (of :aircraft) (map list->tuple (of :leg)) (of :connect) (of :wind) (of :closed) (of :flew)))
+
+(defun day/aircraft (day) (tuple/get day 0))
+(defun day/legs (day) (tuple/get day 1))
+(defun day/connects (day) (tuple/get day 2))
+(defun day/wind (day) (tuple/get day 3))
+(defun day/closed (day) (tuple/get day 4))
+(defun day/flew (day) (tuple/get day 5))
+
+(defun leg-of (day flight) (find (lambda (l) (eq? (tuple/get l 0) flight)) (day/legs day)))
+
+; The changes of one kind, without their keyword: (:close "ORD" 690 840)
+; is ("ORD" 690 840).
+(defun changes-of (kind changes) (map cdr (filter (lambda (c) (eq? (car c) kind)) changes)))
+
+(defun or-0 (v) (if (int? v) v 0))
+
+; --- an aircraft --------------------------------------------------------------
+
+; It knows #(tail closed quick out desk): which it is; when airports are
+; closed and turns are quick; when it goes out of service, or #false; and
+; the desk to tell. Its status is (:gate airport ready), (:air leg due) or
+; (:withdrawn airport), and its legs are those still ahead, each #(flight
+; from to earliest minutes): the earliest it may leave (its departure, and
+; any delay), and how long it takes (its block, and any wind).
+(defun aircraft (ctx status legs)
+    (recv
+        ((:tick t)
+            (match (list ctx (fly ctx t (tuple status legs () 0)))
+                ((#(tail _ _ _ desk) #(status2 legs2 events fuel))
+                    (send desk (list :done tail (list (digest-of tail status2 legs2 t) events fuel)))
+                    (aircraft ctx status2 legs2))))))
+
+(defun aircraft-context (day changes tail desk)
+    (let out (lookup tail (changes-of :out-of-service changes)))
+    (tuple tail (append (day/closed day) (changes-of :close changes)) (changes-of :quick-turn changes)
+           (if (int? out) out #false) desk))
+
+(defun legs-of (day changes tail)
+    (let delays (changes-of :delay changes))
+    (map (lambda (l)
+             (match l
+                 (#(flight _ from to dep block _)
+                     (tuple flight from to (+ dep (or-0 (lookup flight delays))) (+ block (or-0 (lookup flight (day/wind day))))))))
+         (filter (lambda (l) (eq? (tuple/get l 1) tail)) (day/legs day))))
+
+; Its minute t: it lands or holds, it's withdrawn, it leaves, as each
+; applies; now is #(status legs events fuel), events being what the desk
+; needs to know, (:arr flight), (:cancel flight) and (:dep flight), and
+; fuel what it burnt.
+(defun fly (ctx t now) (depart ctx t (withdraw ctx t (land ctx t now))))
+
+(defun land (ctx t now)
+    (match (list ctx now)
+        ((#(_ closed quick _ _) #((:air leg due) legs events fuel))
+            (match leg
+                (#(flight _ to _ _)
+                    (if (and (>= t due) (open? closed to t))
+                        (tuple (list :gate to (+ t (turn quick to t))) legs (cons (list :arr flight) events) fuel)
+                        (tuple (list :air leg due) legs events (+ fuel (fuel-minute)))))))
+        (_ now)))
+
+(defun withdraw (ctx t now)
+    (match (list ctx now)
+        ((#(_ _ _ out _) #((:gate airport _) legs events fuel))
+            (if (and (int? out) (>= t out))
+                (tuple (list :withdrawn airport) () (append (map (lambda (l) (list :cancel (tuple/get l 0))) legs) events) fuel)
+                now))
+        (_ now)))
+
+(defun depart (ctx t now)
+    (match (list ctx now)
+        ((#(_ closed _ _ _) #((:gate _ ready) (leg & rest) events fuel))
+            (match leg
+                (#(flight from _ earliest minutes)
+                    (if (and (>= t earliest) (>= t ready) (open? closed from t))
+                        (tuple (list :air leg (+ t minutes)) rest (cons (list :dep flight) events) (+ fuel (+ (fuel-off) (fuel-minute))))
+                        now))))
+        (_ now)))
+
+; Its part of the day's digest at t: where it is, and how long till it's
+; ready or due.
+(defun digest-of (tail status legs t)
+    (match status
+        ((:gate airport ready) (list :gate tail airport (match legs (() ()) ((l & _) (tuple/get l 0))) (max 0 (- ready t))))
+        ((:air leg due)        (list :air tail (tuple/get leg 0) (max 0 (- due t))))
+        ((:withdrawn airport)  (list :withdrawn tail airport))))
+
+; --- the desk -----------------------------------------------------------------
+
+; A run of the day: the desk is the run's own process, and the aircraft
+; are its children. It knows #(day pids targets): the day; the aircraft,
+; in the day's order; and the runs to compare with, each (name digests
+; from), oldest first. Each minute it tells the aircraft, hears from all
+; of them, and keeps the books, #(totals waiting gone flown digests
+; by-minute): the totals, (fuel late missed cancelled); the passengers
+; waiting to change planes, ((in out) ready), once their first flight has
+; landed; the flights that have left or been cancelled; when each flight
+; left and landed, (flight (off on)); and the digests and totals by
+; minute, newest first. It gives (stop rejoined digests totals flown):
+; the minute it stopped, the run it rejoined there (or () at the end of
+; the day), and the digests and totals by minute, as tuples.
+(defun simulate (day changes targets)
+    (let desk $$)
+    (let pids (map (lambda (a)
+                       (match a
+                           ((tail base)
+                               (fork (aircraft (aircraft-context day changes tail desk) (list :gate base 0) (legs-of day changes tail))))))
+                   (day/aircraft day)))
+    (minute (tuple day pids targets) (start) (tuple (list 0 0 0 0) () () () () ())))
+
+(defun minute (ctx t books)
+    (match ctx
+        (#(_ pids _)
+            (map (lambda (p) (send p (list :tick t))) pids)
+            (hear ctx t books (length pids) ()))))
+
+; What each aircraft said, as (tail (digest events fuel)).
+(defun hear (ctx t books left said)
+    (if (== left 0)
+        (settle ctx t books said)
+        (recv
+            ((:done tail what) (hear ctx t books (dec left) (cons (list tail what) said))))))
+
+(defun settle (ctx t books said)
+    (match ctx
+        (#(day _ targets)
+            (let events (fold/l () (lambda (acc s) (append (cadr (cadr s)) acc)) said))
+            (let kept (keep-books day t (burnt books (sum (map (lambda (s) (caddr (cadr s))) said))) events))
+            (let digest (list (map (lambda (a) (car (lookup (car a) said))) (day/aircraft day))
+                              (waiting-digest day (tuple/get kept 1) t)))
+            (let books2 (record kept digest))
+            (let matched (find (lambda (g) (match g ((_ theirs from) (and (>= t from) (eq? (tuple/get theirs (- t (start))) digest)))))
+                               targets))
+            (cond
+                ((cons? matched)    (finish ctx t books2 (car matched)))
+                ((== (inc t) (end)) (finish ctx t books2 ()))
+                (#true              (minute ctx (inc t) books2))))))
+
+(defun finish (ctx t books rejoined)
+    (match (list ctx books)
+        ((#(_ pids _) #(_ _ _ flown digests by-minute))
+            (map kill pids)
+            (list t rejoined (list->tuple (reverse digests)) (list->tuple (reverse by-minute)) flown))))
+
+(defun burnt (books kg)
+    (match books
+        (#((fuel late missed cancelled) waiting gone flown digests by-minute)
+            (tuple (list (+ fuel kg) late missed cancelled) waiting gone flown digests by-minute))))
+
+(defun record (books digest)
+    (match books
+        (#(totals waiting gone flown digests by-minute)
+            (tuple totals waiting gone flown (cons digest digests) (cons totals by-minute)))))
+
+; The books after minute t's events: arrivals, then departures, then
+; cancellations, so that passengers who land as their next flight leaves
+; miss it.
+(defun keep-books (day t books events)
+    (let of (lambda (kind) (map cadr (filter (lambda (e) (eq? (car e) kind)) events))))
+    (fold/l (fold/l (fold/l books (lambda (b f) (on-arrival day t b f)) (of :arr))
+                    (lambda (b f) (on-departure day t b f)) (of :dep))
+            (lambda (b f) (on-cancel day b f)) (of :cancel)))
+
+(defun on-arrival (day t books flight)
+    (match (list (leg-of day flight) books)
+        ((#(_ _ _ _ dep block pax) #((fuel late missed cancelled) waiting gone flown digests by-minute))
+            (let connecting (filter (lambda (c) (match c ((in out _) (and (eq? in flight) (not (member? out gone))))))
+                                    (day/connects day)))
+            (tuple (list fuel (+ late (* (max 0 (- t (+ dep block))) pax)) missed cancelled)
+                   (append (map (lambda (c) (list (list (car c) (cadr c)) (+ t (change-minutes)))) connecting) waiting)
+                   gone (assoc flight (list (car (lookup flight flown)) t) flown) digests by-minute))))
+
+(defun on-departure (day t books flight)
+    (match books
+        (#((fuel late missed cancelled) waiting gone flown digests by-minute)
+            (let broken (sum (map (lambda (c)
+                                      (match c
+                                          ((in out n)
+                                              (let ready (lookup (list in out) waiting))
+                                              (if (and (int? ready) (<= ready t)) 0 n))))
+                                  (filter (lambda (c) (eq? (cadr c) flight)) (day/connects day)))))
+            (tuple (list fuel late (+ missed broken) cancelled)
+                   (remove (lambda (w) (eq? (cadr (car w)) flight)) waiting)
+                   (cons flight gone) (assoc flight (list t ()) flown) digests by-minute))))
+
+(defun on-cancel (day books flight)
+    (match (list (leg-of day flight) books)
+        ((#(_ _ _ _ _ _ pax) #((fuel late missed cancelled) waiting gone flown digests by-minute))
+            (tuple (list fuel late missed (+ cancelled pax))
+                   (remove (lambda (w) (eq? (cadr (car w)) flight)) waiting)
+                   (cons flight gone) flown digests by-minute))))
+
+; The waiting part of the digest: each connection with passengers
+; waiting, in the day's order, and how long till they can board.
+(defun waiting-digest (day waiting t)
+    (map (lambda (c) (list (car c) (cadr c) (max 0 (- (lookup (list (car c) (cadr c)) waiting) t))))
+         (filter (lambda (c) (int? (lookup (list (car c) (cadr c)) waiting))) (day/connects day))))
+
+; --- branches -----------------------------------------------------------------
+
+; The what-ifs, each (name parent change): a flight that leaves late; the
+; hub closed for two and a half hours; an aircraft out of service from
+; 10:00; and, on top of the closure, quicker turns at the hub after it.
+(defun branches ()
+    (list (list "b1" "base" (list :delay "SL201" 55))
+          (list "b2" "base" (list :close "ORD" 690 840))
+          (list "b3" "base" (list :out-of-service "N104" 600))
+          (list "b4" "b2" (list :quick-turn "ORD" 780 900 20))))
+
+; The minutes in which a change makes what comes in differ: (from to).
+(defun window (day change)
+    (match change
+        ((:delay flight m)
+            (let dep (tuple/get (leg-of day flight) 4))
+            (list dep (+ dep m)))
+        ((:close _ from to)        (list from to))
+        ((:out-of-service _ from)  (list from (end)))
+        ((:quick-turn _ from to _) (list from to))))
+
+; A run that's been kept is #(changes parent change digests totals): all
+; its changes, its parent and its own change (() for the base), and its
+; digests and totals for the whole day.
+(defun run/changes (r) (tuple/get r 0))
+(defun run/parent (r) (tuple/get r 1))
+(defun run/change (r) (tuple/get r 2))
+(defun run/digests (r) (tuple/get r 3))
+(defun run/totals (r) (tuple/get r 4))
+
+; The runs from the base to name, oldest first.
+(defun path-of (runs name)
+    (let parent (run/parent (lookup name runs)))
+    (if (nil? parent) (list name) (append (path-of runs parent) (list name))))
+
+; What a branch with change, from the last run on path, is compared with:
+; each run on the path, as (name digests from), from being where the
+; changes after it on the path, and change, have all stopped making a
+; difference.
+(defun targets-of (day runs path change)
+    (match path
+        (() ())
+        ((name & rest)
+            (let ends (map (lambda (c) (cadr (window day c))) (cons change (map (lambda (r) (run/change (lookup r runs))) rest))))
+            (cons (list name (run/digests (lookup name runs)) (fold/l 0 max ends))
+                  (targets-of day runs rest change)))))
+
+; A run that rejoined name at stop, for the whole day: from stop on its
+; digests are name's, and its totals name's moved by what it had changed.
+(defun rejoined-day (runs name stop digests totals)
+    (let theirs (lookup name runs))
+    (let i (- stop (start)))
+    (let n (- (end) (start)))
+    (let shift (totals- (tuple/get totals i) (tuple/get (run/totals theirs) i)))
+    (list (list->tuple (append (tuple->list digests) (tuple->list (tuple/slice (run/digests theirs) (inc i) n))))
+          (list->tuple (append (tuple->list totals)
+                               (map (lambda (m) (totals+ m shift)) (tuple->list (tuple/slice (run/totals theirs) (inc i) n)))))))
+
+(defun totals+ (a b) (match (list a b) (((f l m c) (f2 l2 m2 c2)) (list (+ f f2) (+ l l2) (+ m m2) (+ c c2)))))
+(defun totals- (a b) (match (list a b) (((f l m c) (f2 l2 m2 c2)) (list (- f f2) (- l l2) (- m m2) (- c c2)))))
+
+; Whether digests a and b are the same for their first n minutes.
+(defun same-before? (a b i n)
+    (cond
+        ((>= i n)                              #true)
+        ((eq? (tuple/get a i) (tuple/get b i)) (same-before? a b (inc i) n))
+        (#true                                 #false)))
+
+(defun last-of (totals) (tuple/get totals (- (- (end) (start)) 1)))
+
+; Runs each branch in turn, says what it came to, and keeps it for those
+; after it; then prints the history, and gives how many minutes it took.
+(defun explore (day bs runs history simulated own)
+    (match bs
+        (()
+            (tty/write "the history:\n")
+            (map pprint (reverse history))
+            (concat (- (end) (start)) " minutes for the base, and " simulated " for its branches, of which " own " their own"))
+        (((name parent change) & rest)
+            (let changes (append (run/changes (lookup parent runs)) (list change)))
+            (let targets (targets-of day runs (path-of runs parent) change))
+            (match (join (fork (simulate day changes targets)))
+                ((:ok (stop rejoined digests totals _))
+                    (let from (car (window day change)))
+                    (let same (same-before? digests (run/digests (lookup parent runs)) 0 (- from (start))))
+                    (let whole (if (nil? rejoined) (list digests totals) (rejoined-day runs rejoined stop digests totals)))
+                    (let d (totals- (last-of (cadr whole)) (last-of (run/totals (lookup "base" runs)))))
+                    (tty/write name ", from " parent ": " (concat change) \n)
+                    (when (not same) (tty/write "    not the same as " parent " before " (clock from) \n))
+                    (tty/write "    the same as " parent " till " (clock from)
+                               (if (nil? rejoined)
+                                   ", its own to the end of the day"
+                                   (concat ", its own till " (clock stop) ", then " rejoined "'s again"))
+                               \n)
+                    (tty/write "    against base: fuel " (signed (nth 0 d)) " kg, " (signed (nth 1 d)) " passenger-minutes late, "
+                               (signed (nth 2 d)) " missed, " (signed (nth 3 d)) " cancelled" \n)
+                    (let entry (list :branch name (list :from parent) (list :change change)
+                                     (list :own (clock from) (clock (if (nil? rejoined) (end) stop)))
+                                     (if (nil? rejoined) (list :to-the-end) (list :rejoined rejoined))
+                                     (list :against-base (list :fuel (nth 0 d)) (list :late (nth 1 d))
+                                                         (list :missed (nth 2 d)) (list :cancelled (nth 3 d)))))
+                    (explore day rest (cons (list name (tuple changes parent change (car whole) (cadr whole))) runs)
+                             (cons entry history) (+ simulated (+ (- stop (start)) 1)) (+ own (+ (- stop from) 1))))))))
+
+(defun clock (m) (concat (format-num (div m 60) 2 "0") ":" (format-num (% m 60) 2 "0")))
+
+(defun signed (n) (if (>= n 0) (concat "+" n) (concat n)))
+
+; --- the program --------------------------------------------------------------
+
+(let path (match @ARGV ((p & _) p) (_ "examples/airline-day.sexp")))
+(let day (match (join (connect :fs/read path (reading ()))) ((:ok records) (day-of records))))
+
+(match (join (fork (simulate day () ())))
+    ((:ok (_ _ digests totals flown))
+        (let agree (length (filter (lambda (r) (match r ((flight off on) (eq? (lookup flight flown) (list off on)))))
+                                   (day/flew day))))
+        (tty/write "the record: " (length (day/legs day)) " legs, " agree " of which the base flies as it says" \n)
+        (match (last-of totals)
+            ((fuel late missed cancelled)
+                (tty/write "base: " (clock (start)) " to " (clock (end)) \n
+                           "    fuel " fuel " kg, " late " passenger-minutes late, " missed " connections missed, "
+                           cancelled " seats cancelled" \n)))
+        (explore day (branches) (list (list "base" (tuple () () () digests totals))) () 0 0)))

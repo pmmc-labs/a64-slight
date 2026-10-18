@@ -3359,3 +3359,50 @@ ends, a refused command isn't run) are there so that a failure of the
 rest can't be the chat not working at all. Rejected: these as golden
 tests, which can't measure a run, put keys in at a moment, or run a
 second program; and pexpect, which isn't in Python's standard library.
+
+**D207. An example: a simulated day, branched.** *(User, Oct 2026:
+"Let's write an example", after a use case of Stevan's: airliners'
+routes simulated from historical data, branched by an agent at any
+moment with a change, each branch recorded till it rejoins the run it
+came from, the branches a history like git's.)* `examples/airline.slight`
+and `examples/airline-day.sexp`: five aircraft, twenty legs through a
+hub, connections, weather, and the record of what flew, read as
+s-expressions from a device. The base flies every leg as the record
+says; four what-ifs (a delay, the hub closed, an aircraft out of service,
+and quicker turns on top of the closure) each run again with their
+changes and those of the branches they're on. Golden, from
+`t/models/airline.py`.
+
+- **Exact rejoining.** Each minute, between ticks, when nothing is in
+  flight, the desk makes a digest of all that decides the rest of the
+  day: where each aircraft is, its next leg, and how long till it's ready
+  or due; and the passengers waiting to change planes, and how long till
+  they can. The totals (fuel, lateness, connections missed, seats
+  cancelled) aren't in it, since they don't change what happens next.
+  A branch whose digest equals a run's at a minute, after every change
+  between them has stopped making a difference to what comes in, flies
+  the rest of the day as that run does: it stops there, and its totals
+  are that run's moved by what it had changed. It's compared with each
+  run it's on, oldest first, so a branch can rejoin the base without
+  rejoining its parent: quicker turns after the closure rejoin the base
+  at 17:05, three hours before the closure alone does.
+- **Whole numbers.** Minutes, kilograms and passengers, so that the same
+  is the same exactly, and no libm function can make two platforms
+  differ (D76).
+- **Canonical order without sorting strings,** which slight can't: every
+  list in a digest is in the day's order, and the aircraft's reports are
+  looked up by tail, so the same flight comes out under any
+  `SLIGHT_SCHED`.
+- **What it showed:** a branch is its parent till its change, minute for
+  minute, which the program checks; rejoining works for a delay absorbed
+  by slack, a closure recovered from by evening, and a mitigation; one
+  that never rejoins runs to the end. Run again from the start of the
+  day, the branches took 3,031 minutes of simulating, 2,011 of them their
+  own: forking from a copy of the parent at the branch would save the
+  rest. The whole program takes about 60 ms.
+- **Rejected:** a digest of the runtime's own (every waiting process's
+  function, arguments and mailbox), since pids and incidental state would
+  keep runs that are the same apart, and what decides the future is the
+  model's to say; rejoining within a tolerance, which is a judgment, not
+  a guarantee; and airports as processes, which this model doesn't need,
+  the desk keeping the passengers' books.

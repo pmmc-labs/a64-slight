@@ -654,6 +654,20 @@ slight against C, Go, Erlang, Node, Perl and Python (D194,
   registers. Worth it once programs show folds with lambdas on their hot
   paths.
 
+### Runs that branch (begun Oct 2026)
+
+Replay as a feature of the language, not only of the tests: record a
+run, branch it at a point with something changed, and keep only what the
+branch changed (`new-vision.md` in ts-cpi: "record only what cannot be
+recomputed"). Begun with `examples/airline.slight` (D207), which does it
+in slight on today's runtime, each branch run again from the start of
+the day. Next, each a proposal first: an input journal of values beside
+`SLIGHT_RECORD`'s log of system calls, its requests checked so that a
+replay finds the first real difference; replaying to a point and then
+going on live; forking a run at a point with `fork(2)`, a branch to a
+core; snapshots on disk; and `clone`, a waiting process copied, for a
+branch smaller than a whole run.
+
 ### Later: the rest of the October 2026 list
 
 The other changes from that list (above, "After 13"), for later, before
