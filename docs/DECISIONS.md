@@ -3839,3 +3839,50 @@ its line. The printed report doesn't change (`t/256`, `t/258`, `t/259`).
 The dashboard *What-Ifs and Remedies* is drawn from it, and from
 `bench/airline.py`'s `--json`: no golden test reads either file, as
 none reads D211's.
+
+**D218. The airline's what-ifs in shares, a core each.** *(Stevan, Oct
+2026: "Yes let's do that", to running the what-ifs as copies of the
+program, each with a share, in place of a runtime on many cores.)* The
+runtime stays on one core (BACKGROUND.md, "Multiple cores", is still
+its own step); the cores are used by the operating system, one copy of
+the program each.
+
+- **`--shard k/n`:** the kth of n shares of the what-ifs. A tree, a
+  branch of a run that isn't among them (the base, or one kept) and
+  every branch from it, goes whole to one share, the jth tree to share j
+  mod n, so each share has every run its branches start from, and every
+  what-if comes out as it does in one run. Each share runs the base
+  itself (0.36 s on the big day). Dealing the trees out by their size,
+  or by how much of the day lies after each change, was tried in a
+  model of the measured times: at most a tenth faster at 32 shares, and
+  nothing at 8, since a few big trees decide the slowest share; so
+  every nth tree it is.
+- **`bench/airline.py --shards 1,2,4`** runs that many copies at once,
+  each with its share, and gives the set's wall time, the slowest
+  share's, the CPU and memory of them all and the speed-up; and checks
+  the shares' reports together against one copy's, what-if for what-if.
+- **Measured** on the cloud machine's 4 cores, 1,000 what-ifs on the big
+  day: 149.7 s in one copy, 74.7 s in two (2.00 times as fast), 38.0 s
+  in four (3.94), and 40.2 s in eight, more copies than cores; every
+  set the same as one copy. Each copy holds its own base, so the memory
+  in all grows (838 MB, 734, 923) as each copy's falls (838, 371, 248).
+  Four runs of the program side by side take the time of one, so
+  nothing but the cores is shared: on this machine, whose cache is 260
+  MB, at least.
+- **Modelled** beyond 4 from each what-if's measured time, the day's
+  reading, the base, and the root's own 3 ms a what-if, in every share:
+  7.1 times as fast on 8 cores, 13 on 16, 22 on 32, 39 on 64 and 57 on
+  128, the slowest share setting the pace. The model said 77.1 s for
+  two shares and 39.4 s for four, where they took 74.7 and 38.0.
+- **Checked:** `t/260` (`--random 40 --seed 7 --shard 2/3`), from
+  `t/models/airline.py`, which shares the what-ifs by its own reading of
+  the rule; the program and the model agree on other shares; and a live
+  check that three shares, run apart, report every what-if as one run
+  does, and simulate as many minutes.
+- **Not yet:** the recovery in shares, which needs a step after them,
+  since the rounds and the services want every remedy's measures at
+  once; and the Mac's cores (12) measured.
+- **Rejected for now:** forking the runtime itself at a branch (fork(2)),
+  which shares the base without running it again but needs the runtime
+  to know about it; and the runtime on many cores, whose own step is
+  BACKGROUND.md's.

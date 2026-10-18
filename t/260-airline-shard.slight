@@ -1,0 +1,9 @@
+; examples/airline.slight --random 40 --seed 7 --shard 2/3 (D218): the
+; second of three shares of t/257's what-ifs, every third tree of
+; branches from the base, so each has the runs its branches start from;
+; each branch is reported as t/257 reports it. The expected output comes
+; from t/models/airline.py --random 40 --seed 7 --shard 2/3,
+; independently of this.
+; args: --random 40 --seed 7 --shard 2/3 examples/airline-day.sexp
+
+(@include "../examples/airline.slight")

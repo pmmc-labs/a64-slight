@@ -672,7 +672,9 @@ by another, over HTTP, slight keeping nothing of anyone (D213); and
 makes its what-ifs, and picks its remedies, at random from a seed, as
 many as asked, `bench/airline.py` running sets of them and timing them
 (D214); and makes its remedies near what the disruption touched, a day
-checked once however many come to it (D215). Next, each a proposal first: an input journal of values beside
+checked once however many come to it (D215); and runs its what-ifs in
+shares, a copy of the program a core, 3.94 times as fast on 4 (D218).
+Next, each a proposal first: an input journal of values beside
 `SLIGHT_RECORD`'s log of system calls, its requests checked so that a
 replay finds the first real difference; replaying to a point and then
 going on live; forking a run at a point with `fork(2)`, a branch to a

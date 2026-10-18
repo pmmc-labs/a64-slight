@@ -202,6 +202,20 @@ will start from them:
 - 1,000 what-ifs: 149 s, 828 MB at most, where they took 162 s and
   1.4 GB.
 
+Since D218 the what-ifs can run in shares, a copy of the program a core
+(`bench/airline.py --random 1000 --shards 1,2,4,8`), each share whole
+trees of branches, every share's report checked against one copy's. On
+the cloud machine's 4 cores:
+
+- 1 copy: 149.7 s, 838 MB;
+- 2: 74.7 s, 2.00 times as fast, 371 MB a copy, 734 in all;
+- 4: 38.0 s, 3.94 times as fast, 248 MB a copy, 923 in all;
+- 8, more copies than cores: 40.2 s.
+
+Modelled from each what-if's measured time, the slowest share setting
+the pace: 7.1 times as fast on 8 cores, 13 on 16, 22 on 32, 39 on 64. The
+M2 Max's 12 cores are to come.
+
 ```
 bench/airline.py --random 10,100,1000
 bench/airline.py --random 30 --rounds 3

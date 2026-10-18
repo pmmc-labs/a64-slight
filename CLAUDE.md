@@ -99,7 +99,9 @@ golden tests 257 and 258); and makes its remedies only near what the
 disruption touched, checks the candidates that come to the same day
 once, and keeps a remedy only as how its day differs (D215, golden test
 259); and with `--json` writes a recovery's candidates, rounds and
-ranking, for charts (D217).
+ranking, for charts (D217); and runs a share of its what-ifs with
+`--shard k/n`, so `bench/airline.py --shards` can run copies of it at
+once, a core each (D218, golden test 260).
 Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,

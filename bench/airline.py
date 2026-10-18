@@ -8,6 +8,7 @@
     bench/airline.py --random day,100 --every 15,30,60
     bench/airline.py --recover --remedies 10,50,200
     bench/airline.py --day small --recover --disruption '(:close "ORD" 600 720)' --remedies all
+    bench/airline.py --random 1000 --shards 1,2,4,8      the what-ifs in shares, one copy of the program a core
 
 An option given a list, comma-separated, is swept: every combination of
 them is run, --repeat times each, and each run is a row of the table, as
@@ -25,6 +26,13 @@ examples/airline-day.sexp; or a file. A --recover with no file of its own
 is told of one disruption: for the small day t/data/airline-recover.sexp's;
 for another, --disruption, or a delay of 45 minutes of the first leg into
 the first hub from 09:00 (airline-gen's own first what-if).
+
+With --shards, each count n runs n copies of the program at once, each
+with --shard k/n, its share of the what-ifs: whole trees of branches,
+so each has the runs its branches start from (D218). A row is then the
+set: its wall time, the slowest share's, the CPU and memory of them all,
+and the speed-up over one copy; and the shares' reports put together are
+checked against one copy's, what-if for what-if.
 
 Everything goes under build/bench/airline/: the binaries, the days made,
 the files written for --recover and --rounds, and each run's output.
@@ -142,16 +150,38 @@ def clean_env(extra):
 # and the program are a process group of their own, so a timeout kills
 # both.
 def run_once(cmd, env, timeout):
-    with tempfile.TemporaryFile() as out, tempfile.NamedTemporaryFile(mode='r') as report:
-        p = subprocess.Popen([RUSAGE, report.name] + cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
-                             env=env, cwd=ROOT, start_new_session=True)
-        timer = threading.Timer(timeout, lambda: os.killpg(p.pid, signal.SIGKILL))
-        timer.start()
-        status = p.wait()
-        timer.cancel()
+    return run_set([cmd], env, timeout)[1][0]
+
+
+# Commands run at once, each as run_once runs one: the wall time from the
+# first's start to the last's end, and each one's run.
+def run_set(cmds, env, timeout):
+    files = [(tempfile.TemporaryFile(), tempfile.NamedTemporaryFile(mode='r')) for _ in cmds]
+    start = time.perf_counter()
+    procs = [subprocess.Popen([RUSAGE, report.name] + cmd, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT,
+                              env=env, cwd=ROOT, start_new_session=True)
+             for cmd, (out, report) in zip(cmds, files)]
+    timers = [threading.Timer(timeout, lambda p=p: os.killpg(p.pid, signal.SIGKILL)) for p in procs]
+    for t in timers:
+        t.start()
+    statuses = [p.wait() for p in procs]
+    wall = time.perf_counter() - start
+    for t in timers:
+        t.cancel()
+    runs = []
+    for status, (out, report) in zip(statuses, files):
         out.seek(0)
-        wall, cpu, rss = (report.read().split() + ['0', '0', '0'])[:3]
-        return dict(wall=float(wall), cpu=float(cpu), rss=int(rss), status=status, out=out.read().decode(errors='replace'))
+        w, cpu, rss = (report.read().split() + ['0', '0', '0'])[:3]
+        runs.append(dict(wall=float(w), cpu=float(cpu), rss=int(rss), status=status, out=out.read().decode(errors='replace')))
+        out.close()
+        report.close()
+    return wall, runs
+
+
+# Each what-if's report in a run's output, by name, without its time.
+def reports(out):
+    return {m.group(1): re.sub(r'^    time: .*\n', '', m.group(0), flags=re.M)
+            for m in re.finditer(r'^(r\d+-\d+|b\d+), from .*\n(?:    .*\n)*', out, re.M)}
 
 
 MS = r'([\d.]+) ms'
@@ -235,6 +265,16 @@ RECOVER = [('seed', 5, lambda c, r: str(c['seed'])), ('remedies', 8, lambda c, r
            ('best', 12, lambda c, r: '-' if not r['best'] or r['best'] == 'none' else f"{r['best']} {r['best_cost']}")]
 
 
+SHARDS = [('seed', 5, lambda c, r: str(c['seed'])), ('what-ifs', 8, lambda c, r: str(c['random'])),
+          ('every', 5, lambda c, r: str(c['every'])), ('shards', 6, lambda c, r: str(c['shards'])),
+          ('wall s', 7, lambda c, r: '%.2f' % r['wall']), ('slowest s', 9, lambda c, r: '%.2f' % r['slowest']),
+          ('cpu s', 7, lambda c, r: '%.2f' % r['cpu']), ('peak MB', 7, lambda c, r: '%.0f' % (r['rss'] / 1e6)),
+          ('MB in all', 9, lambda c, r: '%.0f' % (r['rss_all'] / 1e6)),
+          ('a share', 9, lambda c, r: f"{r['least']}–{r['most']}" if r['least'] != r['most'] else str(r['most'])),
+          ('minutes', 8, lambda c, r: num(r['minutes'], '%d')),
+          ('speed-up', 8, lambda c, r: num(r['speedup'], '%.2fx')), ('same', 4, lambda c, r: r['same'])]
+
+
 def row(cols, c, r):
     return '  '.join(f(c, r).rjust(w) for _, w, f in cols)
 
@@ -259,6 +299,7 @@ def main():
     ap.add_argument('--remedies', default='20,100', help="with --recover, remedies picked by seed, a list (default 20,100); 'all'")
     ap.add_argument('--check', type=int, default=12, help='with --recover and no file: how many to check (default 12)')
     ap.add_argument('--top', type=int, default=3, help='with --recover and no file: how many ranked to show (default 3)')
+    ap.add_argument('--shards', help='run the what-ifs in this many shares at once, a list (1,2,4): one copy of the program each')
     ap.add_argument('--repeat', type=int, default=1, help='runs of each; the table has the fastest, the JSON every one')
     ap.add_argument('--target', default=native(), choices=('aarch64', 'x86_64'), help="the target (default this machine's)")
     ap.add_argument('--sched', type=int, help='SLIGHT_SCHED, processes run in an order from this seed')
@@ -288,6 +329,10 @@ def main():
     # the day's own what-ifs, or all the remedies, are the same for any seed
     configs = [dict(c, seed='-') if 'day' in c.values() or 'all' in c.values() else c for c in configs]
     configs = [c for i, c in enumerate(configs) if c not in configs[:i]]
+    if args.shards:
+        if mode != 'explore' or args.rounds > 1:
+            sys.exit('--shards is for exploring, a round at a time')
+        sys.exit(shards(args, bins, day, env, configs))
     print(f'the day: {os.path.relpath(day, ROOT)}; {args.target}' + (' (under qemu)' if prefix(args.target) else '')
           + f'; {len(configs)} set{"s" if len(configs) > 1 else ""} of options'
           + (f', {args.rounds} rounds each' if mode == 'explore' and args.rounds > 1 else '')
@@ -351,6 +396,69 @@ def main():
                            machine=platform.machine(), day=day, args=vars(args), results=results), f, indent=4)
             f.write('\n')
     sys.exit(1 if failed else 0)
+
+
+# The what-ifs in shares (D218): for each set of options and each count n,
+# n copies at once, each with its share. The fastest of --repeat sets is
+# kept; one copy's reports are what the shares' are checked against.
+def shards(args, bins, day, env, configs):
+    counts = listed(args.shards)
+    print(f'the day: {os.path.relpath(day, ROOT)}; {args.target}' + (' (under qemu)' if prefix(args.target) else '')
+          + f'; {os.cpu_count()} cores; {len(configs)} set{"s" if len(configs) > 1 else ""} of options, in '
+          + ', '.join(map(str, counts)) + ' shares' + (f', each set run {args.repeat} times' if args.repeat > 1 else ''))
+    print(header(SHARDS))
+    results, failed = [], 0
+    try:
+        for c in configs:
+            one, alone = None, None
+            for n in counts:
+                base = ['--time', '--every', str(c['every'])]
+                if c['random'] != 'day':
+                    base += ['--random', str(c['random']), '--seed', str(c['seed'])]
+                cmds = [prefix(args.target) + [bins['airline']] + base + ['--shard', f'{k}/{n}', day] for k in range(1, n + 1)]
+                sets = [run_set(cmds, env, args.timeout) for _ in range(args.repeat)]
+                wall, runs = min(sets, key=lambda s: s[0])
+                bad = [r for r in runs if r['status'] != 0]
+                name = slug(f'{os.path.basename(day)} shards {n} ' + ' '.join(f'{k2} {v}' for k2, v in c.items()))
+                for k, r in enumerate(runs, 1):
+                    with open(os.path.join(BUILD, 'runs', f'{name}-{k}.out'), 'w') as f:
+                        f.write(r['out'])
+                if bad:
+                    failed += 1
+                    tail = '\n'.join('    ' + l for l in bad[0]['out'].rstrip().split('\n')[-5:])
+                    print(f'FAIL (exit {bad[0]["status"]}): {n} shares\n{tail}')
+                    continue
+                said = [parsed('explore', r['out']) for r in runs]
+                together = {}
+                for r in runs:
+                    together.update(reports(r['out']))
+                if n == 1:
+                    one, alone = together, wall
+                r = dict(wall=wall, slowest=max(x['wall'] for x in runs), cpu=sum(x['cpu'] for x in runs),
+                         rss=max(x['rss'] for x in runs), rss_all=sum(x['rss'] for x in runs),
+                         least=min(x['ran'] for x in said), most=max(x['ran'] for x in said),
+                         minutes=sum(x['minutes'] for x in said if x['minutes'] is not None),
+                         speedup=alone / wall if alone else None,
+                         same='-' if one is None else ('yes' if together == one else 'NO'))
+                if r['same'] == 'NO':
+                    failed += 1
+                c2 = dict(c, shards=n)
+                print(row(SHARDS, c2, r), flush=True)
+                results.append(dict(options=c2, commands=cmds, sets=[s[0] for s in sets],
+                                    shares=[dict(wall=x['wall'], cpu=x['cpu'], rss=x['rss'], ran=p['ran'], minutes=p['minutes'],
+                                                 branches_ms=p['branches_ms'], base_ms=p['base_ms'])
+                                            for x, p in zip(runs, said)],
+                                    **{k2: v for k2, v in r.items()}))
+    except KeyboardInterrupt:
+        print('stopped', file=sys.stderr)
+    print('(wall s is the set\'s, from the first copy\'s start to the last\'s end; peak MB the largest copy\'s; '
+          'a share is how many what-ifs each ran; same, whether the shares\' reports together are one copy\'s)')
+    if args.json:
+        with open(args.json, 'w') as f:
+            json.dump(dict(date=datetime.datetime.now().isoformat(timespec='seconds'), mode='shards', target=args.target,
+                           machine=platform.machine(), cores=os.cpu_count(), day=day, args=vars(args), results=results), f, indent=4)
+            f.write('\n')
+    return 1 if failed else 0
 
 
 if __name__ == '__main__':

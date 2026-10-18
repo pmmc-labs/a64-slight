@@ -25,6 +25,8 @@
 #
 #     python3 t/models/airline.py --random 40 --seed 7 > t/257-airline-random.expected
 #
+# and with --shard k/n, only the kth of n shares of them (share_of).
+#
 # With --record it prints the (:flew flight off on) lines the base gives,
 # which is where the data file's record came from: a made-up day has no
 # record of its own, so its record is the model's. (A real one would be
@@ -360,6 +362,20 @@ def random_branches(day, seed, n):
     return out
 
 
+def share_of(branches, k, n):
+    """With --shard k/n, the kth of n shares: each tree (a branch of a run
+    not among the branches, and every branch from it) goes whole to one
+    share, the jth tree to share j mod n."""
+    names = {b[0]: b for b in branches}
+
+    def root(b):
+        while b[1] in names:
+            b = names[b[1]]
+        return b[0]
+    roots = [b[0] for b in branches if b[1] not in names]
+    return [b for b in branches if roots.index(root(b)) % n == k - 1]
+
+
 def option(name, default):
     return int(sys.argv[sys.argv.index(name) + 1]) if name in sys.argv else default
 
@@ -390,6 +406,9 @@ def main():
 
     history, simulated, own = [], 0, 0
     branches = random_branches(day, option('--seed', 1), option('--random', 0)) if '--random' in sys.argv else day.branches
+    if '--shard' in sys.argv:
+        k, n = map(int, sys.argv[sys.argv.index('--shard') + 1].split('/'))
+        branches = share_of(branches, k, n)
     for name, parent, change in branches:
         same, frm, stop, rejoined, begun = ex.branch(name, parent, change)
         simulated += stop - begun + 1

@@ -17,8 +17,9 @@ program, or the system to measure the run.
   lands in the base's record, which is the same in a seeded order
   (D210); and what-ifs run from checkpoints, some kept in a history and
   the rest run from it later, come to what they come to run from the
-  start of the day with no checkpoints (D212); and random what-ifs in
-  two rounds come to what they do in one (D214).
+  start of the day with no checkpoints (D212); random what-ifs in two
+  rounds come to what they do in one (D214); and in three shares, run
+  apart, to what they do in one run (D218).
 
 Nothing here depends on how long anything takes: each step waits for
 what it expects to see, and DEADLINE seconds is only how long it waits
@@ -29,6 +30,7 @@ import fcntl
 import os
 import platform
 import pty
+import re
 import select
 import shlex
 import signal
@@ -294,6 +296,28 @@ def airline():
           and sum(1 for line in second.splitlines() if line.endswith(', kept')) == 10
           and 'r3-20, from r3-5: ' in second,
           f'exits {[status for status, _ in ran]}\n--- the second round\n{second}\n--- in one\n{whole}')
+
+    # The same what-ifs in three shares, each run apart, report every
+    # what-if as the whole run does, and simulate as many minutes (D218).
+    def reports(out):
+        return {m.group(1): re.sub(r'^    time: .*\n', '', m.group(0), flags=re.M)
+                for m in re.finditer(r'^(r\d+-\d+), from .*\n(?:    .*\n)*', out, re.M)}
+
+    def branch_minutes(out):
+        m = re.search(r'and (\d+) for its branches, of which (\d+) their own"$', out, re.M)
+        return (int(m.group(1)), int(m.group(2))) if m else None
+
+    status_one, one = airline_run('--random', '40', '--seed', '7', small)
+    shares = [airline_run('--random', '40', '--seed', '7', '--shard', f'{k}/3', small) for k in (1, 2, 3)]
+    together = {}
+    for _, out in shares:
+        together.update(reports(out))
+    counted = [branch_minutes(out) for _, out in shares]
+    check('random what-ifs in three shares, run apart, come to what they do in one run',
+          status_one == 0 and all(status == 0 for status, _ in shares) and len(together) == 40
+          and together == reports(one) and None not in counted and tuple(map(sum, zip(*counted))) == branch_minutes(one),
+          f'exits {status_one} and {[status for status, _ in shares]}, {len(together)} what-ifs, '
+          f'minutes {counted} against {branch_minutes(one)}')
 
 
 os.makedirs(DIR, exist_ok=True)

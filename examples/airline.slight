@@ -33,6 +33,9 @@
 ;     ./airline --recover r.sexp --json r.json day.sexp
 ;                                   (and writes every candidate, the rounds
 ;                                   and the ranking, for charts)
+;     ./airline --random 1000 --shard 2/4 day.sexp
+;                                   (the second of four shares of the
+;                                   what-ifs, to run beside the others)
 ;
 ; bench/airline.py runs it with sets of these, and times them.
 ;
@@ -773,7 +776,7 @@
 ; --- the program --------------------------------------------------------------
 
 ; The options, #(path record timed json keep from every recover random
-; seed remedies).
+; seed remedies shard), shard being (k n) or #false.
 (defun opt/path (o) (tuple/get o 0))
 (defun opt/record (o) (tuple/get o 1))
 (defun opt/timed (o) (tuple/get o 2))
@@ -785,6 +788,7 @@
 (defun opt/random (o) (tuple/get o 8))
 (defun opt/seed (o) (tuple/get o 9))
 (defun opt/remedies (o) (tuple/get o 10))
+(defun opt/shard (o) (tuple/get o 11))
 
 (defun read-sexps (path) (match (join (connect :fs/read path (reading ()))) ((:ok records) records)))
 
@@ -833,9 +837,28 @@
         (#true
             (report-base day (run/flown base) (run/totals base))
             (when (and (opt/timed opts) (> minutes 0)) (tty/write "    time: " (ms us) ", " (pace day us minutes) \n))
-            (explore day opts h
-                     (if (int? (opt/random opts)) (random-branches day (opt/seed opts) (opt/random opts)) (day/branches day))
-                     runs (list minutes 0 0 0 0)))))
+            (let bs (if (int? (opt/random opts)) (random-branches day (opt/seed opts) (opt/random opts)) (day/branches day)))
+            (explore day opts h (match (opt/shard opts) ((k n) (share-of bs k n)) (_ bs)) runs (list minutes 0 0 0 0)))))
+
+; --- shares -------------------------------------------------------------------
+
+; With --shard k/n, the kth of n shares of the what-ifs, so n copies of
+; the program can run them at once, a core each: a tree, a branch of a
+; run that isn't among them (the base, or one kept) and every branch
+; from it, goes to one share, the jth tree to share j mod n, so each has
+; every run its branches start from. bench/airline.py runs the shares
+; and puts what they say together (D218).
+(defun share-of (bs k n)
+    (let roots (filter (lambda (b) (nil? (branch-named bs (cadr b)))) bs))
+    (let numbers (zip (map car roots) (range 0 (length roots))))
+    (filter (lambda (b) (== (% (lookup (root-of bs b) numbers) n) (dec k))) bs))
+
+(defun branch-named (bs name) (find (lambda (b) (eq? (car b) name)) bs))
+
+(defun root-of (bs b)
+    (match (branch-named bs (cadr b))
+        (() (car b))
+        (p  (root-of bs p))))
 
 ; --- random what-ifs ------------------------------------------------------------
 
@@ -1377,6 +1400,12 @@
         (("--random" n & rest) (options rest (tuple/set o 8 (or-0 (string->int n)))))
         (("--seed" n & rest)   (options rest (tuple/set o 9 (or-0 (string->int n)))))
         (("--remedies" n & rest) (options rest (tuple/set o 10 (or-0 (string->int n)))))
+        (("--shard" kn & rest)
+            (match (map (lambda (x) (or-0 (string->int x))) (str-split kn "/"))
+                ((k n) (if (and (> n 0) (and (>= k 1) (<= k n)))
+                           (options rest (tuple/set o 11 (list k n)))
+                           (concat "--shard wants k/n, 1 <= k <= n, not " kn)))
+                (_     (concat "--shard wants k/n, not " kn))))
         ((p & rest)            (options rest (tuple/set o 0 p)))))
 
-(options @ARGV (tuple "examples/airline-day.sexp" #false #false #false #false #false 30 #false #false 1 #false))
+(options @ARGV (tuple "examples/airline-day.sexp" #false #false #false #false #false 30 #false #false 1 #false #false))
