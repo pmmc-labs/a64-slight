@@ -131,6 +131,111 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The airline at a small airline's size (D210)
+
+Not a benchmark of the others' kind, since it's only in slight:
+`examples/airline.slight --time` on a day from
+`examples/airline-gen.slight` (seed 1: 300 aircraft, 1,499 legs, 2,287
+connections, ten what-ifs). Each minute the desk ticks every aircraft and
+hears from each, so a run of the day is 324,000 aircraft-minutes and
+648,000 messages. On the cloud machine, x86-64, three runs:
+
+- reading the day: 54 ms;
+- the base: 311 to 346 ms, about 300 µs a minute, a microsecond an
+  aircraft-minute, 1.9 million messages a second;
+- the ten branches: 2.2 to 2.5 s, of which 1.15 to 1.35 s on the
+  minutes before their changes, which forking at the change would save;
+- the whole run: 2.6 to 2.9 s, at most 84 MB.
+
+A program of the same shape with nothing else, 300 processes ticked
+1,080 times, takes 80 to 270 ms and 56 MB, so the model is about half
+of a minute's time. The M2 Max's numbers are to come.
+
+Since D212 each branch starts from a checkpoint of its parent's, at
+most half an hour before its change: on the cloud machine the whole
+run is 2.1 to 2.2 s where it was 3.3 to 3.6 (`--every 0`, measured the
+same day, the machine slower than for the runs above), the branches 1.4
+to 1.6 s where they were 2.7 to 3.2. Three more branches from a kept
+history (`--from`) take 0.6 s in all.
+
+```
+node bin/slightc.ts -o build/airline-gen examples/airline-gen.slight
+node bin/slightc.ts -o build/airline examples/airline.slight
+build/airline-gen > build/day.sexp
+build/airline --record build/day.sexp >> build/day.sexp
+build/airline --time build/day.sexp
+```
+
+### The airline's what-ifs at random (D214)
+
+`bench/airline.py` on the same day, the cloud machine, x86-64, a run
+each, `--random` what-ifs made from seed 1:
+
+- 10: 2.8 s in all, the branches 1.9 s, 171 ms each at the median, 7
+  of them rejoining a run before their day ends;
+- 100: 15.5 s, 131 ms each at the median, 312 at the 95th percentile,
+  82 rejoining, 185 MB at most;
+- 1,000: 162 s, 141 ms each at the median, 326 at the 95th percentile
+  and 948 at most, 833 rejoining, 1.4 GB at most. A minute simulated
+  takes 368 µs, as at 100 (359) and in the base (about 330), so a
+  thousand branches cost about a thousand times one. The slowest ran
+  964 minutes, the most of any, at 983 µs a minute, and a handful at
+  twice the usual pace; why, the run doesn't say (a major collection
+  of everything kept is a guess).
+- In rounds of 30, each from the history the last kept: 4.7, 4.3 and
+  5.4 s, the history 2.9, 5.0 and 7.2 MB, read in 46, 148 and 209 ms.
+- Recovering from a 60-minute delay at 11:35: 7,629 remedies made in
+  0.55 s, each run in 115 to 140 ms; 10 of them in 2.5 s in all, 50 in
+  7 to 8 s, 250 in 36 s, 1,000 in 135 s (1.3 GB at most), 2,000 in
+  281 s (2.3 GB); all of them run out of the 1 GB heap (D214).
+  Checking a dozen over HTTP takes 0.15 to 1.3 s.
+
+Since D215 the remedies are made near what the disruption touched, and
+let go once measured; a run makes checkpoints only when a later branch
+will start from them:
+
+- a 45-minute delay at 11:35: 63 remedies made in 13 ms, all run in
+  7.0 s, 111 ms each, 118 MB at most; 64 days, 16 checked, 15 pass;
+- a hub closed for an hour and a half: 905 made in 64 ms, run in
+  136 s, 151 ms each, 251 MB at most (745 before the checkpoints were
+  made only when wanted); 885 days, none passing;
+- 1,000 what-ifs: 149 s, 828 MB at most, where they took 162 s and
+  1.4 GB.
+
+Since D218 the what-ifs can run in shares, a copy of the program a core
+(`bench/airline.py --random 1000 --shards 1,2,4,8`), each share whole
+trees of branches, every share's report checked against one copy's. On
+the cloud machine's 4 cores:
+
+- 1 copy: 149.7 s, 838 MB;
+- 2: 74.7 s, 2.00 times as fast, 371 MB a copy, 734 in all;
+- 4: 38.0 s, 3.94 times as fast, 248 MB a copy, 923 in all;
+- 8, more copies than cores: 40.2 s.
+
+Modelled from each what-if's measured time, the slowest share setting
+the pace: 7.1 times as fast on 8 cores, 13 on 16, 22 on 32, 39 on 64.
+
+On the M2 Max (12 cores: 8 performance, 4 efficiency), Stevan's run:
+
+| Copies | Wall | Speed-up | CPU in all | Peak a copy | In all |
+|---|---|---|---|---|---|
+| 1 | 63.2 s | 1.00 | 63.0 s | 1,696 MB | 1,696 MB |
+| 2 | 34.0 s | 1.86 | 67.4 s | 1,428 MB | 2,754 MB |
+| 4 | 19.3 s | 3.27 | 75.1 s | 1,172 MB | 4,420 MB |
+| 8 | 11.0 s | 5.77 | 80.0 s | 895 MB | 6,512 MB |
+| 12 | 9.9 s | 6.37 | 99.7 s | 788 MB | 8,066 MB |
+
+One copy is 2.4 times as fast as the cloud machine's. The copies slow
+each other as the cores fill (the CPU in all grows), and the model's
+speed-up divided by that growth is what was measured (D218). A copy's
+memory there is about 820 MB more than on Linux, whatever its share.
+
+```
+bench/airline.py --random 10,100,1000
+bench/airline.py --random 30 --rounds 3
+bench/airline.py --recover --remedies 10,50 --seed 1,2
+```
+
 ### The M2 Max after D203
 
 `bench/results/2026-10-17-1311-macos-apple-m2-max.md`, at `448aa6d`: a
@@ -465,7 +570,10 @@ to under 2. The M2's runs after each are above.
 - **A busy process's garbage:** a heap under 256 KB (`GC_MIN`) is never
   collected, so each of `thread-ring`'s 503 processes kept up to that
   much of its messages' chunks: 266 MB, where Erlang needs 37. Done for
-  messages with nothing to copy (D199): 2.6 MB.
+  messages with nothing to copy (D199): 2.6 MB. Not for messages with
+  something in them, nor for what minor collections promote and is
+  dropped after: the airline's 300 aircraft, ticked with `(:tick t)`
+  each minute, hold 84 MB, 61 with bare integers (D210).
 - **One structure's size:** done (D202). A heap's cap is 1 GB, or what
   `SLIGHT_HEAP_MAX` says, where it was 64 MB, which held a structure of
   about 56 MB at most. The cost: a major collection takes 0.5 to 1 ms

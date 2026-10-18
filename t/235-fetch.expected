@@ -35,9 +35,7 @@ line two
 (ok "not text: image/png, 9 bytes")
 (ok "HTTP 404
 Not Found")
-(ok "T
-
-Hello, world.")
+(ok "HTTP 302: a redirect to BASE/page, which a fetch of its own can get")
 (ok "See [next](BASE/docs/next), [home](BASE/) and here.")
 #true
 (error "the URL must start with http:// or https://")

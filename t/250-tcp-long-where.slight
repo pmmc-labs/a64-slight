@@ -1,0 +1,51 @@
+; env: SLIGHT_HOSTS=build/t/250-hosts
+; A "host:port" as long as a program makes it (D204). A host longer than
+; any name can be isn't found, before anything is looked up; and a port
+; may have as many zeros in front as it likes, so the "host:port" a
+; connection fails with can be just as long. Until D204 the runtime
+; copied each onto the stack, 8 MB and more of it here, which a stack
+; doesn't hold.
+
+(defun never ()
+    (recv
+        ((:open c) (pprint :not-reached) ())))
+
+(defun double-up (s n)
+    (cond
+        ((== n 0) s)
+        (#true    (double-up (~ s s) (- n 1)))))
+
+; (car reason) and whether its where is ours
+(defun failed (r where)
+    (list (car r) (car (cadr r)) (eq? (cadr (cadr r)) where)))
+
+(defun writer (text)
+    (recv
+        ((:open f) (send f (list :write text)) (disconnect f))))
+
+; the hosts file has a name of 255 bytes, and one of 256
+(let long (double-up "a" 23))
+(let h255 (substring long 0 255))
+(let h256 (substring long 0 256))
+(join (connect :fs/write "build/t/250-hosts" (writer (concat "127.0.0.1 " h255 " " h256 \n))))
+
+(let where (concat long ":80"))
+(pprint (failed (join (connect :tcp where (never))) where))
+
+(defun answer ()
+    (recv
+        ((:open c) :connected)))
+
+; 255 bytes of host is looked up, and connects, and 256 isn't; then a
+; port that was listened on and isn't now, after 8 MB of zeros
+(defun listening (h255 h256)
+    (recv
+        ((:open l port)
+            (pprint (join (connect :tcp (concat h255 ":" port) (answer))))
+            (let where (concat h256 ":" port))
+            (pprint (failed (join (connect :tcp where (never))) where))
+            (disconnect l)
+            (let refused (concat "127.0.0.1:" (double-up "0" 23) port))
+            (failed (join (connect :tcp refused (never))) refused))))
+
+(pprint (join (connect :tcp/listen 0 (listening h255 h256))))

@@ -1,6 +1,7 @@
 # make test     the compiler's unit tests, the runtime header check, then
-#               the golden tests (t/run.sh) and the record and replay
-#               checks (t/replay.sh) for each of $(TARGETS)
+#               the golden tests (t/run.sh), the record and replay checks
+#               (t/replay.sh) and the live checks (t/live.py) for each of
+#               $(TARGETS)
 # make check    type-check the compiler (needs `npm install` first)
 # make bench    the benchmarks, against other languages (bench/run.py,
 #               docs/BENCHMARKS.md); BENCH passes it options: BENCH=--quick
@@ -34,7 +35,7 @@ endif
 sketch:
 	node bin/slightc.ts -o "./sketch" "author/sketch.slight"
 
-test: unit headers golden replay
+test: unit headers golden replay live
 
 unit:
 	node --test "compiler/tests/**/*.test.ts"
@@ -47,6 +48,11 @@ golden:
 replay:
 	@fail=0; for target in $(TARGETS); do \
 		echo "# $$target replay"; TARGET=$$target ./t/replay.sh || fail=1; \
+	done; exit $$fail
+
+live:
+	@fail=0; for target in $(TARGETS); do \
+		echo "# $$target live"; TARGET=$$target python3 t/live.py || fail=1; \
 	done; exit $$fail
 
 # rt.h must not collide with the system headers (see t/headers.c)
@@ -70,4 +76,4 @@ clean:
 		rm -rf "./sketch.dSYM"; \
     fi
 
-.PHONY: test unit golden replay headers check bench clean
+.PHONY: test unit golden replay live headers check bench clean

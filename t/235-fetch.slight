@@ -1,12 +1,13 @@
 ; env: no_proxy=127.0.0.1 NO_PROXY=127.0.0.1
 ; lib/tools.slight's fetch (D189), through curl, from a server in the
 ; program: a page made plain text, JSON and text as they are, an image
-; said to be one, a 404 with its status, a redirect followed, a refused
-; connection with curl's message, a URL that isn't http, and one the
-; approver refuses, which isn't fetched; and a page's links, against the
-; URL a redirect ended at. First, HTML as text, without a network: what
-; goes, what makes a line, entities, space; and links (D193), as they are
-; with no base, and resolved against one.
+; said to be one, a 404 with its status, a redirect said to be one and
+; where it goes, not followed (D205), a refused connection with curl's
+; message, a URL that isn't http, and one the approver refuses, which
+; isn't fetched; and a page's links, against its URL. First, HTML as
+; text, without a network: what goes, what makes a line, entities,
+; space; and links (D193), as they are with no base, and resolved
+; against one.
 
 (@include :tools)
 (@include :http)
@@ -36,7 +37,6 @@
         ("/text"  (list 200 (list (list "content-type" "text/plain")) "line one\nline two\n"))
         ("/image" (list 200 (list (list "content-type" "image/png")) "\u{89}PNG...."))
         ("/moved" (list 302 (list (list "location" "/page")) ""))
-        ("/go"    (list 302 (list (list "location" "/docs/page")) ""))
         ("/docs/page" (list 200 (list (list "content-type" "text/html")) "<p>See <a href=\"next\">next</a>, <a href=\"/\">home</a> and <a href=\"#x\">here</a>.</p>"))
         (_        (list 404 (list (list "content-type" "text/html")) "<h1>Not Found</h1>"))))
 
@@ -54,8 +54,9 @@
 (pprint (fetch yes (concat base "/text")))
 (pprint (fetch yes (concat base "/image")))
 (pprint (fetch yes (concat base "/nothing")))
-(pprint (fetch yes (concat base "/moved")))
-(pprint (match (fetch yes (concat base "/go")) ((:ok text) (list :ok (str-join "BASE" (str-split text base))))))
+(defun based (fetched base) (match fetched ((:ok text) (list :ok (str-join "BASE" (str-split text base))))))
+(pprint (based (fetch yes (concat base "/moved")) base))
+(pprint (based (fetch yes (concat base "/docs/page")) base))
 (pprint (match (fetch yes "http://127.0.0.1:1/") ((:error message) (starts-with? message "curl: (7)"))))
 (pprint (fetch yes "file:///etc/passwd"))
 (let refused (fetch no (concat base "/page")))

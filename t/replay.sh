@@ -72,7 +72,8 @@ printf 'abq' | run SLIGHT_REPLAY_TEST=recorded SLIGHT_RECORD="$dir/world.record"
 rm -f "$dir/in.txt" "$dir/out.txt"
 run SLIGHT_REPLAY="$dir/world.record" world other args </dev/null >"$dir/world.replayed"
 if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(ok ("line one" "line two"))$' "$dir/world.recorded" \
-   && grep -q '^(env "recorded")$' "$dir/world.recorded"; then
+   && grep -q '^(env "recorded")$' "$dir/world.recorded" \
+   && grep -q '^(clock #true [0-9]*)$' "$dir/world.recorded"; then
     check "world replays as recorded" ok
 else
     diff -u "$dir/world.recorded" "$dir/world.replayed"
@@ -114,6 +115,26 @@ if grep -q '^replay: the run goes another way at entry [0-9]*:' "$dir/net.wrong"
 else
     cat "$dir/net.wrong"
     check "a record that isn't the program's stops the replay" no
+fi
+
+# A record holds all a run read, and its environment, so it's the user's
+# alone, even written over a file others could read; and it isn't written
+# through a symbolic link (D205).
+: >"$dir/mode.record"
+chmod 644 "$dir/mode.record"
+run SLIGHT_RECORD="$dir/mode.record" order >/dev/null
+case $(ls -l "$dir/mode.record") in
+    -rw-------*) check "a record is its user's alone" ok ;;
+    *)           ls -l "$dir/mode.record"; check "a record is its user's alone" no ;;
+esac
+ln -s mode.target "$dir/link.record"
+run SLIGHT_RECORD="$dir/link.record" order >"$dir/link.out"
+if grep -q "^slight: can't record to $dir/link.record: " "$dir/link.out" && grep -q '^exit: 2$' "$dir/link.out" \
+   && [ ! -e "$dir/mode.target" ]; then
+    check "a record isn't written through a link" ok
+else
+    cat "$dir/link.out"
+    check "a record isn't written through a link" no
 fi
 
 # order, first in, first out, and under 20 seeds.

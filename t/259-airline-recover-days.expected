@@ -1,0 +1,44 @@
+the disruption, d: (close "ORD" 480 600), from 08:00
+    against base: fuel +8200 kg, +43295 passenger-minutes late, +0 missed, +0 cancelled
+the candidates: 21 remedies, and nothing; 15 of the remedies rejoin a run before them
+they come to 20 different days, 2 of the remedies to the same as doing nothing
+round 1: the 6 candidates no other left betters in late, missed and cancelled together
+    c0 nothing: late +43295, missed +0, cancelled +0; 2 others come to the same day
+        crew: SL102: its crew is on duty 490 minutes, over 470
+    c10 (cancel "SL102"): late +36895, missed +15, cancelled +278
+        passes
+    c13 (cancel "SL202"): late +34700, missed +20, cancelled +273
+        crew: SL102: its crew is on duty 490 minutes, over 470
+    c19 (swap "N101" "N102" 601): late +43295, missed +0, cancelled +0
+        crew: SL102: its crew is on duty 490 minutes, over 470
+        maintenance: N101: N101 ends the day at ATL; its check tonight is at BOS
+        maintenance: N102: N102 ends the day at BOS; its check tonight is at ATL
+    c20 (swap "N101" "N103" 601): late +43295, missed +0, cancelled +0
+        crew: SL102: its crew is on duty 490 minutes, over 470
+        maintenance: N101: N101 ends the day at DEN; its check tonight is at BOS
+        maintenance: N103: N103 ends the day at BOS; its check tonight is at DEN
+    c21 (swap "N102" "N103" 601): late +43295, missed +0, cancelled +0
+        crew: SL102: its crew is on duty 490 minutes, over 470
+        maintenance: N102: N102 ends the day at DEN; its check tonight is at ATL
+        maintenance: N103: N103 ends the day at ATL; its check tonight is at DEN
+round 2: the 4 candidates no other left betters in late, missed and cancelled together
+    c3 (delay "SL102" 45): late +43935, missed +0, cancelled +0
+        crew: SL102: its crew is on duty 495 minutes, over 470
+    c14 (cancel "SL203"): late +39420, missed +20, cancelled +277
+        crew: SL102: its crew is on duty 490 minutes, over 470
+    c15 (cancel "SL204"): late +43295, missed +0, cancelled +122
+        crew: SL102: its crew is on duty 490 minutes, over 470
+        maintenance: N102: N102 ends the day at ORD; its check tonight is at ATL
+    c17 (cancel "SL303"): late +42535, missed +18, cancelled +291
+        crew: SL102: its crew is on duty 490 minutes, over 470
+round 3: the 3 candidates no other left betters in late, missed and cancelled together
+    c7 (delay "SL304" 15): late +45380, missed +0, cancelled +0
+        crew: SL102: its crew is on duty 490 minutes, over 470
+    c12 (cancel "SL104"): late +43295, missed +0, cancelled +136
+        crew: SL102: its crew is on duty 490 minutes, over 470
+        maintenance: N101: N101 ends the day at ORD; its check tonight is at BOS
+    c16 (cancel "SL302"): late +42535, missed +18, cancelled +300
+        crew: SL102: its crew is on duty 490 minutes, over 470
+ranked by the ranking service, of those that pass:
+    1. c10 (cancel "SL102"): cost 111046: 293 passengers disrupted, 68220 refunded, 0 compensated, 15 misconnected, 40576 passenger-minutes late
+"21 remedies, 20 days, 13 checked, 1 that pass, and the best c10"

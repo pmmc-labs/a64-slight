@@ -654,6 +654,33 @@ slight against C, Go, Erlang, Node, Perl and Python (D194,
   registers. Worth it once programs show folds with lambdas on their hot
   paths.
 
+### Runs that branch (begun Oct 2026)
+
+Replay as a feature of the language, not only of the tests: record a
+run, branch it at a point with something changed, and keep only what the
+branch changed (`new-vision.md` in ts-cpi: "record only what cannot be
+recomputed"). Begun with `examples/airline.slight` (D207), which does it
+in slight on today's runtime, each branch run again from the start of
+the day. At the size of a small airline (D210: 300 aircraft, 1,499
+legs, ten what-ifs), the whole run is under 3 s on the cloud machine,
+and half the branches' time is the minutes before their changes. The
+example now starts each branch from a checkpoint of its parent's, and
+keeps its runs in a file a later round of branches starts from (D212),
+all in slight; and recovers from a disruption, remedies tried as
+branches, the best checked by crew and maintenance services and ranked
+by another, over HTTP, slight keeping nothing of anyone (D213); and
+makes its what-ifs, and picks its remedies, at random from a seed, as
+many as asked, `bench/airline.py` running sets of them and timing them
+(D214); and makes its remedies near what the disruption touched, a day
+checked once however many come to it (D215); and runs its what-ifs in
+shares, a copy of the program a core, 3.94 times as fast on 4 (D218).
+Next, each a proposal first: an input journal of values beside
+`SLIGHT_RECORD`'s log of system calls, its requests checked so that a
+replay finds the first real difference; replaying to a point and then
+going on live; forking a run at a point with `fork(2)`, a branch to a
+core; snapshots on disk; and `clone`, a waiting process copied, for a
+branch smaller than a whole run.
+
 ### Later: the rest of the October 2026 list
 
 The other changes from that list (above, "After 13"), for later, before
@@ -662,7 +689,10 @@ with Stevan first.
 
 - **Bit operations on integers.** Hashing (a hash trie of tuples, for a
   fast dictionary), random number generators (and with them property
-  tests), and binary protocols all need them, and slight has none. And,
+  tests), and binary protocols all need them, and slight has none.
+  `hash` (D209) covers hashing a value, and random numbers made as
+  hashes (`examples/airline-gen.slight`); a hash trie, a generator
+  that's fast, and binary protocols still want them. And,
   or and xor work on tagged words as they are, so they can be inline;
   shifts untag and retag. To settle: the names (`bit/and` and so on, as
   `utf8/`), what a shift does past 63 bits (fault, as arithmetic
@@ -722,6 +752,15 @@ with Stevan first.
   of numerical vectors.
 - **Comparing strings**, a builtin, so `sort` can order them without a
   `less?` written for it (D175).
+- **Exit records that keep big values** (D216). A record keeps the value
+  its process ended with for good (D88), so a program that forks many
+  processes, each ending with a big result it joins, keeps every
+  result: the airline's runs, about 0.15 MB each on the big day. The
+  ways out, when it's taken up: a record's value let go once its parent
+  has joined it, a later `join` then an error (Claude's recommendation);
+  or the airline's runs sending their results, which takes `run-branch`
+  and its callers made into state functions. Until then, it doesn't
+  matter at thousands.
 
 ### 17. Self-host
 

@@ -1,0 +1,25 @@
+the record: 20 legs, 20 of which the base flies as it says
+base: 06:00 to 24:00
+    fuel 119920 kg, 3681 passenger-minutes late, 0 connections missed, 0 seats cancelled
+b1, from base: (delay "SL201" 55)
+    the same as base till 06:30, its own till 13:00, then base's again
+    against base: fuel +0 kg, +9470 passenger-minutes late, +25 missed, +0 cancelled
+b2, from base: (close "ORD" 690 840)
+    the same as base till 11:30, its own till 20:23, then base's again
+    against base: fuel +2600 kg, +16060 passenger-minutes late, +0 missed, +0 cancelled
+b3, from base: (out-of-service "N104" 600)
+    the same as base till 10:00, its own to the end of the day
+    against base: fuel -17420 kg, -1016 passenger-minutes late, +0 missed, +404 cancelled
+b4, from b2: (quick-turn "ORD" 780 900 20)
+    the same as b2 till 13:00, its own till 17:05, then base's again
+    against base: fuel +2600 kg, +12170 passenger-minutes late, +0 missed, +0 cancelled
+b5, from b1: (delay "SL403" 30)
+    the same as b1 till 14:00, its own till 17:15, then base's again
+    against base: fuel +0 kg, +13400 passenger-minutes late, +25 missed, +0 cancelled
+the history:
+(branch "b1" (from "base") (change (delay "SL201" 55)) (own "06:30" "13:00") (rejoined "base") (against-base (fuel 0) (late 9470) (missed 25) (cancelled 0)))
+(branch "b2" (from "base") (change (close "ORD" 690 840)) (own "11:30" "20:23") (rejoined "base") (against-base (fuel 2600) (late 16060) (missed 0) (cancelled 0)))
+(branch "b3" (from "base") (change (out-of-service "N104" 600)) (own "10:00" "24:00") (to-the-end) (against-base (fuel -17420) (late -1016) (missed 0) (cancelled 404)))
+(branch "b4" (from "b2") (change (quick-turn "ORD" 780 900 20)) (own "13:00" "17:05") (rejoined "base") (against-base (fuel 2600) (late 12170) (missed 0) (cancelled 0)))
+(branch "b5" (from "b1") (change (delay "SL403" 30)) (own "14:00" "17:15") (rejoined "base") (against-base (fuel 0) (late 13400) (missed 25) (cancelled 0)))
+"1080 minutes for the base, and 2207 for its branches, of which 2207 their own"

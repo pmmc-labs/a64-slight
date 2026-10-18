@@ -100,8 +100,9 @@ static size_t sequence(const unsigned char *in, size_t n, keypress_t *k) {
     return i;
 }
 
-// The key at in (n > 0 bytes); returns how many bytes it took.
-static size_t decode(const unsigned char *in, size_t n, keypress_t *k) {
+// The key at in (n > 0 bytes), after any ESCs that mean Alt (decode);
+// returns how many bytes it took.
+static size_t decode_key(const unsigned char *in, size_t n, keypress_t *k) {
     unsigned char c = in[0];
     uint32_t      code;
     if (c == ESC) {
@@ -109,9 +110,7 @@ static size_t decode(const unsigned char *in, size_t n, keypress_t *k) {
             k->name = RT_KEY_ESCAPE;
             return 1;
         }
-        if ((in[1] == '[' || in[1] == 'O') && n > 2) return 2 + sequence(in + 2, n - 2, k);
-        k->alt = 1;                     // ESC, then a key: Alt and that key
-        return 1 + decode(in + 1, n - 1, k);
+        return 2 + sequence(in + 2, n - 2, k);  // ESC [ or ESC O, with more after
     }
     if (c == '\r' || c == '\n')      k->name = RT_KEY_ENTER;
     else if (c == '\t')              k->name = RT_KEY_TAB;
@@ -120,6 +119,17 @@ static size_t decode(const unsigned char *in, size_t n, keypress_t *k) {
     else if (c >= ' ' && c < 0x7f)   k->text = in, k->len = 1, k->shift = c >= 'A' && c <= 'Z';
     else if (c >= 0x80 && (k->len = rt_utf8_sequence(in, n, &code))) k->text = in;   // as the utf8/ builtins count (D148)
     return k->len ? k->len : 1;
+}
+
+// The key at in (n > 0 bytes); returns how many bytes it took. ESC, then a
+// key, is Alt and that key, however many ESCs there are: counted here, not
+// by recursing, which for a run of them as long as what's been read would
+// take more than C has of a process's stack.
+static size_t decode(const unsigned char *in, size_t n, keypress_t *k) {
+    size_t esc = 0;
+    while (n - esc > 1 && in[esc] == ESC && !((in[esc + 1] == '[' || in[esc + 1] == 'O') && n - esc > 2)) esc++;
+    if (esc) k->alt = 1;
+    return esc + decode_key(in + esc, n - esc, k);
 }
 
 size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key)) {

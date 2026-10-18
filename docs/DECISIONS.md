@@ -3267,3 +3267,645 @@ they call, `length` and `not`, and `not` alone at 18 per cent of
   took 574 million instructions, 38 per cent fewer, against 28 for the
   loops alone (both before `not` was inline); not worth the pass for
   now.
+
+**D204. A value is held to 64 MB while it's read, and nothing a program
+gives is copied onto a stack.** *(User, Oct 2026: two findings of a
+review of the runtime, fixed as found.)*
+
+- D160 held a value to 64 MB only once it had ended: the cap was what
+  building it took. Until it ended, the reader went on reading, holding
+  all of it, so an endless value (a string opened and never closed, from
+  a socket) grew the device's buffer without limit, as an endless line
+  did before D160. Now a reader with 64 MB and no end to the value, the
+  datum or the doc block ends its owner with `:too-big`, as it does for a
+  line. Test 249.
+- `connect :tcp` copied the host of its "host:port" onto the C stack,
+  and a device that failed copied its path there for the reason, each as
+  long as the program made it (a port may have any number of zeros in
+  front). A process's stack is 8 MB, with one guard page under it, and C
+  runs with 64 KB of it. Now the host goes in a buffer of 256 bytes, a
+  host longer than that (than any name can be, 253) isn't found, and a
+  device keeps its path as a string from the start, which the reason
+  uses as it is. Test 250.
+- **For later:** building the runtime with `-fstack-clash-protection`
+  too, once it's checked that Xcode's clang takes it for both targets.
+
+**D205. What the model says is shown as it is, and other hardening
+from the review.** *(User, Oct 2026: the first two groups of the
+review's list, as Claude recommended, the rest to be talked over.)*
+
+- **`tools/printable`.** A terminal takes control characters as
+  commands, so a model, or a page or file it has read, could make what
+  the person is asked to approve differ from what's done: a command
+  with part of it hidden, say. Each tool that asks `approve` now gives
+  it the text made printable: control characters but newline and tab,
+  DEL, the C1 controls, Unicode's bidirectional embeddings, overrides
+  and isolates, and stray bytes, written as escapes. The chat writes
+  everything from the model through it too. In slight, in
+  `lib/tools.slight`; not a builtin. Test 251.
+- **A fetch doesn't follow redirects.** Approval covered only the first
+  URL, and curl's `-L` went wherever a page sent it, the machine's own
+  services included. Now a redirect is told to the model, and fetching
+  where it goes is asked about in turn; and `--proto =http,https` holds
+  curl to those. Test 235.
+- **The parsers' open lists count.** Building a JSON value or a datum
+  needs a frame for each list or object still open in it, which came
+  from `malloc`, outside any limit: 64 MB of `[` took a gigabyte. Now
+  the frames are allocated as the value is, from the arena a device
+  builds in (D160) or the heap, so they count against the same limit.
+  Test 252.
+- **A record is its owner's alone.** `SLIGHT_RECORD`'s file holds all
+  a run read and its environment: it's made 0600 (even over a file that
+  was there), not through a symbolic link; and a set-user-ID or
+  set-group-ID program ignores `SLIGHT_RECORD`, `SLIGHT_REPLAY`,
+  `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` (`rt_io_getenv`). `t/replay.sh`
+  checks the first two.
+- **Keys are decoded in a loop.** Each ESC before a key (Alt) was a
+  level of recursion, 48 bytes each, so a few thousand in one read,
+  decoded on a process's stack near its limit, ran off it. Not a golden
+  test: keys come that way only on the real clock; `t/live.py` checks
+  it (D206).
+- **A lookup's query ids are random**, each its own, from
+  `getentropy`, recorded like any seed. They came from xorshift on the
+  clock and the pid, so one id told the next.
+- **`format-num` makes its string whole first**, so a width past what
+  the heap holds faults `:heap` at once, instead of building that much
+  outside the heap a byte at a time. Test 253.
+
+**D206. Live checks, for what a golden test can't see.** *(User, Oct
+2026: "add new tests that the golden tests do not cover".)* `t/live.py`
+(Python 3, as the models and the benchmarks are), run by `make live` and
+`make test` for each target, with its programs in `t/live/`:
+
+- **Keys on a stack all but full,** on the real clock, where a busy
+  process reads stdin itself (D122): the one place D205's recursion
+  could run off a stack. The process connects to `:keypress` only at
+  the bottom, so the keys can't be read before it gets there.
+- **Peak memory,** from `wait4`, under 400 MB for an endless JSON value
+  (D204), thirty million arrays deep (D205), and `format-num` to 4 GB
+  (D205), where the code before held 514 MB, 1.1 GB and 2 GB on its way
+  to the same outcomes.
+- **The chat, in a terminal** (a pty), against a model of its own,
+  which streams a terminal escape, asks to run a command with one in it
+  and fetches a redirect: the escapes are shown escaped, the command is
+  refused and not run, and the redirect is told, not followed. The
+  chat had no test before.
+
+Each check waits for what it expects to see, never for a time, so
+nothing depends on how long anything takes, as in `t/replay.sh`, which
+is on the real clock too; a deadline only says when to give up. Against
+the code before D204, eight of the ten fail; the other two (the chat
+ends, a refused command isn't run) are there so that a failure of the
+rest can't be the chat not working at all. Rejected: these as golden
+tests, which can't measure a run, put keys in at a moment, or run a
+second program; and pexpect, which isn't in Python's standard library.
+
+**D207. An example: a simulated day, branched.** *(User, Oct 2026:
+"Let's write an example", after a use case of Stevan's: airliners'
+routes simulated from historical data, branched by an agent at any
+moment with a change, each branch recorded till it rejoins the run it
+came from, the branches a history like git's.)* `examples/airline.slight`
+and `examples/airline-day.sexp`: five aircraft, twenty legs through a
+hub, connections, weather, and the record of what flew, read as
+s-expressions from a device. The base flies every leg as the record
+says; four what-ifs (a delay, the hub closed, an aircraft out of service,
+and quicker turns on top of the closure) each run again with their
+changes and those of the branches they're on. Golden, from
+`t/models/airline.py`.
+
+- **Exact rejoining.** Each minute, between ticks, when nothing is in
+  flight, the desk makes a digest of all that decides the rest of the
+  day: where each aircraft is, its next leg, and how long till it's ready
+  or due; and the passengers waiting to change planes, and how long till
+  they can. The totals (fuel, lateness, connections missed, seats
+  cancelled) aren't in it, since they don't change what happens next.
+  A branch whose digest equals a run's at a minute, after every change
+  between them has stopped making a difference to what comes in, flies
+  the rest of the day as that run does: it stops there, and its totals
+  are that run's moved by what it had changed. It's compared with each
+  run it's on, oldest first, so a branch can rejoin the base without
+  rejoining its parent: quicker turns after the closure rejoin the base
+  at 17:05, three hours before the closure alone does.
+- **Whole numbers.** Minutes, kilograms and passengers, so that the same
+  is the same exactly, and no libm function can make two platforms
+  differ (D76).
+- **Canonical order without sorting strings,** which slight can't: every
+  list in a digest is in the day's order, and the aircraft's reports are
+  looked up by tail, so the same flight comes out under any
+  `SLIGHT_SCHED`.
+- **What it showed:** a branch is its parent till its change, minute for
+  minute, which the program checks; rejoining works for a delay absorbed
+  by slack, a closure recovered from by evening, and a mitigation; one
+  that never rejoins runs to the end. Run again from the start of the
+  day, the branches took 3,031 minutes of simulating, 2,011 of them their
+  own: forking from a copy of the parent at the branch would save the
+  rest. The whole program takes about 60 ms.
+- **Rejected:** a digest of the runtime's own (every waiting process's
+  function, arguments and mailbox), since pids and incidental state would
+  keep runs that are the same apart, and what decides the future is the
+  model's to say; rejoining within a tolerance, which is a judgment, not
+  a guarantee; and airports as processes, which this model doesn't need,
+  the desk keeping the passengers' books.
+
+**D208. `clock/us`.** *(Stevan, Oct 2026: "let's make sure we capture
+timing information", for the airline at the size of a small airline;
+`clock/us` agreed, after options.)* `(clock/us)` is the microseconds
+since the program started, an integer, on the clock the timers go by:
+`now()` in `process.c`, the monotonic clock read through `replay.c`, so
+a recorded run replays with the same readings; or, on the virtual clock,
+the virtual one, which moves only as the timers do, so a golden test can
+check it exactly (`t/255`). Before it, the only clock a program could
+read was `:system`'s `(:clock ms)`: a device's answer, so only where a
+`recv` can go, and in milliseconds. Rejected: nanoseconds, which claim
+more than macOS's monotonic clock gives, where a part of a run worth
+timing takes tens of microseconds or more; milliseconds as a float, the
+timers' unit, but a float where everything else about time is an
+integer; CPU time, which on one core, for work that never waits, is
+the time the clock gives, and which `bench/rusage.c` measures from
+outside; and the time of day, which nothing has needed (`lib/http.slight`
+still sends no Date).
+
+**D209. `hash`.** *(Stevan, Oct 2026: "hash", after options, for the
+airline's digests at the size of a small airline: three hundred
+aircraft make a minute's digest some 20 KB with integer ids, 23 MB a
+day, copied into every branch that compares with it, and a history of
+dozens of branches would pass the heap's cap.)* `(hash v)` is a
+non-negative integer for any value, the same for values that are `eq?`,
+and the same on every run, target and machine: the value's words, as
+`eq?` walks it, through splitmix64's mixer (DESIGN.md says the words).
+A symbol and a function are hashed by name and a pid by its number,
+never by an address, which differs from run to run and moves with the
+collector. Pinned in `t/254`, from `t/models/hash.py`.
+
+- **What it costs:** equal hashes don't prove equal values. At 62 bits,
+  a false match in a thousand branches compared at a thousand minutes
+  each is about one chance in 10^12; it's the bargain git makes for its
+  objects' names, and LANGUAGE.md says it.
+- **Not seeded,** so that a hash kept in a file still means the same
+  value; so it's no defense against keys picked to collide, and a table
+  keyed by them shouldn't use it.
+- **Rejected:** keeping exact digests, which fit for a handful of
+  branches and not for the history the airline is for; and keeping only
+  what changes each minute, with the aircraft that differ from the run
+  compared with counted, which is exact and small but more machinery in
+  every simulation that wants it; a seeded hash, which a file couldn't
+  keep; and a cryptographic one, slower, for an adversary there isn't.
+
+**D210. The airline at the size of a small airline.** *(Stevan, Oct
+2026: "300 airplanes, 100 airports, and around 1500 daily flights ...
+I just want to see how slight might perform", with timing, no Python
+model, and builtins added rather than worked around: `clock/us` (D208)
+and `hash` (D209); string sorting later; where the what-ifs live left to
+Claude.)* `examples/airline-gen.slight` makes such a day: 300 aircraft,
+each of a hub's, out to spokes and back, five legs; 100 airports, four
+of them hubs; 1,499 legs and 2,287 connections for seed 1, and ten
+what-ifs naming its flights. Its random numbers are hashes of (seed what
+which), so nothing is threaded from one to the next. A made-up day has
+no record, so `airline --record` prints the base's, to append. The
+example itself, rewritten for the size, prints what it printed for the
+five aircraft (`t/models/airline.py` still makes the expected output):
+
+- **Numbers, not names:** aircraft, legs and connections are numbered
+  in the file's order, and each leg's connections in and out are tuples
+  by number, so a minute's work is what happens in it.
+- **A digest that doesn't depend on order:** each aircraft hashes its
+  number and state, each waiting connection its number and how long
+  till boarding, and the parts are added modulo 2^61 - 1, so nothing is
+  sorted. The first version sorted the 300 answers and the waiting
+  passengers every minute, for a canonical order: 28 per cent of the
+  instructions. Two minutes that differ add up alike only by chance, as
+  with `hash`.
+- **The what-ifs in the data file,** `(:branch name parent change)`,
+  so a generated day names its own flights; the small day's moved there
+  too, and the model reads them from it.
+- **`--time`** prints, to stdout (slight can't write to stderr), how
+  long the day took to read, and each run: its milliseconds, its
+  microseconds a minute, and its messages a second; and how much of the
+  branches' time was the minutes before their changes. No golden test
+  has it; timings vary.
+- **Measured** on the cloud machine, x86-64, three runs: reading the
+  day 54 ms; the base 311 to 346 ms, about 300 µs a minute, so a
+  microsecond for an aircraft's minute, its tick and its answer, about
+  1.9 million messages a second; the ten branches 2.2 to 2.5 s, 1.15 to
+  1.35 of it the minutes before their changes; the whole run 2.6 to 2.9
+  s, at most 84 MB. The same output on AArch64 under qemu, and under
+  `SLIGHT_SCHED` seeds 1 to 5.
+- **What it found,** biggest first. A fork copies whole each local its
+  expression names, and `simulate` named the day in each aircraft's: the
+  day 300 times a run, 6.6 s and 247 MB to 4.3 s and 82 MB once each
+  aircraft was given only its part; LANGUAGE.md now says so. The sort,
+  above: 4.3 s to 2.9. Then memory: a message with something to copy is
+  dead space in its taker's old generation, and so is what a minor
+  collection promoted and was dropped after, till a major collection,
+  which a heap under 256 KB never has (D106, `GC_MIN`); so each aircraft
+  can keep up to that much. Bare integers for ticks (freed as taken,
+  D199) make the 84 MB 61; and a program of the same shape and nothing
+  else, 300 processes ticked 1,080 times, holds 56 MB with ticks that
+  are lists and 20 with integers. So most of it is the collector's
+  policy, which is left for Stevan; the example keeps `(:tick t)`, as a
+  tick would be written. And reading the day: association lists searched by
+  name, a string compare at each step, about a quarter of the
+  instructions of the day read and the base flown, which an ordering of
+  strings or a map would cut.
+- **Checked** by `t/live.py` (`make live`), on both targets: the
+  generator's day, its 1,499 legs all landing in the base's record, the
+  same record in a seeded order.
+- **Rejected:** the generator as a golden test (300 KB of output, which
+  the live check runs instead); timings in a golden test, on the
+  virtual clock, where work takes no time; and the day in `bench/`,
+  whose programs are each written in several languages.
+
+**D211. The airline's runs as JSON, for charts.** *(Stevan, Oct 2026:
+"Can we read the data generated by the airline run to build some
+visualizations showing the affects of the branches against the main?")*
+`airline --json file` also writes, with `json/print` and `spew`, the day
+and every run, on one line: the legs; the airports' places, which
+`airline-gen` now writes as `(:airport code x y hub?)` records; and for
+each run its parent, change, where it was its own and the run it
+rejoined, its totals at every minute, and each leg's off and on. A
+branch that rejoined is given its whole day, as its totals already were:
+its own legs till it stopped, one in the air then landing when the
+run it rejoined lands it, the two being the same then, and that run's
+after. Checked from outside on both days: every run's passenger-minutes
+late and seats cancelled are the sums over its legs, every departure
+and landing before a branch's change is its parent's, and every one
+after it rejoined is the rejoined run's. The report is unchanged, so the
+golden test is too.
+
+**D212. The airline's checkpoints and history.** *(Stevan, Oct 2026: "So,
+can we replay the entire run, with a new set of branches? Or would we
+need to re-run the full simulation", and yes to keeping runs in a file
+and starting branches from checkpoints, in the example, as Claude
+proposed.)* Replay (D170) doesn't do it: it runs the program again,
+doing all its work, with what it read the first time, the branches
+included. So `examples/airline.slight` keeps what it works out:
+
+- **Checkpoints.** Every half hour (`--every n`, 0 for none) a run's desk
+  asks each aircraft for its state, its status and the legs it has
+  left, and keeps that with the passengers waiting: the day before that
+  minute, but for the totals and the legs flown so far, which the run's
+  whole day already has. Between minutes every aircraft waits in `recv`,
+  so its state is its arguments, all of it data. A branch starts from
+  the last checkpoint at or before its change that holds for its parent:
+  one the parent kept while it ran; one its own parent held for before
+  it began, when the two were the same; or, once the parent had rejoined
+  a run, one of that run's from after, the two being the same then. The
+  aircraft are made again from it with the branch's changes, which can't
+  have made a difference yet. A cancelled leg is now `(:cancelled
+  minute)`, so the legs as they stood at a minute can be had from the
+  whole day.
+- **A history.** `--keep file` writes every run as an s-expression, a
+  line each, its checkpoints too; `--from file` starts from those runs
+  and runs only the branches not in it (a branch kept under the same
+  name with another change is left out, and says so). It's refused for
+  a day it wasn't kept for: it holds a hash of what decides a run but
+  its changes, the model's constants and version and the day's aircraft,
+  legs, connections, wind and closures, not its branches or record, so
+  branches can be added to the day's file a round at a time.
+- **Checked:** the golden test, with a fifth what-if, a delay on top of
+  one that has rejoined the base, which starts from the base's
+  checkpoint, against `t/models/airline.py`, which runs every branch from
+  the start and works out only where the program begins it; the big day
+  the same with checkpoints as without, on both targets and under
+  `SLIGHT_SCHED`; and `t/live.py`, what-ifs of its own covering each way
+  a checkpoint is found, some kept and the rest run from the history,
+  the same as all of them from the start with none.
+- **Measured** on the cloud machine, three runs each, the big day:
+  without checkpoints 3.3 to 3.6 s, the branches 2.7 to 3.2 of it, half
+  of that the minutes before their changes; with them 2.1 to 2.2 s, the
+  branches 1.4 to 1.6, 10 to 14 ms of that before their changes, and 92
+  MB at most where it was 86. The history is 2.1 MB. Three more
+  branches from it: 0.6 s in all, of which 150 to 220 ms reading the day
+  and the history.
+- **Rejected:** checkpoints by the runtime, a waiting process written
+  out whole (PLAN.md's processes as data), which a simulation that knows
+  its own state doesn't need, and which would keep pids and mailboxes
+  that mean nothing to another run; `fork(2)` at a checkpoint, a branch
+  to a core, which is the next step if it's wanted, as a proposal; a
+  checkpoint every minute, 30 times the memory for at most 29 minutes;
+  keeping a rejoined run's checkpoints past its rejoining, which are its
+  target's; and replaying a record with its branches edited, which is
+  only running it again.
+
+**D213. The airline recovering from a disruption, with services.**
+*(Stevan, Oct 2026: when a disruption happens, "run the simulation with
+many branches, find the best ones, check them against crews, maint
+schedules ... then rank the choices", the checking and ranking by
+outside models or web services, "This keeps the PII out of slight";
+then "Yes, lets get started" on Claude's first step.)* Slight stays an
+operational simulator; crews, maintenance and passengers stay with the
+systems that know them.
+
+- **Two changes and a rule in the model.** `(:cancel flight)`, at the
+  flight's departure; `(:swap a b minute)`, the two aircraft taking each
+  other's legs ahead at that minute, the desk asking each for its legs
+  and giving them to the other before the minute's tick. And a leg is
+  cancelled at its departure if its aircraft isn't where it leaves from,
+  or is withdrawn, so cancelling a leg out cancels the leg back. Both
+  changes make a difference only at their minute. Each leg flown keeps
+  the aircraft that flew it, `(off on aircraft)`, and the model is at
+  version 2, so older histories aren't used.
+- **The digest now holds every aircraft's next leg,** in the air too,
+  and withdrawn. Before swaps an aircraft's legs ahead followed from
+  which it was and the leg it was on; a swap broke that, and a swap with
+  both aircraft in the air rejoined the base a minute later, wrongly.
+  The next leg says what's ahead: the rest of the legs it was planned
+  with, which a swap moves together. The report didn't change.
+- **`--recover file`:** the disruption a branch of the base; remedies,
+  each a branch of the disruption from when it's known, asked for in
+  the file or made: holds of 15, 30 and 45 minutes for each flight
+  leaving later that passengers connect to, a cancellation of each such
+  flight, and a swap for each two aircraft at the first minute they're
+  both on the ground at one airport. Then rounds: the candidates, doing
+  nothing among them, that no other left is better than in all of
+  passenger-minutes late, connections missed and seats cancelled go to
+  the crew and maintenance services, till the budget (`(:check n)`) has
+  been sent; those that pass go to the ranking service. Rounds, not one
+  front: in the test's disruption, holding SL102 15 minutes, the best
+  that passes, is bettered by swaps that fail, and a single front
+  never sent it.
+- **What a service is sent** is every leg's flight, aircraft, times and
+  fate, as JSON; nothing of anyone. It answers with reasons, about
+  flights and aircraft, or with a cost and what makes it up.
+- **Stand-ins,** in slight, in `examples/airline-services.slight`, as
+  HTTP handlers knowing the plan: crews, each aircraft's first two legs
+  and its rest, at the same airport, with 30 minutes between, and on
+  duty at most 470 minutes from 45 before to 15 after; maintenance,
+  each aircraft ending the day where its plan does; a cost of refunds,
+  missed connections, compensation and minutes late. `--recover` starts
+  them itself, on ports the system picks, unless `(:services crew
+  maintenance rank)` gives URLs.
+- **Checked:** `t/256`, the whole of it on the small day over HTTP, from
+  `t/models/airline.py --recover`, which runs every candidate from the
+  start of the day and has the stand-ins' rules too; the same under
+  `SLIGHT_SCHED` seeds 1 to 6, `SLIGHT_GC_STRESS=7` and
+  `SLIGHT_GC_VERIFY`; the new changes against the model on branches of
+  their own; and the report and the record unchanged. On the real clock
+  the whole recovery takes 0.15 s.
+- **Not yet:** the remedies made are every one of their kind, which
+  suits a small day; a big one would make tens of thousands, so they
+  need choosing, near the disruption or sampled, and running on more
+  than one core. HTTPS waits for TLS (12c), so a service is plain HTTP
+  or reached through curl.
+- **Rejected:** crews, maintenance and passengers in the simulation
+  (Stevan's call: they stay with their systems); one front of the
+  measures, for the reason above; and a cost of the simulator's own to
+  rank by, which is the ranking service's to say.
+
+**D214. The airline's what-ifs and remedies at random, and a runner.**
+*(Stevan, Oct 2026: "Let's start with generating seeded random
+branches, but make this a parameter so we can experiment with the size.
+Put together a runner for this in bash or Python that allows me to run
+different options. Include timing info, etc. in the output.")* The first
+step of the larger idea: a base, a seeded batch of branches, and later
+an agent consulted when one strays far enough.
+
+- **`--random n --seed s`:** n what-ifs in place of the day's own. A
+  delay of a flight, 15 to 120 minutes, three in five; a closure of an
+  airport, the one some leg leaves from, so busier ones come up more,
+  for 30 minutes to 3 hours from between 07:00 and 19:45, one in four;
+  otherwise an aircraft out of service from between 08:00 and 17:45.
+  One in four branches from an earlier one, the rest from the base. The
+  numbers are hashes, as airline-gen's (D209): the ith branch's are of
+  `(seed what i)`, so it depends on nothing but s and i, and is named
+  `rS-I`. A batch of 200 with a seed takes in the batch of 100, so
+  rounds kept in a history (`--keep`, `--from`, D212) run only what's
+  new.
+- **Of two changes of one flight or aircraft,** a branch's and an
+  ancestor's, the one that says more holds: the longer delay, the
+  earlier time out of service. The program took the first in its list
+  and the model the last, which nothing had shown till random branches
+  delayed a flight a second time (`t/257`, r7-18 on r7-9). A delay says
+  how long a flight can't leave, so the longer is what both say; which
+  came first is an accident of the order.
+- **A run's checkpoints are kept only while a branch still to run
+  branches from it.** Nothing else in a run can start from them; a
+  branch of it in a later round, from a history, starts from its
+  parent's from before it began, and comes to the same, running more
+  minutes. On the big day a thousand branches peak at 1.4 GB with it
+  and 2.1 GB without, in 162 s and 172.
+- **`--remedies n`** with `--recover`: the remedies asked for, and n of
+  those made, picked by `--seed`: those whose hashes of `(seed :remedy
+  change)` come first, in the order made. On the big day the program
+  makes 7,629 for a delay at 11:35 (holds, cancellations, and above all
+  swaps, of every two aircraft that meet), in about 0.55 s; each takes
+  about 120 ms to run. With `--time` it says how long the base, the
+  making, the running, the checking and the ranking took.
+- **The stand-in crews come from the plan:** each aircraft's legs in
+  order, a crew taking as many as fit in 450 minutes on duty as
+  planned, then the next crew. "The first two legs and the rest" was
+  written for the small day's four legs an aircraft; on the big day it
+  put 109 of the 600 crews over the 470-minute limit before anything
+  happened, so every remedy failed. Planned to the limit itself, the
+  wind and the closures still put four over in the base; 20 minutes to
+  spare puts none. The small day's crews are as they were, and `t/256`
+  didn't change.
+- **`t/models/hash.py` hashed a list holding 8 wrongly:** it marked a
+  list's end on its stack with `END`, which is 8, and `x is END` is true
+  of every small 8 in Python. The runtime was right (seven of the first
+  eight random branches agreed with the model, and the eighth's roll
+  hashed an 8). The end is now a marker of its own; `t/254`'s values
+  have no 8, so its expected output stands.
+- **`bench/airline.py`:** builds the program and the generator for this
+  machine, makes and keeps the day (`gen:SEED`, `small`, or a file),
+  sweeps lists of `--random`, `--seed`, `--every` and `--remedies` (and
+  `--rounds`, each round from the history the last kept), runs each
+  `--repeat` times, and prints a row a run: wall and CPU seconds and
+  the peak resident set, measured by `bench/rusage.c`; what the program
+  says of its own times; each branch's median, 95th percentile and
+  longest; the minutes simulated, and how many rejoined; and for
+  `--recover`, the remedies made and run, how long checking and ranking
+  took, how many passed, and the best. `--json` keeps all of it.
+- **Checked:** `t/257` (`--random 40 --seed 7`, on the small day) and
+  `t/258` (`--recover ... --remedies 10 --seed 2`), from
+  `t/models/airline.py`, which makes the what-ifs and picks the remedies
+  by its own hashes; the program and the model agree on six other
+  seeds and sizes up to 120 branches, and on four other samples; both
+  tests under `SLIGHT_GC_STRESS=7`, `SLIGHT_GC_VERIFY` and
+  `SLIGHT_SCHED`; the report, and `t/256`, unchanged.
+- **Not yet, found by the runner:** on the big day, recovering from a
+  60-minute delay that puts SL1002's crew over its duty, nothing passes
+  however many remedies run (10 to 2,000): the budget of a dozen goes
+  on the first front, doing nothing and the remedies that come to the
+  same, swaps far away that rejoin it at once, and all fail on that
+  crew. Remedies near the disruption (its aircraft, its crew's legs, its
+  airports), and a candidate that comes to the same as another checked
+  once, are the next step, each to settle first. And recovery keeps
+  every remedy's run whole and makes every candidate's operated day
+  before checking any: 2,000 remedies peak at 2.3 GB, and all 7,629 run
+  out of the 1 GB heap; a remedy is never branched from, so its minutes
+  could go once it's measured.
+- **Rejected:** a generator whose state goes from one number to the
+  next, which would make a branch depend on those before it, and a
+  bigger batch not take in a smaller; the runner in bash, since parsing
+  the output, measuring the peak and writing JSON are Python's, and
+  `bench/run.py` is too.
+
+**D215. The airline's remedies near the disruption, a day checked once,
+and remedies kept lean.** *(Stevan, Oct 2026: "I agree with you
+suggestions", on D214's three: remedies near the disruption, a candidate
+that comes to the same day as another checked once, and a remedy's run
+let go once it's measured.)*
+
+- **Near:** what the disruption touched is what the simulation sees,
+  since crews stay with their services: the legs it flew otherwise than
+  the base (another minute, another aircraft, or not at all), and the
+  aircraft planned for them or flying them. Holds are made for the
+  flights passengers change to from a touched leg; cancellations for a
+  touched aircraft's legs ahead, which in the plan are its crews' too;
+  swaps for a touched aircraft with each other it meets on the ground,
+  which is where its airports come in. Remedies far from it can't mend
+  what it broke, so they aren't made at all. On the big day a 45-minute
+  delay of SL1002 makes 63 remedies, where it made 7,629, in 13 ms
+  where it took 0.55 s, and all 63 run in 7 s; 15 pass, and the best is
+  a swap at the hub after SL1002 lands. The small day's t/256 makes 10
+  where it made 39, and the best is the same, holding SL102 15 minutes.
+- **A day checked once:** a remedy is kept as the legs it flew otherwise
+  than the disruption did. Candidates with the same differences come to
+  the same day, and are checked and ranked once, as the first of them,
+  the others counted beside it; the budget and the last line count days.
+  Two days are the same when their differences hash alike, as two
+  minutes are when their digests do (D209); the model compares them
+  exactly. On the small day only doing nothing's day ever has others
+  (five aircraft make few remedies, and they differ), as in `t/259`,
+  where the hub closed 08:00 to 10:00 makes 21 remedies, two of which
+  come to doing nothing's day; on the big day a hub closed for an hour
+  and a half makes 905, which come to 885 days.
+- **Lean:** a remedy is kept as (name label measures differences
+  minutes rejoined?), and its run goes once it's measured, so the runs
+  don't grow with the remedies tried; an operated day is made only for
+  what's sent to a service.
+- **A run makes checkpoints only when a later branch will start from
+  them,** where it made them and the root dropped them (D214). A run's
+  process ends with its result, and its exit record keeps that for good
+  (D88), so this is what shrinks the record: the hub closure's 905
+  remedies peak at 251 MB where they peaked at 745, and a thousand
+  what-ifs at 828 MB where they peaked at 1.4 GB, in 149 s where they
+  took 162.
+- **The runner's default disruption is now airline-gen's own first
+  what-if, SL1002 45 minutes late.** At 60 nothing can mend it under the
+  stand-ins' rules: SL1002 ends its crew's day, so landing an hour late
+  puts the crew at 482 minutes whatever's done elsewhere; cancelling it
+  leaves N100 away from its check; and no remedy of the three kinds
+  gives the leg another crew. That's an answer, not a fault: every
+  remedy's reasons say so.
+- **Checked:** `t/256` and `t/258` (now 4 of the 9 made) again, and
+  `t/259`, from `t/models/airline.py`, which makes the remedies near the
+  disruption and the days by its own rules; the program and the model
+  agree on eight disruptions of the small day and two samples; the
+  three under `SLIGHT_GC_STRESS=7`, `SLIGHT_GC_VERIFY` and
+  `SLIGHT_SCHED`; the report and the random what-ifs unchanged.
+- **Not yet:** exit records (D88) keep every value a process ends
+  with, so each remedy or branch still leaves about 0.15 MB for good on
+  the big day; left as it is for now (D216). A remedy
+  the crews' own service could suggest (a reserve crew) is that
+  service's to make; quick turns at a touched airport could be made too.
+- **Rejected:** making every remedy and trying the near ones first,
+  since the far ones can't help and cost a run each; comparing days
+  pairwise with `eq?`, which is n² for thousands.
+
+**D216. Exit records stay as they are, for now.** *(Stevan, Oct 2026:
+"Let's leave it for now, and make a note of this case, and we can
+revisit later.")* D215 found that a record keeps the value its process
+ended with for good (D88), not only that its pid's entry stays: a
+process ending with a list of 10,000 integers, joined and dropped,
+leaves 165 KB a time, and each of the airline's runs, a process ending
+with its whole result, leaves about 0.15 MB on the big day. D88 was
+decided for many small results, and stands. The case is kept in
+`docs/PLAN.md` ("Exit records that keep big values"), for when it's
+taken up, with the ways out weighed then:
+
+- a record's value let go once its parent has joined it, a later `join`
+  of that pid then an error: the retention policy D88 put off, and
+  Claude's recommendation, since it serves every program that joins
+  many big results, and monitors, told as a process ends, don't change;
+- the airline's runs sending their results and ending with `()`, which
+  changes only the example, but makes `run-branch` wait in `recv`, and
+  so it and its callers state functions;
+- nothing, since at thousands of runs it costs a few hundred megabytes.
+
+**D217. The airline's recovery as JSON, for charts.** *(Claude, Oct 2026,
+for Stevan's "lets do another visualization using the new code".)*
+`--json file` with `--recover` writes what the recovery came to, as
+D211's does for exploring: the disruption, when it's known and what it
+does against the base; every candidate, doing nothing among them, with
+its change, (late missed cancelled) against the base, the day it comes
+to (named for the first candidate that does), how many legs it flew
+otherwise than the disruption, its minutes and whether it rejoined; the
+days checked, with their round and the services' reasons; and those
+that passed, ranked, with what the ranking service said. So `shortlist`
+keeps a log of its rounds, and `tell-ranked` gives its scores beside
+its line. The printed report doesn't change (`t/256`, `t/258`, `t/259`).
+The dashboard *What-Ifs and Remedies* is drawn from it, and from
+`bench/airline.py`'s `--json`: no golden test reads either file, as
+none reads D211's.
+
+**D218. The airline's what-ifs in shares, a core each.** *(Stevan, Oct
+2026: "Yes let's do that", to running the what-ifs as copies of the
+program, each with a share, in place of a runtime on many cores.)* The
+runtime stays on one core (BACKGROUND.md, "Multiple cores", is still
+its own step); the cores are used by the operating system, one copy of
+the program each.
+
+- **`--shard k/n`:** the kth of n shares of the what-ifs. A tree, a
+  branch of a run that isn't among them (the base, or one kept) and
+  every branch from it, goes whole to one share, the jth tree to share j
+  mod n, so each share has every run its branches start from, and every
+  what-if comes out as it does in one run. Each share runs the base
+  itself (0.36 s on the big day). Dealing the trees out by their size,
+  or by how much of the day lies after each change, was tried in a
+  model of the measured times: at most a tenth faster at 32 shares, and
+  nothing at 8, since a few big trees decide the slowest share; so
+  every nth tree it is.
+- **`bench/airline.py --shards 1,2,4`** runs that many copies at once,
+  each with its share, and gives the set's wall time, the slowest
+  share's, the CPU and memory of them all and the speed-up; and checks
+  the shares' reports together against one copy's, what-if for what-if.
+- **Measured** on the cloud machine's 4 cores, 1,000 what-ifs on the big
+  day: 149.7 s in one copy, 74.7 s in two (2.00 times as fast), 38.0 s
+  in four (3.94), and 40.2 s in eight, more copies than cores; every
+  set the same as one copy. Each copy holds its own base, so the memory
+  in all grows (838 MB, 734, 923) as each copy's falls (838, 371, 248).
+  Four runs of the program side by side take the time of one, so
+  nothing but the cores is shared: on this machine, whose cache is 260
+  MB, at least.
+- **Modelled** beyond 4 from each what-if's measured time, the day's
+  reading, the base, and the root's own 3 ms a what-if, in every share:
+  7.1 times as fast on 8 cores, 13 on 16, 22 on 32, 39 on 64 and 57 on
+  128, the slowest share setting the pace. The model said 77.1 s for
+  two shares and 39.4 s for four, where they took 74.7 and 38.0.
+- **Measured on the M2 Max** (Stevan's run, 12 cores, 8 of them
+  performance cores and 4 efficiency): 63.2 s in one copy, 34.0 in two
+  (1.86 times as fast), 19.3 in four (3.27), 11.0 in eight (5.77) and
+  9.9 in twelve (6.37), every set the same as one copy. The model's
+  split holds; what it leaves out is that the copies slow each other as
+  the cores fill: their CPU together grows 1.07 times with two, 1.19
+  with four, 1.27 with eight and 1.58 with twelve, and the model's
+  speed-up divided by that is 1.85, 3.25, 5.58 and 6.36, as measured.
+  Eight copies on the performance cores take 1.27 times as long each
+  as one alone; on an efficiency core a share takes about 2.2 times as
+  long. Dealing many small shares to whichever core is free, from one
+  base kept beforehand, would gain about a tenth (a model: 7.1 times
+  with 96 shares), since macOS already moves copies off the efficiency
+  cores as the others finish; so it isn't done.
+- **Memory on the M2 Max:** a copy peaks at about 820 MB and 0.95 MB a
+  run it holds, where on Linux it's 46 MB and 0.77 MB a run, so twelve
+  copies peak at 8 GB in all. The stacks aren't it (pooled, a page or
+  two of each touched). Likely, though not yet checked, macOS's
+  allocator: the heaps of each run's 301 processes are freed when it
+  ends, and freed memory there stays counted as resident until the
+  system wants it. `/usr/bin/time -l` gives the peak memory footprint
+  beside the peak resident set, which would tell.
+- **Checked:** `t/260` (`--random 40 --seed 7 --shard 2/3`), from
+  `t/models/airline.py`, which shares the what-ifs by its own reading of
+  the rule; the program and the model agree on other shares; and a live
+  check that three shares, run apart, report every what-if as one run
+  does, and simulate as many minutes.
+- **Not yet:** the recovery in shares, which needs a step after them,
+  since the rounds and the services want every remedy's measures at
+  once; and why the copies slow each other on the M2 Max, and what its
+  memory really is.
+- **Rejected for now:** forking the runtime itself at a branch (fork(2)),
+  which shares the base without running it again but needs the runtime
+  to know about it; and the runtime on many cores, whose own step is
+  BACKGROUND.md's.

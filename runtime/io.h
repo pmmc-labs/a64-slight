@@ -36,6 +36,12 @@ typedef struct {
 void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *settings);
 int  rt_io_replaying(void);
 
+// getenv, for the variables that say where the runtime reads and writes
+// (SLIGHT_RECORD, SLIGHT_REPLAY, SLIGHT_HOSTS, SLIGHT_RESOLV_CONF): NULL
+// in a program that's set-user-ID or set-group-ID, which takes no such
+// say from whoever runs it.
+const char *rt_io_getenv(const char *name);
+
 uint64_t rt_io_clock(void);             // the monotonic clock, in nanoseconds
 int      rt_io_select(int n, fd_set *in, fd_set *out, struct timeval *timeout);
 ssize_t  rt_io_read(int fd, void *buf, size_t len);
@@ -73,7 +79,8 @@ FILE *rt_io_fopen(const char *path);
 char *rt_io_fgets(char *line, int size, FILE *f);
 void  rt_io_fclose(FILE *f);
 
-// A seed for what has to differ between runs (a lookup's query ids).
+// Random bits, for what has to differ between runs and not be guessed (a
+// lookup's query ids).
 uint32_t rt_io_seed(void);
 
 // The terminal's size: 0, or -1 if stdout isn't one.

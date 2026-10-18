@@ -86,7 +86,11 @@ than time. So (D170):
 
 - `SLIGHT_RECORD=file` writes all it takes from outside, as it takes it,
   to `file`, a record of the run. That includes the environment, keys and
-  all, so keep a record as you would the environment itself.
+  all, so keep a record as you would the environment itself: the file is
+  its owner's alone (0600, even if it was there), and isn't written
+  through a symbolic link (D205). A program that's set-user-ID or
+  set-group-ID ignores `SLIGHT_RECORD` and `SLIGHT_REPLAY`, and
+  `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` too.
 - `SLIGHT_REPLAY=file` runs the program again from that record: the
   arguments, environment, keys, times, file contents and network traffic
   are the record's, and the run goes exactly as the recorded one did,
@@ -349,8 +353,11 @@ by every process.
 
 Starts a new process that evaluates `expr`, and returns its pid. The
 locals `expr` uses are deep-copied into the new process, at most 8 of
-them. Inside `expr`, `$$` is the new process. `expr` may tail-call a
-function that waits in `recv`, which is the usual way to start an actor:
+them. A local is copied whole, however little of it `expr` uses, so a
+big one is worth narrowing first: `(let mine (part-of big i))`, then
+`(fork (worker mine))`. Inside `expr`, `$$` is the new process. `expr`
+may tail-call a function that waits in `recv`, which is the usual way to
+start an actor:
 
     (let c (fork (counter 0)))
 
@@ -659,6 +666,13 @@ same time fire in the order they were set. A pending timer keeps the
 program running, and one for a process that has ended is dropped when
 it's due.
 
+- `(clock/us)`: the microseconds since the program started, an integer,
+  on the clock the timers go by. It's for timing a part of a program:
+  `(let t0 (clock/us))`, then `(- (clock/us) t0)` after it. It isn't the
+  time of day. On the virtual clock (Running a program) it moves only
+  as the timers do, so work takes no time on it; and a recorded run
+  replays with the same readings.
+
 ### Scheduling
 
 Processes take turns from a run queue, first in, first out. A running
@@ -803,7 +817,9 @@ If the file can't be opened, the owner ends before it runs, with
 write that fails ends it the same way, when it happens; and so does a
 line, a count, a JSON value or a datum of 64 MB or more, with `(:error
 (:too-big path))`, whatever the heap holds, so that an endless line
-can't take all the memory.
+can't take all the memory. A value is too big if it hasn't ended by 64
+MB (D204), or if building it takes that much, the lists and objects
+still open in it included (D205).
 
     (defun reader (lines)
         (recv
@@ -1056,6 +1072,16 @@ Integers and floats mix: if either operand is a float, so is the result.
   lists element by element, strings byte by byte, floats by value.
   An integer is never `eq?` to a float, so `(eq? 1 1.0)` is `#false`.
   Functions are `eq?` only to themselves, and pids to the same pid.
+- `(hash v)`: a non-negative integer for any value, the same for values
+  that are `eq?` (`0.0` and `-0.0` included), and the same on every run,
+  target and machine, so a hash kept in a file means the same value
+  later. Two values that aren't `eq?` hash alike only by chance, about
+  once in 2^62: a hash can stand in for a big value where that chance
+  will do, as git's names for its objects do, to keep and compare
+  digests of a simulation's state, say. A symbol and a function hash by
+  their names, so two closures of one `lambda` hash alike, and a pid by
+  its number. It isn't seeded, so it's no help against keys picked to
+  collide.
 
 ### Predicates
 
@@ -1619,8 +1645,9 @@ one conversation to the next, and ask other agents (D188–D192). It includes `:
 
 Each function makes a tool. Those that change something take `approve`,
 a function of what the tool is about to do, as text for a person to
-read; the tool does it only if `approve` gives `#true`, and otherwise
-tells the model it wasn't let. A tool that can't do what it's asked
+read, made printable first (`tools/printable`, below), so it shows what
+will be done whatever the model put in it; the tool does it only if
+`approve` gives `#true`, and otherwise tells the model it wasn't let. A tool that can't do what it's asked
 raises why, and the model is told that too, as is one called without an
 argument it needs, or with one that isn't a string.
 
@@ -1665,15 +1692,26 @@ argument it needs, or with one that isn't a string.
   to its end, and what it printed and its exit status. `approve` is shown
   `run: command`.
 - `(tools/fetch approve)`: `fetch(url)`, an `http://` or `https://` URL
-  (anything else raises), with curl, following redirects, for at most 20
-  seconds and 5 MB. `approve` is shown `fetch url`, every time, since a
-  URL can carry anything out. A web page comes as plain text, by
-  `tools/html->text` (below), its links resolved against the URL it was
-  fetched from, after any redirects; other text (JSON, XML, plain text) as it
-  is; anything else as what it is, `not text: image/png, 5120 bytes`. A
-  status that isn't 2xx comes first, `HTTP 404`, then the text. If curl
-  fails, the tool raises with curl's message, such as `curl: (6) Could
-  not resolve host: example.invalid`.
+  (anything else raises), with curl, for at most 20 seconds and 5 MB.
+  `approve` is shown `fetch url`, every time, since a URL can carry
+  anything out. A redirect isn't followed: the model is told where it
+  goes, `HTTP 302: a redirect to http://...`, and fetching that is
+  asked about in turn, so a page can't send a fetch somewhere the person
+  didn't agree to (D205). A web page comes as plain text, by
+  `tools/html->text` (below), its links resolved against its URL; other
+  text (JSON, XML, plain text) as it is; anything else as what it is,
+  `not text: image/png, 5120 bytes`. Any other status that isn't 2xx
+  comes first, `HTTP 404`, then the text. If curl fails, the tool raises
+  with curl's message, such as `curl: (6) Could not resolve host:
+  example.invalid`.
+- `(tools/printable text)`: `text` with what a terminal would take as a
+  command, or would show in another order, written as an escape a person
+  can read (D205): control characters but newline and tab, DEL and the
+  C1 controls as `\u{1b}`, Unicode's bidirectional embeddings,
+  overrides and isolates (U+202A to U+202E, U+2066 to U+2069) the same,
+  and a byte that isn't UTF-8 as `\x9b`. So `(tools/printable "a\e[8mb")`
+  is `"a\u{1b}[8mb"`. What it gives is printable already. The chat
+  writes everything that comes from the model through it.
 - `(tools/html->text html base)`: HTML as plain text, for a model.
   Comments, scripts, styles, SVG and `noscript` go, with what's in them;
   other tags go, but one that starts a block (a paragraph, a heading, a

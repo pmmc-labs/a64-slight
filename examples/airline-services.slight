@@ -1,0 +1,175 @@
+; airline-services: stand-ins for the services an airline's own systems
+; would answer for examples/airline.slight --recover (D213): a crew
+; checker, a maintenance checker and a ranker, each an HTTP handler that
+; knows the day's plan as the real service would know its crews, its
+; aircraft's checks and its bookings. Not a program: airline.slight
+; includes it, and starts the three itself for (:services :stand-ins).
+; t/models/airline.py has the same rules.
+;
+; Each is sent the candidates' operated days, with nothing of anyone in
+; them, as JSON: {"candidates": [{"name": "c3", "flights": [[flight,
+; tail, off, on, status], ...]}, ...]}, every leg of the day in the day's
+; order, status being "landed", "in the air", "cancelled" or "not flown",
+; and tail, off and on null where there's none. A checker answers
+; {"results": [{"name": "c3", "reasons": [{"what": ..., "why": ...}]}]},
+; no reasons for one that passes; the ranker {"results": [{"name": "c3",
+; "cost": ..., "disrupted": ..., "refunds": ..., "compensated": ...,
+; "misconnected": ..., "late": ...}]}. A real service would answer the
+; same way, and keep who its passengers and crews are to itself.
+
+(defun crew-duty () 470)              ; the most minutes a crew is on duty
+(defun crew-plan () 450)              ; the most it's planned for, leaving 20 for the day
+(defun crew-report () 45)             ; on duty before its first departure
+(defun crew-release () 15)            ; and after its last landing
+(defun crew-connect () 30)            ; the least it has from landing to its next departure
+(defun compensated-minutes () 180)    ; how late a passenger is paid for
+
+(defun crew-service (day) (lambda (req) (answer req (lambda (ops) (list (list "reasons" (crew-reasons day ops)))))))
+(defun maintenance-service (day) (lambda (req) (answer req (lambda (ops) (list (list "reasons" (maintenance-reasons day ops)))))))
+(defun rank-service (day) (lambda (req) (answer req (lambda (ops) (rank-members day ops)))))
+
+; A request's answer: each candidate's name, and the members f makes of
+; its flights, a tuple by leg.
+(defun answer (req f)
+    (match (json/parse (lookup :body req))
+        ((:ok (:object & members))
+            (let results (map (lambda (c)
+                                  (match c
+                                      ((:object & fields)
+                                          (cons :object (cons (list "name" (lookup "name" fields))
+                                                              (f (list->tuple (lookup "flights" fields))))))))
+                              (lookup "candidates" members)))
+            (list 200 (list (list "content-type" "application/json")) (json/print (list :object (list "results" results)))))
+        (_ (list 400 () "not JSON"))))
+
+(defun reason (what why) (list :object (list "what" what) (list "why" why)))
+
+(defun op/tail (op) (nth 1 op))
+(defun op/off (op) (nth 2 op))
+(defun op/status (op) (nth 4 op))
+
+; When it landed, or the end of the day for one still in the air.
+(defun op/on (op) (if (int? (nth 3 op)) (nth 3 op) (end)))
+
+(defun flew? (op) (or (eq? (op/status op) "landed") (eq? (op/status op) "in the air")))
+
+; --- crews ----------------------------------------------------------------------
+
+; The plan pairs each aircraft's legs with crews, in order, a crew taking
+; as many as fit in crew-plan minutes on duty as planned, and the next
+; crew the rest, whichever aircraft flies them. A crew must be where its
+; next leg leaves from, have crew-connect minutes from landing to leaving,
+; and be on duty no more than crew-duty minutes, from crew-report before
+; its first departure to crew-release after its last landing.
+(defun crew-reasons (day ops)
+    (fold/r () (lambda (i acc)
+                   (fold/r acc (lambda (p acc2) (append (pairing-reasons day ops p) acc2))
+                           (pairings day (tuple/get (day/by-aircraft day) i))))
+            (range 0 (tuple/len (day/aircraft day)))))
+
+(defun pairings (day legs)
+    (match legs
+        (() ())
+        ((first & _)
+            (let ends (+ (- (leg/dep (tuple/get (day/legs day) first)) (crew-report)) (crew-plan)))
+            (let n (max 1 (fits day legs ends 0)))
+            (cons (take n legs) (pairings day (skip n legs))))))
+
+; How many of legs, from the first, land as planned crew-release before
+; ends.
+(defun fits (day legs ends n)
+    (match legs
+        ((l & rest)
+            (let leg (tuple/get (day/legs day) l))
+            (if (<= (+ (+ (leg/dep leg) (tuple/get leg 5)) (crew-release)) ends) (fits day rest ends (inc n)) n))
+        (() n)))
+
+(defun pairing-reasons (day ops pairing)
+    (let flew (filter (lambda (l) (flew? (tuple/get ops l))) pairing))
+    (if (nil? flew)
+        ()
+        (append (between-reasons day ops flew) (duty-reasons ops flew))))
+
+(defun between-reasons (day ops flew)
+    (match flew
+        ((a b & _)
+            (let la (tuple/get (day/legs day) a))
+            (let lb (tuple/get (day/legs day) b))
+            (let gap (- (op/off (tuple/get ops b)) (op/on (tuple/get ops a))))
+            (let rest (between-reasons day ops (cdr flew)))
+            (cond
+                ((ne? (tuple/get lb 2) (tuple/get la 3))
+                    (cons (reason (leg/flight lb) (concat "its crew is at " (tuple/get la 3) ", not " (tuple/get lb 2))) rest))
+                ((< gap (crew-connect))
+                    (cons (reason (leg/flight lb) (concat "its crew has " gap " minutes after " (leg/flight la) ", under " (crew-connect)))
+                          rest))
+                (#true rest)))
+        (_ ())))
+
+(defun duty-reasons (ops flew)
+    (let first (tuple/get ops (car flew)))
+    (let last (tuple/get ops (nth (dec (length flew)) flew)))
+    (let duty (- (+ (op/on last) (crew-release)) (- (op/off first) (crew-report))))
+    (if (> duty (crew-duty))
+        (list (reason (car last) (concat "its crew is on duty " duty " minutes, over " (crew-duty))))
+        ()))
+
+; --- maintenance ----------------------------------------------------------------
+
+; Each aircraft must end the day where its last leg was to take it, where
+; its check is tonight.
+(defun maintenance-reasons (day ops)
+    (fold/r () (lambda (i acc)
+                   (match (tuple/get (day/aircraft day) i)
+                       ((tail home)
+                           (let planned (tuple/get (day/by-aircraft day) i))
+                           (let due (if (nil? planned) home (tuple/get (tuple/get (day/legs day) (nth (dec (length planned)) planned)) 3)))
+                           (let flew (filter (lambda (l) (and (eq? (op/tail (tuple/get ops l)) tail) (int? (op/off (tuple/get ops l)))))
+                                             (range 0 (tuple/len ops))))
+                           (let ends (if (nil? flew) home (tuple/get (tuple/get (day/legs day) (last-landed ops flew)) 3)))
+                           (if (eq? ends due)
+                               acc
+                               (cons (reason tail (concat tail " ends the day at " ends "; its check tonight is at " due)) acc)))))
+            (range 0 (tuple/len (day/aircraft day)))))
+
+(defun last-landed (ops legs)
+    (fold/l (car legs) (lambda (best l) (if (> (op/on (tuple/get ops l)) (op/on (tuple/get ops best))) l best)) (cdr legs)))
+
+; --- passengers -----------------------------------------------------------------
+
+; What the day costs its passengers: refunds for legs that don't fly (100
+; and its block minutes a seat), 150 for each who misses a connection,
+; 250 for each who lands compensated-minutes late or more, and 1 a
+; passenger-minute late.
+(defun rank-members (day ops)
+    (let per (map (lambda (l) (leg-cost (tuple/get (day/legs day) l) (tuple/get ops l))) (range 0 (tuple/len ops))))
+    (let refunds (sum (map (lambda (c) (nth 0 c)) per)))
+    (let refunded (sum (map (lambda (c) (nth 1 c)) per)))
+    (let late (sum (map (lambda (c) (nth 2 c)) per)))
+    (let compensated (sum (map (lambda (c) (nth 3 c)) per)))
+    (let misconnected (sum (map (lambda (c) (misconnected-on c ops)) (tuple->list (day/connects day)))))
+    (list (list "cost" (+ (+ refunds (* 250 compensated)) (+ (* 150 misconnected) late)))
+          (list "disrupted" (+ refunded (+ misconnected compensated)))
+          (list "refunds" refunds) (list "compensated" compensated) (list "misconnected" misconnected) (list "late" late)))
+
+; (refunds refunded late compensated) for one leg.
+(defun leg-cost (leg op)
+    (match leg
+        (#(_ _ _ _ dep block pax _)
+            (cond
+                ((not (flew? op))           (list (* pax (+ 100 block)) pax 0 0))
+                ((int? (nth 3 op))
+                    (let m (max 0 (- (op/on op) (+ dep block))))
+                    (list 0 0 (* m pax) (if (>= m (compensated-minutes)) pax 0)))
+                (#true                      (list 0 0 0 0))))))
+
+; The passengers of a connection who miss it: its second flight left,
+; and its first hadn't landed change-minutes before.
+(defun misconnected-on (c ops)
+    (match c
+        (#(in out n)
+            (let first (tuple/get ops in))
+            (let second (tuple/get ops out))
+            (if (and (int? (op/off second)) (or (not (int? (nth 3 first))) (> (+ (op/on first) (change-minutes)) (op/off second))))
+                n
+                0))))

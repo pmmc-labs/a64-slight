@@ -13,7 +13,8 @@ symbols, lists (a heap per process of chunks, capped at 1 GB or what
 message, or at a function's entry, with the frames as roots: D166),
 strings, closures
 (`lambda`, functions and builtins as values, `apply`), arithmetic
-(integers inline; floats inline too, D198, and mixed in C), structural `eq?`, type
+(integers inline; floats inline too, D198, and mixed in C), structural `eq?`
+and `hash`, the same for values that are `eq?` and on every machine (D209), type
 predicates, the string and math builtins (C, in `runtime/`), `cond`,
 `let`, `do`, `pprint`, `tty/write`, and top-level `defun`s with calls and
 tail calls (arguments in `x0`–`x7`; stack and reduction checks at every
@@ -26,7 +27,8 @@ each one into receive functions, D167, and `classify.ts` checks the
 process waiting in `recv` gives back, and the lifecycle: `join`,
 `monitor`, `kill`, `raise`, exit records, and faults that end just their
 process with `(:error (kind value site))` (`runtime/process.c`). Timers:
-`after`, `sleep`, and a virtual clock for tests (`SLIGHT_CLOCK=virtual`).
+`after`, `sleep`, and a virtual clock for tests (`SLIGHT_CLOCK=virtual`);
+`clock/us`, that clock in microseconds (D208).
 The terminal: `connect :keypress`, raw mode, decoded keys, the screen's
 size (`runtime/tty.c`). Files: `connect :fs/read` (`:fs/write`,
 `:fs/append`) opens a file on a device, a pid the runtime serves, and
@@ -76,9 +78,30 @@ interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 beside the byte builtins, the `utf8/` ones count characters (a bad byte
 is a character of its own, as in Go), with `ord` and `chr` in the
 prelude, and `string->float` (D148).
-`examples/` has twenty-one example programs (all but
-`ping-pong-tournament`, `top` and `chat` are golden tests); new ones are
-written when they're wanted (D149).
+`examples/` has twenty-three example programs (all but
+`ping-pong-tournament`, `top`, `chat` and `airline-gen` are golden
+tests), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149), the latest
+`airline`, a simulated day branched with what-ifs, each run till it
+rejoins the run it came from (D207), and `airline-gen`, a day for it
+the size of a small airline's, 300 aircraft and 1,500 legs, which it
+runs, timed with `--time`, in under 3 s (D210); with `--json` it
+writes every run's minutes and flights out, for charts (D211); and it
+starts each branch from a checkpoint, and keeps its runs in a file for
+a later round of branches to start from (`--keep`, `--from`, D212); and
+with `--recover`, tries remedies for a disruption, cancellations and
+swaps among them, has services check the best and rank those that pass,
+over HTTP, with stand-ins for the services in
+`examples/airline-services.slight`, which it includes (D213, golden test
+256); and makes what-ifs at random from a seed, as many as asked
+(`--random n --seed s`), and picks remedies the same way (`--remedies
+n`), with `bench/airline.py` to run sets of these and time them (D214,
+golden tests 257 and 258); and makes its remedies only near what the
+disruption touched, checks the candidates that come to the same day
+once, and keeps a remedy only as how its day differs (D215, golden test
+259); and with `--json` writes a recovery's candidates, rounds and
+ranking, for charts (D217); and runs a share of its what-ifs with
+`--shard k/n`, so `bench/airline.py --shards` can run copies of it at
+once, a core each (D218, golden test 260).
 Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
@@ -245,17 +268,19 @@ to get them back from git (`3fd71e0`).
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
-| `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, and `.ss` for Chez Scheme); `run.py`, the harness, which builds, checks, times and summarizes them; `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
-| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
+| `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, and `.ss` for Chez Scheme); `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
+| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's); `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
 ## Commands
 
 - `npm install` once, for `typescript` (used only by `make check`).
-- `make test`: unit tests, the runtime header check, then the golden tests
-  and the replay checks for each of `TARGETS` (aarch64 and x86_64 on an
-  x86-64 machine, aarch64 on arm64). About two minutes on a cloud session.
-- `make unit`, `make golden`, `make replay`, `make headers`: one at a time.
+- `make test`: unit tests, the runtime header check, then the golden tests,
+  the replay checks and the live checks (`t/live.py`, Python 3) for each
+  of `TARGETS` (aarch64 and x86_64 on an x86-64 machine, aarch64 on
+  arm64). About two minutes on a cloud session.
+- `make unit`, `make golden`, `make replay`, `make live`, `make headers`:
+  one at a time.
   `t/run.sh t/003-int-max.slight` runs one golden test, for `TARGET`
   (`aarch64` unless set: `TARGET=x86_64 t/run.sh ...`). The golden tests
   run `JOBS` at a time (one per CPU unless set; `JOBS=1` for one at a
@@ -267,6 +292,10 @@ to get them back from git (`3fd71e0`).
   Python and Chez Scheme (`bench/run.py`; `BENCH=--quick` for small sizes, and see
   `--help`). Not part of `make test`. Measure on the Mac: timings under
   qemu mean nothing, and the cloud machine's are noisy.
+- `bench/airline.py`: `examples/airline.slight` on a made-up day, with
+  lists of what-ifs, seeds, checkpoint spacings or remedies swept, a
+  table of what each run says of its times and what it cost (see
+  `--help`). Not part of `make test` either.
 - `node bin/slightc.ts -o out file.slight ...`: compile and link. It writes
   `out.S` next to `out`. `-S` writes only the assembly. `--target x86_64`
   compiles for x86-64 (the default is `aarch64`). On x86, run an AArch64

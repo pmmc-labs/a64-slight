@@ -1,0 +1,9 @@
+(error (too-big "build/t/252-deep.json"))
+(error (too-big "build/t/252-deep.sexp"))
+(ok (value 1023))
+fault in #<pid 14>: heap exhausted (json/parse at t/252-deep-values.slight:45:29)
+heap
+fault in #<pid 15>: heap exhausted (sexp/parse at t/252-deep-values.slight:46:29)
+heap
+(ok 1023)
+()

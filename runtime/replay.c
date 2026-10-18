@@ -30,6 +30,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/random.h>
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <time.h>
@@ -176,14 +177,32 @@ static char **get_strings(uint32_t *n) {
     return xs;
 }
 
+const char *rt_io_getenv(const char *name) {
+    return getuid() != geteuid() || getgid() != getegid() ? NULL : getenv(name);
+}
+
+// A record holds all the run read, and its environment, so it's the
+// user's alone (0600, even over a file that was there), and isn't written
+// through a symbolic link to somewhere else.
+static FILE *open_record(const char *path) {
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600);
+    if (fd >= 0 && fchmod(fd, 0600) != 0) {
+        int err = errno;
+        close(fd);
+        fd    = -1;
+        errno = err;
+    }
+    return fd >= 0 ? fdopen(fd, "wb") : NULL;
+}
+
 void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *s) {
-    const char *rec = getenv("SLIGHT_RECORD"), *play = getenv("SLIGHT_REPLAY");
+    const char *rec = rt_io_getenv("SLIGHT_RECORD"), *play = rt_io_getenv("SLIGHT_REPLAY");
     if (rec && play) {
         fputs("slight: SLIGHT_RECORD and SLIGHT_REPLAY can't both be set\n", stderr);
         exit(2);
     }
     if (!rec && !play) return;
-    record = fopen(rec ? rec : play, rec ? "wb" : "rb");
+    record = rec ? open_record(rec) : fopen(play, "rb");
     if (!record) {
         fprintf(stderr, "slight: can't %s %s: %s\n", rec ? "record to" : "replay", rec ? rec : play, strerror(errno));
         exit(2);
@@ -383,10 +402,14 @@ void rt_io_fclose(FILE *f) {
     if (mode != REPLAY) fclose(f);
 }
 
+// From the system's generator; the clock, the pid and an address only if
+// that fails, which they're too easy to guess for anything else.
 uint32_t rt_io_seed(void) {
     if (mode == REPLAY) return (uint32_t)replayed(IO_SEED);
     static char here;
-    return (uint32_t)done(IO_SEED, (uint32_t)time(NULL) ^ (uint32_t)getpid() << 16 ^ (uint32_t)(uintptr_t)&here);
+    uint32_t    bits;
+    if (getentropy(&bits, sizeof bits) != 0) bits = (uint32_t)time(NULL) ^ (uint32_t)getpid() << 16 ^ (uint32_t)(uintptr_t)&here;
+    return (uint32_t)done(IO_SEED, bits);
 }
 
 int rt_io_winsize(int *rows, int *cols) {

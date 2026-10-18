@@ -356,6 +356,93 @@ rt_value_t rt_equal(rt_value_t a, rt_value_t b) {
     return equal(a, b) ? RT_TRUE : RT_FALSE;
 }
 
+// --- hashing ------------------------------------------------------------------
+
+// A value is hashed as equal() walks it, word by word through splitmix64's
+// mixer: each atom as its kind and what it holds, a symbol or a function
+// by its name, never by an address, which differs from run to run and
+// moves when the collector does; a list as its elements and an end, and a
+// tuple as its length and its elements. That's a code no two values that
+// aren't eq? share, functions of one name aside, so two of them hash
+// alike only by chance, about once in 2^62. It isn't seeded, so it's for digests, not for a table whose
+// keys come from someone who'd want them to collide (D209).
+enum { H_INT = 1, H_FLOAT, H_STRING, H_SYMBOL, H_PID, H_FUNCTION, H_LIST, H_END, H_TUPLE, H_OTHER };
+
+static uint64_t mix(uint64_t h, uint64_t w) {
+    uint64_t x = (h ^ w) + 0x9e3779b97f4a7c15;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111eb;
+    return x ^ (x >> 31);
+}
+
+// Byte by byte into words, so the hash doesn't depend on the machine's
+// byte order.
+static uint64_t mix_bytes(uint64_t h, const char *bytes, uint64_t len) {
+    const unsigned char *s = (const unsigned char *)bytes;
+    h = mix(h, len);
+    for (uint64_t i = 0; i < len; i += 8) {
+        uint64_t w = 0;
+        for (uint64_t j = 0; j < 8 && i + j < len; j++) w |= (uint64_t)s[i + j] << (8 * j);
+        h = mix(h, w);
+    }
+    return h;
+}
+
+static uint64_t hash_atom(uint64_t h, rt_value_t v) {
+    if (!(v & RT_TAG_INT_MASK)) return mix(mix(h, H_INT), (uint64_t)rt_int_value(v));
+    if (v == RT_NIL)            return mix(mix(h, H_LIST), H_END);
+    if (rt_is_float(v)) {
+        double   d = rt_float_value(v);
+        uint64_t bits = 0x7ff8000000000000;     // every NaN alike
+        if (d == 0) d = 0;                      // -0.0 is eq? to 0.0
+        if (d == d) memcpy(&bits, &d, sizeof bits);
+        return mix(mix(h, H_FLOAT), bits);
+    }
+    if (rt_is_string(v)) return mix_bytes(mix(h, H_STRING), rt_string_bytes(v), rt_string_len(v));
+    if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
+        const char *name = rt_symbol_name(v >> RT_SYMBOL_SHIFT);
+        return name ? mix_bytes(mix(h, H_SYMBOL), name, strlen(name)) : mix(mix(h, H_SYMBOL), v);
+    }
+    if ((v & RT_TAG_MASK) == RT_TAG_PID) return mix(mix(h, H_PID), v >> RT_PID_SHIFT);
+    if (rt_is_closure(v)) {                     // eq? only to itself, so its name will do
+        const char *name = (const char *)rt_box(v)[3];
+        return mix_bytes(mix(h, H_FUNCTION), name, strlen(name));
+    }
+    return mix(mix(h, H_OTHER), v);
+}
+
+static uint64_t hash_open(uint64_t h, rt_value_t seq) {
+    return rt_is_tuple(seq) ? mix(mix(h, H_TUPLE), rt_tuple_len(seq)) : mix(h, H_LIST);
+}
+
+rt_value_t rt_hash(rt_value_t v, const char *site) {
+    (void)site;
+    uint64_t h = 0;
+    if (!is_seq(v)) return rt_int((int64_t)(hash_atom(h, v) >> 2));
+    rt_work_t w;
+    rt_work_init(&w);
+    cursor_t c = { v, 0 };
+    h = hash_open(h, v);
+    for (;;) {
+        if (at_end(c)) {
+            if (!rt_is_tuple(c.seq)) h = mix(h, H_END);
+            if (!w.n) break;
+            c = pop_cursor(&w);
+            continue;
+        }
+        rt_value_t x = next(&c);
+        if (is_seq(x)) {
+            push_cursor(&w, c);
+            c = (cursor_t){ x, 0 };
+            h = hash_open(h, x);
+            continue;
+        }
+        h = hash_atom(h, x);
+    }
+    rt_work_free(&w);
+    return rt_int((int64_t)(h >> 2));
+}
+
 rt_value_t rt_is_lambda(rt_value_t v) {
     return rt_is_closure(v) ? RT_TRUE : RT_FALSE;
 }
@@ -446,7 +533,7 @@ void *rt_heap_alloc(void *site, size_t bytes) {
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site) {
     uint64_t *box = len >= BIG_STRING ? rt_alloc_old(8 + len + 1, site) : rt_alloc(8 + len + 1, site);
     box[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
-    if (len) memcpy(box + 1, bytes, len);       // bytes may be an empty buffer's NULL
+    if (len && bytes) memcpy(box + 1, bytes, len);
     ((char *)(box + 1))[len] = '\0';
     return (rt_value_t)box | RT_TAG_BOXED;
 }

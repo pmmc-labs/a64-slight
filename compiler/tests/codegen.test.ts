@@ -697,6 +697,14 @@ test('tty/screen/rows and tty/screen/cols are builtins in the runtime', () => {
     fails('(tty/screen/rows 1)', 'test.slight:1:1: tty/screen/rows takes 0 arguments, not 1');
 });
 
+test('clock/us and hash are builtins in the runtime, and can be values', () => {
+    assert.match(compile('(clock/us)'), /LOADADDR x0, Lsite_\d+\n {4}bl {3}rt_clock_us\n/);
+    assert.match(compile('(hash 1)'), /LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_hash\n/);
+    assert.match(compile('(let f hash)'), /LOADADDR x0, bi_hash_closure/);
+    fails('(clock/us 1)', 'test.slight:1:1: clock/us takes 0 arguments, not 1');
+    fails('(hash)', 'test.slight:1:1: hash takes 1 argument, not 0');
+});
+
 test('after and sleep are builtins in the runtime, and can be values', () => {
     assert.match(compile('(after 10 $$ :tick)'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_after\n/);
     assert.match(compile('(sleep 10)'), /LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_sleep\n/);

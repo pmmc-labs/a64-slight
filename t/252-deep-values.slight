@@ -1,0 +1,47 @@
+; Building a value takes room for each list or object still open in it,
+; as well as for the value, and both count (D205): against the 64 MB a
+; value read from a device may take, and against the heap, for
+; json/parse and sexp/parse. A million arrays, each in the one before,
+; take more than 64 MB to build, though the text is 2 MB, and the value
+; would be 16 MB; until D205 the room for the open ones came from outside
+; any limit. A thousand take little.
+
+(defun double-up (s n)
+    (cond
+        ((== n 0) s)
+        (#true    (double-up (~ s s) (- n 1)))))
+
+(defun writer (texts)
+    (recv
+        ((:open f) (map (lambda (t) (send f (list :write t))) texts) (disconnect f))))
+
+(defun write-file (path texts) (join (connect :fs/write path (writer texts))))
+
+(defun reading (how)
+    (recv
+        ((:open f)   (send f (list :read how)) (reading how))
+        ((:json f v) (list :value (depth v 0)))
+        ((:sexp f v) (list :datum (depth v 0)))))
+
+; how many lists the first element of each is in
+(defun depth (v n)
+    (if (cons? v) (depth (car v) (+ n 1)) n))
+
+(defun nested (open close n) (concat (double-up open n) (double-up close n)))
+
+(write-file "build/t/252-deep.json" (list (nested "[" "]" 20)))
+(write-file "build/t/252-deep.sexp" (list (nested "(" ")" 20)))
+(write-file "build/t/252-some.json" (list (nested "[[" "]]" 9) "\n"))
+(pprint (join (connect :fs/read "build/t/252-deep.json" (reading :json))))
+(pprint (join (connect :fs/read "build/t/252-deep.sexp" (reading :sexp))))
+(pprint (join (connect :fs/read "build/t/252-some.json" (reading :json))))
+
+; and in the heap: a fault (its kind, here), not memory from outside it
+(defun parsed (r)
+    (match r
+        ((:ok (:ok v))            (list :ok (depth v 0)))
+        ((:error (kind _ _))      kind)))
+
+(pprint (parsed (join (fork (json/parse (nested "[" "]" 20))))))
+(pprint (parsed (join (fork (sexp/parse (nested "(" ")" 20))))))
+(pprint (parsed (join (fork (json/parse (nested "[[" "]]" 9))))))

@@ -235,6 +235,7 @@ reply refs.
 | `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns `()`. |
 | `(sleep ms)` | **Blocking** wait for `ms` milliseconds, keeping the stack. Works anywhere. Returns `()`. |
+| `(clock/us)` | The microseconds since the program started, on the timers' clock (D208). |
 | `(raise reason)` | Ends the current process with `(:error reason)`. |
 
 - A process whose entry expression returns a value ends with `(:ok value)`.
@@ -289,6 +290,11 @@ reply refs.
   `(sleep 0)` lets the processes already waiting go first). A timer whose
   process has ended by the time it's due is dropped then, as a message to
   it would be.
+- **The clock** (D208). `clock/us` reads the timers' clock: the
+  system's monotonic one, through `replay.c`, so a replay gives the
+  same readings, or the virtual one, which moves only as the timers do.
+  Microseconds, since a part of a run worth timing takes tens of them
+  or more, and nanoseconds would claim more than macOS's clock gives.
 
 ### Program structure
 
@@ -336,6 +342,20 @@ names no program can write.
 - comparison: `== != < <= > >=` on any two numbers (`(== 1 1.0)` is
   `#true`), structural `eq?`/`ne?` on any values (`(eq? 1 1.0)` is
   `#false`)
+- `hash` on any value (`runtime/rt.c`, D209): the value as words, walked
+  as `eq?` walks it, each word `w` making the hash `h` into `mix(h ^ w)`
+  from 0, `mix` being splitmix64's (`+ 0x9e3779b97f4a7c15`, then its
+  finalizer); the result is `h >> 2`. An integer is 1 and its value; a
+  float 2 and its bits, `-0.0` as `0.0` and every NaN as `0x7ff8...`; a
+  string 3, its length, and its bytes eight to a word, little-endian,
+  the last padded with zeros; a symbol 4 and its name, and a function 6
+  and its name, each as a string's length and bytes; a pid 5 and its
+  number; a list 7, its elements and 8, so `()` is 7 8; a tuple 9, its
+  length and its elements. No two values that aren't `eq?` have the same
+  words, but for functions of one name (two closures of one `lambda`);
+  and nothing in them is an address, which differs from run to run and
+  moves with the collector. `t/models/hash.py` is the same in
+  Python.
 - type predicates: `nil? cons? sym? str? num? int? float? lambda? pid?
   bool? tuple?` (`sym?` is true for `#true` and `#false`: they're symbols)
 - lists: `cons car cdr list`, and `c[ad]r` with up to four letters
@@ -422,7 +442,10 @@ slight, its links kept, D193), work out arithmetic (`lib/calc.slight`, D190), an
 in a store, a process that writes them to a file as an s-expression
 (D191), and ask other agents (`agent/ask`, D192); those that change
 something or reach out ask an `approve`
-function first, which the chat makes ask the person at the keyboard. A
+function first, which the chat makes ask the person at the keyboard,
+with the text made printable (`tools/printable`), so the model can't
+work the terminal; and a fetch doesn't follow a redirect, which is
+another fetch to ask about (D205). A
 command ends with the process that ran it, so a call that's killed takes
 its command with it, which is how Escape in the chat stops one (D193).
 
@@ -747,7 +770,9 @@ processes that allocate and then wait turn out to hold too much).
 - Exit records are kept forever (D88). That doesn't matter at hundreds or
   thousands of processes, and a million cost 32 MB. A system that churns
   through many millions will need a retention policy, such as dropping
-  the record once the parent has seen it.
+  the record once the parent has seen it. So will one whose processes
+  end with big values, since a record keeps a copy of its value: the
+  airline's runs each leave theirs (D216).
 
 ### Scheduler
 
@@ -919,7 +944,9 @@ the whole run.
   any bytes it filled in are written to `file`, flushed every time, so a
   crash leaves a record of everything up to it. The record starts with the
   settings that change a run (the clock, the seed), `@ARGV` and the
-  environment, keys and all.
+  environment, keys and all; so the file is its owner's alone (0600),
+  and isn't written through a symbolic link, and a set-user-ID or
+  set-group-ID program ignores this and `SLIGHT_REPLAY` (D205).
 - `SLIGHT_REPLAY=file`: no call is made; each takes the record's next
   entry instead, and the record's settings, arguments and environment are
   the run's.

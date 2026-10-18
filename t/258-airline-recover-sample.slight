@@ -1,0 +1,8 @@
+; examples/airline.slight --recover --remedies 4 --seed 2 (D214): the
+; disruption of t/256, and the remedy asked for, with 4 of the 9 made
+; picked by the seed's numbers. The expected output comes from
+; t/models/airline.py --recover t/data/airline-recover.sexp --remedies 4
+; --seed 2, independently of this.
+; args: --recover t/data/airline-recover.sexp --remedies 4 --seed 2 examples/airline-day.sexp
+
+(@include "../examples/airline.slight")

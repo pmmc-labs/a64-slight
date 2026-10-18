@@ -1,0 +1,41 @@
+the record: 20 legs, 20 of which the base flies as it says
+base: 06:00 to 24:00
+    fuel 119920 kg, 3681 passenger-minutes late, 0 connections missed, 0 seats cancelled
+r7-2, from base: (close "ATL" 1155 1245)
+    the same as base till 19:15, its own till 20:45, then base's again
+    against base: fuel +0 kg, +0 passenger-minutes late, +0 missed, +0 cancelled
+r7-6, from base: (delay "SL403" 15)
+    the same as base till 14:00, its own till 17:00, then base's again
+    against base: fuel +0 kg, +1965 passenger-minutes late, +0 missed, +0 cancelled
+r7-12, from base: (delay "SL103" 60)
+    the same as base till 14:00, its own till 21:10, then base's again
+    against base: fuel +0 kg, +10360 passenger-minutes late, +0 missed, +0 cancelled
+r7-15, from base: (delay "SL202" 30)
+    the same as base till 10:00, its own till 16:05, then base's again
+    against base: fuel +0 kg, +5865 passenger-minutes late, +0 missed, +0 cancelled
+r7-19, from base: (close "ORD" 525 705)
+    the same as base till 08:45, its own till 22:15, then base's again
+    against base: fuel +5600 kg, +100105 passenger-minutes late, +18 missed, +0 cancelled
+r7-24, from base: (delay "SL204" 120)
+    the same as base till 16:30, its own till 21:15, then base's again
+    against base: fuel +0 kg, +14640 passenger-minutes late, +0 missed, +0 cancelled
+r7-27, from base: (delay "SL202" 30)
+    the same as base till 10:00, its own till 16:05, then base's again
+    against base: fuel +0 kg, +5865 passenger-minutes late, +0 missed, +0 cancelled
+r7-30, from base: (delay "SL102" 75)
+    the same as base till 10:00, its own till 17:35, then base's again
+    against base: fuel +0 kg, +13350 passenger-minutes late, +0 missed, +0 cancelled
+r7-35, from base: (delay "SL404" 120)
+    the same as base till 17:15, its own till 22:13, then base's again
+    against base: fuel +0 kg, +15240 passenger-minutes late, +0 missed, +0 cancelled
+the history:
+(branch "r7-2" (from "base") (change (close "ATL" 1155 1245)) (own "19:15" "20:45") (rejoined "base") (against-base (fuel 0) (late 0) (missed 0) (cancelled 0)))
+(branch "r7-6" (from "base") (change (delay "SL403" 15)) (own "14:00" "17:00") (rejoined "base") (against-base (fuel 0) (late 1965) (missed 0) (cancelled 0)))
+(branch "r7-12" (from "base") (change (delay "SL103" 60)) (own "14:00" "21:10") (rejoined "base") (against-base (fuel 0) (late 10360) (missed 0) (cancelled 0)))
+(branch "r7-15" (from "base") (change (delay "SL202" 30)) (own "10:00" "16:05") (rejoined "base") (against-base (fuel 0) (late 5865) (missed 0) (cancelled 0)))
+(branch "r7-19" (from "base") (change (close "ORD" 525 705)) (own "08:45" "22:15") (rejoined "base") (against-base (fuel 5600) (late 100105) (missed 18) (cancelled 0)))
+(branch "r7-24" (from "base") (change (delay "SL204" 120)) (own "16:30" "21:15") (rejoined "base") (against-base (fuel 0) (late 14640) (missed 0) (cancelled 0)))
+(branch "r7-27" (from "base") (change (delay "SL202" 30)) (own "10:00" "16:05") (rejoined "base") (against-base (fuel 0) (late 5865) (missed 0) (cancelled 0)))
+(branch "r7-30" (from "base") (change (delay "SL102" 75)) (own "10:00" "17:35") (rejoined "base") (against-base (fuel 0) (late 13350) (missed 0) (cancelled 0)))
+(branch "r7-35" (from "base") (change (delay "SL404" 120)) (own "17:15" "22:13") (rejoined "base") (against-base (fuel 0) (late 15240) (missed 0) (cancelled 0)))
+"1080 minutes for the base, and 3332 for its branches, of which 3287 their own"
