@@ -14,6 +14,9 @@
 ;     ./airline day.sexp
 ;     ./airline --time day.sexp     (and says how long each part took)
 ;     ./airline --record day.sexp   (prints only the base's record)
+;     ./airline --json out.json day.sexp
+;                                   (and writes every run's minutes and
+;                                   flights, for charts)
 ;
 ; The day, in examples/airline-day.sexp: five aircraft, their twenty legs
 ; through a hub at ORD, the passengers changing planes there, the weather
@@ -72,6 +75,8 @@
 ; last line says how much that would save, and with --time, how long it
 ; would save. The expected output comes from t/models/airline.py.
 
+(@include :fs)
+
 ; --- the model ----------------------------------------------------------------
 
 (defun start () 360)                    ; 06:00, the day's first minute
@@ -100,7 +105,7 @@
         ((:eof f)    (reverse records))))
 
 ; The day: #(aircraft legs connects outs ins by-aircraft closed flew
-; branches). The aircraft, legs and connections are tuples, numbered in
+; branches airports). The aircraft, legs and connections are tuples, numbered in
 ; the file's order: an aircraft is (tail base); a leg #(flight aircraft
 ; from to departure block passengers wind), its aircraft a number; a
 ; connection #(in out passengers), its legs numbers. outs and ins have,
@@ -125,7 +130,7 @@
            (index-by (tuple/len legs) (lambda (c) (connect/in (tuple/get connects c))) (numbers connects))
            (index-by (tuple/len legs) (lambda (c) (connect/out (tuple/get connects c))) (numbers connects))
            (index-by (length tails) (lambda (l) (leg/aircraft (tuple/get legs l))) (numbers legs))
-           (of :closed) (of :flew) (of :branch)))
+           (of :closed) (of :flew) (of :branch) (of :airport)))
 
 ; xs by (key x), a number below n: a tuple of n lists, each in xs's order.
 (defun index-by (n key xs)
@@ -140,6 +145,7 @@
 (defun day/closed (day) (tuple/get day 6))
 (defun day/flew (day) (tuple/get day 7))
 (defun day/branches (day) (tuple/get day 8))
+(defun day/airports (day) (tuple/get day 9))
 
 (defun leg/flight (l) (tuple/get l 0))
 (defun leg/aircraft (l) (tuple/get l 1))
@@ -363,14 +369,17 @@
         ((:out-of-service _ from)  (list from (end)))
         ((:quick-turn _ from to _) (list from to))))
 
-; A run that's been kept is #(changes parent change digests totals): all
-; its changes, its parent and its own change (() for the base), and its
-; digests and totals for the whole day.
+; A run that's been kept is #(changes parent change digests totals flown
+; fate): all its changes, its parent and its own change (() for the
+; base); its digests, totals and legs for the whole day; and (from until
+; rejoined), where it was its own and the run it rejoined, or () for the
+; base.
 (defun run/changes (r) (tuple/get r 0))
 (defun run/parent (r) (tuple/get r 1))
 (defun run/change (r) (tuple/get r 2))
 (defun run/digests (r) (tuple/get r 3))
 (defun run/totals (r) (tuple/get r 4))
+(defun run/flown (r) (tuple/get r 5))
 
 ; The runs from the base to name, oldest first.
 (defun path-of (runs name)
@@ -390,15 +399,26 @@
                   (targets-of day runs rest change)))))
 
 ; A run that rejoined name at stop, for the whole day: from stop on its
-; digests are name's, and its totals name's moved by what it had changed.
-(defun rejoined-day (runs name stop digests totals)
+; digests are name's, its totals name's moved by what it had changed,
+; and its legs name's, but for those it had flown or begun by then. One
+; in the air at stop lands when name's does, the two being the same then.
+(defun rejoined-day (runs name stop digests totals flown)
     (let theirs (lookup name runs))
     (let i (- stop (start)))
     (let n (- (end) (start)))
     (let shift (totals- (tuple/get totals i) (tuple/get (run/totals theirs) i)))
     (list (list->tuple (append (tuple->list digests) (tuple->list (tuple/slice (run/digests theirs) (inc i) n))))
           (list->tuple (append (tuple->list totals)
-                               (map (lambda (m) (totals+ m shift)) (tuple->list (tuple/slice (run/totals theirs) (inc i) n)))))))
+                               (map (lambda (m) (totals+ m shift)) (tuple->list (tuple/slice (run/totals theirs) (inc i) n)))))
+          (rejoined-legs (run/flown theirs) flown)))
+
+(defun rejoined-legs (theirs mine)
+    (list->tuple (map (lambda (l)
+                          (match (tuple/get mine l)
+                              (()       (tuple/get theirs l))
+                              ((off ()) (list off (cadr (tuple/get theirs l))))
+                              (f        f)))
+                      (range 0 (tuple/len mine)))))
 
 (defun totals+ (a b) (match (list a b) (((f l m c) (f2 l2 m2 c2)) (list (+ f f2) (+ l l2) (+ m m2) (+ c c2)))))
 (defun totals- (a b) (match (list a b) (((f l m c) (f2 l2 m2 c2)) (list (- f f2) (- l l2) (- m m2) (- c c2)))))
@@ -417,11 +437,12 @@
 ; tally is (simulated own us saved): the minutes the branches simulated,
 ; and those of their own, the microseconds they took, and those spent on
 ; the minutes before their changes.
-(defun explore (day timed bs runs history tally)
+(defun explore (day timed json bs runs history tally)
     (match (list bs tally)
         ((() (simulated own us saved))
             (tty/write "the history:\n")
             (map pprint (reverse history))
+            (when (str? json) (write-json json day (reverse runs)))
             (when timed
                 (tty/write "time: the branches in " (ms us) ", " (ms saved) " of it on the minutes before their changes,"
                            " which forking at the change would save" \n))
@@ -431,12 +452,12 @@
             (let targets (targets-of day runs (path-of runs parent) change))
             (let t0 (clock/us))
             (match (join (fork (simulate day changes targets)))
-                ((:ok (stop rejoined digests totals _))
+                ((:ok (stop rejoined digests totals flown))
                     (let took (- (clock/us) t0))
                     (let from (car (window day change)))
                     (let minutes (+ (- stop (start)) 1))
                     (let same (same-before? digests (run/digests (lookup parent runs)) 0 (- from (start))))
-                    (let whole (if (nil? rejoined) (list digests totals) (rejoined-day runs rejoined stop digests totals)))
+                    (let whole (if (nil? rejoined) (list digests totals flown) (rejoined-day runs rejoined stop digests totals flown)))
                     (let d (totals- (last-of (cadr whole)) (last-of (run/totals (lookup "base" runs)))))
                     (tty/write name ", from " parent ": " (concat change) \n)
                     (when (not same) (tty/write "    not the same as " parent " before " (clock from) \n))
@@ -453,7 +474,9 @@
                                      (if (nil? rejoined) (list :to-the-end) (list :rejoined rejoined))
                                      (list :against-base (list :fuel (nth 0 d)) (list :late (nth 1 d))
                                                          (list :missed (nth 2 d)) (list :cancelled (nth 3 d)))))
-                    (explore day timed rest (cons (list name (tuple changes parent change (car whole) (cadr whole))) runs)
+                    (let fate (list from (if (nil? rejoined) (end) stop) rejoined))
+                    (explore day timed json rest
+                             (cons (list name (tuple changes parent change (car whole) (cadr whole) (caddr whole) fate)) runs)
                              (cons entry history)
                              (list (+ simulated minutes) (+ own (+ (- stop from) 1)) (+ us took)
                                    (+ saved (div (* took (- from (start))) minutes)))))))))
@@ -475,7 +498,7 @@
 
 ; The base, and then either its record, (:flew flight off on) for each
 ; leg that landed, or what it came to and the branches.
-(defun main (path record timed)
+(defun main (path record timed json)
     (let t0 (clock/us))
     (let day (match (join (connect :fs/read path (reading ()))) ((:ok records) (day-of records))))
     (let t1 (clock/us))
@@ -489,7 +512,8 @@
                 (print-record day flown)
                 (do (report-base day flown totals)
                     (when timed (tty/write "    time: " (ms (- t2 t1)) ", " (pace day (- t2 t1) (- (end) (start))) \n))
-                    (explore day timed (day/branches day) (list (list "base" (tuple () () () digests totals))) () (list 0 0 0 0)))))))
+                    (explore day timed json (day/branches day) (list (list "base" (tuple () () () digests totals flown ())))
+                             () (list 0 0 0 0)))))))
 
 (defun report-base (day flown totals)
     (let agree (length (filter (lambda (r)
@@ -519,11 +543,58 @@
          landed)
     (list :recorded (length landed)))
 
-(defun options (args path record timed)
-    (match args
-        (()                  (main path record timed))
-        (("--record" & rest) (options rest path #true timed))
-        (("--time" & rest)   (options rest path record #true))
-        ((p & rest)          (options rest p record timed))))
+; --- the runs, as JSON --------------------------------------------------------
 
-(options @ARGV "examples/airline-day.sexp" #false #false)
+; With --json, the day and every run, for charts, on one line: the legs,
+; each [flight tail from to departure block passengers wind]; the
+; airports' places, x and y in miles, if the day gives them; and each
+; run: its parent and change, where it was its own, [from until], and the
+; run it rejoined; its totals at each minute, [fuel late missed
+; cancelled]; and each leg's [off on], null for one that didn't leave or
+; land, and "cancelled".
+(defun write-json (path day runs)
+    (spew path (list (json/print (day-json day runs)))))
+
+(defun day-json (day runs)
+    (list :object
+          (list "start" (start))
+          (list "end" (end))
+          (list "airports" (map (lambda (a)
+                                    (match a
+                                        ((code x y hub) (list :object (list "code" code) (list "x" x) (list "y" y) (list "hub" hub)))))
+                                (day/airports day)))
+          (list "legs" (map (lambda (l)
+                                (match l
+                                    (#(flight a from to dep block pax wind)
+                                        (list flight (car (tuple/get (day/aircraft day) a)) from to dep block pax wind))))
+                            (tuple->list (day/legs day))))
+          (list "runs" (map run-json runs))))
+
+(defun or-null (v) (if (nil? v) :null v))
+
+(defun run-json (r)
+    (match r
+        ((name #(_ parent change _ totals flown fate))
+            (list :object
+                  (list "name" name)
+                  (list "parent" (or-null parent))
+                  (list "change" (if (nil? change) :null (cons (symbol->string (car change)) (cdr change))))
+                  (list "own" (match fate ((from until _) (list from until)) (_ :null)))
+                  (list "rejoined" (match fate ((_ _ rejoined) (or-null rejoined)) (_ :null)))
+                  (list "totals" totals)
+                  (list "flown" (map (lambda (f)
+                                         (match f
+                                             (()         :null)
+                                             (:cancelled "cancelled")
+                                             ((off on)   (list off (or-null on)))))
+                                     (tuple->list flown)))))))
+
+(defun options (args path record timed json)
+    (match args
+        (()                       (main path record timed json))
+        (("--record" & rest)      (options rest path #true timed json))
+        (("--time" & rest)        (options rest path record #true json))
+        (("--json" out & rest)    (options rest path record timed out))
+        ((p & rest)               (options rest p record timed json))))
+
+(options @ARGV "examples/airline-day.sexp" #false #false #false)

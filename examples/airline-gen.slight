@@ -10,9 +10,11 @@
 ;     ./airline --record day.sexp >> day.sexp
 ;     ./airline --time day.sexp
 ;
-; Each aircraft belongs to a hub, and flies out to a spoke and back, five
-; legs, from between 06:00 and 08:00, each after the last has landed and
-; turned, with some slack; none lands after 23:00. A leg's block minutes
+; The airports come first, (:airport code x y hub?), x and y in miles,
+; which airline.slight passes on to its --json, for a map. Each aircraft
+; belongs to a hub, and flies out to a spoke and back, five legs, from
+; between 06:00 and 08:00, each after the last has landed and turned,
+; with some slack; none lands after 23:00. A leg's block minutes
 ; come from how far apart its airports are. Passengers change planes at
 ; a hub from a flight that lands to one that leaves 35 minutes to two
 ; hours later, from about one in eight of those.
@@ -134,6 +136,11 @@
     (tty/write "; A day made by examples/airline-gen.slight, seed " seed ": " (aircraft-count) " aircraft, "
                (airport-count) " airports, " (length legs) " legs, " (length connects) " connections.\n"
                "; The hubs: " (str-join " " (map (lambda (i) (tuple/get (tuple/get ports i) 0)) (range 0 (hub-count)))) ".\n\n")
+    (map (lambda (i)
+             (match (tuple/get ports i)
+                 (#(c x y) (tty/write "(:airport " (q c) " " x " " y " " (if (< i (hub-count)) "#true" "#false") ")\n"))))
+         (range 0 (airport-count)))
+    (tty/write \n)
     (dotimes 0 (aircraft-count) (lambda (a) (tty/write "(:aircraft " (q (tail a)) " " (code (stop-of seed a 0)) ")\n")))
     (tty/write \n)
     (map (lambda (l)
