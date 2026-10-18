@@ -1,0 +1,9 @@
+; examples/airline.slight --recover (D215) on the small day, from the hub
+; closed for two hours: of the 21 remedies made near what it touched, two
+; come to the same day as doing nothing, so the three are checked once,
+; as doing nothing, and the rounds go on to the days that differ. The
+; expected output comes from t/models/airline.py --recover
+; t/data/airline-recover-close.sexp, independently of this.
+; args: --recover t/data/airline-recover-close.sexp examples/airline-day.sexp
+
+(@include "../examples/airline.slight")

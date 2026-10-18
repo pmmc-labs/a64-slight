@@ -1,8 +1,8 @@
 ; examples/airline.slight --recover (D213) on the small day, with the
 ; stand-in services it starts itself, over HTTP on this machine: a
-; disruption, the remedies tried for it, the shortlist checked a round at
-; a time by the crew and maintenance stand-ins, and those that pass ranked
-; by the ranking one. The expected output comes from t/models/airline.py
+; disruption, the remedies tried for it, made near what it touched
+; (D215), the shortlist checked a round at a time by the crew and
+; maintenance stand-ins, and those that pass ranked by the ranking one. The expected output comes from t/models/airline.py
 ; --recover t/data/airline-recover.sexp, independently of this.
 ; args: --recover t/data/airline-recover.sexp examples/airline-day.sexp
 

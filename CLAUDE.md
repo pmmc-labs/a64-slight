@@ -95,7 +95,10 @@ over HTTP, with stand-ins for the services in
 256); and makes what-ifs at random from a seed, as many as asked
 (`--random n --seed s`), and picks remedies the same way (`--remedies
 n`), with `bench/airline.py` to run sets of these and time them (D214,
-golden tests 257 and 258).
+golden tests 257 and 258); and makes its remedies only near what the
+disruption touched, checks the candidates that come to the same day
+once, and keeps a remedy only as how its day differs (D215, golden test
+259).
 Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,

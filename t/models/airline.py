@@ -418,10 +418,12 @@ def main():
 # --- recovering from a disruption --------------------------------------------
 #
 # The disruption is a branch of the base; each candidate remedy a branch of
-# it, from when it's known. The shortlist is the candidates, doing nothing
-# among them, that no other is better than in all of passenger-minutes late,
-# connections missed and seats cancelled (the first of any with the same
-# three); the services check those, and rank the ones that pass.
+# it, from when it's known, made near what it touched. Candidates whose
+# legs all come to the same are one day, checked and ranked once as the
+# first of them. In rounds, the days, doing nothing's among them, that no
+# other left is better than in all of passenger-minutes late, connections
+# missed and seats cancelled go to the services that check them, till the
+# budget's spent, and those that pass are ranked.
 
 DUTY = 470                  # the crew service: the most minutes a crew is on duty
 PLAN = 450                  # the most it's planned for
@@ -529,20 +531,43 @@ def rank(day, ops):
                 compensated=compensated, misconnected=misconnected, late=late)
 
 
+def entry(r, f):
+    """What became of a leg in a run, as the program keeps it."""
+    if f in r['cancelled']:
+        return ('cancelled', r['cancelled'][f])
+    return r['flown'].get(f)
+
+
+def touched(ex, d):
+    """The legs the disruption flew otherwise than the base did, and the
+    aircraft planned for them or flying them in either."""
+    day, base, r = ex.day, ex.runs['base'], ex.runs[d]
+    legs = [f for f in day.order if entry(base, f) != entry(r, f)]
+    aircraft = set()
+    for f in legs:
+        aircraft.add(day.legs[f]['tail'])
+        for e in (entry(base, f), entry(r, f)):
+            if e is not None and e[0] != 'cancelled':
+                aircraft.add(e[2])
+    return set(legs), aircraft
+
+
 def candidates(ex, d, now, tries):
-    """The remedies to try, in order: those asked for; holds, each flight
-    with passengers connecting to it, leaving after now, held 15, 30 and 45
-    minutes; cancellations, each flight leaving after now; and swaps, each
-    two aircraft at the first minute after now they're both on the ground
-    at one airport, if either has a leg ahead then. A remedy already there
-    isn't there twice."""
+    """The remedies to try, in order, near what the disruption touched:
+    those asked for; holds, each flight leaving after now that passengers
+    change to from a touched leg, held 15, 30 and 45 minutes;
+    cancellations, each leg leaving after now of a touched aircraft; and
+    swaps, each two aircraft, one of them touched, at the first minute
+    after now they're both on the ground at one airport, if either has a
+    leg ahead then. A remedy already there isn't there twice."""
     day, r = ex.day, ex.runs[d]
+    legs, near = touched(ex, d)
     out = list(tries)
     alive = [f for f in day.order if day.legs[f]['dep'] >= now and f not in r['cancelled']]
     for f in alive:
-        if any(o == f for _, o, _ in day.connects):
+        if any(o == f and i in legs for i, o, _ in day.connects):
             out += [['delay', f, m] for m in (15, 30, 45)]
-    out += [['cancel', f] for f in alive]
+    out += [['cancel', f] for f in alive if day.legs[f]['tail'] in near]
 
     # When each aircraft is on the ground at the start of a minute, and
     # where: before its first departure, at its base; between a landing
@@ -562,6 +587,8 @@ def candidates(ex, d, now, tries):
     for x in range(len(aircraft)):
         for y in range(x + 1, len(aircraft)):
             (a, ha), (b, hb) = aircraft[x], aircraft[y]
+            if a not in near and b not in near:
+                continue
             starts = [max(now, s1, s2) for s1, e1, p1 in ground(a, ha) for s2, e2, p2 in ground(b, hb)
                       if p1 == p2 and max(now, s1, s2) <= min(e1, e2)]
             if not starts:
@@ -615,9 +642,18 @@ def recover(ex, records):
     picked = f', {n} of the {len(others)} made picked by seed {seed}' if sampled else ''
     print(f'the candidates: {len(cands)} remedies, and nothing{picked}; {rejoined} of the remedies rejoin a run before them')
 
-    # Rounds: the candidates no other betters in all three together, checked,
-    # then those of the rest, till as many as the budget have been checked.
-    rest, passed, checked, round_ = [n for n, _ in names], [], 0, 0
+    # The days the candidates come to: those whose legs are all as another's
+    # are that one's day, checked and ranked once, as the first of them.
+    days = {}
+    for n, _ in names:
+        days.setdefault(tuple(entry(ex.runs[run_of[n]], f) for f in day.order), []).append(n)
+    alike = {ns[0]: len(ns) - 1 for ns in days.values()}
+    print(f'they come to {"1 day" if len(days) == 1 else f"{len(days)} different days"}, '
+          f'{alike["c0"]} of the remedies to the same as doing nothing')
+
+    # Rounds: the days no other betters in all three together, checked, then
+    # those of the rest, till as many as the budget have been checked.
+    rest, passed, checked, round_ = list(alike), [], 0, 0
     while rest and checked < budget:
         round_ += 1
         front = [n for n in rest
@@ -625,7 +661,8 @@ def recover(ex, records):
         print(f'round {round_}: the {len(front)} candidates no other left betters in late, missed and cancelled together')
         for n in front:
             late, missed, cancelled = measure[n]
-            print(f'    {n} {label[n]}: late {signed(late)}, missed {signed(missed)}, cancelled {signed(cancelled)}')
+            more = {0: '', 1: '; 1 other comes to the same day'}.get(alike[n], f'; {alike[n]} others come to the same day')
+            print(f'    {n} {label[n]}: late {signed(late)}, missed {signed(missed)}, cancelled {signed(cancelled)}{more}')
             ops = operated(ex, run_of[n])
             reasons = [('crew', w, y) for w, y in crew_check(day, ops)] + [('maintenance', w, y) for w, y in maintenance_check(day, ops)]
             for service, what, why in reasons:
@@ -643,7 +680,7 @@ def recover(ex, records):
               f"{s['refunds']} refunded, {s['compensated']} compensated, {s['misconnected']} misconnected, "
               f"{s['late']} passenger-minutes late")
     best = scored[0][2] if scored else 'none'
-    print(f'"{len(cands)} remedies, {checked} checked, {len(passed)} that pass, and the best {best}"')
+    print(f'"{len(cands)} remedies, {len(days)} day{"" if len(days) == 1 else "s"}, {checked} checked, {len(passed)} that pass, and the best {best}"')
 
 
 if __name__ == '__main__':

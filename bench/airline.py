@@ -23,15 +23,13 @@ The day is gen:SEED (the default, gen:1), the size of a small airline's,
 made by examples/airline-gen.slight with its record appended; small,
 examples/airline-day.sexp; or a file. A --recover with no file of its own
 is told of one disruption: for the small day t/data/airline-recover.sexp's;
-for another, --disruption, or a delay of 60 minutes of the first leg into
-the first hub from 09:00.
+for another, --disruption, or a delay of 45 minutes of the first leg into
+the first hub from 09:00 (airline-gen's own first what-if).
 
 Everything goes under build/bench/airline/: the binaries, the days made,
 the files written for --recover and --rounds, and each run's output.
 Timings mean something only natively: a --target that isn't this
-machine's runs under qemu. On a made-up day, --recover keeps every
-remedy's run whole, and runs out of heap somewhere past 2,000 of them
-(D214), so --remedies all is for the small day.
+machine's runs under qemu.
 """
 
 import argparse
@@ -119,7 +117,7 @@ def recover_file(day, disruption, check, top):
         hubs  = re.search(r'^; The hubs: (.*)\.$', text, re.M)
         legs  = re.findall(r'^\(:leg "(\S+)" "\S+" "(\S+)" "(\S+)" +(\d+)', text, re.M)
         into  = [l for l in legs if int(l[3]) >= 540 and (not hubs or l[2] == hubs.group(1).split()[0])]
-        disruption = f'(:delay "{(into or legs)[0][0]}" 60)'
+        disruption = f'(:delay "{(into or legs)[0][0]}" 45)'
     path = os.path.join(BUILD, 'recover-' + slug(os.path.basename(day) + disruption) + '.sexp')
     with open(path, 'w') as f:
         f.write(f'(:disruption "d" {disruption})\n(:check {check})\n(:top {top})\n')
@@ -182,7 +180,7 @@ def parsed(mode, out):
                  own=int(final.group(3)) if final else None)
     else:
         made = re.search(r'^time: (\d+) remedies made in ' + MS + r'; (\d+) run in ' + MS + r', (\d+) minutes$', out, re.M)
-        final = re.search(r'^"(\d+) remedies, (\d+) checked, (\d+) that pass, and the best (\S+)"$', out, re.M)
+        final = re.search(r'^"(\d+) remedies, (\d+) days?, (\d+) checked, (\d+) that pass, and the best (\S+)"$', out, re.M)
         r.update(base_ms=found(r'^time: the base in ' + MS, out),
                  made=int(made.group(1)) if made else None, make_ms=float(made.group(2)) if made else None,
                  ran=int(made.group(3)) if made else None, run_ms=float(made.group(4)) if made else None,
@@ -190,8 +188,9 @@ def parsed(mode, out):
                  check_ms=found(r'^time: \d+ checked in ' + MS, out),
                  rank_ms=found(r'^time: \d+ ranked in ' + MS, out),
                  rejoined=found(r'; (\d+) of the remedies rejoin', out, int),
-                 checked=int(final.group(2)) if final else None, passed=int(final.group(3)) if final else None,
-                 best=final.group(4) if final else None,
+                 days=int(final.group(2)) if final else None,
+                 checked=int(final.group(3)) if final else None, passed=int(final.group(4)) if final else None,
+                 best=final.group(5) if final else None,
                  best_cost=found(r'^    1\. \S+ .*: cost (\d+):', out, int))
     return r
 
@@ -231,7 +230,7 @@ RECOVER = [('seed', 5, lambda c, r: str(c['seed'])), ('remedies', 8, lambda c, r
            ('ms each', 7, lambda c, r: num(r['run_ms'] / r['ran']) if r['ran'] else '-'),
            ('minutes', 8, lambda c, r: num(r['minutes'], '%d')),
            ('rejoined', 8, lambda c, r: f"{num(r['rejoined'], '%d')}/{num(r['ran'], '%d')}"),
-           ('check ms', 8, lambda c, r: num(r['check_ms'])), ('rank ms', 7, lambda c, r: num(r['rank_ms'])),
+           ('days', 5, lambda c, r: num(r['days'], '%d')), ('check ms', 8, lambda c, r: num(r['check_ms'])), ('rank ms', 7, lambda c, r: num(r['rank_ms'])),
            ('checked', 7, lambda c, r: num(r['checked'], '%d')), ('passed', 6, lambda c, r: num(r['passed'], '%d')),
            ('best', 12, lambda c, r: '-' if not r['best'] or r['best'] == 'none' else f"{r['best']} {r['best_cost']}")]
 

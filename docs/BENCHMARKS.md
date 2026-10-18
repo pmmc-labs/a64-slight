@@ -190,6 +190,18 @@ each, `--random` what-ifs made from seed 1:
   281 s (2.3 GB); all of them run out of the 1 GB heap (D214).
   Checking a dozen over HTTP takes 0.15 to 1.3 s.
 
+Since D215 the remedies are made near what the disruption touched, and
+let go once measured; a run makes checkpoints only when a later branch
+will start from them:
+
+- a 45-minute delay at 11:35: 63 remedies made in 13 ms, all run in
+  7.0 s, 111 ms each, 118 MB at most; 64 days, 16 checked, 15 pass;
+- a hub closed for an hour and a half: 905 made in 64 ms, run in
+  136 s, 151 ms each, 251 MB at most (745 before the checkpoints were
+  made only when wanted); 885 days, none passing;
+- 1,000 what-ifs: 149 s, 828 MB at most, where they took 162 s and
+  1.4 GB.
+
 ```
 bench/airline.py --random 10,100,1000
 bench/airline.py --random 30 --rounds 3

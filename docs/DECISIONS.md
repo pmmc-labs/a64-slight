@@ -3740,3 +3740,68 @@ an agent consulted when one strays far enough.
   bigger batch not take in a smaller; the runner in bash, since parsing
   the output, measuring the peak and writing JSON are Python's, and
   `bench/run.py` is too.
+
+**D215. The airline's remedies near the disruption, a day checked once,
+and remedies kept lean.** *(Stevan, Oct 2026: "I agree with you
+suggestions", on D214's three: remedies near the disruption, a candidate
+that comes to the same day as another checked once, and a remedy's run
+let go once it's measured.)*
+
+- **Near:** what the disruption touched is what the simulation sees,
+  since crews stay with their services: the legs it flew otherwise than
+  the base (another minute, another aircraft, or not at all), and the
+  aircraft planned for them or flying them. Holds are made for the
+  flights passengers change to from a touched leg; cancellations for a
+  touched aircraft's legs ahead, which in the plan are its crews' too;
+  swaps for a touched aircraft with each other it meets on the ground,
+  which is where its airports come in. Remedies far from it can't mend
+  what it broke, so they aren't made at all. On the big day a 45-minute
+  delay of SL1002 makes 63 remedies, where it made 7,629, in 13 ms
+  where it took 0.55 s, and all 63 run in 7 s; 15 pass, and the best is
+  a swap at the hub after SL1002 lands. The small day's t/256 makes 10
+  where it made 39, and the best is the same, holding SL102 15 minutes.
+- **A day checked once:** a remedy is kept as the legs it flew otherwise
+  than the disruption did. Candidates with the same differences come to
+  the same day, and are checked and ranked once, as the first of them,
+  the others counted beside it; the budget and the last line count days.
+  Two days are the same when their differences hash alike, as two
+  minutes are when their digests do (D209); the model compares them
+  exactly. On the small day only doing nothing's day ever has others
+  (five aircraft make few remedies, and they differ), as in `t/259`,
+  where the hub closed 08:00 to 10:00 makes 21 remedies, two of which
+  come to doing nothing's day; on the big day a hub closed for an hour
+  and a half makes 905, which come to 885 days.
+- **Lean:** a remedy is kept as (name label measures differences
+  minutes rejoined?), and its run goes once it's measured, so the runs
+  don't grow with the remedies tried; an operated day is made only for
+  what's sent to a service.
+- **A run makes checkpoints only when a later branch will start from
+  them,** where it made them and the root dropped them (D214). A run's
+  process ends with its result, and its exit record keeps that for good
+  (D88), so this is what shrinks the record: the hub closure's 905
+  remedies peak at 251 MB where they peaked at 745, and a thousand
+  what-ifs at 828 MB where they peaked at 1.4 GB, in 149 s where they
+  took 162.
+- **The runner's default disruption is now airline-gen's own first
+  what-if, SL1002 45 minutes late.** At 60 nothing can mend it under the
+  stand-ins' rules: SL1002 ends its crew's day, so landing an hour late
+  puts the crew at 482 minutes whatever's done elsewhere; cancelling it
+  leaves N100 away from its check; and no remedy of the three kinds
+  gives the leg another crew. That's an answer, not a fault: every
+  remedy's reasons say so.
+- **Checked:** `t/256` and `t/258` (now 4 of the 9 made) again, and
+  `t/259`, from `t/models/airline.py`, which makes the remedies near the
+  disruption and the days by its own rules; the program and the model
+  agree on eight disruptions of the small day and two samples; the
+  three under `SLIGHT_GC_STRESS=7`, `SLIGHT_GC_VERIFY` and
+  `SLIGHT_SCHED`; the report and the random what-ifs unchanged.
+- **Not yet, for Stevan:** exit records (D88) keep every value a
+  process ends with, which was decided for many small results; a run of
+  the airline ends with its whole result, so each remedy or branch
+  still leaves about 0.15 MB for good on the big day. A process ending with a list of
+  10,000 integers, joined and dropped, leaves 165 KB a time. A remedy
+  the crews' own service could suggest (a reserve crew) is that
+  service's to make; quick turns at a touched airport could be made too.
+- **Rejected:** making every remedy and trying the near ones first,
+  since the far ones can't help and cost a run each; comparing days
+  pairwise with `eq?`, which is n² for thousands.
