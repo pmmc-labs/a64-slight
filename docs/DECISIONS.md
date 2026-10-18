@@ -3823,3 +3823,19 @@ taken up, with the ways out weighed then:
   changes only the example, but makes `run-branch` wait in `recv`, and
   so it and its callers state functions;
 - nothing, since at thousands of runs it costs a few hundred megabytes.
+
+**D217. The airline's recovery as JSON, for charts.** *(Claude, Oct 2026,
+for Stevan's "lets do another visualization using the new code".)*
+`--json file` with `--recover` writes what the recovery came to, as
+D211's does for exploring: the disruption, when it's known and what it
+does against the base; every candidate, doing nothing among them, with
+its change, (late missed cancelled) against the base, the day it comes
+to (named for the first candidate that does), how many legs it flew
+otherwise than the disruption, its minutes and whether it rejoined; the
+days checked, with their round and the services' reasons; and those
+that passed, ranked, with what the ranking service said. So `shortlist`
+keeps a log of its rounds, and `tell-ranked` gives its scores beside
+its line. The printed report doesn't change (`t/256`, `t/258`, `t/259`).
+The dashboard *What-Ifs and Remedies* is drawn from it, and from
+`bench/airline.py`'s `--json`: no golden test reads either file, as
+none reads D211's.

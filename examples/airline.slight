@@ -30,6 +30,9 @@
 ;                                   of the day's own; see random what-ifs)
 ;     ./airline --recover r.sexp --remedies 50 --seed 7 day.sexp
 ;                                   (50 of the remedies made, at random)
+;     ./airline --recover r.sexp --json r.json day.sexp
+;                                   (and writes every candidate, the rounds
+;                                   and the ranking, for charts)
 ;
 ; bench/airline.py runs it with sets of these, and times them.
 ;
@@ -1012,13 +1015,18 @@
                     (let services (services-of day asked))
                     (let ctx (tuple day dflown (car services) (setting asked :check 12)))
                     (let t3 (clock/us))
-                    (let told (match (shortlist ctx days () 0 1)
-                                  ((:ok passed checked)
+                    (let told (match (shortlist ctx days () 0 1 ())
+                                  ((:ok passed checked log)
                                       (let t4 (clock/us))
                                       (when (opt/timed opts) (tty/write "time: " checked " checked in " (ms (- t4 t3)) \n))
-                                      (let ranked (tell-ranked ctx passed checked (length cands) (length days) (setting asked :top 3)))
-                                      (when (opt/timed opts) (tty/write "time: " (length passed) " ranked in " (ms (- (clock/us) t4)) \n))
-                                      ranked)
+                                      (match (tell-ranked ctx passed checked (length cands) (length days) (setting asked :top 3))
+                                          ((text ranked)
+                                              (when (opt/timed opts) (tty/write "time: " (length passed) " ranked in " (ms (- (clock/us) t4)) \n))
+                                              (when (str? (opt/json opts))
+                                                  (write-recovery-json (opt/json opts) (list dname dchange now d)
+                                                                       (cons (list "c0" "nothing" (cdr d) () 0 #false) tried)
+                                                                       (cons () cands) log ranked))
+                                              text)))
                                   ((:error why)         (concat "stopped: " why))))
                     (map kill (cadr services))
                     told)))
@@ -1213,11 +1221,12 @@
 
 ; ctx is #(day flown urls budget): the disruption's legs, which each
 ; candidate's differences are from; the services' URLs; and the budget.
-; rest is the days not yet checked (above, days-of). Gives (:ok passed
-; checked) or (:error why).
-(defun shortlist (ctx rest passed checked k)
+; rest is the days not yet checked (above, days-of), and log those that
+; were, each (name round reasons). Gives (:ok passed checked log) or
+; (:error why).
+(defun shortlist (ctx rest passed checked k log)
     (cond
-        ((or (nil? rest) (>= checked (tuple/get ctx 3))) (list :ok passed checked))
+        ((or (nil? rest) (>= checked (tuple/get ctx 3))) (list :ok passed checked (reverse log)))
         (#true
             (let front (filter (lambda (g) (not (bettered? g rest))) rest))
             (let names (map g/name front))
@@ -1227,7 +1236,8 @@
                     (map (lambda (g) (tell-verdict g (lookup (g/name g) said))) front)
                     (shortlist ctx (remove (lambda (g) (member? (g/name g) names)) rest)
                                (append passed (filter (lambda (g) (nil? (lookup (g/name g) said))) front))
-                               (+ checked (length front)) (inc k)))
+                               (+ checked (length front)) (inc k)
+                               (fold/l log (lambda (acc g) (cons (list (g/name g) k (lookup (g/name g) said)) acc)) front)))
                 (failed failed)))))
 
 ; Whether another of rest is as good as g in all three, and better in one.
@@ -1270,7 +1280,9 @@
         (n (concat "; " n " others come to the same day"))))
 
 ; Those that passed, ranked by the ranking service's cost, ties in the
-; order they passed; the first top of them told.
+; order they passed; the first top of them told. Gives (text ranked): the
+; last line, and each that passed, in order, as (name fields), what the
+; ranking service said of it.
 (defun tell-ranked (ctx passed checked tried days top)
     (tty/write "ranked by the ranking service, of those that pass:" \n)
     (match (if (nil? passed) (list :ok ()) (ask-service (caddr (tuple/get ctx 2)) (map (lambda (g) (list (g/name g) (operated ctx g))) passed)))
@@ -1285,9 +1297,54 @@
                                         (lookup "compensated" s) " compensated, " (lookup "misconnected" s) " misconnected, "
                                         (lookup "late" s) " passenger-minutes late" \n))))
                  (zip (range 1 (inc top)) ranked))
-            (concat tried " remedies, " days (if (== days 1) " day, " " days, ") checked " checked, " (length passed) " that pass, and the best "
-                    (if (nil? ranked) "none" (g/name (car ranked)))))
-        ((:error why) (concat "stopped: " why))))
+            (list (concat tried " remedies, " days (if (== days 1) " day, " " days, ") checked " checked, " (length passed)
+                          " that pass, and the best " (if (nil? ranked) "none" (g/name (car ranked))))
+                  (map (lambda (g) (list (g/name g) (lookup (g/name g) scores))) ranked)))
+        ((:error why) (list (concat "stopped: " why) ()))))
+
+; With --json, what the recovery came to, for charts: the disruption, its
+; change, when it's known and what it does against the base; every
+; candidate, with its change, (late missed cancelled) against the base,
+; the day it comes to (named for the first candidate that comes to it),
+; how many legs it flew otherwise than the disruption, the minutes it ran
+; and whether it rejoined a run before it; those checked, with their
+; round and reasons; and those that passed, ranked, with what the ranking
+; service said.
+(defun write-recovery-json (path disruption cs changes log ranked)
+    (let keys (map (lambda (c) (list (hash (nth 3 c)) (nth 0 c))) cs))
+    (let day-of (lambda (c) (let h (hash (nth 3 c))) (cadr (find (lambda (k) (== (car k) h)) keys))))
+    (let as-json (lambda (change) (if (nil? change) :null (cons (symbol->string (car change)) (cdr change)))))
+    (spew path
+          (list (json/print
+                    (list :object
+                          (list "disruption"
+                                (match disruption
+                                    ((name change now (fuel late missed cancelled))
+                                        (list :object (list "name" name) (list "change" (as-json change)) (list "from" now)
+                                              (list "fuel" fuel) (list "late" late) (list "missed" missed) (list "cancelled" cancelled)))))
+                          (list "candidates"
+                                (map (lambda (p)
+                                         (match p
+                                             (((name _ (late missed cancelled) diffs minutes rejoined) change)
+                                                 (list :object (list "name" name) (list "change" (as-json change))
+                                                       (list "late" late) (list "missed" missed) (list "cancelled" cancelled)
+                                                       (list "day" (day-of (car p))) (list "legs" (length diffs))
+                                                       (list "minutes" minutes) (list "rejoined" rejoined)))))
+                                     (zip cs changes)))
+                          (list "checked"
+                                (map (lambda (e)
+                                         (match e
+                                             ((name round reasons)
+                                                 (list :object (list "name" name) (list "round" round)
+                                                       (list "reasons" (map (lambda (r)
+                                                                                (match r
+                                                                                    ((service what why)
+                                                                                        (list :object (list "service" service) (list "what" what)
+                                                                                              (list "why" why)))))
+                                                                            reasons))))))
+                                     log))
+                          (list "ranked"
+                                (map (lambda (p) (match p ((name fields) (cons :object fields)))) ranked)))))))
 
 ; --- the history, kept ---------------------------------------------------------
 
