@@ -15,7 +15,9 @@ program, or the system to measure the run.
 - airline: a day the size of a small airline's, from
   examples/airline-gen.slight, too big for a golden test: every leg
   lands in the base's record, which is the same in a seeded order
-  (D210).
+  (D210); and what-ifs run from checkpoints, some kept in a history and
+  the rest run from it later, come to what they come to run from the
+  start of the day with no checkpoints (D212).
 
 Nothing here depends on how long anything takes: each step waits for
 what it expects to see, and DEADLINE seconds is only how long it waits
@@ -231,6 +233,48 @@ def airline():
           made.returncode == 0 and all(r.returncode == 0 for r in runs) and legs > 1000 and landed == legs
           and first.endswith(f'(recorded {legs})\n'.encode()) and first == again,
           f'made {made.returncode}, recorded {[r.returncode for r in runs]}, the record ends {first[-200:]!r}')
+
+    # What-ifs of the test's own, for each way a checkpoint is found: a hub
+    # closed, and quick turns there after it, from the closure's own; a
+    # small delay, rejoining early; then, from the history, a closure on
+    # top of the small delay, from the base's after it rejoined, and a
+    # delay on top of the closure, from the closure's own.
+    text = (made.stdout + first).decode()
+    hubs = next(line for line in text.splitlines() if line.startswith('; The hubs: '))[len('; The hubs: '):].rstrip('.').split()
+    leg_lines = [line.split() for line in text.splitlines() if line.startswith('(:leg ')]
+    late = next(l[1] for l in leg_lines if l[3] == f'"{hubs[1]}"' and int(l[5]) >= 900)
+    base_day = '\n'.join(line for line in text.splitlines() if not line.startswith('(:branch ')) + '\n'
+    kept_branches = [f'(:branch "c1" "base" (:close "{hubs[1]}" 660 780))',
+                     f'(:branch "c2" "c1" (:quick-turn "{hubs[1]}" 780 900 25))',
+                     f'(:branch "c3" "base" (:delay {leg_lines[0][1]} 15))']
+    more_branches = [f'(:branch "c4" "c3" (:close "{hubs[0]}" 900 930))',
+                     f'(:branch "c5" "c1" (:delay {late} 40))']
+    first_day, more_day = os.path.join(DIR, 'airline-first.sexp'), os.path.join(DIR, 'airline-more.sexp')
+    with open(first_day, 'w') as f:
+        f.write(base_day + '\n'.join(kept_branches) + '\n')
+    with open(more_day, 'w') as f:
+        f.write(base_day + '\n'.join(kept_branches + more_branches) + '\n')
+    kept = os.path.join(DIR, 'airline-kept.sexp')
+    if os.path.exists(kept):
+        os.remove(kept)
+
+    def airline_run(*args):
+        r = subprocess.run(RUN + [prog, *args], stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=ENV, timeout=DEADLINE)
+        return r.returncode, r.stdout.decode()
+
+    def history(out):
+        lines = out.splitlines()
+        return lines[lines.index('the history:') + 1:-1] if 'the history:' in lines else []
+
+    ran = [airline_run('--keep', kept, first_day), airline_run('--from', kept, more_day), airline_run('--every', '0', more_day)]
+    keep_out, from_out, none_out = (out for _, out in ran)
+    from_start = history(none_out)
+    passed_over = [line for line in from_out.splitlines() if line.endswith(', kept')]
+    check('what-ifs from checkpoints, and from a history kept by an earlier run, come to the same as from the start',
+          all(status == 0 for status, _ in ran) and len(from_start) == 5
+          and history(keep_out) == from_start[:3] and history(from_out) == from_start
+          and len(passed_over) == 3 and from_out.splitlines()[-1].startswith('"0 minutes for the base'),
+          f'exits {[status for status, _ in ran]}\n--- kept\n{keep_out}\n--- from the history\n{from_out}\n--- from the start\n{none_out}')
 
 
 os.makedirs(DIR, exist_ok=True)

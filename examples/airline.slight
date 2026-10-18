@@ -17,6 +17,11 @@
 ;     ./airline --json out.json day.sexp
 ;                                   (and writes every run's minutes and
 ;                                   flights, for charts)
+;     ./airline --keep kept.sexp day.sexp
+;                                   (and keeps every run in a file)
+;     ./airline --from kept.sexp day.sexp
+;                                   (runs only the branches not kept)
+;     ./airline --every 60 day.sexp (checkpoints an hour apart; 0 for none)
 ;
 ; The day, in examples/airline-day.sexp: five aircraft, their twenty legs
 ; through a hub at ORD, the passengers changing planes there, the weather
@@ -70,10 +75,21 @@
 ;   and looked up by number, in tuples, so a minute's work grows with
 ;   what happens in it, not with the size of the airline.
 ;
-; Each branch runs again from the start of the day. Forked from a copy of
-; its parent kept at that minute, it would run only its own part; the
-; last line says how much that would save, and with --time, how long it
-; would save. The expected output comes from t/models/airline.py.
+; - Every half hour a run keeps a checkpoint, the state of the day then:
+;   each aircraft's status and the legs it has left, and the passengers
+;   waiting. A branch starts from the last checkpoint before its change
+;   that holds for its parent, the parent's state and the branch's being
+;   the same till then; then it runs only its own part, and the half hour
+;   or less before it. The last line says how many minutes the branches
+;   ran, and how many of them their own.
+; - With --keep, every run is written to a file, its checkpoints too; with
+;   --from, a later run starts from those, and runs only the branches not
+;   kept, so a day can be explored a round at a time, each adding
+;   branches to the day's file. The file holds a hash of what decides a
+;   run but its changes (the model's constants and the day, without its
+;   branches or its record), and is refused for a day it wasn't kept for.
+;
+; The expected output comes from t/models/airline.py.
 
 (@include :fs)
 
@@ -85,6 +101,10 @@
 (defun change-minutes () 30)            ; from landing to boarding another flight
 (defun fuel-off () 300)
 (defun fuel-minute () 40)
+
+; To be changed whenever the model's rules are, so that a history kept by
+; an older model isn't used.
+(defun model-version () 1)
 
 (defun within? (t from to) (and (<= from t) (< t to)))
 
@@ -174,14 +194,23 @@
 ; from to earliest minutes): its number, the earliest it may leave (its
 ; departure, and any delay), and how long it takes (its block, and any
 ; wind). Each minute it tells the desk its part of the digest, its
-; events and the fuel it burnt.
+; events and the fuel it burnt; and for a checkpoint, its state, its legs
+; by number.
 (defun aircraft (ctx status legs)
     (recv
         ((:tick t)
             (match (fly ctx t (tuple status legs () 0))
                 (#(status2 legs2 events fuel)
                     (send (tuple/get ctx 4) (list :done (part (list (tuple/get ctx 0) (state-of status2 legs2 t))) events fuel))
-                    (aircraft ctx status2 legs2))))))
+                    (aircraft ctx status2 legs2))))
+        ((:state)
+            (send (tuple/get ctx 4) (list :state (tuple/get ctx 0) (list (kept-status status) (map (lambda (l) (tuple/get l 0)) legs))))
+            (aircraft ctx status legs))))
+
+(defun kept-status (status)
+    (match status
+        ((:air leg due) (list :air (tuple/get leg 0) due))
+        (_              status)))
 
 (defun aircraft-context (day changes i desk)
     (let out (lookup (car (tuple/get (day/aircraft day) i)) (changes-of :out-of-service changes)))
@@ -242,34 +271,60 @@
 ; --- the desk -----------------------------------------------------------------
 
 ; A run of the day: the desk is the run's own process, and the aircraft
-; are its children. It knows #(day pids targets): the day; the aircraft,
-; in the day's order; and the runs to compare with, each (name digests
-; from), oldest first. Each minute it tells the aircraft, hears from all
-; of them, and keeps the books, #(totals waiting flown digests by-minute):
-; the totals, (fuel late missed cancelled); the passengers waiting to
-; change planes, (connection ready), once their first flight has landed;
-; for each leg, (off ()) once it has left, (off on) once it has landed,
-; and :cancelled; and the digests and totals by minute, newest first. It
-; gives (stop rejoined digests totals flown): the minute it stopped, the
-; run it rejoined there (or () at the end of the day), the digests and
-; totals by minute, as tuples, and the legs.
+; are its children. It knows #(day pids targets every): the day; the
+; aircraft, in the day's order; the runs to compare with, each (name
+; digests from), oldest first; and how many minutes apart to keep
+; checkpoints, or 0 for none. Each minute it tells the aircraft, hears
+; from all of them, and keeps the books, #(ledger digests by-minute
+; checkpoints). The ledger is #(totals waiting flown): the totals, (fuel
+; late missed cancelled); the passengers waiting to change planes,
+; (connection ready), once their first flight has landed; and for each
+; leg, (off ()) once it has left, (off on) once it has landed, or
+; (:cancelled minute). Then the digests and totals by minute, and the
+; checkpoints, each newest first. It gives (stop rejoined digests totals
+; flown checkpoints): the minute it stopped, the run it rejoined there
+; (or () at the end of the day), the digests and totals by minute from
+; the day's start, as tuples, the legs, and the checkpoints, oldest first.
+;
+; It starts at the day's start, or from restore, a checkpoint and the run
+; it came from (restore-of, under checkpoints).
 ;
 ; A fork copies the values its expression names into the new process,
 ; so each aircraft is given only what it needs, made here: naming the day
 ; in the fork would copy all of it, three hundred times a run.
-(defun simulate (day changes targets)
+(defun simulate (day changes targets restore every)
     (let desk $$)
     (let pids (map (lambda (i)
                        (let ctx (aircraft-context day changes i desk))
-                       (let status (list :gate (cadr (tuple/get (day/aircraft day) i)) 0))
-                       (let legs (legs-of day changes i))
+                       (let now (aircraft-at day changes i restore))
+                       (let status (car now))
+                       (let legs (cadr now))
                        (fork (aircraft ctx status legs)))
                    (range 0 (tuple/len (day/aircraft day)))))
-    (minute (tuple day pids targets) (start) (tuple (list 0 0 0 0) () (tuple/make (tuple/len (day/legs day)) ()) () ())))
+    (minute (tuple day pids targets every) (if (nil? restore) (start) (tuple/get restore 0)) (books-at day restore)))
+
+; Aircraft i as a run starts: at its base, all its legs ahead; or as the
+; checkpoint left it, its legs as this run's changes make them.
+(defun aircraft-at (day changes i restore)
+    (let legs (legs-of day changes i))
+    (if (nil? restore)
+        (list (list :gate (cadr (tuple/get (day/aircraft day) i)) 0) legs)
+        (match (tuple/get (tuple/get restore 1) i)
+            ((status ids)
+                (list (match status
+                          ((:air id due) (list :air (find (lambda (l) (== (tuple/get l 0) id)) legs) due))
+                          (_             status))
+                      (filter (lambda (l) (member? (tuple/get l 0) ids)) legs))))))
+
+(defun books-at (day restore)
+    (if (nil? restore)
+        (tuple (tuple (list 0 0 0 0) () (tuple/make (tuple/len (day/legs day)) ())) () () ())
+        (match restore
+            (#(_ _ waiting totals flown digests by-minute) (tuple (tuple totals waiting flown) digests by-minute ())))))
 
 (defun minute (ctx t books)
     (match ctx
-        (#(_ pids _)
+        (#(_ pids _ _)
             (let tick (list :tick t))
             (map (lambda (p) (send p tick)) pids)
             (hear ctx t books (length pids) ()))))
@@ -282,70 +337,87 @@
             ((:done h events fuel) (hear ctx t books (dec left) (cons (tuple h events fuel) said))))))
 
 (defun settle (ctx t books said)
-    (match ctx
-        (#(day _ targets)
+    (match (list ctx books)
+        ((#(day _ targets every) #(ledger digests by-minute checkpoints))
             (let events (fold/l () (lambda (acc s) (append (tuple/get s 1) acc)) said))
-            (let kept (keep-books day t (burnt books (sum (map (lambda (s) (tuple/get s 2)) said))) events))
+            (let kept (keep-books day t (burnt ledger (sum (map (lambda (s) (tuple/get s 2)) said))) events))
             (let digest (hash (list (add-parts (map (lambda (s) (tuple/get s 0)) said)) (waiting-digest (tuple/get kept 1) t))))
-            (let books2 (record kept digest))
+            (let books2 (tuple kept (cons digest digests) (cons (tuple/get kept 0) by-minute) checkpoints))
             (let matched (find (lambda (g) (match g ((_ theirs from) (and (>= t from) (== (tuple/get theirs (- t (start))) digest)))))
                                targets))
             (cond
-                ((cons? matched)    (finish ctx t books2 (car matched)))
-                ((== (inc t) (end)) (finish ctx t books2 ()))
-                (#true              (minute ctx (inc t) books2))))))
+                ((cons? matched)             (finish ctx t books2 (car matched)))
+                ((== (inc t) (end))          (finish ctx t books2 ()))
+                ((checkpoint? every (inc t)) (checkpoint ctx t books2))
+                (#true                       (minute ctx (inc t) books2))))))
+
+(defun checkpoint? (every m) (and (> every 0) (== (% (- m (start)) every) 0)))
+
+; Before minute t + 1, every aircraft's state, asked for, and the
+; passengers waiting: (minute states waiting), the states a tuple by
+; aircraft.
+(defun checkpoint (ctx t books)
+    (match ctx
+        (#(_ pids _ _)
+            (let ask (list :state))
+            (map (lambda (p) (send p ask)) pids)
+            (hear-states ctx t books (length pids) ()))))
+
+(defun hear-states (ctx t books left states)
+    (if (== left 0)
+        (match books
+            (#(ledger digests by-minute checkpoints)
+                (let kept (list (inc t) (list->tuple (map cadr (sort-by car states))) (tuple/get ledger 1)))
+                (minute ctx (inc t) (tuple ledger digests by-minute (cons kept checkpoints)))))
+        (recv
+            ((:state i st) (hear-states ctx t books (dec left) (cons (list i st) states))))))
 
 (defun finish (ctx t books rejoined)
     (match (list ctx books)
-        ((#(_ pids _) #(_ _ flown digests by-minute))
+        ((#(_ pids _ _) #(#(_ _ flown) digests by-minute checkpoints))
             (map kill pids)
-            (list t rejoined (list->tuple (reverse digests)) (list->tuple (reverse by-minute)) flown))))
+            (list t rejoined (list->tuple (reverse digests)) (list->tuple (reverse by-minute)) flown (reverse checkpoints)))))
 
-(defun burnt (books kg)
-    (match books
-        (#((fuel late missed cancelled) waiting flown digests by-minute)
-            (tuple (list (+ fuel kg) late missed cancelled) waiting flown digests by-minute))))
+(defun burnt (ledger kg)
+    (match ledger
+        (#((fuel late missed cancelled) waiting flown)
+            (tuple (list (+ fuel kg) late missed cancelled) waiting flown))))
 
-(defun record (books digest)
-    (match books
-        (#(totals waiting flown digests by-minute)
-            (tuple totals waiting flown (cons digest digests) (cons totals by-minute)))))
-
-; The books after minute t's events: arrivals, then departures, then
+; The ledger after minute t's events: arrivals, then departures, then
 ; cancellations, so that passengers who land as their next flight leaves
 ; miss it.
-(defun keep-books (day t books events)
+(defun keep-books (day t ledger events)
     (let of (lambda (kind) (map cadr (filter (lambda (e) (eq? (car e) kind)) events))))
-    (fold/l (fold/l (fold/l books (lambda (b l) (on-arrival day t b l)) (of :arr))
+    (fold/l (fold/l (fold/l ledger (lambda (b l) (on-arrival day t b l)) (of :arr))
                     (lambda (b l) (on-departure day t b l)) (of :dep))
-            (lambda (b l) (on-cancel day b l)) (of :cancel)))
+            (lambda (b l) (on-cancel day t b l)) (of :cancel)))
 
-(defun on-arrival (day t books id)
-    (match (list (tuple/get (day/legs day) id) books)
-        ((#(_ _ _ _ dep block pax _) #((fuel late missed cancelled) waiting flown digests by-minute))
+(defun on-arrival (day t ledger id)
+    (match (list (tuple/get (day/legs day) id) ledger)
+        ((#(_ _ _ _ dep block pax _) #((fuel late missed cancelled) waiting flown))
             (let connecting (filter (lambda (c) (nil? (tuple/get flown (connect/out (tuple/get (day/connects day) c)))))
                                     (tuple/get (day/outs day) id)))
             (tuple (list fuel (+ late (* (max 0 (- t (+ dep block))) pax)) missed cancelled)
                    (append (map (lambda (c) (list c (+ t (change-minutes)))) connecting) waiting)
-                   (tuple/set flown id (list (car (tuple/get flown id)) t)) digests by-minute))))
+                   (tuple/set flown id (list (car (tuple/get flown id)) t))))))
 
-(defun on-departure (day t books id)
-    (match books
-        (#((fuel late missed cancelled) waiting flown digests by-minute)
+(defun on-departure (day t ledger id)
+    (match ledger
+        (#((fuel late missed cancelled) waiting flown)
             (let broken (sum (map (lambda (c)
                                       (let ready (lookup c waiting))
                                       (if (and (int? ready) (<= ready t)) 0 (connect/n (tuple/get (day/connects day) c))))
                                   (tuple/get (day/ins day) id))))
             (tuple (list fuel late (+ missed broken) cancelled)
                    (remove (lambda (w) (== (connect/out (tuple/get (day/connects day) (car w))) id)) waiting)
-                   (tuple/set flown id (list t ())) digests by-minute))))
+                   (tuple/set flown id (list t ()))))))
 
-(defun on-cancel (day books id)
-    (match books
-        (#((fuel late missed cancelled) waiting flown digests by-minute)
+(defun on-cancel (day t ledger id)
+    (match ledger
+        (#((fuel late missed cancelled) waiting flown)
             (tuple (list fuel late missed (+ cancelled (leg/pax (tuple/get (day/legs day) id))))
                    (remove (lambda (w) (== (connect/out (tuple/get (day/connects day) (car w))) id)) waiting)
-                   (tuple/set flown id :cancelled) digests by-minute))))
+                   (tuple/set flown id (list :cancelled t))))))
 
 ; The waiting part of the digest: each connection with passengers
 ; waiting, and how long till they can board.
@@ -370,16 +442,19 @@
         ((:quick-turn _ from to _) (list from to))))
 
 ; A run that's been kept is #(changes parent change digests totals flown
-; fate): all its changes, its parent and its own change (() for the
-; base); its digests, totals and legs for the whole day; and (from until
-; rejoined), where it was its own and the run it rejoined, or () for the
-; base.
+; fate checkpoints begun): all its changes, its parent and its own change
+; (() for the base); its digests, totals and legs for the whole day; (from
+; until rejoined), where it was its own and the run it rejoined, or ()
+; for the base; the checkpoints it kept; and the minute it began at.
 (defun run/changes (r) (tuple/get r 0))
 (defun run/parent (r) (tuple/get r 1))
 (defun run/change (r) (tuple/get r 2))
 (defun run/digests (r) (tuple/get r 3))
 (defun run/totals (r) (tuple/get r 4))
 (defun run/flown (r) (tuple/get r 5))
+(defun run/fate (r) (tuple/get r 6))
+(defun run/checkpoints (r) (tuple/get r 7))
+(defun run/begun (r) (tuple/get r 8))
 
 ; The runs from the base to name, oldest first.
 (defun path-of (runs name)
@@ -423,6 +498,9 @@
 (defun totals+ (a b) (match (list a b) (((f l m c) (f2 l2 m2 c2)) (list (+ f f2) (+ l l2) (+ m m2) (+ c c2)))))
 (defun totals- (a b) (match (list a b) (((f l m c) (f2 l2 m2 c2)) (list (- f f2) (- l l2) (- m m2) (- c c2)))))
 
+(defun against-base (runs name)
+    (totals- (last-of (run/totals (lookup name runs))) (last-of (run/totals (lookup "base" runs)))))
+
 ; Whether digests a and b are the same for their first n minutes.
 (defun same-before? (a b i n)
     (cond
@@ -432,54 +510,139 @@
 
 (defun last-of (totals) (tuple/get totals (- (- (end) (start)) 1)))
 
+; --- checkpoints ----------------------------------------------------------------
+
+; A checkpoint is (minute states waiting), the day before that minute.
+; What it doesn't hold, the totals and the legs flown so far, its run's
+; whole day does, and so does the whole day of a run it holds for.
+
+; The latest checkpoint at or before minute c that holds for run name, or
+; (): one of its own, kept while it ran; one its parent held for before
+; it began, when it was its parent; or, once it had rejoined a run, one
+; that run held for after, the two being the same then.
+(defun state-at (runs name c)
+    (let r (lookup name runs))
+    (let own (fold/l () (lambda (best cp) (if (<= (car cp) c) cp best)) (run/checkpoints r)))
+    (let before (if (nil? (run/parent r)) () (state-at runs (run/parent r) (min c (run/begun r)))))
+    (let after (match (run/fate r)
+                   ((_ stop rejoined) (if (and (str? rejoined) (> c stop)) (later-than stop (state-at runs rejoined c)) ()))
+                   (_                 ())))
+    (fold/l () later-of (list own before after)))
+
+(defun later-than (m cp) (if (and (cons? cp) (> (car cp) m)) cp ()))
+
+(defun later-of (a b)
+    (cond
+        ((nil? a)              b)
+        ((nil? b)              a)
+        ((> (car b) (car a))   b)
+        (#true                 a)))
+
+; A run of a branch of name's, from checkpoint cp: #(minute states waiting
+; totals flown digests by-minute), the last four name's before minute.
+(defun restore-of (runs name cp)
+    (match cp
+        ((m states waiting)
+            (let r (lookup name runs))
+            (let i (- m (start)))
+            (tuple m states waiting (tuple/get (run/totals r) (dec i)) (flown-at (run/flown r) m)
+                   (reverse (tuple->list (tuple/slice (run/digests r) 0 i)))
+                   (reverse (tuple->list (tuple/slice (run/totals r) 0 i)))))))
+
+; The legs as they stood before minute m.
+(defun flown-at (flown m)
+    (list->tuple (map (lambda (f)
+                          (match f
+                              ((:cancelled at) (if (< at m) f ()))
+                              ((off on)        (cond
+                                                   ((>= off m)                ())
+                                                   ((and (int? on) (< on m))  f)
+                                                   (#true                     (list off ()))))
+                              (_               ())))
+                      (tuple->list flown))))
+
+; --- exploring ------------------------------------------------------------------
+
 ; Runs each branch in turn, says what it came to, and keeps it for those
-; after it; then prints the history, and gives how many minutes it took.
-; tally is (simulated own us saved): the minutes the branches simulated,
-; and those of their own, the microseconds they took, and those spent on
-; the minutes before their changes.
-(defun explore (day timed json bs runs history tally)
+; after it, passing over those kept already; then prints the history,
+; writes what was asked for, and gives how many minutes it took. h is the
+; day's hash, and tally is (base simulated own us saved): the minutes the
+; base simulated, those the branches did, and those of their own, the
+; microseconds the branches took, and those spent on the minutes before
+; their changes.
+(defun explore (day opts h bs runs tally)
     (match (list bs tally)
-        ((() (simulated own us saved))
+        ((() (base simulated own us saved))
+            (let kept (reverse runs))
             (tty/write "the history:\n")
-            (map pprint (reverse history))
-            (when (str? json) (write-json json day (reverse runs)))
-            (when timed
-                (tty/write "time: the branches in " (ms us) ", " (ms saved) " of it on the minutes before their changes,"
-                           " which forking at the change would save" \n))
-            (concat (- (end) (start)) " minutes for the base, and " simulated " for its branches, of which " own " their own"))
-        ((((name parent change) & rest) (simulated own us saved))
-            (let changes (append (run/changes (lookup parent runs)) (list change)))
-            (let targets (targets-of day runs (path-of runs parent) change))
-            (let t0 (clock/us))
-            (match (join (fork (simulate day changes targets)))
-                ((:ok (stop rejoined digests totals flown))
-                    (let took (- (clock/us) t0))
-                    (let from (car (window day change)))
-                    (let minutes (+ (- stop (start)) 1))
-                    (let same (same-before? digests (run/digests (lookup parent runs)) 0 (- from (start))))
-                    (let whole (if (nil? rejoined) (list digests totals flown) (rejoined-day runs rejoined stop digests totals flown)))
-                    (let d (totals- (last-of (cadr whole)) (last-of (run/totals (lookup "base" runs)))))
-                    (tty/write name ", from " parent ": " (concat change) \n)
-                    (when (not same) (tty/write "    not the same as " parent " before " (clock from) \n))
-                    (tty/write "    the same as " parent " till " (clock from)
-                               (if (nil? rejoined)
-                                   ", its own to the end of the day"
-                                   (concat ", its own till " (clock stop) ", then " rejoined "'s again"))
+            (map (lambda (r) (pprint (entry-of runs r))) (filter (lambda (r) (ne? (car r) "base")) kept))
+            (when (str? (opt/json opts)) (write-json (opt/json opts) day kept))
+            (when (str? (opt/keep opts)) (write-history (opt/keep opts) h kept))
+            (when (opt/timed opts)
+                (tty/write "time: the branches in " (ms us) ", " (ms saved) " of it on the minutes before their changes" \n))
+            (concat base " minutes for the base, and " simulated " for its branches, of which " own " their own"))
+        ((((name parent change) & rest) _)
+            (match (lookup name runs)
+                (:not-found
+                    (match (branch day opts runs name parent change tally)
+                        ((runs2 tally2) (explore day opts h rest runs2 tally2))))
+                (r
+                    (tty/write name ", from " parent ": " (concat change)
+                               (if (and (eq? (run/parent r) parent) (eq? (run/change r) change))
+                                   ", kept"
+                                   (concat ", left out: the history's " name " is another branch"))
                                \n)
-                    (tty/write "    against base: fuel " (signed (nth 0 d)) " kg, " (signed (nth 1 d)) " passenger-minutes late, "
-                               (signed (nth 2 d)) " missed, " (signed (nth 3 d)) " cancelled" \n)
-                    (when timed (tty/write "    time: " (ms took) " for " minutes " minutes, " (pace day took minutes) \n))
-                    (let entry (list :branch name (list :from parent) (list :change change)
-                                     (list :own (clock from) (clock (if (nil? rejoined) (end) stop)))
-                                     (if (nil? rejoined) (list :to-the-end) (list :rejoined rejoined))
-                                     (list :against-base (list :fuel (nth 0 d)) (list :late (nth 1 d))
-                                                         (list :missed (nth 2 d)) (list :cancelled (nth 3 d)))))
-                    (let fate (list from (if (nil? rejoined) (end) stop) rejoined))
-                    (explore day timed json rest
-                             (cons (list name (tuple changes parent change (car whole) (cadr whole) (caddr whole) fate)) runs)
-                             (cons entry history)
-                             (list (+ simulated minutes) (+ own (+ (- stop from) 1)) (+ us took)
-                                   (+ saved (div (* took (- from (start))) minutes)))))))))
+                    (explore day opts h rest runs tally))))))
+
+; One branch, run from the last checkpoint before its change: the runs
+; with it, and the tally.
+(defun branch (day opts runs name parent change tally)
+    (let changes (append (run/changes (lookup parent runs)) (list change)))
+    (let targets (targets-of day runs (path-of runs parent) change))
+    (let from (car (window day change)))
+    (let every (opt/every opts))
+    (let cp (if (> every 0) (state-at runs parent from) ()))
+    (let restore (if (nil? cp) () (restore-of runs parent cp)))
+    (let begun (if (nil? cp) (start) (car cp)))
+    (let t0 (clock/us))
+    (match (join (fork (simulate day changes targets restore every)))
+        ((:ok (stop rejoined digests totals flown checkpoints))
+            (let took (- (clock/us) t0))
+            (let minutes (+ (- stop begun) 1))
+            (let same (same-before? digests (run/digests (lookup parent runs)) 0 (- from (start))))
+            (let whole (if (nil? rejoined) (list digests totals flown) (rejoined-day runs rejoined stop digests totals flown)))
+            (let fate (list from (if (nil? rejoined) (end) stop) rejoined))
+            (let runs2 (cons (list name (tuple changes parent change (car whole) (cadr whole) (caddr whole) fate checkpoints begun))
+                             runs))
+            (let d (against-base runs2 name))
+            (tty/write name ", from " parent ": " (concat change) \n)
+            (when (not same) (tty/write "    not the same as " parent " before " (clock from) \n))
+            (tty/write "    the same as " parent " till " (clock from)
+                       (if (nil? rejoined)
+                           ", its own to the end of the day"
+                           (concat ", its own till " (clock stop) ", then " rejoined "'s again"))
+                       \n)
+            (tty/write "    against base: fuel " (signed (nth 0 d)) " kg, " (signed (nth 1 d)) " passenger-minutes late, "
+                       (signed (nth 2 d)) " missed, " (signed (nth 3 d)) " cancelled" \n)
+            (when (opt/timed opts)
+                (tty/write "    time: " (ms took) " for " minutes " minutes, from " (clock begun) ", " (pace day took minutes) \n))
+            (match tally
+                ((base simulated own us saved)
+                    (list runs2 (list base (+ simulated minutes) (+ own (+ (- stop from) 1)) (+ us took)
+                                      (+ saved (div (* took (- from begun)) minutes)))))))))
+
+; What the history says of a branch.
+(defun entry-of (runs r)
+    (match r
+        ((name run)
+            (let d (against-base runs name))
+            (match (run/fate run)
+                ((from until rejoined)
+                    (list :branch name (list :from (run/parent run)) (list :change (run/change run))
+                          (list :own (clock from) (clock until))
+                          (if (nil? rejoined) (list :to-the-end) (list :rejoined rejoined))
+                          (list :against-base (list :fuel (nth 0 d)) (list :late (nth 1 d))
+                                              (list :missed (nth 2 d)) (list :cancelled (nth 3 d)))))))))
 
 (defun clock (m) (concat (format-num (div m 60) 2 "0") ":" (format-num (% m 60) 2 "0")))
 
@@ -496,24 +659,58 @@
 
 ; --- the program --------------------------------------------------------------
 
-; The base, and then either its record, (:flew flight off on) for each
-; leg that landed, or what it came to and the branches.
-(defun main (path record timed json)
+; The options, #(path record timed json keep from every).
+(defun opt/path (o) (tuple/get o 0))
+(defun opt/record (o) (tuple/get o 1))
+(defun opt/timed (o) (tuple/get o 2))
+(defun opt/json (o) (tuple/get o 3))
+(defun opt/keep (o) (tuple/get o 4))
+(defun opt/from (o) (tuple/get o 5))
+(defun opt/every (o) (tuple/get o 6))
+
+(defun read-sexps (path) (match (join (connect :fs/read path (reading ()))) ((:ok records) records)))
+
+; What decides a run but its changes: the model, its constants, and the
+; day's aircraft, legs, connections, wind and closures; not its branches
+; or its record, so branches can be added to a day and its history kept.
+(defun day-hash (records)
+    (hash (list (model-version) (start) (end) (turn-minutes) (change-minutes) (fuel-off) (fuel-minute)
+                (filter (lambda (r) (member? (car r) (list :aircraft :leg :connect :wind :closed))) records))))
+
+; The base, simulated or kept, and then either its record, (:flew flight
+; off on) for each leg that landed, or what it came to and the branches.
+(defun main (opts)
     (let t0 (clock/us))
-    (let day (match (join (connect :fs/read path (reading ()))) ((:ok records) (day-of records))))
+    (let records (read-sexps (opt/path opts)))
+    (let day (day-of records))
+    (let h (day-hash records))
+    (let kept (if (str? (opt/from opts)) (history-of (opt/from opts) h) ()))
     (let t1 (clock/us))
-    (when timed
-        (tty/write "time: the day read in " (ms (- t1 t0)) ": " (tuple/len (day/aircraft day)) " aircraft, "
+    (when (opt/timed opts)
+        (tty/write "time: the day " (if (str? (opt/from opts)) "and its history " "") "read in " (ms (- t1 t0)) ": "
+                   (tuple/len (day/aircraft day)) " aircraft, "
                    (tuple/len (day/legs day)) " legs, " (tuple/len (day/connects day)) " connections" \n))
-    (match (join (fork (simulate day () ())))
-        ((:ok (_ _ digests totals flown))
-            (let t2 (clock/us))
-            (if record
-                (print-record day flown)
-                (do (report-base day flown totals)
-                    (when timed (tty/write "    time: " (ms (- t2 t1)) ", " (pace day (- t2 t1) (- (end) (start))) \n))
-                    (explore day timed json (day/branches day) (list (list "base" (tuple () () () digests totals flown ())))
-                             () (list 0 0 0 0)))))))
+    (cond
+        ((eq? kept :another-day)
+            (raise (concat (opt/from opts) " was kept for another day, or another model, so it's no use for this one")))
+        ((cons? kept)
+            (tty/write "kept: " (length kept) " runs of this day, from " (opt/from opts) \n)
+            (go-on day opts h kept 0 0))
+        (#true
+            (let every (opt/every opts))
+            (match (join (fork (simulate day () () () every)))
+                ((:ok (_ _ digests totals flown checkpoints))
+                    (let t2 (clock/us))
+                    (if (opt/record opts)
+                        (print-record day flown)
+                        (go-on day opts h (list (list "base" (tuple () () () digests totals flown () checkpoints (start))))
+                               (- (end) (start)) (- t2 t1))))))))
+
+(defun go-on (day opts h runs minutes us)
+    (let base (lookup "base" runs))
+    (report-base day (run/flown base) (run/totals base))
+    (when (and (opt/timed opts) (> minutes 0)) (tty/write "    time: " (ms us) ", " (pace day us minutes) \n))
+    (explore day opts h (day/branches day) runs (list minutes 0 0 0 0)))
 
 (defun report-base (day flown totals)
     (let agree (length (filter (lambda (r)
@@ -534,7 +731,7 @@
 ; Its value is a record too, one nothing reads, so that the whole output
 ; can be appended to the day.
 (defun print-record (day flown)
-    (let landed (filter (lambda (l) (match (tuple/get flown l) ((off on) (int? on)) (_ #false)))
+    (let landed (filter (lambda (l) (match (tuple/get flown l) ((:cancelled _) #false) ((off on) (int? on)) (_ #false)))
                         (range 0 (tuple/len (day/legs day)))))
     (tty/write "; The record: when each flight left and landed, from airline --record.\n")
     (map (lambda (l)
@@ -574,7 +771,7 @@
 
 (defun run-json (r)
     (match r
-        ((name #(_ parent change _ totals flown fate))
+        ((name #(_ parent change _ totals flown fate _ _))
             (list :object
                   (list "name" name)
                   (list "parent" (or-null parent))
@@ -584,17 +781,38 @@
                   (list "totals" totals)
                   (list "flown" (map (lambda (f)
                                          (match f
-                                             (()         :null)
-                                             (:cancelled "cancelled")
-                                             ((off on)   (list off (or-null on)))))
+                                             (()             :null)
+                                             ((:cancelled _) "cancelled")
+                                             ((off on)       (list off (or-null on)))))
                                      (tuple->list flown)))))))
 
-(defun options (args path record timed json)
-    (match args
-        (()                       (main path record timed json))
-        (("--record" & rest)      (options rest path #true timed json))
-        (("--time" & rest)        (options rest path record #true json))
-        (("--json" out & rest)    (options rest path record timed out))
-        ((p & rest)               (options rest p record timed json))))
+; --- the history, kept ---------------------------------------------------------
 
-(options @ARGV "examples/airline-day.sexp" #false #false #false)
+; With --keep, every run, for a later --from: (:kept-for h), the day's
+; hash, then (:run name changes parent change digests totals flown fate
+; checkpoints begun) for each run, oldest first, a line each.
+(defun write-history (path h runs)
+    (spew path (cons (sexp/print (list :kept-for h))
+                     (map (lambda (r) (match r ((name run) (sexp/print (cons :run (cons name (tuple->list run))))))) runs))))
+
+; The runs a history kept, newest first as they're kept here, or
+; :another-day if it was kept for another.
+(defun history-of (path h)
+    (let records (read-sexps path))
+    (if (member? (list :kept-for h) records)
+        (reverse (map (lambda (r) (match r ((:run name & fields) (list name (list->tuple fields)))))
+                      (filter (lambda (r) (eq? (car r) :run)) records)))
+        :another-day))
+
+(defun options (args o)
+    (match args
+        (()                    (main o))
+        (("--record" & rest)   (options rest (tuple/set o 1 #true)))
+        (("--time" & rest)     (options rest (tuple/set o 2 #true)))
+        (("--json" f & rest)   (options rest (tuple/set o 3 f)))
+        (("--keep" f & rest)   (options rest (tuple/set o 4 f)))
+        (("--from" f & rest)   (options rest (tuple/set o 5 f)))
+        (("--every" n & rest)  (options rest (tuple/set o 6 (or-0 (string->int n)))))
+        ((p & rest)            (options rest (tuple/set o 0 p)))))
+
+(options @ARGV (tuple "examples/airline-day.sexp" #false #false #false #false #false 30))

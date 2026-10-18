@@ -3531,3 +3531,58 @@ late and seats cancelled are the sums over its legs, every departure
 and landing before a branch's change is its parent's, and every one
 after it rejoined is the rejoined run's. The report is unchanged, so the
 golden test is too.
+
+**D212. The airline's checkpoints and history.** *(Stevan, Oct 2026: "So,
+can we replay the entire run, with a new set of branches? Or would we
+need to re-run the full simulation", and yes to keeping runs in a file
+and starting branches from checkpoints, in the example, as Claude
+proposed.)* Replay (D170) doesn't do it: it runs the program again,
+doing all its work, with what it read the first time, the branches
+included. So `examples/airline.slight` keeps what it works out:
+
+- **Checkpoints.** Every half hour (`--every n`, 0 for none) a run's desk
+  asks each aircraft for its state, its status and the legs it has
+  left, and keeps that with the passengers waiting: the day before that
+  minute, but for the totals and the legs flown so far, which the run's
+  whole day already has. Between minutes every aircraft waits in `recv`,
+  so its state is its arguments, all of it data. A branch starts from
+  the last checkpoint at or before its change that holds for its parent:
+  one the parent kept while it ran; one its own parent held for before
+  it began, when the two were the same; or, once the parent had rejoined
+  a run, one of that run's from after, the two being the same then. The
+  aircraft are made again from it with the branch's changes, which can't
+  have made a difference yet. A cancelled leg is now `(:cancelled
+  minute)`, so the legs as they stood at a minute can be had from the
+  whole day.
+- **A history.** `--keep file` writes every run as an s-expression, a
+  line each, its checkpoints too; `--from file` starts from those runs
+  and runs only the branches not in it (a branch kept under the same
+  name with another change is left out, and says so). It's refused for
+  a day it wasn't kept for: it holds a hash of what decides a run but
+  its changes, the model's constants and version and the day's aircraft,
+  legs, connections, wind and closures, not its branches or record, so
+  branches can be added to the day's file a round at a time.
+- **Checked:** the golden test, with a fifth what-if, a delay on top of
+  one that has rejoined the base, which starts from the base's
+  checkpoint, against `t/models/airline.py`, which runs every branch from
+  the start and works out only where the program begins it; the big day
+  the same with checkpoints as without, on both targets and under
+  `SLIGHT_SCHED`; and `t/live.py`, what-ifs of its own covering each way
+  a checkpoint is found, some kept and the rest run from the history,
+  the same as all of them from the start with none.
+- **Measured** on the cloud machine, three runs each, the big day:
+  without checkpoints 3.3 to 3.6 s, the branches 2.7 to 3.2 of it, half
+  of that the minutes before their changes; with them 2.1 to 2.2 s, the
+  branches 1.4 to 1.6, 10 to 14 ms of that before their changes, and 92
+  MB at most where it was 86. The history is 2.1 MB. Three more
+  branches from it: 0.6 s in all, of which 150 to 220 ms reading the day
+  and the history.
+- **Rejected:** checkpoints by the runtime, a waiting process written
+  out whole (PLAN.md's processes as data), which a simulation that knows
+  its own state doesn't need, and which would keep pids and mailboxes
+  that mean nothing to another run; `fork(2)` at a checkpoint, a branch
+  to a core, which is the next step if it's wanted, as a proposal; a
+  checkpoint every minute, 30 times the memory for at most 29 minutes;
+  keeping a rejoined run's checkpoints past its rejoining, which are its
+  target's; and replaying a record with its branches edited, which is
+  only running it again.

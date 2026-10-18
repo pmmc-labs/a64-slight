@@ -663,8 +663,10 @@ recomputed"). Begun with `examples/airline.slight` (D207), which does it
 in slight on today's runtime, each branch run again from the start of
 the day. At the size of a small airline (D210: 300 aircraft, 1,499
 legs, ten what-ifs), the whole run is under 3 s on the cloud machine,
-and half the branches' time is the minutes before their changes, which
-forking at the change would save. Next, each a proposal first: an input journal of values beside
+and half the branches' time is the minutes before their changes. The
+example now starts each branch from a checkpoint of its parent's, and
+keeps its runs in a file a later round of branches starts from (D212),
+all in slight. Next, each a proposal first: an input journal of values beside
 `SLIGHT_RECORD`'s log of system calls, its requests checked so that a
 replay finds the first real difference; replaying to a point and then
 going on live; forking a run at a point with `fork(2)`, a branch to a

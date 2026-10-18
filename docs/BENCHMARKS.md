@@ -151,6 +151,13 @@ A program of the same shape with nothing else, 300 processes ticked
 1,080 times, takes 80 to 270 ms and 56 MB, so the model is about half
 of a minute's time. The M2 Max's numbers are to come.
 
+Since D212 each branch starts from a checkpoint of its parent's, at
+most half an hour before its change: on the cloud machine the whole
+run is 2.1 to 2.2 s where it was 3.3 to 3.6 (`--every 0`, measured the
+same day, the machine slower than for the runs above), the branches 1.4
+to 1.6 s where they were 2.7 to 3.2. Three more branches from a kept
+history (`--from`) take 0.6 s in all.
+
 ```
 node bin/slightc.ts -o build/airline-gen examples/airline-gen.slight
 node bin/slightc.ts -o build/airline examples/airline.slight

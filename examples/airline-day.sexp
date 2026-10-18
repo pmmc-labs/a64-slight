@@ -49,12 +49,14 @@
 
 ; The what-ifs, each a branch, its parent, and its change: a flight that
 ; leaves late; the hub closed for two and a half hours; an aircraft out
-; of service from 10:00; and, on top of the closure, quicker turns at the
-; hub after it.
+; of service from 10:00; on top of the closure, quicker turns at the hub
+; after it; and on top of the late flight, after it has rejoined the
+; base, another.
 (:branch "b1" "base" (:delay "SL201" 55))
 (:branch "b2" "base" (:close "ORD" 690 840))
 (:branch "b3" "base" (:out-of-service "N104" 600))
 (:branch "b4" "b2" (:quick-turn "ORD" 780 900 20))
+(:branch "b5" "b1" (:delay "SL403" 30))
 
 ; The record: when each flight left and landed.
 (:flew "SL101" 360 510)

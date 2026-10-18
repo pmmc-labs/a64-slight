@@ -4,11 +4,19 @@
 #     python3 t/models/airline.py > examples/airline.expected
 #
 # A day of a small airline, from examples/airline-day.sexp: the base, then
-# each branch, rerun from the start with its change and those of its
-# ancestors, compared minute by minute with each ancestor, oldest first,
-# from the end of the changes between them, and stopped at the first
-# match. Everything is an integer: minutes, kilograms, passengers. The
-# branches, the what-ifs, are in the file too.
+# each branch, run with its change and those of its ancestors, compared
+# minute by minute with each ancestor, oldest first, from the end of the
+# changes between them, and stopped at the first match. Everything is an
+# integer: minutes, kilograms, passengers. The branches, the what-ifs, are
+# in the file too.
+#
+# The program starts a branch from a checkpoint; this model runs each from
+# the start of the day, which is what a checkpoint must come to, and works
+# out only where the program would have begun, for the minutes it says it
+# ran: the last checkpoint at or before the change that holds for the
+# parent (the parent's own, kept every half hour while it ran; its
+# parent's from before it began; or, once it had rejoined, the run it
+# rejoined's from after).
 #
 # With --record it prints the (:flew flight off on) lines the base gives,
 # which is where the data file's record came from: a made-up day has no
@@ -17,6 +25,7 @@
 import sys
 
 TURN, CONNECT, START, END = 40, 30, 360, 1440
+EVERY = 30
 FUEL_OFF, FUEL_MINUTE = 300, 40
 
 def parse(text):
@@ -205,7 +214,24 @@ def main():
     # each run: its changes (its ancestors' and its own), and its digests
     # and totals for the whole day, a rejoined one's from where it rejoined
     # being its ancestor's (the totals moved by what it had changed)
-    runs = {'base': dict(changes=[], parent=None, digests=digests, totals=by_minute)}
+    def kept(begun, stop):
+        # before minute m, after the run has settled m - 1 and gone on
+        return [m for m in range(begun + 1, stop + 1) if (m - START) % EVERY == 0 and m < END]
+
+    def state_at(name, c):
+        r = runs[name]
+        found = [m for m in r['checkpoints'] if m <= c]
+        if r['parent'] is not None:
+            found.append(state_at(r['parent'], min(c, r['begun'])))
+        if r['rejoined'] is not None and c > r['stop']:
+            m = state_at(r['rejoined'], c)
+            if m is not None and m > r['stop']:
+                found.append(m)
+        found = [m for m in found if m is not None]
+        return max(found) if found else None
+
+    runs = {'base': dict(changes=[], parent=None, digests=digests, totals=by_minute,
+                         begun=START, stop=END - 1, rejoined=None, checkpoints=kept(START, END - 1))}
     history, simulated, own = [], 0, 0
     for name, parent, change in day.branches:
         path = [parent]
@@ -222,7 +248,8 @@ def main():
         changes = runs[parent]['changes'] + [change]
         mine, totals, _, stop, rejoined = run(day, changes, targets)
         same = all(mine[t - START] == runs[parent]['digests'][t - START] for t in range(START, frm))
-        simulated += stop - START + 1
+        begun = state_at(parent, frm) or START
+        simulated += stop - begun + 1
         own += stop - frm + 1
 
         if rejoined is None:
@@ -232,7 +259,8 @@ def main():
             shift = {k: totals[-1][k] - theirs['totals'][stop - START][k] for k in keys}
             full_digests = mine + theirs['digests'][stop - START + 1:]
             full_totals = totals + [{k: m[k] + shift[k] for k in keys} for m in theirs['totals'][stop - START + 1:]]
-        runs[name] = dict(changes=changes, parent=parent, digests=full_digests, totals=full_totals)
+        runs[name] = dict(changes=changes, parent=parent, digests=full_digests, totals=full_totals,
+                          begun=begun, stop=stop, rejoined=rejoined, checkpoints=kept(begun, stop))
 
         final = full_totals[-1]
         d = {k: final[k] - base_final[k] for k in keys}

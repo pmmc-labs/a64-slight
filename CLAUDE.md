@@ -85,7 +85,9 @@ tests); new ones are written when they're wanted (D149), the latest
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it
 runs, timed with `--time`, in under 3 s (D210); with `--json` it
-writes every run's minutes and flights out, for charts (D211).
+writes every run's minutes and flights out, for charts (D211); and it
+starts each branch from a checkpoint, and keeps its runs in a file for
+a later round of branches to start from (`--keep`, `--from`, D212).
 Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
