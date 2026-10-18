@@ -18,11 +18,22 @@
 # parent's from before it began; or, once it had rejoined, the run it
 # rejoined's from after).
 #
+# With --random n --seed s, the what-ifs are made at random, as the
+# program makes them (below), in place of the day's own; and with
+# --recover file --remedies n --seed s, n of the remedies made are picked
+# the same way:
+#
+#     python3 t/models/airline.py --random 40 --seed 7 > t/257-airline-random.expected
+#
 # With --record it prints the (:flew flight off on) lines the base gives,
 # which is where the data file's record came from: a made-up day has no
 # record of its own, so its record is the model's. (A real one would be
 # calibrated against the record until it agreed.)
+import os
 import sys
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from hash import hash_of, Sym
 
 TURN, CONNECT, START, END = 40, 30, 360, 1440
 EVERY = 30
@@ -115,8 +126,14 @@ def run(day, changes, targets):
     was cancelled. targets is a list of (name, digests, from), oldest
     first."""
     closed = list(day.closed) + [(c[1], c[2], c[3]) for c in changes if c[0] == 'close']
-    delay = {c[1]: c[2] for c in changes if c[0] == 'delay'}
-    oos = {c[1]: c[2] for c in changes if c[0] == 'out-of-service'}
+    # of two delays of a flight the longer holds, and of two times out of
+    # service the earlier
+    delay, oos = {}, {}
+    for c in changes:
+        if c[0] == 'delay':
+            delay[c[1]] = max(delay.get(c[1], 0), c[2])
+        elif c[0] == 'out-of-service':
+            oos[c[1]] = min(oos.get(c[1], END), c[2])
     quick = [(c[1], c[2], c[3], c[4]) for c in changes if c[0] == 'quick-turn']
     cancel = {c[1] for c in changes if c[0] == 'cancel'}
     swaps = [(c[1], c[2], c[3]) for c in changes if c[0] == 'swap']
@@ -308,6 +325,45 @@ class Explorer:
         return {k: final[k] - base[k] for k in KEYS}
 
 
+# --- random what-ifs ---------------------------------------------------------
+#
+# With --random n, n what-ifs made from --seed's numbers, in place of the
+# day's own: the number for something is the hash of (seed what i), as
+# slight's hash makes it (t/models/hash.py), so the ith is the same
+# whatever n is. A delay of a flight, 15 to 120 minutes, three in five; a
+# closure, for 30 minutes to 3 hours from between 07:00 and 19:45, of the
+# airport a leg leaves from, one in four; or an aircraft out of service
+# from between 08:00 and 17:45. One in four branches from an earlier one.
+#
+# The program keeps a run's checkpoints only while a branch still to run
+# branches from it, which changes nothing it prints here: only a branch of
+# a run, or of a run after it, could start from them.
+
+def roll(seed, what, i, n):
+    return hash_of([seed, Sym(what), i]) % n
+
+
+def random_branches(day, seed, n):
+    legs = [day.legs[f] for f in day.order]
+    out = []
+    for i in range(1, n + 1):
+        kind = roll(seed, 'kind', i, 100)
+        if kind < 60:
+            change = ['delay', legs[roll(seed, 'flight', i, len(legs))]['flight'], 15 * (1 + roll(seed, 'minutes', i, 8))]
+        elif kind < 85:
+            frm = 420 + 15 * roll(seed, 'from', i, 52)
+            change = ['close', legs[roll(seed, 'airport', i, len(legs))]['frm'], frm, frm + 30 * (1 + roll(seed, 'length', i, 6))]
+        else:
+            change = ['out-of-service', day.aircraft[roll(seed, 'tail', i, len(day.aircraft))][0], 480 + 15 * roll(seed, 'from', i, 40)]
+        parent = f'r{seed}-{1 + roll(seed, "which", i, i - 1)}' if i > 1 and roll(seed, 'parent', i, 100) < 25 else 'base'
+        out.append((f'r{seed}-{i}', parent, change))
+    return out
+
+
+def option(name, default):
+    return int(sys.argv[sys.argv.index(name) + 1]) if name in sys.argv else default
+
+
 def shown(change):
     args = ' '.join(f'"{x}"' if isinstance(x, str) else str(x) for x in change[1:])
     return f'({change[0]} {args})'
@@ -333,7 +389,8 @@ def main():
           f"{base_final['missed']} connections missed, {base_final['cancelled']} seats cancelled")
 
     history, simulated, own = [], 0, 0
-    for name, parent, change in day.branches:
+    branches = random_branches(day, option('--seed', 1), option('--random', 0)) if '--random' in sys.argv else day.branches
+    for name, parent, change in branches:
         same, frm, stop, rejoined, begun = ex.branch(name, parent, change)
         simulated += stop - begun + 1
         own += stop - frm + 1
@@ -367,6 +424,7 @@ def main():
 # three); the services check those, and rank the ones that pass.
 
 DUTY = 470                  # the crew service: the most minutes a crew is on duty
+PLAN = 450                  # the most it's planned for
 REPORT, RELEASE = 45, 15    # on duty before its first departure, and after its last landing
 CREW_CONNECT = 30           # the least a crew has from landing to its next departure
 COMPENSATED = 180           # the rank service: minutes late that a passenger is paid for
@@ -389,17 +447,32 @@ def operated(ex, name):
     return out
 
 
+def pairings(day, legs):
+    """An aircraft's legs as the plan pairs them with crews: in order, a
+    crew taking as many as fit in PLAN minutes on duty as planned, from 45
+    before its first departure to 15 after its last planned landing."""
+    out = []
+    for f in legs:
+        leg = day.legs[f]
+        if out and leg['dep'] + leg['block'] + RELEASE > day.legs[out[-1][0]]['dep'] - REPORT + PLAN:
+            out.append([f])
+        elif out:
+            out[-1].append(f)
+        else:
+            out.append([f])
+    return out
+
+
 def crew_check(day, ops):
-    """Each aircraft's first two legs are a crew's, and the rest another's,
-    whichever aircraft flies them. A crew must be where its next leg leaves
-    from, have 30 minutes from landing to leaving, and be on duty no more
-    than DUTY minutes, from 45 before its first departure to 15 after its
-    last landing."""
+    """A crew must be where its next leg leaves from, have 30 minutes from
+    landing to leaving, and be on duty no more than DUTY minutes, from 45
+    before its first departure to 15 after its last landing, whichever
+    aircraft flies its legs."""
     by = {f: (tail, off, on, st) for f, tail, off, on, st in ops}
     reasons = []
     for tail, _ in day.aircraft:
         legs = [f for f in day.order if day.legs[f]['tail'] == tail]
-        for pairing in (legs[:2], legs[2:]):
+        for pairing in pairings(day, legs):
             flew = [f for f in pairing if by[f][3] in ('landed', 'in the air')]
             if not flew:
                 continue
@@ -518,7 +591,19 @@ def recover(ex, records):
     print(f"    against base: fuel {signed(d['fuel'])} kg, {signed(d['late'])} passenger-minutes late, "
           f"{signed(d['missed'])} missed, {signed(d['cancelled'])} cancelled")
 
-    cands = candidates(ex, dname, now, tries)
+    # With --remedies n, the remedies asked for, and n of the rest picked by
+    # --seed: those whose hashes of (seed remedy change) come first, in
+    # the order they were made.
+    made = candidates(ex, dname, now, tries)
+    asked = [c for c in made if c in tries]
+    others = [c for c in made if c not in tries]
+    n, seed = option('--remedies', None), option('--seed', 1)
+    sampled = n is not None and n < len(others)
+    if sampled:
+        picked = sorted(range(len(others)), key=lambda k: (hash_of([seed, Sym('remedy'), [Sym(others[k][0])] + others[k][1:]]), k))[:n]
+        cands = asked + [others[k] for k in sorted(picked)]
+    else:
+        cands = made
     names = [('c0', None)]
     for i, c in enumerate(cands, 1):
         ex.branch(f'c{i}', dname, c)
@@ -527,7 +612,8 @@ def recover(ex, records):
     label = {n: 'nothing' if c is None else shown(c) for n, c in names}
     measure = {n: tuple(ex.against_base(run_of[n])[k] for k in ('late', 'missed', 'cancelled')) for n, _ in names}
     rejoined = sum(1 for n, c in names if c is not None and ex.runs[n]['rejoined'] is not None)
-    print(f'the candidates: {len(cands)} remedies, and nothing; {rejoined} of the remedies rejoin a run before them')
+    picked = f', {n} of the {len(others)} made picked by seed {seed}' if sampled else ''
+    print(f'the candidates: {len(cands)} remedies, and nothing{picked}; {rejoined} of the remedies rejoin a run before them')
 
     # Rounds: the candidates no other betters in all three together, checked,
     # then those of the rest, till as many as the budget have been checked.

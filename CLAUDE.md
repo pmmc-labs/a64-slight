@@ -92,7 +92,10 @@ with `--recover`, tries remedies for a disruption, cancellations and
 swaps among them, has services check the best and rank those that pass,
 over HTTP, with stand-ins for the services in
 `examples/airline-services.slight`, which it includes (D213, golden test
-256).
+256); and makes what-ifs at random from a seed, as many as asked
+(`--random n --seed s`), and picks remedies the same way (`--remedies
+n`), with `bench/airline.py` to run sets of these and time them (D214,
+golden tests 257 and 258).
 Step 11, tooling, is done:
 the runtime is compiled once and kept, and the golden tests run in
 parallel (D150). `make test` passes on x86 Linux (AArch64 under qemu,
@@ -259,7 +262,7 @@ to get them back from git (`3fd71e0`).
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
-| `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, and `.ss` for Chez Scheme); `run.py`, the harness, which builds, checks, times and summarizes them; `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
+| `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, and `.ss` for Chez Scheme); `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's); `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
@@ -283,6 +286,10 @@ to get them back from git (`3fd71e0`).
   Python and Chez Scheme (`bench/run.py`; `BENCH=--quick` for small sizes, and see
   `--help`). Not part of `make test`. Measure on the Mac: timings under
   qemu mean nothing, and the cloud machine's are noisy.
+- `bench/airline.py`: `examples/airline.slight` on a made-up day, with
+  lists of what-ifs, seeds, checkpoint spacings or remedies swept, a
+  table of what each run says of its times and what it cost (see
+  `--help`). Not part of `make test` either.
 - `node bin/slightc.ts -o out file.slight ...`: compile and link. It writes
   `out.S` next to `out`. `-S` writes only the assembly. `--target x86_64`
   compiles for x86-64 (the default is `aarch64`). On x86, run an AArch64

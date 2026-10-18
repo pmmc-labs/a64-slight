@@ -25,6 +25,13 @@
 ;     ./airline --recover t/data/airline-recover.sexp day.sexp
 ;                                   (remedies for a disruption, checked and
 ;                                   ranked by services; see recovering)
+;     ./airline --random 100 --seed 7 day.sexp
+;                                   (100 what-ifs made at random, in place
+;                                   of the day's own; see random what-ifs)
+;     ./airline --recover r.sexp --remedies 50 --seed 7 day.sexp
+;                                   (50 of the remedies made, at random)
+;
+; bench/airline.py runs it with sets of these, and times them.
 ;
 ; The day, in examples/airline-day.sexp: five aircraft, their twenty legs
 ; through a hub at ORD, the passengers changing planes there, the weather
@@ -49,7 +56,9 @@
 ;   withdrawn once it's on the ground, its legs cancelled; and one at the
 ;   gate leaves on its next leg once that's due, it's ready (40 minutes
 ;   after landing), any delay is over, and the airport is open. A leg
-;   takes its block minutes, and any the wind added.
+;   takes its block minutes, and any the wind added. Of two delays of a
+;   flight, the longer holds, and of two times an aircraft goes out of
+;   service, the earlier.
 ; - A leg is cancelled at its departure if a change cancels it, or if its
 ;   aircraft isn't where it leaves from (at the gate there, or bound
 ;   there) or is withdrawn: so cancelling a leg out cancels the leg back.
@@ -228,17 +237,23 @@
         ((:air leg due) (list :air (tuple/get leg 0) due))
         (_              status)))
 
+; Of two changes of one flight or aircraft, on a branch of a branch, the
+; one that says more holds: the longer delay, the earlier time out of
+; service.
 (defun aircraft-context (day changes i desk)
-    (let out (lookup (car (tuple/get (day/aircraft day) i)) (changes-of :out-of-service changes)))
+    (let tail (car (tuple/get (day/aircraft day) i)))
+    (let out (fold/l #false (lambda (at o) (if (and (eq? (car o) tail) (or (not at) (< (cadr o) at))) (cadr o) at))
+                     (changes-of :out-of-service changes)))
     (tuple i (append (day/closed day) (changes-of :close changes)) (changes-of :quick-turn changes)
-           (if (int? out) out #false) desk (map (lambda (c) (index-of-leg day (car c))) (changes-of :cancel changes))))
+           out desk (map (lambda (c) (index-of-leg day (car c))) (changes-of :cancel changes))))
 
 (defun legs-of (day changes i) (map (lambda (id) (leg-of day changes id)) (tuple/get (day/by-aircraft day) i)))
 
 (defun leg-of (day changes id)
     (match (tuple/get (day/legs day) id)
         (#(flight _ from to dep block _ wind)
-            (tuple id from to (+ dep (or-0 (lookup flight (changes-of :delay changes)))) (+ block wind) dep))))
+            (let delay (fold/l 0 (lambda (m d) (if (eq? (car d) flight) (max m (cadr d)) m)) (changes-of :delay changes)))
+            (tuple id from to (+ dep delay) (+ block wind) dep))))
 
 ; Its minute t: it lands or holds, it's withdrawn, legs it can't fly are
 ; cancelled, it leaves, as each applies; now is #(status legs events
@@ -666,7 +681,7 @@
                     (match (run-branch day opts runs name parent change tally)
                         ((runs2 tally2 said)
                             (report-branch day opts runs2 name parent change said)
-                            (explore day opts h rest runs2 tally2))))
+                            (explore day opts h rest (unless-parent name rest runs2) tally2))))
                 (r
                     (tty/write name ", from " parent ": " (concat change)
                                (if (and (eq? (run/parent r) parent) (eq? (run/change r) change))
@@ -674,6 +689,15 @@
                                    (concat ", left out: the history's " name " is another branch"))
                                \n)
                     (explore day opts h rest runs tally))))))
+
+; A run's checkpoints are kept only if a branch still to run branches from
+; it; a branch of it later, from a history, starts from the checkpoint its
+; parent held for before it began, as one before it would. So a thousand
+; branches don't each keep theirs.
+(defun unless-parent (name rest runs)
+    (if (nil? (find (lambda (b) (eq? (cadr b) name)) rest))
+        (match runs (((n run) & older) (cons (list n (tuple/set run 7 ())) older)))
+        runs))
 
 ; One branch, run from the last checkpoint before its change: the runs
 ; with it, the tally, and what report-branch says of it, (same from stop
@@ -747,7 +771,8 @@
 
 ; --- the program --------------------------------------------------------------
 
-; The options, #(path record timed json keep from every recover).
+; The options, #(path record timed json keep from every recover random
+; seed remedies).
 (defun opt/path (o) (tuple/get o 0))
 (defun opt/record (o) (tuple/get o 1))
 (defun opt/timed (o) (tuple/get o 2))
@@ -756,6 +781,9 @@
 (defun opt/from (o) (tuple/get o 5))
 (defun opt/every (o) (tuple/get o 6))
 (defun opt/recover (o) (tuple/get o 7))
+(defun opt/random (o) (tuple/get o 8))
+(defun opt/seed (o) (tuple/get o 9))
+(defun opt/remedies (o) (tuple/get o 10))
 
 (defun read-sexps (path) (match (join (connect :fs/read path (reading ()))) ((:ok records) records)))
 
@@ -798,11 +826,47 @@
 (defun go-on (day opts h runs minutes us)
     (let base (lookup "base" runs))
     (cond
-        ((str? (opt/recover opts)) (recover day opts runs))
+        ((str? (opt/recover opts))
+            (when (and (opt/timed opts) (> minutes 0)) (tty/write "time: the base in " (ms us) ", " (pace day us minutes) \n))
+            (recover day opts runs))
         (#true
             (report-base day (run/flown base) (run/totals base))
             (when (and (opt/timed opts) (> minutes 0)) (tty/write "    time: " (ms us) ", " (pace day us minutes) \n))
-            (explore day opts h (day/branches day) runs (list minutes 0 0 0 0)))))
+            (explore day opts h
+                     (if (int? (opt/random opts)) (random-branches day (opt/seed opts) (opt/random opts)) (day/branches day))
+                     runs (list minutes 0 0 0 0)))))
+
+; --- random what-ifs ------------------------------------------------------------
+
+; With --random n, the day's what-ifs are n made from --seed's numbers, in
+; place of its own: a delay of a flight, 15 to 120 minutes, three in five;
+; a closure of an airport, where a leg leaves from, so busier ones come up
+; more, for 30 minutes to 3 hours from between 07:00 and 19:45, one in
+; four; or an aircraft out of service from between 08:00 and 17:45. One in
+; four branches from an earlier one, the rest from the base. Each is named
+; for its seed and number, r7-12, and the ith is the same whatever n is,
+; so a bigger batch with a seed takes in a smaller one, and the history
+; kept for it.
+(defun roll (seed what i n) (% (hash (list seed what i)) n))
+
+(defun random-branches (day seed n) (map (lambda (i) (random-branch day seed i)) (range 1 (inc n))))
+
+(defun random-branch (day seed i)
+    (let legs (day/legs day))
+    (let leg (lambda (what) (tuple/get legs (roll seed what i (tuple/len legs)))))
+    (let kind (roll seed :kind i 100))
+    (let change (cond
+                    ((< kind 60) (list :delay (leg/flight (leg :flight)) (* 15 (inc (roll seed :minutes i 8)))))
+                    ((< kind 85)
+                        (let from (+ 420 (* 15 (roll seed :from i 52))))
+                        (list :close (tuple/get (leg :airport) 2) from (+ from (* 30 (inc (roll seed :length i 6))))))
+                    (#true
+                        (list :out-of-service (car (tuple/get (day/aircraft day) (roll seed :tail i (tuple/len (day/aircraft day)))))
+                              (+ 480 (* 15 (roll seed :from i 40)))))))
+    (let parent (if (and (> i 1) (< (roll seed :parent i 100) 25)) (random-name seed (inc (roll seed :which i (dec i)))) "base"))
+    (list (random-name seed i) parent change))
+
+(defun random-name (seed i) (concat "r" seed "-" i))
 
 (defun report-base (day flown totals)
     (let agree (length (filter (lambda (r)
@@ -903,7 +967,9 @@
 ; that passengers connect to, held 15, 30 and 45 minutes; cancellations,
 ; each flight leaving after it; and swaps, each two aircraft at the first
 ; minute after it they're both on the ground at one airport, if either
-; has a leg ahead then. What a service is sent, every leg's flight, tail,
+; has a leg ahead then. With --remedies n, those asked for are tried,
+; and n of those made, picked by --seed's numbers (sample, below): a big
+; day makes thousands. What a service is sent, every leg's flight, tail,
 ; times and fate, has nothing of anyone in it (airline-services.slight
 ; says how it's sent and answered).
 (defun recover (day opts runs)
@@ -917,21 +983,38 @@
                     (tty/write "the disruption, " dname ": " (concat dchange) ", from " (clock now) \n
                                "    against base: fuel " (signed (nth 0 d)) " kg, " (signed (nth 1 d)) " passenger-minutes late, "
                                (signed (nth 2 d)) " missed, " (signed (nth 3 d)) " cancelled" \n)
-                    (let cands (candidates day (lookup dname runs2) now (map cadr (filter (lambda (r) (eq? (car r) :try)) asked))))
+                    (let t0 (clock/us))
+                    (let tries (map cadr (filter (lambda (r) (eq? (car r) :try)) asked)))
+                    (let all (candidates day (lookup dname runs2) now tries))
+                    (let made (filter (lambda (c) (not (member? c tries))) all))
+                    (let sampled (and (int? (opt/remedies opts)) (< (opt/remedies opts) (length made))))
+                    (let cands (if sampled (append (filter (lambda (c) (member? c tries)) all) (sample (opt/seed opts) (opt/remedies opts) made)) all))
+                    (let t1 (clock/us))
                     (let runs3 (try-all day opts runs2 dname cands 1))
+                    (let t2 (clock/us))
                     (let names (cons "c0" (map (lambda (i) (concat "c" i)) (range 1 (inc (length cands))))))
                     (let run-of (lambda (n) (if (eq? n "c0") dname n)))
                     (let rejoined (length (filter (lambda (n) (str? (caddr (run/fate (lookup n runs3))))) (cdr names))))
-                    (tty/write "the candidates: " (length cands) " remedies, and nothing; " rejoined
-                               " of the remedies rejoin a run before them" \n)
+                    (tty/write "the candidates: " (length cands) " remedies, and nothing"
+                               (if sampled (concat ", " (opt/remedies opts) " of the " (length made) " made picked by seed " (opt/seed opts)) "")
+                               "; " rejoined " of the remedies rejoin a run before them" \n)
+                    (when (opt/timed opts)
+                        (tty/write "time: " (length all) " remedies made in " (ms (- t1 t0)) "; " (length cands) " run in " (ms (- t2 t1))
+                                   ", " (sum (map (lambda (n) (minutes-run (lookup n runs3))) (cdr names))) " minutes" \n))
                     (let services (services-of day asked))
                     (let ctx (tuple day
                                     (map (lambda (n) (list n (operated day (lookup (run-of n) runs3)))) names)
                                     (zip names (cons "nothing" (map (lambda (c) (concat c)) cands)))
                                     (map (lambda (n) (list n (cdr (against-base runs3 (run-of n))))) names)
                                     (car services) (setting asked :check 12)))
+                    (let t3 (clock/us))
                     (let told (match (shortlist ctx names () 0 1)
-                                  ((:ok passed checked) (tell-ranked ctx passed checked (length cands) (setting asked :top 3)))
+                                  ((:ok passed checked)
+                                      (let t4 (clock/us))
+                                      (when (opt/timed opts) (tty/write "time: " checked " checked in " (ms (- t4 t3)) \n))
+                                      (let ranked (tell-ranked ctx passed checked (length cands) (setting asked :top 3)))
+                                      (when (opt/timed opts) (tty/write "time: " (length passed) " ranked in " (ms (- (clock/us) t4)) \n))
+                                      ranked)
                                   ((:error why)         (concat "stopped: " why))))
                     (map kill (cadr services))
                     told)))
@@ -942,13 +1025,24 @@
         ((_ v) v)
         (_     default)))
 
-; Each remedy run, a branch of the disruption, as c1, c2 and on.
+; Each remedy run, a branch of the disruption, as c1, c2 and on; none is
+; branched from, so none keeps its checkpoints.
 (defun try-all (day opts runs from cands i)
     (match cands
         (() runs)
         ((c & rest)
             (match (run-branch day opts runs (concat "c" i) from c (list 0 0 0 0 0))
-                ((runs2 _ _) (try-all day opts runs2 from rest (inc i)))))))
+                ((runs2 _ _) (try-all day opts (unless-parent (concat "c" i) () runs2) from rest (inc i)))))))
+
+; The minutes a run simulated, from where it began to where it stopped.
+(defun minutes-run (r) (match (run/fate r) ((_ until rejoined) (+ (- (if (str? rejoined) until (dec (end))) (run/begun r)) 1))))
+
+; n of xs picked by seed, in xs's order: those whose hashes with it come
+; first.
+(defun sample (seed n xs)
+    (let tup (list->tuple xs))
+    (let chosen (take n (sort-by car (zip (map (lambda (x) (hash (list seed :remedy x))) xs) (range 0 (length xs))))))
+    (map (lambda (k) (tuple/get tup k)) (sort-by (lambda (k) k) (map cadr chosen))))
 
 ; The remedies to try, in order, none twice: those asked for, then holds,
 ; cancellations and swaps (above, recover).
@@ -1150,6 +1244,9 @@
         (("--from" f & rest)   (options rest (tuple/set o 5 f)))
         (("--every" n & rest)  (options rest (tuple/set o 6 (or-0 (string->int n)))))
         (("--recover" f & rest) (options rest (tuple/set o 7 f)))
+        (("--random" n & rest) (options rest (tuple/set o 8 (or-0 (string->int n)))))
+        (("--seed" n & rest)   (options rest (tuple/set o 9 (or-0 (string->int n)))))
+        (("--remedies" n & rest) (options rest (tuple/set o 10 (or-0 (string->int n)))))
         ((p & rest)            (options rest (tuple/set o 0 p)))))
 
-(options @ARGV (tuple "examples/airline-day.sexp" #false #false #false #false #false 30 #false))
+(options @ARGV (tuple "examples/airline-day.sexp" #false #false #false #false #false 30 #false #false 1 #false))

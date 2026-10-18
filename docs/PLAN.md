@@ -668,7 +668,10 @@ example now starts each branch from a checkpoint of its parent's, and
 keeps its runs in a file a later round of branches starts from (D212),
 all in slight; and recovers from a disruption, remedies tried as
 branches, the best checked by crew and maintenance services and ranked
-by another, over HTTP, slight keeping nothing of anyone (D213). Next, each a proposal first: an input journal of values beside
+by another, over HTTP, slight keeping nothing of anyone (D213); and
+makes its what-ifs, and picks its remedies, at random from a seed, as
+many as asked, `bench/airline.py` running sets of them and timing them
+(D214). Next, each a proposal first: an input journal of values beside
 `SLIGHT_RECORD`'s log of system calls, its requests checked so that a
 replay finds the first real difference; replaying to a point and then
 going on live; forking a run at a point with `fork(2)`, a branch to a

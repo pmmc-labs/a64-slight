@@ -1,0 +1,9 @@
+; examples/airline.slight --random 40 --seed 7 (D214) on the small day:
+; forty what-ifs made from the seed's numbers in place of the day's own,
+; delays, closures and aircraft out of service, some branched from
+; others, r7-18 delaying a flight r7-9 already has, so the longer delay
+; holds and it's r7-9 from the start. The expected output comes from
+; t/models/airline.py --random 40 --seed 7, independently of this.
+; args: --random 40 --seed 7 examples/airline-day.sexp
+
+(@include "../examples/airline.slight")

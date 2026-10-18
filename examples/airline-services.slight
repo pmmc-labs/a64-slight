@@ -18,6 +18,7 @@
 ; same way, and keep who its passengers and crews are to itself.
 
 (defun crew-duty () 470)              ; the most minutes a crew is on duty
+(defun crew-plan () 450)              ; the most it's planned for, leaving 20 for the day
 (defun crew-report () 45)             ; on duty before its first departure
 (defun crew-release () 15)            ; and after its last landing
 (defun crew-connect () 30)            ; the least it has from landing to its next departure
@@ -54,16 +55,34 @@
 
 ; --- crews ----------------------------------------------------------------------
 
-; Each aircraft's first two legs are a crew's, and the rest another's,
-; whichever aircraft flies them. A crew must be where its next leg leaves
-; from, have crew-connect minutes from landing to leaving, and be on duty
-; no more than crew-duty minutes, from crew-report before its first
-; departure to crew-release after its last landing.
+; The plan pairs each aircraft's legs with crews, in order, a crew taking
+; as many as fit in crew-plan minutes on duty as planned, and the next
+; crew the rest, whichever aircraft flies them. A crew must be where its
+; next leg leaves from, have crew-connect minutes from landing to leaving,
+; and be on duty no more than crew-duty minutes, from crew-report before
+; its first departure to crew-release after its last landing.
 (defun crew-reasons (day ops)
     (fold/r () (lambda (i acc)
-                   (let legs (tuple/get (day/by-aircraft day) i))
-                   (append (pairing-reasons day ops (take 2 legs)) (append (pairing-reasons day ops (skip 2 legs)) acc)))
+                   (fold/r acc (lambda (p acc2) (append (pairing-reasons day ops p) acc2))
+                           (pairings day (tuple/get (day/by-aircraft day) i))))
             (range 0 (tuple/len (day/aircraft day)))))
+
+(defun pairings (day legs)
+    (match legs
+        (() ())
+        ((first & _)
+            (let ends (+ (- (leg/dep (tuple/get (day/legs day) first)) (crew-report)) (crew-plan)))
+            (let n (max 1 (fits day legs ends 0)))
+            (cons (take n legs) (pairings day (skip n legs))))))
+
+; How many of legs, from the first, land as planned crew-release before
+; ends.
+(defun fits (day legs ends n)
+    (match legs
+        ((l & rest)
+            (let leg (tuple/get (day/legs day) l))
+            (if (<= (+ (+ (leg/dep leg) (tuple/get leg 5)) (crew-release)) ends) (fits day rest ends (inc n)) n))
+        (() n)))
 
 (defun pairing-reasons (day ops pairing)
     (let flew (filter (lambda (l) (flew? (tuple/get ops l))) pairing))

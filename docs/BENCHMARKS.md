@@ -166,6 +166,36 @@ build/airline --record build/day.sexp >> build/day.sexp
 build/airline --time build/day.sexp
 ```
 
+### The airline's what-ifs at random (D214)
+
+`bench/airline.py` on the same day, the cloud machine, x86-64, a run
+each, `--random` what-ifs made from seed 1:
+
+- 10: 2.8 s in all, the branches 1.9 s, 171 ms each at the median, 7
+  of them rejoining a run before their day ends;
+- 100: 15.5 s, 131 ms each at the median, 312 at the 95th percentile,
+  82 rejoining, 185 MB at most;
+- 1,000: 162 s, 141 ms each at the median, 326 at the 95th percentile
+  and 948 at most, 833 rejoining, 1.4 GB at most. A minute simulated
+  takes 368 µs, as at 100 (359) and in the base (about 330), so a
+  thousand branches cost about a thousand times one. The slowest ran
+  964 minutes, the most of any, at 983 µs a minute, and a handful at
+  twice the usual pace; why, the run doesn't say (a major collection
+  of everything kept is a guess).
+- In rounds of 30, each from the history the last kept: 4.7, 4.3 and
+  5.4 s, the history 2.9, 5.0 and 7.2 MB, read in 46, 148 and 209 ms.
+- Recovering from a 60-minute delay at 11:35: 7,629 remedies made in
+  0.55 s, each run in 115 to 140 ms; 10 of them in 2.5 s in all, 50 in
+  7 to 8 s, 250 in 36 s, 1,000 in 135 s (1.3 GB at most), 2,000 in
+  281 s (2.3 GB); all of them run out of the 1 GB heap (D214).
+  Checking a dozen over HTTP takes 0.15 to 1.3 s.
+
+```
+bench/airline.py --random 10,100,1000
+bench/airline.py --random 30 --rounds 3
+bench/airline.py --recover --remedies 10,50 --seed 1,2
+```
+
 ### The M2 Max after D203
 
 `bench/results/2026-10-17-1311-macos-apple-m2-max.md`, at `448aa6d`: a

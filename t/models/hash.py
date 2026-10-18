@@ -37,6 +37,11 @@ def text(kind, b):
     return words
 
 
+# The end of a list on the stack: not END itself, which as a small int
+# is every 8 in a value too.
+CLOSE = object()
+
+
 # The words of v, with a stack in place of recursion, so a value nested
 # 100000 deep is no trouble. A Python list is a slight list, a tuple a
 # tuple.
@@ -44,7 +49,7 @@ def words(v):
     out, todo = [], [v]
     while todo:
         x = todo.pop()
-        if x is END:
+        if x is CLOSE:
             out.append(END)
         elif isinstance(x, bool):
             raise TypeError(x)
@@ -63,7 +68,7 @@ def words(v):
             out += [PID, x.n]
         elif isinstance(x, list):
             out.append(LIST)
-            todo.append(END)
+            todo.append(CLOSE)
             todo += reversed(x)
         elif isinstance(x, tuple):
             out += [TUPLE, len(x)]
@@ -84,14 +89,15 @@ def nest(n, v):
     return v
 
 
-values = [0, -1, 4611686018427387903, -4611686018427387904, 1.5, -0.0, '', 'slight', 'eight by',
-          Sym('ok'), Sym('#true'), [], (), [1, 2, 3], (1, 2, 3), [('a', []), 2.0, 'b'],
-          Fn('twice'), Pid(1)]
-for v in values:
-    print(hash_of(v))
-print(hash_of(nest(100000, 7)))
-print('(#true #true #true)')
-print('(#false #false #false #false #false #false)')
-print('#true')
-print('#true')
-print('()')
+if __name__ == '__main__':
+    values = [0, -1, 4611686018427387903, -4611686018427387904, 1.5, -0.0, '', 'slight', 'eight by',
+              Sym('ok'), Sym('#true'), [], (), [1, 2, 3], (1, 2, 3), [('a', []), 2.0, 'b'],
+              Fn('twice'), Pid(1)]
+    for v in values:
+        print(hash_of(v))
+    print(hash_of(nest(100000, 7)))
+    print('(#true #true #true)')
+    print('(#false #false #false #false #false #false)')
+    print('#true')
+    print('#true')
+    print('()')

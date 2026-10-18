@@ -17,7 +17,8 @@ program, or the system to measure the run.
   lands in the base's record, which is the same in a seeded order
   (D210); and what-ifs run from checkpoints, some kept in a history and
   the rest run from it later, come to what they come to run from the
-  start of the day with no checkpoints (D212).
+  start of the day with no checkpoints (D212); and random what-ifs in
+  two rounds come to what they do in one (D214).
 
 Nothing here depends on how long anything takes: each step waits for
 what it expects to see, and DEADLINE seconds is only how long it waits
@@ -275,6 +276,24 @@ def airline():
           and history(keep_out) == from_start[:3] and history(from_out) == from_start
           and len(passed_over) == 3 and from_out.splitlines()[-1].startswith('"0 minutes for the base'),
           f'exits {[status for status, _ in ran]}\n--- kept\n{keep_out}\n--- from the history\n{from_out}\n--- from the start\n{none_out}')
+
+    # Random what-ifs on the small day in two rounds, the second from the
+    # history the first kept, come to what they do in one batch (D214):
+    # r3-20 branches from r3-5, whose checkpoints weren't kept, since
+    # nothing in the first round branched from it.
+    rounds = os.path.join(DIR, 'airline-rounds.sexp')
+    if os.path.exists(rounds):
+        os.remove(rounds)
+    small = 'examples/airline-day.sexp'
+    ran = [airline_run('--random', '10', '--seed', '3', '--keep', rounds, small),
+           airline_run('--random', '20', '--seed', '3', '--from', rounds, small),
+           airline_run('--random', '20', '--seed', '3', small)]
+    second, whole = ran[1][1], ran[2][1]
+    check('random what-ifs in two rounds, the second from the history the first kept, come to what they do in one',
+          all(status == 0 for status, _ in ran) and len(history(whole)) == 20 and history(second) == history(whole)
+          and sum(1 for line in second.splitlines() if line.endswith(', kept')) == 10
+          and 'r3-20, from r3-5: ' in second,
+          f'exits {[status for status, _ in ran]}\n--- the second round\n{second}\n--- in one\n{whole}')
 
 
 os.makedirs(DIR, exist_ok=True)

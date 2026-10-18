@@ -3651,3 +3651,92 @@ systems that know them.
   (Stevan's call: they stay with their systems); one front of the
   measures, for the reason above; and a cost of the simulator's own to
   rank by, which is the ranking service's to say.
+
+**D214. The airline's what-ifs and remedies at random, and a runner.**
+*(Stevan, Oct 2026: "Let's start with generating seeded random
+branches, but make this a parameter so we can experiment with the size.
+Put together a runner for this in bash or Python that allows me to run
+different options. Include timing info, etc. in the output.")* The first
+step of the larger idea: a base, a seeded batch of branches, and later
+an agent consulted when one strays far enough.
+
+- **`--random n --seed s`:** n what-ifs in place of the day's own. A
+  delay of a flight, 15 to 120 minutes, three in five; a closure of an
+  airport, the one some leg leaves from, so busier ones come up more,
+  for 30 minutes to 3 hours from between 07:00 and 19:45, one in four;
+  otherwise an aircraft out of service from between 08:00 and 17:45.
+  One in four branches from an earlier one, the rest from the base. The
+  numbers are hashes, as airline-gen's (D209): the ith branch's are of
+  `(seed what i)`, so it depends on nothing but s and i, and is named
+  `rS-I`. A batch of 200 with a seed takes in the batch of 100, so
+  rounds kept in a history (`--keep`, `--from`, D212) run only what's
+  new.
+- **Of two changes of one flight or aircraft,** a branch's and an
+  ancestor's, the one that says more holds: the longer delay, the
+  earlier time out of service. The program took the first in its list
+  and the model the last, which nothing had shown till random branches
+  delayed a flight a second time (`t/257`, r7-18 on r7-9). A delay says
+  how long a flight can't leave, so the longer is what both say; which
+  came first is an accident of the order.
+- **A run's checkpoints are kept only while a branch still to run
+  branches from it.** Nothing else in a run can start from them; a
+  branch of it in a later round, from a history, starts from its
+  parent's from before it began, and comes to the same, running more
+  minutes. On the big day a thousand branches peak at 1.4 GB with it
+  and 2.1 GB without, in 162 s and 172.
+- **`--remedies n`** with `--recover`: the remedies asked for, and n of
+  those made, picked by `--seed`: those whose hashes of `(seed :remedy
+  change)` come first, in the order made. On the big day the program
+  makes 7,629 for a delay at 11:35 (holds, cancellations, and above all
+  swaps, of every two aircraft that meet), in about 0.55 s; each takes
+  about 120 ms to run. With `--time` it says how long the base, the
+  making, the running, the checking and the ranking took.
+- **The stand-in crews come from the plan:** each aircraft's legs in
+  order, a crew taking as many as fit in 450 minutes on duty as
+  planned, then the next crew. "The first two legs and the rest" was
+  written for the small day's four legs an aircraft; on the big day it
+  put 109 of the 600 crews over the 470-minute limit before anything
+  happened, so every remedy failed. Planned to the limit itself, the
+  wind and the closures still put four over in the base; 20 minutes to
+  spare puts none. The small day's crews are as they were, and `t/256`
+  didn't change.
+- **`t/models/hash.py` hashed a list holding 8 wrongly:** it marked a
+  list's end on its stack with `END`, which is 8, and `x is END` is true
+  of every small 8 in Python. The runtime was right (seven of the first
+  eight random branches agreed with the model, and the eighth's roll
+  hashed an 8). The end is now a marker of its own; `t/254`'s values
+  have no 8, so its expected output stands.
+- **`bench/airline.py`:** builds the program and the generator for this
+  machine, makes and keeps the day (`gen:SEED`, `small`, or a file),
+  sweeps lists of `--random`, `--seed`, `--every` and `--remedies` (and
+  `--rounds`, each round from the history the last kept), runs each
+  `--repeat` times, and prints a row a run: wall and CPU seconds and
+  the peak resident set, measured by `bench/rusage.c`; what the program
+  says of its own times; each branch's median, 95th percentile and
+  longest; the minutes simulated, and how many rejoined; and for
+  `--recover`, the remedies made and run, how long checking and ranking
+  took, how many passed, and the best. `--json` keeps all of it.
+- **Checked:** `t/257` (`--random 40 --seed 7`, on the small day) and
+  `t/258` (`--recover ... --remedies 10 --seed 2`), from
+  `t/models/airline.py`, which makes the what-ifs and picks the remedies
+  by its own hashes; the program and the model agree on six other
+  seeds and sizes up to 120 branches, and on four other samples; both
+  tests under `SLIGHT_GC_STRESS=7`, `SLIGHT_GC_VERIFY` and
+  `SLIGHT_SCHED`; the report, and `t/256`, unchanged.
+- **Not yet, found by the runner:** on the big day, recovering from a
+  60-minute delay that puts SL1002's crew over its duty, nothing passes
+  however many remedies run (10 to 2,000): the budget of a dozen goes
+  on the first front, doing nothing and the remedies that come to the
+  same, swaps far away that rejoin it at once, and all fail on that
+  crew. Remedies near the disruption (its aircraft, its crew's legs, its
+  airports), and a candidate that comes to the same as another checked
+  once, are the next step, each to settle first. And recovery keeps
+  every remedy's run whole and makes every candidate's operated day
+  before checking any: 2,000 remedies peak at 2.3 GB, and all 7,629 run
+  out of the 1 GB heap; a remedy is never branched from, so its minutes
+  could go once it's measured.
+- **Rejected:** a generator whose state goes from one number to the
+  next, which would make a branch depend on those before it, and a
+  bigger batch not take in a smaller; the runner in bash, since parsing
+  the output, measuring the peak and writing JSON are Python's, and
+  `bench/run.py` is too.
