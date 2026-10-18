@@ -750,6 +750,15 @@ with Stevan first.
   of numerical vectors.
 - **Comparing strings**, a builtin, so `sort` can order them without a
   `less?` written for it (D175).
+- **Exit records that keep big values** (D216). A record keeps the value
+  its process ended with for good (D88), so a program that forks many
+  processes, each ending with a big result it joins, keeps every
+  result: the airline's runs, about 0.15 MB each on the big day. The
+  ways out, when it's taken up: a record's value let go once its parent
+  has joined it, a later `join` then an error (Claude's recommendation);
+  or the airline's runs sending their results, which takes `run-branch`
+  and its callers made into state functions. Until then, it doesn't
+  matter at thousands.
 
 ### 17. Self-host
 

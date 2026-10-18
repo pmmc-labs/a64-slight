@@ -3795,13 +3795,31 @@ let go once it's measured.)*
   agree on eight disruptions of the small day and two samples; the
   three under `SLIGHT_GC_STRESS=7`, `SLIGHT_GC_VERIFY` and
   `SLIGHT_SCHED`; the report and the random what-ifs unchanged.
-- **Not yet, for Stevan:** exit records (D88) keep every value a
-  process ends with, which was decided for many small results; a run of
-  the airline ends with its whole result, so each remedy or branch
-  still leaves about 0.15 MB for good on the big day. A process ending with a list of
-  10,000 integers, joined and dropped, leaves 165 KB a time. A remedy
+- **Not yet:** exit records (D88) keep every value a process ends
+  with, so each remedy or branch still leaves about 0.15 MB for good on
+  the big day; left as it is for now (D216). A remedy
   the crews' own service could suggest (a reserve crew) is that
   service's to make; quick turns at a touched airport could be made too.
 - **Rejected:** making every remedy and trying the near ones first,
   since the far ones can't help and cost a run each; comparing days
   pairwise with `eq?`, which is n² for thousands.
+
+**D216. Exit records stay as they are, for now.** *(Stevan, Oct 2026:
+"Let's leave it for now, and make a note of this case, and we can
+revisit later.")* D215 found that a record keeps the value its process
+ended with for good (D88), not only that its pid's entry stays: a
+process ending with a list of 10,000 integers, joined and dropped,
+leaves 165 KB a time, and each of the airline's runs, a process ending
+with its whole result, leaves about 0.15 MB on the big day. D88 was
+decided for many small results, and stands. The case is kept in
+`docs/PLAN.md` ("Exit records that keep big values"), for when it's
+taken up, with the ways out weighed then:
+
+- a record's value let go once its parent has joined it, a later `join`
+  of that pid then an error: the retention policy D88 put off, and
+  Claude's recommendation, since it serves every program that joins
+  many big results, and monitors, told as a process ends, don't change;
+- the airline's runs sending their results and ending with `()`, which
+  changes only the example, but makes `run-branch` wait in `recv`, and
+  so it and its callers state functions;
+- nothing, since at thousands of runs it costs a few hundred megabytes.

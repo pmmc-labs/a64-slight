@@ -770,7 +770,9 @@ processes that allocate and then wait turn out to hold too much).
 - Exit records are kept forever (D88). That doesn't matter at hundreds or
   thousands of processes, and a million cost 32 MB. A system that churns
   through many millions will need a retention policy, such as dropping
-  the record once the parent has seen it.
+  the record once the parent has seen it. So will one whose processes
+  end with big values, since a record keeps a copy of its value: the
+  airline's runs each leave theirs (D216).
 
 ### Scheduler
 
