@@ -1029,6 +1029,8 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'tuple/get':          fixed('rt_tuple_ref', 2),
     'tuple/set':          fixed('rt_tuple_set', 3),
     'tuple/make':         fixed('rt_tuple_make', 2),
+    'tuple/insert':       fixed('rt_tuple_insert', 3),
+    'tuple/remove':       fixed('rt_tuple_remove', 2),
     'tuple/slice':        fixed('rt_tuple_slice', 3),
     'list->tuple':        fixed('rt_tuple', 1),
     'tuple->list':        fixed('rt_tuple_to_list', 1),

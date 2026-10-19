@@ -322,7 +322,7 @@ the rest of the body.
     (defun hypotenuse (a b)
         (let a2 (* a a))
         (let b2 (* b b))
-        (sqrt (+ a2 b2)))
+        (math/sqrt (+ a2 b2)))
 
 ### cond
 
@@ -1251,6 +1251,12 @@ that grows an element at a time suits a list.
   range (`:out-of-range`).
 - `(tuple/set t i x)`: a new tuple, `t` with `x` at index `i`; `t` is as
   it was. The index is checked as `tuple/get` checks it.
+- `(tuple/insert t i x)`: a new tuple one longer, `x` at index `i` and
+  the elements that were there from `i` on after it. `i` can be the
+  length, putting `x` at the end; anything past it faults
+  (`:out-of-range`).
+- `(tuple/remove t i)`: a new tuple one shorter, without the element at
+  index `i`, which is checked as `tuple/get` checks it.
 - `(tuple/slice t start end)`: a new tuple of the elements from `start`
   up to but not including `end`, each clamped to the tuple; empty when
   `start` isn't before `end`.
@@ -1596,6 +1602,51 @@ only its caller.
 
 Either gives `(:error (name path))` if the file can't be opened, read or
 written: `(:error (enoent "notes.txt"))`, say.
+
+### (@include :map)
+
+`lib/map.slight`: a persistent map, a hash trie as Clojure's maps are
+(D223). A map is a value, as a list is: a change gives a new map, which
+shares all but the path it changed with the old one, and the old one is
+as it was. Keys are compared with `eq?` and found by their `hash`, so any
+value can be a key, and finding one takes a few steps however many there
+are. It's for a process's own data; sending a map copies it whole, as
+any value is copied.
+
+    (@include :map)
+
+    (let m (map/put (map/put (map/new) "a" 1) "b" 2))
+    (map/get m "a")                      1
+    (map/get (map/delete m "a") "a")     not-found
+    (map->list m)                        (("a" 1) ("b" 2))
+
+- `(map/new)`: a map with nothing in it.
+- `(map/get m k)`: `k`'s value, or `:not-found`. `(map/has? m k)`:
+  whether `k` has one, for when a value could be `:not-found` itself.
+- `(map/put m k v)`: `m` with `v` as `k`'s value, in place of any it had.
+- `(map/delete m k)`: `m` without `k`, or `m` itself if it hasn't `k`.
+- `(map/update m k f default)`: `m` with `(f v)` as `k`'s value, or
+  `(f default)` if it has none, as `dict/update` (under `:ds`).
+- `(map/size m)`: how many keys, at once.
+- `(map/fold acc f m)`: calls `(f acc k v)` for each entry, each result
+  being the next `acc`, as `fold/l`, and gives the last.
+- `(map->list m)`: the entries, `((k v) ...)`, an association list.
+- `(list->map xs)`: a map of an association list's entries; for a key
+  that's there more than once, its first value, as `lookup` gives.
+
+`map/fold` and `map->list` take the entries in an order that depends
+only on the keys' hashes: the same every run and on every machine, but
+neither the order they were put in nor any order of the keys. Two maps
+with the same entries are `eq?`, whatever was put and deleted on the way.
+A map is a tuple, so `tuple?` says `#true` of one, and `pprint` shows the
+trie; `map->list` is the way to show it. A `nan` key is never found again,
+since `nan` isn't `eq?` to itself.
+
+Its helpers (`map/get-hashed`, `map/put-hashed`, `map/delete-hashed`,
+which take the key's hash, for tests; `map/bit`, `map/slot`,
+`map/bucket-index`, `map/leaf`, `map/put-at`, `map/pair`,
+`map/delete-at`, `map/collapse`, `map/walk` and `map/walk-slots`) are
+visible too, but not meant to be called.
 
 ### (@include :ds)
 

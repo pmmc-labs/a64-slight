@@ -1,0 +1,176 @@
+; A persistent map, a hash trie (D223): not part of the prelude, so a
+; program that wants one says (@include :map).
+;
+;     (let m (map/put (map/put (map/new) "a" 1) "b" 2))
+;     (map/get m "a")                      1
+;     (map/get (map/delete m "a") "a")     not-found
+;
+; A map is a value, as a list is: a change gives a new map, which shares
+; all but the path it changed with the old one, and the old one is as it
+; was. Keys are compared with eq? and found by their hash, so any value
+; can be one.
+;
+; The trie is Bagwell's, as Clojure's maps are. A map is #(size root). A
+; node is #(bitmap slot ...), a slot for each bit set in the bitmap, in
+; order, so a node holds only what it has. A slot is a leaf, (k v h), h
+; being k's hash, kept so that splitting a leaf needn't hash its key
+; again; or a node a level down. Each level takes 5 bits of the hash, the
+; lowest first, so a node has up to 32 slots and its bitmap fits in an
+; integer. hash gives 62 bits, so past 13 levels (a shift over 60) keys
+; whose hashes are the same share a bucket, #(leaf ...), in the order
+; they came.
+;
+; A slot is a leaf when one key alone is under it, and a node when more
+; are: putting splits a leaf, and deleting folds a node left with one
+; leaf back into it. So a map's shape depends only on its keys (but for a
+; bucket's order), and maps with the same entries are eq?.
+
+(defun map/new () (tuple 0 (tuple 0)))
+
+(defun map/size (m) (tuple/get m 0))
+
+; The value for k, or :not-found.
+(defun map/get (m k) (map/get-hashed m (hash k) k))
+
+(defun map/has? (m k) (cons? (map/leaf (tuple/get m 1) (hash k) 0 k)))
+
+; m with v as k's value, in place of any it had.
+(defun map/put (m k v) (map/put-hashed m (hash k) k v))
+
+; m without k, or m if it hasn't k.
+(defun map/delete (m k) (map/delete-hashed m (hash k) k))
+
+; m with (f v) as k's value, or (f default) if it has none, as dict/update.
+(defun map/update (m k f default)
+    (let h (hash k))
+    (let leaf (map/leaf (tuple/get m 1) h 0 k))
+    (map/put-hashed m h k (f (if (nil? leaf) default (cadr leaf)))))
+
+; (f acc k v) for each entry, each result the next acc, as fold/l, and
+; gives the last. The order is the keys' hashes', the same every run and
+; on every machine, but neither the order they were put in nor theirs.
+(defun map/fold (acc f m)
+    (map/walk acc (lambda (acc leaf) (f acc (car leaf) (cadr leaf))) (tuple/get m 1) 0))
+
+; The entries, ((k v) ...), in the order map/fold takes them.
+(defun map->list (m)
+    (reverse (map/walk () (lambda (acc leaf) (cons (list (car leaf) (cadr leaf)) acc)) (tuple/get m 1) 0)))
+
+; A map of an association list's entries; for a key that's there more
+; than once, the first value, as lookup gives.
+(defun list->map (xs) (fold/r (map/new) (lambda (x m) (map/put m (car x) (cadr x))) xs))
+
+; --- the trie -------------------------------------------------------------------
+;
+; The -hashed functions take the key's hash, so a test can give keys
+; whatever hashes it wants, collisions too.
+
+(defun map/get-hashed (m h k)
+    (let leaf (map/leaf (tuple/get m 1) h 0 k))
+    (if (nil? leaf) :not-found (cadr leaf)))
+
+(defun map/put-hashed (m h k v)
+    (let n (tuple/get m 0))
+    (let root (tuple/get m 1))
+    (tuple (if (nil? (map/leaf root h 0 k)) (inc n) n) (map/put-at root h 0 (list k v h))))
+
+(defun map/delete-hashed (m h k)
+    (let root (tuple/get m 1))
+    (if (nil? (map/leaf root h 0 k))
+        m
+        (tuple (dec (tuple/get m 0)) (map/delete-at root h 0 k))))
+
+; k's bit in the bitmap of a node at shift.
+(defun map/bit (h shift) (bit/shl 1 (bit/and (bit/shr h shift) 31)))
+
+; The slot for bit: one more than the bits set below it.
+(defun map/slot (bitmap bit) (inc (bit/count (bit/and bitmap (dec bit)))))
+
+; Where k's leaf is in a bucket, or the bucket's length if it hasn't one.
+(defun map/bucket-index (bucket k i)
+    (cond
+        ((== i (tuple/len bucket))          i)
+        ((eq? (car (tuple/get bucket i)) k) i)
+        (#true                              (map/bucket-index bucket k (inc i)))))
+
+; k's leaf under node, or ().
+(defun map/leaf (node h shift k)
+    (cond
+        ((> shift 60)
+            (let i (map/bucket-index node k 0))
+            (if (== i (tuple/len node)) () (tuple/get node i)))
+        (#true
+            (let bitmap (tuple/get node 0))
+            (let bit (map/bit h shift))
+            (cond
+                ((== (bit/and bitmap bit) 0) ())
+                (#true
+                    (let slot (tuple/get node (map/slot bitmap bit)))
+                    (cond
+                        ((tuple? slot)      (map/leaf slot h (+ shift 5) k))
+                        ((eq? (car slot) k) slot)
+                        (#true              ())))))))
+
+; node with leaf, (k v h), in place of any leaf of k's.
+(defun map/put-at (node h shift leaf)
+    (let k (car leaf))
+    (cond
+        ((> shift 60)
+            (let i (map/bucket-index node k 0))
+            (if (== i (tuple/len node)) (tuple/insert node i leaf) (tuple/set node i leaf)))
+        (#true
+            (let bitmap (tuple/get node 0))
+            (let bit (map/bit h shift))
+            (let i (map/slot bitmap bit))
+            (cond
+                ((== (bit/and bitmap bit) 0) (tuple/set (tuple/insert node i leaf) 0 (bit/or bitmap bit)))
+                (#true
+                    (let slot (tuple/get node i))
+                    (tuple/set node i
+                        (cond
+                            ((tuple? slot)      (map/put-at slot h (+ shift 5) leaf))
+                            ((eq? (car slot) k) leaf)
+                            (#true              (map/pair slot leaf (+ shift 5))))))))))
+
+; A node at shift for two leaves of different keys: a level for each 5
+; bits their hashes share, and a bucket once there are none left.
+(defun map/pair (a b shift)
+    (cond
+        ((> shift 60) (tuple a b))
+        (#true
+            (let ba (map/bit (caddr a) shift))
+            (let bb (map/bit (caddr b) shift))
+            (cond
+                ((== ba bb) (tuple ba (map/pair a b (+ shift 5))))
+                ((< ba bb)  (tuple (bit/or ba bb) a b))
+                (#true      (tuple (bit/or ba bb) b a))))))
+
+; node without k's leaf, which it has.
+(defun map/delete-at (node h shift k)
+    (cond
+        ((> shift 60) (tuple/remove node (map/bucket-index node k 0)))
+        (#true
+            (let bitmap (tuple/get node 0))
+            (let bit (map/bit h shift))
+            (let i (map/slot bitmap bit))
+            (let slot (tuple/get node i))
+            (if (tuple? slot)
+                (tuple/set node i (map/collapse (map/delete-at slot h (+ shift 5) k) (+ shift 5)))
+                (tuple/set (tuple/remove node i) 0 (bit/xor bitmap bit))))))
+
+; A node at shift, or its leaf if that's all it holds.
+(defun map/collapse (node shift)
+    (cond
+        ((> shift 60)                                             (if (== (tuple/len node) 1) (tuple/get node 0) node))
+        ((and (== (tuple/len node) 2) (cons? (tuple/get node 1))) (tuple/get node 1))
+        (#true                                                    node)))
+
+; (g acc leaf) for each leaf under node, in order.
+(defun map/walk (acc g node shift) (map/walk-slots acc g node shift (if (> shift 60) 0 1)))
+
+(defun map/walk-slots (acc g node shift i)
+    (cond
+        ((== i (tuple/len node)) acc)
+        (#true
+            (let slot (tuple/get node i))
+            (map/walk-slots (if (tuple? slot) (map/walk acc g slot (+ shift 5)) (g acc slot)) g node shift (inc i)))))

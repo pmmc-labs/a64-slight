@@ -610,6 +610,8 @@ rt_value_t rt_tuple_len_of(rt_value_t t, const char *site) RT_ASM(rt_tuple_len_o
 rt_value_t rt_tuple_ref(rt_value_t t, rt_value_t i, const char *site) RT_ASM(rt_tuple_ref);
 rt_value_t rt_tuple_set(rt_value_t t, rt_value_t i, rt_value_t v, const char *site) RT_ASM(rt_tuple_set);
 rt_value_t rt_tuple_make(rt_value_t n, rt_value_t v, const char *site) RT_ASM(rt_tuple_make);
+rt_value_t rt_tuple_insert(rt_value_t t, rt_value_t i, rt_value_t v, const char *site) RT_ASM(rt_tuple_insert);
+rt_value_t rt_tuple_remove(rt_value_t t, rt_value_t i, const char *site) RT_ASM(rt_tuple_remove);
 rt_value_t rt_tuple_slice(rt_value_t t, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_tuple_slice);
 rt_value_t rt_tuple_to_list(rt_value_t t, const char *site) RT_ASM(rt_tuple_to_list);
 

@@ -719,6 +719,13 @@ depend on the order processes run in (D222). Boids draws its flock with
 them. Golden test 273, and the replay checks. Cryptographic randomness
 waits for TLS.
 
+### Maps (done, Oct 2026)
+
+A persistent map, a hash trie of tuples, in slight: `lib/map.slight`,
+with `tuple/insert` and `tuple/remove` in the runtime for its nodes
+(D223). Golden tests 274 and 275, from `t/models/map.py`. Next: the
+airline's lookups by name onto it.
+
 ### Later: the rest of the October 2026 list
 
 The other changes from that list (above, "After 13"), for later, before

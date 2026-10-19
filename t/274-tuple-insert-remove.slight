@@ -1,0 +1,31 @@
+; tuple/insert and tuple/remove (D223): a copy one longer or one shorter,
+; the tuple itself as it was. An insert's index goes up to the length,
+; so an element can go at the end; a removal's is checked as tuple/get's.
+
+(let t (tuple :a :b :c))
+(pprint (list (tuple/insert t 0 :x) (tuple/insert t 1 :x) (tuple/insert t 3 :x) t))
+(pprint (list (tuple/remove t 0) (tuple/remove t 1) (tuple/remove t 2) t))
+(pprint (list (tuple/insert (tuple) 0 (list 1 2)) (tuple/remove (tuple 9) 0)))
+
+; one at a time, as a node of a hash trie grows and shrinks
+(defun grow (t i n) (if (== i n) t (grow (tuple/insert t (% (* i 7) (inc i)) i) (inc i) n)))
+(let g (grow (tuple) 0 8))
+(pprint g)
+(defun shrink (t out)
+    (if (== (tuple/len t) 0)
+        (reverse out)
+        (do
+            (let i (div (tuple/len t) 2))
+            (shrink (tuple/remove t i) (cons (tuple/get t i) out)))))
+(pprint (list (tuple/len g) (shrink g ())))
+
+; as values
+(pprint (map (lambda (f) (f (tuple 1 2) 1 0)) (list tuple/insert tuple/set)))
+
+; the faults
+(pprint (join (fork (tuple/insert t 4 :x))))
+(pprint (join (fork (tuple/insert t -1 :x))))
+(pprint (join (fork (tuple/remove t 3))))
+(pprint (join (fork (tuple/remove (tuple) 0))))
+(pprint (join (fork (tuple/remove (list 1) 0))))
+(pprint (join (fork (tuple/insert t :b :x))))

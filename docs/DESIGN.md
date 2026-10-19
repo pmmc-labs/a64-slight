@@ -388,7 +388,9 @@ names no program can write.
   everywhere; write `'(a b)`, not `'(:a :b)`.
 - tuples (`runtime/tuples.c`, D169): `tuple` (variadic), `tuple?`,
   `tuple/len`, `tuple/get`, `tuple/set` (a copy with one element
-  changed), `tuple/make`, `tuple/slice`, `list->tuple`, `tuple->list`.
+  changed), `tuple/insert` and `tuple/remove` (a copy one longer or
+  shorter, for a hash trie's nodes, D223), `tuple/make`, `tuple/slice`,
+  `list->tuple`, `tuple->list`.
   `eq?`, printing, `json/print` (as an array), `sexp/print` and
   `sexp/parse` (as `#(...)`) and copying know them. In a program,
   `#(...)` is only a pattern (D176).
@@ -448,6 +450,15 @@ each a process, and `ask` and `reply` for one's own. Writes are sends;
 `ask` forks a box for the answer, which watches the structure, and joins
 it, raising `(:ended pid result)` if the structure ends first. Opt-in:
 `(@include :ds)`.
+
+**A map as a value:** `lib/map.slight` (D223) is a persistent hash trie,
+as Clojure's maps are, in slight: 32-way nodes of tuples, a bitmap
+saying which slots a node has (`bit/count` finding a slot), 5 bits of
+`hash` a level, and a bucket for keys whose 62-bit hashes are the same.
+A slot is a leaf only when one key alone is under it, so a map's shape
+depends only on its keys and `eq?` compares maps. Opt-in: `(@include
+:map)`. Sharing ends at a process's edge: a send copies a map as it
+copies any value (D25).
 
 **An agent in slight:** `lib/agent.slight` (D184) is a conversation with a
 model as a process, on ollama's `/api/chat` over `http/stream`. Its state

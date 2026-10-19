@@ -4236,3 +4236,62 @@ left for one of its own.)*
   draw the same under five `SLIGHT_SCHED` orders from one seed, an
   unseeded run replays as it was recorded, and two unseeded runs
   differ.
+
+**D223. A persistent map, a hash trie in slight.** *(Stevan, Oct 2026:
+"Yes, let's build it", to Claude's proposal, the second of what the
+airline asked for, after strings, joins and numbers.)*
+
+- **What:** `lib/map.slight`, opt-in (`(@include :map)`): a hash array
+  mapped trie, Bagwell's, as Clojure's maps are, made of tuples. A map
+  is a value; a change copies only the path to what it changed. The
+  airline looked things up by name in association lists, a few of them
+  quadratic (`share-of`, naming a candidate's day); a map makes each
+  lookup a few steps. Rejected: a balanced tree, which needs an order on
+  keys that slight's values don't have, where every value has a `hash`
+  and `eq?`; a table in C (D157's other option), a type of its own in
+  the runtime, to be copied, collected, printed and compared; and the
+  map in the prelude, which every program would compile.
+- **Two builtins:** `tuple/insert` and `tuple/remove`, a copy one longer
+  or one shorter, which a node needs as keys come and go. In slight they
+  were two slices, two lists, an `append` and `list->tuple` on every
+  write at every level.
+- **The trie:** a map is `#(size root)`; a node `#(bitmap slot ...)`,
+  a slot for each bit set; a slot a leaf, `(k v h)`, or a node a level
+  down. 5 bits of the hash a level, the lowest first, so a node has up
+  to 32 slots and its bitmap fits in an integer (64 wouldn't, in 63
+  bits). `hash` gives 62 bits, so past 13 levels keys with the same hash
+  share a bucket, `#(leaf ...)`, in the order they came. A leaf keeps
+  its key's hash, so splitting it needn't hash the key again, and a test
+  can give keys hashes of its choosing (`map/put-hashed` and the like),
+  collisions included, which real keys can't be found for.
+- **The same entries make the same map:** a slot is a leaf only when
+  one key alone is under it, so deleting folds a node left with one
+  leaf back into it, and a map's shape depends only on its keys (but for
+  a bucket's order, which needs two keys with the same 62-bit hash). So
+  `eq?` and `hash` work on maps as on any value.
+- **The names,** under `map/`: `new`, `get` (`:not-found` for a missing
+  key, as `lookup`), `has?`, `put`, `delete`, `update`, `size`, `fold`,
+  and `map->list` and `list->map`. Claude proposed `map/empty` and
+  `map/remove`; it became `(map/new)`, since a library can define only
+  functions, and `map/delete`, and `map/update` takes a default, as
+  `lib/ds.slight`'s `dict/` has them. `map/` beside the prelude's `map`,
+  as `str/` beside `str`. Not added: `map/keys` and `map/values`, which
+  `map->list` covers.
+- **What a map is:** a tuple, not a type: `tuple?` says `#true` of one,
+  and `pprint` shows the trie. Sharing ends at a process's edge: a send,
+  a fork's captured values and an exit record copy a map whole, as they
+  copy everything (D25); so a map serves a process's own data, and
+  copying that keeps sharing would be a proposal of its own.
+- **Not done here:** `bit/count`, `tuple/get`, `tuple/len` and `tuple?`
+  are calls into C, several a level; compiling them inline waits for a
+  profile that asks. 100,000 puts, a fold and 200,000 deletes take 0.2 s
+  on the cloud machine. `hash` isn't seeded, so keys picked to collide
+  pile into one bucket. The airline moves onto it in a commit of its
+  own.
+- **Checked:** golden test 274 (`tuple/insert` and `tuple/remove`, by
+  hand), and 275: the API and the trie's layout by hand, collisions and
+  a path 13 levels deep through the hashed functions, and a seeded run
+  of 3,000 puts and deletes checked against an association list at
+  every step, its entries, their order and their hash from
+  `t/models/map.py`, a Python dict with slight's `hash` and generator
+  in Python, the order worked out from the hashes.
