@@ -4086,8 +4086,15 @@ too: why the airline ran its what-ifs one at a time, and why
   a killed racer, racers waking in order, a pool of two, a timeout, and
   `:system`), 267 (`join/any` and `join/all`, with the times they took
   on the virtual clock) and 268 (the faults, and the deadlock), worked
-  out by hand; 211 now has a reply that comes in time as well as one
-  that doesn't. 267 gives the same under five seeded orders, a replay
-  check now. A program that races thousands of times, killing targets
+  out by hand; 211's timeout goes through the new `http/await`. 267
+  gives the same under five seeded orders, a replay check now. Not
+  tested: a reply over a socket that comes before its timer, on the
+  virtual clock. The clock moves to the timer when nothing is ready to
+  read, and macOS's loopback delivers a moment after the send, so there
+  the timer wins (it did, when 211 had such a case: Stevan's run on the
+  M2 Max). The runtime waits for loopback before the clock moves only
+  for a lookup's own timer (D165); doing it for every timer would change
+  the virtual clock, a proposal of its own. `within` in 266 is the same
+  race between processes, with no socket. A program that races thousands of times, killing targets
   and racers along the way, runs clean under AddressSanitizer and under
   eight seeded orders.
