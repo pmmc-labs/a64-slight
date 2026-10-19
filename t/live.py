@@ -119,11 +119,11 @@ def memory():
     cases = [
         ('endless', '(error (too-big "sh"))\n()\n', 'a JSON value with no end, from a command'),
         ('deep', '(error (too-big "sh"))\n()\n', '30 million arrays deep, from a command'),
-        ('wide', None, 'format-num to a width of 4 GB'),
+        ('wide', None, 'str/pad-start to a width of 4 GB'),
     ]
     for name, expected, what in cases:
         out, status, peak = peak_run(prog, [name])
-        ok_out = out == expected if expected else out.startswith('(error (heap () "format-num at ')
+        ok_out = out == expected if expected else out.startswith('(error (heap () "str/pad-start at ')
         check(f'{what}: {out.splitlines()[0] if out else "nothing"}, at most {peak >> 20} MB',
               status == 0 and ok_out and peak < PEAK, f'exit {status}, printed {out!r}')
 

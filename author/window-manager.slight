@@ -7,7 +7,7 @@
         (:init
             (tty/write
                     \e "[s" \e "[" (inc (coords :x)) ";" (inc (coords :y)) "H"
-                    \e "[37;42m LOG " (str-repeat " " (- (dims :w) 13)) $$ " "
+                    \e "[37;42m LOG " (str/repeat " " (max 0 (- (dims :w) 13))) $$ " "
                     \e "[0m"
                     \e "[u")
             (Logger dims coords logs))
@@ -21,7 +21,7 @@
                         (:DEBUG 3)
                         (:ERROR 1)
                     ) "m▕"
-                \e "[32;47;4m" (pad-end line (dims :w) " ")
+                \e "[32;47;4m" (str/pad-end line (dims :w) " ")
                 \e "[0m"
                 \e "[u")
             (Logger dims coords (cons line logs)))
@@ -33,25 +33,25 @@
     (recv
         (:refresh
             (tty/write \e "[s" \e "[" (+ (coords :x) 1) ";" (+ (coords :y) 1) "H")
-            (tty/write \e "[37;46m " name (str-repeat " " (- (dims :w) (+ (str-len name) 6))) $$ " " \e "[0m")
+            (tty/write \e "[37;46m " name (str/repeat " " (max 0 (- (dims :w) (+ (bytes/len name) 6)))) $$ " " \e "[0m")
             (tty/write \e "[" (+ (coords :x) 2) ";" (+ (coords :y) 1) "H")
             (dotimes 0 (dims :h)
                 (lambda (i)
-                    (tty/write \e "[36;47m" "▏" (format-num i 2 "0") "▕" \e "[4m" (str-repeat " " (dims :w)) \e "[0m")
+                    (tty/write \e "[36;47m" "▏" (str/pad-start (str i) 2 "0") "▕" \e "[4m" (str/repeat " " (dims :w)) \e "[0m")
                     (tty/write \e "[" (+ (coords :x) (+ i 2)) ";" (+ (coords :y) 1) "H")
                 ))
             (tty/write \e "[0m" \e "[u")
-            (send logger (list :log $$ :INFO (concat "-> window[" $$ "](" name ") got refresh")))
+            (send logger (list :log $$ :INFO (str "-> window[" $$ "](" name ") got refresh")))
             (yield (Window name dims coords contents logger))
         )
         (:EXIT
-            (send logger (list :log $$ :ALERT (concat "... exiting window[" $$ "]"))))))
+            (send logger (list :log $$ :ALERT (str "... exiting window[" $$ "]"))))))
 
 
 (defun WindowManager ( rows cols windows logger )
     (recv
         ((:newWindow name dims coords)
-            (send logger (list :log $$ :ALERT (concat "+ new Window(" name ")")))
+            (send logger (list :log $$ :ALERT (str "+ new Window(" name ")")))
             (let win (fork (Window name dims coords () logger)))
             (send win :refresh)
             (yield (WindowManager rows cols (cons win windows) logger))

@@ -34,7 +34,7 @@
 
 ; The "response" of each line, joined.
 (defun answer (said)
-    (str-join "" (map (lambda (m) (lookup "response" (cdr (cadr (cadr m)))))
+    (str/join "" (map (lambda (m) (lookup "response" (cdr (cadr (cadr m)))))
                       (filter (lambda (m) (eq? (car m) :line)) said))))
 
 (defun main ()
@@ -42,7 +42,7 @@
     (let raw (raw-listen :raw (list (list "/api/generate" (pieces))) me))
     (recv
         ((:raw port)
-            (let said (streamed (concat "http://127.0.0.1:" port "/api/generate")))
+            (let said (streamed (str "http://127.0.0.1:" port "/api/generate")))
             (kill raw)
             (map pprint said)
             (answer said))))

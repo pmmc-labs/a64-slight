@@ -14,11 +14,11 @@
         (list "/eof"       "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nabc")) me))
     (recv
         ((:raw port)
-            (let base (concat "http://127.0.0.1:" port))
+            (let base (str "http://127.0.0.1:" port))
             (let r (list
-                (http/request :head (concat base "/head") () "")
-                (http/get (concat base "/nocontent"))
-                (http/get (concat base "/eof"))))
+                (http/request :head (str base "/head") () "")
+                (http/get (str base "/nocontent"))
+                (http/get (str base "/eof"))))
             (kill raw)
             r)))
 

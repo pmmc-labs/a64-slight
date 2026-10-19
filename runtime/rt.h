@@ -20,10 +20,14 @@
 #define RT_PID_SHIFT         3
 #define RT_SYMBOL_SHIFT      3    // a symbol is id << 3 | RT_TAG_SYMBOL
 
-// A boxed value points at a header word: the box's type in the low byte,
-// its size above. A string's size is its length in bytes; the bytes follow
-// the header, then a NUL that the length doesn't count.
-#define RT_BOX_TYPE_MASK  0xff
+// A boxed value points at a header word: the box's type in the low seven
+// bits, its size above the low byte. A string's size is its length in
+// bytes; the bytes follow the header, then a NUL that the length doesn't
+// count. A string's header has RT_BOX_ASCII too when every byte is below
+// 0x80, so a character is a byte and the str/ builtins index in one step
+// (D219); one made without it is only slower.
+#define RT_BOX_TYPE_MASK  0x7f
+#define RT_BOX_ASCII      0x80
 #define RT_BOX_SIZE_SHIFT    8
 #define RT_BOX_STRING        1
 #define RT_BOX_FLOAT         2    // size 8: an IEEE double
@@ -403,6 +407,7 @@ static inline double      rt_float_value(rt_value_t v) {
     return d;
 }
 static inline uint64_t    rt_string_len(rt_value_t v)   { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
+static inline int         rt_string_ascii(rt_value_t v) { return (rt_box(v)[0] & RT_BOX_ASCII) != 0; }
 static inline const char *rt_string_bytes(rt_value_t v) { return (const char *)(rt_box(v) + 1); }
 static inline uint64_t    rt_tuple_len(rt_value_t v)    { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
 static inline rt_value_t  rt_tuple_get(rt_value_t v, uint64_t i) { return rt_box(v)[1 + i]; }
@@ -532,34 +537,53 @@ rt_value_t rt_equal(rt_value_t a, rt_value_t b) RT_ASM(rt_equal);
 // the same on every run, target and machine (D209).
 rt_value_t rt_hash(rt_value_t v, const char *site) RT_ASM(rt_hash);
 
-// Builtins written in C (strings.c). Each takes the call's site last, for
-// its faults. The variadic ones (concat, tty/write) take their arguments
-// as a list.
+// Builtins written in C (strings.c, D219). Each takes the call's site
+// last, for its faults; an optional argument not given is (). The variadic
+// ones (str, ~, tty/write) take their arguments as a list. The str/ ones
+// count characters, the bytes/ ones bytes.
 rt_value_t rt_is_str(rt_value_t v) RT_ASM(rt_is_str);
+rt_value_t rt_str(rt_value_t args, const char *site) RT_ASM(rt_str);
+rt_value_t rt_cat(rt_value_t args, const char *site) RT_ASM(rt_cat);
 rt_value_t rt_str_len(rt_value_t s, const char *site) RT_ASM(rt_str_len);
-rt_value_t rt_substring(rt_value_t s, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_substring);
-rt_value_t rt_concat(rt_value_t args, const char *site) RT_ASM(rt_concat);
-rt_value_t rt_concat2(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_concat2);
-rt_value_t rt_index_of(rt_value_t s, rt_value_t m, const char *site) RT_ASM(rt_index_of);
-rt_value_t rt_str_split(rt_value_t s, rt_value_t sep, const char *site) RT_ASM(rt_str_split);
+rt_value_t rt_str_at(rt_value_t s, rt_value_t i, const char *site) RT_ASM(rt_str_at);
+rt_value_t rt_str_code_at(rt_value_t s, rt_value_t i, const char *site) RT_ASM(rt_str_code_at);
+rt_value_t rt_str_slice(rt_value_t s, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_str_slice);
+rt_value_t rt_str_index_of(rt_value_t s, rt_value_t m, rt_value_t from, const char *site) RT_ASM(rt_str_index_of);
+rt_value_t rt_str_last_index_of(rt_value_t s, rt_value_t m, rt_value_t from, const char *site) RT_ASM(rt_str_last_index_of);
+rt_value_t rt_str_includes(rt_value_t s, rt_value_t m, const char *site) RT_ASM(rt_str_includes);
+rt_value_t rt_str_starts_with(rt_value_t s, rt_value_t m, const char *site) RT_ASM(rt_str_starts_with);
+rt_value_t rt_str_ends_with(rt_value_t s, rt_value_t m, const char *site) RT_ASM(rt_str_ends_with);
+rt_value_t rt_str_split(rt_value_t s, rt_value_t sep, rt_value_t limit, const char *site) RT_ASM(rt_str_split);
 rt_value_t rt_str_join(rt_value_t sep, rt_value_t xs, const char *site) RT_ASM(rt_str_join);
-rt_value_t rt_string_to_int(rt_value_t s, const char *site) RT_ASM(rt_string_to_int);
-rt_value_t rt_string_to_float(rt_value_t s, const char *site) RT_ASM(rt_string_to_float);
-rt_value_t rt_symbol_to_string(rt_value_t sym, const char *site) RT_ASM(rt_symbol_to_string);
-rt_value_t rt_string_to_symbol(rt_value_t s, const char *site) RT_ASM(rt_string_to_symbol);
-rt_value_t rt_byte_at(rt_value_t s, rt_value_t i, const char *site) RT_ASM(rt_byte_at);
-rt_value_t rt_bytes_to_string(rt_value_t xs, const char *site) RT_ASM(rt_bytes_to_string);
-rt_value_t rt_format_num(rt_value_t n, rt_value_t width, rt_value_t fill, const char *site) RT_ASM(rt_format_num);
+rt_value_t rt_str_repeat(rt_value_t s, rt_value_t n, const char *site) RT_ASM(rt_str_repeat);
+rt_value_t rt_str_pad_start(rt_value_t s, rt_value_t n, rt_value_t fill, const char *site) RT_ASM(rt_str_pad_start);
+rt_value_t rt_str_pad_end(rt_value_t s, rt_value_t n, rt_value_t fill, const char *site) RT_ASM(rt_str_pad_end);
+rt_value_t rt_str_trim(rt_value_t s, const char *site) RT_ASM(rt_str_trim);
+rt_value_t rt_str_trim_start(rt_value_t s, const char *site) RT_ASM(rt_str_trim_start);
+rt_value_t rt_str_trim_end(rt_value_t s, const char *site) RT_ASM(rt_str_trim_end);
+rt_value_t rt_str_upper(rt_value_t s, const char *site) RT_ASM(rt_str_upper);
+rt_value_t rt_str_lower(rt_value_t s, const char *site) RT_ASM(rt_str_lower);
+rt_value_t rt_str_replace(rt_value_t s, rt_value_t m, rt_value_t r, const char *site) RT_ASM(rt_str_replace);
+rt_value_t rt_str_replace_all(rt_value_t s, rt_value_t m, rt_value_t r, const char *site) RT_ASM(rt_str_replace_all);
+rt_value_t rt_str_compare(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_str_compare);
+rt_value_t rt_str_less(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_str_less);
+rt_value_t rt_str_chars(rt_value_t s, const char *site) RT_ASM(rt_str_chars);
+rt_value_t rt_str_codes(rt_value_t s, const char *site) RT_ASM(rt_str_codes);
+rt_value_t rt_codes_to_str(rt_value_t xs, const char *site) RT_ASM(rt_codes_to_str);
+rt_value_t rt_str_well_formed(rt_value_t s, const char *site) RT_ASM(rt_str_well_formed);
+rt_value_t rt_str_to_well_formed(rt_value_t s, const char *site) RT_ASM(rt_str_to_well_formed);
+rt_value_t rt_str_to_int(rt_value_t s, rt_value_t radix, const char *site) RT_ASM(rt_str_to_int);
+rt_value_t rt_int_to_str(rt_value_t n, rt_value_t radix, const char *site) RT_ASM(rt_int_to_str);
+rt_value_t rt_str_to_float(rt_value_t s, const char *site) RT_ASM(rt_str_to_float);
+rt_value_t rt_str_to_sym(rt_value_t s, const char *site) RT_ASM(rt_str_to_sym);
+rt_value_t rt_sym_to_str(rt_value_t sym, const char *site) RT_ASM(rt_sym_to_str);
+rt_value_t rt_str_to_bytes(rt_value_t s, const char *site) RT_ASM(rt_str_to_bytes);
+rt_value_t rt_bytes_to_str(rt_value_t xs, const char *site) RT_ASM(rt_bytes_to_str);
+rt_value_t rt_bytes_len(rt_value_t s, const char *site) RT_ASM(rt_bytes_len);
+rt_value_t rt_bytes_at(rt_value_t s, rt_value_t i, const char *site) RT_ASM(rt_bytes_at);
+rt_value_t rt_bytes_slice(rt_value_t s, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_bytes_slice);
+rt_value_t rt_bytes_index_of(rt_value_t s, rt_value_t m, rt_value_t from, const char *site) RT_ASM(rt_bytes_index_of);
 rt_value_t rt_tty_write(rt_value_t args, const char *site) RT_ASM(rt_tty_write);
-
-// The utf8/ builtins (strings.c), which count characters (D148).
-rt_value_t rt_utf8_len(rt_value_t s, const char *site) RT_ASM(rt_utf8_len);
-rt_value_t rt_utf8_substring(rt_value_t s, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_utf8_substring);
-rt_value_t rt_utf8_index_of(rt_value_t s, rt_value_t m, const char *site) RT_ASM(rt_utf8_index_of);
-rt_value_t rt_utf8_chars(rt_value_t s, const char *site) RT_ASM(rt_utf8_chars);
-rt_value_t rt_utf8_code(rt_value_t s, const char *site) RT_ASM(rt_utf8_code);
-rt_value_t rt_utf8_char(rt_value_t n, const char *site) RT_ASM(rt_utf8_char);
-rt_value_t rt_utf8_valid(rt_value_t s, const char *site) RT_ASM(rt_utf8_valid);
 
 // The length of the well-formed UTF-8 sequence at the start of the n > 0
 // bytes at p, with its code point in *code; 0 if they don't start one.
@@ -641,9 +665,15 @@ void *rt_alloc_old(size_t bytes, const char *site); // for what points at nothin
 // exit status 2, since the runtime can't go on without memory.
 void *rt_must(void *p);
 
-// A new string holding a copy of len bytes; or, if bytes is NULL, len
-// bytes for the caller to fill before anything else runs.
+// A new string holding a copy of len bytes, marked RT_BOX_ASCII if they
+// all are; or, if bytes is NULL, len bytes for the caller to fill before
+// anything else runs, and then mark with rt_string_mark.
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site);
+void       rt_string_mark(rt_value_t s);
+
+// A string's header word, for len bytes: RT_BOX_ASCII in it if they're all
+// below 0x80.
+uint64_t rt_string_header(const char *bytes, size_t len);
 
 // A new float.
 rt_value_t rt_new_float(double d, const char *site);
@@ -688,8 +718,14 @@ static inline rt_value_t rt_work_pop(rt_work_t *w) {
 }
 
 // Appends v as pprint shows it. With raw, a string is its bytes, without
-// quotes (concat and tty/write); strings inside lists are always quoted.
+// quotes (str and tty/write); strings inside lists are always quoted, and
+// escaped as rt_quote does.
 void rt_render(rt_buf_t *b, rt_value_t v, int raw);
+
+// Appends len bytes as a string the reader takes back: in double quotes,
+// with ", \ and the control characters escaped, so it stays on one line
+// (D219).
+void rt_quote(rt_buf_t *b, const char *p, size_t len);
 
 // The name of symbol id, or NULL; the id of the symbol named by len
 // bytes, or -1 if the program has none (symbols are made only by the

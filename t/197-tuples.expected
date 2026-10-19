@@ -9,7 +9,7 @@
 (#(1 2) #() (1 2) ())
 (#true #false #false #false #true)
 "t=#(1 #(2))"
-"[1,["a",null],[2],[]]"
+"[1,[\"a\",null],[2],[]]"
 #("s" 1.5 #((1 2)) #(1 "a" b (2 3) #() 2.5))
 #true
 fault in #<pid 3>: out of range: 2 (tuple/get at t/197-tuples.slight:48:21)

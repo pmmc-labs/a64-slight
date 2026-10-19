@@ -9,10 +9,10 @@
 (defun churn (n)
     (cond
         ((== n 0) :churned)
-        (#true    (let junk (map (lambda (i) (concat "junk " i)) (range 0 20))) (churn (- n 1)))))
+        (#true    (let junk (map (lambda (i) (str "junk " i)) (range 0 20))) (churn (- n 1)))))
 
 (defun maker (p)
-    (let xs (map (lambda (i) (concat "item " i)) (range 0 5)))
+    (let xs (map (lambda (i) (str "item " i)) (range 0 5)))
     (send p (list :show xs))
     (fork (pprint (list :forked xs)))
     :maker-done)

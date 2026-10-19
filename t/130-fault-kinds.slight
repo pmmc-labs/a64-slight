@@ -12,7 +12,7 @@
 (pprint (kind (fork (depth 0))))
 (pprint (kind (fork (grow ()))))
 (pprint (kind (fork (/ 1 0))))
-(pprint (kind (fork (str-len 5))))
+(pprint (kind (fork (bytes/len 5))))
 (pprint (join (fork (sum-down 10000))))
 (pprint (join (fork (length (range 0 100000)))))
 :done

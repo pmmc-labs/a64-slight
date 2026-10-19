@@ -15,8 +15,8 @@
     (let server (http/serve 0 handler))
     (recv
         ((:listening port)
-            (let base (concat "http://127.0.0.1:" port "/"))
-            (let pids (map (lambda (i) (fork (http/get (concat base i)))) (range 1 11)))
+            (let base (str "http://127.0.0.1:" port "/"))
+            (let pids (map (lambda (i) (fork (http/get (str base i)))) (range 1 11)))
             (let r (map (lambda (p) (body-of (join p))) pids))
             (kill server)
             r)))

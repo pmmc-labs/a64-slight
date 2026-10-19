@@ -1,3 +1,0 @@
-99
-fault: out of range: 3 (byte-at at t/068-byte-at-range.slight:2:1)
-exit: 1

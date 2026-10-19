@@ -4,5 +4,5 @@
 (#false #false #false)
 (#false #false #false #false #false #false #false #false #false #false #false #false #false #false #false)
 (12 12.0 #false)
-fault: not a string: 12 (string->float at t/167-string-to-float.slight:16:1)
+fault: not a string: 12 (str->float at t/167-str-to-float.slight:16:1)
 exit: 1

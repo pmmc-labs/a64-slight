@@ -14,7 +14,7 @@
                 (http/get "https://127.0.0.1/")
                 (http/get "ftp://127.0.0.1/")
                 (http/get "http://127.0.0.1:1/")
-                (http/request-within 100 :get (concat "http://127.0.0.1:" port "/silent") () "")
+                (http/request-within 100 :get (str "http://127.0.0.1:" port "/silent") () "")
                 (http/parse-url "http://example.com:8080/a/b?c=d")
                 (http/parse-url "http://example.com")))
             (kill raw)

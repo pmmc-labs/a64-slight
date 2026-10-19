@@ -1517,7 +1517,7 @@ static rt_value_t io_reason(rt_value_t *cells, int err, rt_value_t path) {
 // words): for a value that's copied before space goes.
 static rt_value_t string_in(uint64_t *space, const char *bytes, size_t len) {
     uint64_t *box = (uint64_t *)(((uintptr_t)space + 15) & ~(uintptr_t)15);
-    box[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
+    box[0] = rt_string_header(bytes, len);
     if (len) memcpy(box + 1, bytes, len);
     ((char *)(box + 1))[len] = '\0';
     return (rt_value_t)box | RT_TAG_BOXED;

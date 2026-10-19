@@ -37,7 +37,7 @@
     (let ctx (list :client (http/method-name method)))
     (match (http/parse-url url)
         ((:ok host port target)
-            (http/unwrap (join (connect :tcp (concat host ":" port) (http/exchange host port target headers body ctx)))))
+            (http/unwrap (join (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx)))))
         ((:error reason) (list :error reason))))
 
 ; As http/request, but gives (:error :timeout) if no answer comes within ms
@@ -47,7 +47,7 @@
     (let ctx (list :client (http/method-name method)))
     (match (http/parse-url url)
         ((:ok host port target)
-            (http/await (connect :tcp (concat host ":" port) (http/exchange host port target headers body ctx)) ms))
+            (http/await (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx)) ms))
         ((:error reason) (list :error reason))))
 
 ; The pid's result, or (:error :timeout) after ms milliseconds, killing it.
@@ -81,7 +81,7 @@
     (let caller $$)
     (let ctx    (list :stream (http/method-name method) caller (http/how how)))
     (let s      (match (http/parse-url url)
-        ((:ok host port target) (connect :tcp (concat host ":" port) (http/exchange host port target headers body ctx)))
+        ((:ok host port target) (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx)))
         ((:error reason)        (fork (raise reason)))))
     (fork (http/watch s caller))
     s)
@@ -145,32 +145,32 @@
 ; (total . lines), total being the head's bytes so far and lines the lines so
 ; far, last first. 65536 is the most a head may be.
 (defun http/head (c ctx buf acc)
-    (let i (index-of buf "\n"))
+    (let i (bytes/index-of buf "\n"))
     (cond
         ((>= i 0)
-            (let line  (http/chop (substring buf 0 i)))
+            (let line  (http/chop (bytes/slice buf 0 i)))
             (let total (+ (car acc) (+ i 1)))
-            (let rest  (substring buf (+ i 1) (str-len buf)))
+            (let rest  (bytes/slice buf (+ i 1)))
             (cond
                 ((> total 65536)                                  (http/fail c ctx :head-too-big))
-                ((and (== (str-len line) 0) (nil? (cdr acc)))     (http/fail c ctx (list :bad-http "no start line")))
-                ((== (str-len line) 0)                            (http/after-head c ctx rest (reverse (cdr acc))))
+                ((and (== (bytes/len line) 0) (nil? (cdr acc)))   (http/fail c ctx (list :bad-http "no start line")))
+                ((== (bytes/len line) 0)                          (http/after-head c ctx rest (reverse (cdr acc))))
                 (#true                                            (http/head c ctx rest (cons total (cons line (cdr acc)))))))
-        ((> (str-len buf) 65536) (http/fail c ctx :head-too-big))
+        ((> (bytes/len buf) 65536) (http/fail c ctx :head-too-big))
         (#true (recv
             ((:chunk c s) (http/head c ctx (~ buf s) acc))
-            ((:eof c)     (http/fail c ctx (if (and (nil? (cdr acc)) (== (str-len buf) 0))
+            ((:eof c)     (http/fail c ctx (if (and (nil? (cdr acc)) (== (bytes/len buf) 0))
                                                :closed
                                                (list :bad-http "closed in the head"))))))))
 
 ; The line without its \r, if it has one.
 (defun http/chop (s)
-    (if (ends-with? s "\r") (substring s 0 (- (str-len s) 1)) s))
+    (if (str/ends-with? s "\r") (bytes/slice s 0 -1) s))
 
 ; The head is in. Its start line must have the parts its side needs; the body
 ; comes next, as the head says.
 (defun http/after-head (c ctx buf lines)
-    (let words (str-split (car lines) " "))
+    (let words (str/split (car lines) " "))
     (let msg   (list words (map http/header (cdr lines))))
     (if (http/start-ok? ctx words)
         (http/start-body c ctx msg buf)
@@ -192,16 +192,16 @@
 (defun http/start-ok? (ctx words)
     (if (eq? (car ctx) :server)
         (== (length words) 3)
-        (and (>= (length words) 2) (int? (string->int (cadr words))))))
+        (and (>= (length words) 2) (int? (str->int (cadr words))))))
 
 ; A header line, "Name: value", as (name value): the name in lowercase, and
 ; the value without the spaces around it.
 (defun http/header (line)
-    (let i (index-of line ":"))
+    (let i (bytes/index-of line ":"))
     (cond
-        ((< i 0) (list (lc line) ""))
-        (#true   (list (lc (http/trim (substring line 0 i)))
-                       (http/trim (substring line (+ i 1) (str-len line)))))))
+        ((< i 0) (list (str/lower line) ""))
+        (#true   (list (str/lower (http/trim (bytes/slice line 0 i)))
+                       (http/trim (bytes/slice line (+ i 1)))))))
 
 ; The text without spaces and tabs at either end.
 (defun http/trim (s)
@@ -209,14 +209,14 @@
 
 (defun http/trim-left (s)
     (cond
-        ((and (> (str-len s) 0) (http/blank? (byte-at s 0)))
-            (http/trim-left (substring s 1 (str-len s))))
+        ((and (> (bytes/len s) 0) (http/blank? (bytes/at s 0)))
+            (http/trim-left (bytes/slice s 1)))
         (#true s)))
 
 (defun http/trim-right (s)
     (cond
-        ((and (> (str-len s) 0) (http/blank? (byte-at s (- (str-len s) 1))))
-            (http/trim-right (substring s 0 (- (str-len s) 1))))
+        ((and (> (bytes/len s) 0) (http/blank? (bytes/at s (- (bytes/len s) 1))))
+            (http/trim-right (bytes/slice s 0 -1)))
         (#true s)))
 
 (defun http/blank? (b) (or (== b 32) (== b 9)))
@@ -230,11 +230,11 @@
         ((http/chunked? headers) (list :chunked))
         ((http/no-body? ctx msg) (list :none))
         ((eq? clen :not-found)   (if (eq? (car ctx) :server) (list :none) (list :to-eof)))
-        (#true                   (list :length (string->int clen)))))
+        (#true                   (list :length (str->int clen)))))
 
 (defun http/chunked? (headers)
     (let te (lookup "transfer-encoding" headers))
-    (and (not (eq? te :not-found)) (>= (index-of (lc te) "chunked") 0)))
+    (and (not (eq? te :not-found)) (>= (bytes/index-of (str/lower te) "chunked") 0)))
 
 (defun http/no-body? (ctx msg)
     (cond
@@ -242,7 +242,7 @@
         ((eq? (cadr ctx) "HEAD") #true)
         (#true                   (http/bodiless? (http/status msg)))))
 
-(defun http/status (msg) (string->int (cadr (car msg))))
+(defun http/status (msg) (str->int (cadr (car msg))))
 
 ; 1xx, 204 and 304 have no body.
 (defun http/bodiless? (status)
@@ -271,51 +271,51 @@
 ; waited for, so a stream's caller has it at once.
 (defun http/data (c ctx msg buf acc need chunked)
     (cond
-        ((>= (str-len buf) need)
-            (let taken (http/take ctx acc (substring buf 0 need)))
-            (let rest  (substring buf need (str-len buf)))
+        ((>= (bytes/len buf) need)
+            (let taken (http/take ctx acc (bytes/slice buf 0 need)))
+            (let rest  (bytes/slice buf need))
             (if chunked (http/chunk-end c ctx msg rest taken) (http/done c ctx msg taken)))
         (#true
             (let taken (http/take ctx acc buf))
             (recv
-                ((:chunk c s) (http/data c ctx msg s taken (- need (str-len buf)) chunked))
+                ((:chunk c s) (http/data c ctx msg s taken (- need (bytes/len buf)) chunked))
                 ((:eof c)     (http/fail c ctx (list :bad-http "short body")))))))
 
 ; A chunked body: a size line, the bytes it gives, the line after them, and so
 ; on, till a size of 0 and the trailers.
 (defun http/chunk-size (c ctx msg buf acc)
-    (let i (index-of buf "\n"))
+    (let i (bytes/index-of buf "\n"))
     (cond
         ((>= i 0)
-            (let size (http/chunk-size-of (substring buf 0 i)))
-            (let rest (substring buf (+ i 1) (str-len buf)))
+            (let size (http/chunk-size-of (bytes/slice buf 0 i)))
+            (let rest (bytes/slice buf (+ i 1)))
             (cond
                 ((not (int? size))                                              (http/fail c ctx (list :bad-http "chunk size")))
                 ((== size 0)                                                    (http/trailers c ctx msg rest acc))
                 ((and (eq? (car ctx) :server) (> (+ (car acc) size) 8388608))   (http/fail c ctx :body-too-big))
                 (#true                                                          (http/data c ctx msg rest acc size #true))))
-        ((> (str-len buf) 65536) (http/fail c ctx (list :bad-http "chunk size")))
+        ((> (bytes/len buf) 65536) (http/fail c ctx (list :bad-http "chunk size")))
         (#true (recv
             ((:chunk c s) (http/chunk-size c ctx msg (~ buf s) acc))
             ((:eof c)     (http/fail c ctx (list :bad-http "short body")))))))
 
 ; The size in a chunk's size line: hexadecimal, with any ";extension" ignored.
 (defun http/chunk-size-of (line)
-    (let semi (index-of line ";"))
-    (http/hex (http/trim (if (< semi 0) (http/chop line) (substring line 0 semi)))))
+    (let semi (bytes/index-of line ";"))
+    (http/hex (http/trim (if (< semi 0) (http/chop line) (bytes/slice line 0 semi)))))
 
 ; The number a hexadecimal string gives, or #false. Eight digits at most, so
 ; it can't overflow.
 (defun http/hex (s)
     (cond
-        ((or (== (str-len s) 0) (> (str-len s) 8)) #false)
+        ((or (== (bytes/len s) 0) (> (bytes/len s) 8)) #false)
         (#true (http/hex-loop s 0 0))))
 
 (defun http/hex-loop (s i acc)
     (cond
-        ((== i (str-len s)) acc)
+        ((== i (bytes/len s)) acc)
         (#true
-            (let d (http/hex-digit (byte-at s i)))
+            (let d (http/hex-digit (bytes/at s i)))
             (if (< d 0) #false (http/hex-loop s (+ i 1) (+ (* acc 16) d))))))
 
 (defun http/hex-digit (b)
@@ -327,23 +327,23 @@
 
 ; The line that ends a chunk's bytes, then the next size line.
 (defun http/chunk-end (c ctx msg buf acc)
-    (let i (index-of buf "\n"))
+    (let i (bytes/index-of buf "\n"))
     (cond
-        ((>= i 0) (http/chunk-size c ctx msg (substring buf (+ i 1) (str-len buf)) acc))
-        ((> (str-len buf) 65536) (http/fail c ctx (list :bad-http "chunk end")))
+        ((>= i 0) (http/chunk-size c ctx msg (bytes/slice buf (+ i 1)) acc))
+        ((> (bytes/len buf) 65536) (http/fail c ctx (list :bad-http "chunk end")))
         (#true (recv
             ((:chunk c s) (http/chunk-end c ctx msg (~ buf s) acc))
             ((:eof c)     (http/fail c ctx (list :bad-http "short body")))))))
 
 ; The trailers after the last chunk, to a blank line; then the body is done.
 (defun http/trailers (c ctx msg buf acc)
-    (let i (index-of buf "\n"))
+    (let i (bytes/index-of buf "\n"))
     (cond
         ((>= i 0)
             (cond
-                ((== (str-len (http/chop (substring buf 0 i))) 0) (http/done c ctx msg acc))
-                (#true (http/trailers c ctx msg (substring buf (+ i 1) (str-len buf)) acc))))
-        ((> (str-len buf) 65536) (http/fail c ctx (list :bad-http "trailers")))
+                ((== (bytes/len (http/chop (bytes/slice buf 0 i))) 0) (http/done c ctx msg acc))
+                (#true (http/trailers c ctx msg (bytes/slice buf (+ i 1)) acc))))
+        ((> (bytes/len buf) 65536) (http/fail c ctx (list :bad-http "trailers")))
         (#true (recv
             ((:chunk c s) (http/trailers c ctx msg (~ buf s) acc))
             ((:eof c)     (http/fail c ctx (list :bad-http "short body")))))))
@@ -363,11 +363,11 @@
 (defun http/take (ctx acc s)
     (match ctx
         ((:stream _ caller :lines)
-            (http/lines caller (str-split (~ acc s) "\n")))
+            (http/lines caller (str/split (~ acc s) "\n")))
         ((:stream _ caller :chunks)
-            (if (== (str-len s) 0) () (send caller (list :chunk $$ s)))
+            (if (== (bytes/len s) 0) () (send caller (list :chunk $$ s)))
             acc)
-        (_ (cons (+ (car acc) (str-len s)) (cons s (cdr acc))))))
+        (_ (cons (+ (car acc) (bytes/len s)) (cons s (cdr acc))))))
 
 ; The pieces of the body between newlines: each but the last is a line, sent
 ; without its \r, as the head's are; the last hasn't ended, and is kept. A
@@ -376,13 +376,13 @@
 (defun http/lines (caller pieces)
     (cond
         ((nil? pieces)                    "")
-        ((> (str-len (car pieces)) 65536) (raise :line-too-big))
+        ((> (bytes/len (car pieces)) 65536) (raise :line-too-big))
         ((nil? (cdr pieces))              (car pieces))
         (#true
             (send caller (list :line $$ (http/chop (car pieces))))
             (http/lines caller (cdr pieces)))))
 
-(defun http/joined (acc) (str-join "" (reverse (cdr acc))))
+(defun http/joined (acc) (str/join "" (reverse (cdr acc))))
 
 ; The message is whole. A server runs the handler and answers; a client gives
 ; its response; a stream sends its last line, if it had no newline. (Its
@@ -391,7 +391,7 @@
     (match ctx
         ((:server handler)    (http/respond c handler (http/request-of msg (http/joined acc))))
         ((:client _)          (list :ok (http/response-of msg (http/joined acc))))
-        ((:stream _ caller _) (if (== (str-len acc) 0) () (send caller (list :line $$ (http/chop acc)))))))
+        ((:stream _ caller _) (if (== (bytes/len acc) 0) () (send caller (list :line $$ (http/chop acc)))))))
 
 ; A message that breaks the rules: a server answers with the status that
 ; says why, and a client gives the reason. A server whose client closed
@@ -426,11 +426,11 @@
 (defun http/request-of (msg body)
     (let words  (car msg))
     (let target (cadr words))
-    (let q      (index-of target "?"))
+    (let q      (bytes/index-of target "?"))
     (list
         (list :method  (http/method-of (car words)))
-        (list :path    (if (< q 0) target (substring target 0 q)))
-        (list :query   (if (< q 0) "" (substring target (+ q 1) (str-len target))))
+        (list :path    (if (< q 0) target (bytes/slice target 0 q)))
+        (list :query   (if (< q 0) "" (bytes/slice target (+ q 1))))
         (list :headers (cadr msg))
         (list :body    body)))
 
@@ -446,29 +446,29 @@
 ; The method as it goes on the wire: :get is "GET", and a string stays as it is.
 (defun http/method-name (method)
     (cond
-        ((sym? method) (uc (symbol->string method)))
+        ((sym? method) (str/upper (sym->str method)))
         (#true         method)))
 
 (defun http/response-of (msg body)
     (list (http/status msg) (cadr msg) body))
 
 (defun http/request-text (method host port target headers body)
-    (concat method " " target " HTTP/1.1\r\n"
+    (str method " " target " HTTP/1.1\r\n"
             "Host: " host ":" port "\r\n"
             "Connection: close\r\n"
             (http/header-lines headers)
-            "Content-Length: " (str-len body) "\r\n\r\n"
+            "Content-Length: " (bytes/len body) "\r\n\r\n"
             body))
 
 (defun http/response-text (status headers body)
-    (concat "HTTP/1.1 " status " " (http/reason status) "\r\n"
+    (str "HTTP/1.1 " status " " (http/reason status) "\r\n"
             (http/header-lines headers)
-            "Content-Length: " (str-len body) "\r\n"
+            "Content-Length: " (bytes/len body) "\r\n"
             "Connection: close\r\n\r\n"
             body))
 
 (defun http/header-lines (headers)
-    (str-join "" (map (lambda (h) (concat (car h) ": " (cadr h) "\r\n")) headers)))
+    (str/join "" (map (lambda (h) (str (car h) ": " (cadr h) "\r\n")) headers)))
 
 (defun http/reason (status)
     (cond
@@ -492,17 +492,17 @@
 ; and the target "/" when none is given.
 (defun http/parse-url (url)
     (cond
-        ((starts-with? url "https://")      (list :error :no-tls))
-        ((not (starts-with? url "http://")) (list :error (list :bad-url url)))
-        (#true                              (http/split-url (substring url 7 (str-len url)) url))))
+        ((str/starts-with? url "https://")  (list :error :no-tls))
+        ((not (str/starts-with? url "http://")) (list :error (list :bad-url url)))
+        (#true                              (http/split-url (bytes/slice url 7) url))))
 
 (defun http/split-url (authority-and-target url)
-    (let slash     (index-of authority-and-target "/"))
-    (let authority (if (< slash 0) authority-and-target (substring authority-and-target 0 slash)))
-    (let target    (if (< slash 0) "/" (substring authority-and-target slash (str-len authority-and-target))))
-    (let colon     (index-of authority ":"))
-    (let host      (if (< colon 0) authority (substring authority 0 colon)))
-    (let port      (if (< colon 0) 80 (string->int (substring authority (+ colon 1) (str-len authority)))))
-    (if (and (> (str-len host) 0) (int? port))
+    (let slash     (bytes/index-of authority-and-target "/"))
+    (let authority (if (< slash 0) authority-and-target (bytes/slice authority-and-target 0 slash)))
+    (let target    (if (< slash 0) "/" (bytes/slice authority-and-target slash)))
+    (let colon     (bytes/index-of authority ":"))
+    (let host      (if (< colon 0) authority (bytes/slice authority 0 colon)))
+    (let port      (if (< colon 0) 80 (str->int (bytes/slice authority (+ colon 1)))))
+    (if (and (> (bytes/len host) 0) (int? port))
         (list :ok host port target)
         (list :error (list :bad-url url))))

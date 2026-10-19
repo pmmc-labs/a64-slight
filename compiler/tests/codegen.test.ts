@@ -142,7 +142,7 @@ test('a local that shadows a builtin is called as a closure', () => {
 test('a slot is reused once the value in it is dead', () => {
     // The top level's first slots hold its parameters, @ARGV and %ENV.
     const frame = (src: string): string | undefined => /sub {2}sp, sp, #(\d+)/.exec(compile(src))?.[1];
-    const len = (s: string): string => `(str-len "${s}")`;
+    const len = (s: string): string => `(str/len "${s}")`;
     assert.equal(frame('42'), '16');                          // just @ARGV and %ENV
     assert.equal(frame(`(+ ${len('a')} ${len('b')}) (+ ${len('c')} ${len('d')})`), '32'); // and one slot, used twice, rounded up
     assert.equal(frame(`(+ ${len('a')} (+ ${len('b')} (+ ${len('c')} ${len('d')})))`), '48'); // and three waiting left operands
@@ -162,9 +162,15 @@ test('only a function that calls another, not in tail position, zeroes its slots
     assert.equal(zeroes('(defun g (f n) (+ 1 (f n))) (g car 3)', 'fn_g'), true);
     assert.equal(zeroes('(defun g (f n) (+ 1 (apply f (list n)))) (g car 3)', 'fn_g'), true);
     assert.equal(zeroes('(defun g (f n) (f n)) (g car 3)', 'fn_g'), false);
-    assert.equal(zeroes('(defun g (n) (+ 1 (str-len n))) (g "abc")', 'fn_g'), false);
+    assert.equal(zeroes('(defun g (n) (+ 1 (str/len n))) (g "abc")', 'fn_g'), false);
     // A lambda's calls are its own, not its enclosing function's.
     assert.equal(zeroes(`${loop} (defun g (n) (lambda () (+ 1 (loop n 0)))) (g 3)`, 'fn_g'), false);
+});
+
+test('a string literal all below 0x80 is marked ASCII', () => {
+    // so the str/ builtins index it in one step (D219)
+    assert.match(compile('"abc"'), /\.quad 3 << RT_BOX_SIZE_SHIFT \| RT_BOX_STRING \| RT_BOX_ASCII\n/);
+    assert.match(compile('"é"'), /\.quad 2 << RT_BOX_SIZE_SHIFT \| RT_BOX_STRING\n/);
 });
 
 test('strings in the assembly are escaped byte by byte', () => {
@@ -374,29 +380,29 @@ test('a string literal is a box in the read-only data', () => {
 });
 
 test('the control-character names are strings, unless shadowed', () => {
-    assert.match(compile('\\e'), /\.quad 1 << RT_BOX_SIZE_SHIFT \| RT_BOX_STRING\n {4}\.asciz "\\033"/);
+    assert.match(compile('\\e'), /\.quad 1 << RT_BOX_SIZE_SHIFT \| RT_BOX_STRING \| RT_BOX_ASCII\n {4}\.asciz "\\033"/);
     // after @ARGV and %ENV; a backslash in a comment is escaped (160-backslash-names)
     assert.match(compile('(let \\n 5) \\n'), /ldr {2}x0, \[sp, #16\] {4}\/\/ \\134n/);
 });
 
 test('C builtins get their site after their arguments', () => {
     // the last argument worked out stays in the accumulator, which is x0
-    assert.match(compile('(str-len "a")'), /orr {2}x0, x0, #RT_TAG_BOXED\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_str_len/);
+    assert.match(compile('(str/len "a")'), /orr {2}x0, x0, #RT_TAG_BOXED\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_str_len/);
     // a local is read from its slot, straight into its register
-    assert.match(compile('(let s "a") (substring s 0 1)'), /ldr {2}x0, \[sp, #16\]\n {4}movz x1, #0\n {4}movz x2, #0x2, lsl #0\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_substring/);
+    assert.match(compile('(let s "a") (str/slice s 0 1)'), /ldr {2}x0, \[sp, #16\]\n {4}movz x1, #0\n {4}movz x2, #0x2, lsl #0\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_str_slice/);
     // a missing optional argument is ()
-    assert.match(compile('(format-num 1 2)'), /mov {2}x2, #RT_NIL\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_format_num/);
+    assert.match(compile('(str/pad-start "1" 2)'), /mov {2}x2, #RT_NIL\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_str_pad_start/);
     // a variadic one gets a list
-    assert.match(compile('(concat "a" 1)'), /orr {2}x0, x2, #RT_TAG_LIST\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_concat/);
-    assert.match(compile('(concat)'), /mov {2}x0, #RT_NIL\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_concat/);
+    assert.match(compile('(str "a" 1)'), /orr {2}x0, x2, #RT_TAG_LIST\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_str\n/);
+    assert.match(compile('(str)'), /mov {2}x0, #RT_NIL\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_str\n/);
 });
 
 test('C builtins check their arity', () => {
-    fails('(substring "a" 1)', 'test.slight:1:1: substring takes 3 arguments, not 2');
-    fails('(format-num 1)', 'test.slight:1:1: format-num takes 2 or 3 arguments, not 1');
-    fails('(format-num 1 2 3 4)', 'test.slight:1:1: format-num takes 2 or 3 arguments, not 4');
+    fails('(str/repeat "a")', 'test.slight:1:1: str/repeat takes 2 arguments, not 1');
+    fails('(str/slice "a")', 'test.slight:1:1: str/slice takes 2 or 3 arguments, not 1');
+    fails('(str/slice "a" 1 2 3)', 'test.slight:1:1: str/slice takes 2 or 3 arguments, not 4');
     fails('(str? "a" "b")', 'test.slight:1:1: str? takes 1 argument, not 2');
-    fails('(defun concat (x) x)', "test.slight:1:8: can't define concat: it's a builtin");
+    fails('(defun str (x) x)', "test.slight:1:8: can't define str: it's a builtin");
     fails('(defun tty/write (x) x)', "test.slight:1:8: can't define tty/write: it's a builtin");
 });
 
@@ -543,7 +549,9 @@ test('a builtin used as a value is a small wrapper function', () => {
     assert.match(asm, /bi_car:\n|bi_car: {4}\/\/ car/);
     assert.equal(asm.split('bi_car_closure:').length, 2);       // made once
     fails('(let f list)', "test.slight:1:8: list can't be used as a value: it takes a varying number of arguments");
-    fails('(let f format-num)', "test.slight:1:8: format-num can't be used as a value: it takes a varying number of arguments");
+    fails('(let f str)', "test.slight:1:8: str can't be used as a value: it takes a varying number of arguments");
+    // with optional arguments, it takes the ones it needs (D219)
+    assert.match(compile('(let f str/slice) (f "abc" 1)'), /mov {2}x2, #RT_NIL\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_str_slice/);
 });
 
 test('lambda is (lambda (params...) body...)', () => {

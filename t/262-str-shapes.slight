@@ -1,0 +1,39 @@
+; Splitting, joining, repeating, padding, trimming and replacing (D219),
+; as JavaScript's split, join, repeat, padStart, padEnd, trim, replace
+; and replaceAll do them, counting characters.
+
+(pprint (str/split "a,b,,c" ","))
+(pprint (list (str/split "" ",") (str/split "" "") (str/split ",a," ",") (str/split "abc" "abc")))
+(pprint (str/split "aé日" ""))
+(pprint (str/split "a, b, c" ", "))
+(pprint (list (str/split "a,b,c,d" "," 2) (str/split "a,b" "," 0) (str/split "a,b" "," 9) (str/split "aé日" "" 2)))
+(pprint (str/split "日本語" "本"))
+(pprint (str/join ", " (list "a" 1 'b 2.5 (list 1 "x"))))
+(pprint (list (str/join "-" ()) (str/join "-" (list "x")) (str/join "" (str/split "a-b" "-"))))
+(pprint (list (str/repeat "ab" 3) (str/repeat "é" 2) (str/repeat "x" 0) (str/repeat "" 5)))
+
+; padding counts characters: é is one, though it's two bytes
+(pprint (list (str/pad-start "é" 3) (str/pad-end "é" 3 "-") (str/pad-start "5" 4 "ab") (str/pad-end "x" 6 "日本")))
+(pprint (list (str/pad-start "abc" 2) (str/pad-start "x" 3 "") (str/pad-end "" 2 "😀")))
+(pprint (map bytes/len (list (str/pad-start "é" 3) (str/pad-end "x" 6 "日本"))))
+
+; white space is Unicode's: the no-break space, the ideographic space and
+; the line separator among it; a stray byte and a zero-width space aren't
+(pprint (list (str/trim "  a b \t\n") (str/trim-start "  a  ") (str/trim-end "  a  ") (str/trim "") (str/trim " \t ")))
+(pprint (str/codes (str/trim (codes->str (list 160 12288 97 8232 32)))))
+(pprint (str->bytes (str/trim (bytes->str (list 32 255 32)))))
+(pprint (str/codes (str/trim (codes->str (list 8203 97 8203)))))
+
+; replacing; an empty pattern is at the start, or around every character
+(pprint (list (str/replace "a.b.c" "." "-") (str/replace-all "a.b.c" "." "-") (str/replace-all "aaa" "aa" "b") (str/replace "abc" "x" "y")))
+(pprint (list (str/replace "abc" "" "-") (str/replace-all "abc" "" "-") (str/replace-all "aé" "" "|") (str/replace-all "" "" "-")))
+(pprint (str/replace-all "日本と日本" "日本" "Japan"))
+
+; faults
+(defun kind (pid) (car (cadr (join pid))))
+(pprint (kind (fork (str/split "a" "," -1))))
+(pprint (kind (fork (str/repeat "a" -1))))
+(pprint (kind (fork (str/pad-start "a" 3 5))))
+(pprint (kind (fork (str/join "," "abc"))))
+(pprint (kind (fork (str/replace "a" "a" 1))))
+(kind (fork (str/repeat "ab" 4611686018427387903)))

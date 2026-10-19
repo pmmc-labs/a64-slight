@@ -31,7 +31,7 @@
         ((:line c s)
             (cond
                 ((eq? s "\r")      (raw-answer c (lookup path replies) tag told))
-                ((eq? path #false) (raw-head c replies tag told (cadr (str-split s " "))))
+                ((eq? path #false) (raw-head c replies tag told (cadr (str/split s " "))))
                 (#true             (raw-head c replies tag told path))))
         ((:eof c) (disconnect c))))
 
@@ -72,7 +72,7 @@
 ; A raw client: pieces are sent one after another, a millisecond apart, and
 ; what the server sends comes back as one string, once it closes.
 (defun talk (port pieces)
-    (reply-of (join (connect :tcp (concat "127.0.0.1:" port) (talk-conn pieces)))))
+    (reply-of (join (connect :tcp (str "127.0.0.1:" port) (talk-conn pieces)))))
 
 (defun talk-conn (pieces)
     (recv
@@ -98,7 +98,7 @@
 
 ; A client that connects and says nothing, closing at once.
 (defun quit-at-once (port)
-    (reply-of (join (connect :tcp (concat "127.0.0.1:" port) (quit-now)))))
+    (reply-of (join (connect :tcp (str "127.0.0.1:" port) (quit-now)))))
 
 (defun quit-now ()
     (recv ((:open c) (disconnect c) :quit)))

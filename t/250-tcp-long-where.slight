@@ -25,11 +25,11 @@
 
 ; the hosts file has a name of 255 bytes, and one of 256
 (let long (double-up "a" 23))
-(let h255 (substring long 0 255))
-(let h256 (substring long 0 256))
-(join (connect :fs/write "build/t/250-hosts" (writer (concat "127.0.0.1 " h255 " " h256 \n))))
+(let h255 (bytes/slice long 0 255))
+(let h256 (bytes/slice long 0 256))
+(join (connect :fs/write "build/t/250-hosts" (writer (str "127.0.0.1 " h255 " " h256 \n))))
 
-(let where (concat long ":80"))
+(let where (str long ":80"))
 (pprint (failed (join (connect :tcp where (never))) where))
 
 (defun answer ()
@@ -41,11 +41,11 @@
 (defun listening (h255 h256)
     (recv
         ((:open l port)
-            (pprint (join (connect :tcp (concat h255 ":" port) (answer))))
-            (let where (concat h256 ":" port))
+            (pprint (join (connect :tcp (str h255 ":" port) (answer))))
+            (let where (str h256 ":" port))
             (pprint (failed (join (connect :tcp where (never))) where))
             (disconnect l)
-            (let refused (concat "127.0.0.1:" (double-up "0" 23) port))
+            (let refused (str "127.0.0.1:" (double-up "0" 23) port))
             (failed (join (connect :tcp refused (never))) refused))))
 
 (pprint (join (connect :tcp/listen 0 (listening h255 h256))))

@@ -1,20 +1,6 @@
-"A Page
-
-Hello & welcome
-
-Some bold text, and a [link](/x).
-
-- one
-- two <3 ’s — &bogus; &#0; &#xD800; &
-
-| a | b
-| c | d
-
-1 < 2 and 3 > 2
-
-end"
+"A Page\n\nHello & welcome\n\nSome bold text, and a [link](/x).\n\n- one\n- two <3 ’s — &bogus; &#0; &#xD800; &\n\n| a | b\n| c | d\n\n1 < 2 and 3 > 2\n\nend"
 ""
-"just text, "quoted""
+"just text, \"quoted\""
 [absolute](https://other.org/a), [no scheme](https://cdn.example.com/lib), [root](https://example.com/root), [relative](https://example.com/docs/rel/x.html), [up](https://example.com/docs/../up), [query](https://example.com/docs/page.html?page=2), same page, mail, script, , [upper](https://example.com/Upper?a=1&b=2), [data](https://example.com/yes), [bare](https://example.com/bare), anchor, empty.
 
 - [spaced out](https://example.com/docs/one)
@@ -25,16 +11,11 @@ end"
 [first](https://example.com/docs/first) [second](https://example.com/docs/second) after
 
 end [never closed](https://example.com/docs/open)
-(ok "T
-
-Hello, world.")
-(ok "{"a": [1, 2]}")
-(ok "line one
-line two
-")
+(ok "T\n\nHello, world.")
+(ok "{\"a\": [1, 2]}")
+(ok "line one\nline two\n")
 (ok "not text: image/png, 9 bytes")
-(ok "HTTP 404
-Not Found")
+(ok "HTTP 404\nNot Found")
 (ok "HTTP 302: a redirect to BASE/page, which a fetch of its own can get")
 (ok "See [next](BASE/docs/next), [home](BASE/) and here.")
 #true

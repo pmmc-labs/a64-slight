@@ -19,9 +19,9 @@
                 ((eq? (lookup "model" fields) "missing")
                     (list 404 () (json/print (list :object (list "error" "model 'missing' not found")))))
                 ((eq? (lookup "model" fields) "helper")
-                    (list 200 () (lines (list (piece "helper: ") (piece (concat (lookup "content" last) (roles messages))) (done)))))
+                    (list 200 () (lines (list (piece "helper: ") (piece (str (lookup "content" last) (roles messages))) (done)))))
                 ((eq? (lookup "role" last) "tool")
-                    (list 200 () (lines (list (piece (concat "results: " (lookup "content" last))) (piece (roles messages)) (done)))))
+                    (list 200 () (lines (list (piece (str "results: " (lookup "content" last))) (piece (roles messages)) (done)))))
                 ((eq? asked "consult")
                     (list 200 () (lines (list (calls "ask_expert" "what is 2+2?") (done)))))
                 ((eq? asked "consult the broken one")
@@ -43,10 +43,10 @@
     (list :object (list "message" (list :object (list "role" "assistant") (list "content" ""))) (list "done" #true)))
 
 (defun lines (values)
-    (str-join "" (map (lambda (v) (concat (json/print v) "\n")) values)))
+    (str/join "" (map (lambda (v) (str (json/print v) "\n")) values)))
 
 (defun roles (messages)
-    (concat " [" (str-join " " (map (lambda (m) (if (eq? (lookup "tool_calls" (cdr m)) :not-found) (lookup "role" (cdr m)) "calls")) messages)) "]"))
+    (str " [" (str/join " " (map (lambda (m) (if (eq? (lookup "tool_calls" (cdr m)) :not-found) (lookup "role" (cdr m)) "calls")) messages)) "]"))
 
 ; What a caller of agent/say hears, till the answer or an error.
 (defun heard (acc)
@@ -63,7 +63,7 @@
 
 (defun main ()
     (let srv    (http/serve 0 handler))
-    (let base   (recv ((:listening port) (concat "http://127.0.0.1:" port))))
+    (let base   (recv ((:listening port) (str "http://127.0.0.1:" port))))
     (let helper (agent/new base "helper" "" ()))
     (pprint (agent/ask helper "hello"))
     (send $$ :nothing-else)

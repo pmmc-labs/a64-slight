@@ -9,7 +9,7 @@
 
 (show (list 1 -2 0 4611686018427387903 -4611686018427387904))
 (show (list 1.0 -0.0 0.1 100.0 1.0e21 1.5e-7 1.0e-7 123456.789 (/ 1 3) 5.0e-324 1.7976931348623157e308))
-(show (concat "q\"b\\" (bytes->string (list 10 9 13 27 0 1 31 127)) "é😀"))
+(show (str "q\"b\\" (bytes->str (list 10 9 13 27 0 1 31 127)) "é😀"))
 (show (list :alpha 'beta #true #false (list :quote :gamma) ()))
 (show (list (list :symbol "zebra") (list :symbol "two words") (list :symbol "12") (list :symbol "")
             (list :symbol ":k") (list :symbol "#x") (list :symbol ".") (list :symbol "a(b") (list :symbol "x" "y")))
@@ -26,7 +26,7 @@
 (pprint (map same? (list
     (list 1 (list 2 (list 3 ())) "four" 5.5 #true :alpha)
     (list 0.1 (/ 2 3) 1.0e21 1.0e-7 5.0e-324 -0.0 1.7976931348623157e308)
-    (bytes->string (bytes 255 ()))
+    (bytes->str (bytes 255 ()))
     (list :quote (list :quote :beta))
     (list (list :symbol "zebra") (list :symbol "two words"))
     ())))

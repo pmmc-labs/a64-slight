@@ -1,0 +1,14 @@
+"plain"
+"say \"hi\""
+"back\\slash"
+"line\nbreak, tab\there, return\r, escape\e[0m"
+"\u{0}\u{1}\u{7}\u{8}\u{b}\u{c}\u{1f}\u{7f}"
+"\u{80}\u{85}\u{9b}\u{9f} ÿ"
+"é 日本 😀"
+("a\"b" ("c\\d") sym "e\nf")
+(34 255 10)
+8
+tty/write: say "hi"
+"str: \"q\" (\"\\\"q\\\"\")"
+(#true #true)
+"a\"\\\n\t\e\u{9b}é"

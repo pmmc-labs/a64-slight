@@ -217,10 +217,10 @@
 ; halfway between an axis and a diagonal.
 (defun arrow (vx vy)
     (cond
-        ((<= (abs vy) (* (abs vx) 0.41421356)) (if (< vx 0) (concat \e "[33m" "←" \e "[0m") (concat \e "[35m" "→" \e "[0m")))
-        ((<= (abs vx) (* (abs vy) 0.41421356)) (if (< vy 0) (concat \e "[32m" "↑" \e "[0m") (concat \e "[36m" "↓" \e "[0m")))
-        ((< vx 0)                              (if (< vy 0) (concat \e "[31m" "↖" \e "[0m") (concat \e "[37m" "↙" \e "[0m")))
-        (#true                                 (if (< vy 0) (concat \e "[34m" "↗" \e "[0m") (concat \e "[91m" "↘" \e "[0m")))))
+        ((<= (abs vy) (* (abs vx) 0.41421356)) (if (< vx 0) (str \e "[33m" "←" \e "[0m") (str \e "[35m" "→" \e "[0m")))
+        ((<= (abs vx) (* (abs vy) 0.41421356)) (if (< vy 0) (str \e "[32m" "↑" \e "[0m") (str \e "[36m" "↓" \e "[0m")))
+        ((< vx 0)                              (if (< vy 0) (str \e "[31m" "↖" \e "[0m") (str \e "[37m" "↙" \e "[0m")))
+        (#true                                 (if (< vy 0) (str \e "[34m" "↗" \e "[0m") (str \e "[91m" "↘" \e "[0m")))))
 
 ; The sky as a tuple of rows, each a tuple of one-character strings, with
 ; a bird put in it. A bird on the far edge, which rounding can leave
@@ -239,14 +239,14 @@
         ((w h)
             (let live (< frames 1))
             (let grid (fold/l (tuple/make (div h 2) (tuple/make w " ")) put birds))
-            (let edge (concat "+" (str-repeat "-" w) "+\n"))
+            (let edge (str "+" (str/repeat "-" w) "+\n"))
             (tty/write
-                (if live (concat \e "[H") "")
+                (if live (str \e "[H") "")
                 edge
-                (str-join "" (map (lambda (row) (concat "|" (str-join "" (tuple->list row)) "|\n")) (tuple->list grid)))
+                (str/join "" (map (lambda (row) (str "|" (str/join "" (tuple->list row)) "|\n")) (tuple->list grid)))
                 edge
                 "tick " tick ", " (length birds) " birds"
-                (if (nil? took) "" (concat ", " took " ms a tick"))
+                (if (nil? took) "" (str ", " took " ms a tick"))
                 (if live ", q quits" "\n")))))
 
 (defun keys (shown)
@@ -285,7 +285,7 @@
 
 ; --- the program --------------------------------------------------------------
 
-(let args (map string->int @ARGV))
+(let args (map str->int @ARGV))
 
 (let n      (arg 0 args 300))
 (let frames (arg 1 args 0))
@@ -313,4 +313,4 @@
 (when (< frames 1)
     (tty/write \e "[?25h\n"))
 
-(match drawn ((:ok k) (concat k " frames")))
+(match drawn ((:ok k) (str k " frames")))

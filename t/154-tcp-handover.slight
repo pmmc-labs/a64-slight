@@ -28,7 +28,7 @@
     (recv
         ((:open l port)
             (let me $$)
-            (let where (concat "localhost:" port))
+            (let where (str "localhost:" port))
             (fork (send me (list :client (join (connect :tcp where (first-client where))))))
             (holding l))))
 

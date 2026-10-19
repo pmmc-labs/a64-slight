@@ -13,6 +13,6 @@
         ((:listening port)
             (let reply (talk port (list "POST / HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\n" "hello")))
             (kill server)
-            (map (lambda (p) (car (str-split p "\r\n"))) (str-split reply "\r\n\r\n")))))
+            (map (lambda (p) (car (str/split p "\r\n"))) (str/split reply "\r\n\r\n")))))
 
 (main)

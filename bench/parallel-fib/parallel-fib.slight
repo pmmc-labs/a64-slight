@@ -5,6 +5,6 @@
 (defun fib (n)
     (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
 
-(let k       (string->int (car @ARGV)))
+(let k       (str->int (car @ARGV)))
 (let workers (map (lambda (_) (fork (fib k))) (range 0 64)))
 (sum (map (lambda (w) (match (join w) ((:ok v) v))) workers))

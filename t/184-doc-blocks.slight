@@ -23,7 +23,7 @@ line and its head.
     (recv
         ((:open f)          (send f (list :read :source)) (outline seen))
         ((:form f v line)   (outline (cons (list line (car v)) seen)))
-        ((:doc f text line) (outline (cons (list line :doc (car (str-split text "\n"))) seen)))
+        ((:doc f text line) (outline (cons (list line :doc (car (str/split text "\n"))) seen)))
         ((:eof f)           (reverse seen))))
 
 (defun forms (heads)

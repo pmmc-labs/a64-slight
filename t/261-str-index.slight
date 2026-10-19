@@ -1,0 +1,51 @@
+; The str/ builtins count characters (D219): a well-formed UTF-8
+; sequence, or a stray byte on its own. Their indexes are JavaScript's:
+; str/at and str/code-at count from the end when an index is negative,
+; and fault past either end; str/slice counts from the end too, clamps,
+; and is empty unless start comes first; str/index-of and
+; str/last-index-of clamp where they start. Each is tried on ASCII, on
+; characters of two, three and four bytes, and on stray bytes.
+
+(let a "hello")
+(let u "aé日😀z")
+(let bad (bytes->str (list 104 255 105 226 130 33)))    ; h, a stray FF, i, € cut short, !
+
+(pprint (map str/len (list a u bad "")))
+(pprint (map (lambda (i) (str/at u i)) (list 0 1 2 3 4 -1 -5)))
+(pprint (map (lambda (i) (str/code-at u i)) (list 0 1 2 3 4)))
+(pprint (map (lambda (i) (str/code-at bad i)) (list 0 1 2 3 4 5)))
+(pprint (str->bytes (str/at bad 3)))
+
+; slices
+(pprint (list (str/slice u 1 3) (str/slice u 3) (str/slice u -2) (str/slice u -3 -1)))
+(pprint (list (str/slice u 2 1) (str/slice u -99 99) (str/slice u 5) (str/slice u 0 0) (str/slice "" 0)))
+(pprint (str->bytes (str/slice bad 1 4)))
+(pprint (list (str/slice a 1 -1) (bytes/slice u 1 3) (str->bytes (bytes/slice u 1 2))))
+
+; searches
+(pprint (list (str/index-of u "日") (str/index-of u "😀z") (str/index-of u "") (str/index-of u "x")))
+(pprint (list (str/index-of "abcabc" "bc" 2) (str/index-of "abcabc" "bc" -5) (str/index-of "abc" "" 9) (str/index-of "abc" "c" 9)))
+(pprint (list (str/last-index-of "abcabc" "bc") (str/last-index-of "abcabc" "bc" 3) (str/last-index-of "abcabc" "bc" 0)))
+(pprint (list (str/last-index-of "abc" "") (str/last-index-of "abc" "" 1) (str/last-index-of "aé日é" "é") (str/last-index-of "aé日é" "é" -1)))
+(pprint (list (str/includes? u "é日") (str/includes? u "日é") (str/starts-with? u "aé") (str/ends-with? u "😀z")))
+(pprint (list (str/ends-with? u "") (str/starts-with? "" "") (str/starts-with? "a" "ab") (str/ends-with? "b" "ab")))
+
+; a match is whole characters: a stray byte matches only a stray byte, not
+; the start of a longer character, nor a byte inside one
+(let lead (bytes->str (list 195)))                      ; é's first byte
+(let tail (bytes->str (list 169)))                      ; and its second
+(pprint (list (str/index-of "é" lead) (str/index-of "é" tail) (str/includes? "é" lead) (str/starts-with? "é" lead) (str/ends-with? "é" tail)))
+(pprint (list (bytes/index-of "é" lead) (bytes/index-of "é" tail)))
+(pprint (list (str/index-of (~ lead "x") lead) (str/ends-with? (~ "x" tail) tail) (str/index-of bad (bytes->str (list 226 130)))))
+(pprint (map str->bytes (str/split (~ "a" lead "b") lead)))
+(pprint (str/split "aéb" lead))
+(pprint (str/replace-all "éé" tail "-"))
+
+; faults
+(defun kind (pid) (car (cadr (join pid))))
+(pprint (kind (fork (str/at u 5))))
+(pprint (kind (fork (str/at u -6))))
+(pprint (kind (fork (str/code-at "" 0))))
+(pprint (kind (fork (str/slice u "1"))))
+(pprint (kind (fork (str/index-of u 'a))))
+(kind (fork (str/last-index-of u "a" "0")))

@@ -12,11 +12,11 @@
 (defun kind (r) (match r ((:ok v) v) ((:error (k _ _)) k)))
 
 (let nan (sqrt -1))
-(let big (string->float "1e200"))
+(let big (str->float "1e200"))
 (let inf (* big big))
 (pprint (ops 0.1 0.2))
 (pprint (ops 1.5 -2.25))
-(pprint (ops big (string->float "3e100")))
+(pprint (ops big (str->float "3e100")))
 (pprint (ops -0.0 1.0))
 (pprint (ops inf 1.0))
 (pprint (ops inf inf))

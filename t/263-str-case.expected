@@ -1,0 +1,16 @@
+("HELLO, WORLD 1" "hello, world 1")
+("STRASSE" "FINE" "Ǆ" "ǆ" "ʼN" "J̌")
+("οδυσσευς" "σ" "ας." "ας ας" "ασα" "α'ς'")
+("I" "i̇" (105 775) "I")
+("ΑΒΓ ДЖ ABC" "αβγ дж abc" "Ꭰ" "ꭰ" "Ⓐ")
+("日本" "😀" "" 3)
+(65 255 66)
+(945 65533 963)
+(-1 1 0 -1 -1)
+(-1 1 -1)
+(#true #false #false)
+("" "Apple" "apple" "pear" "zoo" "äpfel" "été" "日本")
+fault in #<pid 2>: not a string: a (str/upper at t/263-str-case.slight:21:21)
+not-a-string
+fault in #<pid 3>: not a string: 1 (str/compare at t/263-str-case.slight:22:13)
+not-a-string

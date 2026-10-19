@@ -11,6 +11,6 @@
 (defun gather (n acc)
     (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
 
-(let n (string->int (car @ARGV)))
+(let n (str->int (car @ARGV)))
 (map (lambda (p) (send p (list :ping $$))) (start n ()))
 (gather n 0)

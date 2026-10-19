@@ -1,8 +1,7 @@
 "hello"
 ""
-"tab	here"
-"two
-lines"
+"tab\there"
+"two\nlines"
 ("a" ("b") 1)
 "quoted"
 ("in" ("a" "list"))

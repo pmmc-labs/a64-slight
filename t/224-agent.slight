@@ -36,10 +36,10 @@
     (list :object (list "message" (list :object (list "role" "assistant") (list "content" ""))) (list "done" #true)))
 
 (defun lines (values)
-    (str-join "" (map (lambda (v) (concat (json/print v) "\n")) values)))
+    (str/join "" (map (lambda (v) (str (json/print v) "\n")) values)))
 
 (defun roles (messages)
-    (concat " [" (str-join " " (map (lambda (m) (lookup "role" (cdr m))) messages)) "]"))
+    (str " [" (str/join " " (map (lambda (m) (lookup "role" (cdr m))) messages)) "]"))
 
 ; --- asking ------------------------------------------------------------
 
@@ -66,12 +66,12 @@
 (defun main ()
     (let me   $$)
     (let srv  (http/serve 0 handler))
-    (let base (recv ((:listening port) (concat "http://127.0.0.1:" port))))
+    (let base (recv ((:listening port) (str "http://127.0.0.1:" port))))
     (let raw  (raw-listen :raw (list (list "/api/chat" (list
                   "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
                   "3f\r\n{\"message\":{\"role\":\"assistant\",\"content\":\"Once\"},\"done\":false}\n\r\n"
                   #false))) me))
-    (let held (recv ((:raw port) (concat "http://127.0.0.1:" port))))
+    (let held (recv ((:raw port) (str "http://127.0.0.1:" port))))
     (let a    (agent/new base "fake" "be brief" ()))
     (pprint (ask-all a (list "hello")))
     (pprint (ask-all a (list "again")))

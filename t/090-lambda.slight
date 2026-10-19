@@ -15,7 +15,7 @@
 (let nested (lambda (a) (lambda (b) (+ a (+ b k)))))
 (pprint ((nested 1) 2))
 ; a lambda with a let of its own, closing over two parameters
-(defun labeller (name start) (lambda (step) (let next (+ start step)) (concat name ":" next)))
+(defun labeller (name start) (lambda (step) (let next (+ start step)) (str name ":" next)))
 (pprint ((labeller "c" 10) 5))
 ; closures in a list
 (let fs (list (make-adder 1) (make-adder 2) (make-adder 3)))

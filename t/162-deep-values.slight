@@ -1,4 +1,4 @@
-; Values nested 200,000 deep: printing (here through concat, to keep the
+; Values nested 200,000 deep: printing (here through str, to keep the
 ; output short), copying (a fork's values, a message, a result through
 ; join), and eq? (a million deep, in a process of its own for the heap)
 ; walk them with work stacks, not C recursion, so a value can nest as deep
@@ -33,7 +33,7 @@
         (v (depth v 0))))
 
 (let deep (nest 200000 1))
-(pprint (str-len (concat deep)))
+(pprint (bytes/len (str deep)))
 (pprint (join (fork (depth deep 0))))
 (pprint (depth (cadr (join (fork (nest 200000 :x)))) 0))
 (pprint (join (fork (eq? (nest 1000000 1) (nest 1000000 1)))))

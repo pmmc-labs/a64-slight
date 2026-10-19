@@ -236,14 +236,14 @@
         ((w h)
             (let live (< frames 1))
             (let grid (fold/l (tuple/make (div h 2) (tuple/make w " ")) put birds))
-            (let edge (concat "+" (str-repeat "-" w) "+\n"))
+            (let edge (str "+" (str/repeat "-" w) "+\n"))
             (tty/write
-                (if live (concat \e "[H") "")
+                (if live (str \e "[H") "")
                 edge
-                (str-join "" (map (lambda (row) (concat "|" (str-join "" (tuple->list row)) "|\n")) (tuple->list grid)))
+                (str/join "" (map (lambda (row) (str "|" (str/join "" (tuple->list row)) "|\n")) (tuple->list grid)))
                 edge
                 "tick " tick ", " (length birds) " birds"
-                (if (nil? took) "" (concat ", " took " ms a tick"))
+                (if (nil? took) "" (str ", " took " ms a tick"))
                 (if live ", q quits" "\n")))))
 
 (defun keys (shown)
@@ -282,7 +282,7 @@
 
 ; --- the program --------------------------------------------------------------
 
-(let args (map string->int @ARGV))
+(let args (map str->int @ARGV))
 (let n (arg 0 args 30))
 (let frames (arg 1 args 0))
 (let sky (list (- (tty/screen/cols) 2) (* 2 (- (tty/screen/rows) 3))))
@@ -300,4 +300,4 @@
 (map kill (cons keyboard birds))
 (when (< frames 1) (tty/write \e "[?25h\n"))
 (match drawn
-    ((:ok k) (concat k " frames")))
+    ((:ok k) (str k " frames")))

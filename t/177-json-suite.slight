@@ -33,7 +33,7 @@
     (let path (~ "t/data/json-suite/" name))
     (let r (json/parse (bytes-of path)))
     (cond
-        ((and (starts-with? name "y_") (eq? (car r) :ok))
+        ((and (str/starts-with? name "y_") (eq? (car r) :ok))
             (tty/write name " ok " (json/print (cadr r)) "\n")
             (eq? (values-of path) (cdr r)))
         (#true

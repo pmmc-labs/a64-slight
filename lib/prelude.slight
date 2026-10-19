@@ -5,8 +5,8 @@
 ; filter keeps what matches and remove drops it; why range is (range
 ; start end), from start up to but not including end; and why take and
 ; skip stop at the end of the list rather than faulting. Predicates end
-; in ?, starts-with? and ends-with? among them. Every loop is a tail
-; call, so long lists are fine.
+; in ?, member? among them. Every loop is a tail call, so long lists are
+; fine. The string functions are builtins, in C (D219).
 
 ; --- numbers and booleans ---------------------------------------------------
 
@@ -186,49 +186,3 @@
     (match table
         (()                   :not-found)
         (((key value) & rest) (if (eq? k key) value (lookup k rest)))))
-
-; --- strings ------------------------------------------------------------------
-
-(defun str-repeat (s n) (str-repeat-loop s n ""))
-(defun str-repeat-loop (s n acc)
-    (cond
-        ((<= n 0) acc)
-        (#true    (str-repeat-loop s (- n 1) (~ acc s)))))
-
-(defun starts-with? (s m)
-    (cond
-        ((> (str-len m) (str-len s)) #false)
-        (#true                       (eq? (substring s 0 (str-len m)) m))))
-
-(defun ends-with? (s m)
-    (cond
-        ((> (str-len m) (str-len s)) #false)
-        (#true                       (eq? (substring s (- (str-len s) (str-len m)) (str-len s)) m))))
-
-; s padded to n bytes with fill, repeated and cut to fit, as JavaScript's
-; padStart and padEnd do.
-(defun pad-start (s n fill) (~ (padding s n fill) s))
-(defun pad-end (s n fill) (~ s (padding s n fill)))
-(defun padding (s n fill)
-    (let need (- n (str-len s)))
-    (cond
-        ((<= need 0)          "")
-        ((== (str-len fill) 0) "")
-        (#true                (substring (str-repeat fill (+ 1 (div need (str-len fill)))) 0 need))))
-
-; ASCII only (D27): other bytes are left alone.
-(defun uc (s) (bytes->string (map (lambda (b) (cond ((and (>= b 97) (<= b 122)) (- b 32)) (#true b))) (bytes s))))
-(defun lc (s) (bytes->string (map (lambda (b) (cond ((and (>= b 65) (<= b 90)) (+ b 32)) (#true b))) (bytes s))))
-
-; The bytes of s, as a list of integers.
-(defun bytes (s) (bytes-loop s (- (str-len s) 1) ()))
-(defun bytes-loop (s i acc)
-    (cond
-        ((< i 0) acc)
-        (#true   (bytes-loop s (- i 1) (cons (byte-at s i) acc)))))
-
-; Perl's ord and chr (D148): the code point of a string's first character,
-; and the one-character string for a code point. They're utf8/code and
-; utf8/char, under the names Perl gives them.
-(defun ord (s) (utf8/code s))
-(defun chr (n) (utf8/char n))

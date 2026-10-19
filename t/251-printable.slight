@@ -12,7 +12,7 @@
 (shown "colour \e[31mred\e[0m, and \e[8mhidden\e[28m")
 (shown "back\rover, bell\u{7}, delete\u{7f}, nul\u{0}")
 (shown "C1: \u{9b}31m and \u{85}")
-(shown (bytes->string (list 97 155 98 255 32 226 130 65)))
+(shown (bytes->str (list 97 155 98 255 32 226 130 65)))
 (shown "bidi: \u{202a}abc\u{202e}fed\u{2069} \u{2066}x\u{2069}")
 
 ; what it gives is printable already

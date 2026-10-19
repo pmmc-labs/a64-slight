@@ -603,9 +603,11 @@ description)`.
 Left "for now" by earlier decisions, and taken on when something needs
 them:
 
-- **Display width** (the rest of DESIGN.md's level 2 strings): a wide
+- **Display width, graphemes and normalization** (D219): a wide
   character (CJK, most emoji) takes two columns of a terminal and counts
-  one, so a terminal UI can't line up such text yet.
+  one, so a terminal UI can't line up such text yet; `str/width`,
+  `str/graphemes` and `str/normalize`, from utf8proc, vendored as D151
+  has it.
 - More than 8 arguments to a function, on the stack (DESIGN.md).
 - Sockets: IPv6, and more than the 1,000 or so that `select()` holds
   (D113), with `poll`, `kqueue` or `epoll`.
@@ -681,6 +683,16 @@ going on live; forking a run at a point with `fork(2)`, a branch to a
 core; snapshots on disk; and `clone`, a waiting process copied, for a
 branch smaller than a whole run.
 
+### Strings (done, Oct 2026)
+
+One set of string builtins in place of the byte ones and the `utf8/`
+ones (D219): `str/` counting characters, with JavaScript's methods'
+names and edge cases, `bytes/` counting bytes, conversions as `a->b`,
+case mapping and white space from Unicode's tables (15.1, generated
+into `runtime/unicode.c`), ASCII strings marked so they're indexed in
+one step, and `pprint` escaping strings. Every program moved to the new
+names; golden tests 261 to 265, from `t/models/strings.py`.
+
 ### Later: the rest of the October 2026 list
 
 The other changes from that list (above, "After 13"), for later, before
@@ -695,7 +707,7 @@ with Stevan first.
   that's fast, and binary protocols still want them. And,
   or and xor work on tagged words as they are, so they can be inline;
   shifts untag and retag. To settle: the names (`bit/and` and so on, as
-  `utf8/`), what a shift does past 63 bits (fault, as arithmetic
+  `str/`), what a shift does past 63 bits (fault, as arithmetic
   does?), and negative counts.
 - **A `recv` with a timeout.** Today it's `after` and a message, and a
   late timeout can arrive after the answer, to be told apart by hand. A
@@ -750,8 +762,6 @@ with Stevan first.
   within a function. Either is a proposal of its own; boids is the
   benchmark. Not this way (D179): fixed point in the example, or a type
   of numerical vectors.
-- **Comparing strings**, a builtin, so `sort` can order them without a
-  `less?` written for it (D175).
 - **Exit records that keep big values** (D216). A record keeps the value
   its process ended with for good (D88), so a program that forks many
   processes, each ending with a big result it joins, keeps every

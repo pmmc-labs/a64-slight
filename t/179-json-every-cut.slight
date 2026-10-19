@@ -6,7 +6,7 @@
 ; :json and with :json/items. The last value, a number, ends only with
 ; the input.
 
-(let text (concat
+(let text (str
     "{\"s\": \"a\\\"b\\\\c\\/\\u00e9\\ud83d\\ude00\", "
     "\"n\": [0, -1, 2.5, -3.25e+2, 4E-1, 12345678901234567890], "
     "\"w\": [true, false, null], \"e\": {}, \"a\": [[], [{}]]}\n"
@@ -18,9 +18,9 @@
 
 (defun drip (c text i)
     (cond
-        ((== i (str-len text)) (disconnect c))
+        ((== i (bytes/len text)) (disconnect c))
         (#true
-            (send c (list :write (substring text i (+ i 1))))
+            (send c (list :write (bytes/slice text i (+ i 1))))
             (after 1 $$ :next)
             (drip-wait c text (+ i 1)))))
 
@@ -38,7 +38,7 @@
     (recv
         ((:open l port)
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (reader how ()))))))
+            (fork (send me (list :client (join (connect :tcp (str "localhost:" port) (reader how ()))))))
             (serving l text))))
 
 (defun serving (l text)
@@ -49,7 +49,7 @@
 (defun read-dripped (text how) (cadr (join (connect :tcp/listen 0 (listener text how)))))
 
 ; the whole text as one array of its values, for json/parse
-(let whole (cadr (json/parse (concat "["
+(let whole (cadr (json/parse (str "["
     "{\"s\": \"a\\\"b\\\\c\\/\\u00e9\\ud83d\\ude00\", "
     "\"n\": [0, -1, 2.5, -3.25e+2, 4E-1, 12345678901234567890], "
     "\"w\": [true, false, null], \"e\": {}, \"a\": [[], [{}]]},"

@@ -26,15 +26,15 @@
 
 ; strings, as their code points: the reader's escapes, \e among them, and
 ; \u{hex}; a string can run over lines
-(defun codes (text) (map ord (utf8/chars (cadr (sexp/parse text)))))
+(defun codes (text) (map (lambda (c) (str/code-at c 0)) (str/chars (cadr (sexp/parse text)))))
 
 (pprint (codes "\"\\\"\\\\\\n\\t\\r\\e\""))
 (pprint (codes "\"\\u{41}\\u{e9}\\u{20AC}\\u{1F600}\\u{0}\""))
 (pprint (codes "\"two\nlines\""))
 
 ; bytes that aren't UTF-8 pass through
-(let raw (cadr (sexp/parse (~ "\"" (~ (bytes->string (list 255 128 65)) "\"")))))
-(pprint (map (lambda (i) (byte-at raw i)) (range 0 (str-len raw))))
+(let raw (cadr (sexp/parse (~ "\"" (~ (bytes->str (list 255 128 65)) "\"")))))
+(pprint (map (lambda (i) (bytes/at raw i)) (range 0 (bytes/len raw))))
 
 ; nested as deep as the heap allows
 (defun depth (v n)
@@ -57,6 +57,6 @@
 (map show (cadr (slurp "t/data/sexp-bad.txt")))
 
 ; a NUL is no delimiter, so it can't end #true
-(show (~ "#true" (bytes->string (list 0))))
+(show (~ "#true" (bytes->str (list 0))))
 
 (pprint (join (fork (sexp/parse 5))))

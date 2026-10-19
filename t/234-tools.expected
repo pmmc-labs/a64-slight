@@ -4,27 +4,17 @@ write build/t/234-tools/a.txt, 14 bytes:
 + two
 + three
 (ok "wrote 14 bytes to build/t/234-tools/a.txt")
-(ok "one
-two
-three
-")
-(ok "a.txt
-sub/
-")
+(ok "one\ntwo\nthree\n")
+(ok "a.txt\nsub/\n")
 (ok "the directory is empty")
-(ok "build/t/234-tools/a.txt:2:two
-")
+(ok "build/t/234-tools/a.txt:2:two\n")
 (ok "no lines contain it")
 edit build/t/234-tools/a.txt:
 - two
 + 2
 + 2.5
 (ok "changed build/t/234-tools/a.txt")
-(ok "one
-2
-2.5
-three
-")
+(ok "one\n2\n2.5\nthree\n")
 (error "the text to replace isn't in build/t/234-tools/a.txt")
 (error "the text to replace is in build/t/234-tools/a.txt more than once: give more of it, to say which")
 (error "old is empty: give the text to replace")
@@ -37,17 +27,10 @@ edit build/t/234-tools/a.txt:
 (ok "the user didn't let it be changed")
 run: touch build/t/234-tools/ran
 (ok "the user didn't let it run")
-(ok "a.txt
-sub/
-")
-(ok "one
-2
-2.5
-three
-")
+(ok "a.txt\nsub/\n")
+(ok "one\n2\n2.5\nthree\n")
 run: echo hi; exit 3
-(ok "hi
-[exit status: 3]")
+(ok "hi\n[exit status: 3]")
 (error "the argument path is missing")
 (error "the argument path must be a string")
 ()

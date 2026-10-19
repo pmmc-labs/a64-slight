@@ -29,7 +29,7 @@
 ; A tool, for the model to call. params is a list of (name type
 ; description), type being :string, :number, :integer or :boolean, each
 ; one required. f is a function of the arguments the model gives, a list
-; of (name value) that lookup reads; its value, rendered as concat renders
+; of (name value) that lookup reads; its value, rendered as str renders
 ; it, is the result. If it fails, the model is told the reason.
 (defun tool/new (name description params f)
     (list :tool name (agent/schema name description params) f))
@@ -154,7 +154,7 @@
 (defun agent/round (turn round)
     (let settings (car turn))
     (let tools    (agent/tools turn))
-    (http/stream :post (concat (car settings) "/api/chat")
+    (http/stream :post (str (car settings) "/api/chat")
         (list (list "Content-Type" "application/json"))
         (json/print
             (cons :object
@@ -172,7 +172,7 @@
         ((:line _ line)    (agent/line turn round status parts calls line (json/parse line)))
         ((:eof _)
             (if (== status 200)
-                (agent/replied turn round (str-join "" (reverse parts)) calls)
+                (agent/replied turn round (str/join "" (reverse parts)) calls)
                 (raise (list :http status ""))))
         ((:error _ reason) (raise reason))
         ((:exit _ _)       :agent-ended)))
@@ -189,7 +189,7 @@
     (cond
         ((not (eq? err :not-found)) (raise (if (== status 200) (list :model err) (list :http status err))))
         ((not (== status 200))      (raise (list :http status line)))
-        ((and (str? piece) (> (str-len piece) 0))
+        ((and (str? piece) (> (bytes/len piece) 0))
             (send (agent/from turn) (list :piece (agent/of turn) piece))
             (agent/reading turn round status (cons piece parts) (append calls more)))
         (#true
@@ -231,7 +231,7 @@
 (defun agent/run (tools name args)
     (let tool (find (lambda (x) (eq? (cadr x) name)) tools))
     (if (nil? tool)
-        (raise (concat "there's no tool called " name))
+        (raise (str "there's no tool called " name))
         ((cadddr tool) args)))
 
 ; results holds the calls' results as their processes end, by pid. When
@@ -262,8 +262,8 @@
 ; (agent/most) bytes, or why it failed.
 (defun agent/text (result)
     (let s (match result
-               ((:ok v)         (concat v))
-               ((:error reason) (concat "error: " reason))))
-    (if (> (str-len s) (agent/most))
-        (concat (substring s 0 (agent/most)) "\n[cut: " (- (str-len s) (agent/most)) " more bytes]")
+               ((:ok v)         (str v))
+               ((:error reason) (str "error: " reason))))
+    (if (> (bytes/len s) (agent/most))
+        (str (bytes/slice s 0 (agent/most)) "\n[cut: " (- (bytes/len s) (agent/most)) " more bytes]")
         s))

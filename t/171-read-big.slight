@@ -19,7 +19,7 @@
     (recv
         ((:open f)    (map (lambda (how) (send f (list :read how))) first) (measure first seen))
         ((:line f s)  (measure first (cons s seen)))
-        ((:chunk f s) (measure first (cons (str-len s) seen)))
+        ((:chunk f s) (measure first (cons (bytes/len s) seen)))
         ((:eof f)     (reverse seen))))
 
 ; 10,000 lines of 11 bytes: 110,000 bytes
@@ -35,7 +35,7 @@
     (recv
         ((:open f)    (line-then-chunks seen))
         ((:line f s)  (send f (list :read :chunks)) (line-then-chunks (cons s seen)))
-        ((:chunk f s) (line-then-chunks (cons (str-len s) seen)))
+        ((:chunk f s) (line-then-chunks (cons (bytes/len s) seen)))
         ((:eof f)     (reverse seen))))
 
 (pprint (join (connect :fs/read path (line-then-chunks ()))))

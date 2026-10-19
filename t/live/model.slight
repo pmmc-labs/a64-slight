@@ -8,7 +8,7 @@
 
 (@include :http)
 
-(defun line (fields) (concat (json/print (cons :object fields)) \n))
+(defun line (fields) (str (json/print (cons :object fields)) \n))
 
 (defun message (fields) (list "message" (cons :object (cons (list "role" "assistant") fields))))
 
@@ -16,11 +16,11 @@
     (list :object (list "function" (list :object (list "name" name) (list "arguments" (cons :object args))))))
 
 (defun first-answer (host)
-    (concat
-        (line (list (message (list (list "content" (concat "Hello, " \e "[8mhidden" \e "[28m world.")))) (list "done" #false)))
+    (str
+        (line (list (message (list (list "content" (str "Hello, " \e "[8mhidden" \e "[28m world.")))) (list "done" #false)))
         (line (list (message (list (list "content" "")
-                                   (list "tool_calls" (list (call "run" (list (list "command" (concat "echo shown" \e "[8m; echo hidden"))))
-                                                            (call "fetch" (list (list "url" (concat "http://" host "/moved"))))))))
+                                   (list "tool_calls" (list (call "run" (list (list "command" (str "echo shown" \e "[8m; echo hidden"))))
+                                                            (call "fetch" (list (list "url" (str "http://" host "/moved"))))))))
                     (list "done" #false)))
         (line (list (message (list (list "content" ""))) (list "done" #true)))))
 

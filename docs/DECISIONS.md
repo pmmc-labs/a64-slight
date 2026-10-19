@@ -156,7 +156,8 @@ and sent without copying.
 **D27. Strings: level 1 now (immutable bytes, byte indexing, ASCII case),
 level 2 UTF-8 helpers when the editor needs them, full Unicode out.**
 *(User agreed.)* No char type. Rejected: mutable C-style byte buffers
-(break immutability).
+(break immutability). D219 counts characters everywhere, and maps case
+in full.
 
 ## Runtime and I/O
 
@@ -350,7 +351,8 @@ ts-slight's were JavaScript's: `substring` clamps and swaps its indexes,
 pads like `padStart`, `concat` and `str-join` render non-strings as
 `pprint` does. Indexes and lengths count bytes (DESIGN, level 1). Where
 JavaScript would give `NaN`, a fault instead: `byte-at` out of range,
-`bytes->string` given something other than 0–255.
+`bytes->string` given something other than 0–255. D219 renamed these,
+and took JavaScript's `slice` in place of `substring`.
 
 **D63. C builtins are passed the call's site.** *(Default.)* In the
 register after the arguments, so a fault raised in C reports the slight
@@ -358,7 +360,7 @@ source position, as the compiler's own checks do. Rejected: inline type
 checks before every call (more code), or C faults without positions.
 
 **D64. `pprint` doesn't escape inside strings.** *(Default, as ts-slight.)*
-`(pprint "a\"b")` prints `"a"b"`.
+`(pprint "a\"b")` prints `"a"b"`. Replaced by D219: it escapes them.
 
 **D65. `tty/write` takes its arguments as they are.** *(Default.)*
 ts-slight also accepted one list argument and wrote its elements; here a
@@ -439,7 +441,8 @@ asked). `take` and `skip` stop at the end of the list rather than fault.
 `str-join` does it. Kept: `fold/l`/`fold/r` (init, f, list), `assoc`
 (adds, as in Clojure) and `lookup` (`:not-found`), `nth` and `find`
 (`()` when there's nothing), `dotimes`, `pad-start`/`pad-end` (s, n,
-fill). Every loop in the prelude is a tail call.
+fill). Every loop in the prelude is a tail call. D219 made the string
+functions builtins, `str/starts-with?` and `str/pad-start` among them.
 
 **D79. A lambda copies its captured values into its frame on entry.**
 *(Default.)* Then they're ordinary locals in the body, and the code for
@@ -1179,6 +1182,8 @@ differs only on bad input, and needs more machinery); a `string->number`
 giving an integer or a float (`string->int` already does the one);
 display width, case mapping beyond ASCII and normalization (not needed
 for JSON; `pad-start`, `pad-end` and `format-num` still count bytes).
+D219 renamed the byte builtins after all, to `bytes/`, and maps case
+beyond ASCII; display width and normalization are still to come.
 
 **D149. The plan after 10e: porting stops, and HTTP's groundwork comes
 first.** *(User, Oct 2026.)* Fifteen of ts-slight's examples are ported,
@@ -3909,3 +3914,111 @@ the program each.
   which shares the base without running it again but needs the runtime
   to know about it; and the runtime on many cores, whose own step is
   BACKGROUND.md's.
+
+**D219. Strings: one set of builtins, counting characters, after
+JavaScript's.** *(Stevan, Oct 2026: "Let's start with cleaning up all the
+string handling ... Let's aim for clean UTF handling similar to JS, let's
+be forward thinking here"; and, to the proposal, "We can get rid of
+ord/chr, and yes, lets fix pprint too. One small change, instead of
+`str/bytes-` lets do `bytes/` instead and have `bytes->str` to convert it
+to the utf8 string.")* It replaces the byte builtins of D27 and D62, the
+`utf8/` ones of D148, the prelude's string functions (D78), and D64.
+
+- **The unit is the character of D148:** a well-formed UTF-8 sequence,
+  or a stray byte on its own, whose code point is U+FFFD. So strings stay
+  bytes, nothing faults on bad bytes, and splitting into characters
+  loses nothing. `(str/len "😀")` is 1, where JavaScript's length is 2:
+  its UTF-16 units are a fact of its history, and would put half an
+  emoji in slight's hands for nothing.
+- **Names.** The `str/` builtins count characters and are JavaScript's
+  methods in kebab case, `toUpperCase` and `toLowerCase` shortened:
+  `str/len`, `str/at`, `str/code-at`, `str/slice`, `str/index-of`,
+  `str/last-index-of`, `str/includes?`, `str/starts-with?`,
+  `str/ends-with?`, `str/split`, `str/join`, `str/repeat`,
+  `str/pad-start`, `str/pad-end`, `str/trim`, `str/trim-start`,
+  `str/trim-end`, `str/upper`, `str/lower`, `str/replace`,
+  `str/replace-all`, `str/well-formed?`, `str/to-well-formed`, with
+  `str/chars`, `str/codes`, `str/compare` and `str/<` beside them. The
+  `bytes/` builtins count bytes, in one step, for protocols and for
+  parsers whose delimiters are ASCII: `bytes/len`, `bytes/at`,
+  `bytes/slice`, `bytes/index-of`; they take an ordinary string (a type
+  for bytes that aren't text is a proposal of its own). Conversions are
+  `a->b`: `str->int` and `int->str` (in a radix, 2 to 36), `str->float`,
+  `str->sym`, `sym->str`, `str->bytes`, `bytes->str` and `codes->str`.
+  `str` is what `concat` was; `~` stays, strings only, and takes any
+  number now. `format-num` is `(str/pad-start (str n) w fill)`; `ord`
+  and `chr`, `(str/code-at s 0)` and `(codes->str (list n))`. A clean
+  break: no old name is kept, and every program moved (129 files,
+  Stevan's sketches in `author/` among them, where two counts that a
+  narrow window makes negative are kept at 0 now that `str/repeat`
+  faults on them; by a script that rewrote names, not text, so strings,
+  comments and doc blocks were left alone; `str-len`, `substring` and
+  `index-of` became their `bytes/` names, which kept what each program
+  did, the parsers in `lib/` counting bytes as they should).
+- **Edge cases are JavaScript's,** where it has them: `str/at` and
+  `str/code-at` count from the end when an index is negative;
+  `str/slice` (and `bytes/slice`) count from the end, clamp, and are
+  empty unless start comes first (`substring` swapped them, which no
+  program wanted); `index-of` takes where to start, clamped; `str/split`
+  takes a limit, and `(str/split "" ",")` is `("")`, where `str-split`
+  gave `()` (one caller, `tools/marked`, changed for it); an empty
+  separator splits into characters; `str/replace-all` with an empty
+  pattern goes around every character; padding counts characters.
+  Where JavaScript gives `undefined` or `NaN`, a fault, as D62 had it:
+  an index past the end, a negative count or limit, a code point with no
+  UTF-8. `str/compare` is code point order, which for UTF-8 is byte
+  order, where JavaScript's `<` compares UTF-16 units and puts U+FFFF
+  after an emoji.
+- **A match is whole characters,** in every search, split and replace:
+  it starts where a character does, and now ends where one does too, so
+  a stray byte 195 isn't found in `"é"`, though it's é's first byte. A
+  byte search does that by itself unless the pattern starts with a
+  continuation byte or ends with a stray byte; only then does it check.
+- **Case and white space are Unicode's,** without a language:
+  `str/upper` and `str/lower` map in full (SpecialCasing's unconditional
+  mappings over UnicodeData's: `"straße"` is `"STRASSE"`, `"ﬁ"` is
+  `"FI"`), with Final_Sigma, the one conditional mapping that needs no
+  language; `str/trim` takes White_Space. `runtime/gen-unicode.py`
+  writes the tables into `runtime/unicode.c` from the Unicode Character
+  Database, pinned to 15.1, the version Python 3.13 has, so the tests'
+  model agrees (unicode.org is blocked from the cloud sessions; ICU's
+  copy of the files, `release-74-1`, is the same). They agree with
+  Python's `str.upper` and `str.lower` on every code point. They're
+  about 64 KB of each binary; packing the one-to-one mappings would
+  take that to about 30, when it matters. Normalization, graphemes and
+  display width (`str/normalize`, `str/graphemes`, `str/width`) are
+  utf8proc's to give, vendored as D151 has it, when they're wanted.
+- **ASCII strings are marked.** A string whose bytes are all below 0x80
+  has `RT_BOX_ASCII` (0x80) in its header, the box's type narrowed to
+  the low seven bits; there a character is a byte, so `str/len`,
+  `str/at` and `str/slice` take one step. It's set where strings are
+  made: `rt_new_string`, the readers and decoders, `rt_string_mark`
+  after a builtin fills a blank string, and the compiler on literals.
+  One made without it is only slower. Rejected: a character count in
+  each string (a word each, and indexing non-ASCII text still walks),
+  and an index of offsets (memory, for text that's mostly walked once).
+- **`pprint` escapes a string** as the reader takes it back, on one
+  line, as `sexp/print` did: `"` and `\`, and the control characters,
+  C0, DEL and C1 (`\n`, `\t`, `\r`, `\e`, or `\u{hex}`); the C1 ones
+  are new, since a terminal acts on U+009B as it does on ESC [. Other
+  characters, and stray bytes, as they are. The two share `rt_quote`.
+  Two tests that escaped by hand now let `pprint` do it.
+- **A builtin with optional arguments can be a value,** taking the ones
+  it needs: `(map str->int words)`. Before, only a fixed arity could.
+- **Checked:** `t/models/strings.py`, an evaluator for the part of
+  slight the string tests use, with every builtin written again in
+  Python over characters, gives their expected output. It agrees with
+  Node's own string methods on 33,000 random ASCII cases, and the
+  runtime agrees with it on 2,000 random calls over strings of every
+  kind of character and stray byte. Golden tests 261 to 265 are new,
+  and 061, 164 and 166 (`ord` and `chr`'s, now code points') were
+  written again; the tests whose output changed only by the escaping
+  were checked to read back as before; the string tests pass
+  `SLIGHT_GC_STRESS` and `SLIGHT_GC_VERIFY`.
+- **Rejected:** UTF-16 units, as JavaScript counts (above); graphemes as
+  the unit (tables, and slow, for what a terminal's columns want more
+  than a program's indexes; later, as `str/graphemes`); strings that are
+  always well-formed (every string checked as it's made, and a bad
+  file's bytes lost); a character type; `str/bytes-` names, the
+  proposal's, for the user's `bytes/`; keeping the old names as aliases;
+  keeping `ord` and `chr`.

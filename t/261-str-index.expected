@@ -1,0 +1,33 @@
+(5 5 6 0)
+("a" "é" "日" "😀" "z" "z" "a")
+(97 233 26085 128512 122)
+(104 65533 105 65533 65533 33)
+(226)
+("é日" "😀z" "😀z" "日😀")
+("" "aé日😀z" "" "" "")
+(255 105 226)
+("ell" "é" (195))
+(2 3 0 -1)
+(4 1 3 -1)
+(4 1 -1)
+(3 1 3 -1)
+(#true #false #true #true)
+(#true #true #false #false)
+(-1 -1 #false #false #false)
+(0 1)
+(0 #true 3)
+((97) (98))
+("aéb")
+"éé"
+fault in #<pid 2>: out of range: 5 (str/at at t/261-str-index.slight:46:21)
+out-of-range
+fault in #<pid 3>: out of range: -6 (str/at at t/261-str-index.slight:47:21)
+out-of-range
+fault in #<pid 4>: out of range: 0 (str/code-at at t/261-str-index.slight:48:21)
+out-of-range
+fault in #<pid 5>: not an integer: "1" (str/slice at t/261-str-index.slight:49:21)
+not-an-int
+fault in #<pid 6>: not a string: a (str/index-of at t/261-str-index.slight:50:21)
+not-a-string
+fault in #<pid 7>: not an integer: "0" (str/last-index-of at t/261-str-index.slight:51:13)
+not-an-int

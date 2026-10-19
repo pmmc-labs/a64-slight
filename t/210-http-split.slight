@@ -13,6 +13,6 @@
         ((:listening port)
             (let reply (talk port (list "POST /p HTTP/1.1\r\nContent-Le" "ngth: 5\r\n\r\nhel" "lo")))
             (kill server)
-            (list (car (str-split reply "\r\n")) (cadr (str-split reply "\r\n\r\n"))))))
+            (list (car (str/split reply "\r\n")) (cadr (str/split reply "\r\n\r\n"))))))
 
 (main)

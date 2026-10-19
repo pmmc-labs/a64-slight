@@ -25,9 +25,9 @@
                 (#true                (send (cadr msg) (list :read how))))
             (reading table (cons (show msg) seen)))))
 
-; A message without its pid, with a newline in it shown as \n.
+; A message without its pid.
 (defun show (msg)
-    (cons (car msg) (map (lambda (s) (str-join "\\n" (str-split s "\n"))) (cddr msg))))
+    (cons (car msg) (cddr msg)))
 
 (let lines "t/data/lines.txt")
 
@@ -52,7 +52,7 @@
 (pprint (read-all lines '(((open) (3 6)))))
 
 ; from chunks back to lines
-(pprint (read-all lines '(((open) (chunks 9)) ((chunk "first\\n  s") lines))))
+(pprint (read-all lines '(((open) (chunks 9)) ((chunk "first\n  s") lines))))
 
 ; a reader takes (:read how) with a how it knows, and nothing else; a
 ; writer doesn't take it

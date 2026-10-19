@@ -8,8 +8,8 @@
 
 (pprint @ARGV)
 (pprint (how-many @ARGV))
-(pprint (string->int (cadr @ARGV)))
-(pprint (str-len (cadddr @ARGV)))
+(pprint (str->int (cadr @ARGV)))
+(pprint (bytes/len (cadddr @ARGV)))
 (pprint ((lambda () (car @ARGV))))
 (pprint (join (fork (cdr @ARGV))))
 :done

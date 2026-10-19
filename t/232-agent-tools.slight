@@ -29,9 +29,9 @@
 (defun reply (asked last fields messages)
     (cond
         ((eq? asked "schema")              (list (piece (json/print (car (lookup "tools" fields)))) (done)))
-        ((eq? asked "no tools")            (list (piece (concat (lookup "tools" fields))) (done)))
+        ((eq? asked "no tools")            (list (piece (str (lookup "tools" fields))) (done)))
         ((eq? asked "loop")                (list (calls (list (call "get_weather" (list (list "city" "Rome"))))) (done)))
-        ((eq? (lookup "role" last) "tool") (list (piece (concat "results: " (results messages))) (piece (roles messages)) (done)))
+        ((eq? (lookup "role" last) "tool") (list (piece (str "results: " (results messages))) (piece (roles messages)) (done)))
         ((eq? asked "weather")             (list (piece "Let me look.") (calls (list (call "get_weather" (list (list "city" "Tokyo"))))) (done)))
         ((eq? asked "both")                (list (calls (list (call "get_weather" (list (list "city" "Oslo"))) (call "add" (list (list "a" 2) (list "b" 3))))) (done)))
         ((eq? asked "broken")              (list (calls (list (call "broken" ()))) (done)))
@@ -53,22 +53,22 @@
     (list :object (list "message" (list :object (list "role" "assistant") (list "content" ""))) (list "done" #true)))
 
 (defun lines (values)
-    (str-join "" (map (lambda (v) (concat (json/print v) "\n")) values)))
+    (str/join "" (map (lambda (v) (str (json/print v) "\n")) values)))
 
 (defun roles (messages)
-    (concat " [" (str-join " " (map role-of messages)) "]"))
+    (str " [" (str/join " " (map role-of messages)) "]"))
 
 (defun role-of (m)
     (let f (cdr m))
     (cond
         ((not (eq? (lookup "tool_calls" f) :not-found)) "calls")
-        ((eq? (lookup "role" f) "tool")                 (concat "tool:" (lookup "tool_name" f)))
+        ((eq? (lookup "role" f) "tool")                 (str "tool:" (lookup "tool_name" f)))
         (#true                                          (lookup "role" f))))
 
 ; The results at the end of the conversation, in order; a long one as its
 ; length and its last 22 bytes.
 (defun results (messages)
-    (str-join " | " (map summary (trailing-tools (reverse messages) ()))))
+    (str/join " | " (map summary (trailing-tools (reverse messages) ()))))
 
 (defun trailing-tools (newest acc)
     (match newest
@@ -76,8 +76,8 @@
         (()         acc)))
 
 (defun summary (c)
-    (if (> (str-len c) 100)
-        (concat (str-len c) " bytes, ending " (substring c (- (str-len c) 22) (str-len c)))
+    (if (> (bytes/len c) 100)
+        (str (bytes/len c) " bytes, ending " (bytes/slice c (- (bytes/len c) 22)))
         c))
 
 ; --- the tools ---------------------------------------------------------
@@ -87,11 +87,11 @@
 (defun tools (me)
     (list
         (tool/new "get_weather" "The weather in a city, now." (list (list "city" :string "The city"))
-            (lambda (args) (concat "11 degrees in " (lookup "city" args))))
+            (lambda (args) (str "11 degrees in " (lookup "city" args))))
         (tool/new "add" "Adds two integers." (list (list "a" :integer "One") (list "b" :integer "The other"))
             (lambda (args) (+ (lookup "a" args) (lookup "b" args))))
         (tool/new "broken" "Fails." () (lambda (args) (raise "the tool broke")))
-        (tool/new "big" "Says a lot." () (lambda (args) (str-repeat "x" 20000)))
+        (tool/new "big" "Says a lot." () (lambda (args) (str/repeat "x" 20000)))
         (tool/new "stuck" "Never answers." () (lambda (args) (send me (list :stuck $$)) (join (fork (forever)))))))
 
 ; --- asking ------------------------------------------------------------
@@ -102,7 +102,7 @@
     (recv
         ((:piece _ text)        (heard (cons (list :piece text) acc)))
         ((:calling _ name args) (heard (cons (list :calling name args) acc)))
-        ((:called _ name text)  (heard (cons (list :called name (if (> (str-len text) 100) (str-len text) text)) acc)))
+        ((:called _ name text)  (heard (cons (list :called name (if (> (bytes/len text) 100) (bytes/len text) text)) acc)))
         ((:answer _ text)       (reverse (cons (list :answer text) acc)))
         ((:error _ reason)      (reverse (cons (list :error reason) acc)))))
 
@@ -118,7 +118,7 @@
 (defun main ()
     (let me   $$)
     (let srv  (http/serve 0 handler))
-    (let base (recv ((:listening port) (concat "http://127.0.0.1:" port))))
+    (let base (recv ((:listening port) (str "http://127.0.0.1:" port))))
     (let ts   (tools me))
     (let a    (agent/new base "fake" "be brief" ts))
     (pprint (ask a "schema"))

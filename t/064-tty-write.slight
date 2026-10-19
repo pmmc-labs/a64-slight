@@ -3,4 +3,4 @@
 (tty/write "no newline")
 (tty/write \n "tab:" \t "end" \n)
 (pprint (tty/write))
-(str-len (concat \e "[0m"))
+(bytes/len (str \e "[0m"))

@@ -38,7 +38,7 @@
 (defun display-grid (grid gen)
     (tty/write "generation " gen \n)
     (map (lambda (row)
-        (tty/write (str-join "" (map (lambda (c) (if (eq? c :LIVE) "@" "_")) (tuple->list row))) \n))
+        (tty/write (str/join "" (map (lambda (c) (if (eq? c :LIVE) "@" "_")) (tuple->list row))) \n))
         (tuple->list grid)))
 
 (defun run-n-generations (n grid gen)

@@ -8,7 +8,7 @@
 
 (defun handler (req) (list 200 () "fine"))
 
-(defun first-line (reply) (car (str-split reply "\r\n")))
+(defun first-line (reply) (car (str/split reply "\r\n")))
 
 (defun main ()
     (let server (http/serve 0 handler))
@@ -16,7 +16,7 @@
         ((:listening port)
             (let r (list
                 (first-line (talk port (list "NOPE\r\n\r\n")))
-                (first-line (talk port (list (concat "GET / HTTP/1.1\r\nX: " (str-repeat "a" 70000) "\r\n"))))
+                (first-line (talk port (list (str "GET / HTTP/1.1\r\nX: " (str/repeat "a" 70000) "\r\n"))))
                 (first-line (talk port (list "POST / HTTP/1.1\r\nContent-Length: 9000000\r\n\r\n")))
                 (first-line (talk port (list "GET / HTTP/1.1\r\nHost: x\r\n\r\n")))
                 (quit-at-once port)))

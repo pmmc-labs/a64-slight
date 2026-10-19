@@ -22,4 +22,4 @@
             (let d (deriv e))
             (run (- n 1) e (+ total (length d)) d))))
 
-(run (string->int (car @ARGV)) '(+ (* 3 x x) (* a x x) (* b x) 5) 0 ())
+(run (str->int (car @ARGV)) '(+ (* 3 x x) (* a x x) (* b x) 5) 0 ())

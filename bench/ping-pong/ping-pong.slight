@@ -13,4 +13,4 @@
             (send p (list :ping $$ i))
             (recv ((:pong _) (ping p (+ i 1) n))))))
 
-(ping (fork (pong)) 0 (string->int (car @ARGV)))
+(ping (fork (pong)) 0 (str->int (car @ARGV)))

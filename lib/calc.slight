@@ -20,7 +20,7 @@
         (#true
             (match (calc/sum tokens)
                 ((v ())                  v)
-                ((_ ((:comma at) & _))   (raise (concat "at byte " at ": a , where an operator or the end should be (a number is written without commas)")))
+                ((_ ((:comma at) & _))   (raise (str "at byte " at ": a , where an operator or the end should be (a number is written without commas)")))
                 ((_ (token & _))         (calc/stuck token "an operator or the end"))))))
 
 ; --- reading -----------------------------------------------------------
@@ -30,65 +30,65 @@
 ; ** is ^, and ×, ÷ and − are *, / and -, since a model may write them.
 (defun calc/tokens (s i acc)
     (cond
-        ((>= i (str-len s)) (reverse acc))
+        ((>= i (bytes/len s)) (reverse acc))
         (#true
-            (let b  (byte-at s i))
+            (let b  (bytes/at s i))
             (let at (+ i 1))
             (cond
                 ((member? b (list 32 9 10 13))              (calc/tokens s (+ i 1) acc))
                 ((or (calc/digit? b) (== b 46))             (calc/number s i acc))
                 ((calc/letter? b)                           (calc/name s i (calc/name-end s i) acc))
-                ((eq? (substring s i (+ i 2)) "**")         (calc/tokens s (+ i 2) (cons (list :op "^" at) acc)))
-                ((eq? (substring s i (+ i 2)) "×")          (calc/tokens s (+ i 2) (cons (list :op "*" at) acc)))
-                ((eq? (substring s i (+ i 2)) "÷")          (calc/tokens s (+ i 2) (cons (list :op "/" at) acc)))
-                ((eq? (substring s i (+ i 3)) "−")          (calc/tokens s (+ i 3) (cons (list :op "-" at) acc)))
-                ((member? b (list 43 45 42 47 37 94))       (calc/tokens s (+ i 1) (cons (list :op (substring s i (+ i 1)) at) acc)))
+                ((eq? (bytes/slice s i (+ i 2)) "**")       (calc/tokens s (+ i 2) (cons (list :op "^" at) acc)))
+                ((eq? (bytes/slice s i (+ i 2)) "×")        (calc/tokens s (+ i 2) (cons (list :op "*" at) acc)))
+                ((eq? (bytes/slice s i (+ i 2)) "÷")        (calc/tokens s (+ i 2) (cons (list :op "/" at) acc)))
+                ((eq? (bytes/slice s i (+ i 3)) "−")        (calc/tokens s (+ i 3) (cons (list :op "-" at) acc)))
+                ((member? b (list 43 45 42 47 37 94))       (calc/tokens s (+ i 1) (cons (list :op (bytes/slice s i (+ i 1)) at) acc)))
                 ((== b 40)                                  (calc/tokens s (+ i 1) (cons (list :open at) acc)))
                 ((== b 41)                                  (calc/tokens s (+ i 1) (cons (list :close at) acc)))
                 ((== b 44)                                  (calc/tokens s (+ i 1) (cons (list :comma at) acc)))
-                (#true (raise (concat "at byte " at ": can't read " (utf8/substring (substring s i (str-len s)) 0 1))))))))
+                (#true (raise (str "at byte " at ": can't read " (str/slice (bytes/slice s i) 0 1))))))))
 
 (defun calc/digit? (b) (and (>= b 48) (<= b 57)))
 (defun calc/letter? (b) (or (and (>= b 65) (<= b 90)) (and (>= b 97) (<= b 122))))
 
 (defun calc/digits-end (s i)
-    (if (and (< i (str-len s)) (calc/digit? (byte-at s i))) (calc/digits-end s (+ i 1)) i))
+    (if (and (< i (bytes/len s)) (calc/digit? (bytes/at s i))) (calc/digits-end s (+ i 1)) i))
 
 (defun calc/name-end (s i)
-    (if (and (< i (str-len s)) (calc/letter? (byte-at s i))) (calc/name-end s (+ i 1)) i))
+    (if (and (< i (bytes/len s)) (calc/letter? (bytes/at s i))) (calc/name-end s (+ i 1)) i))
 
 (defun calc/name (s i end acc)
-    (calc/tokens s end (cons (list :name (lc (substring s i end)) (+ i 1)) acc)))
+    (calc/tokens s end (cons (list :name (str/lower (bytes/slice s i end)) (+ i 1)) acc)))
 
 ; A number: digits, maybe a point and more, maybe an exponent. Whole if it
 ; has neither and fits; a float otherwise, its parts made into the form
-; string->float takes (".5" and "1." have a 0 put to them).
+; str->float takes (".5" and "1." have a 0 put to them).
 (defun calc/number (s i acc)
     (let whole (calc/digits-end s i))
-    (let point (and (< whole (str-len s)) (== (byte-at s whole) 46)))
+    (let point (and (< whole (bytes/len s)) (== (bytes/at s whole) 46)))
     (let frac  (if point (calc/digits-end s (+ whole 1)) whole))
     (let exp   (calc/exponent-end s frac))
-    (let ints  (substring s i whole))
-    (let fracs (if point (substring s (+ whole 1) frac) ""))
+    (let ints  (bytes/slice s i whole))
+    (let fracs (if point (bytes/slice s (+ whole 1) frac) ""))
     (let n     (cond
-                   ((and (== (str-len ints) 0) (== (str-len fracs) 0)) (raise (concat "at byte " (+ i 1) ": a point with no digits")))
+                   ((and (== (bytes/len ints) 0) (== (bytes/len fracs) 0)) (raise (str "at byte " (+ i 1) ": a point with no digits")))
                    ((and (not point) (== exp frac))
-                       (let k (string->int ints))
-                       (if (int? k) k (string->float ints)))
+                       (let k (str->int ints))
+                       (if (int? k) k (str->float ints)))
                    (#true
-                       (string->float (concat (if (eq? ints "") "0" ints) "." (if (eq? fracs "") "0" fracs)
-                                              (substring s frac exp))))))
+                       (str->float (str (if (eq? ints "") "0" ints) "." (if (eq? fracs "") "0" fracs)
+                                              (bytes/slice s frac exp))))))
     (if (eq? n #false)
-        (raise (concat "at byte " (+ i 1) ": " (substring s i exp) " is too big for a number"))
+        (raise (str "at byte " (+ i 1) ": " (bytes/slice s i exp) " is too big for a number"))
         (calc/tokens s exp (cons (list :num n (+ i 1)) acc))))
 
 ; Where an exponent after i ends: e or E, maybe a sign, and digits; or i
 ; itself if there isn't one.
 (defun calc/exponent-end (s i)
-    (let sign (if (and (< (+ i 1) (str-len s)) (member? (byte-at s (+ i 1)) (list 43 45))) 2 1))
+    (let sign (if (and (< (+ i 1) (bytes/len s)) (member? (bytes/at s (+ i 1)) (list 43 45))) 2 1))
     (cond
-        ((not (and (< i (str-len s)) (member? (byte-at s i) (list 101 69)))) i)
-        ((not (and (< (+ i sign) (str-len s)) (calc/digit? (byte-at s (+ i sign))))) i)
+        ((not (and (< i (bytes/len s)) (member? (bytes/at s i) (list 101 69)))) i)
+        ((not (and (< (+ i sign) (bytes/len s)) (calc/digit? (bytes/at s (+ i sign))))) i)
         (#true (calc/digits-end s (+ i sign)))))
 
 ; --- working it out ----------------------------------------------------
@@ -145,7 +145,7 @@
 (defun calc/closed (vt at)
     (match vt
         ((v ((:close _) & rest)) (list v rest))
-        (_                       (raise (concat "at byte " at ": a ( that isn't closed")))))
+        (_                       (raise (str "at byte " at ": a ( that isn't closed")))))
 
 ; A function's arguments, after its (: (values tokens-left).
 (defun calc/args (tokens acc)
@@ -164,11 +164,11 @@
     (let x   (if one (car args) 0))
     (cond
         ((member? f (list "min" "max"))
-            (if (nil? args) (raise (concat "at byte " at ": " f " takes at least one number"))
+            (if (nil? args) (raise (str "at byte " at ": " f " takes at least one number"))
                 (fold/l (car args) (if (eq? f "min") min max) (cdr args))))
         ((not (member? f (list "sqrt" "abs" "floor" "ceil" "round" "sin" "cos" "tan" "exp")))
             (calc/unknown f at))
-        ((not one) (raise (concat "at byte " at ": " f " takes one number")))
+        ((not one) (raise (str "at byte " at ": " f " takes one number")))
         ((eq? f "sqrt")  (sqrt x))
         ((eq? f "abs")   (abs x))
         ((eq? f "sin")   (sin x))
@@ -192,10 +192,10 @@
         (#true        (calc/unknown c at))))
 
 (defun calc/unknown (name at)
-    (raise (concat "at byte " at ": there's no " name ": the functions are sqrt, abs, floor, ceil, round, sin, cos, tan, exp, min and max, and the constants pi and e")))
+    (raise (str "at byte " at ": there's no " name ": the functions are sqrt, abs, floor, ceil, round, sin, cos, tan, exp, min and max, and the constants pi and e")))
 
 (defun calc/stuck (token wanted)
-    (raise (concat "at byte " (car (reverse token)) ": " (calc/shown token) " where " wanted " should be")))
+    (raise (str "at byte " (car (reverse token)) ": " (calc/shown token) " where " wanted " should be")))
 
 (defun calc/shown (token)
     (match token

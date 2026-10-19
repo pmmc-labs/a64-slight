@@ -680,7 +680,7 @@
             (when (str? (opt/keep opts)) (write-history (opt/keep opts) h kept))
             (when (opt/timed opts)
                 (tty/write "time: the branches in " (ms us) ", " (ms saved) " of it on the minutes before their changes" \n))
-            (concat base " minutes for the base, and " simulated " for its branches, of which " own " their own"))
+            (str base " minutes for the base, and " simulated " for its branches, of which " own " their own"))
         ((((name parent change) & rest) _)
             (match (lookup name runs)
                 (:not-found
@@ -689,10 +689,10 @@
                             (report-branch day opts runs2 name parent change said)
                             (explore day opts h rest runs2 tally2))))
                 (r
-                    (tty/write name ", from " parent ": " (concat change)
+                    (tty/write name ", from " parent ": " (str change)
                                (if (and (eq? (run/parent r) parent) (eq? (run/change r) change))
                                    ", kept"
-                                   (concat ", left out: the history's " name " is another branch"))
+                                   (str ", left out: the history's " name " is another branch"))
                                \n)
                     (explore day opts h rest runs tally))))))
 
@@ -735,12 +735,12 @@
     (match said
         ((same from stop rejoined begun took minutes)
             (let d (against-base runs name))
-            (tty/write name ", from " parent ": " (concat change) \n)
+            (tty/write name ", from " parent ": " (str change) \n)
             (when (not same) (tty/write "    not the same as " parent " before " (clock from) \n))
             (tty/write "    the same as " parent " till " (clock from)
                        (if (nil? rejoined)
                            ", its own to the end of the day"
-                           (concat ", its own till " (clock stop) ", then " rejoined "'s again"))
+                           (str ", its own till " (clock stop) ", then " rejoined "'s again"))
                        \n)
             (tty/write "    against base: fuel " (signed (nth 0 d)) " kg, " (signed (nth 1 d)) " passenger-minutes late, "
                        (signed (nth 2 d)) " missed, " (signed (nth 3 d)) " cancelled" \n)
@@ -760,18 +760,18 @@
                           (list :against-base (list :fuel (nth 0 d)) (list :late (nth 1 d))
                                               (list :missed (nth 2 d)) (list :cancelled (nth 3 d)))))))))
 
-(defun clock (m) (concat (format-num (div m 60) 2 "0") ":" (format-num (% m 60) 2 "0")))
+(defun clock (m) (str (str/pad-start (str (div m 60)) 2 "0") ":" (str/pad-start (str (% m 60)) 2 "0")))
 
-(defun signed (n) (if (>= n 0) (concat "+" n) (concat n)))
+(defun signed (n) (if (>= n 0) (str "+" n) (str n)))
 
 ; Microseconds as milliseconds, to a tenth.
-(defun ms (us) (concat (div us 1000) "." (div (% us 1000) 100) " ms"))
+(defun ms (us) (str (div us 1000) "." (div (% us 1000) 100) " ms"))
 
 ; How fast minutes went: the time for each, and the messages a second, in
 ; millions to a tenth, a tick and an answer for each aircraft each minute.
 (defun pace (day us minutes)
     (let tenths (div (* (* 2 (tuple/len (day/aircraft day))) minutes) (max 1 (div us 10))))
-    (concat (div us minutes) " µs a minute, " (div tenths 10) "." (% tenths 10) " million messages a second"))
+    (str (div us minutes) " µs a minute, " (div tenths 10) "." (% tenths 10) " million messages a second"))
 
 ; --- the program --------------------------------------------------------------
 
@@ -814,7 +814,7 @@
                    (tuple/len (day/legs day)) " legs, " (tuple/len (day/connects day)) " connections" \n))
     (cond
         ((eq? kept :another-day)
-            (raise (concat (opt/from opts) " was kept for another day, or another model, so it's no use for this one")))
+            (raise (str (opt/from opts) " was kept for another day, or another model, so it's no use for this one")))
         ((cons? kept)
             (tty/write "kept: " (length kept) " runs of this day, from " (opt/from opts) \n)
             (go-on day opts h kept 0 0))
@@ -890,7 +890,7 @@
     (let parent (if (and (> i 1) (< (roll seed :parent i 100) 25)) (random-name seed (inc (roll seed :which i (dec i)))) "base"))
     (list (random-name seed i) parent change))
 
-(defun random-name (seed i) (concat "r" seed "-" i))
+(defun random-name (seed i) (str "r" seed "-" i))
 
 (defun report-base (day flown totals)
     (let agree (length (filter (lambda (r)
@@ -958,7 +958,7 @@
             (list :object
                   (list "name" name)
                   (list "parent" (or-null parent))
-                  (list "change" (if (nil? change) :null (cons (symbol->string (car change)) (cdr change))))
+                  (list "change" (if (nil? change) :null (cons (sym->str (car change)) (cdr change))))
                   (list "own" (match fate ((from until _) (list from until)) (_ :null)))
                   (list "rejoined" (match fate ((_ _ rejoined) (or-null rejoined)) (_ :null)))
                   (list "totals" totals)
@@ -1012,7 +1012,7 @@
                     (let now (car (window day dchange)))
                     (let dflown (run/flown (lookup dname runs2)))
                     (let d (against-base runs2 dname))
-                    (tty/write "the disruption, " dname ": " (concat dchange) ", from " (clock now) \n
+                    (tty/write "the disruption, " dname ": " (str dchange) ", from " (clock now) \n
                                "    against base: fuel " (signed (nth 0 d)) " kg, " (signed (nth 1 d)) " passenger-minutes late, "
                                (signed (nth 2 d)) " missed, " (signed (nth 3 d)) " cancelled" \n)
                     (let t0 (clock/us))
@@ -1028,9 +1028,9 @@
                     (let days (days-of (cons (list "c0" "nothing" (cdr d) () 0 #false) tried)))
                     (let nothings (g/others (car days)))
                     (tty/write "the candidates: " (length cands) " remedies, and nothing"
-                               (if sampled (concat ", " (opt/remedies opts) " of the " (length made) " made picked by seed " (opt/seed opts)) "")
+                               (if sampled (str ", " (opt/remedies opts) " of the " (length made) " made picked by seed " (opt/seed opts)) "")
                                "; " (length (filter (lambda (c) (nth 5 c)) tried)) " of the remedies rejoin a run before them" \n
-                               "they come to " (if (== (length days) 1) "1 day" (concat (length days) " different days")) ", " nothings
+                               "they come to " (if (== (length days) 1) "1 day" (str (length days) " different days")) ", " nothings
                                " of the remedies to the same as doing nothing" \n)
                     (when (opt/timed opts)
                         (tty/write "time: " (length all) " remedies made in " (ms (- t1 t0)) "; " (length cands) " run in " (ms (- t2 t1))
@@ -1050,10 +1050,10 @@
                                                                        (cons (list "c0" "nothing" (cdr d) () 0 #false) tried)
                                                                        (cons () cands) log ranked))
                                               text)))
-                                  ((:error why)         (concat "stopped: " why))))
+                                  ((:error why)         (str "stopped: " why))))
                     (map kill (cadr services))
                     told)))
-        (_ (concat (opt/recover opts) " says no (:disruption name change)"))))
+        (_ (str (opt/recover opts) " says no (:disruption name change)"))))
 
 (defun setting (asked key default)
     (match (find (lambda (r) (eq? (car r) key)) asked)
@@ -1071,12 +1071,12 @@
     (match cands
         (() (reverse acc))
         ((c & rest)
-            (let name (concat "c" i))
+            (let name (str "c" i))
             (match (run-branch day opts runs name from c (list 0 0 0 0 0) #false)
                 ((runs2 _ _)
                     (let r (lookup name runs2))
                     (try-all day opts runs from dflown rest (inc i)
-                             (cons (list name (concat c) (cdr (against-base runs2 name)) (differences dflown (run/flown r))
+                             (cons (list name (str c) (cdr (against-base runs2 name)) (differences dflown (run/flown r))
                                          (minutes-run r) (str? (caddr (run/fate r))))
                                    acc)))))))
 
@@ -1222,7 +1222,7 @@
 ; A stand-in, listening where the system says: its URL and its pid.
 (defun stand-in (handler)
     (match (join (fork (serve-for handler)))
-        ((:ok (port pid)) (list (concat "http://127.0.0.1:" port "/") pid))))
+        ((:ok (port pid)) (list (str "http://127.0.0.1:" port "/") pid))))
 
 (defun serve-for (handler)
     (let server (http/serve 0 handler))
@@ -1238,9 +1238,9 @@
             (match (json/parse text)
                 ((:ok (:object & members))
                     (list :ok (map (lambda (r) (match r ((:object & fields) (list (lookup "name" fields) fields)))) (lookup "results" members))))
-                (_ (list :error (concat url " answered with what isn't JSON")))))
-        ((:ok (status _ _)) (list :error (concat url " answered " status)))
-        ((:error reason)    (list :error (concat url ": " reason)))))
+                (_ (list :error (str url " answered with what isn't JSON")))))
+        ((:ok (status _ _)) (list :error (str url " answered " status)))
+        ((:error reason)    (list :error (str url ": " reason)))))
 
 ; ctx is #(day flown urls budget): the disruption's legs, which each
 ; candidate's differences are from; the services' URLs; and the budget.
@@ -1300,7 +1300,7 @@
     (match (g/others g)
         (0 "")
         (1 "; 1 other comes to the same day")
-        (n (concat "; " n " others come to the same day"))))
+        (n (str "; " n " others come to the same day"))))
 
 ; Those that passed, ranked by the ranking service's cost, ties in the
 ; order they passed; the first top of them told. Gives (text ranked): the
@@ -1320,10 +1320,10 @@
                                         (lookup "compensated" s) " compensated, " (lookup "misconnected" s) " misconnected, "
                                         (lookup "late" s) " passenger-minutes late" \n))))
                  (zip (range 1 (inc top)) ranked))
-            (list (concat tried " remedies, " days (if (== days 1) " day, " " days, ") checked " checked, " (length passed)
+            (list (str tried " remedies, " days (if (== days 1) " day, " " days, ") checked " checked, " (length passed)
                           " that pass, and the best " (if (nil? ranked) "none" (g/name (car ranked))))
                   (map (lambda (g) (list (g/name g) (lookup (g/name g) scores))) ranked)))
-        ((:error why) (list (concat "stopped: " why) ()))))
+        ((:error why) (list (str "stopped: " why) ()))))
 
 ; With --json, what the recovery came to, for charts: the disruption, its
 ; change, when it's known and what it does against the base; every
@@ -1336,7 +1336,7 @@
 (defun write-recovery-json (path disruption cs changes log ranked)
     (let keys (map (lambda (c) (list (hash (nth 3 c)) (nth 0 c))) cs))
     (let day-of (lambda (c) (let h (hash (nth 3 c))) (cadr (find (lambda (k) (== (car k) h)) keys))))
-    (let as-json (lambda (change) (if (nil? change) :null (cons (symbol->string (car change)) (cdr change)))))
+    (let as-json (lambda (change) (if (nil? change) :null (cons (sym->str (car change)) (cdr change)))))
     (spew path
           (list (json/print
                     (list :object
@@ -1395,17 +1395,17 @@
         (("--json" f & rest)   (options rest (tuple/set o 3 f)))
         (("--keep" f & rest)   (options rest (tuple/set o 4 f)))
         (("--from" f & rest)   (options rest (tuple/set o 5 f)))
-        (("--every" n & rest)  (options rest (tuple/set o 6 (or-0 (string->int n)))))
+        (("--every" n & rest)  (options rest (tuple/set o 6 (or-0 (str->int n)))))
         (("--recover" f & rest) (options rest (tuple/set o 7 f)))
-        (("--random" n & rest) (options rest (tuple/set o 8 (or-0 (string->int n)))))
-        (("--seed" n & rest)   (options rest (tuple/set o 9 (or-0 (string->int n)))))
-        (("--remedies" n & rest) (options rest (tuple/set o 10 (or-0 (string->int n)))))
+        (("--random" n & rest) (options rest (tuple/set o 8 (or-0 (str->int n)))))
+        (("--seed" n & rest)   (options rest (tuple/set o 9 (or-0 (str->int n)))))
+        (("--remedies" n & rest) (options rest (tuple/set o 10 (or-0 (str->int n)))))
         (("--shard" kn & rest)
-            (match (map (lambda (x) (or-0 (string->int x))) (str-split kn "/"))
+            (match (map (lambda (x) (or-0 (str->int x))) (str/split kn "/"))
                 ((k n) (if (and (> n 0) (and (>= k 1) (<= k n)))
                            (options rest (tuple/set o 11 (list k n)))
-                           (concat "--shard wants k/n, 1 <= k <= n, not " kn)))
-                (_     (concat "--shard wants k/n, not " kn))))
+                           (str "--shard wants k/n, 1 <= k <= n, not " kn)))
+                (_     (str "--shard wants k/n, not " kn))))
         ((p & rest)            (options rest (tuple/set o 0 p)))))
 
 (options @ARGV (tuple "examples/airline-day.sexp" #false #false #false #false #false 30 #false #false 1 #false #false))

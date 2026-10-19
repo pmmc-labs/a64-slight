@@ -91,7 +91,7 @@
 (defun frame (s frames last calls rt ps)
     (let spent (- (lookup :reductions rt) calls))
     (tty/write
-        (if (< frames 0) (concat \e "[H" \e "[2J") "")
+        (if (< frames 0) (str \e "[H" \e "[2J") "")
         "top at " (seconds (lookup :clock rt)) ":   processes " (lookup :processes rt)
         "   ready " (lookup :ready rt) "   timers " (lookup :timers rt)
         "   devices " (lookup :devices rt) "   heap " (lookup :heap rt) "\n\n"
@@ -107,13 +107,13 @@
 (defun row (i last spent)
     (let pid (lookup :pid i))
     (let in (lookup :in i))
-    (concat
-        (pad-start (pid-number pid) 5 " ") " "
-        (pad-start (pid-number (lookup :parent i)) 6 " ") " "
-        (pad-end (symbol->string (lookup :state i)) 9 " ")
-        (format-num (lookup :mail i) 6)
-        (format-num (lookup :heap i) 9)
-        (format-num (busy (- (lookup :reductions i) (calls-before pid last)) spent) 5) "%  "
+    (str
+        (str/pad-start (pid-number pid) 5 " ") " "
+        (str/pad-start (pid-number (lookup :parent i)) 6 " ") " "
+        (str/pad-end (sym->str (lookup :state i)) 9 " ")
+        (str/pad-start (str (lookup :mail i)) 6)
+        (str/pad-start (str (lookup :heap i)) 9)
+        (str/pad-start (str (busy (- (lookup :reductions i) (calls-before pid last)) spent)) 5) "%  "
         (if (eq? in ()) "?" in)))
 
 ; a pid's number, as text: "" for none (the root's parent)
@@ -121,8 +121,8 @@
     (match p
         (() "")
         (_
-            (let s (concat p))
-            (substring s 6 (dec (str-len s))))))
+            (let s (str p))
+            (bytes/slice s 6 -1))))
 
 (defun calls-before (pid last)
     (match (find (lambda (i) (eq? (lookup :pid i) pid)) last)
@@ -133,13 +133,13 @@
     (if (== spent 0) 0 (div (* 100 calls) spent)))
 
 (defun seconds (ms)
-    (concat (div ms 1000) "." (div (% ms 1000) 100) " s"))
+    (str (div ms 1000) "." (div (% ms 1000) 100) " s"))
 
 ; --- the program --------------------------------------------------------------
 
 (let frames
     (match @ARGV
-        ((n) (match (string->int n) (#false -1) (k k)))
+        ((n) (match (str->int n) (#false -1) (k k)))
         (_   -1)))
 (let pong (fork (ponger)))
 (let sink (fork (consumer)))

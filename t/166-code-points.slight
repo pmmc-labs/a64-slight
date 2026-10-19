@@ -1,0 +1,40 @@
+; str/code-at and codes->str (D148, D219), at the ends of each length of
+; UTF-8 sequence. Each line is a code point, the length in bytes of its
+; character, its code point read back, and its bytes.
+
+(defun round-trip (n)
+    (let c (codes->str (list n)))
+    (list n (bytes/len c) (str/code-at c 0) (str->bytes c)))
+
+(map (lambda (n) (pprint (round-trip n))) (list 0 127 128 2047 2048 55295 57344 65533 65535 65536 1114111))
+
+(pprint (list (str/code-at "日本" 0) (str/code-at "日本" 1) (str/code-at "日本" -1)))
+(pprint (str/codes "slight"))
+(pprint (codes->str (list 26085 26412 35486)))
+(pprint (list (eq? (codes->str (list 233)) "é") (eq? (codes->str (list 233)) "\u{e9}")))
+(pprint (list (str/code-at "😀" 0) (codes->str (list 955)) (codes->str ())))
+; codes->str undoes str/codes, for a string with no stray bytes
+(pprint (eq? (codes->str (str/codes "a é 😀")) "a é 😀"))
+; they're functions, to pass around
+(pprint (map codes->str (list (list 97) (list 233) (list 128512))))
+(pprint (apply codes->str (list (list 955))))
+(pprint (fold/l 0 (lambda (acc c) (+ acc (str/code-at c 0))) (str/chars "abc")))
+
+; a code point with no character, an index past the end, or the wrong type
+; faults
+(defun kind (pid) (car (cadr (join pid))))
+(pprint (kind (fork (str/code-at "" 0))))
+(pprint (kind (fork (str/code-at "日本" 2))))
+(pprint (kind (fork (str/code-at "日本" -3))))
+(pprint (kind (fork (codes->str (list -1)))))
+(pprint (kind (fork (codes->str (list 55296)))))
+(pprint (kind (fork (codes->str (list 57343)))))
+(pprint (kind (fork (codes->str (list 1114112)))))
+(pprint (kind (fork (codes->str (list "a")))))
+(pprint (kind (fork (codes->str "a"))))
+(pprint (kind (fork (str/code-at 97 0))))
+(pprint (kind (fork (str/len 5))))
+(pprint (kind (fork (str/slice "abc" 0 "x"))))
+(pprint (kind (fork (str/index-of "abc" 'a))))
+(pprint (kind (fork (str/chars ()))))
+(kind (fork (str/well-formed? 1.5)))

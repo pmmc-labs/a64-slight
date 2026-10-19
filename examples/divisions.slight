@@ -15,7 +15,7 @@
             (tty/write
                 \e "[" (+ x i) ";" y "H"
                 \e "[37;" color "m"
-                (str-repeat " " w)
+                (str/repeat " " w)
                 \e "[0m")))
     (tty/write \e "[s"))
 

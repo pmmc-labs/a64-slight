@@ -91,4 +91,4 @@
 
 (let start (offset (system)))
 (tty/write (shown (energy start 0.0)) \n)
-(shown (energy (steps start (string->int (car @ARGV))) 0.0))
+(shown (energy (steps start (str->int (car @ARGV))) 0.0))

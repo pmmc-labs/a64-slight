@@ -8,7 +8,7 @@
 ; colour as its state. A key is (key mods...), taken apart by recv's
 ; pattern and then matched: the arrows are names such as :ArrowUp, and the
 ; digits are one-character strings ("1" rather than 1), so pick-color
-; reads them with string->int.
+; reads them with str->int.
 
 (defun keyboard (color)
     (recv
@@ -27,7 +27,7 @@
 
 ; a digit from 1 to 7 picks a colour (41 to 47); any other key keeps it
 (defun pick-color (key color)
-    (let digit (cond ((str? key) (string->int key)) (#true #false)))
+    (let digit (cond ((str? key) (str->int key)) (#true #false)))
     (cond
         ((not (int? digit))               color)
         ((and (>= digit 1) (<= digit 7)) (+ 40 digit))

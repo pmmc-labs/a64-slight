@@ -6,7 +6,7 @@
 (defun size (n)
     (recv
         ((:open p)     (send p (list :read :chunks)) (send p (list :eof)) (size n))
-        ((:chunk p s)  (size (+ n (str-len s))))
+        ((:chunk p s)  (size (+ n (bytes/len s))))
         ((:eof p)      (size n))
         ((:exited p s) (list s n))))
 

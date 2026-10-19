@@ -20,7 +20,7 @@
 ; The bytes, joined to the chunk before if that's what came last.
 (defun add-chunk (bytes acc)
     (cond
-        ((== (str-len bytes) 0) (cons (list :empty-chunk) acc))
+        ((== (bytes/len bytes) 0) (cons (list :empty-chunk) acc))
         (#true (match acc
             (((:chunk b) & rest) (cons (list :chunk (~ b bytes)) rest))
             (_                   (cons (list :chunk bytes) acc))))))
@@ -41,16 +41,16 @@
         (list "/short"   (list "HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\n" "hello"))) me))
     (recv
         ((:raw port)
-            (let base (concat "http://127.0.0.1:" port))
+            (let base (str "http://127.0.0.1:" port))
             (let r (list
-                (streamed :get (concat base "/chunked"))
-                (streamed :get (concat base "/length"))
-                (streamed :get (concat base "/close"))
-                (streamed :head (concat base "/head"))
-                (streamed :get (concat base "/info"))
-                (streamed :get (concat base "/none"))
-                (streamed :get (concat base "/same"))
-                (streamed :get (concat base "/short"))))
+                (streamed :get (str base "/chunked"))
+                (streamed :get (str base "/length"))
+                (streamed :get (str base "/close"))
+                (streamed :head (str base "/head"))
+                (streamed :get (str base "/info"))
+                (streamed :get (str base "/none"))
+                (streamed :get (str base "/same"))
+                (streamed :get (str base "/short"))))
             (kill raw)
             (map pprint r)
             :done)))

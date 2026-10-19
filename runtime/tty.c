@@ -141,7 +141,7 @@ size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key)) {
     _Alignas(16) rt_value_t cells[8];
     rt_value_t key = rt_symbol(RT_SYM_KEYS + (uint64_t)k.name);
     if (k.len) {
-        text[0] = k.len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
+        text[0] = rt_string_header((const char *)k.text, k.len);
         memcpy(&text[1], k.text, k.len);
         ((char *)&text[1])[k.len] = 0;
         key = (rt_value_t)text | RT_TAG_BOXED;

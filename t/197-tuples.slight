@@ -25,7 +25,7 @@
               (eq? (list (tuple) 1) (list (tuple) 1))))
 
 ; rendered as pprint shows it, and as JSON arrays
-(pprint (concat "t=" (tuple 1 (tuple 2))))
+(pprint (str "t=" (tuple 1 (tuple 2))))
 (pprint (json/print (tuple 1 (tuple "a" :null) (list 2) (tuple))))
 
 ; copied whole into a message, and back

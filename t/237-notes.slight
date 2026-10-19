@@ -10,7 +10,7 @@
 (defun call (tool args) (join (fork (tool/call tool args))))
 
 (let dir  "build/t/237-notes")
-(let path (concat dir "/notes.sexp"))
+(let path (str dir "/notes.sexp"))
 (exec/run (list "rm" "-rf" dir))
 (exec/run (list "mkdir" "-p" dir))
 
@@ -33,7 +33,7 @@
 (pprint (call (tools/recall again) (list (list "key" "lang"))))
 
 ; A file that isn't notes: the store ends, and says why.
-(let bad (concat dir "/bad.sexp"))
+(let bad (str dir "/bad.sexp"))
 (tools/save bad "((\"a\" 1))")
 (let broken (notes/open bad))
 (pprint (match (call (tools/recall broken) (list (list "key" "a")))
@@ -41,6 +41,6 @@
 (pprint (tools/read bad))
 
 ; A file that can't be written: remember fails, and the store goes on.
-(let lost (notes/open (concat dir "/no-such-dir/notes.sexp")))
+(let lost (notes/open (str dir "/no-such-dir/notes.sexp")))
 (pprint (call (tools/remember lost) (list (list "key" "k") (list "text" "v"))))
 (pprint (call (tools/recall lost) (list (list "key" "k"))))

@@ -22,7 +22,7 @@
         (tty/write (trees (pow2 (+ (- top d) 4)) d 0) \n)
         (depths (+ d 2) top)))
 
-(let top  (max 6 (string->int (car @ARGV))))
+(let top  (max 6 (str->int (car @ARGV))))
 (tty/write (check (make (+ top 1))) \n)
 (let long (make top))
 (depths 4 top)

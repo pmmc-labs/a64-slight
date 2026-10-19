@@ -2,7 +2,7 @@
 (defun digits (n acc)
     (cond
         ((== n 0) acc)
-        (#true    (digits (- n 1) (~ acc (format-num (- n (* 10 (tens n))) 1))))))
+        (#true    (digits (- n 1) (~ acc (str/pad-start (str (- n (* 10 (tens n)))) 1))))))
 
 ; n mod 10 the slow way: no integer division until floats arrive
 (defun tens (n) (tens-loop n 0))
@@ -12,9 +12,9 @@
         (#true    (tens-loop (- n 10) (+ q 1)))))
 
 (let s (digits 1000 ""))
-(pprint (str-len s))
-(pprint (substring s 0 12))
-(length-of (str-split s "0"))
+(pprint (bytes/len s))
+(pprint (bytes/slice s 0 12))
+(length-of (str/split s "0"))
 (defun length-of (xs) (count xs 0))
 (defun count (xs n)
     (cond

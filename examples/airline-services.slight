@@ -99,9 +99,9 @@
             (let rest (between-reasons day ops (cdr flew)))
             (cond
                 ((ne? (tuple/get lb 2) (tuple/get la 3))
-                    (cons (reason (leg/flight lb) (concat "its crew is at " (tuple/get la 3) ", not " (tuple/get lb 2))) rest))
+                    (cons (reason (leg/flight lb) (str "its crew is at " (tuple/get la 3) ", not " (tuple/get lb 2))) rest))
                 ((< gap (crew-connect))
-                    (cons (reason (leg/flight lb) (concat "its crew has " gap " minutes after " (leg/flight la) ", under " (crew-connect)))
+                    (cons (reason (leg/flight lb) (str "its crew has " gap " minutes after " (leg/flight la) ", under " (crew-connect)))
                           rest))
                 (#true rest)))
         (_ ())))
@@ -111,7 +111,7 @@
     (let last (tuple/get ops (nth (dec (length flew)) flew)))
     (let duty (- (+ (op/on last) (crew-release)) (- (op/off first) (crew-report))))
     (if (> duty (crew-duty))
-        (list (reason (car last) (concat "its crew is on duty " duty " minutes, over " (crew-duty))))
+        (list (reason (car last) (str "its crew is on duty " duty " minutes, over " (crew-duty))))
         ()))
 
 ; --- maintenance ----------------------------------------------------------------
@@ -129,7 +129,7 @@
                            (let ends (if (nil? flew) home (tuple/get (tuple/get (day/legs day) (last-landed ops flew)) 3)))
                            (if (eq? ends due)
                                acc
-                               (cons (reason tail (concat tail " ends the day at " ends "; its check tonight is at " due)) acc)))))
+                               (cons (reason tail (str tail " ends the day at " ends "; its check tonight is at " due)) acc)))))
             (range 0 (tuple/len (day/aircraft day)))))
 
 (defun last-landed (ops legs)

@@ -74,10 +74,10 @@ and reductions) and the runtime, from a table of function names the
 compiler emits, which the deadlock message uses too (D171).
 A second target, x86-64: the code generator emits through a target
 interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
-`slightc --target x86_64` builds for it (D145, D146). Strings are bytes;
-beside the byte builtins, the `utf8/` ones count characters (a bad byte
-is a character of its own, as in Go), with `ord` and `chr` in the
-prelude, and `string->float` (D148).
+`slightc --target x86_64` builds for it (D145, D146). Strings are bytes,
+UTF-8 by convention: the `str/` builtins count characters (a bad byte is
+a character of its own, as in Go), and the `bytes/` ones count bytes
+(D148, D219).
 `examples/` has twenty-three example programs (all but
 `ping-pong-tournament`, `top`, `chat` and `airline-gen` are golden
 tests), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149), the latest
@@ -152,7 +152,13 @@ with no write barrier, since nothing old can point at anything young
 (D200, 244); and phase 3, Chez Scheme and five more programs (`tak`,
 `nqueens`, `deriv`, `spectral-norm`, `fan-in`, D201), and what its
 profiles found: the prelude's list functions as loops, and its `not`
-compiled inline (D203, golden tests 247 and 248). **Next:** to settle with
+compiled inline (D203, golden tests 247 and 248). Strings, cleaned up
+(D219): one set of builtins in place of the byte ones and the `utf8/`
+ones, `str/` with JavaScript's methods' names and edge cases over
+characters, `bytes/` over bytes, conversions as `a->b`, Unicode's case
+mapping and white space (`runtime/unicode.c`), ASCII strings marked so
+they're indexed in one step, and `pprint` escaping strings; golden
+tests 261 to 265, from `t/models/strings.py`. **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
@@ -265,7 +271,7 @@ to get them back from git (`3fd71e0`).
 | `bin/slightc.ts` | The driver: read and expand (with the files it includes), compile, write `out.S`, link with clang |
 | `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `pattern.ts` (`match`'s and `recv`'s patterns, as tests and bindings), `split.ts` (a `recv` anywhere a tail call could go, made the whole body of a generated receive function), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
-| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c` (the string builtins, D219), `unicode.c` (Unicode's case mappings and the properties they need, made by `gen-unicode.py`; don't edit it), `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, and `.ss` for Chez Scheme); `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |

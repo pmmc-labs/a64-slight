@@ -10,7 +10,7 @@
 (pprint (str? :x))
 (pprint (str? 1))
 ; lengths are in bytes
-(pprint (str-len "hello"))
-(pprint (str-len ""))
-(pprint (str-len "é"))
-(str-len "héllo")
+(pprint (bytes/len "hello"))
+(pprint (bytes/len ""))
+(pprint (bytes/len "é"))
+(bytes/len "héllo")
