@@ -808,6 +808,7 @@ static entry_t *entry(rt_value_t pid, const char *site) {
 rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
     (void)site;
     rt_proc_t  *p = rt_new_process(code, rt_current->pid);
+    rt_rand_split(rt_current, p);
     rt_chunk_t *c = copy_values(values, p->args, n);
     if (c) adopt(p, c);
     return p->pid;
@@ -2867,8 +2868,13 @@ int main(int argc, char **argv) {
     const char *stress = getenv("SLIGHT_GC_STRESS");
     gc_stress = !stress ? 0 : atoll(stress) < 1 ? 1 : atoll(stress) > QUOTA ? QUOTA : atoll(stress);
     const char *mode = getenv("SLIGHT_CLOCK"), *seed = getenv("SLIGHT_SCHED"), *cap = getenv("SLIGHT_HEAP_MAX");
+    const char *rand_seed = getenv("SLIGHT_SEED");
     if (seed && (!*seed || strspn(seed, "0123456789") != strlen(seed))) {
         fputs("slight: SLIGHT_SCHED is a number, a seed for the order processes run in\n", stderr);
+        return 2;
+    }
+    if (rand_seed && (!*rand_seed || strspn(rand_seed, "0123456789") != strlen(rand_seed))) {
+        fputs("slight: SLIGHT_SEED is a number, a seed for the random numbers\n", stderr);
         return 2;
     }
     if (cap && bytes_of(cap) < CHUNK_MAX) {
@@ -2885,6 +2891,7 @@ int main(int argc, char **argv) {
     heap_max      = settings.heap_max;
     started       = now();
     rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);
+    rt_rand_start(p, rt_io_random_seed(rand_seed));
     p->args[0]   = arguments(p, argc, argv);
     p->args[1]   = environment(p, env);
     rt_run();

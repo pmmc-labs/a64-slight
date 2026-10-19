@@ -166,7 +166,12 @@ each keeping its caller's stack as `join` does; golden tests 266 to
 JavaScript's `Math`, `math/pow` exact on two integers, `math/mod`,
 `math/nan?`, `math/E` and `math/INF`, `int->float`, `float->str` as
 `toFixed`, and the bit operations, `bit/`, compiled inline; golden tests
-269 to 272. Random numbers are next, as a proposal of their own.
+269 to 272. Random numbers (D222): a generator in each process,
+SplitMix64 as Java's `SplittableRandom`, `rand/int`, `rand/float` and
+`rand/seed`, and `rand/pick` and `rand/shuffle` in the prelude; a fork's
+split from its parent's, so the numbers don't depend on the order
+processes run in, and the run's seed recorded for a replay; golden test
+273, from Java's own (`t/models/Rand273.java`).
 **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
@@ -284,7 +289,7 @@ to get them back from git (`3fd71e0`).
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, and `.ss` for Chez Scheme); `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
-| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's); `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
+| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
 ## Commands
@@ -350,6 +355,9 @@ to get them back from git (`3fd71e0`).
   touching nothing but stdout and stderr (D170).
 - `SLIGHT_SCHED=n` runs processes in an order picked by a generator seeded
   with `n`, the same for each `n`, to look for races (D170).
+- `SLIGHT_SEED=n` seeds the random numbers (`rand/`); without it they
+  come from the system's entropy, different every run, and are recorded
+  for a replay either way (D222). `t/run.sh` sets `1`.
 - `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` name files for a lookup to read
   in place of `/etc/hosts` and `/etc/resolv.conf`; there a `nameserver`
   line may give a port (`127.0.0.1:5353`), so a test can be its own name

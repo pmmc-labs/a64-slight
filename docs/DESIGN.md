@@ -352,6 +352,13 @@ names no program can write.
   `bit/count` in C. A shift left wraps, losing what passes the top; a
   shift right fills with the sign; a count of 63 or more gives 0 or -1,
   as in Go, and a negative one faults (D221).
+- random numbers: `rand/int` (0 to n - 1), `rand/float` ([0, 1)) and
+  `rand/seed`, from a generator each process has, two words in its
+  record: SplitMix64, Java's `SplittableRandom` (D222). The root's
+  starts from `SLIGHT_SEED`, or from the system's entropy, the seed
+  recorded either way; `fork` gives the child a generator split from the
+  parent's, so a process's numbers never depend on the order processes
+  run in. Not cryptographic.
   `float?` and `num?` alongside `int?`. Floats print in the shortest form
   that reads back as the same double, laid out as JavaScript does, but
   always with a `.` or an exponent: `3.0`, `0.1`, `1e+21`, `nan`, `inf`.
@@ -409,6 +416,7 @@ program; it can only define functions.
 | folds | `(fold/l init f xs)` with `(f acc x)`; `(fold/r init f xs)` with `(f x acc)` |
 | lists | `reverse length append sum product map`; `(filter f xs)` keeps what `f` says `#true` to, `(remove f xs)` drops it; `(take n xs)`, `(skip n xs)` stop at the end of the list; `(nth i xs)` and `(find f xs)` give `()` when there's nothing; `member?`; `(range start end)` is `start` up to but not including `end`; `(dotimes start end f)` |
 | association lists | `(assoc k v table)` adds `(k v)`; `(lookup k table)` gives the value or `:not-found` |
+| random numbers | `(rand/pick xs)`, an element or `()`; `(rand/shuffle xs)`, each element sorted by a `rand/float` of its own (D222) |
 | processes | `(join/any pids)`, the first to succeed as `(:ok v)`, or `(:error reasons)` once all have failed; `(join/all pids)`, `(:ok values)` in the order of `pids`, or the first `(:error r)` as soon as one fails (D220) |
 
 D78 has why `filter`, `remove`, `range`, `take` and `skip` work as they
@@ -971,7 +979,8 @@ Everything a run takes from the world comes through one place,
 `runtime/replay.c`, behind `runtime/io.h`: the clock, `select()`'s
 answers, what reads and receives give, whether files and sockets open
 and what they say, whether commands start and how they end, the hosts
-file and `resolv.conf`, a lookup's query ids, and the screen's size. The rest of a run is decided by the runtime
+file and `resolv.conf`, a lookup's query ids, the seed for the random
+numbers when `SLIGHT_SEED` doesn't give one (D222), and the screen's size. The rest of a run is decided by the runtime
 itself (calls are counted, not timed), so those answers, in order, decide
 the whole run.
 
@@ -995,7 +1004,8 @@ the whole run.
 - Tested by `t/replay.sh` (`make replay`): runs with keys, files, the real
   clock, sockets, a lookup and commands are recorded, then replayed with
   none of them, and must print the same; and `SLIGHT_SCHED` gives several orders,
-  each the same every time.
+  each the same every time, and the same random numbers in each from one
+  `SLIGHT_SEED`.
 
 ### Builtins in C
 
@@ -1166,7 +1176,8 @@ line-by-line translation.
   some. The same tests and expected output serve both targets (D146).
 - **Compiler unit tests** with `node:test`, per pass.
 - **Timing uses the virtual clock** (`t/run.sh` sets
-  `SLIGHT_CLOCK=virtual`), never real time.
+  `SLIGHT_CLOCK=virtual`), never real time, and random numbers a fixed
+  seed (`SLIGHT_SEED=1`).
 - **Record and replay** (`t/replay.sh`, D170): a few programs recorded on
   the real clock and replayed; each replay is compared with its own
   recording, never with a fixed output, so nothing depends on timing.

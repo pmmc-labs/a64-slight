@@ -10,8 +10,12 @@
 # had the clock after two. The root's value comes last.
 #
 #     python3 t/models/boids.py 30 4 8 > examples/boids.expected
+import os
 import sys
 from math import floor, sqrt
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from rand import Rand
 
 SIGHT, ROOM = 10.0, 2.0
 COHESION, ALIGNMENT, SEPARATION = 0.01, 0.125, 0.1
@@ -66,15 +70,11 @@ def steer(me, flock):
     v = limit(v)
     return ((around(x + v[0], w), around(y + v[1], h)), v)
 
-def random(s): return s * 16807 % 2147483647
-def fraction(s): return s / 2147483647
-
+rand = Rand(seed)                     # the root's, after (rand/seed seed)
 flock = []
 for _ in range(n):
-    a = random(seed); b = random(a); c = random(b); d = random(c)
-    seed = d
-    flock.append(((fraction(a) * w, fraction(b) * h),
-                  ((fraction(c) * 2 - 1) * MAX, (fraction(d) * 2 - 1) * MAX)))
+    a, b, c, d = rand.float(), rand.float(), rand.float(), rand.float()
+    flock.append(((a * w, b * h), ((c * 2 - 1) * MAX, (d * 2 - 1) * MAX)))
 
 K = 0.41421356
 def arrow(v):

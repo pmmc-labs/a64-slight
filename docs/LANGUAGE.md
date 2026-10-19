@@ -76,7 +76,8 @@ tests: `SLIGHT_CLOCK=virtual` swaps the real clock for one that starts at
 and `SLIGHT_GC_STRESS=n` makes it collect at the entry of every nth
 function called (n from 1, every call, which is slow, to 1,000), and at
 every `recv`.
-`SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` are in "Sockets".
+`SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` are in "Sockets", and
+`SLIGHT_SEED` in "Random numbers", under Builtins.
 
 ### Replaying a run, and other orders
 
@@ -115,7 +116,8 @@ than time. So (D170):
       for n in $(seq 1 100); do SLIGHT_SCHED=$n ./prog || echo "seed $n"; done
 
   A record keeps its run's seed and its clock (real or virtual), so a
-  replay uses them.
+  replay uses them, and the seed its random numbers started from,
+  whether `SLIGHT_SEED` gave it or the system did.
 
 ### @ARGV
 
@@ -1153,6 +1155,38 @@ Anything else faults (`:not-an-int`).
 They take a fixed number of arguments, so they can be values:
 `(fold/l 0 bit/xor hashes)`.
 
+### Random numbers
+
+Each process has a generator of its own (D222).
+
+- `(rand/int n)`: an integer from 0 to `n` - 1, each as likely. `n` must
+  be an integer (`:not-an-int`) of at least 1 (`:out-of-range`).
+- `(rand/float)`: a float from 0 up to but not including 1, in steps of
+  2^-53, each as likely.
+- `(rand/seed n)`: starts the calling process's generator again from
+  the integer `n`, so the numbers it draws after are the same every run.
+  Returns `()`.
+
+The root's generator starts from the run's seed: `SLIGHT_SEED=n`, a
+number of digits, or, without it, one the system makes up, different
+every run. A `fork` gives the new process a generator drawn from its
+parent's, as a number is drawn. So what a process draws depends only on
+the seed and on what was drawn and forked before, in it and in the
+processes it was forked from, never on the order processes run in.
+Under one `SLIGHT_SEED`, a program draws the same numbers whatever
+`SLIGHT_SCHED` says. And a record keeps the seed, even one the system
+made up, so a replay draws them again.
+
+    (rand/seed 2026)
+    (let die (lambda () (+ 1 (rand/int 6))))
+    (list (die) (die) (die))
+
+The prelude has `rand/pick` and `rand/shuffle`. The generator is
+SplitMix64, Java's `SplittableRandom`, the same numbers from the same
+seed. It's fast and fair, but what it'll draw next can be worked out
+from what it drew, so it's not for keys, tokens or anything that
+mustn't be guessed.
+
 ### Comparison
 
 - `(== a b)`, `(!= a b)`, `(< a b)`, `(<= a b)`, `(> a b)`, `(>= a b)`:
@@ -1497,6 +1531,13 @@ Association lists, `((key value) ...)`:
 - `(assoc k v table)`: `table` with `(k v)` added at the front.
 - `(lookup k table)`: the value for the first key `eq?` to `k`, or
   `:not-found`.
+
+Random numbers (D222):
+
+- `(rand/pick xs)`: an element of `xs`, each as likely, or `()` if
+  there are none.
+- `(rand/shuffle xs)`: the elements of `xs` in an order each of whose
+  arrangements is as likely.
 
 Processes: `join/any` and `join/all`, under Waiting for a process.
 

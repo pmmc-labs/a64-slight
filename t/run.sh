@@ -33,6 +33,8 @@ export SLIGHT_HEAP_MAX=64M
 # Time starts at 0 and moves only when nothing can run, straight to the
 # next timer, so timer tests are exact and take no real time.
 export SLIGHT_CLOCK=virtual
+# And the random numbers start from the same seed every run (D222).
+export SLIGHT_SEED=1
 
 # The watchdog leaves a file to say it killed the test, since its own
 # output can't go down the pipe to diff: diff would wait for it.

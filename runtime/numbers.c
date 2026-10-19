@@ -247,3 +247,63 @@ rt_value_t rt_float_to_str(rt_value_t x, rt_value_t digits, const char *site) {
     rt_buf_free(&b);
     return s;
 }
+
+// --- random numbers -------------------------------------------------------------
+//
+// Java's SplittableRandom (Steele, Lea and Flood): SplitMix64, a state that
+// steps by an odd gamma, each step mixed. Splitting draws a new state and
+// gamma from the parent's stream, so a process's numbers depend on the run's
+// seed and its place in the tree of forks, never on how processes
+// interleave (D222). Not for keys or anything that mustn't be guessed.
+
+#define GOLDEN_GAMMA 0x9e3779b97f4a7c15u
+
+static uint64_t mix64(uint64_t z) {
+    z = (z ^ (z >> 30)) * 0xbf58476d1ce4e5b9u;
+    z = (z ^ (z >> 27)) * 0x94d049bb133111ebu;
+    return z ^ (z >> 31);
+}
+
+// An odd gamma with enough bit changes in it, which a mixed number may not
+// have.
+static uint64_t mix_gamma(uint64_t z) {
+    z = (z ^ (z >> 33)) * 0xff51afd7ed558ccdu;
+    z = (z ^ (z >> 33)) * 0xc4ceb9fe1a85ec53u;
+    z = (z ^ (z >> 33)) | 1;
+    return __builtin_popcountll(z ^ (z >> 1)) < 24 ? z ^ 0xaaaaaaaaaaaaaaaau : z;
+}
+
+static uint64_t next_seed(rt_proc_t *p) { return p->rand_seed += p->rand_gamma; }
+static uint64_t next64(rt_proc_t *p)    { return mix64(next_seed(p)); }
+
+void rt_rand_start(rt_proc_t *p, uint64_t seed) {
+    p->rand_seed  = seed;
+    p->rand_gamma = GOLDEN_GAMMA;
+}
+
+void rt_rand_split(rt_proc_t *parent, rt_proc_t *child) {
+    child->rand_seed  = next64(parent);
+    child->rand_gamma = mix_gamma(next_seed(parent));
+}
+
+// 0 to n - 1, each as likely: a draw in the top part of the range that
+// would make some come up more often than others is drawn again, as Java's
+// nextLong(bound) has it.
+rt_value_t rt_rand_int(rt_value_t n, const char *site) {
+    int64_t bound = rt_need_int(n, site);
+    if (bound < 1) rt_fault(RT_FAULT_RANGE, n, site);
+    uint64_t m = (uint64_t)bound - 1, r = next64(rt_current);
+    if (((uint64_t)bound & m) == 0) return rt_int((int64_t)(r & m));
+    for (uint64_t u = r >> 1; (int64_t)(u + m - (r = u % (uint64_t)bound)) < 0; u = next64(rt_current) >> 1) {}
+    return rt_int((int64_t)r);
+}
+
+// [0, 1), in steps of 2^-53.
+rt_value_t rt_rand_float(const char *site) {
+    return rt_new_float((double)(next64(rt_current) >> 11) * 0x1.0p-53, site);
+}
+
+rt_value_t rt_rand_seed(rt_value_t n, const char *site) {
+    rt_rand_start(rt_current, (uint64_t)rt_need_int(n, site));
+    return RT_NIL;
+}

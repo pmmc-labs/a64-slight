@@ -187,6 +187,20 @@
         (()                   :not-found)
         (((key value) & rest) (if (eq? k key) value (lookup k rest)))))
 
+; --- random numbers -----------------------------------------------------------
+
+; rand/int, rand/float and rand/seed are builtins, each process with a
+; generator of its own (D222).
+
+; An element of xs, each as likely, or () if there are none, as nth gives.
+(defun rand/pick (xs)
+    (if (nil? xs) () (nth (rand/int (length xs)) xs)))
+
+; xs in an order each of whose arrangements is as likely: each element
+; sorted by a draw of its own, where swapping as the elements come is easy
+; to get subtly wrong.
+(defun rand/shuffle (xs) (sort-by (lambda (x) (rand/float)) xs))
+
 ; --- waiting for processes ----------------------------------------------------
 
 ; join/race, in the runtime, gives the first of pids to end, as (pid

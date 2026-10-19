@@ -708,17 +708,23 @@ The math builtins under `math/`, with the rest of JavaScript's `Math`,
 `math/INF`, `int->float` and `float->str` (`toFixed`); and the bit
 operations, `bit/`, compiled inline (D221). Golden tests 269 to 272.
 
+### Random numbers (done, Oct 2026)
+
+A generator in each process, SplitMix64 as Java's `SplittableRandom`
+has it: `rand/int`, `rand/float` and `rand/seed` in the runtime,
+`rand/pick` and `rand/shuffle` in the prelude; the run seeded by
+`SLIGHT_SEED` or the system, the seed recorded for a replay, and a
+fork's generator split from its parent's, so a process's numbers don't
+depend on the order processes run in (D222). Boids draws its flock with
+them. Golden test 273, and the replay checks. Cryptographic randomness
+waits for TLS.
+
 ### Later: the rest of the October 2026 list
 
 The other changes from that list (above, "After 13"), for later, before
 self-hosting, since most change the language. Each has points to settle
 with Stevan first.
 
-- **Random numbers,** next (D221 left them for a proposal of their own):
-  how a generator's state is kept (passed along, in a process, or per
-  process by the runtime, as Erlang's `rand`), where the seed comes from
-  and how a replay gets it, a fork's own stream, and the cryptographic
-  kind TLS will want. Boids defines its own `random`.
 - **Numerical vectors and matrices,** only if a program needs them
   (D179, D221): embeddings for the agent's notes are the likeliest.
   Floats that need no box would come first.

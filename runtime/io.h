@@ -83,6 +83,11 @@ void  rt_io_fclose(FILE *f);
 // lookup's query ids).
 uint32_t rt_io_seed(void);
 
+// The run's seed for its random numbers (D222): the number given, if one
+// is (SLIGHT_SEED), or else the system's entropy. Recorded either way, so
+// a replay has the same, whatever it's given.
+uint64_t rt_io_random_seed(const char *given);
+
 // The terminal's size: 0, or -1 if stdout isn't one.
 int rt_io_winsize(int *rows, int *cols);
 

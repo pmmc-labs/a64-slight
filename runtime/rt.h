@@ -389,6 +389,8 @@ typedef struct rt_proc {
     int64_t         slice;      // the calls its last slice had, reductions and slice_rest together
     uint64_t        calls;      // the calls of its slices before that one, for :system
     uintptr_t       at;         // where in compiled code it last stopped while holding a stack, or 0
+    uint64_t        rand_seed;  // its random numbers: SplitMix64's state...
+    uint64_t        rand_gamma; // ...and the step it takes, its own (numbers.c, D222)
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -670,6 +672,16 @@ rt_value_t rt_is_nan(rt_value_t v) RT_ASM(rt_is_nan);
 rt_value_t rt_int_to_float(rt_value_t n, const char *site) RT_ASM(rt_int_to_float);
 rt_value_t rt_float_to_str(rt_value_t x, rt_value_t digits, const char *site) RT_ASM(rt_float_to_str);
 rt_value_t rt_bit_count(rt_value_t n, const char *site) RT_ASM(rt_bit_count);
+
+// Random numbers (numbers.c, D222): each process has a generator of its
+// own, Java's SplittableRandom. The root's starts from the run's seed, a
+// fork's child's is split from its parent's, and rand/seed starts the
+// caller's again.
+void       rt_rand_start(rt_proc_t *p, uint64_t seed);
+void       rt_rand_split(rt_proc_t *parent, rt_proc_t *child);
+rt_value_t rt_rand_int(rt_value_t n, const char *site) RT_ASM(rt_rand_int);
+rt_value_t rt_rand_float(const char *site) RT_ASM(rt_rand_float);
+rt_value_t rt_rand_seed(rt_value_t n, const char *site) RT_ASM(rt_rand_seed);
 
 // Called at a function's entry when proc's reductions run out, with the
 // function's first n slots (from frame: its parameters and captured

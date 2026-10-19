@@ -4166,3 +4166,73 @@ after, and numerical objects only if needed", to Claude's proposal, and
   `t/models/bits.py`, the operands as literals and as values, which the
   compiler takes two ways); t/070, t/074 and t/080 changed only where
   `math/pow` is now exact or a fault names `math/round`.
+
+**D222. Random numbers: a generator per process.** *(Stevan, Oct 2026:
+"Lets go with your picks, I agree", to Claude's proposal, which D221
+left for one of its own.)*
+
+- **Where the state lives: in each process, in the runtime,** as
+  Erlang's `rand` keeps it in the process dictionary: two words in the
+  process's record. A draw is a builtin with no generator to pass, and
+  nothing else sees it, so it's no more shared state than `$$` is.
+  Rejected: a generator as a value, passed along and handed back with
+  each draw, as Haskell's `StdGen` (pure, but every function that draws
+  grows a parameter and a result, and a process's loop carries it); a
+  generator as a process, asked for each number (a message each way per
+  draw, and the order processes ask in decides who gets which, so a
+  seed wouldn't give the same run under another order); and draws made
+  from a counter, a hash of a seed and an index, as a builtin. That last
+  is how the airline makes its what-ifs and remedies (D214), each the
+  same whatever the others are, and it stays a pattern in slight
+  (`(% (hash (list seed what i)) n)`) rather than a builtin.
+- **The generator is SplitMix64, Java's `SplittableRandom`** (Steele,
+  Lea and Flood): a state that steps by an odd gamma, each step mixed.
+  It's small, fast, passes BigCrush, and splits, which a fork wants;
+  and Java gives the same numbers from the same seed, which the tests
+  are checked against. `(rand/int n)` is Java's `nextLong(bound)`, a
+  power of two masked and anything else drawn again in the top part of
+  the range that would favor some numbers; `(rand/float)` is
+  `nextDouble`, 53 bits. A bound under 1 faults (`:out-of-range`).
+- **A fork splits the parent's generator,** as `SplittableRandom.split`
+  does: the child's state and gamma are the parent's next two draws. So
+  what a process draws depends on the seed and on what was drawn and
+  forked before it, along its line of forks, never on the order
+  processes run in: under one seed a program draws the same numbers
+  whatever `SLIGHT_SCHED` says. Rejected: every process seeded from one
+  generator for the run (the numbers would follow the order processes
+  run in), and every process seeded alike (forked workers would all draw
+  the same).
+- **Seeding:** `SLIGHT_SEED=n` seeds the root, digits only (anything
+  else stops the run, exit 2, as `SLIGHT_SCHED` does); without it, the
+  system's entropy (`getentropy`), so runs differ. `(rand/seed n)`
+  starts the calling process's generator again from `n`, for a program
+  that takes its seed as an argument (boids). The seed goes through
+  `replay.c` (`rt_io_random_seed`) either way, so every record now holds
+  one more entry, before the program's first, and a replay draws what
+  the recorded run drew without being given the seed. `t/run.sh` sets
+  `SLIGHT_SEED=1`, so the golden tests are the same every run.
+- **The prelude** has `rand/pick`, an element, `()` for none, as `nth`
+  gives, and `rand/shuffle`, which sorts the elements by a `rand/float`
+  each: a list can't be shuffled in place, and sorting by random keys
+  is hard to get wrong where swapping as elements come is easy to bias.
+  Two keys alike, which would keep their order, come about once in
+  2^54 / n^2 shuffles.
+- **Not cryptographic,** and said so: what SplitMix64 draws next can be
+  worked out from what it drew. Keys and tokens want the system's
+  entropy each time, which TLS will want anyway (12c); a lookup's query
+  ids already take theirs from it (`rt_io_seed`). Left for then.
+- **Boids** is the first program to use it: its Park–Miller generator,
+  written in slight, is gone, and it draws its flock with `rand/float`
+  after `(rand/seed seed)`, its seed still an argument. Its expected
+  output was made again by its model, `t/models/boids.py`, which draws
+  from `t/models/rand.py`, a SplittableRandom in Python, checked against
+  Java's on 9,000 draws and splits from three seeds.
+- **Checked:** golden test 273, whose expected output is Java 21's
+  `SplittableRandom` (`t/models/Rand273.java`): draws from
+  `SLIGHT_SEED`, `rand/seed` again giving the same, a negative seed,
+  bounds of 1, a power of two and 2^62 - 1, floats, forks and a fork's
+  fork, `rand/pick`, `rand/shuffle`, and the faults; and
+  `t/replay/rand.slight` in `t/replay.sh`: processes that interleave
+  draw the same under five `SLIGHT_SCHED` orders from one seed, an
+  unseeded run replays as it was recorded, and two unseeded runs
+  differ.
