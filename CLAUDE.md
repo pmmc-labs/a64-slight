@@ -78,9 +78,11 @@ interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 UTF-8 by convention: the `str/` builtins count characters (a bad byte is
 a character of its own, as in Go), and the `bytes/` ones count bytes
 (D148, D219).
-`examples/` has twenty-three example programs (all but
-`ping-pong-tournament`, `top`, `chat` and `airline-gen` are golden
-tests), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149), the latest
+`examples/` has twenty-four example programs (all but
+`ping-pong-tournament`, `top`, `chat`, `airline-gen` and `forest` are
+golden tests; `forest`, a forest grown by a process per branch, drawn
+in Braille, the same picture under any schedule, draws with `math/sin`,
+whose last bits differ between machines, D76), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149), the latest
 `airline`, a simulated day branched with what-ifs, each run till it
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it
