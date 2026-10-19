@@ -1,0 +1,64 @@
+; A snail race, and an oracle that knows who'll win.
+;
+;     node bin/slightc.ts --target x86_64 -o snails examples/snails.slight
+;     ./snails          a new race every time
+;     ./snails 7        race 7
+;
+; Each snail is a process that crawls a step at a time, after a pause it
+; draws from its own random numbers. Before the race, the oracle runs it
+; already: it seeds the generator, forks five ghost snails, which draw
+; just as the real ones will but only add their pauses up, and joins
+; them. It writes its answer down, sealed: the answer's hash. Then the
+; generator is seeded the same again and the real snails are forked the
+; same way, so each gets the very generator its ghost had, split from the
+; root's at the fork (D222), and crawls as its ghost said it would.
+; join/race waits for the first over the line; the seal is opened. The
+; oracle is right every time, and under any SLIGHT_SCHED.
+;
+; The pauses are tens of milliseconds and the last is the lane's number,
+; so no two snails ever finish together.
+
+; A snail: steps steps, each after a pause; then (lane total), the time
+; it took. A ghost doesn't sleep or show itself, only adds up.
+(defun crawl (lane x steps ghost total)
+    (cond
+        ((== x steps)
+            (when (not ghost) (sleep lane))
+            (list lane (+ total lane)))
+        (#true
+            (let pause (* 10 (+ 3 (rand/int 10))))
+            (when (not ghost)
+                (sleep pause)
+                (tty/write \e "[" (* 2 lane) ";" (+ x 3) "H" \e "[38;5;" (colour lane) "m_@"))
+            (crawl lane (inc x) steps ghost (+ total pause)))))
+
+(defun colour (lane) (tuple/get (tuple 0 196 214 46 51 201) lane))
+
+(defun field (seed steps ghost)
+    (rand/seed seed)
+    (map (lambda (lane) (fork (crawl lane 0 steps ghost 0))) (range 1 6)))
+
+(defun line (row text) (tty/write \e "[" row ";1H" \e "[0m" \e "[K" text))
+
+(let seed (match @ARGV ((s & _) (str->int s)) (_ (rand/int 1000000))))
+(let steps (math/min 60 (- (tty/screen/cols) 8)))
+(tty/write \e "[?25l" \e "[2J")
+(line 1 (str "race " seed))
+(dotimes 1 6 (lambda (lane)
+                 (tty/write \e "[" (* 2 lane) ";1H" \e "[38;5;" (colour lane) "m" lane " @"
+                            \e "[" (* 2 lane) ";" (+ steps 4) "H" \e "[0m|")))
+
+; The oracle: the race, run already by ghosts.
+(match (join/all (field seed steps #true))
+    ((:ok ghosts)
+        (let order (sort-by cadr ghosts))
+        (let answer (car (car order)))
+        (line 13 (str "the oracle has run the race already, and sealed its answer: " (hash (list seed answer))))
+        (let snails (field seed steps #false))
+        (match (join/race snails)
+            ((_ (:ok (lane total)))
+                (line 14 (str "lane " lane " won in " total " ms; the seal opens: lane " answer ", " (hash (list seed answer))
+                              (if (== lane answer) " - right" " - wrong!")))
+                (join/all snails)
+                (line 15 (str "the oracle's whole order: " (map car order) "\e[?25h\n"))
+                (list :race seed :winner lane :oracle answer)))))

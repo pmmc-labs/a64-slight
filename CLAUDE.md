@@ -78,9 +78,11 @@ interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 UTF-8 by convention: the `str/` builtins count characters (a bad byte is
 a character of its own, as in Go), and the `bytes/` ones count bytes
 (D148, D219).
-`examples/` has twenty-five example programs (all but
-`ping-pong-tournament`, `top`, `chat`, `airline-gen`, `forest` and
-`sieve` are golden tests; `forest`, a forest grown by a process per
+`examples/` has twenty-six example programs (all but
+`ping-pong-tournament`, `top`, `chat`, `airline-gen`, `forest`, `sieve`
+and `snails` are golden tests; `snails`, a race whose winner an oracle
+of ghost snails, forked from the same seed, foretells, runs on the real
+clock; `forest`, a forest grown by a process per
 branch, drawn in Braille, the same picture under any schedule, draws
 with `math/sin`, whose last bits differ between machines, D76; `sieve`,
 the prime sieve as a chain of processes, a process per prime, drawn as
