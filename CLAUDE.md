@@ -78,9 +78,11 @@ interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 UTF-8 by convention: the `str/` builtins count characters (a bad byte is
 a character of its own, as in Go), and the `bytes/` ones count bytes
 (D148, D219).
-`examples/` has twenty-eight example programs (all but
+`examples/` has twenty-nine example programs (all but
 `ping-pong-tournament`, `top`, `chat`, `airline-gen`, `forest`, `sieve`,
-`snails`, `coral` and `waves` are golden tests; `waves`, strings on sine
+`snails`, `coral`, `waves` and `sketch` are golden tests; `sketch`, an
+Etch A Sketch on the keyboard, whose every step is a persistent map kept
+for undo and redo, is interactive; `waves`, strings on sine
 waves, a scroller, a case wave and a Lissajous snake, draws with
 `math/sin`, D76; `coral`, Collatz's ways to 1
 walked out from 1 and drawn in Braille, draws with `math/sin`, D76; `snails`, a race whose winner an oracle
