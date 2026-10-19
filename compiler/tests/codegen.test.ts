@@ -397,6 +397,21 @@ test('C builtins get their site after their arguments', () => {
     assert.match(compile('(str)'), /mov {2}x0, #RT_NIL\n {4}LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_str\n/);
 });
 
+test('the bit operations are inline (D221)', () => {
+    // two integers' tagged words, as they are
+    assert.match(compile('(let a 12) (let b 10) (bit/and a b)'), /and {2}x0, x1, x0/);
+    assert.match(compile('(let a 12) (bit/xor a 3)'), /eor {2}x0, x1, x0/);
+    assert.match(compile('(let a 12) (bit/not a)'), /eor {2}x0, x0, #-2/);
+    // a shift's count, checked, untagged and clamped to 63
+    assert.match(compile('(let a 12) (bit/shl a 3)'), /b\.lt Lfault_\d+\n {4}asr {2}x2, x0, #1\n {4}mov {2}x16, #63\n {4}cmp {2}x2, x16\n {4}csel x2, x2, x16, lt\n {4}lsl {2}x0, x1, x2/);
+    assert.match(compile('(let a 12) (bit/shr a 3)'), /asr {2}x0, x1, x2\n {4}and {2}x0, x0, #-2/);
+    assert.doesNotMatch(compile('(let a 12) (bit/and a 3)'), /rt_bit/);
+    assert.match(compile('(bit/count 255)'), /bl {3}rt_bit_count/);
+    assert.match(compile('(let f bit/or) (f 1 2)'), /orr {2}x0, x1, x0/);
+    fails('(bit/and 1)', 'test.slight:1:1: bit/and takes 2 arguments, not 1');
+    fails('(bit/not 1 2)', 'test.slight:1:1: bit/not takes 1 argument, not 2');
+});
+
 test('C builtins check their arity', () => {
     fails('(str/repeat "a")', 'test.slight:1:1: str/repeat takes 2 arguments, not 1');
     fails('(str/slice "a")', 'test.slight:1:1: str/slice takes 2 or 3 arguments, not 1');

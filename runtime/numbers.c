@@ -196,6 +196,12 @@ rt_value_t rt_is_nan(rt_value_t v) {
     return rt_is_float(v) && isnan(rt_float_value(v)) ? RT_TRUE : RT_FALSE;
 }
 
+// The bits set in n, as 63 bits of two's complement: (bit/count -1) is 63.
+// The other bit operations are compiled inline (D221).
+rt_value_t rt_bit_count(rt_value_t n, const char *site) {
+    return rt_int(__builtin_popcountll((uint64_t)rt_need_int(n, site) & ~((uint64_t)1 << 63)));
+}
+
 // The nearest float: exact up to 2^53.
 rt_value_t rt_int_to_float(rt_value_t n, const char *site) {
     return rt_new_float((double)rt_need_int(n, site), site);

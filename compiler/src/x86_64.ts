@@ -11,7 +11,7 @@
 // addressed up from rsp, so rsp is 16-aligned for every call, as System V
 // requires: nothing checks it, and a mistake crashes deep in libc.
 
-import { comment, NOT, placeArgs, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
+import { comment, NOT, placeArgs, type Code, type BitOp, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
 import { FLOAT_HEADER, FLOAT_VALUE, tupleElement } from './values.ts';
 
 const ARGS = ['rdi', 'rsi', 'rdx', 'rcx', 'r8', 'r9', 'r10', 'r11'];
@@ -112,6 +112,30 @@ const DIVISION: Readonly<Record<'div' | '%', (zero: string, overflow: string) =>
         '    mov  rax, rdx',
     ],
 };
+
+// Bits (D221), as on AArch64: and, or and xor of the tagged words, and
+// shifts of the word, a shift right's bit 0 cleared. The count goes in cl,
+// clamped to 63, which the shifts would otherwise take mod 64.
+const BITS: Readonly<Record<BitOp, (range: string) => Code>> = {
+    and: () => '    and  rax, rcx',
+    or:  () => '    or   rax, rcx',
+    xor: () => '    xor  rax, rcx',
+    shl: (range) => [...COUNT(range), '    shl  rdx, cl', '    mov  rax, rdx'],
+    shr: (range) => [...COUNT(range), '    sar  rdx, cl', '    and  rdx, -2', '    mov  rax, rdx'],
+};
+
+// The left operand into rdx, and the accumulator's count, untagged and
+// clamped to 63, into rcx.
+const COUNT = (range: string): readonly string[] => [
+    '    test rax, rax',
+    `    js   ${range}`,
+    '    mov  rdx, rcx',
+    '    mov  rcx, rax',
+    '    sar  rcx, 1',
+    '    mov  esi, 63',
+    '    cmp  rcx, rsi',
+    '    cmova rcx, rsi',
+];
 
 const register = (op: Operand): string | null =>
     op.t === 'acc' ? 'rax' : op.t === 'left' ? 'rcx' : op.t === 'proc' ? 'r15' : op.t === 'fp' ? 'rbp' : null;
@@ -271,6 +295,8 @@ export const X86_64: Target = {
         `    jo   ${overflow}`,
     ],
     divide: (op, zero, overflow) => DIVISION[op](zero, overflow),
+    bits: (op, range) => BITS[op](range),
+    bitNot: '    xor  rax, -2',
 
     cxr: (step) => (step === 'a' ? '    mov  rax, qword ptr [rax - 1]    // car' : '    mov  rax, qword ptr [rax + 7]    // cdr'),
     tupleRef: (i) => `    mov  rax, qword ptr [rax + ${tupleElement(i)}]    // element ${i}`,

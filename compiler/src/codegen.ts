@@ -45,7 +45,7 @@ import { isReceiveBody, stateFunctions } from './classify.ts';
 import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
 import { AARCH64 } from './aarch64.ts';
-import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, word, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
+import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, word, type BitOp, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
 
 // The locals in scope, innermost first: an association list from name to
 // frame slot.
@@ -547,6 +547,20 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
         const [cond, op] = cmp;
         return compileNumeric(x, name, args, operand, st, 'rt_compare', [imm(op)], (s) => [s.t.compareBool(cond), s]);
     }
+    const bit = BITS[name];
+    if (bit !== undefined) {
+        return compileBinary(x, name, args, operand, st, (s) => {
+            if (bit !== 'shl' && bit !== 'shr') return [s.t.bits(bit, ''), s];
+            const [range, s1] = faultLabel(s, 'RT_FAULT_RANGE', name, x.pos);
+            return [s.t.bits(bit, range), s1];
+        });
+    }
+    if (name === 'bit/not') {
+        checkArity(x, name, args, 1);
+        const [notInt, st1] = faultLabel(st, 'RT_FAULT_NOT_INT', name, x.pos);
+        const [code, st2]   = compileExpr(args[0]!, operand, st1);
+        return [[code, st.t.branchUnlessInt(notInt), st.t.bitNot], st2];
+    }
     if (DIVISION.includes(name)) {
         const op = name as 'div' | '%';
         return compileBinary(x, name, args, operand, st, (s) => {
@@ -852,8 +866,8 @@ function builtinWrapper(x: Sym, st: St): [string, St] {
 }
 
 function builtinArity(name: string): number | null {
-    if (name in ARITH || name in COMPARE || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply', '/'].includes(name)) return 2;
-    if (PREDICATES.includes(name) || name === 'pprint' || cxrPath(name) !== null) return 1;
+    if (name in ARITH || name in COMPARE || name in BITS || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply', '/'].includes(name)) return 2;
+    if (PREDICATES.includes(name) || name === 'pprint' || name === 'bit/not' || cxrPath(name) !== null) return 1;
     // with optional arguments, as a value it takes just the ones it needs (D219)
     const c = C_BUILTINS[name];
     return c !== undefined && !c.variadic ? c.min : null;
@@ -939,6 +953,12 @@ const COMPARE: Readonly<Record<string, readonly [Cond, string]>> = {
 
 // div and %: integers only, truncating toward zero (D68).
 const DIVISION: readonly string[] = ['div', '%'];
+
+// The bit operations on two integers, inline (D221); bit/not is one's, and
+// bit/count is in C.
+const BITS: Readonly<Record<string, BitOp>> = {
+    'bit/and': 'and', 'bit/or': 'or', 'bit/xor': 'xor', 'bit/shl': 'shl', 'bit/shr': 'shr',
+};
 
 const RT_TAG_LIST = 1;
 
@@ -1048,6 +1068,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'math/nan?':          fixed('rt_is_nan', 1),
     'int->float':         fixed('rt_int_to_float', 1),
     'float->str':         fixed('rt_float_to_str', 1, 2),
+    'bit/count':          fixed('rt_bit_count', 1),
     'lambda?':            fixed('rt_is_lambda', 1),
     'send':               fixed('rt_send', 2),
     'join':               fixed('rt_join', 1),
@@ -1067,8 +1088,8 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
 // The names a defun can't take.
 const BUILTINS: readonly string[] = [
     'pprint', 'eq?', 'ne?', 'cons', 'list', 'tuple', 'apply', '/',
-    ...DIVISION, ...PREDICATES,
-    ...[ARITH, COMPARE, C_BUILTINS].flatMap((table) => Object.keys(table)),
+    ...DIVISION, ...PREDICATES, 'bit/not',
+    ...[ARITH, COMPARE, BITS, C_BUILTINS].flatMap((table) => Object.keys(table)),
 ];
 
 const isBuiltin = (name: string): boolean => BUILTINS.includes(name) || cxrPath(name) !== null;
@@ -1514,7 +1535,7 @@ function label(st: St, hint: string): [string, St] {
 
 type Fault = 'RT_FAULT_NOT_INT' | 'RT_FAULT_OVERFLOW' | 'RT_FAULT_NOT_BOOL' | 'RT_FAULT_NO_CLAUSE' | 'RT_FAULT_STACK' | 'RT_FAULT_NO_MATCH'
            | 'RT_FAULT_NOT_CONS' | 'RT_FAULT_NOT_LIST' | 'RT_FAULT_HEAP' | 'RT_FAULT_DIV_ZERO'
-           | 'RT_FAULT_NOT_FUNC' | 'RT_FAULT_ARITY';
+           | 'RT_FAULT_NOT_FUNC' | 'RT_FAULT_ARITY' | 'RT_FAULT_RANGE';
 
 // A label to branch to when `what`, at `pos`, goes wrong: an out-of-line
 // call to rt_fault, with the offending value (if any) in the accumulator.

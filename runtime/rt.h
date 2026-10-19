@@ -669,6 +669,7 @@ rt_value_t rt_mod(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_mod);
 rt_value_t rt_is_nan(rt_value_t v) RT_ASM(rt_is_nan);
 rt_value_t rt_int_to_float(rt_value_t n, const char *site) RT_ASM(rt_int_to_float);
 rt_value_t rt_float_to_str(rt_value_t x, rt_value_t digits, const char *site) RT_ASM(rt_float_to_str);
+rt_value_t rt_bit_count(rt_value_t n, const char *site) RT_ASM(rt_bit_count);
 
 // Called at a function's entry when proc's reductions run out, with the
 // function's first n slots (from frame: its parameters and captured

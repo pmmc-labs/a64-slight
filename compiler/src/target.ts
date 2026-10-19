@@ -32,6 +32,7 @@ export type Cond = 'eq' | 'ne' | 'lt' | 'le' | 'gt' | 'ge';
 
 // The float operations compiled code does itself (D198).
 export type FloatOp = '+' | '-' | '*' | '/';
+export type BitOp = 'and' | 'or' | 'xor' | 'shl' | 'shr';
 
 // Each condition's opposite, for a branch taken when it doesn't hold.
 export const NOT: Readonly<Record<Cond, Cond>> = { eq: 'ne', ne: 'eq', lt: 'ge', le: 'gt', gt: 'le', ge: 'lt' };
@@ -164,6 +165,13 @@ export type Target = {
     readonly floatArith: (op: FloatOp) => Code;
     readonly floatArithInt: (op: FloatOp, n: bigint) => Code;
     readonly divide: (op: 'div' | '%', zero: string, overflow: string) => Code;
+    // Bit operations on integers (D221), as tagged words: of the left
+    // operand and the accumulator, into the accumulator, a shift's count
+    // being the accumulator, branching to range when it's negative, and
+    // taken as 63 when it's more, so that bits shifted out are lost and a
+    // shift right fills with the sign; and the accumulator's complement.
+    readonly bits: (op: BitOp, range: string) => Code;
+    readonly bitNot: Code;
 
     // The accumulator's car or cdr (it's a cons), for car, cdr and c[ad]r;
     // and its element i (it's a tuple of more than i), for a tuple pattern.

@@ -1133,6 +1133,26 @@ keeps it in `Math` (D221).
   as a float; and a tie goes away from zero, so `(float->str 2.5 0)` is
   `"3"`. From 1e21 up, and `nan` and `inf`, are as `str` shows them.
 
+### Bits
+
+On integers, as 63 bits of two's complement, compiled inline (D221).
+Anything else faults (`:not-an-int`).
+
+- `(bit/and a b)`, `(bit/or a b)`, `(bit/xor a b)`, `(bit/not a)`.
+- `(bit/shl a k)`: `a` shifted left `k` bits. Bits shifted past the top
+  are lost, where `*` would fault: `(bit/shl 3 61)` keeps only the low
+  63 bits, and so is negative.
+- `(bit/shr a k)`: `a` shifted right `k` bits, filled with its sign, as
+  JavaScript's `>>`, so it's `a` divided by 2^k, rounded down:
+  `(bit/shr -7 1)` is -4.
+- A count of 63 or more shifts out every bit, giving 0, or -1 for a
+  negative `a` shifted right, as Go has it (JavaScript takes it mod 32
+  instead). A negative count faults (`:out-of-range`).
+- `(bit/count a)`: the bits set in `a`'s 63, so `(bit/count -1)` is 63.
+
+They take a fixed number of arguments, so they can be values:
+`(fold/l 0 bit/xor hashes)`.
+
 ### Comparison
 
 - `(== a b)`, `(!= a b)`, `(< a b)`, `(<= a b)`, `(> a b)`, `(>= a b)`:
