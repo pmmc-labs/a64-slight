@@ -116,6 +116,7 @@
 
 (@include :fs)
 (@include :http)
+(@include :map)
 (@include "airline-services.slight")
 
 ; --- the model ----------------------------------------------------------------
@@ -556,9 +557,18 @@
 (defun run/checkpoints (r) (tuple/get r 7))
 (defun run/begun (r) (tuple/get r 8))
 
+; The runs kept so far, #(by-name names): a map from each name to its run,
+; to find one in a few steps however many there are, and the names,
+; newest first, for the order they came in (D223). runs/of makes them
+; from (name run) pairs, newest first, and runs/list gives those back.
+(defun runs/of (pairs) (tuple (list->map pairs) (map car pairs)))
+(defun runs/get (runs name) (map/get (tuple/get runs 0) name))
+(defun runs/add (runs name run) (tuple (map/put (tuple/get runs 0) name run) (cons name (tuple/get runs 1))))
+(defun runs/list (runs) (map (lambda (name) (list name (runs/get runs name))) (tuple/get runs 1)))
+
 ; The runs from the base to name, oldest first.
 (defun path-of (runs name)
-    (let parent (run/parent (lookup name runs)))
+    (let parent (run/parent (runs/get runs name)))
     (if (nil? parent) (list name) (append (path-of runs parent) (list name))))
 
 ; What a branch with change, from the last run on path, is compared with:
@@ -569,8 +579,8 @@
     (match path
         (() ())
         ((name & rest)
-            (let ends (map (lambda (c) (cadr (window day c))) (cons change (map (lambda (r) (run/change (lookup r runs))) rest))))
-            (cons (list name (run/digests (lookup name runs)) (fold/l 0 math/max ends))
+            (let ends (map (lambda (c) (cadr (window day c))) (cons change (map (lambda (r) (run/change (runs/get runs r))) rest))))
+            (cons (list name (run/digests (runs/get runs name)) (fold/l 0 math/max ends))
                   (targets-of day runs rest change)))))
 
 ; A run that rejoined name at stop, for the whole day: from stop on its
@@ -578,7 +588,7 @@
 ; and its legs name's, but for those it had flown or begun by then. One
 ; in the air at stop lands when name's does, the two being the same then.
 (defun rejoined-day (runs name stop digests totals flown)
-    (let theirs (lookup name runs))
+    (let theirs (runs/get runs name))
     (let i (- stop (start)))
     (let n (- (end) (start)))
     (let shift (totals- (tuple/get totals i) (tuple/get (run/totals theirs) i)))
@@ -599,7 +609,7 @@
 (defun totals- (a b) (match (list a b) (((f l m c) (f2 l2 m2 c2)) (list (- f f2) (- l l2) (- m m2) (- c c2)))))
 
 (defun against-base (runs name)
-    (totals- (last-of (run/totals (lookup name runs))) (last-of (run/totals (lookup "base" runs)))))
+    (totals- (last-of (run/totals (runs/get runs name))) (last-of (run/totals (runs/get runs "base")))))
 
 ; Whether digests a and b are the same for their first n minutes.
 (defun same-before? (a b i n)
@@ -621,7 +631,7 @@
 ; it began, when it was its parent; or, once it had rejoined a run, one
 ; that run held for after, the two being the same then.
 (defun state-at (runs name c)
-    (let r (lookup name runs))
+    (let r (runs/get runs name))
     (let own (fold/l () (lambda (best cp) (if (<= (car cp) c) cp best)) (run/checkpoints r)))
     (let before (if (nil? (run/parent r)) () (state-at runs (run/parent r) (math/min c (run/begun r)))))
     (let after (match (run/fate r)
@@ -643,7 +653,7 @@
 (defun restore-of (runs name cp)
     (match cp
         ((m states waiting)
-            (let r (lookup name runs))
+            (let r (runs/get runs name))
             (let i (- m (start)))
             (tuple m states waiting (tuple/get (run/totals r) (dec i)) (flown-at (run/flown r) m)
                    (reverse (tuple->list (tuple/slice (run/digests r) 0 i)))
@@ -673,7 +683,7 @@
 (defun explore (day opts h bs runs tally)
     (match (list bs tally)
         ((() (base simulated own us saved))
-            (let kept (reverse runs))
+            (let kept (reverse (runs/list runs)))
             (tty/write "the history:\n")
             (map (lambda (r) (pprint (entry-of runs r))) (filter (lambda (r) (ne? (car r) "base")) kept))
             (when (str? (opt/json opts)) (write-json (opt/json opts) day kept))
@@ -682,7 +692,7 @@
                 (tty/write "time: the branches in " (ms us) ", " (ms saved) " of it on the minutes before their changes" \n))
             (str base " minutes for the base, and " simulated " for its branches, of which " own " their own"))
         ((((name parent change) & rest) _)
-            (match (lookup name runs)
+            (match (runs/get runs name)
                 (:not-found
                     (match (run-branch day opts runs name parent change tally (parent? name rest))
                         ((runs2 tally2 said)
@@ -707,7 +717,7 @@
 ; its own if keeps: the runs with it, the tally, and what report-branch
 ; says of it, (same from stop rejoined begun took minutes).
 (defun run-branch (day opts runs name parent change tally keeps)
-    (let changes (append (run/changes (lookup parent runs)) (list change)))
+    (let changes (append (run/changes (runs/get runs parent)) (list change)))
     (let targets (targets-of day runs (path-of runs parent) change))
     (let from (car (window day change)))
     (let every (opt/every opts))
@@ -719,11 +729,10 @@
         ((:ok (stop rejoined digests totals flown checkpoints))
             (let took (- (clock/us) t0))
             (let minutes (+ (- stop begun) 1))
-            (let same (same-before? digests (run/digests (lookup parent runs)) 0 (- from (start))))
+            (let same (same-before? digests (run/digests (runs/get runs parent)) 0 (- from (start))))
             (let whole (if (nil? rejoined) (list digests totals flown) (rejoined-day runs rejoined stop digests totals flown)))
             (let fate (list from (if (nil? rejoined) (end) stop) rejoined))
-            (let runs2 (cons (list name (tuple changes parent change (car whole) (cadr whole) (caddr whole) fate checkpoints begun))
-                             runs))
+            (let runs2 (runs/add runs name (tuple changes parent change (car whole) (cadr whole) (caddr whole) fate checkpoints begun)))
             (match tally
                 ((base simulated own us saved)
                     (list runs2
@@ -817,7 +826,7 @@
             (raise (str (opt/from opts) " was kept for another day, or another model, so it's no use for this one")))
         ((cons? kept)
             (tty/write "kept: " (length kept) " runs of this day, from " (opt/from opts) \n)
-            (go-on day opts h kept 0 0))
+            (go-on day opts h (runs/of kept) 0 0))
         (#true
             (let every (opt/every opts))
             (match (join (fork (simulate day () () () every)))
@@ -825,11 +834,11 @@
                     (let t2 (clock/us))
                     (if (opt/record opts)
                         (print-record day flown)
-                        (go-on day opts h (list (list "base" (tuple () () () digests totals flown () checkpoints (start))))
+                        (go-on day opts h (runs/of (list (list "base" (tuple () () () digests totals flown () checkpoints (start)))))
                                (- (end) (start)) (- t2 t1))))))))
 
 (defun go-on (day opts h runs minutes us)
-    (let base (lookup "base" runs))
+    (let base (runs/get runs "base"))
     (cond
         ((str? (opt/recover opts))
             (when (and (opt/timed opts) (> minutes 0)) (tty/write "time: the base in " (ms us) ", " (pace day us minutes) \n))
@@ -849,16 +858,16 @@
 ; every run its branches start from. bench/airline.py runs the shares
 ; and puts what they say together (D218).
 (defun share-of (bs k n)
-    (let roots (filter (lambda (b) (nil? (branch-named bs (cadr b)))) bs))
-    (let numbers (zip (map car roots) (range 0 (length roots))))
-    (filter (lambda (b) (== (% (lookup (root-of bs b) numbers) n) (dec k))) bs))
+    (let named (list->map (map (lambda (b) (list (car b) b)) bs)))
+    (let roots (filter (lambda (b) (not (map/has? named (cadr b)))) bs))
+    (let numbers (list->map (zip (map car roots) (range 0 (length roots)))))
+    (filter (lambda (b) (== (% (map/get numbers (root-of named b)) n) (dec k))) bs))
 
-(defun branch-named (bs name) (find (lambda (b) (eq? (car b) name)) bs))
-
-(defun root-of (bs b)
-    (match (branch-named bs (cadr b))
-        (() (car b))
-        (p  (root-of bs p))))
+; The name of the tree b is in: its own, if its parent isn't a branch.
+(defun root-of (named b)
+    (match (map/get named (cadr b))
+        (:not-found (car b))
+        (p          (root-of named p))))
 
 ; --- random what-ifs ------------------------------------------------------------
 
@@ -1010,14 +1019,14 @@
             (match (run-branch day opts runs dname "base" dchange (list 0 0 0 0 0) #true)
                 ((runs2 _ _)
                     (let now (car (window day dchange)))
-                    (let dflown (run/flown (lookup dname runs2)))
+                    (let dflown (run/flown (runs/get runs2 dname)))
                     (let d (against-base runs2 dname))
                     (tty/write "the disruption, " dname ": " (str dchange) ", from " (clock now) \n
                                "    against base: fuel " (signed (nth 0 d)) " kg, " (signed (nth 1 d)) " passenger-minutes late, "
                                (signed (nth 2 d)) " missed, " (signed (nth 3 d)) " cancelled" \n)
                     (let t0 (clock/us))
                     (let tries (map cadr (filter (lambda (r) (eq? (car r) :try)) asked)))
-                    (let near (touched day (run/flown (lookup "base" runs2)) dflown))
+                    (let near (touched day (run/flown (runs/get runs2 "base")) dflown))
                     (let all (candidates day dflown now tries near))
                     (let made (filter (lambda (c) (not (member? c tries))) all))
                     (let sampled (and (int? (opt/remedies opts)) (< (opt/remedies opts) (length made))))
@@ -1074,7 +1083,7 @@
             (let name (str "c" i))
             (match (run-branch day opts runs name from c (list 0 0 0 0 0) #false)
                 ((runs2 _ _)
-                    (let r (lookup name runs2))
+                    (let r (runs/get runs2 name))
                     (try-all day opts runs from dflown rest (inc i)
                              (cons (list name (str c) (cdr (against-base runs2 name)) (differences dflown (run/flown r))
                                          (minutes-run r) (str? (caddr (run/fate r))))
@@ -1095,15 +1104,18 @@
 ; their differences hash alike, as two minutes are the same when their
 ; digests are.
 (defun days-of (cs)
-    (let tup (list->tuple cs))
-    (let keyed (sort-by car (zip (map (lambda (c) (hash (nth 3 c))) cs) (range 0 (length cs)))))
-    (let runs (fold/l () (lambda (acc p)
-                             (match (list p acc)
-                                 (((h k) ((h2 k2 n) & older)) (if (== h h2) (cons (list h2 k2 (inc n)) older) (cons (list h k 1) acc)))
-                                 (((h k) ())                  (list (list h k 1)))))
-                      keyed))
-    (map (lambda (r) (match r ((_ k n) (append (take 4 (tuple/get tup k)) (list (dec n))))))
-         (sort-by cadr runs)))
+    (let hs (map (lambda (c) (hash (nth 3 c))) cs))
+    (days-firsts (zip cs hs) (fold/l (map/new) (lambda (m h) (map/update m h inc 0)) hs) ()))
+
+; Each candidate whose day is still counted, with how many others came to
+; it; its day's count then goes, so the rest that come to it are passed over.
+(defun days-firsts (chs counts acc)
+    (match chs
+        (() (reverse acc))
+        (((c h) & rest)
+            (match (map/get counts h)
+                (:not-found (days-firsts rest counts acc))
+                (n          (days-firsts rest (map/delete counts h) (cons (append (take 4 c) (list (dec n))) acc)))))))
 
 (defun g/name (g) (nth 0 g))
 (defun g/label (g) (nth 1 g))

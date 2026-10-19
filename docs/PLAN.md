@@ -723,8 +723,8 @@ waits for TLS.
 
 A persistent map, a hash trie of tuples, in slight: `lib/map.slight`,
 with `tuple/insert` and `tuple/remove` in the runtime for its nodes
-(D223). Golden tests 274 and 275, from `t/models/map.py`. Next: the
-airline's lookups by name onto it.
+(D223). Golden tests 274 and 275, from `t/models/map.py`. The airline
+finds its runs, its shares' trees and its remedies' days with it.
 
 ### Later: the rest of the October 2026 list
 

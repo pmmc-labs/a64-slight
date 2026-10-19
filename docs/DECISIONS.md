@@ -4286,8 +4286,19 @@ airline asked for, after strings, joins and numbers.)*
   are calls into C, several a level; compiling them inline waits for a
   profile that asks. 100,000 puts, a fold and 200,000 deletes take 0.2 s
   on the cloud machine. `hash` isn't seeded, so keys picked to collide
-  pile into one bucket. The airline moves onto it in a commit of its
-  own.
+  pile into one bucket.
+- **The airline,** its first user, in a commit of its own: its runs,
+  kept as an association list and looked up by name about fifteen
+  times, are a map and the list of names, newest first, for the order
+  the history, the JSON and `--keep` write them in; `--shard`'s
+  `share-of` finds each branch's parent and tree's number in maps, where
+  it walked lists; and `days-of` counts the candidates that come to each
+  day in a map, where it sorted them by hash and folded neighbours. Its
+  output is the same, byte for byte, golden tests 256 to 260 and the
+  live checks unchanged, and the JSON and kept histories compared with
+  the program before. It's no faster at 1,000 what-ifs on the big day
+  (140 s either way): the simulating is the cost there, and the lists
+  would have told only at many times that.
 - **Checked:** golden test 274 (`tuple/insert` and `tuple/remove`, by
   hand), and 275: the API and the trie's layout by hand, collisions and
   a path 13 levels deep through the hashed functions, and a seeded run
