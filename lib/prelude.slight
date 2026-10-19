@@ -186,3 +186,29 @@
     (match table
         (()                   :not-found)
         (((key value) & rest) (if (eq? k key) value (lookup k rest)))))
+
+; --- waiting for processes ----------------------------------------------------
+
+; join/race, in the runtime, gives the first of pids to end, as (pid
+; result). These are JavaScript's Promise.any and Promise.all on top of
+; it; both leave the processes they don't wait for running (D220).
+
+; The first of pids to succeed, as (:ok value); or, once all have failed,
+; (:error reasons), the reasons in the order of pids.
+(defun join/any (pids) (join/any-loop pids pids))
+(defun join/any-loop (pids waiting)
+    (if (nil? waiting)
+        (list :error (map (lambda (p) (cadr (join p))) pids))
+        (match (join/race waiting)
+            ((_ (:ok v))    (list :ok v))
+            ((p (:error _)) (join/any-loop pids (remove (lambda (q) (eq? q p)) waiting))))))
+
+; (:ok values), the values in the order of pids, once all have succeeded;
+; or the first (:error reason) as soon as one fails.
+(defun join/all (pids) (join/all-loop pids pids))
+(defun join/all-loop (pids waiting)
+    (if (nil? waiting)
+        (list :ok (map (lambda (p) (cadr (join p))) pids))
+        (match (join/race waiting)
+            ((_ (:error reason)) (list :error reason))
+            ((p (:ok _))         (join/all-loop pids (remove (lambda (q) (eq? q p)) waiting))))))

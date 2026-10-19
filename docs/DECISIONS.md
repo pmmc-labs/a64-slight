@@ -4022,3 +4022,72 @@ to the utf8 string.")* It replaces the byte builtins of D27 and D62, the
   file's bytes lost); a character type; `str/bytes-` names, the
   proposal's, for the user's `bytes/`; keeping the old names as aliases;
   keeping `ord` and `chr`.
+
+**D220. `join/race`, `join/any` and `join/all`: waiting for the first of
+several processes.** *(Stevan, Oct 2026: "Let's stick to the JavaScript
+meanings. And I agree with your recommendations. Let's build it", to
+Claude's proposal, after he asked whether `join/all` and `join/race`
+should come with `join/any`.)* `join` waits for one pid. Waiting for
+whichever of several ends first meant `monitor` and `recv`, and so a
+state function, which the caller and everything above it then had to be
+too: why the airline ran its what-ifs one at a time, and why
+`http/await` forked a box to watch for the reply and the timer.
+
+- **JavaScript's meanings.** `(join/race pids)` gives `(pid result)` for
+  the first of `pids` to end, well or not (`Promise.race`); `(join/any
+  pids)` gives `(:ok v)` for the first to end well, or `(:error
+  reasons)`, in the order of `pids`, once all have failed
+  (`Promise.any`); `(join/all pids)` gives `(:ok values)`, in the order
+  of `pids`, or the first `(:error r)` as soon as there is one, without
+  waiting for the rest (`Promise.all`). `allSettled` is `(map join
+  pids)`, so it has no name. Claude's first name for the race was
+  `join-any`, which JavaScript's `any` would have made mean something
+  else.
+- **One of them in the runtime.** `join/race` is a builtin in C; the
+  other two are a few lines of slight in the prelude, on it. Like
+  `join`, it keeps the caller's stack while it waits, so the caller
+  needn't be a state function, and the `recv` rule doesn't change.
+- **How it waits.** A process blocked in `join` is on its pid's list of
+  joiners, and on only one; a race is on several. So it's a watch on
+  each pid, as a monitor is (D183), that wakes its process instead of
+  sending it a message: the first to end wakes it, and it takes the
+  rest off when it runs; a pid that ends in between finds it woken
+  already, and only goes. Its watches go with it if it's killed, as a
+  monitor's do. `join` keeps its own way, which allocates nothing, since
+  the benchmarks join a great deal; a watch is a malloc a pid.
+- **Pids that have ended already:** the first of them in the list, as
+  `Promise.race` settles with promises settled before it's called, and
+  at once. An exit record doesn't keep when its process ended, and
+  keeping it would cost every process.
+- **Losers go on running,** as in JavaScript. A process may be another's
+  to join too, and `(map kill pids)` is one call. Rejected: killing them,
+  as structured concurrency does, which is tidier but would surprise a
+  caller who joins them later.
+- **Faults,** all found before it waits, so a bad pid faults whichever
+  ends first: an empty list (`:not-a-pid`, the value `()`), since
+  JavaScript's race of nothing waits forever, and here that's a hang;
+  something that isn't a list (`:not-a-list`), or in it that isn't a
+  pid (`:not-a-pid`); the caller's own pid (`:join-self`). `join/any` of
+  `()` is `(:error ())`, and `join/all` of `()` is `(:ok ())`, as in
+  JavaScript.
+- **Telling of it:** `:system` shows a racer as `:joining`, its
+  `:joining` field the list of the pids it races, in order; and a root
+  racing processes that never end is a deadlock, `... waiting in f for
+  the first of #<pid 2>, #<pid 3> to end, ...`.
+- **`http/await`** races the request's process against one that sleeps,
+  in place of a box that monitored it and took the timer's message.
+- **What it doesn't do:** make CPU work faster. The runtime runs on one
+  core, so the airline's what-ifs in processes of their own would take
+  as long, and want `--shard` (D218) as before. It's for waits that
+  overlap (a timeout, services asked at once, the first good answer),
+  and programs written so get the cores if the runtime ever has them.
+- **Checked:** golden tests 266 (the race: the first to end, an error
+  winning, pids already ended, two ending at once, a killed target and
+  a killed racer, racers waking in order, a pool of two, a timeout, and
+  `:system`), 267 (`join/any` and `join/all`, with the times they took
+  on the virtual clock) and 268 (the faults, and the deadlock), worked
+  out by hand; 211 now has a reply that comes in time as well as one
+  that doesn't. 267 gives the same under five seeded orders, a replay
+  check now. A program that races thousands of times, killing targets
+  and racers along the way, runs clean under AddressSanitizer and under
+  eight seeded orders.

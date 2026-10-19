@@ -50,19 +50,14 @@
             (http/await (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx)) ms))
         ((:error reason) (list :error reason))))
 
-; The pid's result, or (:error :timeout) after ms milliseconds, killing it.
+; The pid's result, or (:error :timeout) after ms milliseconds, killing it:
+; it races a process that sleeps that long (D220).
 (defun http/await (pid ms)
-    (let box (fork (http/box pid)))
-    (after ms box :timeout)
-    (match (join box)
-        ((:ok (:done exit)) (http/unwrap exit))
-        ((:ok (:timeout))   (kill pid) (list :error :timeout))))
-
-(defun http/box (pid)
-    (monitor pid)
-    (recv
-        ((:exit _ exit) (list :done exit))
-        (:timeout       (list :timeout))))
+    (let timer (fork (sleep ms)))
+    (match (join/race (list pid timer))
+        ((p exit) (if (eq? p pid)
+                      (do (kill timer) (http/unwrap exit))
+                      (do (kill pid) (list :error :timeout))))))
 
 ; A connection's process ends with its result, or with (:error reason) if the
 ; device failed (D136). join gives either as (:ok result) or (:error reason).

@@ -1,0 +1,10 @@
+fault in #<pid 2>: not a pid: () (join/race at t/268-join-race-faults.slight:7:21)
+not-a-pid
+fault in #<pid 3>: not a list: 5 (join/race at t/268-join-race-faults.slight:8:21)
+not-a-list
+fault in #<pid 4>: not a pid: 3 (join/race at t/268-join-race-faults.slight:9:21)
+not-a-pid
+fault in #<pid 6>: a process can't join itself: #<pid 6> (join/race at t/268-join-race-faults.slight:10:21)
+join-self
+deadlock: the root process is waiting in the top level for the first of #<pid 7>, #<pid 8> to end, and nothing else can run
+exit: 1

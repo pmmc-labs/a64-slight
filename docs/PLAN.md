@@ -693,6 +693,14 @@ into `runtime/unicode.c`), ASCII strings marked so they're indexed in
 one step, and `pprint` escaping strings. Every program moved to the new
 names; golden tests 261 to 265, from `t/models/strings.py`.
 
+### Waiting for several processes (done, Oct 2026)
+
+`join/race`, the first of a list of pids to end, in the runtime, and
+`join/any` and `join/all` in the prelude on it: JavaScript's
+`Promise.race`, `any` and `all` (D220). They keep the caller's stack, as
+`join` does, so the caller needn't be a state function. `http/await`
+races its request against a sleeper. Golden tests 266 to 268.
+
 ### Later: the rest of the October 2026 list
 
 The other changes from that list (above, "After 13"), for later, before

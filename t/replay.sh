@@ -14,7 +14,10 @@
 # t/replay/order.slight runs first in, first out, and then under
 # SLIGHT_SCHED with 20 seeds: each must print the five workers in some
 # order, the same each time for the same seed, and the seeds must not
-# all give one order. A seeded run must replay as it went.
+# all give one order. A seeded run must replay as it went. And
+# t/267-join-any-all.slight, whose results go by the virtual clock and
+# not by the order processes run in, must print its golden output under
+# five seeds (D220).
 cd "$(dirname "$0")/.." || exit 2
 TARGET=${TARGET-aarch64}
 case "$TARGET-$(uname -m)" in
@@ -43,6 +46,10 @@ for name in world net exec order; do
         check "$name (compile)" no
     fi
 done
+if ! node bin/slightc.ts --target "$TARGET" -o "$dir/joins" t/267-join-any-all.slight >"$dir/joins.compile" 2>&1; then
+    cat "$dir/joins.compile"
+    check "joins (compile)" no
+fi
 [ $fail -eq 0 ] || exit 1
 
 # run [NAME=value ...] prog [args ...]: runs a program, with those
@@ -163,6 +170,17 @@ else
     diff -u "$dir/order.recorded" "$dir/order.replayed"
     check "a seeded run replays as recorded" no
 fi
+
+# join/any and join/all: the same, whatever the order.
+for seed in 1 2 3 4 5; do
+    run SLIGHT_CLOCK=virtual SLIGHT_SCHED=$seed joins >"$dir/joins.$seed"
+    if printf 'exit: 0\n' | cat t/267-join-any-all.expected - | cmp -s - "$dir/joins.$seed"; then
+        check "join/any and join/all, seed $seed" ok
+    else
+        diff -u t/267-join-any-all.expected "$dir/joins.$seed"
+        check "join/any and join/all, seed $seed" no
+    fi
+done
 
 echo "replay: $fail failed"
 [ $fail -eq 0 ]

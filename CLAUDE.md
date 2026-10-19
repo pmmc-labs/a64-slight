@@ -25,7 +25,7 @@ each one into receive functions, D167, and `classify.ts` checks the
 `recv` rule),
 `$$`, `^$$`, `yield`, preemption, a FIFO run queue, pooled stacks that a
 process waiting in `recv` gives back, and the lifecycle: `join`,
-`monitor`, `kill`, `raise`, exit records, and faults that end just their
+`monitor`, `kill`, `raise`, `join/race` (D220), exit records, and faults that end just their
 process with `(:error (kind value site))` (`runtime/process.c`). Timers:
 `after`, `sleep`, and a virtual clock for tests (`SLIGHT_CLOCK=virtual`);
 `clock/us`, that clock in microseconds (D208).
@@ -158,7 +158,11 @@ ones, `str/` with JavaScript's methods' names and edge cases over
 characters, `bytes/` over bytes, conversions as `a->b`, Unicode's case
 mapping and white space (`runtime/unicode.c`), ASCII strings marked so
 they're indexed in one step, and `pprint` escaping strings; golden
-tests 261 to 265, from `t/models/strings.py`. **Next:** to settle with
+tests 261 to 265, from `t/models/strings.py`. Waiting for the first of
+several processes (D220): `join/race` in the runtime, and `join/any` and
+`join/all` in the prelude, JavaScript's `Promise.race`, `any` and `all`,
+each keeping its caller's stack as `join` does; golden tests 266 to
+268. **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan

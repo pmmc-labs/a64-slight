@@ -1,0 +1,15 @@
+(ok fast)
+10
+(error (listed-first failed-first))
+(error ())
+(ok done)
+0
+(ok (a b c))
+30
+(error first)
+10
+(ok slow)
+100
+(ok ())
+(ok (done done))
+()

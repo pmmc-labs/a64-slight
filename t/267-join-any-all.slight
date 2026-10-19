@@ -1,0 +1,39 @@
+; join/any and join/all (D220), in the prelude, on join/race:
+; JavaScript's Promise.any and Promise.all. join/any gives the first to
+; succeed, or every reason once all have failed; join/all gives every
+; value, in the order of the pids, or the first error as soon as there is
+; one. Neither stops the processes it no longer waits for. Times are in
+; milliseconds on the virtual clock.
+
+(defun after-ms (ms v) (fork (do (sleep ms) v)))
+(defun fail-ms (ms r) (fork (do (sleep ms) (raise r))))
+(defun took (t0) (div (- (clock/us) t0) 1000))
+
+; join/any: the first success, not the first end
+(let t0 (clock/us))
+(pprint (join/any (list (fail-ms 5 :x) (after-ms 20 :slow) (after-ms 10 :fast))))
+(pprint (took t0))
+; all fail: the reasons in the order of the pids, not of the failures
+(pprint (join/any (list (fail-ms 10 :listed-first) (fail-ms 5 :failed-first))))
+(pprint (join/any ()))
+; one that has succeeded already wins at once
+(let done (after-ms 1 :done))
+(sleep 2)
+(let t1 (clock/us))
+(pprint (join/any (list (after-ms 50 :later) done)))
+(pprint (took t1))
+
+; join/all: the values in the order of the pids, not of the ends
+(let t2 (clock/us))
+(pprint (join/all (list (after-ms 20 :a) (after-ms 10 :b) (after-ms 30 :c))))
+(pprint (took t2))
+; the first to fail, as soon as it does
+(let slow (after-ms 100 :slow))
+(let t3 (clock/us))
+(pprint (join/all (list slow (fail-ms 20 :second) (fail-ms 10 :first))))
+(pprint (took t3))
+; and the rest left running: slow ends when it would have
+(pprint (join slow))
+(pprint (took t3))
+(pprint (join/all ()))
+(pprint (join/all (list done done)))

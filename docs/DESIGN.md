@@ -231,6 +231,7 @@ reply refs.
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
 | `(join pid)` | **Blocking** wait for `pid` to end. Returns `(:ok value)` or `(:error reason)`. Works on any pid (not just children), anywhere (including inside lambdas), any number of times, and after the process has already ended. Joiners wake in the order they joined. `(join $$)` faults (`:join-self`). |
+| `(join/race pids)` | **Blocking** wait for the first of `pids` to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
 | `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has. Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
 | `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns `()`. |
@@ -260,7 +261,7 @@ reply refs.
   process pauses where it is, *keeping its stack*, and goes to the back of
   the run queue. `yield` is the same pause, chosen by the program.
 - **Stacks exist only while needed.** A process that is running, paused
-  (preempted or yielded), blocked in `join`, or blocked in a syscall holds a
+  (preempted or yielded), blocked in `join` or `join/race`, or blocked in a syscall holds a
   stack. A process waiting in `recv` holds none.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
   sources, no blocked I/O) is detected and reported. So far (step 10d): if
@@ -269,8 +270,9 @@ reply refs.
   for (below), and the root process hasn't ended,
   the program prints `deadlock: the root process is waiting in f for a
   message, and nothing else can run` (or `... waiting in f for #<pid N>
-  to end, ...`, in `join`) to stderr and exits 1, `f` being the function
-  it waits in (D171).
+  to end, ...`, in `join`, and `... for the first of #<pid N>, #<pid
+  M> to end, ...`, in `join/race`) to stderr and exits 1, `f` being the
+  function it waits in (D171).
 - **The program ends when nothing can run** and nothing more can come (no
   timer is pending, no socket or command can be waited for, and no
   process is connected to `:keypress` or stdin has ended), not when the
@@ -374,7 +376,7 @@ names no program can write.
   bytes, and the conversions `str->int`, `int->str`, `str->float`,
   `str->sym`, `sym->str`, `str->bytes`, `bytes->str` and `codes->str`.
   See Strings below for how each behaves.
-- processes: `send join monitor kill after raise disconnect`
+- processes: `send join join/race monitor kill after raise disconnect`
 - I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols` (the terminal's
   size, asked each time; 24 and 80 when stdout isn't a terminal), `pprint`
   (prints its argument and a newline, and returns `()`: D43;
@@ -393,6 +395,7 @@ program; it can only define functions.
 | folds | `(fold/l init f xs)` with `(f acc x)`; `(fold/r init f xs)` with `(f x acc)` |
 | lists | `reverse length append sum product map`; `(filter f xs)` keeps what `f` says `#true` to, `(remove f xs)` drops it; `(take n xs)`, `(skip n xs)` stop at the end of the list; `(nth i xs)` and `(find f xs)` give `()` when there's nothing; `member?`; `(range start end)` is `start` up to but not including `end`; `(dotimes start end f)` |
 | association lists | `(assoc k v table)` adds `(k v)`; `(lookup k table)` gives the value or `:not-found` |
+| processes | `(join/any pids)`, the first to succeed as `(:ok v)`, or `(:error reasons)` once all have failed; `(join/all pids)`, `(:ok values)` in the order of `pids`, or the first `(:error r)` as soon as one fails (D220) |
 
 D78 has why `filter`, `remove`, `range`, `take` and `skip` work as they
 do. The string functions it had are builtins now (D219).
@@ -774,7 +777,11 @@ processes that allocate and then wait turn out to hold too much).
 - Ending: the Result is copied into a small per-pid **exit record**.
   Processes blocked in `join` on it wake with a copy; later `join`s read
   the record; monitors get `(:exit pid result)`, and the monitors it set
-  on others are taken off their lists (D183). Then the heap, the
+  on others are taken off their lists (D183). A `join/race` is a watch
+  on each of its pids, as a monitor is, that wakes its process rather
+  than sending it a message; the first to end wakes it, and it takes the
+  rest off when it runs, so a killed racer, or one whose other pids end
+  first, leaves nothing behind (D220). Then the heap, the
   mailbox, the stack and the process struct are freed (D102). Nothing
   on a stack needs cleaning up, so `kill` frees a process wherever it is
   (D103).

@@ -1029,6 +1029,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'lambda?':            fixed('rt_is_lambda', 1),
     'send':               fixed('rt_send', 2),
     'join':               fixed('rt_join', 1),
+    'join/race':          fixed('rt_join_race', 1),
     'monitor':            fixed('rt_monitor', 1),
     'kill':               fixed('rt_kill', 1),
     'raise':              fixed('rt_raise', 1),

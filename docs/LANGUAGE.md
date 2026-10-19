@@ -52,9 +52,10 @@ exits 1:
     deadlock: the root process is waiting in wait-forever for a
     message, and nothing else can run
 
-(on one line; the other kind is `... waiting in the top level for #<pid
-2> to end, ...`). It names the function the root waits in, as `:system`
-does (under Devices).
+(on one line; the others are `... waiting in the top level for #<pid
+2> to end, ...`, in `join`, and `... for the first of #<pid 2>, #<pid
+3> to end, ...`, in `join/race`). It names the function the root waits
+in, as `:system` does (under Devices).
 
 These also go to stderr, as they happen:
 
@@ -644,6 +645,37 @@ The fault kinds:
   value)` or `(:error reason)`. It works on any pid, any number of
   times, from anywhere (a lambda included), and after the process has
   ended. Several joiners wake in the order they joined.
+- `(join/race pids)` waits until the first of the list `pids` ends, and
+  gives `(pid result)`, `result` being what `join` would give (D220). If
+  some have ended already, it's the first of those in the list. Like
+  `join`, it works from anywhere, and the caller keeps its stack while it
+  waits, so it needn't be a function that waits in `recv`. An empty list
+  faults (`:not-a-pid`), since it would wait forever, and so does
+  something in the list that isn't a pid, or the caller's own pid
+  (`:join-self`), all found before it waits. The others go on running:
+  `kill` them if they're no longer wanted.
+
+      (defun within (ms pid)
+          (let timer (fork (sleep ms)))
+          (match (join/race (list pid timer))
+              ((p result) (if (eq? p pid)
+                              (do (kill timer) result)
+                              (do (kill pid) (list :error :timeout))))))
+
+  And a pool, at most k jobs at once, is a loop that forks till k are
+  running and then waits for the first of them to end.
+- `(join/any pids)` gives `(:ok value)` for the first of `pids` to end
+  well, or, once all have ended with errors, `(:error reasons)`, the
+  reasons in the order of `pids`: JavaScript's `Promise.any`. An empty
+  list gives `(:error ())`.
+- `(join/all pids)` gives `(:ok values)`, the values in the order of
+  `pids`, once all have ended well; or the first `(:error reason)` as
+  soon as there is one, without waiting for the rest: JavaScript's
+  `Promise.all`. An empty list gives `(:ok ())`. `(map join pids)` is the
+  one that waits for every result, ended well or not.
+
+  Both are in the prelude, on `join/race`, and both leave running the
+  processes they no longer wait for.
 - `(monitor pid)` asks to be told when `pid` ends: the caller is sent
   `(:exit pid result)` then, or at once if it already has. Monitoring
   twice means two messages. Nothing is sent to a parent unless it asks.
@@ -992,12 +1024,13 @@ which `lookup` reads; more keys may come. A process's:
   the root).
 - `(:state st)`: `:running` (the one asking, unless a timer asked),
   `:ready` (in the run queue), `:recv` (waiting for a message),
-  `:joining` or `:sleeping`.
-- `(:joining p)`: the process it waits for in `join`, or `()`.
+  `:joining` (in `join` or `join/race`) or `:sleeping`.
+- `(:joining p)`: the process it waits for in `join`, the list of those
+  it races in `join/race`, or `()`.
 - `(:in name)`: the function it's in, as a string: the receive function
-  it waits in; the one that called `join`, `sleep`, `yield`, or `send`
-  to a device; the one it was entering when it was preempted; or the one
-  it starts in. A `recv` in the middle of a function waits in a receive
+  it waits in; the one that called `join`, `join/race`, `sleep`,
+  `yield`, or `send` to a device; the one it was entering when it was
+  preempted; or the one it starts in. A `recv` in the middle of a function waits in a receive
   function of its own, named for both: `"server (recv at
   prog.slight:7:12)"`. The top level is `"the top level"`, a `fork`'s
   body `"fork at prog.slight:3:9"` (a `connect`'s, `"connect at ..."`),
@@ -1411,10 +1444,13 @@ Association lists, `((key value) ...)`:
 - `(lookup k table)`: the value for the first key `eq?` to `k`, or
   `:not-found`.
 
+Processes: `join/any` and `join/all`, under Waiting for a process.
+
 Its helpers (`fold/r-loop`, `reverse-onto`, `length-loop`, `sum-loop`,
 `product-loop`, `map-loop`, `filter-loop`, `remove-loop`, `take-loop`,
-`range-loop`, `zip-loop`, `sort-runs`, `sort-pairs` and `sort-merge`)
-are visible too, but not meant to be called. The string functions are
+`range-loop`, `zip-loop`, `sort-runs`, `sort-pairs`, `sort-merge`,
+`join/any-loop` and `join/all-loop`) are visible too, but not meant to
+be called. The string functions are
 builtins (Strings, under Builtins).
 
 

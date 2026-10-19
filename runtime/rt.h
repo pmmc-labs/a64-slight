@@ -338,17 +338,21 @@ typedef struct rt_msg {
 } rt_msg_t;
 
 // READY: in the run queue. WAITING: in recv, with no stack. JOINING:
-// blocked in join, keeping its stack. SLEEPING: in sleep, keeping its
-// stack, until its timer wakes it. DONE: ended, about to be freed.
-typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_SLEEPING, RT_DONE } rt_state_t;
+// blocked in join, keeping its stack. RACING: blocked in join/race,
+// keeping its stack, with a watch that wakes it on each of its pids.
+// SLEEPING: in sleep, keeping its stack, until its timer wakes it. DONE:
+// ended, about to be freed.
+typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_RACING, RT_SLEEPING, RT_DONE } rt_state_t;
 
 // One monitor: someone to tell when a process ends. It's on the watched
 // process's list, in the order they asked, and on the watcher's, so that
-// whichever ends first takes it off both (D183).
+// whichever ends first takes it off both (D183). A race's watch wakes its
+// watcher instead (D220).
 typedef struct rt_watch {
     struct rt_watch *next, *prev;           // on the watched one's list
     struct rt_watch *next_held, *prev_held; // on the watcher's
     struct rt_proc  *watched, *watcher;
+    int              wakes;                 // join/race's: wakes the watcher, rather than telling it
 } rt_watch_t;
 
 // A process. Compiled code finds the current one in x28 (r15 on x86-64),
@@ -376,7 +380,7 @@ typedef struct rt_proc {
     struct rt_proc *next_ready;
     struct rt_proc *joiners;    // blocked in join on this one, in the order they joined
     struct rt_proc *next_joiner;
-    rt_value_t      joining;    // while JOINING: whom
+    rt_value_t      joining;    // while JOINING: whom; once a race is woken, the pid that woke it
     rt_watch_t     *watchers, *last_watcher; // monitoring this one, in order
     rt_watch_t     *watching;   // the monitors it has set on processes still running
     struct rt_device *devices;  // the files it has open (process.c)
@@ -493,11 +497,13 @@ void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_lette
 void       rt_yield(void) RT_ASM(rt_yield);
 
 // The lifecycle (process.c). rt_join waits for pid to end, keeping the
-// stack, and returns (:ok value) or (:error reason). rt_monitor has
-// (:exit pid result) sent to the caller when pid ends, or at once if it
-// has. rt_kill ends pid with (:error :killed). rt_raise ends the caller
-// with (:error reason). Each returns ().
+// stack, and returns (:ok value) or (:error reason); rt_join_race waits
+// so for the first of a list of pids, and returns (pid result) (D220).
+// rt_monitor has (:exit pid result) sent to the caller when pid ends, or
+// at once if it has. rt_kill ends pid with (:error :killed). rt_raise
+// ends the caller with (:error reason). These three return ().
 rt_value_t rt_join(rt_value_t pid, const char *site) RT_ASM(rt_join);
+rt_value_t rt_join_race(rt_value_t pids, const char *site) RT_ASM(rt_join_race);
 rt_value_t rt_monitor(rt_value_t pid, const char *site) RT_ASM(rt_monitor);
 rt_value_t rt_kill(rt_value_t pid, const char *site) RT_ASM(rt_kill);
 __attribute__((noreturn))
