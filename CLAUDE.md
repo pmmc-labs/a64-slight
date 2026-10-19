@@ -80,7 +80,7 @@ a character of its own, as in Go), and the `bytes/` ones count bytes
 (D148, D219).
 `examples/` has twenty-nine example programs (all but
 `ping-pong-tournament`, `top`, `chat`, `airline-gen`, `forest`, `sieve`,
-`snails`, `coral`, `waves` and `sketch` are golden tests; `sketch`, an
+`snails`, `coral`, `waves` and `etch` are golden tests; `etch`, an
 Etch A Sketch on the keyboard, whose every step is a persistent map kept
 for undo and redo, is interactive; `waves`, strings on sine
 waves, a scroller, a case wave and a Lissajous snake, draws with
