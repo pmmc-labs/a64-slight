@@ -396,10 +396,10 @@ function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
     }
 }
 
-// Names for constants: control characters, and PI. A local of the same
+// Names for constants: control characters, and math/PI. A local of the same
 // name hides them.
 const CONSTANTS: Readonly<Record<string, Sexp>> = {
-    '\\n': str('\n'), '\\r': str('\r'), '\\t': str('\t'), '\\e': str('\x1b'), 'PI': float(Math.PI),
+    '\\n': str('\n'), '\\r': str('\r'), '\\t': str('\t'), '\\e': str('\x1b'), 'math/PI': float(Math.PI),
 };
 
 function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
@@ -1013,19 +1013,19 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'tuple->list':        fixed('rt_tuple_to_list', 1),
     'float?':             fixed('rt_is_flt', 1),
     'num?':               fixed('rt_is_num', 1),
-    'ceil':               fixed('rt_ceil', 1),
-    'floor':              fixed('rt_floor', 1),
-    'round':              fixed('rt_round', 1),
-    'trunc':              fixed('rt_trunc', 1),
-    'abs':                fixed('rt_abs', 1),
-    'min':                fixed('rt_min', 2),
-    'max':                fixed('rt_max', 2),
-    'pow':                fixed('rt_pow', 2),
-    'sqrt':               fixed('rt_sqrt', 1),
-    'sin':                fixed('rt_sin', 1),
-    'cos':                fixed('rt_cos', 1),
-    'tan':                fixed('rt_tan', 1),
-    'exp':                fixed('rt_exp', 1),
+    'math/ceil':          fixed('rt_ceil', 1),
+    'math/floor':         fixed('rt_floor', 1),
+    'math/round':         fixed('rt_round', 1),
+    'math/trunc':         fixed('rt_trunc', 1),
+    'math/abs':           fixed('rt_abs', 1),
+    'math/min':           fixed('rt_min', 2),
+    'math/max':           fixed('rt_max', 2),
+    'math/pow':           fixed('rt_pow', 2),
+    'math/sqrt':          fixed('rt_sqrt', 1),
+    'math/sin':           fixed('rt_sin', 1),
+    'math/cos':           fixed('rt_cos', 1),
+    'math/tan':           fixed('rt_tan', 1),
+    'math/exp':           fixed('rt_exp', 1),
     'lambda?':            fixed('rt_is_lambda', 1),
     'send':               fixed('rt_send', 2),
     'join':               fixed('rt_join', 1),

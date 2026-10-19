@@ -7,7 +7,7 @@
         (:init
             (tty/write
                     \e "[s" \e "[" (inc (coords :x)) ";" (inc (coords :y)) "H"
-                    \e "[37;42m LOG " (str/repeat " " (max 0 (- (dims :w) 13))) $$ " "
+                    \e "[37;42m LOG " (str/repeat " " (math/max 0 (- (dims :w) 13))) $$ " "
                     \e "[0m"
                     \e "[u")
             (Logger dims coords logs))
@@ -33,7 +33,7 @@
     (recv
         (:refresh
             (tty/write \e "[s" \e "[" (+ (coords :x) 1) ";" (+ (coords :y) 1) "H")
-            (tty/write \e "[37;46m " name (str/repeat " " (max 0 (- (dims :w) (+ (bytes/len name) 6)))) $$ " " \e "[0m")
+            (tty/write \e "[37;46m " name (str/repeat " " (math/max 0 (- (dims :w) (+ (bytes/len name) 6)))) $$ " " \e "[0m")
             (tty/write \e "[" (+ (coords :x) 2) ";" (+ (coords :y) 1) "H")
             (dotimes 0 (dims :h)
                 (lambda (i)

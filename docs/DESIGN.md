@@ -53,7 +53,7 @@ The reader (`compiler/src/reader.ts`, D37) reads:
 - `@ARGV` and `%ENV`, the program's arguments and environment, at the
   top level only (Program structure, below)
 - the names `\n`, `\r`, `\t` and `\e`, constants for those one-character
-  strings, and `PI`
+  strings, and `math/PI`
 
 ### Types
 
@@ -334,10 +334,13 @@ names no program can write.
   float, and an integer result that doesn't fit in 63 bits faults. `/`
   always returns a float. `div` and `%` take integers only and truncate
   toward zero (`(% -7 2)` is -1). Dividing by zero faults, with `/` too.
-  `ceil`, `floor`, `round` and `trunc` return integers (`round` sends
-  halves up, D72, so `(round -2.5)` is -2), and fault if the result
-  doesn't fit. `sqrt pow sin cos tan exp` always return floats.
-  `abs`, `min` and `max` keep their argument's type. `PI` is a float.
+  The math builtins are under `math/` (D221). `math/ceil`, `math/floor`,
+  `math/round` and `math/trunc` return integers (`math/round` sends
+  halves up, D72, so `(math/round -2.5)` is -2), and fault if the result
+  doesn't fit. `math/pow` of two integers is an integer, exactly; with a
+  float, a float. `math/sqrt math/sin math/cos math/tan math/exp` always
+  return floats. `math/abs`, `math/min` and `math/max` keep their
+  argument's type. `math/PI` is a float.
   `float?` and `num?` alongside `int?`. Floats print in the shortest form
   that reads back as the same double, laid out as JavaScript does, but
   always with a `.` or an exponent: `3.0`, `0.1`, `1e+21`, `nan`, `inf`.

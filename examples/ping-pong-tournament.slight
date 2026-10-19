@@ -65,7 +65,7 @@
         (match (list (counts acc) (counts r))
             (((a1 a2) (b1 b2))
                 (cond
-                    ((and (<= (abs (- a1 b1)) 1) (<= (abs (- a2 b2)) 1)) acc)
+                    ((and (<= (math/abs (- a1 b1)) 1) (<= (math/abs (- a2 b2)) 1)) acc)
                     (#true
                         (tty/write "... results diverged from " acc " to " r \n)
                         r)))))

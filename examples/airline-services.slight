@@ -72,7 +72,7 @@
         (() ())
         ((first & _)
             (let ends (+ (- (leg/dep (tuple/get (day/legs day) first)) (crew-report)) (crew-plan)))
-            (let n (max 1 (fits day legs ends 0)))
+            (let n (math/max 1 (fits day legs ends 0)))
             (cons (take n legs) (pairings day (skip n legs))))))
 
 ; How many of legs, from the first, land as planned crew-release before
@@ -159,7 +159,7 @@
             (cond
                 ((not (flew? op))           (list (* pax (+ 100 block)) pax 0 0))
                 ((int? (nth 3 op))
-                    (let m (max 0 (- (op/on op) (+ dep block))))
+                    (let m (math/max 0 (- (op/on op) (+ dep block))))
                     (list 0 0 (* m pax) (if (>= m (compensated-minutes)) pax 0)))
                 (#true                      (list 0 0 0 0))))))
 

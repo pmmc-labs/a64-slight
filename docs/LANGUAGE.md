@@ -202,7 +202,7 @@ list too. `'(:inc)` is the list `((quote inc))`, not the message
 `$$` is the current process, and `^$$` its parent (Processes).
 
 `\n`, `\r`, `\t` and `\e` are also names, for the one-character strings,
-and `PI` is the float 3.141592653589793. They're constants rather than
+and `math/PI` is the float 3.141592653589793. They're constants rather than
 reserved words: a local of the same name hides them.
 
 These names can't be bound or defined: `#true`, `#false`, `$$`, `^$$`,
@@ -1086,18 +1086,23 @@ Integers and floats mix: if either operand is a float, so is the result.
   `(% -7 2)` is -1 (as in C, Go or JavaScript). By zero, both fault
   (`:div-by-zero`), and so does `div` of the most negative integer by
   -1 (`:overflow`).
-- `(ceil x)`, `(floor x)`, `(round x)`, `(trunc x)`: an integer. An
-  integer stays as it is. `round` sends halves up, so `(round 2.5)` is
-  3 and `(round -2.5)` is -2 (JavaScript's `Math.round`). A float too
+- `(math/ceil x)`, `(math/floor x)`, `(math/round x)`, `(math/trunc
+  x)`: an integer. An integer stays as it is. `math/round` sends halves
+  up, so `(math/round 2.5)` is 3 and `(math/round -2.5)` is -2
+  (JavaScript's `Math.round`). A float too
   big for an integer faults (`:out-of-range`).
-- `(abs x)`: keeps the type. `abs` of the most negative integer
+- `(math/abs x)`: keeps the type. `math/abs` of the most negative integer
   overflows.
-- `(min a b)`, `(max a b)`: whichever argument it is, as it was given,
-  so `(min 1 2.0)` is 1; the first one on a tie.
-- `(sqrt x)`, `(pow a b)`, `(sin x)`, `(cos x)`, `(tan x)`, `(exp x)`:
+- `(math/min a b)`, `(math/max a b)`: whichever argument it is, as it
+  was given, so `(math/min 1 2.0)` is 1; the first one on a tie.
+- `(math/pow a b)`: of two integers, an integer, exactly, as `*` gives
+  one: past 63 bits it overflows, and a negative exponent faults
+  (`:out-of-range`), since the result wouldn't be an integer. With a
+  float on either side, a float (D221).
+- `(math/sqrt x)`, `(math/sin x)`, `(math/cos x)`, `(math/tan x)`, `(math/exp x)`:
   always a float. Out of their domain they give `nan` or `inf` rather
-  than faulting: `(sqrt -1)` is `nan`.
-- `PI`: 3.141592653589793.
+  than faulting: `(math/sqrt -1)` is `nan`.
+- `math/PI`: 3.141592653589793.
 
 ### Comparison
 

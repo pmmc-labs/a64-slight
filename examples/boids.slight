@@ -111,7 +111,7 @@
 
 ; Not faster than max-speed, nor slower than min-speed unless still.
 (defun limit (v)
-    (let speed (sqrt (dot v v)))
+    (let speed (math/sqrt (dot v v)))
     (cond
         ((> speed (max-speed))                    (v* v (/ (max-speed) speed)))
         ((and (< speed (min-speed)) (> speed 0))  (v* v (/ (min-speed) speed)))
@@ -214,8 +214,8 @@
 ; halfway between an axis and a diagonal.
 (defun arrow (vx vy)
     (cond
-        ((<= (abs vy) (* (abs vx) 0.41421356)) (if (< vx 0) "←" "→"))
-        ((<= (abs vx) (* (abs vy) 0.41421356)) (if (< vy 0) "↑" "↓"))
+        ((<= (math/abs vy) (* (math/abs vx) 0.41421356)) (if (< vx 0) "←" "→"))
+        ((<= (math/abs vx) (* (math/abs vy) 0.41421356)) (if (< vy 0) "↑" "↓"))
         ((< vx 0)                              (if (< vy 0) "↖" "↙"))
         (#true                                 (if (< vy 0) "↗" "↘"))))
 
@@ -225,8 +225,8 @@
 (defun put (grid bird)
     (match bird
         (#(_ x y vx vy)
-            (let row (% (floor (/ y 2)) (tuple/len grid)))
-            (let col (% (floor x) (tuple/len (tuple/get grid 0))))
+            (let row (% (math/floor (/ y 2)) (tuple/len grid)))
+            (let col (% (math/floor x) (tuple/len (tuple/get grid 0))))
             (tuple/set grid row (tuple/set (tuple/get grid row) col (arrow vx vy))))))
 
 ; Each frame redraws the whole screen from the top left, or, when there's

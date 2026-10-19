@@ -418,7 +418,7 @@ test('a float literal is a box holding the double', () => {
     const asm = compile('1.5');
     assert.match(asm, /Lfloat_0:\n {4}\.quad 8 << RT_BOX_SIZE_SHIFT \| RT_BOX_FLOAT\n {4}\.quad 0x3ff8000000000000 {4}\/\/ 1\.5/);
     assert.match(compile("'(2.5)"), /\.quad Lfloat_0\+RT_TAG_BOXED, RT_NIL/);
-    assert.match(compile('PI'), /\.quad 0x400921fb54442d18/);
+    assert.match(compile('math/PI'), /\.quad 0x400921fb54442d18/);
 });
 
 test('+ and < on two integers are inline; anything else goes out of line', () => {
@@ -489,10 +489,10 @@ test('div and % are integers only, and check for zero', () => {
 });
 
 test('the math builtins are builtins', () => {
-    for (const name of ['/', 'div', '%', 'ceil', 'round', 'sqrt', 'pow', 'min', 'float?', 'num?']) {
+    for (const name of ['/', 'div', '%', 'math/ceil', 'math/round', 'math/sqrt', 'math/pow', 'math/min', 'float?', 'num?']) {
         fails(`(defun ${name} (x) x)`, `test.slight:1:8: can't define ${name}: it's a builtin`);
     }
-    fails('(sqrt 1 2)', 'test.slight:1:1: sqrt takes 1 argument, not 2');
+    fails('(math/sqrt 1 2)', 'test.slight:1:1: math/sqrt takes 1 argument, not 2');
     fails('(div 1)', 'test.slight:1:1: div takes 2 arguments, not 1');
 });
 

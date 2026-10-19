@@ -23,7 +23,7 @@
 (pprint (try :other))
 (pprint (try (list 1 $$)))
 (pprint (try (list :object (list "f" car))))
-(pprint (try (list (sqrt -1))))
+(pprint (try (list (math/sqrt -1))))
 (pprint (try (* 1.0e308 10.0)))
 (pprint (try (list :object (list 1 2))))
 (pprint (try (list :object (list "k"))))

@@ -35,7 +35,7 @@
 (defun try (v) (join (fork (sexp/print v))))
 (pprint (try (list 1 $$)))
 (pprint (try (list car)))
-(pprint (try (sqrt -1)))
+(pprint (try (math/sqrt -1)))
 (pprint (try (* 1.0e308 10.0)))
 (pprint (try (list (* -1.0e308 10.0))))
 

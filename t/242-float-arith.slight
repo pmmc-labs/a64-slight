@@ -11,7 +11,7 @@
 (defun fprod (i acc) (if (== i 0) acc (fprod (- i 1) (* acc 1.0001))))
 (defun kind (r) (match r ((:ok v) v) ((:error (k _ _)) k)))
 
-(let nan (sqrt -1))
+(let nan (math/sqrt -1))
 (let big (str->float "1e200"))
 (let inf (* big big))
 (pprint (ops 0.1 0.2))

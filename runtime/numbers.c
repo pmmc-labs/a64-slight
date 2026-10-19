@@ -135,8 +135,20 @@ static rt_value_t math(rt_value_t x, double (*f)(double), const char *site) {
     return rt_new_float(f(as_double(x, site)), site);
 }
 
+// Two integers give an integer, as * does, by squaring: a result past 63
+// bits overflows, and a negative exponent, whose result isn't an integer,
+// is out of range. A float on either side gives a float (D221).
 rt_value_t rt_pow(rt_value_t a, rt_value_t b, const char *site) {
-    return rt_new_float(pow(as_double(a, site), as_double(b, site)), site);
+    if (!is_int(a) || !is_int(b)) return rt_new_float(pow(as_double(a, site), as_double(b, site)), site);
+    int64_t base = rt_int_value(a), e = rt_int_value(b), r = 1;
+    if (e < 0) rt_fault(RT_FAULT_RANGE, b, site);
+    // Once the base's square overflows, so does the result: what's left of
+    // the exponent is at least 2.
+    for (; e > 0; e >>= 1) {
+        if ((e & 1) && (__builtin_mul_overflow(r, base, &r) || r < INT_MIN63 || r > INT_MAX63)) rt_fault(RT_FAULT_OVERFLOW, 0, site);
+        if (e > 1 && (__builtin_mul_overflow(base, base, &base) || base > INT_MAX63)) rt_fault(RT_FAULT_OVERFLOW, 0, site);
+    }
+    return rt_int(r);
 }
 
 rt_value_t rt_sqrt(rt_value_t x, const char *site) { return math(x, sqrt, site); }

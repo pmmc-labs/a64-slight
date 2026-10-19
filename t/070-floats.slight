@@ -12,5 +12,5 @@
 (pprint 0.0)
 (pprint (+ 0.1 0.2))
 (pprint (/ 1 3))
-(pprint (pow 2 60))
-PI
+(pprint (math/pow 2 60))
+math/PI

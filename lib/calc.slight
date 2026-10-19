@@ -165,20 +165,20 @@
     (cond
         ((member? f (list "min" "max"))
             (if (nil? args) (raise (str "at byte " at ": " f " takes at least one number"))
-                (fold/l (car args) (if (eq? f "min") min max) (cdr args))))
+                (fold/l (car args) (if (eq? f "min") math/min math/max) (cdr args))))
         ((not (member? f (list "sqrt" "abs" "floor" "ceil" "round" "sin" "cos" "tan" "exp")))
             (calc/unknown f at))
         ((not one) (raise (str "at byte " at ": " f " takes one number")))
-        ((eq? f "sqrt")  (sqrt x))
-        ((eq? f "abs")   (abs x))
-        ((eq? f "sin")   (sin x))
-        ((eq? f "cos")   (cos x))
-        ((eq? f "tan")   (tan x))
-        ((eq? f "exp")   (exp x))
+        ((eq? f "sqrt")  (math/sqrt x))
+        ((eq? f "abs")   (math/abs x))
+        ((eq? f "sin")   (math/sin x))
+        ((eq? f "cos")   (math/cos x))
+        ((eq? f "tan")   (math/tan x))
+        ((eq? f "exp")   (math/exp x))
         ((calc/whole? x) x)
-        ((eq? f "floor") (floor x))
-        ((eq? f "ceil")  (ceil x))
-        (#true           (round x))))
+        ((eq? f "floor") (math/floor x))
+        ((eq? f "ceil")  (math/ceil x))
+        (#true           (math/round x))))
 
 ; Whether rounding x would give it back as it is: a whole number, or a
 ; float too big for one (or infinite, or not a number), which floor and
@@ -187,7 +187,7 @@
 
 (defun calc/constant (c at)
     (cond
-        ((eq? c "pi") PI)
+        ((eq? c "pi") math/PI)
         ((eq? c "e")  2.718281828459045)
         (#true        (calc/unknown c at))))
 
@@ -212,7 +212,7 @@
 ; a float's estimate of it tells; past that, it's a float, rather than an
 ; overflow.
 
-(defun calc/big? (x) (> (abs x) 4.0e18))
+(defun calc/big? (x) (> (math/abs x) 4.0e18))
 (defun calc/float (x) (* 1.0 x))
 
 (defun calc/add (a b) (if (and (int? a) (int? b) (not (calc/big? (+ (calc/float a) b)))) (+ a b) (+ (calc/float a) b)))
@@ -231,13 +231,13 @@
         ((== b 0)                                          (raise "division by zero, in %"))
         ((and (int? a) (int? b))                           (% a b))
         ((calc/whole? (/ a b))                             (raise "% of numbers that far apart"))
-        (#true                                             (- a (* b (trunc (/ a b)))))))
+        (#true                                             (- a (* b (math/trunc (/ a b)))))))
 
 ; A whole power of a whole number is worked out exactly, by squaring.
 (defun calc/pow (a b)
     (if (and (int? a) (int? b) (>= b 0))
         (calc/ipow a b 1)
-        (pow (calc/float a) (calc/float b))))
+        (math/pow (calc/float a) (calc/float b))))
 
 (defun calc/ipow (a b acc)
     (cond

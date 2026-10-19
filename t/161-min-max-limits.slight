@@ -1,9 +1,10 @@
-; min and max of two integers compare them as integers. As doubles, the
-; integers near 2^62 round together (4611686018427387903 and ...902 are
-; both 4.611686018427388e18), and min gave the larger of the two.
+; math/min and math/max of two integers compare them as integers. As
+; doubles, the integers near 2^62 round together (4611686018427387903
+; and ...902 are both 4.611686018427388e18), and math/min gave the larger
+; of the two.
 
-(pprint (min 4611686018427387903 4611686018427387902))
-(pprint (max -4611686018427387904 -4611686018427387903))
-(pprint (min -4611686018427387904 4611686018427387903))
-(pprint (max 7 7))
-(list (min 1 2) (max 1 2))
+(pprint (math/min 4611686018427387903 4611686018427387902))
+(pprint (math/max -4611686018427387904 -4611686018427387903))
+(pprint (math/min -4611686018427387904 4611686018427387903))
+(pprint (math/max 7 7))
+(list (math/min 1 2) (math/max 1 2))

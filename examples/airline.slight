@@ -258,7 +258,7 @@
 (defun leg-of (day changes id)
     (match (tuple/get (day/legs day) id)
         (#(flight _ from to dep block _ wind)
-            (let delay (fold/l 0 (lambda (m d) (if (eq? (car d) flight) (max m (cadr d)) m)) (changes-of :delay changes)))
+            (let delay (fold/l 0 (lambda (m d) (if (eq? (car d) flight) (math/max m (cadr d)) m)) (changes-of :delay changes)))
             (tuple id from to (+ dep delay) (+ block wind) dep))))
 
 ; Its minute t: it lands or holds, it's withdrawn, legs it can't fly are
@@ -331,8 +331,8 @@
 (defun state-of (status legs t)
     (let next (match legs (() ()) ((l & _) (tuple/get l 0))))
     (match status
-        ((:gate airport ready) (list :gate airport next (max 0 (- ready t))))
-        ((:air leg due)        (list :air (tuple/get leg 0) next (max 0 (- due t))))
+        ((:gate airport ready) (list :gate airport next (math/max 0 (- ready t))))
+        ((:air leg due)        (list :air (tuple/get leg 0) next (math/max 0 (- due t))))
         ((:withdrawn airport)  (list :withdrawn airport next))))
 
 ; --- the desk -----------------------------------------------------------------
@@ -493,7 +493,7 @@
         ((#(_ _ _ _ dep block pax _) #((fuel late missed cancelled) waiting flown))
             (let connecting (filter (lambda (c) (nil? (tuple/get flown (connect/out (tuple/get (day/connects day) c)))))
                                     (tuple/get (day/outs day) id)))
-            (tuple (list fuel (+ late (* (max 0 (- t (+ dep block))) pax)) missed cancelled)
+            (tuple (list fuel (+ late (* (math/max 0 (- t (+ dep block))) pax)) missed cancelled)
                    (append (map (lambda (c) (list c (+ t (change-minutes)))) connecting) waiting)
                    (tuple/set flown id (match (tuple/get flown id) ((off _ i) (list off t i))))))))
 
@@ -518,7 +518,7 @@
 ; The waiting part of the digest: each connection with passengers
 ; waiting, and how long till they can board.
 (defun waiting-digest (waiting t)
-    (add-parts (map (lambda (w) (part (list (car w) (max 0 (- (cadr w) t))))) waiting)))
+    (add-parts (map (lambda (w) (part (list (car w) (math/max 0 (- (cadr w) t))))) waiting)))
 
 ; Parts of a digest, and their sum, modulo 2^61 - 1, a prime.
 (defun prime () 2305843009213693951)
@@ -570,7 +570,7 @@
         (() ())
         ((name & rest)
             (let ends (map (lambda (c) (cadr (window day c))) (cons change (map (lambda (r) (run/change (lookup r runs))) rest))))
-            (cons (list name (run/digests (lookup name runs)) (fold/l 0 max ends))
+            (cons (list name (run/digests (lookup name runs)) (fold/l 0 math/max ends))
                   (targets-of day runs rest change)))))
 
 ; A run that rejoined name at stop, for the whole day: from stop on its
@@ -623,7 +623,7 @@
 (defun state-at (runs name c)
     (let r (lookup name runs))
     (let own (fold/l () (lambda (best cp) (if (<= (car cp) c) cp best)) (run/checkpoints r)))
-    (let before (if (nil? (run/parent r)) () (state-at runs (run/parent r) (min c (run/begun r)))))
+    (let before (if (nil? (run/parent r)) () (state-at runs (run/parent r) (math/min c (run/begun r)))))
     (let after (match (run/fate r)
                    ((_ stop rejoined) (if (and (str? rejoined) (> c stop)) (later-than stop (state-at runs rejoined c)) ()))
                    (_                 ())))
@@ -770,7 +770,7 @@
 ; How fast minutes went: the time for each, and the messages a second, in
 ; millions to a tenth, a tick and an answer for each aircraft each minute.
 (defun pace (day us minutes)
-    (let tenths (div (* (* 2 (tuple/len (day/aircraft day))) minutes) (max 1 (div us 10))))
+    (let tenths (div (* (* 2 (tuple/len (day/aircraft day))) minutes) (math/max 1 (div us 10))))
     (str (div us minutes) " µs a minute, " (div tenths 10) "." (% tenths 10) " million messages a second"))
 
 ; --- the program --------------------------------------------------------------
@@ -1168,13 +1168,13 @@
                                (fold/r acc (lambda (b acc2)
                                                (match (list a b)
                                                    (((s1 e1 p1) (s2 e2 p2))
-                                                       (let m (max now (max s1 s2)))
-                                                       (if (and (eq? p1 p2) (<= m (min e1 e2))) (cons m acc2) acc2))))
+                                                       (let m (math/max now (math/max s1 s2)))
+                                                       (if (and (eq? p1 p2) (<= m (math/min e1 e2))) (cons m acc2) acc2))))
                                        (tuple/get spans y)))
                         (tuple/get spans x)))
     (if (nil? starts)
         ()
-        (do (let m (fold/l (car starts) min (cdr starts)))
+        (do (let m (fold/l (car starts) math/min (cdr starts)))
             (let ahead (filter (lambda (l) (match (tuple/get flown l) ((off _ i) (and (or (== i x) (== i y)) (>= off m))) (_ #false)))
                                (range 0 (tuple/len flown))))
             (if (nil? ahead) () (list :swap (car (tuple/get (day/aircraft day) x)) (car (tuple/get (day/aircraft day) y)) m)))))
