@@ -1,0 +1,33 @@
+(asin #true)
+(acos #true)
+(atan #true)
+(atan2 #true)
+(sinh #true)
+(cosh #true)
+(tanh #true)
+(asinh #true)
+(acosh #true)
+(atanh #true)
+(log #true)
+(log2 #true)
+(log10 #true)
+(log1p #true)
+(expm1 #true)
+(cbrt #true)
+(hypot #true)
+9.999999999500001e-11
+(3.0 5.0 0.0 0.0 0.0 0.0 0.0)
+(-inf #true #true inf -inf)
+(2 -2 -1 1 0 9 -1)
+0
+(#true #false #false #false #false)
+(2.718281828459045 inf -inf #true #true)
+(3.0 -4611686018427388000.0 9007199254740992.0)
+fault in #<pid 2>: division by zero (math/mod at t/270-math-more.slight:37:21)
+div-by-zero
+fault in #<pid 3>: not an integer: 1.5 (math/mod at t/270-math-more.slight:38:21)
+not-an-int
+fault in #<pid 4>: not an integer: 1.5 (int->float at t/270-math-more.slight:39:21)
+not-an-int
+fault in #<pid 5>: not a number: "3" (math/hypot at t/270-math-more.slight:40:13)
+not-a-number

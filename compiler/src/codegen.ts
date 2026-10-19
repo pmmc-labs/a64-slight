@@ -396,10 +396,11 @@ function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
     }
 }
 
-// Names for constants: control characters, and math/PI. A local of the same
-// name hides them.
+// Names for constants: control characters, and math/PI, math/E and
+// math/INF. A local of the same name hides them.
 const CONSTANTS: Readonly<Record<string, Sexp>> = {
-    '\\n': str('\n'), '\\r': str('\r'), '\\t': str('\t'), '\\e': str('\x1b'), 'math/PI': float(Math.PI),
+    '\\n': str('\n'), '\\r': str('\r'), '\\t': str('\t'), '\\e': str('\x1b'),
+    'math/PI': float(Math.PI), 'math/E': float(Math.E), 'math/INF': float(Infinity),
 };
 
 function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
@@ -1026,6 +1027,27 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'math/cos':           fixed('rt_cos', 1),
     'math/tan':           fixed('rt_tan', 1),
     'math/exp':           fixed('rt_exp', 1),
+    'math/asin':          fixed('rt_asin', 1),
+    'math/acos':          fixed('rt_acos', 1),
+    'math/atan':          fixed('rt_atan', 1),
+    'math/sinh':          fixed('rt_sinh', 1),
+    'math/cosh':          fixed('rt_cosh', 1),
+    'math/tanh':          fixed('rt_tanh', 1),
+    'math/asinh':         fixed('rt_asinh', 1),
+    'math/acosh':         fixed('rt_acosh', 1),
+    'math/atanh':         fixed('rt_atanh', 1),
+    'math/log':           fixed('rt_log', 1),
+    'math/log2':          fixed('rt_log2', 1),
+    'math/log10':         fixed('rt_log10', 1),
+    'math/log1p':         fixed('rt_log1p', 1),
+    'math/expm1':         fixed('rt_expm1', 1),
+    'math/cbrt':          fixed('rt_cbrt', 1),
+    'math/atan2':         fixed('rt_atan2', 2),
+    'math/hypot':         fixed('rt_hypot', 2),
+    'math/mod':           fixed('rt_mod', 2),
+    'math/nan?':          fixed('rt_is_nan', 1),
+    'int->float':         fixed('rt_int_to_float', 1),
+    'float->str':         fixed('rt_float_to_str', 1, 2),
     'lambda?':            fixed('rt_is_lambda', 1),
     'send':               fixed('rt_send', 2),
     'join':               fixed('rt_join', 1),

@@ -1075,6 +1075,8 @@ what it wanted (`:not-a-number`, `:not-a-string`, ...).
 ### Numbers
 
 Integers and floats mix: if either operand is a float, so is the result.
+The arithmetic is unprefixed; the rest is under `math/`, as JavaScript
+keeps it in `Math` (D221).
 
 - `(+ a b)`, `(- a b)`, `(* a b)`: two numbers, exactly. An integer
   result that doesn't fit in 63 bits faults (`:overflow`).
@@ -1086,23 +1088,50 @@ Integers and floats mix: if either operand is a float, so is the result.
   `(% -7 2)` is -1 (as in C, Go or JavaScript). By zero, both fault
   (`:div-by-zero`), and so does `div` of the most negative integer by
   -1 (`:overflow`).
+- `(math/mod a b)`: the remainder of a floored division, with the sign
+  of `b`: `(math/mod -1 10)` is 9, where `(% -1 10)` is -1, so it's the
+  one for wrapping an index round. Integers only, as `%` is.
 - `(math/ceil x)`, `(math/floor x)`, `(math/round x)`, `(math/trunc
   x)`: an integer. An integer stays as it is. `math/round` sends halves
   up, so `(math/round 2.5)` is 3 and `(math/round -2.5)` is -2
-  (JavaScript's `Math.round`). A float too
-  big for an integer faults (`:out-of-range`).
-- `(math/abs x)`: keeps the type. `math/abs` of the most negative integer
-  overflows.
+  (JavaScript's `Math.round`). A float too big for an integer faults
+  (`:out-of-range`).
+- `(math/abs x)`: keeps the type. `math/abs` of the most negative
+  integer overflows.
 - `(math/min a b)`, `(math/max a b)`: whichever argument it is, as it
   was given, so `(math/min 1 2.0)` is 1; the first one on a tie.
 - `(math/pow a b)`: of two integers, an integer, exactly, as `*` gives
   one: past 63 bits it overflows, and a negative exponent faults
   (`:out-of-range`), since the result wouldn't be an integer. With a
-  float on either side, a float (D221).
-- `(math/sqrt x)`, `(math/sin x)`, `(math/cos x)`, `(math/tan x)`, `(math/exp x)`:
-  always a float. Out of their domain they give `nan` or `inf` rather
-  than faulting: `(math/sqrt -1)` is `nan`.
-- `math/PI`: 3.141592653589793.
+  float on either side, a float.
+- `(math/sqrt x)`, `(math/cbrt x)`, `(math/exp x)`, `(math/expm1 x)`,
+  `(math/log x)` (natural), `(math/log2 x)`, `(math/log10 x)`,
+  `(math/log1p x)`, `(math/hypot x y)`; `(math/sin x)`, `(math/cos x)`,
+  `(math/tan x)`, `(math/asin x)`, `(math/acos x)`, `(math/atan x)`,
+  `(math/atan2 y x)`; `(math/sinh x)`, `(math/cosh x)`, `(math/tanh x)`,
+  `(math/asinh x)`, `(math/acosh x)`, `(math/atanh x)`: JavaScript's
+  `Math` functions of the same names, always a float. Out of their
+  domain they give `nan` or `inf` rather than faulting: `(math/sqrt -1)`
+  is `nan`, and `(math/log 0)` is `-inf`. `math/expm1` and
+  `math/log1p` keep their precision near 0, where `(math/exp x)` less
+  one, or `(math/log (+ 1 x))`, lose it. Beside `math/sqrt`, which is
+  exact everywhere, each is only as good as the platform's C library,
+  which can be a bit off in the last place, and so differ between
+  machines (D76).
+- `(math/nan? x)`: whether `x` is the float `nan`; anything else is
+  `#false`. `nan` is the one value that isn't `==` to itself.
+- `math/PI`, `math/E`: 3.141592653589793 and 2.718281828459045.
+  `math/INF`: the float `inf`, which `(- 0 math/INF)` makes `-inf`.
+- `(int->float n)`: the float nearest the integer `n`, exactly so up to
+  2^53.
+- `(float->str x [digits])`: `x`, which may be an integer, as a float:
+  as `str` shows one, or with `digits` (0 to 100), in fixed notation
+  with that many digits after the point, as JavaScript's `toFixed`:
+  `(float->str 3.14159 2)` is `"3.14"`, and `(float->str 7 2)` is
+  `"7.00"`. It's the nearest such decimal to the float's exact value,
+  so `(float->str 1.005 2)` is `"1.00"`, 1.005 being a little under that
+  as a float; and a tie goes away from zero, so `(float->str 2.5 0)` is
+  `"3"`. From 1e21 up, and `nan` and `inf`, are as `str` shows them.
 
 ### Comparison
 

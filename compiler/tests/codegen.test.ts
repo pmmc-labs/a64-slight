@@ -419,6 +419,8 @@ test('a float literal is a box holding the double', () => {
     assert.match(asm, /Lfloat_0:\n {4}\.quad 8 << RT_BOX_SIZE_SHIFT \| RT_BOX_FLOAT\n {4}\.quad 0x3ff8000000000000 {4}\/\/ 1\.5/);
     assert.match(compile("'(2.5)"), /\.quad Lfloat_0\+RT_TAG_BOXED, RT_NIL/);
     assert.match(compile('math/PI'), /\.quad 0x400921fb54442d18/);
+    assert.match(compile('math/E'), /\.quad 0x4005bf0a8b145769/);
+    assert.match(compile('math/INF'), /\.quad 0x7ff0000000000000/);
 });
 
 test('+ and < on two integers are inline; anything else goes out of line', () => {

@@ -648,6 +648,27 @@ rt_value_t rt_sin(rt_value_t x, const char *site) RT_ASM(rt_sin);
 rt_value_t rt_cos(rt_value_t x, const char *site) RT_ASM(rt_cos);
 rt_value_t rt_tan(rt_value_t x, const char *site) RT_ASM(rt_tan);
 rt_value_t rt_exp(rt_value_t x, const char *site) RT_ASM(rt_exp);
+rt_value_t rt_asin(rt_value_t x, const char *site) RT_ASM(rt_asin);
+rt_value_t rt_acos(rt_value_t x, const char *site) RT_ASM(rt_acos);
+rt_value_t rt_atan(rt_value_t x, const char *site) RT_ASM(rt_atan);
+rt_value_t rt_sinh(rt_value_t x, const char *site) RT_ASM(rt_sinh);
+rt_value_t rt_cosh(rt_value_t x, const char *site) RT_ASM(rt_cosh);
+rt_value_t rt_tanh(rt_value_t x, const char *site) RT_ASM(rt_tanh);
+rt_value_t rt_asinh(rt_value_t x, const char *site) RT_ASM(rt_asinh);
+rt_value_t rt_acosh(rt_value_t x, const char *site) RT_ASM(rt_acosh);
+rt_value_t rt_atanh(rt_value_t x, const char *site) RT_ASM(rt_atanh);
+rt_value_t rt_log(rt_value_t x, const char *site) RT_ASM(rt_log);
+rt_value_t rt_log2(rt_value_t x, const char *site) RT_ASM(rt_log2);
+rt_value_t rt_log10(rt_value_t x, const char *site) RT_ASM(rt_log10);
+rt_value_t rt_log1p(rt_value_t x, const char *site) RT_ASM(rt_log1p);
+rt_value_t rt_expm1(rt_value_t x, const char *site) RT_ASM(rt_expm1);
+rt_value_t rt_cbrt(rt_value_t x, const char *site) RT_ASM(rt_cbrt);
+rt_value_t rt_atan2(rt_value_t y, rt_value_t x, const char *site) RT_ASM(rt_atan2);
+rt_value_t rt_hypot(rt_value_t x, rt_value_t y, const char *site) RT_ASM(rt_hypot);
+rt_value_t rt_mod(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_mod);
+rt_value_t rt_is_nan(rt_value_t v) RT_ASM(rt_is_nan);
+rt_value_t rt_int_to_float(rt_value_t n, const char *site) RT_ASM(rt_int_to_float);
+rt_value_t rt_float_to_str(rt_value_t x, rt_value_t digits, const char *site) RT_ASM(rt_float_to_str);
 
 // Called at a function's entry when proc's reductions run out, with the
 // function's first n slots (from frame: its parameters and captured

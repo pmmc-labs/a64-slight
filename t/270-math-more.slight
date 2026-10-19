@@ -1,0 +1,40 @@
+; The math builtins D221 added beside JavaScript's Math. A libm function
+; is only as good as the platform's (D76), so each is checked to 12
+; significant places against V8's value (its own libm, not the system's),
+; apart from the results that are exact everywhere; log1p and expm1 are
+; there for what's near 0, where (math/log (+ 1 x)) would fail the check.
+; Then math/mod, floored, its sign the divisor's; math/nan?; math/E and
+; math/INF; and int->float.
+
+(defun close? (a b) (<= (math/abs (- a b)) (* 1.0e-12 (math/abs b))))
+
+(pprint (list 'asin (close? (math/asin 0.5) 0.5235987755982989)))
+(pprint (list 'acos (close? (math/acos 0.5) 1.0471975511965979)))
+(pprint (list 'atan (close? (math/atan 2) 1.1071487177940904)))
+(pprint (list 'atan2 (close? (math/atan2 1 -2) 2.677945044588987)))
+(pprint (list 'sinh (close? (math/sinh 1.5) 2.1292794550948173)))
+(pprint (list 'cosh (close? (math/cosh 1.5) 2.352409615243247)))
+(pprint (list 'tanh (close? (math/tanh 0.5) 0.46211715726000974)))
+(pprint (list 'asinh (close? (math/asinh 2) 1.4436354751788103)))
+(pprint (list 'acosh (close? (math/acosh 2) 1.3169578969248166)))
+(pprint (list 'atanh (close? (math/atanh 0.5) 0.5493061443340548)))
+(pprint (list 'log (close? (math/log 10) 2.302585092994046)))
+(pprint (list 'log2 (close? (math/log2 10) 3.321928094887362)))
+(pprint (list 'log10 (close? (math/log10 2) 0.3010299956639812)))
+(pprint (list 'log1p (close? (math/log1p 1.0e-10) 9.999999999500001e-11)))
+(pprint (list 'expm1 (close? (math/expm1 1.0e-10) 1.00000000005e-10)))
+(pprint (list 'cbrt (close? (math/cbrt 27) 3.0)))
+(pprint (list 'hypot (close? (math/hypot 1.0e200 1.0e200) 1.414213562373095e200)))
+(pprint (math/log1p 1.0e-10))
+(pprint (list (math/log2 8) (math/hypot 3 4) (math/log 1) (math/atan2 0 1) (math/sinh 0) (math/expm1 0) (math/log1p 0)))
+(pprint (list (math/log 0) (math/nan? (math/log -1)) (math/nan? (math/acos 2)) (math/atanh 1) (math/atanh -1)))
+(pprint (list (math/mod -7 3) (math/mod 7 -3) (math/mod -7 -3) (math/mod 7 3) (math/mod 0 5) (math/mod -1 10) (% -1 10)))
+(pprint (math/mod -4611686018427387904 -1))
+(pprint (list (math/nan? (math/sqrt -1)) (math/nan? math/INF) (math/nan? 1) (math/nan? "nan") (math/nan? ())))
+(pprint (list math/E math/INF (- 0 math/INF) (> math/INF 1.0e308) (== math/INF (* 2 math/INF))))
+(pprint (list (int->float 3) (int->float -4611686018427387904) (int->float 9007199254740993)))
+(defun kind (pid) (car (cadr (join pid))))
+(pprint (kind (fork (math/mod 1 0))))
+(pprint (kind (fork (math/mod 1.5 2))))
+(pprint (kind (fork (int->float 1.5))))
+(kind (fork (math/hypot "3" 4)))
