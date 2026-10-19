@@ -162,7 +162,12 @@ tests 261 to 265, from `t/models/strings.py`. Waiting for the first of
 several processes (D220): `join/race` in the runtime, and `join/any` and
 `join/all` in the prelude, JavaScript's `Promise.race`, `any` and `all`,
 each keeping its caller's stack as `join` does; golden tests 266 to
-268. **Next:** to settle with
+268. Numbers (D221): the math builtins under `math/`, with the rest of
+JavaScript's `Math`, `math/pow` exact on two integers, `math/mod`,
+`math/nan?`, `math/E` and `math/INF`, `int->float`, `float->str` as
+`toFixed`, and the bit operations, `bit/`, compiled inline; golden tests
+269 to 272. Random numbers are next, as a proposal of their own.
+**Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan

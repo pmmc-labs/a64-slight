@@ -4098,3 +4098,71 @@ too: why the airline ran its what-ifs one at a time, and why
   race between processes, with no socket. A program that races thousands of times, killing targets
   and racers along the way, runs clean under AddressSanitizer and under
   eight seeded orders.
+
+**D221. Numbers: `math/`, the rest of JavaScript's `Math`, and the bit
+operations.** *(Stevan, Oct 2026: "Lets put everything under math/. Make
+pow exact on 2 ints. Make bit/shl wrap. round toFixed. E and INF can be
+constants, and nan? is enough. And I agree, lets do random numbers
+after, and numerical objects only if needed", to Claude's proposal, and
+"lets build this".)*
+
+- **`math/`.** The math builtins move under it, as JavaScript keeps them
+  in `Math`: `math/abs`, `min`, `max`, `ceil`, `floor`, `round`,
+  `trunc`, `sqrt`, `pow`, `sin`, `cos`, `tan`, `exp` and `PI`. The
+  arithmetic (`+ - * / div %`) and the comparisons stay as they are. A
+  clean break, as D219's was: every program moved, 124 names, by a
+  script over tokens that leaves a name alone in a form that binds it as
+  a local (`agent.slight`'s `round`, `calc.slight`'s `exp`), and t/241's
+  top-level `min` and `max`, which bind to the end of the file, put back
+  by hand.
+- **The rest of `Math`:** `math/asin`, `acos`, `atan`, `atan2`, `sinh`,
+  `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `log`, `log2`, `log10`,
+  `log1p`, `expm1`, `cbrt` and `hypot`, libm's, always floats, `nan` or
+  `inf` out of their domains. glibc's `cbrt` of 27 is a bit over 3, so,
+  as D76 has it, the tests check them to 12 significant places, against
+  V8's values, which come from its own libm and not the system's.
+- **`math/pow` of two integers is exact**, as `*` is: past 63 bits it
+  overflows, and a negative exponent is out of range, since the result
+  wouldn't be an integer (rather than a float for some exponents and an
+  integer for others). A float on either side gives a float, as before.
+  `(math/pow 2 10)` is 1024, where it was 1024.0.
+- **`math/mod`,** the floored remainder, its sign the divisor's, which
+  both game-of-life examples faked with `(% (+ n size) size)`. Integers
+  only, as `%` is.
+- **`math/nan?`,** as `Number.isNaN`: anything but a float that's NaN is
+  `#false`. Rejected: `finite?` and `infinite?` beside it (Stevan: "nan?
+  is enough"), and a `NAN` constant.
+- **Constants:** `math/E` and `math/INF` beside `math/PI`.
+- **`int->float`,** and **`float->str x [digits]`**: as `str` shows a
+  float, or with digits, 0 to 100, `toFixed`: the nearest decimal with
+  that many digits to the float's exact value, a tie going away from
+  zero, where `printf`'s goes to even, so it's rounded from the exact
+  expansion (`%.1100f`, which every double's ends within). From 1e21 up,
+  and `nan` and `inf`, as `str` shows them, as `toFixed` does. The
+  airline makes its tenths of a millisecond by hand, and keeps them, since
+  it cuts where `float->str` rounds.
+- **Bits:** `bit/and`, `bit/or`, `bit/xor`, `bit/not`, `bit/shl` and
+  `bit/shr`, compiled inline on both targets, and `bit/count` in C, on
+  63-bit two's-complement integers. An integer is `n << 1`, so and, or
+  and xor of the tagged words are the tagged results; not is a xor with
+  -2; a shift left of the word wraps by itself, losing what passes the
+  top (Stevan: wrap, rather than fault as `*` does, which hashing and
+  packing bytes want); a shift right is of the word, its bit 0 cleared,
+  and fills with the sign. A count of 63 or more gives 0, or -1, as Go
+  has it, where JavaScript takes a count mod 32; a negative one faults
+  (`:out-of-range`). Rejected: `>>>`, a logical shift right, which on a
+  63-bit word means little; `(bit/and (bit/shr x n) mask)` does it.
+- **Not taken up:** big integers, rationals, complex numbers, 32-bit
+  floats, unsigned 64-bit integers. Random numbers are next, as a
+  proposal of their own: they're about where state lives, seeding,
+  replay and processes, not arithmetic. Numerical vectors and matrices
+  wait for a program that needs them, and floats that need no box would
+  come first (D179).
+- **Checked:** golden tests 269 (`math/pow`'s edges, from Python's
+  integers), 270 (the libm functions against V8, `math/mod`, `math/nan?`,
+  the constants, `int->float`), 271 (`float->str`, from Python's
+  `Decimal`, `t/models/float-to-str.py`, which also checks every case
+  against V8's own `toFixed`) and 272 (the bits, from
+  `t/models/bits.py`, the operands as literals and as values, which the
+  compiler takes two ways); t/070, t/074 and t/080 changed only where
+  `math/pow` is now exact or a fault names `math/round`.

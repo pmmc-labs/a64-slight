@@ -701,22 +701,27 @@ names; golden tests 261 to 265, from `t/models/strings.py`.
 `join` does, so the caller needn't be a state function. `http/await`
 races its request against a sleeper. Golden tests 266 to 268.
 
+### Numbers (done, Oct 2026)
+
+The math builtins under `math/`, with the rest of JavaScript's `Math`,
+`math/pow` exact on two integers, `math/mod`, `math/nan?`, `math/E` and
+`math/INF`, `int->float` and `float->str` (`toFixed`); and the bit
+operations, `bit/`, compiled inline (D221). Golden tests 269 to 272.
+
 ### Later: the rest of the October 2026 list
 
 The other changes from that list (above, "After 13"), for later, before
 self-hosting, since most change the language. Each has points to settle
 with Stevan first.
 
-- **Bit operations on integers.** Hashing (a hash trie of tuples, for a
-  fast dictionary), random number generators (and with them property
-  tests), and binary protocols all need them, and slight has none.
-  `hash` (D209) covers hashing a value, and random numbers made as
-  hashes (`examples/airline-gen.slight`); a hash trie, a generator
-  that's fast, and binary protocols still want them. And,
-  or and xor work on tagged words as they are, so they can be inline;
-  shifts untag and retag. To settle: the names (`bit/and` and so on, as
-  `str/`), what a shift does past 63 bits (fault, as arithmetic
-  does?), and negative counts.
+- **Random numbers,** next (D221 left them for a proposal of their own):
+  how a generator's state is kept (passed along, in a process, or per
+  process by the runtime, as Erlang's `rand`), where the seed comes from
+  and how a replay gets it, a fork's own stream, and the cryptographic
+  kind TLS will want. Boids defines its own `random`.
+- **Numerical vectors and matrices,** only if a program needs them
+  (D179, D221): embeddings for the agent's notes are the likeliest.
+  Floats that need no box would come first.
 - **A `recv` with a timeout.** Today it's `after` and a message, and a
   late timeout can arrive after the answer, to be told apart by hand. A
   clause such as `(:after ms body...)`, as Erlang's, needs timers that

@@ -338,9 +338,20 @@ names no program can write.
   `math/round` and `math/trunc` return integers (`math/round` sends
   halves up, D72, so `(math/round -2.5)` is -2), and fault if the result
   doesn't fit. `math/pow` of two integers is an integer, exactly; with a
-  float, a float. `math/sqrt math/sin math/cos math/tan math/exp` always
-  return floats. `math/abs`, `math/min` and `math/max` keep their
-  argument's type. `math/PI` is a float.
+  float, a float. `math/mod` is the floored remainder, its sign the
+  divisor's. The rest of JavaScript's `Math` (`math/sqrt`, `math/log`,
+  `math/atan2`, `math/hypot` and so on) is libm's, and always returns
+  floats. `math/abs`, `math/min` and `math/max` keep their argument's
+  type. `math/PI`, `math/E` and `math/INF` are floats; `math/nan?` tests
+  for `nan`. `int->float`, and `float->str`, which with a count of
+  digits is JavaScript's `toFixed`, rounding the float's exact value, a
+  tie away from zero.
+- bits: `bit/and bit/or bit/xor bit/not bit/shl bit/shr` on 63-bit
+  two's-complement integers, compiled inline (an integer is `n << 1`, so
+  and, or and xor of the tagged words are the tagged results), and
+  `bit/count` in C. A shift left wraps, losing what passes the top; a
+  shift right fills with the sign; a count of 63 or more gives 0 or -1,
+  as in Go, and a negative one faults (D221).
   `float?` and `num?` alongside `int?`. Floats print in the shortest form
   that reads back as the same double, laid out as JavaScript does, but
   always with a `.` or an exponent: `3.0`, `0.1`, `1e+21`, `nan`, `inf`.
