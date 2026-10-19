@@ -70,7 +70,7 @@
         (lambda (args)
             (let key (tools/string args "key"))
             (notes/put store key (tools/string args "text"))
-            (concat "remembered " key))))
+            (str "remembered " key))))
 
 (defun tools/recall (store)
     (tool/new "recall" "Gives the note kept under a key. For a key with no note, it gives the keys there are."
@@ -82,7 +82,7 @@
             (cond
                 ((str? text) text)
                 ((nil? keys) "there are no notes yet")
-                (#true       (concat "there's no note under " key "; the keys are: " (str-join ", " keys)))))))
+                (#true       (str "there's no note under " key "; the keys are: " (str/join ", " keys)))))))
 
 ; Another agent, a, as a tool called name, which description tells the
 ; model about: a bigger model, say, or one with a system prompt of its
@@ -107,9 +107,9 @@
 (defun tools/string (args name)
     (let v (lookup name args))
     (cond
-        ((eq? v :not-found) (raise (concat "the argument " name " is missing")))
+        ((eq? v :not-found) (raise (str "the argument " name " is missing")))
         ((str? v)           v)
-        (#true              (raise (concat "the argument " name " must be a string")))))
+        (#true              (raise (str "the argument " name " must be a string")))))
 
 ; The file at path, its bytes as they are; or it raises why not.
 (defun tools/read (path)
@@ -121,7 +121,7 @@
     (recv
         ((:open f)    (send f (list :read :chunks)) (tools/chunks acc))
         ((:chunk f s) (tools/chunks (cons s acc)))
-        ((:eof f)     (str-join "" (reverse acc)))))
+        ((:eof f)     (str/join "" (reverse acc)))))
 
 ; Makes the file at path hold text, and nothing else.
 (defun tools/save (path text)
@@ -136,7 +136,7 @@
 (defun tools/output (ran)
     (match ran
         ((:ok (0 output))      output)
-        ((:ok (status output)) (concat output "[exit status: " status "]"))
+        ((:ok (status output)) (str output "[exit status: " status "]"))
         ((:error reason)       (raise reason))))
 
 ; An empty directory says so, since an empty result reads as nothing.
@@ -154,42 +154,42 @@
 
 (defun tools/write (approve path content)
     (cond
-        ((not (tools/allowed? approve (concat "write " path ", " (str-len content) " bytes:\n" (tools/marked "+ " content))))
+        ((not (tools/allowed? approve (str "write " path ", " (bytes/len content) " bytes:\n" (tools/marked "+ " content))))
             "the user didn't let it be written")
         (#true
             (tools/save path content)
-            (concat "wrote " (str-len content) " bytes to " path))))
+            (str "wrote " (bytes/len content) " bytes to " path))))
 
 ; old must be in the file once: a second one, even overlapping the first,
 ; would leave which to change to chance.
 (defun tools/edit (approve path old new)
     (let text (tools/read path))
-    (let at   (index-of text old))
+    (let at   (bytes/index-of text old))
     (cond
-        ((== (str-len old) 0) (raise "old is empty: give the text to replace"))
-        ((< at 0)             (raise (concat "the text to replace isn't in " path)))
-        ((>= (index-of (substring text (+ at 1) (str-len text)) old) 0)
-            (raise (concat "the text to replace is in " path " more than once: give more of it, to say which")))
-        ((not (tools/allowed? approve (concat "edit " path ":\n" (tools/marked "- " old) (tools/marked "+ " new))))
+        ((== (bytes/len old) 0) (raise "old is empty: give the text to replace"))
+        ((< at 0)             (raise (str "the text to replace isn't in " path)))
+        ((>= (bytes/index-of (bytes/slice text (+ at 1)) old) 0)
+            (raise (str "the text to replace is in " path " more than once: give more of it, to say which")))
+        ((not (tools/allowed? approve (str "edit " path ":\n" (tools/marked "- " old) (tools/marked "+ " new))))
             "the user didn't let it be changed")
         (#true
-            (tools/save path (concat (substring text 0 at) new (substring text (+ at (str-len old)) (str-len text))))
-            (concat "changed " path))))
+            (tools/save path (str (bytes/slice text 0 at) new (bytes/slice text (+ at (bytes/len old)))))
+            (str "changed " path))))
 
 (defun tools/command (approve command)
     (cond
-        ((not (tools/allowed? approve (concat "run: " command))) "the user didn't let it run")
+        ((not (tools/allowed? approve (str "run: " command))) "the user didn't let it run")
         (#true
             (match (exec/run (list "sh" "-c" command))
-                ((:ok (status output)) (concat output "[exit status: " status "]"))
+                ((:ok (status output)) (str output "[exit status: " status "]"))
                 ((:error reason)       (raise reason))))))
 
 ; text's lines, each after mark, for the person to read; a last newline
 ; makes no line of its own.
 (defun tools/marked (mark text)
-    (let lines (str-split text \n))
-    (let shown (if (and (cons? lines) (cons? (cdr lines)) (eq? (car (reverse lines)) "")) (reverse (cdr (reverse lines))) lines))
-    (str-join "" (map (lambda (line) (concat mark line \n)) shown)))
+    (let lines (str/split text \n))
+    (let shown (if (eq? (car (reverse lines)) "") (reverse (cdr (reverse lines))) lines))
+    (str/join "" (map (lambda (line) (str mark line \n)) shown)))
 
 ; --- what's shown ------------------------------------------------------
 
@@ -204,22 +204,22 @@
 ; that isn't UTF-8 as \x9b. What it gives is printable already, so it
 ; can be given again.
 (defun tools/printable (text)
-    (str-join "" (map tools/printable-char (utf8/chars text))))
+    (str/join "" (map tools/printable-char (str/chars text))))
 
 (defun tools/printable-char (c)
-    (let code (ord c))
+    (let code (str/code-at c 0))
     (cond
-        ((and (== (str-len c) 1) (>= (byte-at c 0) 128))   (concat "\\x" (tools/hex-of (byte-at c 0))))
-        ((or (== code 10) (== code 9))                      c)
+        ((and (== (bytes/len c) 1) (>= (bytes/at c 0) 128)) (str "\\x" (tools/hex-of (bytes/at c 0))))
+        ((or (== code 10) (== code 9))                       c)
         ((or (< code 32) (== code 127) (and (>= code 128) (<= code 159))
              (and (>= code 8234) (<= code 8238)) (and (>= code 8294) (<= code 8297)))
-            (concat "\\u{" (tools/hex-of code) "}"))
+            (str "\\u{" (tools/hex-of code) "}"))
         (#true                                              c)))
 
 ; n in hexadecimal, lower case.
 (defun tools/hex-of (n)
-    (let d (substring "0123456789abcdef" (% n 16) (+ (% n 16) 1)))
-    (if (< n 16) d (concat (tools/hex-of (div n 16)) d)))
+    (let d (bytes/slice "0123456789abcdef" (% n 16) (+ (% n 16) 1)))
+    (if (< n 16) d (str (tools/hex-of (div n 16)) d)))
 
 ; --- fetching ----------------------------------------------------------
 
@@ -236,46 +236,46 @@
 ; trailer and anything it fetched before left out.
 (defun tools/get (approve url)
     (cond
-        ((not (or (starts-with? url "http://") (starts-with? url "https://")))
+        ((not (or (str/starts-with? url "http://") (str/starts-with? url "https://")))
             (raise "the URL must start with http:// or https://"))
-        ((not (tools/allowed? approve (concat "fetch " url))) "the user didn't let it be fetched")
+        ((not (tools/allowed? approve (str "fetch " url))) "the user didn't let it be fetched")
         (#true
             (match (exec/run (list "curl" "-sS" "--proto" "=http,https" "--max-time" "20" "--max-filesize" "5000000"
-                                   "-w" (concat "\\n" (tools/marker) "%{http_code}\\n%{url_effective}\\n%{content_type}\\n%{redirect_url}") "--" url))
+                                   "-w" (str "\\n" (tools/marker) "%{http_code}\\n%{url_effective}\\n%{content_type}\\n%{redirect_url}") "--" url))
                 ((:ok (0 output))      (tools/fetched output))
                 ((:ok (status output)) (raise (tools/curl-error output status)))
                 ((:error reason)       (raise reason))))))
 
 (defun tools/curl-error (output status)
-    (let at (index-of output "curl: ("))
+    (let at (bytes/index-of output "curl: ("))
     (if (< at 0)
-        (concat "curl failed, with status " status)
-        (car (str-split (substring output at (str-len output)) \n))))
+        (str "curl failed, with status " status)
+        (car (str/split (bytes/slice output at) \n))))
 
 ; What was fetched, as text: a page made plain, its links against the URL
 ; it came from, text as it is, or what it is if it isn't text; after its
 ; status, if that isn't 2xx. A redirect is where it goes.
 (defun tools/fetched (output)
-    (let parts   (reverse (str-split output (concat \n (tools/marker)))))
-    (let body    (if (cons? parts) (str-join (concat \n (tools/marker)) (reverse (cdr parts))) ""))
-    (let trailer (append (str-split (if (cons? parts) (car parts) "") \n) (list "" "" "" "")))
+    (let parts   (reverse (str/split output (str \n (tools/marker)))))
+    (let body    (if (cons? parts) (str/join (str \n (tools/marker)) (reverse (cdr parts))) ""))
+    (let trailer (append (str/split (if (cons? parts) (car parts) "") \n) (list "" "" "" "")))
     (let code    (car trailer))
-    (let type    (lc (caddr trailer)))
+    (let type    (str/lower (caddr trailer)))
     (let to      (cadddr trailer))
     (let text    (cond
-                     ((>= (index-of type "html") 0) (tools/html->text body (cadr trailer)))
+                     ((>= (bytes/index-of type "html") 0) (tools/html->text body (cadr trailer)))
                      ((tools/text? type body)       body)
-                     (#true                         (concat "not text: " type ", " (str-len body) " bytes"))))
+                     (#true                         (str "not text: " type ", " (bytes/len body) " bytes"))))
     (cond
-        ((starts-with? code "2")                         text)
-        ((and (starts-with? code "3") (not (eq? to ""))) (concat "HTTP " code ": a redirect to " to ", which a fetch of its own can get"))
-        (#true                                           (concat "HTTP " code \n text))))
+        ((str/starts-with? code "2")                     text)
+        ((and (str/starts-with? code "3") (not (eq? to ""))) (str "HTTP " code ": a redirect to " to ", which a fetch of its own can get"))
+        (#true                                           (str "HTTP " code \n text))))
 
 (defun tools/text? (type body)
     (cond
-        ((eq? type "")                    (utf8/valid? body))
-        ((starts-with? type "text/")      #true)
-        (#true (or (>= (index-of type "json") 0) (>= (index-of type "xml") 0) (>= (index-of type "javascript") 0)))))
+        ((eq? type "")                    (str/well-formed? body))
+        ((str/starts-with? type "text/")  #true)
+        (#true (or (>= (bytes/index-of type "json") 0) (>= (bytes/index-of type "xml") 0) (>= (bytes/index-of type "javascript") 0)))))
 
 ; --- HTML as text ------------------------------------------------------
 
@@ -288,21 +288,21 @@
 ; is cut at each <, so each piece is a tag and the text after it, and the
 ; whole is read once.
 (defun tools/html->text (html base)
-    (let pieces (str-split (tools/uncomment html) "<"))
+    (let pieces (str/split (tools/uncomment html) "<"))
     (if (nil? pieces)
         ""
         (tools/lines (tools/pieces (cdr pieces) () base #false (list (tools/plain (car pieces)))))))
 
 ; html without its comments, which can hold a < of their own.
 (defun tools/uncomment (html)
-    (let parts (str-split html "<!--"))
+    (let parts (str/split html "<!--"))
     (if (nil? parts)
         ""
-        (str-join "" (cons (car parts) (map tools/after-comment (cdr parts))))))
+        (str/join "" (cons (car parts) (map tools/after-comment (cdr parts))))))
 
 (defun tools/after-comment (part)
-    (let end (index-of part "-->"))
-    (if (< end 0) "" (substring part (+ end 3) (str-len part))))
+    (let end (bytes/index-of part "-->"))
+    (if (< end 0) "" (bytes/slice part (+ end 3))))
 
 ; skip is the tag that ends what's being left out ("/script"), or ().
 ; open is whether a link is open: its <a> put (:link url) in acc, which
@@ -310,18 +310,18 @@
 ; since.
 (defun tools/pieces (pieces skip base open acc)
     (match pieces
-        (() (str-join "" (reverse (tools/shut open acc))))
+        (() (str/join "" (reverse (tools/shut open acc))))
         ((p & rest)
-            (let close (index-of p ">"))
+            (let close (bytes/index-of p ">"))
             (let tag   (tools/tag p close))
-            (let text  (if (< close 0) "" (substring p (+ close 1) (str-len p))))
+            (let text  (if (< close 0) "" (bytes/slice p (+ close 1))))
             (cond
                 ((not (nil? skip))
                     (if (eq? tag skip) (tools/pieces rest () base open (cons (tools/plain text) acc)) (tools/pieces rest skip base open acc)))
                 ((eq? tag "")
-                    (tools/pieces rest () base open (cons (tools/plain (concat "<" p)) acc)))
+                    (tools/pieces rest () base open (cons (tools/plain (str "<" p)) acc)))
                 ((member? tag (list "script" "style" "svg" "noscript"))
-                    (tools/pieces rest (concat "/" tag) base open acc))
+                    (tools/pieces rest (str "/" tag) base open acc))
                 ((eq? tag "a")
                     (tools/pieces rest () base #true (cons (tools/plain text) (cons (list :link (tools/href p close base)) (tools/shut open acc)))))
                 ((eq? tag "/a")
@@ -332,27 +332,27 @@
 ; A piece's tag, lower case, with its / if it closes one; or "" if the <
 ; didn't start a tag ("a < b").
 (defun tools/tag (p close)
-    (let head  (if (< close 0) p (substring p 0 close)))
-    (let first (if (== (str-len head) 0) 0 (byte-at head 0)))
+    (let head  (if (< close 0) p (bytes/slice p 0 close)))
+    (let first (if (== (bytes/len head) 0) 0 (bytes/at head 0)))
     (cond
         ((not (or (tools/letter? first) (== first 47) (== first 33) (== first 63))) "")
-        (#true (lc (tools/name-of head)))))
+        (#true (str/lower (tools/name-of head)))))
 
 (defun tools/letter? (b) (or (and (>= b 65) (<= b 90)) (and (>= b 97) (<= b 122))))
 
 ; A tag's name: up to a space, a newline, a tab or a /, past a first /.
 (defun tools/name-of (head)
-    (let rest (if (starts-with? head "/") (substring head 1 (str-len head)) head))
+    (let rest (if (str/starts-with? head "/") (bytes/slice head 1) head))
     (let end  (tools/until rest 0 (cons 47 (tools/spaces))))
-    (concat (if (starts-with? head "/") "/" "") (substring rest 0 end)))
+    (str (if (str/starts-with? head "/") "/" "") (bytes/slice rest 0 end)))
 
 ; The first index from i in s whose byte is one of stops, or past the end;
 ; and the first whose byte isn't one of skips.
 (defun tools/until (s i stops)
-    (if (or (>= i (str-len s)) (member? (byte-at s i) stops)) i (tools/until s (+ i 1) stops)))
+    (if (or (>= i (bytes/len s)) (member? (bytes/at s i) stops)) i (tools/until s (+ i 1) stops)))
 
 (defun tools/past (s i skips)
-    (if (and (< i (str-len s)) (member? (byte-at s i) skips)) (tools/past s (+ i 1) skips) i))
+    (if (and (< i (bytes/len s)) (member? (bytes/at s i) skips)) (tools/past s (+ i 1) skips) i))
 
 (defun tools/spaces () (list 32 10 13 9))
 
@@ -360,7 +360,7 @@
 ; before a cell, or nothing. An item, a row or a term starts a line, and
 ; its end doesn't, so a list's items are on lines one after another.
 (defun tools/break (tag)
-    (let name (if (starts-with? tag "/") (substring tag 1 (str-len tag)) tag))
+    (let name (if (str/starts-with? tag "/") (bytes/slice tag 1) tag))
     (cond
         ((eq? tag "li")                                                     "\n- ")
         ((member? tag (list "td" "th"))                                     " | ")
@@ -375,32 +375,32 @@
 ; single spaces, a space at either end kept, since the text next to it
 ; may need it.
 (defun tools/plain (text)
-    (let spaced (str-join " " (str-split (str-join " " (str-split (str-join " " (str-split text \n)) \t)) \r)))
-    (let words  (filter (lambda (w) (> (str-len w) 0)) (str-split spaced " ")))
-    (let lead   (if (starts-with? spaced " ") " " ""))
-    (let trail  (if (and (cons? words) (ends-with? spaced " ")) " " ""))
-    (tools/entities (concat lead (str-join " " words) trail)))
+    (let spaced (str/join " " (str/split (str/join " " (str/split (str/join " " (str/split text \n)) \t)) \r)))
+    (let words  (filter (lambda (w) (> (bytes/len w) 0)) (str/split spaced " ")))
+    (let lead   (if (str/starts-with? spaced " ") " " ""))
+    (let trail  (if (and (cons? words) (str/ends-with? spaced " ")) " " ""))
+    (tools/entities (str lead (str/join " " words) trail)))
 
 (defun tools/entities (s)
-    (let parts (str-split s "&"))
+    (let parts (str/split s "&"))
     (if (or (nil? parts) (nil? (cdr parts)))
         s
-        (str-join "" (cons (car parts) (map tools/entity (cdr parts))))))
+        (str/join "" (cons (car parts) (map tools/entity (cdr parts))))))
 
 ; A piece after an &: an entity it knows, up to its ;, and the rest; or
 ; the & back, as it was.
 (defun tools/entity (part)
-    (let semi  (index-of part ";"))
-    (let value (if (and (> semi 0) (< semi 10)) (tools/decode (substring part 0 semi)) :not-found))
+    (let semi  (bytes/index-of part ";"))
+    (let value (if (and (> semi 0) (< semi 10)) (tools/decode (bytes/slice part 0 semi)) :not-found))
     (if (eq? value :not-found)
-        (concat "&" part)
-        (concat value (substring part (+ semi 1) (str-len part)))))
+        (str "&" part)
+        (str value (bytes/slice part (+ semi 1)))))
 
 (defun tools/decode (name)
     (cond
-        ((starts-with? name "#x") (tools/code (tools/hex (substring name 2 (str-len name)) 0)))
-        ((starts-with? name "#X") (tools/code (tools/hex (substring name 2 (str-len name)) 0)))
-        ((starts-with? name "#")  (tools/code (string->int (substring name 1 (str-len name)))))
+        ((str/starts-with? name "#x") (tools/code (tools/hex (bytes/slice name 2) 0)))
+        ((str/starts-with? name "#X") (tools/code (tools/hex (bytes/slice name 2) 0)))
+        ((str/starts-with? name "#")  (tools/code (str->int (bytes/slice name 1))))
         (#true
             (lookup name (list (list "amp" "&") (list "lt" "<") (list "gt" ">") (list "quot" "\"")
                                (list "apos" "'") (list "nbsp" " ") (list "mdash" "—") (list "ndash" "–")
@@ -410,27 +410,27 @@
 ; A code point as its character, if it is one.
 (defun tools/code (n)
     (if (and (int? n) (> n 0) (< n 1114112) (not (and (>= n 55296) (<= n 57343))))
-        (utf8/char n)
+        (codes->str (list n))
         :not-found))
 
 (defun tools/hex (s acc)
     (cond
-        ((== (str-len s) 0) acc)
+        ((== (bytes/len s) 0) acc)
         (#true
-            (let b (byte-at s 0))
+            (let b (bytes/at s 0))
             (let d (cond
                        ((and (>= b 48) (<= b 57))  (- b 48))
                        ((and (>= b 97) (<= b 102)) (- b 87))
                        ((and (>= b 65) (<= b 70))  (- b 55))
                        (#true                      -1)))
-            (if (or (< d 0) (> acc 1114111)) #false (tools/hex (substring s 1 (str-len s)) (+ (* acc 16) d))))))
+            (if (or (< d 0) (> acc 1114111)) #false (tools/hex (bytes/slice s 1) (+ (* acc 16) d))))))
 
 ; The text's lines, each with its space squeezed and none at its ends
 ; (pieces next to each other may each have kept a space), and no more than
 ; one blank line in a row, none at the start or the end.
 (defun tools/lines (text)
-    (let lines (map (lambda (line) (str-join " " (filter (lambda (w) (> (str-len w) 0)) (str-split line " ")))) (str-split text \n)))
-    (str-join \n (reverse (tools/blank-once lines () #true))))
+    (let lines (map (lambda (line) (str/join " " (filter (lambda (w) (> (bytes/len w) 0)) (str/split line " ")))) (str/split text \n)))
+    (str/join \n (reverse (tools/blank-once lines () #true))))
 
 (defun tools/blank-once (lines acc blank)
     (match lines
@@ -455,79 +455,79 @@
 ; breaks around it kept outside; or the text as it was, if it has no words
 ; (an image's link) or goes nowhere a fetch could.
 (defun tools/link-text (inside url)
-    (let raw   (str-join "" inside))
-    (let words (filter (lambda (w) (> (str-len w) 0)) (str-split (str-join " " (str-split raw \n)) " ")))
+    (let raw   (str/join "" inside))
+    (let words (filter (lambda (w) (> (bytes/len w) 0)) (str/split (str/join " " (str/split raw \n)) " ")))
     (cond
         ((or (nil? words) (eq? url :none)) raw)
         (#true
             (let start (tools/past raw 0 (list 32 10)))
-            (let end   (tools/back raw (str-len raw)))
-            (concat (substring raw 0 start) "[" (str-join " " words) "](" url ")" (substring raw end (str-len raw))))))
+            (let end   (tools/back raw (bytes/len raw)))
+            (str (bytes/slice raw 0 start) "[" (str/join " " words) "](" url ")" (bytes/slice raw end)))))
 
 ; Where the space and line breaks at the end of s, before i, start.
 (defun tools/back (s i)
-    (if (and (> i 0) (member? (byte-at s (- i 1)) (list 32 10))) (tools/back s (- i 1)) i))
+    (if (and (> i 0) (member? (bytes/at s (- i 1)) (list 32 10))) (tools/back s (- i 1)) i))
 
 ; Where an <a> goes, the piece p after its <: its href, entities decoded
 ; and resolved against base; or :none.
 (defun tools/href (p close base)
-    (let head (if (< close 0) p (substring p 0 close)))
-    (let at   (tools/attribute (lc head) "href" 0))
+    (let head (if (< close 0) p (bytes/slice p 0 close)))
+    (let at   (tools/attribute (str/lower head) "href" 0))
     (if (< at 0) :none (tools/resolve base (tools/entities (tools/value head at)))))
 
 ; Where the value of the attribute name starts in head, lower case: name
 ; after a space and before an =, so not data-href; or -1.
 (defun tools/attribute (head name from)
-    (let i (index-of (substring head from (str-len head)) name))
+    (let i (bytes/index-of (bytes/slice head from) name))
     (cond
         ((< i 0) -1)
         (#true
             (let at (+ from i))
-            (let eq (tools/past head (+ at (str-len name)) (tools/spaces)))
-            (if (and (> at 0) (member? (byte-at head (- at 1)) (tools/spaces)) (< eq (str-len head)) (== (byte-at head eq) 61))
+            (let eq (tools/past head (+ at (bytes/len name)) (tools/spaces)))
+            (if (and (> at 0) (member? (bytes/at head (- at 1)) (tools/spaces)) (< eq (bytes/len head)) (== (bytes/at head eq) 61))
                 (tools/past head (+ eq 1) (tools/spaces))
                 (tools/attribute head name (+ at 1))))))
 
 ; The value at i: in quotes, up to the closing one, or up to a space.
 (defun tools/value (head i)
-    (let q (if (< i (str-len head)) (byte-at head i) 0))
+    (let q (if (< i (bytes/len head)) (bytes/at head i) 0))
     (cond
         ((or (== q 34) (== q 39))
-            (let rest (substring head (+ i 1) (str-len head)))
-            (let end  (index-of rest (if (== q 34) "\"" "'")))
-            (if (< end 0) rest (substring rest 0 end)))
-        (#true (substring head i (tools/until head i (tools/spaces))))))
+            (let rest (bytes/slice head (+ i 1)))
+            (let end  (bytes/index-of rest (if (== q 34) "\"" "'")))
+            (if (< end 0) rest (bytes/slice rest 0 end)))
+        (#true (bytes/slice head i (tools/until head i (tools/spaces))))))
 
 ; href as a whole URL, against base, the page's; or :none for a place on
 ; the same page, or a scheme a fetch can't follow (mailto:, javascript:).
 ; A ../ is left in, for the server to take out.
 (defun tools/resolve (base href)
-    (let lower (lc (substring href 0 8)))
+    (let lower (str/lower (bytes/slice href 0 8)))
     (cond
-        ((or (eq? href "") (starts-with? href "#"))                          :none)
-        ((or (starts-with? lower "http://") (starts-with? lower "https://")) href)
-        ((tools/scheme? href)                                                :none)
-        ((eq? base "")                                                       href)
-        ((starts-with? href "//") (concat (substring base 0 (+ (index-of base ":") 1)) href))
-        ((starts-with? href "/")  (concat (tools/origin base) href))
-        ((starts-with? href "?")  (concat (tools/page base) href))
-        (#true                    (concat (tools/dir base) href))))
+        ((or (eq? href "") (str/starts-with? href "#"))                              :none)
+        ((or (str/starts-with? lower "http://") (str/starts-with? lower "https://")) href)
+        ((tools/scheme? href)                                                        :none)
+        ((eq? base "")                                                               href)
+        ((str/starts-with? href "//") (str (bytes/slice base 0 (+ (bytes/index-of base ":") 1)) href))
+        ((str/starts-with? href "/")  (str (tools/origin base) href))
+        ((str/starts-with? href "?")  (str (tools/page base) href))
+        (#true                        (str (tools/dir base) href))))
 
 ; Whether href starts with a scheme: a : before any / ? or #.
 (defun tools/scheme? (href)
     (let c (tools/until href 0 (list 58 47 63 35)))
-    (and (> c 0) (< c (str-len href)) (== (byte-at href c) 58)))
+    (and (> c 0) (< c (bytes/len href)) (== (bytes/at href c) 58)))
 
 ; A URL's scheme and host (and port); without its query or fragment; and
 ; its directory, up to its last /.
-(defun tools/origin (url) (substring url 0 (tools/until url (+ (index-of url "//") 2) (list 47 63 35))))
-(defun tools/page (url) (substring url 0 (tools/until url 0 (list 63 35))))
+(defun tools/origin (url) (bytes/slice url 0 (tools/until url (+ (bytes/index-of url "//") 2) (list 47 63 35))))
+(defun tools/page (url) (bytes/slice url 0 (tools/until url 0 (list 63 35))))
 
 (defun tools/dir (url)
     (let page (tools/page url))
-    (if (== (str-len page) (str-len (tools/origin url)))
-        (concat page "/")
-        (concat (str-join "/" (reverse (cdr (reverse (str-split page "/"))))) "/")))
+    (if (== (bytes/len page) (bytes/len (tools/origin url)))
+        (str page "/")
+        (str (str/join "/" (reverse (cdr (reverse (str/split page "/"))))) "/")))
 
 ; --- notes -------------------------------------------------------------
 
@@ -553,7 +553,7 @@
         ((:keys to)    (reply to (map car table)) (notes/loop path table))
         ((:put key text to)
             (let new (cons (list key text) (remove (lambda (n) (eq? (car n) key)) table)))
-            (match (join (fork (tools/save path (concat (sexp/print new) \n))))
+            (match (join (fork (tools/save path (str (sexp/print new) \n))))
                 ((:ok _)
                     (reply to ())
                     (notes/loop path new))

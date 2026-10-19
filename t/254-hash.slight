@@ -20,7 +20,7 @@
 ; eq?, and so hashed alike: 0.0 and -0.0, a string made two ways, a list
 ; made two ways.
 (pprint (list (== (hash 0.0) (hash -0.0))
-              (== (hash (concat "sl" "ight")) (hash "slight"))
+              (== (hash (str "sl" "ight")) (hash "slight"))
               (== (hash (list 1 (list 2) 3)) (hash (cons 1 (cons (cons 2 ()) (cons 3 ())))))))
 
 ; Not eq?, and hashed apart: an integer and a float, a string and a

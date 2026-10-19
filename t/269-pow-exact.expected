@@ -1,0 +1,13 @@
+(81 -2305843009213693952 -4611686018427387904 1 7)
+(1 -1 4611686014132420609)
+(8.0 0.5 2.0)
+fault in #<pid 2>: integer overflow (math/pow at t/269-pow-exact.slight:9:21)
+overflow
+fault in #<pid 3>: integer overflow (math/pow at t/269-pow-exact.slight:10:21)
+overflow
+fault in #<pid 4>: integer overflow (math/pow at t/269-pow-exact.slight:11:21)
+overflow
+fault in #<pid 5>: out of range: -1 (math/pow at t/269-pow-exact.slight:12:21)
+out-of-range
+fault in #<pid 6>: not a number: "2" (math/pow at t/269-pow-exact.slight:13:13)
+not-a-number

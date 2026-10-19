@@ -1,0 +1,44 @@
+(42 -42 0 0 7)
+(#false #false #false #false #false #false #false #false)
+(255 255 -5 35 35 #false #false)
+(4611686018427387903 #false -4611686018427387904 #false)
+(4611686018427387903 #false -4611686018427387904)
+("42" "-42" "0" "ff" "11111111" "-z")
+("z1ci99jj7473" "-4000000000000000")
+(123456789 123456789 123456789 123456789 123456789)
+((1 #false -3) ("1" "-2"))
+(1.5 -0.25 1000.0 0.0025 12.0 -0.0 #false)
+(#false #false #false #false #false #false #false)
+("hello" "key" hello key #false)
+((97 233 128512) "hé😀" () "")
+((97 195 169) "hi" ())
+(#true #false (97 65533 98 65533 65533 65533) (97 65533 98 65533 65533 65533))
+(6 6 14 #true)
+(3 195 169 (195) "é")
+(3 -1 2 1)
+("" "a12.5b#true()(1 \"x\" (\"y\"))z")
+("" "a" "abc")
+fault in #<pid 2>: out of range: 1 (str->int at t/264-str-convert.slight:34:21)
+out-of-range
+fault in #<pid 3>: out of range: 37 (str->int at t/264-str-convert.slight:35:21)
+out-of-range
+fault in #<pid 4>: out of range: 0 (int->str at t/264-str-convert.slight:36:21)
+out-of-range
+fault in #<pid 5>: not an integer: "1" (int->str at t/264-str-convert.slight:37:21)
+not-an-int
+fault in #<pid 6>: not a string: 1 (str->int at t/264-str-convert.slight:38:21)
+not-a-string
+fault in #<pid 7>: out of range: 256 (bytes->str at t/264-str-convert.slight:39:21)
+out-of-range
+fault in #<pid 8>: out of range: -1 (bytes->str at t/264-str-convert.slight:40:21)
+out-of-range
+fault in #<pid 9>: out of range: 3 (bytes/at at t/264-str-convert.slight:41:21)
+out-of-range
+fault in #<pid 10>: out of range: -4 (bytes/at at t/264-str-convert.slight:42:21)
+out-of-range
+fault in #<pid 11>: not a symbol: "a" (sym->str at t/264-str-convert.slight:43:21)
+not-a-symbol
+fault in #<pid 12>: not a string: 1 (~ at t/264-str-convert.slight:44:21)
+not-a-string
+fault in #<pid 13>: not a string: a (~ at t/264-str-convert.slight:45:13)
+not-a-string

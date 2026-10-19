@@ -5,13 +5,13 @@
             (send $s :SOD)
             (char-buffer $s))
         ((:line f s)
-            (map (lambda (c) (send $s c)) (str-split s ""))
+            (map (lambda (c) (send $s c)) (str/split s ""))
             (char-buffer $s))
         ((:eof f)
             (send $s :EOD))))
 
 (defun flush-buffer ($s buffer)
-    (when (> (str-len buffer) 0)
+    (when (> (bytes/len buffer) 0)
         (send $s (list :ATOM buffer)))
     "")
 

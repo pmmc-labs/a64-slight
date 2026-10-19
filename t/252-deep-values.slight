@@ -27,7 +27,7 @@
 (defun depth (v n)
     (if (cons? v) (depth (car v) (+ n 1)) n))
 
-(defun nested (open close n) (concat (double-up open n) (double-up close n)))
+(defun nested (open close n) (str (double-up open n) (double-up close n)))
 
 (write-file "build/t/252-deep.json" (list (nested "[" "]" 20)))
 (write-file "build/t/252-deep.sexp" (list (nested "(" ")" 20)))

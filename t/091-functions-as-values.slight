@@ -6,7 +6,7 @@
 ; builtins too
 (pprint (map car '((a 1) (b 2))))
 (pprint (fold/l 0 + (range 1 11)))
-(pprint (map str-len '("a" "bb" "")))
+(pprint (map bytes/len '("a" "bb" "")))
 (pprint (map pprint '(x y)))
 (pprint square)
 (pprint car)

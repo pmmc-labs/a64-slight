@@ -1,0 +1,37 @@
+; Random numbers (D222). Each process has a generator of its own, Java's
+; SplittableRandom: t/run.sh seeds the run (SLIGHT_SEED=1), rand/seed
+; starts the caller's again, and a fork's child's is split from its
+; parent's, so a process's numbers don't depend on the order processes
+; run in. This output comes from Java's own SplittableRandom, in
+; t/models/Rand273.java.
+
+; the root's, from SLIGHT_SEED
+(pprint (list (rand/int 10) (rand/int 10) (rand/int 1000000)))
+; from 42: dice, a bound of 1, a power of two, the biggest bound, floats
+(rand/seed 42)
+(pprint (map (lambda (i) (rand/int 6)) (range 0 12)))
+(pprint (list (rand/int 1) (rand/int 1024) (rand/int 4611686018427387903) (rand/float) (rand/float)))
+; from 42 again, the same
+(rand/seed 42)
+(pprint (map (lambda (i) (rand/int 6)) (range 0 12)))
+(rand/seed -7)
+(pprint (list (rand/int 100) (rand/int 3)))
+
+; each child's numbers come from its parent's, at the fork
+(rand/seed 7)
+(let a (fork (list (rand/int 100) (rand/int 100))))
+(let b (fork (do (let c (fork (rand/int 100))) (list (rand/int 100) (cadr (join c))))))
+(pprint (list (rand/int 100) (cadr (join a)) (cadr (join b))))
+
+; an element, each as likely, or () from ()
+(rand/seed 9)
+(pprint (list (rand/pick '(a b c d e)) (rand/pick '(a b c d e)) (rand/pick ())))
+; an order, each as likely: the elements, and no others
+(pprint (rand/shuffle (range 0 10)))
+(pprint (list (rand/shuffle ()) (sort < (rand/shuffle (range 0 10)))))
+
+(defun kind (pid) (car (cadr (join pid))))
+(pprint (kind (fork (rand/int 0))))
+(pprint (kind (fork (rand/int -5))))
+(pprint (kind (fork (rand/int 2.5))))
+(kind (fork (rand/seed "x")))

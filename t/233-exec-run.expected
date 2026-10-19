@@ -1,15 +1,9 @@
-(ok (0 "a
-b
-"))
-(ok (3 "out
-err
-"))
+(ok (0 "a\nb\n"))
+(ok (3 "out\nerr\n"))
 (ok (0 ""))
 (ok ((signal term) ""))
 (error (enoent "no-such-command"))
-(ok (0 "running
-"))
+(ok (0 "running\n"))
 (error killed)
-(ok (0 "gone
-"))
+(ok (0 "gone\n"))
 ()

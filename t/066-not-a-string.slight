@@ -1,2 +1,2 @@
-(pprint (str-len "ok"))
-(str-len 5)
+(pprint (bytes/len "ok"))
+(bytes/len 5)

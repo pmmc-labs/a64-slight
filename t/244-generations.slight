@@ -24,13 +24,13 @@
 (let grown (grow 12500 ()))
 (pprint (fold/l 0 (lambda (a t) (match t (#(i k) (+ a (+ i k))))) grown))
 
-(let big (str-join "," keep))
-(pprint (str-len big))
-(let pieces (str-split big ","))
-(pprint (list (length pieces) (sum (map string->int pieces))))
+(let big (str/join "," keep))
+(pprint (bytes/len big))
+(let pieces (str/split big ","))
+(pprint (list (length pieces) (sum (map str->int pieces))))
 (let cells (tuple->list (list->tuple (range 0 70000))))
 (pprint (garbage 1000 0))
-(pprint (list (substring big 0 9) (substring big (- (str-len big) 11) (str-len big))))
+(pprint (list (bytes/slice big 0 9) (bytes/slice big (- (bytes/len big) 11))))
 
 (defun keeper (kept)
     (recv
@@ -48,6 +48,6 @@
 (match (join (fork (range 0 10000)))
     ((:ok xs) (pprint (sum xs))))
 
-(pprint (list (length keep) (length grown) (str-len big)))
+(pprint (list (length keep) (length grown) (bytes/len big)))
 (pprint (list (sum keep) (length pieces) (sum cells)))
 :done

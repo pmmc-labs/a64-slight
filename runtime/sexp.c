@@ -349,9 +349,9 @@ static size_t decode(const char *p, char *out, const char **end) {
 static rt_value_t new_string(const char *bytes, size_t n, rt_build_alloc_t alloc, void *cx) {
     uint64_t *box = alloc(cx, 8 + n + 1);
     if (!box) return 0;
-    box[0] = (uint64_t)n << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
     if (bytes) memcpy(box + 1, bytes, n);
     ((char *)(box + 1))[n] = '\0';
+    box[0] = rt_string_header((const char *)(box + 1), n);
     return (rt_value_t)box | RT_TAG_BOXED;
 }
 
@@ -463,9 +463,9 @@ int rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
                 size_t      n = decode(p + 1, NULL, &after);
                 uint64_t   *box = alloc(cx, 8 + n + 1);
                 if (!box) goto too_big;
-                box[0] = (uint64_t)n << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
                 decode(p + 1, (char *)(box + 1), &after);
                 ((char *)(box + 1))[n] = '\0';
+                box[0] = rt_string_header((const char *)(box + 1), n);
                 v = (rt_value_t)box | RT_TAG_BOXED;
                 p = after;
             } else {
@@ -536,35 +536,6 @@ static void put(rt_buf_t *b, const char *s) {
     rt_buf_add(b, s, strlen(s));
 }
 
-// A string as the reader takes it back: " and \ escaped, and the control
-// characters, so what's printed stays on one line.
-static void put_string(rt_buf_t *b, const char *p, size_t len) {
-    size_t from = 0;
-    put(b, "\"");
-    for (size_t i = 0; i < len; i++) {
-        unsigned char c = (unsigned char)p[i];
-        const char   *e = c == '"' ? "\\\"" : c == '\\' ? "\\\\" : c == '\n' ? "\\n" : c == '\t' ? "\\t"
-                        : c == '\r' ? "\\r" : c == 0x1b ? "\\e" : NULL;
-        char u[12];
-        if (!e && (c < 0x20 || c == 0x7f)) {
-            static const char digits[] = "0123456789abcdef";
-            int k = 0;
-            memcpy(u, "\\u{", 3);
-            if (c >= 16) u[3 + k++] = digits[c >> 4];
-            u[3 + k++] = digits[c & 15];
-            u[3 + k++] = '}';
-            u[3 + k]   = '\0';
-            e = u;
-        }
-        if (!e) continue;
-        rt_buf_add(b, p + from, i - from);
-        put(b, e);
-        from = i + 1;
-    }
-    rt_buf_add(b, p + from, len - from);
-    put(b, "\"");
-}
-
 // Whether len bytes read back as a name: not a number, not ".", no
 // delimiter, and not a # literal or a keyword.
 static int is_name(const char *p, size_t len) {
@@ -612,7 +583,7 @@ rt_value_t rt_sexp_print(rt_value_t v, const char *site) {
         } else if (v == RT_NIL) {
             put(&b, "()");
         } else if (rt_is_string(v)) {
-            put_string(&b, rt_string_bytes(v), rt_string_len(v));
+            rt_quote(&b, rt_string_bytes(v), rt_string_len(v));
         } else if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
             put(&b, rt_symbol_name(v >> RT_SYMBOL_SHIFT));
         } else if (!(v & RT_TAG_INT_MASK)) {

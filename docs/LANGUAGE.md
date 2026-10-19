@@ -52,9 +52,10 @@ exits 1:
     deadlock: the root process is waiting in wait-forever for a
     message, and nothing else can run
 
-(on one line; the other kind is `... waiting in the top level for #<pid
-2> to end, ...`). It names the function the root waits in, as `:system`
-does (under Devices).
+(on one line; the others are `... waiting in the top level for #<pid
+2> to end, ...`, in `join`, and `... for the first of #<pid 2>, #<pid
+3> to end, ...`, in `join/race`). It names the function the root waits
+in, as `:system` does (under Devices).
 
 These also go to stderr, as they happen:
 
@@ -75,7 +76,8 @@ tests: `SLIGHT_CLOCK=virtual` swaps the real clock for one that starts at
 and `SLIGHT_GC_STRESS=n` makes it collect at the entry of every nth
 function called (n from 1, every call, which is slow, to 1,000), and at
 every `recv`.
-`SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` are in "Sockets".
+`SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` are in "Sockets", and
+`SLIGHT_SEED` in "Random numbers", under Builtins.
 
 ### Replaying a run, and other orders
 
@@ -114,7 +116,8 @@ than time. So (D170):
       for n in $(seq 1 100); do SLIGHT_SCHED=$n ./prog || echo "seed $n"; done
 
   A record keeps its run's seed and its clock (real or virtual), so a
-  replay uses them.
+  replay uses them, and the seed its random numbers started from,
+  whether `SLIGHT_SEED` gave it or the system did.
 
 ### @ARGV
 
@@ -127,7 +130,7 @@ Only the top level sees it: the top-level forms are the body of a
 function, and `@ARGV` is that function's parameter. So a lambda or a
 `fork` at the top level captures it like any other local, and a `defun`
 that names it is a compile error; pass it to the functions that need it.
-A number arrives as a string: `(string->int (car @ARGV))`. `@ARGV` can't
+A number arrives as a string: `(str->int (car @ARGV))`. `@ARGV` can't
 be bound or defined (D144).
 
 ### %ENV
@@ -179,8 +182,8 @@ is compiled at once (D141).
   the escapes `\"`, `\\`, `\n`, `\t`, `\r`, `\e` (ESC), and `\u{hex}`:
   the UTF-8 for a code point, in hex, up to 10FFFF and not a surrogate.
 - A name is a run of anything but whitespace, parentheses, `'`, `"`,
-  `;`, the backquote and the comma. So `str-len`, `utf8/len`,
-  `string->int`, `nil?`, `+` and `==` are all names.
+  `;`, the backquote and the comma. So `str/len`, `str->int`, `nil?`,
+  `+` and `==` are all names.
 - `:name` is a keyword: a symbol that stands for itself. The reader makes
   it `(quote name)`, so `:ping` and `'ping` are the same symbol. `:12`,
   `::x`, `:#x` and a lone `:` are errors.
@@ -201,7 +204,7 @@ list too. `'(:inc)` is the list `((quote inc))`, not the message
 `$$` is the current process, and `^$$` its parent (Processes).
 
 `\n`, `\r`, `\t` and `\e` are also names, for the one-character strings,
-and `PI` is the float 3.141592653589793. They're constants rather than
+and `math/PI` is the float 3.141592653589793. They're constants rather than
 reserved words: a local of the same name hides them.
 
 These names can't be bound or defined: `#true`, `#false`, `$$`, `^$$`,
@@ -251,12 +254,15 @@ forms in order (Files).
   `nan`, `inf`, `-inf`.
 - **Symbols**: `:ping`, `'ping`. They print without the colon. Every
   symbol is known when the program is compiled; none are made while it
-  runs (`string->symbol`, below).
+  runs (`str->sym`, below).
 - **Booleans**: `#true` and `#false`, which are symbols too.
 - **Lists**: `()`, and cons cells. Every list is proper: `cons` faults
   on anything but a list as its second argument.
-- **Strings**: immutable bytes, UTF-8 by convention. `pprint` shows them
-  in double quotes, with nothing inside escaped.
+- **Strings**: immutable bytes, UTF-8 by convention (Strings, under
+  Builtins). `pprint` shows one as the reader takes it back, on one
+  line: in double quotes, with `"` and `\` escaped, and the control
+  characters, as `\n`, `\t`, `\r`, `\e`, or `\u{hex}` for the rest
+  (C0, DEL and C1). Other characters, and stray bytes, are as they are.
 - **Tuples**: a fixed number of values, any of which can be had in one
   step, where a list takes a step per element (D169). They print as
   `#(1 "a" b)`. `(tuple 1 "a" :b)` makes one, and a pattern such as
@@ -316,7 +322,7 @@ the rest of the body.
     (defun hypotenuse (a b)
         (let a2 (* a a))
         (let b2 (* b b))
-        (sqrt (+ a2 b2)))
+        (math/sqrt (+ a2 b2)))
 
 ### cond
 
@@ -484,16 +490,16 @@ a function faults (`:not-a-function`), and so does the wrong number of
 arguments (`:arity`). A local hides a function or builtin of the same
 name.
 
-A `defun` name, a lambda, or a builtin that takes a fixed number of
-arguments can be used as a value:
+A `defun` name, a lambda, or a builtin can be used as a value. A builtin
+with optional arguments then takes just the ones it needs (D219):
 
     (map car pairs)
     (fold/l 0 + xs)
+    (map str->int words)
 
-A builtin that takes a varying number (`list`, `tuple`, `concat`,
-`tty/write`, `format-num`) can't, so `(apply list xs)` is a compile
-error. Nor can a
-function that waits in `recv`.
+A builtin that takes any number of arguments (`list`, `tuple`, `str`,
+`~`, `tty/write`) can't, so `(apply list xs)` is a compile error. Nor
+can a function that waits in `recv`.
 
 `(apply f xs)` calls `f` with the elements of the list `xs` as its
 arguments, at most 8. In tail position it's a tail call.
@@ -641,6 +647,37 @@ The fault kinds:
   value)` or `(:error reason)`. It works on any pid, any number of
   times, from anywhere (a lambda included), and after the process has
   ended. Several joiners wake in the order they joined.
+- `(join/race pids)` waits until the first of the list `pids` ends, and
+  gives `(pid result)`, `result` being what `join` would give (D220). If
+  some have ended already, it's the first of those in the list. Like
+  `join`, it works from anywhere, and the caller keeps its stack while it
+  waits, so it needn't be a function that waits in `recv`. An empty list
+  faults (`:not-a-pid`), since it would wait forever, and so does
+  something in the list that isn't a pid, or the caller's own pid
+  (`:join-self`), all found before it waits. The others go on running:
+  `kill` them if they're no longer wanted.
+
+      (defun within (ms pid)
+          (let timer (fork (sleep ms)))
+          (match (join/race (list pid timer))
+              ((p result) (if (eq? p pid)
+                              (do (kill timer) result)
+                              (do (kill pid) (list :error :timeout))))))
+
+  And a pool, at most k jobs at once, is a loop that forks till k are
+  running and then waits for the first of them to end.
+- `(join/any pids)` gives `(:ok value)` for the first of `pids` to end
+  well, or, once all have ended with errors, `(:error reasons)`, the
+  reasons in the order of `pids`: JavaScript's `Promise.any`. An empty
+  list gives `(:error ())`.
+- `(join/all pids)` gives `(:ok values)`, the values in the order of
+  `pids`, once all have ended well; or the first `(:error reason)` as
+  soon as there is one, without waiting for the rest: JavaScript's
+  `Promise.all`. An empty list gives `(:ok ())`. `(map join pids)` is the
+  one that waits for every result, ended well or not.
+
+  Both are in the prelude, on `join/race`, and both leave running the
+  processes they no longer wait for.
 - `(monitor pid)` asks to be told when `pid` ends: the caller is sent
   `(:exit pid result)` then, or at once if it already has. Monitoring
   twice means two messages. Nothing is sent to a parent unless it asks.
@@ -723,7 +760,7 @@ the new process's pid.
 The new process is sent every key typed, as `(key mods...)`:
 
 - `key` is a one-character string for a printable key (any UTF-8
-  character, well-formed as the `utf8/` builtins have it), or a name:
+  character, well-formed as the `str/` builtins have it), or a name:
   `:ArrowUp`, `:ArrowDown`, `:ArrowLeft`, `:ArrowRight`, `:Home`, `:End`,
   `:Insert`, `:Delete`, `:PageUp`, `:PageDown`, `:Enter`, `:Escape`,
   `:Backspace`, `:Tab`, `:F1` to `:F12`, or `:Unidentified`, which is
@@ -801,7 +838,7 @@ before it, and a bad s-expression with `(:error (:bad-sexp path))`.
     (defun size (n)
         (recv
             ((:open f)    (send f (list :read :chunks)) (size n))
-            ((:chunk f s) (size (+ n (str-len s))))
+            ((:chunk f s) (size (+ n (bytes/len s))))
             ((:eof f)     n)))
 
     (join (connect :fs/read "photo.jpg" (size 0)))
@@ -989,12 +1026,13 @@ which `lookup` reads; more keys may come. A process's:
   the root).
 - `(:state st)`: `:running` (the one asking, unless a timer asked),
   `:ready` (in the run queue), `:recv` (waiting for a message),
-  `:joining` or `:sleeping`.
-- `(:joining p)`: the process it waits for in `join`, or `()`.
+  `:joining` (in `join` or `join/race`) or `:sleeping`.
+- `(:joining p)`: the process it waits for in `join`, the list of those
+  it races in `join/race`, or `()`.
 - `(:in name)`: the function it's in, as a string: the receive function
-  it waits in; the one that called `join`, `sleep`, `yield`, or `send`
-  to a device; the one it was entering when it was preempted; or the one
-  it starts in. A `recv` in the middle of a function waits in a receive
+  it waits in; the one that called `join`, `join/race`, `sleep`,
+  `yield`, or `send` to a device; the one it was entering when it was
+  preempted; or the one it starts in. A `recv` in the middle of a function waits in a receive
   function of its own, named for both: `"server (recv at
   prog.slight:7:12)"`. The top level is `"the top level"`, a `fork`'s
   body `"fork at prog.slight:3:9"` (a `connect`'s, `"connect at ..."`),
@@ -1039,6 +1077,8 @@ what it wanted (`:not-a-number`, `:not-a-string`, ...).
 ### Numbers
 
 Integers and floats mix: if either operand is a float, so is the result.
+The arithmetic is unprefixed; the rest is under `math/`, as JavaScript
+keeps it in `Math` (D221).
 
 - `(+ a b)`, `(- a b)`, `(* a b)`: two numbers, exactly. An integer
   result that doesn't fit in 63 bits faults (`:overflow`).
@@ -1050,18 +1090,102 @@ Integers and floats mix: if either operand is a float, so is the result.
   `(% -7 2)` is -1 (as in C, Go or JavaScript). By zero, both fault
   (`:div-by-zero`), and so does `div` of the most negative integer by
   -1 (`:overflow`).
-- `(ceil x)`, `(floor x)`, `(round x)`, `(trunc x)`: an integer. An
-  integer stays as it is. `round` sends halves up, so `(round 2.5)` is
-  3 and `(round -2.5)` is -2 (JavaScript's `Math.round`). A float too
-  big for an integer faults (`:out-of-range`).
-- `(abs x)`: keeps the type. `abs` of the most negative integer
-  overflows.
-- `(min a b)`, `(max a b)`: whichever argument it is, as it was given,
-  so `(min 1 2.0)` is 1; the first one on a tie.
-- `(sqrt x)`, `(pow a b)`, `(sin x)`, `(cos x)`, `(tan x)`, `(exp x)`:
-  always a float. Out of their domain they give `nan` or `inf` rather
-  than faulting: `(sqrt -1)` is `nan`.
-- `PI`: 3.141592653589793.
+- `(math/mod a b)`: the remainder of a floored division, with the sign
+  of `b`: `(math/mod -1 10)` is 9, where `(% -1 10)` is -1, so it's the
+  one for wrapping an index round. Integers only, as `%` is.
+- `(math/ceil x)`, `(math/floor x)`, `(math/round x)`, `(math/trunc
+  x)`: an integer. An integer stays as it is. `math/round` sends halves
+  up, so `(math/round 2.5)` is 3 and `(math/round -2.5)` is -2
+  (JavaScript's `Math.round`). A float too big for an integer faults
+  (`:out-of-range`).
+- `(math/abs x)`: keeps the type. `math/abs` of the most negative
+  integer overflows.
+- `(math/min a b)`, `(math/max a b)`: whichever argument it is, as it
+  was given, so `(math/min 1 2.0)` is 1; the first one on a tie.
+- `(math/pow a b)`: of two integers, an integer, exactly, as `*` gives
+  one: past 63 bits it overflows, and a negative exponent faults
+  (`:out-of-range`), since the result wouldn't be an integer. With a
+  float on either side, a float.
+- `(math/sqrt x)`, `(math/cbrt x)`, `(math/exp x)`, `(math/expm1 x)`,
+  `(math/log x)` (natural), `(math/log2 x)`, `(math/log10 x)`,
+  `(math/log1p x)`, `(math/hypot x y)`; `(math/sin x)`, `(math/cos x)`,
+  `(math/tan x)`, `(math/asin x)`, `(math/acos x)`, `(math/atan x)`,
+  `(math/atan2 y x)`; `(math/sinh x)`, `(math/cosh x)`, `(math/tanh x)`,
+  `(math/asinh x)`, `(math/acosh x)`, `(math/atanh x)`: JavaScript's
+  `Math` functions of the same names, always a float. Out of their
+  domain they give `nan` or `inf` rather than faulting: `(math/sqrt -1)`
+  is `nan`, and `(math/log 0)` is `-inf`. `math/expm1` and
+  `math/log1p` keep their precision near 0, where `(math/exp x)` less
+  one, or `(math/log (+ 1 x))`, lose it. Beside `math/sqrt`, which is
+  exact everywhere, each is only as good as the platform's C library,
+  which can be a bit off in the last place, and so differ between
+  machines (D76).
+- `(math/nan? x)`: whether `x` is the float `nan`; anything else is
+  `#false`. `nan` is the one value that isn't `==` to itself.
+- `math/PI`, `math/E`: 3.141592653589793 and 2.718281828459045.
+  `math/INF`: the float `inf`, which `(- 0 math/INF)` makes `-inf`.
+- `(int->float n)`: the float nearest the integer `n`, exactly so up to
+  2^53.
+- `(float->str x [digits])`: `x`, which may be an integer, as a float:
+  as `str` shows one, or with `digits` (0 to 100), in fixed notation
+  with that many digits after the point, as JavaScript's `toFixed`:
+  `(float->str 3.14159 2)` is `"3.14"`, and `(float->str 7 2)` is
+  `"7.00"`. It's the nearest such decimal to the float's exact value,
+  so `(float->str 1.005 2)` is `"1.00"`, 1.005 being a little under that
+  as a float; and a tie goes away from zero, so `(float->str 2.5 0)` is
+  `"3"`. From 1e21 up, and `nan` and `inf`, are as `str` shows them.
+
+### Bits
+
+On integers, as 63 bits of two's complement, compiled inline (D221).
+Anything else faults (`:not-an-int`).
+
+- `(bit/and a b)`, `(bit/or a b)`, `(bit/xor a b)`, `(bit/not a)`.
+- `(bit/shl a k)`: `a` shifted left `k` bits. Bits shifted past the top
+  are lost, where `*` would fault: `(bit/shl 3 61)` keeps only the low
+  63 bits, and so is negative.
+- `(bit/shr a k)`: `a` shifted right `k` bits, filled with its sign, as
+  JavaScript's `>>`, so it's `a` divided by 2^k, rounded down:
+  `(bit/shr -7 1)` is -4.
+- A count of 63 or more shifts out every bit, giving 0, or -1 for a
+  negative `a` shifted right, as Go has it (JavaScript takes it mod 32
+  instead). A negative count faults (`:out-of-range`).
+- `(bit/count a)`: the bits set in `a`'s 63, so `(bit/count -1)` is 63.
+
+They take a fixed number of arguments, so they can be values:
+`(fold/l 0 bit/xor hashes)`.
+
+### Random numbers
+
+Each process has a generator of its own (D222).
+
+- `(rand/int n)`: an integer from 0 to `n` - 1, each as likely. `n` must
+  be an integer (`:not-an-int`) of at least 1 (`:out-of-range`).
+- `(rand/float)`: a float from 0 up to but not including 1, in steps of
+  2^-53, each as likely.
+- `(rand/seed n)`: starts the calling process's generator again from
+  the integer `n`, so the numbers it draws after are the same every run.
+  Returns `()`.
+
+The root's generator starts from the run's seed: `SLIGHT_SEED=n`, a
+number of digits, or, without it, one the system makes up, different
+every run. A `fork` gives the new process a generator drawn from its
+parent's, as a number is drawn. So what a process draws depends only on
+the seed and on what was drawn and forked before, in it and in the
+processes it was forked from, never on the order processes run in.
+Under one `SLIGHT_SEED`, a program draws the same numbers whatever
+`SLIGHT_SCHED` says. And a record keeps the seed, even one the system
+made up, so a replay draws them again.
+
+    (rand/seed 2026)
+    (let die (lambda () (+ 1 (rand/int 6))))
+    (list (die) (die) (die))
+
+The prelude has `rand/pick` and `rand/shuffle`. The generator is
+SplitMix64, Java's `SplittableRandom`, the same numbers from the same
+seed. It's fast and fair, but what it'll draw next can be worked out
+from what it drew, so it's not for keys, tokens or anything that
+mustn't be guessed.
 
 ### Comparison
 
@@ -1127,6 +1251,12 @@ that grows an element at a time suits a list.
   range (`:out-of-range`).
 - `(tuple/set t i x)`: a new tuple, `t` with `x` at index `i`; `t` is as
   it was. The index is checked as `tuple/get` checks it.
+- `(tuple/insert t i x)`: a new tuple one longer, `x` at index `i` and
+  the elements that were there from `i` on after it. `i` can be the
+  length, putting `x` at the end; anything past it faults
+  (`:out-of-range`).
+- `(tuple/remove t i)`: a new tuple one shorter, without the element at
+  index `i`, which is checked as `tuple/get` checks it.
 - `(tuple/slice t start end)`: a new tuple of the elements from `start`
   up to but not including `end`, each clamped to the tuple; empty when
   `start` isn't before `end`.
@@ -1142,67 +1272,136 @@ element by element, and a tuple is never `eq?` to a list.
 
 ### Strings
 
-Strings are bytes, and these builtins count bytes: `(str-len "héllo")`
-is 6. The `utf8/` builtins, after them, count characters.
+A string is immutable bytes, UTF-8 by convention (D219). The `str/`
+builtins count characters. A character is a well-formed UTF-8 sequence,
+or, failing that, a stray byte on its own, whose code point is then
+65533 (U+FFFD), as in Go (D148): `(str/len "héllo")` is 5, an emoji
+counts 1, nothing faults on bad bytes, and splitting a string into
+characters loses nothing. The `bytes/` builtins count bytes, for
+protocols and parsers: `(bytes/len "héllo")` is 6. Where a builtin's
+behavior isn't obvious, it's that of JavaScript's string method of the
+same name, with characters in place of UTF-16 units. A string whose
+bytes are all below 128 is marked so when it's made, and there a
+character is a byte, so the `str/` builtins index it in one step;
+elsewhere they walk from the start.
 
-- `(str-len s)`: the length, in bytes.
-- `(substring s start end)`: the bytes from `start` up to but not
-  including `end`. Each index is clamped to the string, and the two are
-  swapped if `start` is after `end`, so `(substring "hello" 3 1)` is
-  `"el"`.
-- `(index-of s m)`: the byte index of the first `m` in `s`, or -1. An
-  empty `m` is at 0.
-- `(concat x ...)`: any number of values of any type, joined: a string
-  as its bytes, anything else as `pprint` shows it. `(concat "n=" 5)` is
-  `"n=5"`.
-- `(~ a b)`: two strings, and only strings, joined.
-- `(str-split s sep)`: the pieces of `s` between the `sep`s:
-  `(str-split "a,b,,c" ",")` is `("a" "b" "" "c")`. An empty `s` gives
-  `()`, and an empty `sep` splits into single bytes.
-- `(str-join sep xs)`: the elements of the list `xs`, rendered as
-  `concat` renders them, with `sep` between.
-- `(string->int s)`: the integer, if `s` is decimal digits with maybe a
-  `-` in front, and fits in 63 bits; otherwise `#false`.
-- `(string->float s)`: the nearest float, if `s` is digits, maybe a `-`
-  in front, maybe a point and more digits, and maybe an exponent; so
-  `"1.5"`, `"-2"`, `"1e3"` and `"2.5E-3"`, but not `".5"`, `"1."` or
-  `"inf"`. Otherwise, or if it's too big for a float, `#false`.
-- `(symbol->string sym)`: the symbol's name, without a colon.
-- `(string->symbol s)`: the symbol with that name, if the program
-  mentions it anywhere (as `:name` or `'name`); otherwise `#false`,
-  since symbols are made only by the compiler.
-- `(byte-at s i)`: the byte at index `i`, as an integer. An index out of
-  range faults (`:out-of-range`).
-- `(bytes->string xs)`: a list of integers 0 to 255, as a string.
-- `(format-num n width [fill])`: the number `n` as text, padded at the
-  start to `width` bytes with `fill` (a string, `" "` by default),
-  repeated and cut to fit: `(format-num 7 3 "0")` is `"007"`.
+Making strings:
 
-Counting characters (D148). A character is a well-formed UTF-8
-sequence, or, failing that, a stray byte on its own, whose code point is
-then 65533 (U+FFFD), as in Go. So nothing faults on bad bytes, and
-splitting a string into characters loses nothing.
-
-- `(utf8/len s)`: the length, in characters: `(utf8/len "héllo")` is 5,
-  and an emoji counts 1.
-- `(utf8/substring s start end)`: characters, clamped and swapped as
-  `substring` does.
-- `(utf8/index-of s m)`: the character index of the first `m` that
-  starts at a character, or -1. An empty `m` is at 0.
-- `(utf8/chars s)`: the characters, as one-character strings.
-  `(str-join "" (utf8/chars s))` is `s` again.
-- `(utf8/code s)`: the code point of the first character. `""` faults
+- `(str x ...)`: any number of values of any type, joined: a string as
+  its bytes, anything else as `pprint` shows it. `(str "n=" 5)` is
+  `"n=5"`, and `(str)` is `""`.
+- `(~ s ...)`: strings, and only strings, joined.
+- `(str/join sep xs)`: the elements of the list `xs`, rendered as `str`
+  renders them, with `sep` between.
+- `(str/repeat s n)`: `s`, `n` times. A negative `n` faults
   (`:out-of-range`).
-- `(utf8/char n)`: the one-character string for code point `n`. A
+- `(str/pad-start s n [fill])`, `(str/pad-end s n [fill])`: `s` padded
+  to `n` characters with `fill` (`" "` if it isn't given), repeated and
+  cut to fit: `(str/pad-start (str 7) 3 "0")` is `"007"`. If `s` has `n`
+  characters already, or `fill` is empty, it's `s`.
+
+Characters by index, which counts from 0; where it says so, a negative
+one counts from the end, -1 being the last character:
+
+- `(str/len s)`: the length, in characters.
+- `(str/at s i)`: the character at `i`, as a one-character string;
+  negative from the end. Past either end faults (`:out-of-range`).
+- `(str/code-at s i)`: the code point of the character at `i`, as
+  `str/at` finds it.
+- `(str/slice s start [end])`: the characters from `start` up to but
+  not including `end`, or to the end if it isn't given. Either counts
+  from the end when it's negative, each is clamped to the string, and
+  the slice is empty unless `start` comes before `end`:
+  `(str/slice "hello" 1 -1)` is `"ell"`, and `(str/slice s -3)` is the
+  last three characters.
+- `(str/chars s)`: the characters, as one-character strings.
+  `(str/join "" (str/chars s))` is `s` again.
+- `(str/codes s)`: the characters' code points.
+- `(codes->str xs)`: the string of the code points in the list `xs`. A
   surrogate, or anything past 1114111 (U+10FFFF), faults
   (`:out-of-range`).
-- `(utf8/valid? s)`: whether `s` is all well-formed UTF-8.
 
-The byte builtins that don't count are right for UTF-8 as they are:
-`concat`, `~`, `str-join`, `eq?`, `starts-with?`, `ends-with?`, and
-`str-split` with a separator that isn't empty. There's no character
-type: a character is an integer or a one-character string. Build a long
-string by collecting the pieces in a list and joining them.
+Searching. A match is whole characters: it starts and ends where
+characters do, which only a stray byte in what's looked for can make a
+difference to: a stray byte 195 isn't found in `"é"`, though 195 is the
+first of its bytes.
+
+- `(str/index-of s m [from])`: the character index of the first `m` at
+  or after `from` (0 if it isn't given; clamped to the string), or -1.
+  An empty `m` is at `from`.
+- `(str/last-index-of s m [from])`: the index of the last `m` that
+  starts at or before `from` (the end if it isn't given), or -1.
+- `(str/includes? s m)`, `(str/starts-with? s m)`,
+  `(str/ends-with? s m)`.
+- `(str/split s sep [limit])`: the pieces of `s` between the `sep`s:
+  `(str/split "a,b,,c" ",")` is `("a" "b" "" "c")`, and
+  `(str/split "" ",")` is `("")`. An empty `sep` splits into characters.
+  With a `limit`, only the first that many pieces; a negative one
+  faults (`:out-of-range`).
+- `(str/replace s m r)`: `s` with its first `m` made `r`;
+  `(str/replace-all s m r)`, with every one. An empty `m` is at the
+  start, or, for `str/replace-all`, before each character and at the
+  end: `(str/replace-all "ab" "" "-")` is `"-a-b-"`.
+
+Changing:
+
+- `(str/trim s)`, `(str/trim-start s)`, `(str/trim-end s)`: `s` without
+  the white space at both ends, at its start, or at its end. White
+  space is Unicode's (White_Space), the no-break space and the
+  ideographic space among it.
+- `(str/upper s)`, `(str/lower s)`: each character mapped to its upper
+  or lower case in full, as Unicode does it without a language:
+  `(str/upper "straße")` is `"STRASSE"`, and a capital sigma that ends a
+  word is a final sigma in lowercase, so `(str/lower "ΟΔΟΣ")` is
+  `"οδος"`. A stray byte stays as it is. The mappings are Unicode
+  15.1's, made into `runtime/unicode.c` by `runtime/gen-unicode.py`.
+- `(str/well-formed? s)`: whether `s` has no stray bytes.
+- `(str/to-well-formed s)`: `s` with each stray byte made U+FFFD.
+
+Comparing. `eq?` says whether two strings are the same bytes.
+
+- `(str/compare a b)`: -1, 0 or 1, as `a` comes before `b`, is the
+  same, or comes after, in the order of their code points, which for
+  UTF-8 is the order of their bytes; a string comes before the longer
+  ones it starts. Stray bytes compare as the bytes they are.
+- `(str/< a b)`: whether `a` comes before `b`, so `(sort str/< xs)`
+  sorts strings.
+
+Converting:
+
+- `(str->int s [radix])`: the integer, if `s` is digits in `radix` (2
+  to 36, or 10 if it isn't given; past 9, letters in either case), maybe
+  with a `-` in front, and fits in 63 bits; otherwise `#false`.
+  `(str->int "ff" 16)` is 255.
+- `(int->str n [radix])`: `n` written in `radix`, its letters lowercase:
+  `(int->str 255 16)` is `"ff"`. In either, a radix outside 2 to 36
+  faults (`:out-of-range`).
+- `(str->float s)`: the nearest float, if `s` is digits, maybe a `-` in
+  front, maybe a point and more digits, and maybe an exponent; so
+  `"1.5"`, `"-2"`, `"1e3"` and `"2.5E-3"`, but not `".5"`, `"1."` or
+  `"inf"`. Otherwise, or if it's too big for a float, `#false`.
+- `(sym->str sym)`: the symbol's name, without a colon.
+- `(str->sym s)`: the symbol with that name, if the program mentions it
+  anywhere (as `:name` or `'name`); otherwise `#false`, since symbols
+  are made only by the compiler.
+- `(str->bytes s)`: the bytes, as a list of integers.
+- `(bytes->str xs)`: a list of integers 0 to 255, as a string.
+
+Bytes, for what's made of them: protocols, and parsers whose delimiters
+are ASCII, where a byte's index serves as well as a character's and is
+found in one step:
+
+- `(bytes/len s)`: the length, in bytes.
+- `(bytes/at s i)`: the byte at `i`, as an integer; negative from the
+  end. Past either end faults (`:out-of-range`).
+- `(bytes/slice s start [end])`: bytes, as `str/slice` takes
+  characters.
+- `(bytes/index-of s m [from])`: the byte index of the first `m` at or
+  after `from` (clamped), or -1.
+
+There's no character type: a character is a one-character string, or a
+code point. Build a long string by collecting the pieces in a list and
+joining them.
 
 ### JSON
 
@@ -1258,8 +1457,7 @@ forms, and a program can read slight's own source:
   has digits on both sides of its point (`1.0e+21`); a symbol is its
   name, without a colon; `(:symbol "name")` is `name`; a tuple is
   `#(...)`. Anything that isn't data faults (`:not-sexp`): a pid, a
-  function, `nan` or `inf`.
-  `pprint` stays as it is, its strings unescaped.
+  function, `nan` or `inf`. `pprint` quotes a string the same way.
 
 A file or socket can be read as s-expressions too: `(:read :sexp)`,
 under Files.
@@ -1267,10 +1465,10 @@ under Files.
 ### Output
 
 - `(pprint x)`: writes `x` as the program shows values (strings in
-  quotes, symbols without their colon), and a newline, to stdout.
-  Returns `()`.
+  quotes and escaped, symbols without their colon), and a newline, to
+  stdout. Returns `()`.
 - `(tty/write x ...)`: writes its arguments to stdout, rendered as
-  `concat` renders them (strings as their bytes), and flushes. Returns
+  `str` renders them (strings as their bytes), and flushes. Returns
   `()`. `(tty/write "\e[2J")` clears a terminal.
 - `(tty/screen/rows)`, `(tty/screen/cols)`: the terminal's size, asked
   each time; 24 and 80 when stdout isn't a terminal.
@@ -1332,8 +1530,7 @@ Sorting:
   be a number, ascending, and stable too. `key` is called once for each
   element. `(sort-by car pairs)` sorts pairs by their first element.
 
-There's no comparison of strings yet, so sorting strings takes a `less?`
-written for it.
+`(sort str/< xs)` sorts strings.
 
 Association lists, `((key value) ...)`:
 
@@ -1341,24 +1538,21 @@ Association lists, `((key value) ...)`:
 - `(lookup k table)`: the value for the first key `eq?` to `k`, or
   `:not-found`.
 
-Strings:
+Random numbers (D222):
 
-- `(str-repeat s n)`: `s`, `n` times.
-- `(starts-with? s m)`, `(ends-with? s m)`.
-- `(pad-start s n fill)`, `(pad-end s n fill)`: `s` padded to `n` bytes
-  with `fill`, repeated and cut to fit (JavaScript's `padStart` and
-  `padEnd`).
-- `(uc s)`, `(lc s)`: upper and lower case, for ASCII letters only;
-  other bytes are left alone.
-- `(bytes s)`: the bytes of `s`, as a list of integers.
-- `(ord s)`, `(chr n)`: `utf8/code` and `utf8/char`, under Perl's
-  names: `(ord "é")` is 233, and `(chr 233)` is `"é"`.
+- `(rand/pick xs)`: an element of `xs`, each as likely, or `()` if
+  there are none.
+- `(rand/shuffle xs)`: the elements of `xs` in an order each of whose
+  arrangements is as likely.
+
+Processes: `join/any` and `join/all`, under Waiting for a process.
 
 Its helpers (`fold/r-loop`, `reverse-onto`, `length-loop`, `sum-loop`,
 `product-loop`, `map-loop`, `filter-loop`, `remove-loop`, `take-loop`,
 `range-loop`, `zip-loop`, `sort-runs`, `sort-pairs`, `sort-merge`,
-`str-repeat-loop`, `padding` and `bytes-loop`) are visible too, but not
-meant to be called.
+`join/any-loop` and `join/all-loop`) are visible too, but not meant to
+be called. The string functions are
+builtins (Strings, under Builtins).
 
 
 ## Libraries
@@ -1408,6 +1602,51 @@ only its caller.
 
 Either gives `(:error (name path))` if the file can't be opened, read or
 written: `(:error (enoent "notes.txt"))`, say.
+
+### (@include :map)
+
+`lib/map.slight`: a persistent map, a hash trie as Clojure's maps are
+(D223). A map is a value, as a list is: a change gives a new map, which
+shares all but the path it changed with the old one, and the old one is
+as it was. Keys are compared with `eq?` and found by their `hash`, so any
+value can be a key, and finding one takes a few steps however many there
+are. It's for a process's own data; sending a map copies it whole, as
+any value is copied.
+
+    (@include :map)
+
+    (let m (map/put (map/put (map/new) "a" 1) "b" 2))
+    (map/get m "a")                      1
+    (map/get (map/delete m "a") "a")     not-found
+    (map->list m)                        (("a" 1) ("b" 2))
+
+- `(map/new)`: a map with nothing in it.
+- `(map/get m k)`: `k`'s value, or `:not-found`. `(map/has? m k)`:
+  whether `k` has one, for when a value could be `:not-found` itself.
+- `(map/put m k v)`: `m` with `v` as `k`'s value, in place of any it had.
+- `(map/delete m k)`: `m` without `k`, or `m` itself if it hasn't `k`.
+- `(map/update m k f default)`: `m` with `(f v)` as `k`'s value, or
+  `(f default)` if it has none, as `dict/update` (under `:ds`).
+- `(map/size m)`: how many keys, at once.
+- `(map/fold acc f m)`: calls `(f acc k v)` for each entry, each result
+  being the next `acc`, as `fold/l`, and gives the last.
+- `(map->list m)`: the entries, `((k v) ...)`, an association list.
+- `(list->map xs)`: a map of an association list's entries; for a key
+  that's there more than once, its first value, as `lookup` gives.
+
+`map/fold` and `map->list` take the entries in an order that depends
+only on the keys' hashes: the same every run and on every machine, but
+neither the order they were put in nor any order of the keys. Two maps
+with the same entries are `eq?`, whatever was put and deleted on the way.
+A map is a tuple, so `tuple?` says `#true` of one, and `pprint` shows the
+trie; `map->list` is the way to show it. A `nan` key is never found again,
+since `nan` isn't `eq?` to itself.
+
+Its helpers (`map/get-hashed`, `map/put-hashed`, `map/delete-hashed`,
+which take the key's hash, for tests; `map/bit`, `map/slot`,
+`map/bucket-index`, `map/leaf`, `map/put-at`, `map/pair`,
+`map/delete-at`, `map/collapse`, `map/walk` and `map/walk-slots`) are
+visible too, but not meant to be called.
 
 ### (@include :ds)
 
@@ -1468,7 +1707,7 @@ waits for TLS (step 12c).
 
     (defun handler (req)
         (list 200 (list (list "Content-Type" "text/plain"))
-            (concat "you asked for " (lookup :path req))))
+            (str "you asked for " (lookup :path req))))
 
     (let server (http/serve 8080 handler))    ; the listener's pid
     (http/get "http://localhost:8080/hello")  ; (:ok (200 headers body))
@@ -1589,7 +1828,7 @@ what with:
     (let weather
         (tool/new "get_weather" "The weather in a city, now."
             (list (list "city" :string "The city, such as Tokyo"))
-            (lambda (args) (concat "11 degrees in " (lookup "city" args)))))
+            (lambda (args) (str "11 degrees in " (lookup "city" args)))))
 
     (let a (agent/new url "llama3.2" "" (list weather)))
     (agent/say a "What's the weather in Tokyo?")
@@ -1606,7 +1845,7 @@ what with:
 - When the model calls tools, each call runs in a process of its own,
   all at once. The caller hears `(:calling a name args)` for each call,
   then `(:called a name result)` for each, in the calls' order, once all
-  have finished. The result is `f`'s value, rendered as `concat` renders
+  have finished. The result is `f`'s value, rendered as `str` renders
   it; or `"error: reason"` if it raised, faulted or was killed, or for a
   tool the agent doesn't have. A result longer than 16 KB is cut there,
   with `[cut: n more bytes]` at its end. The results go back to the

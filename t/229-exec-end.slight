@@ -14,7 +14,7 @@
 ; Whether the process pid is gone (kill -0 fails), asked of another
 ; command.
 (defun gone (pid)
-    (join (connect :exec (list "sh" "-c" (concat "kill -0 " pid " 2>/dev/null || echo gone")) (run ()))))
+    (join (connect :exec (list "sh" "-c" (str "kill -0 " pid " 2>/dev/null || echo gone")) (run ()))))
 
 ; A command that says its pid, then waits for input that never comes.
 (defun waits ()

@@ -6,7 +6,7 @@
 
 (defun handler (req)
     (list 200 ()
-        (concat (if (eq? (lookup :method req) :post) "post" "other")
+        (str (if (eq? (lookup :method req) :post) "post" "other")
                 " " (lookup :body req)
                 " " (lookup "x-who" (lookup :headers req)))))
 
@@ -14,7 +14,7 @@
     (let server (http/serve 0 handler))
     (recv
         ((:listening port)
-            (let r (http/request :post (concat "http://127.0.0.1:" port "/") (list (list "X-Who" "stevan")) "hello"))
+            (let r (http/request :post (str "http://127.0.0.1:" port "/") (list (list "X-Who" "stevan")) "hello"))
             (kill server)
             r)))
 

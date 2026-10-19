@@ -26,5 +26,5 @@
 (let me $$)
 (let l (connect :tcp/listen 0 (server me)))
 (let port (recv ((:port p) p)))
-(pprint (join (connect :tcp (concat "echo.test:" port) (client (list "one" "two" "three") ()))))
+(pprint (join (connect :tcp (str "echo.test:" port) (client (list "one" "two" "three") ()))))
 (kill l)

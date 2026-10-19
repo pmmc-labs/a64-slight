@@ -14,7 +14,7 @@
 ; counts, waiting in the middle of its function each time (D167). The root
 ; starts the games, joins them all, says where a game's counts differ from
 ; the one before by more than one, and adds them up.
-; N and D come from @ARGV, through string->int, and default to 10 and
+; N and D come from @ARGV, through str->int, and default to 10 and
 ; 100. A game is forked by name: a function that waits isn't a value.
 
 (defun player (counter)
@@ -65,7 +65,7 @@
         (match (list (counts acc) (counts r))
             (((a1 a2) (b1 b2))
                 (cond
-                    ((and (<= (abs (- a1 b1)) 1) (<= (abs (- a2 b2)) 1)) acc)
+                    ((and (<= (math/abs (- a1 b1)) 1) (<= (math/abs (- a2 b2)) 1)) acc)
                     (#true
                         (tty/write "... results diverged from " acc " to " r \n)
                         r)))))
@@ -74,8 +74,8 @@
 (defun calculate-totals (results)
     (fold/l 0 (lambda (acc r) (+ acc (sum (counts r)))) results))
 
-(let num-games     (if (nil? @ARGV) 10  (string->int (car  @ARGV))))
-(let game-duration (if (nil? @ARGV) 100 (string->int (cadr @ARGV))))
+(let num-games     (if (nil? @ARGV) 10  (str->int (car     @ARGV))))
+(let game-duration (if (nil? @ARGV) 100 (str->int (cadr @ARGV))))
 
 (tty/write "Running " num-games " for " game-duration \n)
 

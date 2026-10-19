@@ -28,7 +28,7 @@
         ((:open l port)
             (pprint (list :listening (int? port) (> port 0)))
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (talker (list "hello" "" "world") 3))))))
+            (fork (send me (list :client (join (connect :tcp (str "localhost:" port) (talker (list "hello" "" "world") 3))))))
             (serving l))))
 
 (defun serving (l)

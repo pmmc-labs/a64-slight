@@ -7,22 +7,22 @@
 ; floats.
 
 (defun tests (a b)
-    (concat (if (< a b) "t" "f") (if (<= a b) "t" "f") (if (> a b) "t" "f")
+    (str (if (< a b) "t" "f") (if (<= a b) "t" "f") (if (> a b) "t" "f")
             (if (>= a b) "t" "f") (if (== a b) "t" "f") (if (!= a b) "t" "f")))
 
 (defun shown (r) (if (eq? r #true) "t" "f"))
 
 (defun as-values (a b)
-    (str-join "" (map shown (list (< a b) (<= a b) (> a b) (>= a b) (== a b) (!= a b)))))
+    (str/join "" (map shown (list (< a b) (<= a b) (> a b) (>= a b) (== a b) (!= a b)))))
 
 (defun lits (a)
-    (concat (if (< a 2) "t" "f") (if (< 2 a) "t" "f") (if (>= a -3) "t" "f") (if (== a 0) "t" "f")
+    (str (if (< a 2) "t" "f") (if (< 2 a) "t" "f") (if (>= a -3) "t" "f") (if (== a 0) "t" "f")
             (if (!= 5000 a) "t" "f") (if (> a 10000000000) "t" "f") (if (<= -10000000000 a) "t" "f")))
 
 (defun lits-as-values (a)
-    (str-join "" (map shown (list (< a 2) (< 2 a) (>= a -3) (== a 0) (!= 5000 a) (> a 10000000000) (<= -10000000000 a)))))
+    (str/join "" (map shown (list (< a 2) (< 2 a) (>= a -3) (== a 0) (!= 5000 a) (> a 10000000000) (<= -10000000000 a)))))
 
-(let nan (sqrt -1))
+(let nan (math/sqrt -1))
 (let max 4611686018427387903)
 (let min -4611686018427387904)
 (let xs (list -3 0 2 3 5000 10000000000 max min 2.5 -3.0 nan))

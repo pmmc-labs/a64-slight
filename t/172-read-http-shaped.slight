@@ -12,8 +12,8 @@
 (defun content-length (hs)
     (cond
         ((nil? hs) 0)
-        ((starts-with? (car hs) "Content-Length: ")
-            (string->int (substring (car hs) 16 (- (str-len (car hs)) 1))))
+        ((str/starts-with? (car hs) "Content-Length: ")
+            (str->int (bytes/slice (car hs) 16 (- (bytes/len (car hs)) 1))))
         (#true (content-length (cdr hs)))))
 
 ; --- the server: for each request, its request line and what its body was
@@ -30,11 +30,11 @@
 (defun body (c line)
     (recv
         ((:chunk c s)
-            (let text (concat (substring line 0 (- (str-len line) 1)) " got " (str-len s) " bytes: " s))
-            (send c (list :write "HTTP/1.1 200 OK\r\nContent-Length: " (str-len text) "\r\n\r\n" text))
+            (let text (str (bytes/slice line 0 -1) " got " (bytes/len s) " bytes: " s))
+            (send c (list :write "HTTP/1.1 200 OK\r\nContent-Length: " (bytes/len text) "\r\n\r\n" text))
             (request c ()))))
 
-; --- the client: the n answers' bodies, with \r and \n shown as such
+; --- the client: the n answers' bodies
 
 (defun client (n)
     (recv
@@ -56,16 +56,14 @@
     (recv
         ((:chunk c s)
             (cond
-                ((== n 1) (disconnect c) (reverse (cons (show s) seen)))
-                (#true    (response (- n 1) () (cons (show s) seen)))))))
-
-(defun show (s) (str-join "\\n" (str-split (str-join "\\r" (str-split s "\r")) "\n")))
+                ((== n 1) (disconnect c) (reverse (cons s seen)))
+                (#true    (response (- n 1) () (cons s seen)))))))
 
 (defun listener ()
     (recv
         ((:open l port)
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (client 3))))))
+            (fork (send me (list :client (join (connect :tcp (str "localhost:" port) (client 3))))))
             (serving l))))
 
 (defun serving (l)

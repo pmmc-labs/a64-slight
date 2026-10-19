@@ -22,7 +22,7 @@
             (:-      (lambda (o) (Point (list oid :- (o :oid)) (- x (o :x)) (- y (o :y)))))
             (:==     (lambda (o) (and (== x (o :x)) (== y (o :y)))))
             (:!=     (lambda (o) (or  (!= x (o :x)) (!= y (o :y)))))
-            (:to-str (concat "Point:" x ":" y))
+            (:to-str (str "Point:" x ":" y))
             (_       (super m)))))
 
 (let obj1 (Object 1))

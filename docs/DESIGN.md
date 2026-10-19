@@ -53,7 +53,7 @@ The reader (`compiler/src/reader.ts`, D37) reads:
 - `@ARGV` and `%ENV`, the program's arguments and environment, at the
   top level only (Program structure, below)
 - the names `\n`, `\r`, `\t` and `\e`, constants for those one-character
-  strings, and `PI`
+  strings, and `math/PI`
 
 ### Types
 
@@ -231,6 +231,7 @@ reply refs.
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
 | `(join pid)` | **Blocking** wait for `pid` to end. Returns `(:ok value)` or `(:error reason)`. Works on any pid (not just children), anywhere (including inside lambdas), any number of times, and after the process has already ended. Joiners wake in the order they joined. `(join $$)` faults (`:join-self`). |
+| `(join/race pids)` | **Blocking** wait for the first of `pids` to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
 | `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has. Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
 | `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns `()`. |
@@ -260,7 +261,7 @@ reply refs.
   process pauses where it is, *keeping its stack*, and goes to the back of
   the run queue. `yield` is the same pause, chosen by the program.
 - **Stacks exist only while needed.** A process that is running, paused
-  (preempted or yielded), blocked in `join`, or blocked in a syscall holds a
+  (preempted or yielded), blocked in `join` or `join/race`, or blocked in a syscall holds a
   stack. A process waiting in `recv` holds none.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
   sources, no blocked I/O) is detected and reported. So far (step 10d): if
@@ -269,8 +270,9 @@ reply refs.
   for (below), and the root process hasn't ended,
   the program prints `deadlock: the root process is waiting in f for a
   message, and nothing else can run` (or `... waiting in f for #<pid N>
-  to end, ...`, in `join`) to stderr and exits 1, `f` being the function
-  it waits in (D171).
+  to end, ...`, in `join`, and `... for the first of #<pid N>, #<pid
+  M> to end, ...`, in `join/race`) to stderr and exits 1, `f` being the
+  function it waits in (D171).
 - **The program ends when nothing can run** and nothing more can come (no
   timer is pending, no socket or command can be waited for, and no
   process is connected to `:keypress` or stdin has ended), not when the
@@ -311,7 +313,7 @@ strings (`()` with none). The top-level forms are the body of a function,
 `slight_main`, and `@ARGV` is its one parameter: the top level sees it
 like any local (a lambda or a `fork` there captures it), and a `defun`
 doesn't, so pass it to the functions that need it. It can't be bound or
-defined. A number comes as a string: `(string->int (car @ARGV))`.
+defined. A number comes as a string: `(str->int (car @ARGV))`.
 
 **`%ENV`** (D186) is the program's environment, as a list of `(name
 value)` lists of strings, in the environment's order, for `lookup`
@@ -332,10 +334,31 @@ names no program can write.
   float, and an integer result that doesn't fit in 63 bits faults. `/`
   always returns a float. `div` and `%` take integers only and truncate
   toward zero (`(% -7 2)` is -1). Dividing by zero faults, with `/` too.
-  `ceil`, `floor`, `round` and `trunc` return integers (`round` sends
-  halves up, D72, so `(round -2.5)` is -2), and fault if the result
-  doesn't fit. `sqrt pow sin cos tan exp` always return floats.
-  `abs`, `min` and `max` keep their argument's type. `PI` is a float.
+  The math builtins are under `math/` (D221). `math/ceil`, `math/floor`,
+  `math/round` and `math/trunc` return integers (`math/round` sends
+  halves up, D72, so `(math/round -2.5)` is -2), and fault if the result
+  doesn't fit. `math/pow` of two integers is an integer, exactly; with a
+  float, a float. `math/mod` is the floored remainder, its sign the
+  divisor's. The rest of JavaScript's `Math` (`math/sqrt`, `math/log`,
+  `math/atan2`, `math/hypot` and so on) is libm's, and always returns
+  floats. `math/abs`, `math/min` and `math/max` keep their argument's
+  type. `math/PI`, `math/E` and `math/INF` are floats; `math/nan?` tests
+  for `nan`. `int->float`, and `float->str`, which with a count of
+  digits is JavaScript's `toFixed`, rounding the float's exact value, a
+  tie away from zero.
+- bits: `bit/and bit/or bit/xor bit/not bit/shl bit/shr` on 63-bit
+  two's-complement integers, compiled inline (an integer is `n << 1`, so
+  and, or and xor of the tagged words are the tagged results), and
+  `bit/count` in C. A shift left wraps, losing what passes the top; a
+  shift right fills with the sign; a count of 63 or more gives 0 or -1,
+  as in Go, and a negative one faults (D221).
+- random numbers: `rand/int` (0 to n - 1), `rand/float` ([0, 1)) and
+  `rand/seed`, from a generator each process has, two words in its
+  record: SplitMix64, Java's `SplittableRandom` (D222). The root's
+  starts from `SLIGHT_SEED`, or from the system's entropy, the seed
+  recorded either way; `fork` gives the child a generator split from the
+  parent's, so a process's numbers never depend on the order processes
+  run in. Not cryptographic.
   `float?` and `num?` alongside `int?`. Floats print in the shortest form
   that reads back as the same double, laid out as JavaScript does, but
   always with a `.` or an exponent: `3.0`, `0.1`, `1e+21`, `nan`, `inf`.
@@ -365,17 +388,18 @@ names no program can write.
   everywhere; write `'(a b)`, not `'(:a :b)`.
 - tuples (`runtime/tuples.c`, D169): `tuple` (variadic), `tuple?`,
   `tuple/len`, `tuple/get`, `tuple/set` (a copy with one element
-  changed), `tuple/make`, `tuple/slice`, `list->tuple`, `tuple->list`.
+  changed), `tuple/insert` and `tuple/remove` (a copy one longer or
+  shorter, for a hash trie's nodes, D223), `tuple/make`, `tuple/slice`,
+  `list->tuple`, `tuple->list`.
   `eq?`, printing, `json/print` (as an array), `sexp/print` and
   `sexp/parse` (as `#(...)`) and copying know them. In a program,
   `#(...)` is only a pattern (D176).
-- strings: `str?`, `str-len` (bytes), `substring`, `concat`/`~`,
-  `index-of`, `str-split`, `str-join`, `string->int`, `string->float`,
-  `symbol->string`, `string->symbol`, `byte-at`, `bytes->string`,
-  `format-num`; and counting characters, `utf8/len`, `utf8/substring`,
-  `utf8/index-of`, `utf8/chars`, `utf8/code`, `utf8/char`, `utf8/valid?`.
+- strings (`runtime/strings.c`, D219): `str?`, `str`, `~`, the `str/`
+  builtins, which count characters, the `bytes/` ones, which count
+  bytes, and the conversions `str->int`, `int->str`, `str->float`,
+  `str->sym`, `sym->str`, `str->bytes`, `bytes->str` and `codes->str`.
   See Strings below for how each behaves.
-- processes: `send join monitor kill after raise disconnect`
+- processes: `send join join/race monitor kill after raise disconnect`
 - I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols` (the terminal's
   size, asked each time; 24 and 80 when stdout isn't a terminal), `pprint`
   (prints its argument and a newline, and returns `()`: D43;
@@ -394,18 +418,19 @@ program; it can only define functions.
 | folds | `(fold/l init f xs)` with `(f acc x)`; `(fold/r init f xs)` with `(f x acc)` |
 | lists | `reverse length append sum product map`; `(filter f xs)` keeps what `f` says `#true` to, `(remove f xs)` drops it; `(take n xs)`, `(skip n xs)` stop at the end of the list; `(nth i xs)` and `(find f xs)` give `()` when there's nothing; `member?`; `(range start end)` is `start` up to but not including `end`; `(dotimes start end f)` |
 | association lists | `(assoc k v table)` adds `(k v)`; `(lookup k table)` gives the value or `:not-found` |
-| strings | `uc lc` (ASCII), `(pad-start s n fill)`, `(pad-end s n fill)`, `(str-repeat s n)`, `starts-with?`, `ends-with?`, `(bytes s)` (a list of its bytes), `ord` and `chr` (`utf8/code` and `utf8/char`, under Perl's names) |
+| random numbers | `(rand/pick xs)`, an element or `()`; `(rand/shuffle xs)`, each element sorted by a `rand/float` of its own (D222) |
+| processes | `(join/any pids)`, the first to succeed as `(:ok v)`, or `(:error reasons)` once all have failed; `(join/all pids)`, `(:ok values)` in the order of `pids`, or the first `(:error r)` as soon as one fails (D220) |
 
-D78 has why `filter`, `remove`, `range`, `take`, `skip`,
-`starts-with?` and `ends-with?` work as they do.
+D78 has why `filter`, `remove`, `range`, `take` and `skip` work as they
+do. The string functions it had are builtins now (D219).
 
 A program can define a function with a prelude name. Its own code then
 uses its definition, and the prelude keeps using the prelude's (D80).
 
-**Functions as values.** A `defun` name, a `lambda`, or a builtin with a
-fixed number of arguments (`(map car xs)`, `(fold/l 0 + xs)`) can be used
-as a value. Builtins with a varying number (`list`, `concat`,
-`format-num`) can't.
+**Functions as values.** A `defun` name, a `lambda`, or a builtin
+(`(map car xs)`, `(fold/l 0 + xs)`) can be used as a value; a builtin
+with optional arguments then takes the ones it needs (`(map str->int
+xs)`, D219). Builtins that take any number (`list`, `str`, `~`) can't.
 
 **Tests in slight:** `lib/test.slight` is a TAP library: `(run-tests
 (list (ok test msg) (is got expected msg) (diag msg)))`. It isn't part
@@ -425,6 +450,15 @@ each a process, and `ask` and `reply` for one's own. Writes are sends;
 `ask` forks a box for the answer, which watches the structure, and joins
 it, raising `(:ended pid result)` if the structure ends first. Opt-in:
 `(@include :ds)`.
+
+**A map as a value:** `lib/map.slight` (D223) is a persistent hash trie,
+as Clojure's maps are, in slight: 32-way nodes of tuples, a bitmap
+saying which slots a node has (`bit/count` finding a slot), 5 bits of
+`hash` a level, and a bucket for keys whose 62-bit hashes are the same.
+A slot is a leaf only when one key alone is under it, so a map's shape
+depends only on its keys and `eq?` compares maps. Opt-in: `(@include
+:map)`. Sharing ends at a process's edge: a send copies a map as it
+copies any value (D25).
 
 **An agent in slight:** `lib/agent.slight` (D184) is a conversation with a
 model as a process, on ollama's `/api/chat` over `http/stream`. Its state
@@ -451,63 +485,79 @@ its command with it, which is how Escape in the chat stops one (D193).
 
 ### Strings
 
-- **Level 1:** immutable byte strings. The byte builtins index by byte;
-  case mapping is ASCII only.
-- **Level 2, in part (D148):** a second set of builtins, `utf8/`, that
-  count characters, enough for a JSON parser and printer. Display width
-  is still to come, when the editor needs it.
-- Full Unicode is out. If it's ever needed, a C library comes in as a
-  driver.
-- There's no character type. A character is an integer or a one-character
-  string.
+Settled in D219, which replaced the byte builtins of step 5a and the
+`utf8/` ones of D148 with one set, named after JavaScript's methods:
+
+- **Bytes, counted as characters.** A string is immutable bytes, UTF-8
+  by convention, and nothing checks it. A character is a well-formed
+  UTF-8 sequence or, failing that, a stray byte on its own, whose code
+  point is U+FFFD, as in Go (D148). So nothing faults on bad bytes,
+  `str/chars` loses nothing, and `str/well-formed?` says whether a
+  string has any stray bytes.
+- **Two families.** The `str/` builtins count characters (code points,
+  not UTF-16 units, and not graphemes); the `bytes/` builtins count
+  bytes, in one step, for protocols and for parsers whose delimiters
+  are ASCII. Where an edge case could go either way, a builtin does what
+  JavaScript's method of the same name does (D62), with characters in
+  place of UTF-16 units.
+- **ASCII is marked.** A string whose bytes are all below 0x80 has
+  `RT_BOX_ASCII` in its header (the type is the low seven bits), set
+  where a string is made: by `rt_new_string`, by `rt_string_mark` after
+  a builtin fills a blank one, by the readers and decoders, and by the
+  compiler on a literal. There a character is a byte, so the `str/`
+  builtins index in one step; elsewhere they walk from the start. A
+  string made without the mark is only slower, never wrong.
+- **Matches are whole characters.** A match must start and end where
+  characters of the string do. A byte search already does that unless
+  the pattern starts with a continuation byte or ends with a stray
+  byte, which only a stray byte in it can do; then the search checks.
+- **Unicode's tables, generated.** `str/upper` and `str/lower` map in
+  full and without a language (SpecialCasing's unconditional mappings
+  over UnicodeData's, and Final_Sigma), and `str/trim` takes Unicode's
+  White_Space. `runtime/gen-unicode.py` makes `runtime/unicode.c` from
+  the Unicode Character Database, pinned to the version the tests'
+  Python has (15.1). Normalization, graphemes and display width are
+  to come, from utf8proc, when they're wanted.
+- There's no character type. A character is a one-character string, or
+  a code point.
 - Build strings by collecting pieces in a list and joining them.
 - `\n`, `\r`, `\t` and `\e` are names for one-character strings; string
   literals also take those escapes, plus `\"`, `\\` and `\u{hex}`.
 
-**The builtins (step 5a).** Where an edge case could go either way,
-they do what JavaScript's string methods do (D62):
-
 | Builtin | |
 |---|---|
 | `(str? x)` | |
-| `(str-len s)` | length in bytes |
-| `(substring s start end)` | bytes `[start, end)`; each index clamped to the string, and swapped if `start > end` |
-| `(concat x ...)` | any values: strings as their bytes, anything else as `pprint` shows it |
-| `(~ a b)` | two strings only |
-| `(index-of s m)` | byte index of the first `m`, or -1; an empty `m` is at 0 |
-| `(str-split s sep)` | the pieces between the `sep`s; `""` gives `()`; an empty `sep` splits into bytes |
-| `(str-join sep xs)` | `xs` rendered as `concat` does, with `sep` between |
-| `(string->int s)` | a decimal integer that fits in 63 bits, or `#false` |
-| `(string->float s)` | a decimal number, `-?D+(.D+)?([eE][+-]?D+)?`, as the nearest float (as the reader rounds a literal), or `#false`, also when it's too big for a double |
-| `(symbol->string sym)`, `(string->symbol s)` | the latter is `#false` unless the program mentions that symbol (D14) |
-| `(byte-at s i)` | a byte as an integer; an index out of range faults |
-| `(bytes->string xs)` | integers 0–255 to a string |
-| `(format-num n width [fill])` | `n` padded at the start to `width`, with `fill` (default `" "`) repeated as JavaScript's `padStart` does |
-| `(tty/write x ...)` | writes its arguments, rendered as `concat` does, and flushes; returns `()` |
+| `(str x ...)` | any values joined: strings as their bytes, anything else as `pprint` shows it |
+| `(~ s ...)` | strings only, joined |
+| `(str/join sep xs)` | `xs` rendered as `str` does, with `sep` between |
+| `(str/repeat s n)` | a negative `n` faults (`:out-of-range`) |
+| `(str/pad-start s n [fill])`, `(str/pad-end s n [fill])` | to `n` characters, `fill` (default `" "`) repeated and cut, as `padStart` and `padEnd` |
+| `(str/len s)` | length in characters |
+| `(str/at s i)`, `(str/code-at s i)` | the character at `i`, or its code point; negative from the end; out of range faults |
+| `(str/slice s start [end])` | characters `[start, end)`, as `slice`: negative from the end, clamped, empty unless `start < end` |
+| `(str/chars s)`, `(str/codes s)`, `(codes->str xs)` | characters as one-character strings, or code points, and back; a code point with no UTF-8 faults |
+| `(str/index-of s m [from])`, `(str/last-index-of s m [from])` | character index, or -1; `from` clamped |
+| `(str/includes? s m)`, `(str/starts-with? s m)`, `(str/ends-with? s m)` | |
+| `(str/split s sep [limit])` | as `split`: `""` gives `("")`; an empty `sep` splits into characters; at most `limit` pieces |
+| `(str/replace s m r)`, `(str/replace-all s m r)` | as `replace` and `replaceAll` with a string; an empty `m` is at the start, or around each character |
+| `(str/trim s)`, `(str/trim-start s)`, `(str/trim-end s)` | White_Space |
+| `(str/upper s)`, `(str/lower s)` | full case mapping, no language; a stray byte stays |
+| `(str/well-formed? s)`, `(str/to-well-formed s)` | stray bytes, or none, each made U+FFFD |
+| `(str/compare a b)`, `(str/< a b)` | code point order, which is byte order |
+| `(str->int s [radix])`, `(int->str n [radix])` | radix 2 to 36; `str->int` gives `#false` for what isn't one that fits in 63 bits |
+| `(str->float s)` | a decimal number, `-?D+(.D+)?([eE][+-]?D+)?`, as the nearest float (as the reader rounds a literal), or `#false`, also when it's too big for a double |
+| `(sym->str sym)`, `(str->sym s)` | the latter is `#false` unless the program mentions that symbol (D14) |
+| `(str->bytes s)`, `(bytes->str xs)` | the bytes as integers 0–255, and back |
+| `(bytes/len s)`, `(bytes/at s i)`, `(bytes/slice s start [end])`, `(bytes/index-of s m [from])` | as the `str/` ones, on bytes |
+| `(tty/write x ...)` | writes its arguments, rendered as `str` does, and flushes; returns `()` |
 
-`pprint` shows a string in double quotes with nothing escaped inside
-(D64). `eq?` compares strings byte by byte.
-
-**Counting characters (D148).** A character is a well-formed UTF-8
-sequence or, failing that, a stray byte on its own, whose code point is
-U+FFFD, as in Go. So nothing faults on bad bytes, `utf8/chars` loses
-nothing, and `utf8/valid?` says whether a string has any.
-
-| Builtin | |
-|---|---|
-| `(utf8/len s)` | length in characters |
-| `(utf8/substring s start end)` | characters `[start, end)`, clamped and swapped as `substring` does |
-| `(utf8/index-of s m)` | character index of the first `m` that starts a character, or -1; an empty `m` is at 0 |
-| `(utf8/chars s)` | the characters, as one-character strings; `(str-join "" (utf8/chars s))` is `s` |
-| `(utf8/code s)` | the code point of the first character; `""` faults (`:out-of-range`) |
-| `(utf8/char n)` | the one-character string for code point `n`; a surrogate or anything past U+10FFFF faults (`:out-of-range`) |
-| `(utf8/valid? s)` | `#true` if `s` is all well-formed sequences |
-
-The byte builtins that don't count are right for UTF-8 as they are:
-`concat`, `~`, `str-join`, `eq?`, `starts-with?`, `ends-with?`, and
-`str-split` on a separator that isn't empty. Output writes a string's
-bytes as they are. `utf8/chars` takes 32 bytes a character, so a text
-split into one list tops out at about 2 MB, all of it live.
+`pprint` shows a string as the reader takes it back, on one line, as
+`sexp/print` does: `"` and `\` escaped, and the control characters (C0,
+DEL and C1) as `\n`, `\t`, `\r`, `\e` or `\u{hex}`; other characters,
+and stray bytes, as they are (D219, which replaced D64). `eq?` compares
+strings byte by byte. Output writes a string's bytes as they are.
+`str/chars` takes 32 bytes a character, so a text split into one list
+tops out at about 2 MB, all of it live.
 
 ### JSON, s-expressions and source (step 12a, done)
 
@@ -532,8 +582,8 @@ can cut its bytes into messages (D154–D156):
 - **S-expressions** (`runtime/sexp.c`, D163), as JSON is: `(sexp/parse
   s)` gives `(:ok datum)` or `(:error (:bad-sexp at))`; `(sexp/print v)`
   prints what `sexp/parse` reads back, on one line, and faults
-  (`:not-sexp`) on pids, closures, `nan` and `inf`; `pprint` stays
-  unescaped. A device reads them with `(:read :sexp)`, `(:sexp f v)` for
+  (`:not-sexp`) on pids, closures, `nan` and `inf`; `pprint` quotes
+  strings the same way. A device reads them with `(:read :sexp)`, `(:sexp f v)` for
   each top-level datum. The text is the compiler's reader's: lists,
   numbers, strings, symbols, keywords, `#true`, `#false`, `'x`,
   comments. A symbol the program mentions reads as itself, any other as
@@ -760,7 +810,11 @@ processes that allocate and then wait turn out to hold too much).
 - Ending: the Result is copied into a small per-pid **exit record**.
   Processes blocked in `join` on it wake with a copy; later `join`s read
   the record; monitors get `(:exit pid result)`, and the monitors it set
-  on others are taken off their lists (D183). Then the heap, the
+  on others are taken off their lists (D183). A `join/race` is a watch
+  on each of its pids, as a monitor is, that wakes its process rather
+  than sending it a message; the first to end wakes it, and it takes the
+  rest off when it runs, so a killed racer, or one whose other pids end
+  first, leaves nothing behind (D220). Then the heap, the
   mailbox, the stack and the process struct are freed (D102). Nothing
   on a stack needs cleaning up, so `kill` frees a process wherever it is
   (D103).
@@ -936,7 +990,8 @@ Everything a run takes from the world comes through one place,
 `runtime/replay.c`, behind `runtime/io.h`: the clock, `select()`'s
 answers, what reads and receives give, whether files and sockets open
 and what they say, whether commands start and how they end, the hosts
-file and `resolv.conf`, a lookup's query ids, and the screen's size. The rest of a run is decided by the runtime
+file and `resolv.conf`, a lookup's query ids, the seed for the random
+numbers when `SLIGHT_SEED` doesn't give one (D222), and the screen's size. The rest of a run is decided by the runtime
 itself (calls are counted, not timed), so those answers, in order, decide
 the whole run.
 
@@ -960,7 +1015,8 @@ the whole run.
 - Tested by `t/replay.sh` (`make replay`): runs with keys, files, the real
   clock, sockets, a lookup and commands are recorded, then replayed with
   none of them, and must print the same; and `SLIGHT_SCHED` gives several orders,
-  each the same every time.
+  each the same every time, and the same random numbers in each from one
+  `SLIGHT_SEED`.
 
 ### Builtins in C
 
@@ -974,9 +1030,9 @@ float or faults. Comparisons on floats are the runtime's.
 
 A builtin written in C is an ordinary C function (AAPCS64, or System V
 on x86-64). The compiler
-passes the call's site (`"str-len at t/x.slight:2:1"`) in the register
+passes the call's site (`"str/len at t/x.slight:2:1"`) in the register
 after the arguments, so faults raised inside C still say where in the
-program they happened (D63). A variadic builtin (`concat`, `tty/write`)
+program they happened (D63). A variadic builtin (`str`, `~`, `tty/write`)
 gets its arguments as one list. C code allocates with `rt_alloc`, which
 bumps the heap pointer of `rt_current`, the running process.
 
@@ -1131,7 +1187,8 @@ line-by-line translation.
   some. The same tests and expected output serve both targets (D146).
 - **Compiler unit tests** with `node:test`, per pass.
 - **Timing uses the virtual clock** (`t/run.sh` sets
-  `SLIGHT_CLOCK=virtual`), never real time.
+  `SLIGHT_CLOCK=virtual`), never real time, and random numbers a fixed
+  seed (`SLIGHT_SEED=1`).
 - **Record and replay** (`t/replay.sh`, D170): a few programs recorded on
   the real clock and replayed; each replay is compared with its own
   recording, never with a fixed output, so nothing depends on timing.

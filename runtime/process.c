@@ -808,6 +808,7 @@ static entry_t *entry(rt_value_t pid, const char *site) {
 rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
     (void)site;
     rt_proc_t  *p = rt_new_process(code, rt_current->pid);
+    rt_rand_split(rt_current, p);
     rt_chunk_t *c = copy_values(values, p->args, n);
     if (c) adopt(p, c);
     return p->pid;
@@ -940,11 +941,21 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
         enqueue(j);
     }
     while (p->watchers) {
-        // Not p itself: its notice would be dropped with its mail, and if
-        // it was killed waiting in recv, it would go back on the run queue
-        // as it's freed.
-        if (p->watchers->watcher != p) notify(p->watchers->watcher->pid, p->pid, e);
-        unwatch(p->watchers);
+        rt_watch_t *w = p->watchers;
+        if (w->wakes) {
+            // A race wakes on the first of its pids to end; one that ends
+            // before the racer has run again only goes.
+            if (w->watcher->state == RT_RACING) {
+                w->watcher->joining = p->pid;
+                enqueue(w->watcher);
+            }
+        } else if (w->watcher != p) {
+            // Not p itself: its notice would be dropped with its mail, and
+            // if it was killed waiting in recv, it would go back on the run
+            // queue as it's freed.
+            notify(w->watcher->pid, p->pid, e);
+        }
+        unwatch(w);
     }
     // The monitors p set go too. Their notices would be dropped, and kept,
     // they'd pile up on a process that lives long: each ask's box left one
@@ -1000,20 +1011,61 @@ rt_value_t rt_join(rt_value_t pid, const char *site) {
     return copy_here(result_at(cells, &procs[pid >> RT_PID_SHIFT]));
 }
 
-rt_value_t rt_monitor(rt_value_t pid, const char *site) {
-    entry_t *e = entry(pid, site);
-    if (!e->proc) {
-        notify(rt_current->pid, pid, e);
-        return RT_NIL;
-    }
-    rt_proc_t  *t = e->proc, *me = rt_current;
+// A watch by me on t: last on t's list, and first on mine.
+static void watch(rt_proc_t *t, rt_proc_t *me, int wakes) {
     rt_watch_t *w = rt_must(malloc(sizeof *w));
-    *w = (rt_watch_t){ .prev = t->last_watcher, .next_held = me->watching, .watched = t, .watcher = me };
+    *w = (rt_watch_t){ .prev = t->last_watcher, .next_held = me->watching, .watched = t, .watcher = me, .wakes = wakes };
     if (t->last_watcher) t->last_watcher->next = w;
     else                 t->watchers           = w;
     t->last_watcher = w;
     if (me->watching) me->watching->prev_held = w;
     me->watching = w;
+}
+
+// The oldest of p's watches. A race adds its watches in the order of its
+// pids, each first, so from here back to the newest they're in that order.
+static const rt_watch_t *race_last(const rt_proc_t *p) {
+    const rt_watch_t *w = p->watching;
+    while (w && w->next_held) w = w->next_held;
+    return w;
+}
+
+// The first of pids to end, as (pid result). If some have ended already,
+// it's the first of those in the list, as JavaScript's Promise.race
+// settles; else a watch on each wakes the caller when the first of them
+// ends (D220). The pids are all checked before it waits, so a bad one
+// faults whichever ends first.
+rt_value_t rt_join_race(rt_value_t pids, const char *site) {
+    rt_proc_t *p   = rt_current;
+    rt_value_t won = 0;
+    if (pids == RT_NIL) rt_fault(RT_FAULT_NOT_PID, pids, site);   // nothing to wait for, ever
+    for (rt_value_t xs = pids; xs != RT_NIL; xs = rt_cdr(xs)) {
+        if (!rt_is_cons(xs)) rt_fault(RT_FAULT_NOT_LIST, pids, site);
+        rt_value_t pid = rt_car(xs);
+        entry_t   *e   = entry(pid, site);
+        if (pid == p->pid) rt_fault(RT_FAULT_JOIN_SELF, pid, site);
+        if (!won && !e->proc) won = pid;
+    }
+    if (!won) {
+        for (rt_value_t xs = pids; xs != RT_NIL; xs = rt_cdr(xs)) watch(procs[rt_car(xs) >> RT_PID_SHIFT].proc, p, 1);
+        p->state = RT_RACING;
+        p->at    = (uintptr_t)__builtin_return_address(0);
+        to_scheduler(p);                        // until the first ends, and finish wakes us
+        won = p->joining;
+        for (rt_watch_t *w = p->watching, *next; w; w = next) {
+            next = w->next_held;
+            if (w->wakes) unwatch(w);
+        }
+    }
+    _Alignas(16) rt_value_t cells[8];
+    rt_value_t result = result_at(cells, &procs[won >> RT_PID_SHIFT]);
+    return copy_here(rt_cons_at(cells + 4, won, rt_cons_at(cells + 6, result, RT_NIL)));
+}
+
+rt_value_t rt_monitor(rt_value_t pid, const char *site) {
+    entry_t *e = entry(pid, site);
+    if (!e->proc) notify(rt_current->pid, pid, e);
+    else          watch(e->proc, rt_current, 0);
     return RT_NIL;
 }
 
@@ -1468,8 +1520,8 @@ typedef struct rt_device {
     int               status;           // how it ended, as waitpid says
     struct snapshot  *snap;             // :system's processes, still to be sent...
     uint64_t          snap_at, snap_len, snap_cap;  // ...from snap_at to snap_len
-    rt_value_t       *snap_devices;     // ...and the devices they own
-    uint64_t          snap_ndevices, snap_devices_cap;
+    rt_value_t       *snap_pids;        // ...and the devices they own and the pids they race
+    uint64_t          snap_npids, snap_pids_cap;
 } rt_device_t;
 
 static rt_device_t *sockets;            // open sockets and commands, and closing sockets (nsockets counts them)
@@ -1517,7 +1569,7 @@ static rt_value_t io_reason(rt_value_t *cells, int err, rt_value_t path) {
 // words): for a value that's copied before space goes.
 static rt_value_t string_in(uint64_t *space, const char *bytes, size_t len) {
     uint64_t *box = (uint64_t *)(((uintptr_t)space + 15) & ~(uintptr_t)15);
-    box[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
+    box[0] = rt_string_header(bytes, len);
     if (len) memcpy(box + 1, bytes, len);
     ((char *)(box + 1))[len] = '\0';
     return (rt_value_t)box | RT_TAG_BOXED;
@@ -1572,7 +1624,7 @@ static void close_now(rt_device_t *d) {
         free(d->buf);
         free(d->path_space);
         free(d->snap);
-        free(d->snap_devices);
+        free(d->snap_pids);
         free(d);
         return;
     }
@@ -2535,7 +2587,8 @@ typedef struct snapshot {
     rt_value_t pid, parent, joining;    // pid 0: the end of a (:processes)
     uintptr_t  in;                      // where it is in compiled code, or 0
     uint64_t   mail, heap, calls;
-    uint64_t   devices, ndevices;       // its devices: snap_devices from devices
+    uint64_t   devices, ndevices;       // its devices: snap_pids from devices
+    uint64_t   racing, nracing;         // the pids it races, after them
     int        state, stack;            // an RT_SYS_ state; whether it holds a stack
 } snapshot_t;
 
@@ -2579,22 +2632,29 @@ static void *grow(void *array, uint64_t *cap, size_t size) {
     return rt_must(realloc(array, *cap * size));
 }
 
+static void snap_pid(rt_device_t *d, rt_value_t pid) {
+    if (d->snap_npids == d->snap_pids_cap) d->snap_pids = grow(d->snap_pids, &d->snap_pids_cap, sizeof *d->snap_pids);
+    d->snap_pids[d->snap_npids++] = pid;
+}
+
 static snapshot_t take(rt_device_t *d, const rt_proc_t *p) {
     static const int states[] = {
         [RT_READY] = RT_SYS_READY, [RT_RUNNING] = RT_SYS_RUNNING, [RT_WAITING] = RT_SYS_RECV,
-        [RT_JOINING] = RT_SYS_JOINING, [RT_SLEEPING] = RT_SYS_SLEEPING,
+        [RT_JOINING] = RT_SYS_JOINING, [RT_RACING] = RT_SYS_JOINING, [RT_SLEEPING] = RT_SYS_SLEEPING,
     };
     snapshot_t r = {
         .pid   = p->pid, .parent = p->parent, .joining = p->state == RT_JOINING ? p->joining : RT_NIL,
         .in    = where(p), .heap = in_use(p), .calls = calls_of(p),
-        .state = states[p->state], .stack = p->stack != NULL, .devices = d->snap_ndevices,
+        .state = states[p->state], .stack = p->stack != NULL, .devices = d->snap_npids,
     };
     for (rt_msg_t *m = p->mail; m; m = m->next) r.mail++;
-    for (rt_device_t *x = p->devices; x; x = x->next) {
-        if (d->snap_ndevices == d->snap_devices_cap) d->snap_devices = grow(d->snap_devices, &d->snap_devices_cap, sizeof *d->snap_devices);
-        d->snap_devices[d->snap_ndevices++] = x->pid;
+    for (rt_device_t *x = p->devices; x; x = x->next) snap_pid(d, x->pid);
+    r.ndevices = d->snap_npids - r.devices;
+    r.racing   = d->snap_npids;
+    if (p->state == RT_RACING) {
+        for (const rt_watch_t *w = race_last(p); w; w = w->prev_held) if (w->wakes) snap_pid(d, w->watched->pid);
     }
-    r.ndevices = d->snap_ndevices - r.devices;
+    r.nracing = d->snap_npids - r.racing;
     return r;
 }
 
@@ -2617,15 +2677,16 @@ static void tell_process(rt_device_t *d, const snapshot_t *r, int more) {
     const char *name  = r->in ? function_name(r->in) : NULL;
     size_t      len   = name ? strlen(name) : 0;
     uint64_t    words = (len / 8 + 7) & ~(uint64_t)1;     // the name's string, then cells
-    rt_value_t *space = rt_must(malloc((words + 62 + 2 * r->ndevices) * sizeof *space)), *at = space + words;
+    rt_value_t *space = rt_must(malloc((words + 62 + 2 * (r->ndevices + r->nracing)) * sizeof *space)), *at = space + words;
     rt_value_t  in    = name ? string_in(space, name, len) : RT_NIL;
     rt_value_t  devices = RT_NIL;                          // they're newest first: the list is oldest first
-    for (uint64_t i = 0; i < r->ndevices; i++, at += 2) devices = rt_cons_at(at, d->snap_devices[r->devices + i], devices);
+    for (uint64_t i = 0; i < r->ndevices; i++, at += 2) devices = rt_cons_at(at, d->snap_pids[r->devices + i], devices);
+    rt_value_t  joining = r->nracing ? list_at(&at, d->snap_pids + r->racing, r->nracing) : r->joining;
     rt_value_t fields[] = {
         field(&at, SYS(PID), r->pid),
         field(&at, SYS(PARENT), r->parent),
         field(&at, SYS(STATE), rt_symbol(RT_SYM_SYSTEM + (uint64_t)r->state)),
-        field(&at, SYS(JOINING), r->joining),
+        field(&at, SYS(JOINING), joining),
         field(&at, SYS(IN), in),
         field(&at, SYS(MAIL), rt_int((int64_t)r->mail)),
         field(&at, RT_SYM_FAULTS - 1 + RT_FAULT_HEAP, rt_int((int64_t)r->heap)),
@@ -2684,7 +2745,7 @@ static void system_next(rt_device_t *d) {
     int        more = d->snap_at < d->snap_len;
     if (r.pid) tell_process(d, &r, 1);
     else       tell_sym(d, rt_symbol(SYS(END)), RT_NIL, more);
-    if (!more) d->snap_at = d->snap_len = d->snap_ndevices = 0;
+    if (!more) d->snap_at = d->snap_len = d->snap_npids = 0;
 }
 
 static void system_command(rt_device_t *d, rt_value_t msg) {
@@ -2699,10 +2760,10 @@ static void system_command(rt_device_t *d, rt_value_t msg) {
     } else if (word == rt_symbol(SYS(PROCESS)) && (pid & RT_TAG_MASK) == RT_TAG_PID) {
         const entry_t *e = &procs[pid >> RT_PID_SHIFT];
         if (alive(e->proc)) {
-            uint64_t   mark = d->snap_ndevices;     // its devices go after the ones still to be sent
+            uint64_t   mark = d->snap_npids;     // its devices go after the ones still to be sent
             snapshot_t r    = take(d, e->proc);
             tell_process(d, &r, 0);
-            d->snap_ndevices = mark;
+            d->snap_npids = mark;
         } else {
             _Alignas(16) rt_value_t cells[8];
             tell_sym(d, rt_symbol(SYS(ENDED)), rt_cons_at(cells + 4, pid, rt_cons_at(cells + 6, result_at(cells, e), RT_NIL)), 0);
@@ -2807,8 +2868,13 @@ int main(int argc, char **argv) {
     const char *stress = getenv("SLIGHT_GC_STRESS");
     gc_stress = !stress ? 0 : atoll(stress) < 1 ? 1 : atoll(stress) > QUOTA ? QUOTA : atoll(stress);
     const char *mode = getenv("SLIGHT_CLOCK"), *seed = getenv("SLIGHT_SCHED"), *cap = getenv("SLIGHT_HEAP_MAX");
+    const char *rand_seed = getenv("SLIGHT_SEED");
     if (seed && (!*seed || strspn(seed, "0123456789") != strlen(seed))) {
         fputs("slight: SLIGHT_SCHED is a number, a seed for the order processes run in\n", stderr);
+        return 2;
+    }
+    if (rand_seed && (!*rand_seed || strspn(rand_seed, "0123456789") != strlen(rand_seed))) {
+        fputs("slight: SLIGHT_SEED is a number, a seed for the random numbers\n", stderr);
         return 2;
     }
     if (cap && bytes_of(cap) < CHUNK_MAX) {
@@ -2825,6 +2891,7 @@ int main(int argc, char **argv) {
     heap_max      = settings.heap_max;
     started       = now();
     rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);
+    rt_rand_start(p, rt_io_random_seed(rand_seed));
     p->args[0]   = arguments(p, argc, argv);
     p->args[1]   = environment(p, env);
     rt_run();
@@ -2835,6 +2902,15 @@ int main(int argc, char **argv) {
         if (root->proc->state == RT_JOINING) {
             fprintf(stderr, "deadlock: the root process is waiting in %s for #<pid %" PRIu64 "> to end, and nothing else can run\n",
                     in ? in : "?", root->proc->joining >> RT_PID_SHIFT);
+        } else if (root->proc->state == RT_RACING) {
+            fprintf(stderr, "deadlock: the root process is waiting in %s for the first of", in ? in : "?");
+            const char *sep = " ";
+            for (const rt_watch_t *w = race_last(root->proc); w; w = w->prev_held) {
+                if (!w->wakes) continue;
+                fprintf(stderr, "%s#<pid %" PRIu64 ">", sep, w->watched->pid >> RT_PID_SHIFT);
+                sep = ", ";
+            }
+            fprintf(stderr, " to end, and nothing else can run\n");
         } else {
             fprintf(stderr, "deadlock: the root process is waiting in %s for a message, and nothing else can run\n", in ? in : "?");
         }

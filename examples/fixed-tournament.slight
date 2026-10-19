@@ -6,7 +6,7 @@
 ; of its function for each (D167); each player is a receive function, and
 ; rally is the step between its states. The root
 ; joins every game. N and R come from @ARGV, as strings, through
-; string->int, and default to 100 and 1000. A game is forked by name,
+; str->int, and default to 100 and 1000. A game is forked by name,
 ; since a function that waits in recv can't be passed around as a
 ; value.
 
@@ -64,8 +64,8 @@
                 (+ failures 1))))
         results))
 
-(let num-games (if (nil? @ARGV) 100  (string->int (car  @ARGV))))
-(let rallies   (if (nil? @ARGV) 1000 (string->int (cadr @ARGV))))
+(let num-games (if (nil? @ARGV) 100  (str->int (car     @ARGV))))
+(let rallies   (if (nil? @ARGV) 1000 (str->int (cadr @ARGV))))
 
 (tty/write "tournament: " num-games " games x " rallies " rallies" \n)
 

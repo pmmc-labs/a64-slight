@@ -10,8 +10,8 @@
 
 (defun try (s)
     (match (join (fork (calc/eval s)))
-        ((:ok v)     (concat v))
-        ((:error e)  (concat "error: " e))))
+        ((:ok v)     (str v))
+        ((:error e)  (str "error: " e))))
 
 (map (lambda (s) (tty/write s "  =>  " (try s) \n))
     (list "1 + 2 * 3" "(1 + 2) * 3" "7 / 2" "6 / 2" "-7 / 2" "7 % 3" "-7 % 3" "10.5 % 3"

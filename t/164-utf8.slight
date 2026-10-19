@@ -1,33 +1,35 @@
-; The utf8/ builtins count characters where the byte builtins count bytes
-; (D148). Here é is 2 bytes, 日 3 and 😀 4.
+; The str/ builtins count characters where the bytes/ builtins count bytes
+; (D148, D219). Here é is 2 bytes, 日 3 and 😀 4.
 
 (let s "aé日😀")
-(pprint (list (str-len s) (utf8/len s)))
-(pprint (utf8/chars s))
-(pprint (list (utf8/len "") (utf8/chars "")))
-; characters [start, end), clamped and swapped as substring's bytes are
-(pprint (utf8/substring s 1 3))
-(pprint (utf8/substring s 3 1))
-(pprint (utf8/substring s -5 2))
-(pprint (utf8/substring s 2 99))
-(pprint (utf8/substring s 4 4))
-(pprint (utf8/substring s 9 7))
-(pprint (bytes (substring s 1 2)))
+(pprint (list (bytes/len s) (str/len s)))
+(pprint (str/chars s))
+(pprint (list (str/len "") (str/chars "")))
+; characters [start, end), as JavaScript's slice takes them: an index
+; counts from the end when it's negative, each is clamped, and the slice
+; is empty unless start comes before end
+(pprint (str/slice s 1 3))
+(pprint (str/slice s 3 1))
+(pprint (str/slice s -5 2))
+(pprint (str/slice s 2 99))
+(pprint (str/slice s 4 4))
+(pprint (str/slice s 9 7))
+(pprint (str->bytes (bytes/slice s 1 2)))
 ; the index of a character, not of a byte
-(pprint (list (utf8/index-of s "😀") (index-of s "😀")))
-(pprint (utf8/index-of s "日😀"))
-(pprint (utf8/index-of s ""))
-(pprint (utf8/index-of s "x"))
-(pprint (utf8/index-of "" ""))
-(pprint (utf8/valid? s))
-; the byte builtins that don't count are right for UTF-8 as they are
-(pprint (str-split "α,β,γ" ","))
-(pprint (str-join "·" (list "α" "β")))
-(pprint (list (starts-with? "日本語" "日本") (ends-with? "日本語" "語")))
+(pprint (list (str/index-of s "😀") (bytes/index-of s "😀")))
+(pprint (str/index-of s "日😀"))
+(pprint (str/index-of s ""))
+(pprint (str/index-of s "x"))
+(pprint (str/index-of "" ""))
+(pprint (str/well-formed? s))
+; what doesn't count is the same for bytes and characters
+(pprint (str/split "α,β,γ" ","))
+(pprint (str/join "·" (list "α" "β")))
+(pprint (list (str/starts-with? "日本語" "日本") (str/ends-with? "日本語" "語")))
 (pprint (~ "é" "😀"))
-(pprint (eq? (str-join "" (utf8/chars s)) s))
+(pprint (eq? (str/join "" (str/chars s)) s))
 ; and output is the bytes as they are
 (tty/write "tty/write: " s "\n")
-(pprint (concat "concat: " s " " 1.5))
+(pprint (str "str: " s " " 1.5))
 ; a combining accent is a character of its own
-(map ord (utf8/chars "e\u{301}"))
+(str/codes "e\u{301}")

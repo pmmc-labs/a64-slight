@@ -5,7 +5,7 @@
 // D47).
 // Frame slots are addressed up from sp, under x29/x30.
 
-import { comment, NOT, placeArgs, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
+import { comment, NOT, placeArgs, type Code, type BitOp, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
 import { FLOAT_HEADER, FLOAT_VALUE, tupleElement } from './values.ts';
 
 const ARGS = ['x0', 'x1', 'x2', 'x3', 'x4', 'x5', 'x6', 'x7'];
@@ -71,6 +71,30 @@ const DIVISION: Readonly<Record<'div' | '%', (zero: string, overflow: string) =>
         '    msub x0, x2, x0, x1',
     ],
 };
+
+// Bits (D221). An integer is n << 1, so and, or and xor of the tagged
+// words are the tagged results, and a shift left of the word is the tagged
+// n << k, wrapped to 63 bits. A shift right of the word is n >> (k - 1),
+// whose bit 0, cleared, leaves the tagged n >> k. A count is clamped to
+// 63, which the shifts would otherwise take mod 64: that shifts out every
+// bit, or leaves only the sign's.
+const BITS: Readonly<Record<BitOp, (range: string) => Code>> = {
+    and: () => '    and  x0, x1, x0',
+    or:  () => '    orr  x0, x1, x0',
+    xor: () => '    eor  x0, x1, x0',
+    shl: (range) => [...COUNT(range), '    lsl  x0, x1, x2'],
+    shr: (range) => [...COUNT(range), '    asr  x0, x1, x2', '    and  x0, x0, #-2'],
+};
+
+// The accumulator's count, untagged and clamped to 63, into x2.
+const COUNT = (range: string): readonly string[] => [
+    '    cmp  x0, #0',
+    `    b.lt ${range}`,
+    '    asr  x2, x0, #1',
+    '    mov  x16, #63',
+    '    cmp  x2, x16',
+    '    csel x2, x2, x16, lt',
+];
 
 // The shortest movz/movn + movk sequence that puts a 64-bit word in reg:
 // start from all zeros (movz) or all ones (movn), whichever leaves fewer
@@ -288,6 +312,8 @@ export const AARCH64: Target = {
         return [apply, `    b.vs ${overflow}`];
     },
     divide: (op, zero, overflow) => DIVISION[op](zero, overflow),
+    bits: (op, range) => BITS[op](range),
+    bitNot: '    eor  x0, x0, #-2',
 
     cxr: (step) => (step === 'a' ? '    ldur x0, [x0, #-1]    // car' : '    ldur x0, [x0, #7]     // cdr'),
     // ldur reaches 255 bytes on; past that, the offset is in a register

@@ -15,7 +15,7 @@
 (defun pprint-tree (t depth)
     (match t
         ((:Leaf value)
-            (tty/write (str-repeat "  " depth) ":..[" value "]" \n))
+            (tty/write (str/repeat "  " depth) ":..[" value "]" \n))
         ((:Branch left right)
             (pprint-tree left  (inc depth))
             (pprint-tree right (inc depth)))))

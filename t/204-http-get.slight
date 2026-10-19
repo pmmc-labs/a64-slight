@@ -5,13 +5,13 @@
 (@include :http)
 
 (defun handler (req)
-    (list 200 (list (list "Content-Type" "text/plain")) (concat (lookup :path req) "?" (lookup :query req))))
+    (list 200 (list (list "Content-Type" "text/plain")) (str (lookup :path req) "?" (lookup :query req))))
 
 (defun main ()
     (let server (http/serve 0 handler))
     (recv
         ((:listening port)
-            (let r (http/get (concat "http://127.0.0.1:" port "/hello?x=1")))
+            (let r (http/get (str "http://127.0.0.1:" port "/hello?x=1")))
             (kill server)
             r)))
 

@@ -603,9 +603,11 @@ description)`.
 Left "for now" by earlier decisions, and taken on when something needs
 them:
 
-- **Display width** (the rest of DESIGN.md's level 2 strings): a wide
+- **Display width, graphemes and normalization** (D219): a wide
   character (CJK, most emoji) takes two columns of a terminal and counts
-  one, so a terminal UI can't line up such text yet.
+  one, so a terminal UI can't line up such text yet; `str/width`,
+  `str/graphemes` and `str/normalize`, from utf8proc, vendored as D151
+  has it.
 - More than 8 arguments to a function, on the stack (DESIGN.md).
 - Sockets: IPv6, and more than the 1,000 or so that `select()` holds
   (D113), with `poll`, `kqueue` or `epoll`.
@@ -681,22 +683,58 @@ going on live; forking a run at a point with `fork(2)`, a branch to a
 core; snapshots on disk; and `clone`, a waiting process copied, for a
 branch smaller than a whole run.
 
+### Strings (done, Oct 2026)
+
+One set of string builtins in place of the byte ones and the `utf8/`
+ones (D219): `str/` counting characters, with JavaScript's methods'
+names and edge cases, `bytes/` counting bytes, conversions as `a->b`,
+case mapping and white space from Unicode's tables (15.1, generated
+into `runtime/unicode.c`), ASCII strings marked so they're indexed in
+one step, and `pprint` escaping strings. Every program moved to the new
+names; golden tests 261 to 265, from `t/models/strings.py`.
+
+### Waiting for several processes (done, Oct 2026)
+
+`join/race`, the first of a list of pids to end, in the runtime, and
+`join/any` and `join/all` in the prelude on it: JavaScript's
+`Promise.race`, `any` and `all` (D220). They keep the caller's stack, as
+`join` does, so the caller needn't be a state function. `http/await`
+races its request against a sleeper. Golden tests 266 to 268.
+
+### Numbers (done, Oct 2026)
+
+The math builtins under `math/`, with the rest of JavaScript's `Math`,
+`math/pow` exact on two integers, `math/mod`, `math/nan?`, `math/E` and
+`math/INF`, `int->float` and `float->str` (`toFixed`); and the bit
+operations, `bit/`, compiled inline (D221). Golden tests 269 to 272.
+
+### Random numbers (done, Oct 2026)
+
+A generator in each process, SplitMix64 as Java's `SplittableRandom`
+has it: `rand/int`, `rand/float` and `rand/seed` in the runtime,
+`rand/pick` and `rand/shuffle` in the prelude; the run seeded by
+`SLIGHT_SEED` or the system, the seed recorded for a replay, and a
+fork's generator split from its parent's, so a process's numbers don't
+depend on the order processes run in (D222). Boids draws its flock with
+them. Golden test 273, and the replay checks. Cryptographic randomness
+waits for TLS.
+
+### Maps (done, Oct 2026)
+
+A persistent map, a hash trie of tuples, in slight: `lib/map.slight`,
+with `tuple/insert` and `tuple/remove` in the runtime for its nodes
+(D223). Golden tests 274 and 275, from `t/models/map.py`. The airline
+finds its runs, its shares' trees and its remedies' days with it.
+
 ### Later: the rest of the October 2026 list
 
 The other changes from that list (above, "After 13"), for later, before
 self-hosting, since most change the language. Each has points to settle
 with Stevan first.
 
-- **Bit operations on integers.** Hashing (a hash trie of tuples, for a
-  fast dictionary), random number generators (and with them property
-  tests), and binary protocols all need them, and slight has none.
-  `hash` (D209) covers hashing a value, and random numbers made as
-  hashes (`examples/airline-gen.slight`); a hash trie, a generator
-  that's fast, and binary protocols still want them. And,
-  or and xor work on tagged words as they are, so they can be inline;
-  shifts untag and retag. To settle: the names (`bit/and` and so on, as
-  `utf8/`), what a shift does past 63 bits (fault, as arithmetic
-  does?), and negative counts.
+- **Numerical vectors and matrices,** only if a program needs them
+  (D179, D221): embeddings for the agent's notes are the likeliest.
+  Floats that need no box would come first.
 - **A `recv` with a timeout.** Today it's `after` and a message, and a
   late timeout can arrive after the answer, to be told apart by hand. A
   clause such as `(:after ms body...)`, as Erlang's, needs timers that
@@ -750,8 +788,6 @@ with Stevan first.
   within a function. Either is a proposal of its own; boids is the
   benchmark. Not this way (D179): fixed point in the example, or a type
   of numerical vectors.
-- **Comparing strings**, a builtin, so `sort` can order them without a
-  `less?` written for it (D175).
 - **Exit records that keep big values** (D216). A record keeps the value
   its process ended with for good (D88), so a program that forks many
   processes, each ending with a big result it joins, keeps every

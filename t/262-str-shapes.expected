@@ -1,0 +1,31 @@
+("a" "b" "" "c")
+(("") () ("" "a" "") ("" ""))
+("a" "é" "日")
+("a" "b" "c")
+(("a" "b") () ("a" "b") ("a" "é"))
+("日" "語")
+"a, 1, b, 2.5, (1 \"x\")"
+("" "x" "ab")
+("ababab" "éé" "" "")
+("  é" "é--" "aba5" "x日本日本日")
+("abc" "x" "😀😀")
+(4 16)
+("a b" "a  " "  a" "" "")
+(97)
+(255)
+(8203 97 8203)
+("a-b.c" "a-b-c" "ba" "abc")
+("-abc" "-a-b-c-" "|a|é|" "-")
+"JapanとJapan"
+fault in #<pid 2>: out of range: -1 (str/split at t/262-str-shapes.slight:34:21)
+out-of-range
+fault in #<pid 3>: out of range: -1 (str/repeat at t/262-str-shapes.slight:35:21)
+out-of-range
+fault in #<pid 4>: not a string: 5 (str/pad-start at t/262-str-shapes.slight:36:21)
+not-a-string
+fault in #<pid 5>: not a list: "abc" (str/join at t/262-str-shapes.slight:37:21)
+not-a-list
+fault in #<pid 6>: not a string: 1 (str/replace at t/262-str-shapes.slight:38:21)
+not-a-string
+fault in #<pid 7>: heap exhausted (str/repeat at t/262-str-shapes.slight:39:13)
+heap

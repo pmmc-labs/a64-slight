@@ -1,0 +1,94 @@
+; join/race (D220): the first of a list of pids to end, as (pid result),
+; whether it ended well or not. If some have ended already, it's the first
+; of those in the list, as JavaScript's Promise.race settles. It keeps the
+; caller's stack, as join does, so the caller needn't be a state function.
+; Results are shown by name, (name result), and times in milliseconds on
+; the virtual clock.
+
+(defun after-ms (ms v) (fork (do (sleep ms) v)))
+(defun fail-ms (ms r) (fork (do (sleep ms) (raise r))))
+(defun named (names r) (cons (lookup (car r) names) (cdr r)))
+(defun took (t0) (div (- (clock/us) t0) 1000))
+
+(let t0 (clock/us))
+(let a (after-ms 30 :a))
+(let b (after-ms 10 :b))
+(let c (fail-ms 20 :c-failed))
+(let abc (list (list a :a) (list b :b) (list c :c)))
+; the first to end: b, at 10
+(pprint (named abc (join/race (list a b c))))
+(pprint (took t0))
+; an error is an end too: c fails at 20, before a ends
+(pprint (named abc (join/race (list a c))))
+(pprint (took t0))
+; b and c have ended: the first of them in the list, at once
+(pprint (named abc (join/race (list a c b))))
+(pprint (named abc (join/race (list b c))))
+(pprint (named abc (join/race (list a b))))
+(pprint (took t0))
+; a, twice, still running: it waits for a
+(pprint (named abc (join/race (list a a))))
+(pprint (took t0))
+
+; two that end at the same time: the first to end wins, though it's second
+; in the list, and the other ends before the racer runs again
+(let d (after-ms 5 :d))
+(let e (after-ms 5 :e))
+(pprint (named (list (list d :d) (list e :e)) (join/race (list e d))))
+
+; one that's killed ends with (:error :killed), which wins as any end does
+(let f (fork (recv (_ :never))))
+(let g (after-ms 50 :g))
+(fork (do (sleep 1) (kill f)))
+(pprint (named (list (list f :f) (list g :g)) (join/race (list f g))))
+
+; a racer that's killed takes its watches with it: h ends later, and wakes
+; no one
+(let h (after-ms 5 :h))
+(let racer (fork (join/race (list h))))
+(sleep 1)
+(kill racer)
+(pprint (list (join racer) (join h)))
+
+; racers on the same pid wake in the order they asked
+(let k (after-ms 5 :k))
+(let r1 (fork (do (join/race (list k)) (pprint :first))))
+(let r2 (fork (do (join/race (list k)) (pprint :second))))
+(join r2)
+
+; a pool of two: a job starts as soon as one of the two running ends
+(defun pool (jobs running done)
+    (cond
+        ((and (cons? jobs) (< (length running) 2))
+            (pool (cdr jobs) (cons (after-ms (car jobs) (car jobs)) running) done))
+        ((nil? running) (reverse done))
+        (#true
+            (match (join/race running)
+                ((p (:ok ms)) (pool jobs (remove (lambda (q) (eq? q p)) running) (cons ms done)))))))
+(let t1 (clock/us))
+(pprint (pool (list 30 10 15 5 20) () ()))
+(pprint (took t1))
+
+; a timeout: a race against a process that sleeps
+(defun within (ms pid)
+    (let timer (fork (sleep ms)))
+    (match (join/race (list pid timer))
+        ((p result) (if (eq? p pid) (do (kill timer) result) (do (kill pid) (list :error :timeout))))))
+(pprint (within 10 (after-ms 5 :quick)))
+(pprint (within 10 (after-ms 50 :slow)))
+
+; :system tells of a racer as joining, with the pids it races, in order
+(defun racing (ps) (join/race ps))
+(defun asking (pid)
+    (let s (recv ((:open s) s)))
+    (send s (list :process pid))
+    (recv ((:process s2 i) i)))
+(let w1 (fork (recv (_ :w1))))
+(let w2 (fork (recv (_ :w2))))
+(let racer2 (fork (racing (list w2 w1))))
+(sleep 1)
+(let info (cadr (join (connect :system (asking racer2)))))
+(pprint (list (lookup :state info) (eq? (lookup :joining info) (list w2 w1)) (lookup :in info) (lookup :stack info)))
+(send w1 :go)
+(send w2 :go)
+(named (list (list w1 :w1) (list w2 :w2)) (cadr (join racer2)))

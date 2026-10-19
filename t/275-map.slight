@@ -1,0 +1,65 @@
+; A persistent map, a hash trie (D223). The by-hand part first; the rest,
+; from a seeded run of puts and deletes, comes from t/models/map.py, a
+; Python dict, with t/models/hash.py and rand.py for slight's hash and
+; random numbers, and the order map->list gives worked out from the hashes.
+(@include :map)
+
+; the basics
+(let m (list->map '((a 1) (b 2) (a 3))))
+(pprint (list (map/size m) (map/get m :a) (map/get m :b) (map/get m :c) (map/has? m :b) (map/has? m :c)))
+(let m2 (map/update (map/update m :a inc 0) :c inc 0))
+(pprint (list (map/get m2 :a) (map/get m2 :c) (map/size m2) (map/get m :a) (map/size m)))
+(pprint (list (eq? (map/delete m :zz) m) (map/size (map/delete m :a)) (map/get (map/delete m :a) :a)))
+(pprint (list (map/size (map/new)) (map->list (map/new)) (map/get (map/new) 1) (eq? (list->map ()) (map/new))))
+
+; any value is a key, compared with eq?
+(let ks (list 1 1.0 "1" :one () '(1) (tuple 1) (map/new) -0.0 0.0))
+(let km (fold/l (map/new) (lambda (m k) (map/put m k (map/size (map/delete m k)))) ks))
+(pprint (list (map/size km) (map (lambda (k) (map/get km k)) (list 1 1.0 "1" :one () '(1) (tuple 1) (map/new) 0.0))))
+
+; the same entries make the same map, whatever came and went
+(let a (fold/l (map/new) (lambda (m i) (map/put m i (* i i))) (range 0 200)))
+(let b (fold/l (map/new) (lambda (m i) (map/put m i (* i i))) (reverse (range 0 400))))
+(let b2 (fold/l b (lambda (m i) (map/delete m i)) (range 200 400)))
+(pprint (list (eq? a b) (eq? a b2) (map/size b2) (map/fold 0 (lambda (acc k v) (+ acc v)) b2)))
+
+; the trie itself: hashes 0 and 32 share their lowest 5 bits, so a node
+; holds both a level down; then 1 goes beside it in the root
+(let t (map/put-hashed (map/put-hashed (map/new) 0 :x 1) 32 :y 2))
+(pprint t)
+(pprint (map/put-hashed t 1 :z 3))
+(pprint (map/delete-hashed t 32 :y))
+
+; hashes that differ only in their top bits, 13 levels down, and the
+; same hash for three keys, a bucket; deleting folds them back up
+(let deep (map/put-hashed (map/put-hashed (map/new) 0 :p 1) 2305843009213693952 :q 2))
+(pprint (list (map/get-hashed deep 0 :p) (map/get-hashed deep 2305843009213693952 :q) (map/get-hashed deep 0 :q)))
+(pprint (eq? (map/delete-hashed deep 0 :p) (map/put-hashed (map/new) 2305843009213693952 :q 2)))
+(let bucket (fold/l (map/new) (lambda (m k) (map/put-hashed m 5 k k)) (list :c :a :b :a)))
+(pprint (list (map/size bucket) (map->list bucket) (map/get-hashed bucket 5 :b) (map/get-hashed bucket 5 :d)))
+(pprint (map->list (map/put-hashed (map/delete-hashed bucket 5 :c) 5 :c 0)))
+(pprint (eq? (map/delete-hashed (map/delete-hashed bucket 5 :a) 5 :c) (map/put-hashed (map/new) 5 :b :b)))
+
+; a seeded run, checked against an association list at every step
+(rand/seed 7)
+(defun key (k kind) (if (== kind 0) k (str "k" k)))
+(defun churn (m alist i n ok)
+    (cond
+        ((== i n) (list m (and ok (all-found m alist))))
+        (#true
+            (let op (rand/int 10))
+            (let k (key (rand/int 300) (rand/int 2)))
+            (let rest (remove (lambda (e) (eq? (car e) k)) alist))
+            (let m2 (if (< op 6) (map/put m k i) (map/delete m k)))
+            (let alist2 (if (< op 6) (assoc k i rest) rest))
+            (churn m2 alist2 (inc i) n (and ok (== (map/size m2) (length alist2)) (eq? (map/get m2 k) (lookup k alist2)))))))
+(defun all-found (m alist)
+    (match alist
+        (() #true)
+        (((k v) & rest) (and (eq? (map/get m k) v) (all-found m rest)))))
+(match (churn (map/new) () 0 3000 #true)
+    ((r ok)
+        (pprint (list (map/size r) ok (map/fold 0 (lambda (acc k v) (+ acc v)) r)))
+        (pprint (take 8 (map->list r)))
+        (pprint (hash (map->list r)))
+        (pprint (list (eq? r (list->map (map->list r))) (eq? r (list->map (rand/shuffle (map->list r))))))))

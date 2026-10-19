@@ -1,0 +1,18 @@
+; Random numbers in processes that interleave (D222). Each worker forks a
+; helper, draws, spins, and draws again; the root joins them in order and
+; prints what each drew. Each process's numbers come from its parent's at
+; the fork, so with SLIGHT_SEED the output is the same under every
+; SLIGHT_SCHED order; without it, a recorded run replays the same, and
+; two runs differ (t/replay.sh).
+
+(defun spin (n) (if (== n 0) :done (spin (- n 1))))
+
+(defun work (i)
+    (let helper (fork (do (spin (* i 200)) (rand/int 1000000))))
+    (let a (rand/int 1000000))
+    (spin (* (- 5 i) 300))
+    (list i a (rand/int 1000000) (cadr (join helper))))
+
+(let workers (map (lambda (i) (fork (work i))) (range 0 5)))
+(pprint (map (lambda (w) (cadr (join w))) workers))
+(rand/int 1000000)

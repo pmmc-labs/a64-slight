@@ -199,9 +199,8 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
         return;
     }
     if (rt_is_string(v)) {
-        if (!raw) buf_str(b, "\"");
-        rt_buf_add(b, rt_string_bytes(v), rt_string_len(v));
-        if (!raw) buf_str(b, "\"");
+        if (raw) rt_buf_add(b, rt_string_bytes(v), rt_string_len(v));
+        else     rt_quote(b, rt_string_bytes(v), rt_string_len(v));
         return;
     }
     if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
@@ -497,7 +496,7 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
     size_t     len = strlen(site);
     uint64_t   space[len / 8 + 6];
     uint64_t  *str = (uint64_t *)(((uintptr_t)space + 15) & ~(uintptr_t)15);
-    str[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
+    str[0] = rt_string_header(site, len);
     memcpy(str + 1, site, len + 1);
     _Alignas(16) rt_value_t cells[6] = {
         rt_symbol(RT_SYM_FAULTS - 1 + fault), (rt_value_t)&cells[2] | RT_TAG_LIST,
@@ -532,10 +531,66 @@ void *rt_heap_alloc(void *site, size_t bytes) {
 
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site) {
     uint64_t *box = len >= BIG_STRING ? rt_alloc_old(8 + len + 1, site) : rt_alloc(8 + len + 1, site);
-    box[0] = (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
+    box[0] = bytes ? rt_string_header(bytes, len) : (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
     if (len && bytes) memcpy(box + 1, bytes, len);
     ((char *)(box + 1))[len] = '\0';
     return (rt_value_t)box | RT_TAG_BOXED;
+}
+
+// A word at a time where the bytes are aligned for it, which a box's are.
+uint64_t rt_string_header(const char *bytes, size_t len) {
+    uint64_t high = 0;
+    size_t   i    = 0;
+    if (((uintptr_t)bytes & 7) == 0) {
+        for (; i + 8 <= len; i += 8) {
+            uint64_t w;
+            memcpy(&w, bytes + i, 8);
+            high |= w;
+        }
+        high &= 0x8080808080808080u;
+    }
+    for (; i < len; i++) high |= (unsigned char)bytes[i] & 0x80;
+    return (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING | (high ? 0 : RT_BOX_ASCII);
+}
+
+void rt_string_mark(rt_value_t s) {
+    uint64_t *box = (uint64_t *)rt_box(s);
+    box[0] = rt_string_header(rt_string_bytes(s), rt_string_len(s));
+}
+
+// The control characters (Unicode's: C0, DEL and C1) as escapes, as the
+// reader takes them, those without a letter in \u{hex}; stray bytes as
+// they are, since no escape makes one.
+void rt_quote(rt_buf_t *b, const char *p, size_t len) {
+    static const char digits[] = "0123456789abcdef";
+    size_t from = 0;
+    buf_str(b, "\"");
+    for (size_t i = 0; i < len; i++) {
+        unsigned char c = (unsigned char)p[i], n = 1;
+        if (c == 0xc2 && i + 1 < len && (unsigned char)p[i + 1] <= 0x9f && (unsigned char)p[i + 1] >= 0x80) {
+            c = (unsigned char)p[i + 1];                // U+0080 to U+009F, in two bytes
+            n = 2;
+        }
+        const char *e = c == '"' ? "\\\"" : c == '\\' ? "\\\\" : c == '\n' ? "\\n" : c == '\t' ? "\\t"
+                      : c == '\r' ? "\\r" : c == 0x1b ? "\\e" : NULL;
+        char u[8];
+        if (!e && (c < 0x20 || c == 0x7f || n == 2)) {
+            int k = 0;
+            memcpy(u, "\\u{", 3);
+            if (c >= 16) u[3 + k++] = digits[c >> 4];
+            u[3 + k++] = digits[c & 15];
+            u[3 + k++] = '}';
+            u[3 + k]   = '\0';
+            e = u;
+        }
+        if (!e) continue;
+        rt_buf_add(b, p + from, i - from);
+        buf_str(b, e);
+        i   += n - 1;
+        from = i + 1;
+    }
+    rt_buf_add(b, p + from, len - from);
+    buf_str(b, "\"");
 }
 
 rt_value_t rt_new_float(double d, const char *site) {

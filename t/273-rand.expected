@@ -1,0 +1,17 @@
+(2 9 445295)
+(0 3 3 0 5 3 0 4 0 1 5 5)
+(0 439 1523326691193374575 0.20343510930023068 0.10357423567927071)
+(0 3 3 0 5 3 0 4 0 1 5 5)
+(76 0)
+(37 (23 0) (98 61))
+(e d ())
+(3 9 6 2 0 8 4 1 7 5)
+(() (0 1 2 3 4 5 6 7 8 9))
+fault in #<pid 5>: out of range: 0 (rand/int at t/273-rand.slight:34:21)
+out-of-range
+fault in #<pid 6>: out of range: -5 (rand/int at t/273-rand.slight:35:21)
+out-of-range
+fault in #<pid 7>: not an integer: 2.5 (rand/int at t/273-rand.slight:36:21)
+not-an-int
+fault in #<pid 8>: not an integer: "x" (rand/seed at t/273-rand.slight:37:13)
+not-an-int

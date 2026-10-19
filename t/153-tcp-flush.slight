@@ -11,19 +11,19 @@
 
 (defun blurt (n)
     (recv
-        ((:open c) (write-lines c 0 n (str-repeat "x" 90)))))
+        ((:open c) (write-lines c 0 n (str/repeat "x" 90)))))
 
 (defun tally (n total)
     (recv
         ((:open c)   (tally n total))
-        ((:line c s) (tally (+ n 1) (+ total (str-len s))))
+        ((:line c s) (tally (+ n 1) (+ total (bytes/len s))))
         ((:eof c)    (disconnect c) (list n total))))
 
 (defun listener ()
     (recv
         ((:open l port)
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (tally 0 0))))))
+            (fork (send me (list :client (join (connect :tcp (str "localhost:" port) (tally 0 0))))))
             (serving l))))
 
 (defun serving (l)

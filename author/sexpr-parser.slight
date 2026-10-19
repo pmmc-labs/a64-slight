@@ -22,7 +22,7 @@
         ((token & rest)
             (cond
                 ((sym? token)               (lexer rest (cons token acc)))
-                ((int? (string->int token)) (lexer rest (cons (list :INT (string->int token)) acc)))
+                ((int? (str->int token)) (lexer rest (cons (list :INT (str->int token)) acc)))
                 (#true                      (lexer rest (cons (list :SYM token) acc)))))))
 
 (defun close-expression (stack acc)
@@ -42,7 +42,7 @@
     (parser
         (lexer
             (tokenizer
-                (str-split "(+ 10 (+ (* 2 10) 30))" "")
+                (str/split "(+ 10 (+ (* 2 10) 30))" "")
             ())
         ())
     ())

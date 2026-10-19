@@ -412,6 +412,15 @@ uint32_t rt_io_seed(void) {
     return (uint32_t)done(IO_SEED, bits);
 }
 
+uint64_t rt_io_random_seed(const char *given) {
+    if (mode == REPLAY) return (uint64_t)replayed(IO_SEED);
+    static char here;
+    uint64_t    bits;
+    if (given) bits = strtoull(given, NULL, 10);
+    else if (getentropy(&bits, sizeof bits) != 0) bits = (uint64_t)time(NULL) << 32 ^ (uint64_t)getpid() << 16 ^ (uint64_t)(uintptr_t)&here;
+    return (uint64_t)done(IO_SEED, (int64_t)bits);
+}
+
 int rt_io_winsize(int *rows, int *cols) {
     int32_t size[2] = { 0, 0 };
     int     r;

@@ -14,7 +14,15 @@
 # t/replay/order.slight runs first in, first out, and then under
 # SLIGHT_SCHED with 20 seeds: each must print the five workers in some
 # order, the same each time for the same seed, and the seeds must not
-# all give one order. A seeded run must replay as it went.
+# all give one order. A seeded run must replay as it went. And
+# t/267-join-any-all.slight, whose results go by the virtual clock and
+# not by the order processes run in, must print its golden output under
+# five seeds (D220).
+#
+# t/replay/rand.slight draws random numbers in processes that interleave
+# (D222): with SLIGHT_SEED it must print the same under five SLIGHT_SCHED
+# orders as first in, first out; without it, a recorded run must replay
+# the same, and two runs must differ.
 cd "$(dirname "$0")/.." || exit 2
 TARGET=${TARGET-aarch64}
 case "$TARGET-$(uname -m)" in
@@ -22,7 +30,7 @@ case "$TARGET-$(uname -m)" in
     x86_64-arm64)                                RUN=${RUN-} ;;
     *)                                           RUN=${RUN-qemu-$TARGET} ;;
 esac
-unset SLIGHT_CLOCK SLIGHT_SCHED SLIGHT_RECORD SLIGHT_REPLAY
+unset SLIGHT_CLOCK SLIGHT_SCHED SLIGHT_RECORD SLIGHT_REPLAY SLIGHT_SEED
 dir=build/t/$TARGET/replay
 rm -rf "$dir"
 mkdir -p "$dir"
@@ -37,12 +45,16 @@ check() {                               # check what ok-or-not
     fi
 }
 
-for name in world net exec order; do
+for name in world net exec order rand; do
     if ! node bin/slightc.ts --target "$TARGET" -o "$dir/$name" "t/replay/$name.slight" >"$dir/$name.compile" 2>&1; then
         cat "$dir/$name.compile"
         check "$name (compile)" no
     fi
 done
+if ! node bin/slightc.ts --target "$TARGET" -o "$dir/joins" t/267-join-any-all.slight >"$dir/joins.compile" 2>&1; then
+    cat "$dir/joins.compile"
+    check "joins (compile)" no
+fi
 [ $fail -eq 0 ] || exit 1
 
 # run [NAME=value ...] prog [args ...]: runs a program, with those
@@ -162,6 +174,42 @@ if cmp -s "$dir/order.recorded" "$dir/order.replayed" && [ "$recorded" = "1 2 3 
 else
     diff -u "$dir/order.recorded" "$dir/order.replayed"
     check "a seeded run replays as recorded" no
+fi
+
+# join/any and join/all: the same, whatever the order.
+for seed in 1 2 3 4 5; do
+    run SLIGHT_CLOCK=virtual SLIGHT_SCHED=$seed joins >"$dir/joins.$seed"
+    if printf 'exit: 0\n' | cat t/267-join-any-all.expected - | cmp -s - "$dir/joins.$seed"; then
+        check "join/any and join/all, seed $seed" ok
+    else
+        diff -u t/267-join-any-all.expected "$dir/joins.$seed"
+        check "join/any and join/all, seed $seed" no
+    fi
+done
+
+# Random numbers: the same, whatever the order, from one seed.
+run SLIGHT_SEED=5 rand >"$dir/rand.fifo"
+same=ok
+for seed in 1 2 3 4 5; do
+    run SLIGHT_SEED=5 SLIGHT_SCHED=$seed rand >"$dir/rand.$seed"
+    cmp -s "$dir/rand.fifo" "$dir/rand.$seed" || { diff -u "$dir/rand.fifo" "$dir/rand.$seed"; same=no; }
+done
+grep -q '^((0 [0-9]* [0-9]* [0-9]*) (1 ' "$dir/rand.fifo" && grep -q '^exit: 0$' "$dir/rand.fifo" || same=no
+check "random numbers, the same under five orders from one seed" $same
+# Without a seed, the system's: replayed as recorded, and new each run.
+run SLIGHT_RECORD="$dir/rand.record" rand >"$dir/rand.recorded"
+run SLIGHT_REPLAY="$dir/rand.record" rand >"$dir/rand.replayed"
+if cmp -s "$dir/rand.recorded" "$dir/rand.replayed" && grep -q '^exit: 0$' "$dir/rand.recorded"; then
+    check "random numbers without a seed replay as recorded" ok
+else
+    diff -u "$dir/rand.recorded" "$dir/rand.replayed"
+    check "random numbers without a seed replay as recorded" no
+fi
+run rand >"$dir/rand.again"
+if cmp -s "$dir/rand.recorded" "$dir/rand.again"; then
+    check "random numbers without a seed differ from run to run" no
+else
+    check "random numbers without a seed differ from run to run" ok
 fi
 
 echo "replay: $fail failed"

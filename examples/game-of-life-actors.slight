@@ -80,7 +80,7 @@
 (defun display-grid (states gen)
     (tty/write "generation " gen \n)
     (map (lambda (row)
-        (tty/write (str-join "" (map (lambda (c) (if (eq? c :LIVE) "@" "_")) (tuple->list row))) \n))
+        (tty/write (str/join "" (map (lambda (c) (if (eq? c :LIVE) "@" "_")) (tuple->list row))) \n))
         (tuple->list states)))
 
 ; Shows the states; then, for the last of n generations, stops the cells,

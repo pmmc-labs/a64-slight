@@ -4,4 +4,4 @@
 (pprint @ARGV)
 (cond
     ((nil? @ARGV) 27)
-    (#true        (string->int (car @ARGV))))
+    (#true        (str->int (car @ARGV))))

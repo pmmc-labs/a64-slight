@@ -1,0 +1,22 @@
+; str/upper and str/lower map each character in full, as Unicode does
+; without a language (D219): ß is SS in uppercase, ﬁ is FI, and a capital
+; sigma that ends a word is a final sigma in lowercase. A stray byte stays
+; as it is. Comparing is by code point, which for UTF-8 is byte by byte.
+
+(pprint (list (str/upper "hello, World 1") (str/lower "Hello, WORLD 1")))
+(pprint (list (str/upper "straße") (str/upper "ﬁne") (str/upper "ǆ") (str/lower "ǅ") (str/upper "ŉ") (str/upper "ǰ")))
+(pprint (list (str/lower "ΟΔΥΣΣΕΥΣ") (str/lower "Σ") (str/lower "ΑΣ.") (str/lower "ΑΣ ΑΣ") (str/lower "ΑΣΑ") (str/lower "Α'Σ'")))
+(pprint (list (str/upper "ı") (str/lower "İ") (str/codes (str/lower "İ")) (str/upper "i")))
+(pprint (list (str/upper "αβγ дж abc") (str/lower "ΑΒΓ ДЖ ABC") (str/upper "ꭰ") (str/lower "Ꭰ") (str/upper "ⓐ")))
+(pprint (list (str/upper "日本") (str/upper "😀") (str/upper "") (str/len (str/upper "ﬃ"))))
+(pprint (str->bytes (str/upper (bytes->str (list 97 255 98)))))
+(pprint (str/codes (str/lower (~ "Α" (bytes->str (list 255)) "Σ"))))
+
+(pprint (list (str/compare "a" "b") (str/compare "b" "a") (str/compare "a" "a") (str/compare "a" "ab") (str/compare "" "a")))
+(pprint (list (str/compare "Z" "a") (str/compare "é" "z") (str/compare (codes->str (list 65535)) "😀")))
+(pprint (list (str/< "a" "b") (str/< "b" "a") (str/< "a" "a")))
+(pprint (sort str/< (list "pear" "Apple" "apple" "été" "zoo" "" "日本" "äpfel")))
+
+(defun kind (pid) (car (cadr (join pid))))
+(pprint (kind (fork (str/upper 'a))))
+(kind (fork (str/compare "a" 1)))

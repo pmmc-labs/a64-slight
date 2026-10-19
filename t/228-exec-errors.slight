@@ -16,7 +16,7 @@
 (pprint (join (connect :exec (list "t/data/no-such-file") (run))))
 (pprint (join (connect :exec (list "t/data") (run))))
 (pprint (join (connect :exec (list "t/data/lines.txt") (run))))
-(pprint (join (connect :exec (list "echo" (concat "a" (chr 0) "b")) (run))))
+(pprint (join (connect :exec (list "echo" (str "a" (codes->str (list 0)) "b")) (run))))
 
 (defun poke ()
     (recv

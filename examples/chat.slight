@@ -30,7 +30,7 @@
 (defun prompt () "❯ ")
 
 (defun divider ()
-    (concat \e "[2m" (str-repeat "─" (tty/screen/cols)) \e "[0m" \n))
+    (str \e "[2m" (str/repeat "─" (tty/screen/cols)) \e "[0m" \n))
 
 (defun main (args env)
     (let model (if (cons? args) (car args) "llama3.2"))
@@ -46,7 +46,7 @@
                "    url   : " url   \n
                "    tools : read_file, list_files, search, calc, remember, recall, write_file, edit_file, run, fetch" \n
                "    notes : " path " (" (length keys) ")" \n
-               (if (str? expert) (concat "    expert: " expert \n) "")
+               (if (str? expert) (str "    expert: " expert \n) "")
                \e "[0m"
                \n
                (divider) (prompt))
@@ -57,19 +57,19 @@
 ; The notes go in the home directory, so every chat has them.
 (defun notes-path (env)
     (let home (lookup "HOME" env))
-    (if (str? home) (concat home "/.slight-chat-notes") ".slight-chat-notes"))
+    (if (str? home) (str home "/.slight-chat-notes") ".slight-chat-notes"))
 
 ; A model doesn't know to recall what it can't know it has.
 (defun system (keys)
     (if (nil? keys)
         ""
-        (concat "You keep notes with the remember tool, and read them with recall. You have notes under these keys: "
-                (str-join ", " keys) ".")))
+        (str "You keep notes with the remember tool, and read them with recall. You have notes under these keys: "
+                (str/join ", " keys) ".")))
 
 ; Another agent, on the model called expert, to ask.
 (defun expert-tool (url expert)
     (tools/ask-agent "ask_expert"
-        (concat "Asks an expert (the model " expert ") a question, and gives its answer. It knows nothing of this conversation, so ask in full.")
+        (str "Asks an expert (the model " expert ") a question, and gives its answer. It knows nothing of this conversation, so ask in full.")
         (agent/new url expert "Answer briefly and exactly." ())))
 
 ; The model's tools. me is the keyboard's process, which those that
@@ -86,12 +86,12 @@
     (let h (lookup "OLLAMA_HOST" env))
     (cond
         ((or (eq? h :not-found) (eq? h "")) "http://localhost:11434")
-        ((>= (index-of h "://") 0)          (with-port h (+ (index-of h "://") 3)))
-        (#true                              (with-port (concat "http://" h) 7))))
+        ((>= (bytes/index-of h "://") 0)    (with-port h (+ (bytes/index-of h "://") 3)))
+        (#true                              (with-port (str "http://" h) 7))))
 
 ; url, with ollama's port if what's after its scheme (from at) has none.
 (defun with-port (url at)
-    (if (>= (index-of (substring url at (str-len url)) ":") 0) url (concat url ":11434")))
+    (if (>= (bytes/index-of (bytes/slice url at) ":") 0) url (str url ":11434")))
 
 ; Editing a line. pending holds the keys typed during the last answer,
 ; oldest first; they come before any typed since.
@@ -103,18 +103,18 @@
 (defun typed (a line key pending)
     (match key
         ((:Enter)
-            (if (== (str-len line) 0)
+            (if (== (bytes/len line) 0)
                 (typing a line pending)
                 (do (tty/write \n (divider))
                     (agent/say a line)
                     (answering a pending ()))))
         ((:Backspace)
-            (if (== (str-len line) 0)
+            (if (== (bytes/len line) 0)
                 (typing a line pending)
                 (do (tty/write "\u{8} \u{8}")
-                    (typing a (utf8/substring line 0 (- (utf8/len line) 1)) pending))))
+                    (typing a (str/slice line 0 -1) pending))))
         (("d" :ctrl)
-            (if (== (str-len line) 0)
+            (if (== (bytes/len line) 0)
                 (tty/write "\n")
                 (typing a line pending)))
         ((char & mods)
@@ -133,8 +133,8 @@
 (defun answering (a pending allowed)
     (recv
         ((:piece  _ text)        (tty/write \e "[3;36m" (tools/printable text) \e "[0m") (answering a pending allowed))
-        ((:calling _ name args)  (tty/write \n \e "[2m" "→ " (tools/printable (concat name " " (show-args args))) \e "[0m" \n) (answering a pending allowed))
-        ((:called _ name result) (tty/write \e "[2m" "← " (tools/printable (concat name ": " (show-result result))) \e "[0m" \n) (answering a pending allowed))
+        ((:calling _ name args)  (tty/write \n \e "[2m" "→ " (tools/printable (str name " " (show-args args))) \e "[0m" \n) (answering a pending allowed))
+        ((:called _ name result) (tty/write \e "[2m" "← " (tools/printable (str name ": " (show-result result))) \e "[0m" \n) (answering a pending allowed))
         ((:approve what p box)   (approving a pending allowed what p box ()))
         ((:answer _ _)           (tty/write \n (divider) (prompt)) (typing a "" pending))
         ((:error  _ reason)      (tty/write "[" (tools/printable (trouble reason)) "]" \n (prompt)) (typing a "" pending))
@@ -164,24 +164,24 @@
 
 ; The arguments, each as its first line, cut at 60 characters.
 (defun show-args (args)
-    (str-join ", " (map (lambda (arg) (concat (car arg) ": " (short (concat (cadr arg))))) args)))
+    (str/join ", " (map (lambda (arg) (str (car arg) ": " (short (str (cadr arg))))) args)))
 
 (defun short (s)
-    (let line (if (== (str-len s) 0) "" (car (str-split s \n))))
-    (if (or (> (utf8/len line) 60) (< (str-len line) (str-len s))) (concat (utf8/substring line 0 60) "…") line))
+    (let line (if (== (bytes/len s) 0) "" (car (str/split s \n))))
+    (if (or (> (str/len line) 60) (< (bytes/len line) (bytes/len s))) (str (str/slice line 0 60) "…") line))
 
 ; A result, short: an error's first line, or how long it is.
 (defun show-result (result)
-    (if (starts-with? result "error:")
-        (car (str-split result \n))
-        (concat (str-len result) " bytes")))
+    (if (str/starts-with? result "error:")
+        (car (str/split result \n))
+        (str (bytes/len result) " bytes")))
 
 ; What went wrong, for a person: what the server or the model said, or the
 ; reason as it is.
 (defun trouble (reason)
     (match reason
-        ((:http status message) (concat "the server said " status ": " message))
-        ((:model message)       (concat "the model said: " message))
-        (_                      (concat "error: " reason))))
+        ((:http status message) (str "the server said " status ": " message))
+        ((:model message)       (str "the model said: " message))
+        (_                      (str "error: " reason))))
 
 (main @ARGV %ENV)

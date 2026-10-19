@@ -23,5 +23,5 @@
         ((:open p)     (send p (list :read :chunks)) (send p (list :eof)) (exec/collect chunks))
         ((:chunk p s)  (exec/collect (cons s chunks)))
         ((:eof p)      (exec/collect chunks))
-        ((:exited p n) (list n (str-join "" (reverse chunks))))
+        ((:exited p n) (list n (str/join "" (reverse chunks))))
         ((:exit _ _)   :caller-ended)))

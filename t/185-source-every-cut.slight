@@ -8,7 +8,7 @@
 
 (let known '(alpha beta gamma line))
 
-(let text (concat
+(let text (str
     "; leading comment\n"
     "=doc\nIntro, *with* `code`.\n=cut\n"
     "(alpha 1) (beta\n    2)\n"
@@ -24,9 +24,9 @@
 
 (defun drip (c text i)
     (cond
-        ((== i (str-len text)) (disconnect c))
+        ((== i (bytes/len text)) (disconnect c))
         (#true
-            (send c (list :write (substring text i (+ i 1))))
+            (send c (list :write (bytes/slice text i (+ i 1))))
             (after 1 $$ :next)
             (drip-wait c text (+ i 1)))))
 
@@ -47,7 +47,7 @@
     (recv
         ((:open l port)
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (reader :source ()))))))
+            (fork (send me (list :client (join (connect :tcp (str "localhost:" port) (reader :source ()))))))
             (serving l text))))
 
 (defun serving (l text)
@@ -80,4 +80,4 @@
 
 (join (connect :fs/write "build/t/185-switch.txt" (writer "(alpha) \n=doc\ntext\n=cut\n(beta)\n")))
 (let switched (cadr (join (connect :fs/read "build/t/185-switch.txt" (back-and-forth ())))))
-(tty/write (str-join "\n" (map sexp/print switched)) "\n")
+(tty/write (str/join "\n" (map sexp/print switched)) "\n")

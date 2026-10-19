@@ -9,6 +9,6 @@
 (defun gather (n acc)
     (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
 
-(let n (string->int (car @ARGV)))
+(let n (str->int (car @ARGV)))
 (start 0 n $$)
 (gather n 0)

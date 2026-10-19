@@ -3,7 +3,7 @@
 ; program does it, so the energies agree to the last digit printed. Prints
 ; the energy before and after, times 10^9, rounded.
 
-(defun solar-mass () (* (* 4.0 PI) PI))
+(defun solar-mass () (* (* 4.0 math/PI) math/PI))
 (defun year () 365.24)
 
 (defun planet (x y z vx vy vz m)
@@ -61,7 +61,7 @@
             (let dx   (- x ox))
             (let dy   (- y oy))
             (let dz   (- z oz))
-            (let dist (sqrt (+ (+ (* dx dx) (* dy dy)) (* dz dz))))
+            (let dist (math/sqrt (+ (+ (* dx dx) (* dy dy)) (* dz dz))))
             (let mag  (/ dt (* (* dist dist) dist)))
             (pull (tuple x y z (- vx (* (* dx om) mag)) (- vy (* (* dy om) mag)) (- vz (* (* dz om) mag)) m)
                   rest dt
@@ -82,13 +82,13 @@
             (let dx (- x ox))
             (let dy (- y oy))
             (let dz (- z oz))
-            (potential b rest (- e (/ (* m om) (sqrt (+ (+ (* dx dx) (* dy dy)) (* dz dz)))))))))
+            (potential b rest (- e (/ (* m om) (math/sqrt (+ (+ (* dx dx) (* dy dy)) (* dz dz)))))))))
 
 (defun steps (bodies n)
     (if (== n 0) bodies (steps (advance bodies 0.01) (- n 1))))
 
-(defun shown (e) (floor (+ (* e 1000000000.0) 0.5)))
+(defun shown (e) (math/floor (+ (* e 1000000000.0) 0.5)))
 
 (let start (offset (system)))
 (tty/write (shown (energy start 0.0)) \n)
-(shown (energy (steps start (string->int (car @ARGV))) 0.0))
+(shown (energy (steps start (str->int (car @ARGV))) 0.0))

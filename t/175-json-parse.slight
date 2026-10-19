@@ -23,15 +23,15 @@
 
 ; strings, as their code points: escapes, a surrogate pair, and lone
 ; surrogates, which have no UTF-8, as U+FFFD
-(defun codes (text) (map ord (utf8/chars (cadr (json/parse text)))))
+(defun codes (text) (map (lambda (c) (str/code-at c 0)) (str/chars (cadr (json/parse text)))))
 
 (pprint (codes "\"\\\"\\\\\\/\\b\\f\\n\\r\\t\""))
 (pprint (codes "\"\\u0041\\u00e9\\u20ac\\ud83d\\ude00\\u0000\""))
 (pprint (codes "\"\\ud83d|\\ude00|\\ud83d\\u0041|\\udbff\\udfff|\\ud800\\ud800\\udc00\""))
 
 ; bytes that aren't UTF-8 pass through
-(let raw (cadr (json/parse (~ "\"" (~ (bytes->string (list 255 128 65)) "\"")))))
-(pprint (map (lambda (i) (byte-at raw i)) (range 0 (str-len raw))))
+(let raw (cadr (json/parse (~ "\"" (~ (bytes->str (list 255 128 65)) "\"")))))
+(pprint (map (lambda (i) (bytes/at raw i)) (range 0 (bytes/len raw))))
 
 ; nested as deep as the heap allows
 (defun depth (v n)
@@ -57,8 +57,8 @@
 ; a byte past ASCII outside one, UTF-8's byte order mark, a NUL after a value
 (show "\"a\nb\"")
 (show "\"a\tb\"")
-(show (bytes->string (list 91 255 93)))
-(show (bytes->string (list 239 187 191 123 125)))
-(show (~ "1" (bytes->string (list 0))))
+(show (bytes->str (list 91 255 93)))
+(show (bytes->str (list 239 187 191 123 125)))
+(show (~ "1" (bytes->str (list 0))))
 
 (pprint (join (fork (json/parse 5))))

@@ -61,12 +61,12 @@
 (defun pour (p i n)
     (cond
         ((== i n) (send p (list :eof)))
-        (#true    (send p (list :write (str-repeat "x" 999) \n)) (pour p (+ i 1) n))))
+        (#true    (send p (list :write (str/repeat "x" 999) \n)) (pour p (+ i 1) n))))
 
 (defun tally (lines bytes)
     (recv
         ((:open p)     (pour p 0 1000) (tally lines bytes))
-        ((:line p s)   (tally (+ lines 1) (+ bytes (str-len s))))
+        ((:line p s)   (tally (+ lines 1) (+ bytes (bytes/len s))))
         ((:eof p)      (tally lines bytes))
         ((:exited p n) (list n lines bytes))))
 

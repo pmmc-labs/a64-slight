@@ -20,7 +20,7 @@
 
 ; Every entry is a name and a value, both strings; three are the test's.
 (pprint (nil? (remove (lambda (e) (and (str? (car e)) (str? (cadr e)) (nil? (cddr e)))) %ENV)))
-(pprint (length (filter (lambda (e) (starts-with? (car e) "SLIGHT_TEST_")) %ENV)))
+(pprint (length (filter (lambda (e) (str/starts-with? (car e) "SLIGHT_TEST_")) %ENV)))
 
 (pprint ((lambda () (lookup "SLIGHT_TEST_EQ" %ENV))))
 (pprint (join (fork (lookup "SLIGHT_TEST_HOST" %ENV))))

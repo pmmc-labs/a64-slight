@@ -1,0 +1,45 @@
+; Conversions (D219): str->int and int->str in a radix from 2 to 36,
+; str->float, symbols, code points and bytes, and the bytes/ builtins,
+; which count bytes; str, which shows anything as pprint does but a
+; string as its bytes; and ~, which joins strings and nothing else.
+
+(pprint (list (str->int "42") (str->int "-42") (str->int "0") (str->int "-0") (str->int "007")))
+(pprint (list (str->int "") (str->int "-") (str->int "+1") (str->int " 1") (str->int "1 ") (str->int "1.0") (str->int "1e3") (str->int "٣")))
+(pprint (list (str->int "ff" 16) (str->int "FF" 16) (str->int "-101" 2) (str->int "z" 36) (str->int "Z" 36) (str->int "8" 8) (str->int "g" 16)))
+(pprint (list (str->int "4611686018427387903") (str->int "4611686018427387904") (str->int "-4611686018427387904") (str->int "-4611686018427387905")))
+(pprint (list (str->int "3fffffffffffffff" 16) (str->int "4000000000000000" 16) (str->int "-4000000000000000" 16)))
+(pprint (list (int->str 42) (int->str -42) (int->str 0) (int->str 255 16) (int->str 255 2) (int->str -35 36)))
+(pprint (list (int->str 4611686018427387903 36) (int->str -4611686018427387904 16)))
+(pprint (map (lambda (r) (str->int (int->str 123456789 r) r)) (list 2 3 7 16 36)))
+(pprint (list (map str->int (list "1" "x" "-3")) (map int->str (list 1 -2))))
+
+(pprint (list (str->float "1.5") (str->float "-0.25") (str->float "1e3") (str->float "2.5E-3") (str->float "12") (str->float "-0") (str->float "1e400")))
+(pprint (list (str->float ".5") (str->float "1.") (str->float "1e") (str->float "") (str->float "nan") (str->float "inf") (str->float "0x10")))
+
+(pprint (list (sym->str 'hello) (sym->str :key) (str->sym "hello") (str->sym "key") (str->sym "no-such-symbol-anywhere")))
+(pprint (list (str/codes "aé😀") (codes->str (list 104 233 128512)) (str/codes "") (codes->str ())))
+(pprint (list (str->bytes "aé") (bytes->str (list 104 105)) (str->bytes "")))
+
+; a stray byte's code point is U+FFFD; str/to-well-formed makes it one
+(let bad (bytes->str (list 97 255 98 237 160 128)))
+(pprint (list (str/well-formed? "aé😀") (str/well-formed? bad) (str/codes bad) (str/codes (str/to-well-formed bad))))
+(pprint (list (bytes/len bad) (str/len bad) (bytes/len (str/to-well-formed bad)) (str/well-formed? (str/to-well-formed bad))))
+
+(pprint (list (bytes/len "aé") (bytes/at "aé" 1) (bytes/at "aé" -1) (str->bytes (bytes/slice "aé" 1 2)) (bytes/slice "aé" -2)))
+(pprint (list (bytes/index-of "aéa" "a" 1) (bytes/index-of "aéa" "a" 99) (bytes/index-of "aéa" "" 2) (bytes/index-of "aéa" "é" -9)))
+(pprint (list (str) (str "a" 1 2.5 'b #true () (list 1 "x" (list "y")) "z")))
+(pprint (list (~) (~ "a") (~ "a" "b" "c")))
+
+(defun kind (pid) (car (cadr (join pid))))
+(pprint (kind (fork (str->int "1" 1))))
+(pprint (kind (fork (str->int "1" 37))))
+(pprint (kind (fork (int->str 1 0))))
+(pprint (kind (fork (int->str "1"))))
+(pprint (kind (fork (str->int 1))))
+(pprint (kind (fork (bytes->str (list 256)))))
+(pprint (kind (fork (bytes->str (list -1)))))
+(pprint (kind (fork (bytes/at "abc" 3))))
+(pprint (kind (fork (bytes/at "abc" -4))))
+(pprint (kind (fork (sym->str "a"))))
+(pprint (kind (fork (~ "a" 1))))
+(kind (fork (~ 'a "b")))

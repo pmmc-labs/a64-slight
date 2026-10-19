@@ -1,5 +1,5 @@
 ; fib: the doubly recursive Fibonacci, of the program's argument, or of
-; 25 without one. @ARGV holds strings, so n goes through string->int.
+; 25 without one. @ARGV holds strings, so n goes through str->int.
 ; Neither recursive call is a tail call, so it exercises the stack.
 
 (defun fib (n)
@@ -7,6 +7,6 @@
         ((< n 2) n)
         (#true   (+ (fib (- n 1)) (fib (- n 2))))))
 
-(let n (if (nil? @ARGV) 25 (string->int (car @ARGV))))
+(let n (if (nil? @ARGV) 25 (str->int (car @ARGV))))
 (tty/write "fib(" n ") = ")
 (fib n)

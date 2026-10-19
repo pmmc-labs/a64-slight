@@ -17,7 +17,7 @@
         ((:open p)   (first-line))
         ((:line p s) (disconnect p) s)))
 
-(pprint (join (connect :exec (list "sh" "-c" (concat "echo written >" (car @ARGV) "; cat; echo $$ >&2; exit 3")) (run ()))))
+(pprint (join (connect :exec (list "sh" "-c" (str "echo written >" (car @ARGV) "; cat; echo $$ >&2; exit 3")) (run ()))))
 (pprint (join (connect :exec (list "sh" "-c" "kill -TERM $$") (run ()))))
 (pprint (join (connect :exec (list "no-such-command") (run ()))))
 (pprint (join (connect :exec (list "sh" "-c" "echo first; exec cat") (first-line))))

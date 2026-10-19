@@ -244,9 +244,9 @@ static rt_value_t string(const char **p, rt_build_alloc_t alloc, void *cx) {
     size_t      n   = decode(*p + 1, NULL, &end);
     uint64_t   *box = alloc(cx, 8 + n + 1);
     if (!box) return 0;
-    box[0] = (uint64_t)n << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
     decode(*p + 1, (char *)(box + 1), &end);
     ((char *)(box + 1))[n] = '\0';
+    box[0] = rt_string_header((const char *)(box + 1), n);
     *p = end;
     return (rt_value_t)box | RT_TAG_BOXED;
 }

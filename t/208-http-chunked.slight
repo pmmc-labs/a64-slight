@@ -17,11 +17,11 @@
             ((:raw p)       (both hp p srv raw))))))
 
 (defun run (hp rp srv raw)
-    (let got (http/get (concat "http://127.0.0.1:" rp "/chunked")))
+    (let got (http/get (str "http://127.0.0.1:" rp "/chunked")))
     (let echoed (talk hp (list "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n")))
     (kill srv)
     (kill raw)
-    (list got (cadr (str-split echoed "\r\n\r\n"))))
+    (list got (cadr (str/split echoed "\r\n\r\n"))))
 
 (defun main ()
     (let me $$)

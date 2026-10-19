@@ -30,7 +30,7 @@
         ((== n 0) (list 0 0))
         (#true
             (let mine  (fill 100 n ()))
-            (let tag   (concat "level " n))
+            (let tag   (str "level " n))
             (let half  (/ n 2))
             (let count (lambda () (total mine 0)))
             (churn 50)
@@ -39,7 +39,7 @@
             (let ok    (and (== sum (* 100 n))
                             (== (count) sum)
                             (== (apply total (list mine 0)) sum)
-                            (eq? tag (concat "level " n))
+                            (eq? tag (str "level " n))
                             (eq? half (/ n 2))))
             (list (+ (car below) sum) (+ (cadr below) (cond (ok 1) (#true 0)))))))
 

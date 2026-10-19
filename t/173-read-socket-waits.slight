@@ -13,8 +13,8 @@
 (defun content-length (hs)
     (cond
         ((nil? hs) 0)
-        ((starts-with? (car hs) "Content-Length: ")
-            (string->int (substring (car hs) 16 (- (str-len (car hs)) 1))))
+        ((str/starts-with? (car hs) "Content-Length: ")
+            (str->int (bytes/slice (car hs) 16 (- (bytes/len (car hs)) 1))))
         (#true (content-length (cdr hs)))))
 
 (defun greet (c)
@@ -34,7 +34,7 @@
 
 (defun body (c)
     (recv
-        ((:chunk c s) (send c (list :write "got " (str-len s) " bytes: " s \n)) (disconnect c))))
+        ((:chunk c s) (send c (list :write "got " (bytes/len s) " bytes: " s \n)) (disconnect c))))
 
 ; The client gives what it heard, \r taken off a line's end.
 (defun client ()
@@ -56,7 +56,7 @@
                     (send c (list :write "01234"))
                     (send c (list :write "56789"))
                     (reply seen))
-                (#true (going-on (cons (substring s 0 (- (str-len s) 1)) seen)))))))
+                (#true (going-on (cons (bytes/slice s 0 -1) seen)))))))
 
 (defun reply (seen)
     (recv
@@ -79,7 +79,7 @@
     (recv
         ((:open l port)
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (concat "localhost:" port) (client))))))
+            (fork (send me (list :client (join (connect :tcp (str "localhost:" port) (client))))))
             (serving l))))
 
 (defun serving (l)

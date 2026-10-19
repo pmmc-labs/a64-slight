@@ -1,0 +1,13 @@
+; math/pow of two integers is an integer, exactly, as * gives one (D221):
+; past 63 bits it overflows, and a negative exponent, whose result isn't
+; an integer, is out of range. A float on either side gives a float.
+
+(pprint (list (math/pow 3 4) (math/pow -2 61) (math/pow -4 31) (math/pow 0 0) (math/pow 7 1)))
+(pprint (list (math/pow 1 4611686018427387903) (math/pow -1 4611686018427387903) (math/pow 2147483647 2)))
+(pprint (list (math/pow 2.0 3) (math/pow 2 -1.0) (math/pow 4 0.5)))
+(defun kind (pid) (car (cadr (join pid))))
+(pprint (kind (fork (math/pow 2 62))))
+(pprint (kind (fork (math/pow -2 62))))
+(pprint (kind (fork (math/pow 2147483648 2))))
+(pprint (kind (fork (math/pow 2 -1))))
+(kind (fork (math/pow "2" 2)))

@@ -8,7 +8,7 @@
 (defun holder (q) (recv ((:open c) (join q))))
 (defun server (q)
     (let lp (recv ((:open l port) (list l port))))
-    (let h (connect :tcp (concat "127.0.0.1:" (cadr lp)) (holder q)))
+    (let h (connect :tcp (str "127.0.0.1:" (cadr lp)) (holder q)))
     (let conn (recv ((:accept l2 conn) conn)))
     (disconnect conn)
     (disconnect (car lp))

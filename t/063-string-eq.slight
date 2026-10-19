@@ -2,7 +2,7 @@
 (pprint (eq? "abc" (~ "ab" "c")))
 (pprint (eq? "abc" "abd"))
 (pprint (eq? "abc" "abcd"))
-(pprint (eq? "" (substring "abc" 1 1)))
+(pprint (eq? "" (bytes/slice "abc" 1 1)))
 (pprint (eq? "a" :a))
 (pprint (eq? (list "a" (list "b")) (list "a" (list "b"))))
 (pprint (ne? "x" "y"))

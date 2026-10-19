@@ -23,7 +23,7 @@
 (defun measure (n total longest)
     (recv
         ((:open f)   (measure n total longest))
-        ((:line f s) (measure (+ n 1) (+ total (str-len s)) (max longest (str-len s))))
+        ((:line f s) (measure (+ n 1) (+ total (bytes/len s)) (math/max longest (bytes/len s))))
         ((:eof f)    (list n total longest))))
 
 (let path "build/t/149-fs-big.txt")

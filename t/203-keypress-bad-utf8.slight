@@ -1,6 +1,6 @@
 ; stdin: é\0365\0200\0200\0340\0200\0200\0355\0240\0200€q
 ; A key is a character only when its bytes are well-formed UTF-8, by the
-; rule the utf8/ builtins have (D148): a byte that can't begin one
+; rule the str/ builtins have (D148): a byte that can't begin one
 ; (0xf5), an overlong form (0xe0 0x80 0x80) and a surrogate (0xed 0xa0
 ; 0x80) are taken a byte at a time, and each byte is Unidentified.
 

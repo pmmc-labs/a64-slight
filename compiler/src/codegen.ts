@@ -45,7 +45,7 @@ import { isReceiveBody, stateFunctions } from './classify.ts';
 import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
 import { AARCH64 } from './aarch64.ts';
-import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, word, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
+import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, word, type BitOp, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
 
 // The locals in scope, innermost first: an association list from name to
 // frame slot.
@@ -396,10 +396,11 @@ function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
     }
 }
 
-// Names for constants: control characters, and PI. A local of the same
-// name hides them.
+// Names for constants: control characters, and math/PI, math/E and
+// math/INF. A local of the same name hides them.
 const CONSTANTS: Readonly<Record<string, Sexp>> = {
-    '\\n': str('\n'), '\\r': str('\r'), '\\t': str('\t'), '\\e': str('\x1b'), 'PI': float(Math.PI),
+    '\\n': str('\n'), '\\r': str('\r'), '\\t': str('\t'), '\\e': str('\x1b'),
+    'math/PI': float(Math.PI), 'math/E': float(Math.E), 'math/INF': float(Infinity),
 };
 
 function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
@@ -420,11 +421,13 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
 }
 
 // A string literal is a box in the read-only data: the header (its length
-// in bytes and the string type), the bytes, and a NUL.
+// in bytes, the string type, and RT_BOX_ASCII if every byte is below 0x80,
+// D219), the bytes, and a NUL.
 function staticString(s: string, st: St): [string, St] {
     const [name, st1] = label(st, 'string');
-    const length = new TextEncoder().encode(s).length;
-    const box = ['    .p2align 4', `${name}:`, `    .quad ${length} << RT_BOX_SIZE_SHIFT | RT_BOX_STRING`, `    .asciz ${asmString(s)}`];
+    const bytes = new TextEncoder().encode(s);
+    const ascii = bytes.every((b) => b < 0x80) ? ' | RT_BOX_ASCII' : '';
+    const box = ['    .p2align 4', `${name}:`, `    .quad ${bytes.length} << RT_BOX_SIZE_SHIFT | RT_BOX_STRING${ascii}`, `    .asciz ${asmString(s)}`];
     return [name, { ...st1, data: [st1.data, box] }];
 }
 
@@ -543,6 +546,20 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (cmp !== undefined) {
         const [cond, op] = cmp;
         return compileNumeric(x, name, args, operand, st, 'rt_compare', [imm(op)], (s) => [s.t.compareBool(cond), s]);
+    }
+    const bit = BITS[name];
+    if (bit !== undefined) {
+        return compileBinary(x, name, args, operand, st, (s) => {
+            if (bit !== 'shl' && bit !== 'shr') return [s.t.bits(bit, ''), s];
+            const [range, s1] = faultLabel(s, 'RT_FAULT_RANGE', name, x.pos);
+            return [s.t.bits(bit, range), s1];
+        });
+    }
+    if (name === 'bit/not') {
+        checkArity(x, name, args, 1);
+        const [notInt, st1] = faultLabel(st, 'RT_FAULT_NOT_INT', name, x.pos);
+        const [code, st2]   = compileExpr(args[0]!, operand, st1);
+        return [[code, st.t.branchUnlessInt(notInt), st.t.bitNot], st2];
     }
     if (DIVISION.includes(name)) {
         const op = name as 'div' | '%';
@@ -849,10 +866,11 @@ function builtinWrapper(x: Sym, st: St): [string, St] {
 }
 
 function builtinArity(name: string): number | null {
-    if (name in ARITH || name in COMPARE || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply', '/'].includes(name)) return 2;
-    if (PREDICATES.includes(name) || name === 'pprint' || cxrPath(name) !== null) return 1;
+    if (name in ARITH || name in COMPARE || name in BITS || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply', '/'].includes(name)) return 2;
+    if (PREDICATES.includes(name) || name === 'pprint' || name === 'bit/not' || cxrPath(name) !== null) return 1;
+    // with optional arguments, as a value it takes just the ones it needs (D219)
     const c = C_BUILTINS[name];
-    return c !== undefined && !c.variadic && c.min === c.max ? c.min : null;
+    return c !== undefined && !c.variadic ? c.min : null;
 }
 
 // A constant. Symbols are their compile-time ids; integers and () quote
@@ -936,6 +954,12 @@ const COMPARE: Readonly<Record<string, readonly [Cond, string]>> = {
 // div and %: integers only, truncating toward zero (D68).
 const DIVISION: readonly string[] = ['div', '%'];
 
+// The bit operations on two integers, inline (D221); bit/not is one's, and
+// bit/count is in C.
+const BITS: Readonly<Record<string, BitOp>> = {
+    'bit/and': 'and', 'bit/or': 'or', 'bit/xor': 'xor', 'bit/shl': 'shl', 'bit/shr': 'shr',
+};
+
 const RT_TAG_LIST = 1;
 
 // Type predicates, inline (the target's predicate). #true and #false are
@@ -953,76 +977,124 @@ const fixed    = (fn: string, min: number, max = min): CBuiltin => ({ fn, min, m
 const variadic = (fn: string): CBuiltin => ({ fn, min: 0, max: 1, variadic: true });
 
 const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
-    'str?':           fixed('rt_is_str', 1),
-    'str-len':        fixed('rt_str_len', 1),
-    'substring':      fixed('rt_substring', 3),
-    'concat':         variadic('rt_concat'),
-    '~':              fixed('rt_concat2', 2),
-    'index-of':       fixed('rt_index_of', 2),
-    'str-split':      fixed('rt_str_split', 2),
-    'str-join':       fixed('rt_str_join', 2),
-    'string->int':    fixed('rt_string_to_int', 1),
-    'string->float':  fixed('rt_string_to_float', 1),
-    'symbol->string': fixed('rt_symbol_to_string', 1),
-    'string->symbol': fixed('rt_string_to_symbol', 1),
-    'byte-at':        fixed('rt_byte_at', 2),
-    'bytes->string':  fixed('rt_bytes_to_string', 1),
-    'format-num':     fixed('rt_format_num', 2, 3),
-    'tty/write':      variadic('rt_tty_write'),
-    'utf8/len':       fixed('rt_utf8_len', 1),
-    'utf8/substring': fixed('rt_utf8_substring', 3),
-    'utf8/index-of':  fixed('rt_utf8_index_of', 2),
-    'utf8/chars':     fixed('rt_utf8_chars', 1),
-    'utf8/code':      fixed('rt_utf8_code', 1),
-    'utf8/char':      fixed('rt_utf8_char', 1),
-    'utf8/valid?':    fixed('rt_utf8_valid', 1),
-    'json/parse':     fixed('rt_json_parse', 1),
-    'json/print':     fixed('rt_json_print', 1),
-    'sexp/parse':     fixed('rt_sexp_parse', 1),
-    'sexp/print':     fixed('rt_sexp_print', 1),
-    'tuple?':         fixed('rt_is_tuple_p', 1),
-    'tuple/len':      fixed('rt_tuple_len_of', 1),
-    'tuple/get':      fixed('rt_tuple_ref', 2),
-    'tuple/set':      fixed('rt_tuple_set', 3),
-    'tuple/make':     fixed('rt_tuple_make', 2),
-    'tuple/slice':    fixed('rt_tuple_slice', 3),
-    'list->tuple':    fixed('rt_tuple', 1),
-    'tuple->list':    fixed('rt_tuple_to_list', 1),
-    'float?':         fixed('rt_is_flt', 1),
-    'num?':           fixed('rt_is_num', 1),
-    'ceil':           fixed('rt_ceil', 1),
-    'floor':          fixed('rt_floor', 1),
-    'round':          fixed('rt_round', 1),
-    'trunc':          fixed('rt_trunc', 1),
-    'abs':            fixed('rt_abs', 1),
-    'min':            fixed('rt_min', 2),
-    'max':            fixed('rt_max', 2),
-    'pow':            fixed('rt_pow', 2),
-    'sqrt':           fixed('rt_sqrt', 1),
-    'sin':            fixed('rt_sin', 1),
-    'cos':            fixed('rt_cos', 1),
-    'tan':            fixed('rt_tan', 1),
-    'exp':            fixed('rt_exp', 1),
-    'lambda?':        fixed('rt_is_lambda', 1),
-    'send':           fixed('rt_send', 2),
-    'join':           fixed('rt_join', 1),
-    'monitor':        fixed('rt_monitor', 1),
-    'kill':           fixed('rt_kill', 1),
-    'raise':          fixed('rt_raise', 1),
-    'after':          fixed('rt_after', 3),
-    'disconnect':     fixed('rt_disconnect', 1),
-    'sleep':          fixed('rt_sleep', 1),
-    'clock/us':       fixed('rt_clock_us', 0),
-    'hash':           fixed('rt_hash', 1),
-    'tty/screen/rows': fixed('rt_screen_rows', 0),
-    'tty/screen/cols': fixed('rt_screen_cols', 0),
+    'str?':               fixed('rt_is_str', 1),
+    'str':                variadic('rt_str'),
+    '~':                  variadic('rt_cat'),
+    'str/len':            fixed('rt_str_len', 1),
+    'str/at':             fixed('rt_str_at', 2),
+    'str/code-at':        fixed('rt_str_code_at', 2),
+    'str/slice':          fixed('rt_str_slice', 2, 3),
+    'str/index-of':       fixed('rt_str_index_of', 2, 3),
+    'str/last-index-of':  fixed('rt_str_last_index_of', 2, 3),
+    'str/includes?':      fixed('rt_str_includes', 2),
+    'str/starts-with?':   fixed('rt_str_starts_with', 2),
+    'str/ends-with?':     fixed('rt_str_ends_with', 2),
+    'str/split':          fixed('rt_str_split', 2, 3),
+    'str/join':           fixed('rt_str_join', 2),
+    'str/repeat':         fixed('rt_str_repeat', 2),
+    'str/pad-start':      fixed('rt_str_pad_start', 2, 3),
+    'str/pad-end':        fixed('rt_str_pad_end', 2, 3),
+    'str/trim':           fixed('rt_str_trim', 1),
+    'str/trim-start':     fixed('rt_str_trim_start', 1),
+    'str/trim-end':       fixed('rt_str_trim_end', 1),
+    'str/upper':          fixed('rt_str_upper', 1),
+    'str/lower':          fixed('rt_str_lower', 1),
+    'str/replace':        fixed('rt_str_replace', 3),
+    'str/replace-all':    fixed('rt_str_replace_all', 3),
+    'str/compare':        fixed('rt_str_compare', 2),
+    'str/<':              fixed('rt_str_less', 2),
+    'str/chars':          fixed('rt_str_chars', 1),
+    'str/codes':          fixed('rt_str_codes', 1),
+    'str/well-formed?':   fixed('rt_str_well_formed', 1),
+    'str/to-well-formed': fixed('rt_str_to_well_formed', 1),
+    'codes->str':         fixed('rt_codes_to_str', 1),
+    'str->int':           fixed('rt_str_to_int', 1, 2),
+    'int->str':           fixed('rt_int_to_str', 1, 2),
+    'str->float':         fixed('rt_str_to_float', 1),
+    'str->sym':           fixed('rt_str_to_sym', 1),
+    'sym->str':           fixed('rt_sym_to_str', 1),
+    'str->bytes':         fixed('rt_str_to_bytes', 1),
+    'bytes->str':         fixed('rt_bytes_to_str', 1),
+    'bytes/len':          fixed('rt_bytes_len', 1),
+    'bytes/at':           fixed('rt_bytes_at', 2),
+    'bytes/slice':        fixed('rt_bytes_slice', 2, 3),
+    'bytes/index-of':     fixed('rt_bytes_index_of', 2, 3),
+    'tty/write':          variadic('rt_tty_write'),
+    'json/parse':         fixed('rt_json_parse', 1),
+    'json/print':         fixed('rt_json_print', 1),
+    'sexp/parse':         fixed('rt_sexp_parse', 1),
+    'sexp/print':         fixed('rt_sexp_print', 1),
+    'tuple?':             fixed('rt_is_tuple_p', 1),
+    'tuple/len':          fixed('rt_tuple_len_of', 1),
+    'tuple/get':          fixed('rt_tuple_ref', 2),
+    'tuple/set':          fixed('rt_tuple_set', 3),
+    'tuple/make':         fixed('rt_tuple_make', 2),
+    'tuple/insert':       fixed('rt_tuple_insert', 3),
+    'tuple/remove':       fixed('rt_tuple_remove', 2),
+    'tuple/slice':        fixed('rt_tuple_slice', 3),
+    'list->tuple':        fixed('rt_tuple', 1),
+    'tuple->list':        fixed('rt_tuple_to_list', 1),
+    'float?':             fixed('rt_is_flt', 1),
+    'num?':               fixed('rt_is_num', 1),
+    'math/ceil':          fixed('rt_ceil', 1),
+    'math/floor':         fixed('rt_floor', 1),
+    'math/round':         fixed('rt_round', 1),
+    'math/trunc':         fixed('rt_trunc', 1),
+    'math/abs':           fixed('rt_abs', 1),
+    'math/min':           fixed('rt_min', 2),
+    'math/max':           fixed('rt_max', 2),
+    'math/pow':           fixed('rt_pow', 2),
+    'math/sqrt':          fixed('rt_sqrt', 1),
+    'math/sin':           fixed('rt_sin', 1),
+    'math/cos':           fixed('rt_cos', 1),
+    'math/tan':           fixed('rt_tan', 1),
+    'math/exp':           fixed('rt_exp', 1),
+    'math/asin':          fixed('rt_asin', 1),
+    'math/acos':          fixed('rt_acos', 1),
+    'math/atan':          fixed('rt_atan', 1),
+    'math/sinh':          fixed('rt_sinh', 1),
+    'math/cosh':          fixed('rt_cosh', 1),
+    'math/tanh':          fixed('rt_tanh', 1),
+    'math/asinh':         fixed('rt_asinh', 1),
+    'math/acosh':         fixed('rt_acosh', 1),
+    'math/atanh':         fixed('rt_atanh', 1),
+    'math/log':           fixed('rt_log', 1),
+    'math/log2':          fixed('rt_log2', 1),
+    'math/log10':         fixed('rt_log10', 1),
+    'math/log1p':         fixed('rt_log1p', 1),
+    'math/expm1':         fixed('rt_expm1', 1),
+    'math/cbrt':          fixed('rt_cbrt', 1),
+    'math/atan2':         fixed('rt_atan2', 2),
+    'math/hypot':         fixed('rt_hypot', 2),
+    'math/mod':           fixed('rt_mod', 2),
+    'math/nan?':          fixed('rt_is_nan', 1),
+    'int->float':         fixed('rt_int_to_float', 1),
+    'float->str':         fixed('rt_float_to_str', 1, 2),
+    'bit/count':          fixed('rt_bit_count', 1),
+    'rand/int':           fixed('rt_rand_int', 1),
+    'rand/float':         fixed('rt_rand_float', 0),
+    'rand/seed':          fixed('rt_rand_seed', 1),
+    'lambda?':            fixed('rt_is_lambda', 1),
+    'send':               fixed('rt_send', 2),
+    'join':               fixed('rt_join', 1),
+    'join/race':          fixed('rt_join_race', 1),
+    'monitor':            fixed('rt_monitor', 1),
+    'kill':               fixed('rt_kill', 1),
+    'raise':              fixed('rt_raise', 1),
+    'after':              fixed('rt_after', 3),
+    'disconnect':         fixed('rt_disconnect', 1),
+    'sleep':              fixed('rt_sleep', 1),
+    'clock/us':           fixed('rt_clock_us', 0),
+    'hash':               fixed('rt_hash', 1),
+    'tty/screen/rows':    fixed('rt_screen_rows', 0),
+    'tty/screen/cols':    fixed('rt_screen_cols', 0),
 };
 
 // The names a defun can't take.
 const BUILTINS: readonly string[] = [
     'pprint', 'eq?', 'ne?', 'cons', 'list', 'tuple', 'apply', '/',
-    ...DIVISION, ...PREDICATES,
-    ...[ARITH, COMPARE, C_BUILTINS].flatMap((table) => Object.keys(table)),
+    ...DIVISION, ...PREDICATES, 'bit/not',
+    ...[ARITH, COMPARE, BITS, C_BUILTINS].flatMap((table) => Object.keys(table)),
 ];
 
 const isBuiltin = (name: string): boolean => BUILTINS.includes(name) || cxrPath(name) !== null;
@@ -1468,7 +1540,7 @@ function label(st: St, hint: string): [string, St] {
 
 type Fault = 'RT_FAULT_NOT_INT' | 'RT_FAULT_OVERFLOW' | 'RT_FAULT_NOT_BOOL' | 'RT_FAULT_NO_CLAUSE' | 'RT_FAULT_STACK' | 'RT_FAULT_NO_MATCH'
            | 'RT_FAULT_NOT_CONS' | 'RT_FAULT_NOT_LIST' | 'RT_FAULT_HEAP' | 'RT_FAULT_DIV_ZERO'
-           | 'RT_FAULT_NOT_FUNC' | 'RT_FAULT_ARITY';
+           | 'RT_FAULT_NOT_FUNC' | 'RT_FAULT_ARITY' | 'RT_FAULT_RANGE';
 
 // A label to branch to when `what`, at `pos`, goes wrong: an out-of-line
 // call to rt_fault, with the offending value (if any) in the accumulator.

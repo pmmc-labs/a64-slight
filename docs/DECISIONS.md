@@ -156,7 +156,8 @@ and sent without copying.
 **D27. Strings: level 1 now (immutable bytes, byte indexing, ASCII case),
 level 2 UTF-8 helpers when the editor needs them, full Unicode out.**
 *(User agreed.)* No char type. Rejected: mutable C-style byte buffers
-(break immutability).
+(break immutability). D219 counts characters everywhere, and maps case
+in full.
 
 ## Runtime and I/O
 
@@ -350,7 +351,8 @@ ts-slight's were JavaScript's: `substring` clamps and swaps its indexes,
 pads like `padStart`, `concat` and `str-join` render non-strings as
 `pprint` does. Indexes and lengths count bytes (DESIGN, level 1). Where
 JavaScript would give `NaN`, a fault instead: `byte-at` out of range,
-`bytes->string` given something other than 0–255.
+`bytes->string` given something other than 0–255. D219 renamed these,
+and took JavaScript's `slice` in place of `substring`.
 
 **D63. C builtins are passed the call's site.** *(Default.)* In the
 register after the arguments, so a fault raised in C reports the slight
@@ -358,7 +360,7 @@ source position, as the compiler's own checks do. Rejected: inline type
 checks before every call (more code), or C faults without positions.
 
 **D64. `pprint` doesn't escape inside strings.** *(Default, as ts-slight.)*
-`(pprint "a\"b")` prints `"a"b"`.
+`(pprint "a\"b")` prints `"a"b"`. Replaced by D219: it escapes them.
 
 **D65. `tty/write` takes its arguments as they are.** *(Default.)*
 ts-slight also accepted one list argument and wrote its elements; here a
@@ -439,7 +441,8 @@ asked). `take` and `skip` stop at the end of the list rather than fault.
 `str-join` does it. Kept: `fold/l`/`fold/r` (init, f, list), `assoc`
 (adds, as in Clojure) and `lookup` (`:not-found`), `nth` and `find`
 (`()` when there's nothing), `dotimes`, `pad-start`/`pad-end` (s, n,
-fill). Every loop in the prelude is a tail call.
+fill). Every loop in the prelude is a tail call. D219 made the string
+functions builtins, `str/starts-with?` and `str/pad-start` among them.
 
 **D79. A lambda copies its captured values into its frame on entry.**
 *(Default.)* Then they're ordinary locals in the body, and the code for
@@ -1179,6 +1182,8 @@ differs only on bad input, and needs more machinery); a `string->number`
 giving an integer or a float (`string->int` already does the one);
 display width, case mapping beyond ASCII and normalization (not needed
 for JSON; `pad-start`, `pad-end` and `format-num` still count bytes).
+D219 renamed the byte builtins after all, to `bytes/`, and maps case
+beyond ASCII; display width and normalization are still to come.
 
 **D149. The plan after 10e: porting stops, and HTTP's groundwork comes
 first.** *(User, Oct 2026.)* Fifteen of ts-slight's examples are ported,
@@ -3909,3 +3914,395 @@ the program each.
   which shares the base without running it again but needs the runtime
   to know about it; and the runtime on many cores, whose own step is
   BACKGROUND.md's.
+
+**D219. Strings: one set of builtins, counting characters, after
+JavaScript's.** *(Stevan, Oct 2026: "Let's start with cleaning up all the
+string handling ... Let's aim for clean UTF handling similar to JS, let's
+be forward thinking here"; and, to the proposal, "We can get rid of
+ord/chr, and yes, lets fix pprint too. One small change, instead of
+`str/bytes-` lets do `bytes/` instead and have `bytes->str` to convert it
+to the utf8 string.")* It replaces the byte builtins of D27 and D62, the
+`utf8/` ones of D148, the prelude's string functions (D78), and D64.
+
+- **The unit is the character of D148:** a well-formed UTF-8 sequence,
+  or a stray byte on its own, whose code point is U+FFFD. So strings stay
+  bytes, nothing faults on bad bytes, and splitting into characters
+  loses nothing. `(str/len "😀")` is 1, where JavaScript's length is 2:
+  its UTF-16 units are a fact of its history, and would put half an
+  emoji in slight's hands for nothing.
+- **Names.** The `str/` builtins count characters and are JavaScript's
+  methods in kebab case, `toUpperCase` and `toLowerCase` shortened:
+  `str/len`, `str/at`, `str/code-at`, `str/slice`, `str/index-of`,
+  `str/last-index-of`, `str/includes?`, `str/starts-with?`,
+  `str/ends-with?`, `str/split`, `str/join`, `str/repeat`,
+  `str/pad-start`, `str/pad-end`, `str/trim`, `str/trim-start`,
+  `str/trim-end`, `str/upper`, `str/lower`, `str/replace`,
+  `str/replace-all`, `str/well-formed?`, `str/to-well-formed`, with
+  `str/chars`, `str/codes`, `str/compare` and `str/<` beside them. The
+  `bytes/` builtins count bytes, in one step, for protocols and for
+  parsers whose delimiters are ASCII: `bytes/len`, `bytes/at`,
+  `bytes/slice`, `bytes/index-of`; they take an ordinary string (a type
+  for bytes that aren't text is a proposal of its own). Conversions are
+  `a->b`: `str->int` and `int->str` (in a radix, 2 to 36), `str->float`,
+  `str->sym`, `sym->str`, `str->bytes`, `bytes->str` and `codes->str`.
+  `str` is what `concat` was; `~` stays, strings only, and takes any
+  number now. `format-num` is `(str/pad-start (str n) w fill)`; `ord`
+  and `chr`, `(str/code-at s 0)` and `(codes->str (list n))`. A clean
+  break: no old name is kept, and every program moved (129 files,
+  Stevan's sketches in `author/` among them, where two counts that a
+  narrow window makes negative are kept at 0 now that `str/repeat`
+  faults on them; by a script that rewrote names, not text, so strings,
+  comments and doc blocks were left alone; `str-len`, `substring` and
+  `index-of` became their `bytes/` names, which kept what each program
+  did, the parsers in `lib/` counting bytes as they should).
+- **Edge cases are JavaScript's,** where it has them: `str/at` and
+  `str/code-at` count from the end when an index is negative;
+  `str/slice` (and `bytes/slice`) count from the end, clamp, and are
+  empty unless start comes first (`substring` swapped them, which no
+  program wanted); `index-of` takes where to start, clamped; `str/split`
+  takes a limit, and `(str/split "" ",")` is `("")`, where `str-split`
+  gave `()` (one caller, `tools/marked`, changed for it); an empty
+  separator splits into characters; `str/replace-all` with an empty
+  pattern goes around every character; padding counts characters.
+  Where JavaScript gives `undefined` or `NaN`, a fault, as D62 had it:
+  an index past the end, a negative count or limit, a code point with no
+  UTF-8. `str/compare` is code point order, which for UTF-8 is byte
+  order, where JavaScript's `<` compares UTF-16 units and puts U+FFFF
+  after an emoji.
+- **A match is whole characters,** in every search, split and replace:
+  it starts where a character does, and now ends where one does too, so
+  a stray byte 195 isn't found in `"é"`, though it's é's first byte. A
+  byte search does that by itself unless the pattern starts with a
+  continuation byte or ends with a stray byte; only then does it check.
+- **Case and white space are Unicode's,** without a language:
+  `str/upper` and `str/lower` map in full (SpecialCasing's unconditional
+  mappings over UnicodeData's: `"straße"` is `"STRASSE"`, `"ﬁ"` is
+  `"FI"`), with Final_Sigma, the one conditional mapping that needs no
+  language; `str/trim` takes White_Space. `runtime/gen-unicode.py`
+  writes the tables into `runtime/unicode.c` from the Unicode Character
+  Database, pinned to 15.1, the version Python 3.13 has, so the tests'
+  model agrees (unicode.org is blocked from the cloud sessions; ICU's
+  copy of the files, `release-74-1`, is the same). They agree with
+  Python's `str.upper` and `str.lower` on every code point. They're
+  about 64 KB of each binary; packing the one-to-one mappings would
+  take that to about 30, when it matters. Normalization, graphemes and
+  display width (`str/normalize`, `str/graphemes`, `str/width`) are
+  utf8proc's to give, vendored as D151 has it, when they're wanted.
+- **ASCII strings are marked.** A string whose bytes are all below 0x80
+  has `RT_BOX_ASCII` (0x80) in its header, the box's type narrowed to
+  the low seven bits; there a character is a byte, so `str/len`,
+  `str/at` and `str/slice` take one step. It's set where strings are
+  made: `rt_new_string`, the readers and decoders, `rt_string_mark`
+  after a builtin fills a blank string, and the compiler on literals.
+  One made without it is only slower. Rejected: a character count in
+  each string (a word each, and indexing non-ASCII text still walks),
+  and an index of offsets (memory, for text that's mostly walked once).
+- **`pprint` escapes a string** as the reader takes it back, on one
+  line, as `sexp/print` did: `"` and `\`, and the control characters,
+  C0, DEL and C1 (`\n`, `\t`, `\r`, `\e`, or `\u{hex}`); the C1 ones
+  are new, since a terminal acts on U+009B as it does on ESC [. Other
+  characters, and stray bytes, as they are. The two share `rt_quote`.
+  Two tests that escaped by hand now let `pprint` do it.
+- **A builtin with optional arguments can be a value,** taking the ones
+  it needs: `(map str->int words)`. Before, only a fixed arity could.
+- **Checked:** `t/models/strings.py`, an evaluator for the part of
+  slight the string tests use, with every builtin written again in
+  Python over characters, gives their expected output. It agrees with
+  Node's own string methods on 33,000 random ASCII cases, and the
+  runtime agrees with it on 2,000 random calls over strings of every
+  kind of character and stray byte. Golden tests 261 to 265 are new,
+  and 061, 164 and 166 (`ord` and `chr`'s, now code points') were
+  written again; the tests whose output changed only by the escaping
+  were checked to read back as before; the string tests pass
+  `SLIGHT_GC_STRESS` and `SLIGHT_GC_VERIFY`.
+- **Rejected:** UTF-16 units, as JavaScript counts (above); graphemes as
+  the unit (tables, and slow, for what a terminal's columns want more
+  than a program's indexes; later, as `str/graphemes`); strings that are
+  always well-formed (every string checked as it's made, and a bad
+  file's bytes lost); a character type; `str/bytes-` names, the
+  proposal's, for the user's `bytes/`; keeping the old names as aliases;
+  keeping `ord` and `chr`.
+
+**D220. `join/race`, `join/any` and `join/all`: waiting for the first of
+several processes.** *(Stevan, Oct 2026: "Let's stick to the JavaScript
+meanings. And I agree with your recommendations. Let's build it", to
+Claude's proposal, after he asked whether `join/all` and `join/race`
+should come with `join/any`.)* `join` waits for one pid. Waiting for
+whichever of several ends first meant `monitor` and `recv`, and so a
+state function, which the caller and everything above it then had to be
+too: why the airline ran its what-ifs one at a time, and why
+`http/await` forked a box to watch for the reply and the timer.
+
+- **JavaScript's meanings.** `(join/race pids)` gives `(pid result)` for
+  the first of `pids` to end, well or not (`Promise.race`); `(join/any
+  pids)` gives `(:ok v)` for the first to end well, or `(:error
+  reasons)`, in the order of `pids`, once all have failed
+  (`Promise.any`); `(join/all pids)` gives `(:ok values)`, in the order
+  of `pids`, or the first `(:error r)` as soon as there is one, without
+  waiting for the rest (`Promise.all`). `allSettled` is `(map join
+  pids)`, so it has no name. Claude's first name for the race was
+  `join-any`, which JavaScript's `any` would have made mean something
+  else.
+- **One of them in the runtime.** `join/race` is a builtin in C; the
+  other two are a few lines of slight in the prelude, on it. Like
+  `join`, it keeps the caller's stack while it waits, so the caller
+  needn't be a state function, and the `recv` rule doesn't change.
+- **How it waits.** A process blocked in `join` is on its pid's list of
+  joiners, and on only one; a race is on several. So it's a watch on
+  each pid, as a monitor is (D183), that wakes its process instead of
+  sending it a message: the first to end wakes it, and it takes the
+  rest off when it runs; a pid that ends in between finds it woken
+  already, and only goes. Its watches go with it if it's killed, as a
+  monitor's do. `join` keeps its own way, which allocates nothing, since
+  the benchmarks join a great deal; a watch is a malloc a pid.
+- **Pids that have ended already:** the first of them in the list, as
+  `Promise.race` settles with promises settled before it's called, and
+  at once. An exit record doesn't keep when its process ended, and
+  keeping it would cost every process.
+- **Losers go on running,** as in JavaScript. A process may be another's
+  to join too, and `(map kill pids)` is one call. Rejected: killing them,
+  as structured concurrency does, which is tidier but would surprise a
+  caller who joins them later.
+- **Faults,** all found before it waits, so a bad pid faults whichever
+  ends first: an empty list (`:not-a-pid`, the value `()`), since
+  JavaScript's race of nothing waits forever, and here that's a hang;
+  something that isn't a list (`:not-a-list`), or in it that isn't a
+  pid (`:not-a-pid`); the caller's own pid (`:join-self`). `join/any` of
+  `()` is `(:error ())`, and `join/all` of `()` is `(:ok ())`, as in
+  JavaScript.
+- **Telling of it:** `:system` shows a racer as `:joining`, its
+  `:joining` field the list of the pids it races, in order; and a root
+  racing processes that never end is a deadlock, `... waiting in f for
+  the first of #<pid 2>, #<pid 3> to end, ...`.
+- **`http/await`** races the request's process against one that sleeps,
+  in place of a box that monitored it and took the timer's message.
+- **What it doesn't do:** make CPU work faster. The runtime runs on one
+  core, so the airline's what-ifs in processes of their own would take
+  as long, and want `--shard` (D218) as before. It's for waits that
+  overlap (a timeout, services asked at once, the first good answer),
+  and programs written so get the cores if the runtime ever has them.
+- **Checked:** golden tests 266 (the race: the first to end, an error
+  winning, pids already ended, two ending at once, a killed target and
+  a killed racer, racers waking in order, a pool of two, a timeout, and
+  `:system`), 267 (`join/any` and `join/all`, with the times they took
+  on the virtual clock) and 268 (the faults, and the deadlock), worked
+  out by hand; 211's timeout goes through the new `http/await`. 267
+  gives the same under five seeded orders, a replay check now. Not
+  tested: a reply over a socket that comes before its timer, on the
+  virtual clock. The clock moves to the timer when nothing is ready to
+  read, and macOS's loopback delivers a moment after the send, so there
+  the timer wins (it did, when 211 had such a case: Stevan's run on the
+  M2 Max). The runtime waits for loopback before the clock moves only
+  for a lookup's own timer (D165); doing it for every timer would change
+  the virtual clock, a proposal of its own. `within` in 266 is the same
+  race between processes, with no socket. A program that races thousands of times, killing targets
+  and racers along the way, runs clean under AddressSanitizer and under
+  eight seeded orders.
+
+**D221. Numbers: `math/`, the rest of JavaScript's `Math`, and the bit
+operations.** *(Stevan, Oct 2026: "Lets put everything under math/. Make
+pow exact on 2 ints. Make bit/shl wrap. round toFixed. E and INF can be
+constants, and nan? is enough. And I agree, lets do random numbers
+after, and numerical objects only if needed", to Claude's proposal, and
+"lets build this".)*
+
+- **`math/`.** The math builtins move under it, as JavaScript keeps them
+  in `Math`: `math/abs`, `min`, `max`, `ceil`, `floor`, `round`,
+  `trunc`, `sqrt`, `pow`, `sin`, `cos`, `tan`, `exp` and `PI`. The
+  arithmetic (`+ - * / div %`) and the comparisons stay as they are. A
+  clean break, as D219's was: every program moved, 124 names, by a
+  script over tokens that leaves a name alone in a form that binds it as
+  a local (`agent.slight`'s `round`, `calc.slight`'s `exp`), and t/241's
+  top-level `min` and `max`, which bind to the end of the file, put back
+  by hand.
+- **The rest of `Math`:** `math/asin`, `acos`, `atan`, `atan2`, `sinh`,
+  `cosh`, `tanh`, `asinh`, `acosh`, `atanh`, `log`, `log2`, `log10`,
+  `log1p`, `expm1`, `cbrt` and `hypot`, libm's, always floats, `nan` or
+  `inf` out of their domains. glibc's `cbrt` of 27 is a bit over 3, so,
+  as D76 has it, the tests check them to 12 significant places, against
+  V8's values, which come from its own libm and not the system's.
+- **`math/pow` of two integers is exact**, as `*` is: past 63 bits it
+  overflows, and a negative exponent is out of range, since the result
+  wouldn't be an integer (rather than a float for some exponents and an
+  integer for others). A float on either side gives a float, as before.
+  `(math/pow 2 10)` is 1024, where it was 1024.0.
+- **`math/mod`,** the floored remainder, its sign the divisor's, which
+  both game-of-life examples faked with `(% (+ n size) size)`. Integers
+  only, as `%` is.
+- **`math/nan?`,** as `Number.isNaN`: anything but a float that's NaN is
+  `#false`. Rejected: `finite?` and `infinite?` beside it (Stevan: "nan?
+  is enough"), and a `NAN` constant.
+- **Constants:** `math/E` and `math/INF` beside `math/PI`.
+- **`int->float`,** and **`float->str x [digits]`**: as `str` shows a
+  float, or with digits, 0 to 100, `toFixed`: the nearest decimal with
+  that many digits to the float's exact value, a tie going away from
+  zero, where `printf`'s goes to even, so it's rounded from the exact
+  expansion (`%.1100f`, which every double's ends within). From 1e21 up,
+  and `nan` and `inf`, as `str` shows them, as `toFixed` does. The
+  airline makes its tenths of a millisecond by hand, and keeps them, since
+  it cuts where `float->str` rounds.
+- **Bits:** `bit/and`, `bit/or`, `bit/xor`, `bit/not`, `bit/shl` and
+  `bit/shr`, compiled inline on both targets, and `bit/count` in C, on
+  63-bit two's-complement integers. An integer is `n << 1`, so and, or
+  and xor of the tagged words are the tagged results; not is a xor with
+  -2; a shift left of the word wraps by itself, losing what passes the
+  top (Stevan: wrap, rather than fault as `*` does, which hashing and
+  packing bytes want); a shift right is of the word, its bit 0 cleared,
+  and fills with the sign. A count of 63 or more gives 0, or -1, as Go
+  has it, where JavaScript takes a count mod 32; a negative one faults
+  (`:out-of-range`). Rejected: `>>>`, a logical shift right, which on a
+  63-bit word means little; `(bit/and (bit/shr x n) mask)` does it.
+- **Not taken up:** big integers, rationals, complex numbers, 32-bit
+  floats, unsigned 64-bit integers. Random numbers are next, as a
+  proposal of their own: they're about where state lives, seeding,
+  replay and processes, not arithmetic. Numerical vectors and matrices
+  wait for a program that needs them, and floats that need no box would
+  come first (D179).
+- **Checked:** golden tests 269 (`math/pow`'s edges, from Python's
+  integers), 270 (the libm functions against V8, `math/mod`, `math/nan?`,
+  the constants, `int->float`), 271 (`float->str`, from Python's
+  `Decimal`, `t/models/float-to-str.py`, which also checks every case
+  against V8's own `toFixed`) and 272 (the bits, from
+  `t/models/bits.py`, the operands as literals and as values, which the
+  compiler takes two ways); t/070, t/074 and t/080 changed only where
+  `math/pow` is now exact or a fault names `math/round`.
+
+**D222. Random numbers: a generator per process.** *(Stevan, Oct 2026:
+"Lets go with your picks, I agree", to Claude's proposal, which D221
+left for one of its own.)*
+
+- **Where the state lives: in each process, in the runtime,** as
+  Erlang's `rand` keeps it in the process dictionary: two words in the
+  process's record. A draw is a builtin with no generator to pass, and
+  nothing else sees it, so it's no more shared state than `$$` is.
+  Rejected: a generator as a value, passed along and handed back with
+  each draw, as Haskell's `StdGen` (pure, but every function that draws
+  grows a parameter and a result, and a process's loop carries it); a
+  generator as a process, asked for each number (a message each way per
+  draw, and the order processes ask in decides who gets which, so a
+  seed wouldn't give the same run under another order); and draws made
+  from a counter, a hash of a seed and an index, as a builtin. That last
+  is how the airline makes its what-ifs and remedies (D214), each the
+  same whatever the others are, and it stays a pattern in slight
+  (`(% (hash (list seed what i)) n)`) rather than a builtin.
+- **The generator is SplitMix64, Java's `SplittableRandom`** (Steele,
+  Lea and Flood): a state that steps by an odd gamma, each step mixed.
+  It's small, fast, passes BigCrush, and splits, which a fork wants;
+  and Java gives the same numbers from the same seed, which the tests
+  are checked against. `(rand/int n)` is Java's `nextLong(bound)`, a
+  power of two masked and anything else drawn again in the top part of
+  the range that would favor some numbers; `(rand/float)` is
+  `nextDouble`, 53 bits. A bound under 1 faults (`:out-of-range`).
+- **A fork splits the parent's generator,** as `SplittableRandom.split`
+  does: the child's state and gamma are the parent's next two draws. So
+  what a process draws depends on the seed and on what was drawn and
+  forked before it, along its line of forks, never on the order
+  processes run in: under one seed a program draws the same numbers
+  whatever `SLIGHT_SCHED` says. Rejected: every process seeded from one
+  generator for the run (the numbers would follow the order processes
+  run in), and every process seeded alike (forked workers would all draw
+  the same).
+- **Seeding:** `SLIGHT_SEED=n` seeds the root, digits only (anything
+  else stops the run, exit 2, as `SLIGHT_SCHED` does); without it, the
+  system's entropy (`getentropy`), so runs differ. `(rand/seed n)`
+  starts the calling process's generator again from `n`, for a program
+  that takes its seed as an argument (boids). The seed goes through
+  `replay.c` (`rt_io_random_seed`) either way, so every record now holds
+  one more entry, before the program's first, and a replay draws what
+  the recorded run drew without being given the seed. `t/run.sh` sets
+  `SLIGHT_SEED=1`, so the golden tests are the same every run.
+- **The prelude** has `rand/pick`, an element, `()` for none, as `nth`
+  gives, and `rand/shuffle`, which sorts the elements by a `rand/float`
+  each: a list can't be shuffled in place, and sorting by random keys
+  is hard to get wrong where swapping as elements come is easy to bias.
+  Two keys alike, which would keep their order, come about once in
+  2^54 / n^2 shuffles.
+- **Not cryptographic,** and said so: what SplitMix64 draws next can be
+  worked out from what it drew. Keys and tokens want the system's
+  entropy each time, which TLS will want anyway (12c); a lookup's query
+  ids already take theirs from it (`rt_io_seed`). Left for then.
+- **Boids** is the first program to use it: its Park–Miller generator,
+  written in slight, is gone, and it draws its flock with `rand/float`
+  after `(rand/seed seed)`, its seed still an argument. Its expected
+  output was made again by its model, `t/models/boids.py`, which draws
+  from `t/models/rand.py`, a SplittableRandom in Python, checked against
+  Java's on 9,000 draws and splits from three seeds.
+- **Checked:** golden test 273, whose expected output is Java 21's
+  `SplittableRandom` (`t/models/Rand273.java`): draws from
+  `SLIGHT_SEED`, `rand/seed` again giving the same, a negative seed,
+  bounds of 1, a power of two and 2^62 - 1, floats, forks and a fork's
+  fork, `rand/pick`, `rand/shuffle`, and the faults; and
+  `t/replay/rand.slight` in `t/replay.sh`: processes that interleave
+  draw the same under five `SLIGHT_SCHED` orders from one seed, an
+  unseeded run replays as it was recorded, and two unseeded runs
+  differ.
+
+**D223. A persistent map, a hash trie in slight.** *(Stevan, Oct 2026:
+"Yes, let's build it", to Claude's proposal, the second of what the
+airline asked for, after strings, joins and numbers.)*
+
+- **What:** `lib/map.slight`, opt-in (`(@include :map)`): a hash array
+  mapped trie, Bagwell's, as Clojure's maps are, made of tuples. A map
+  is a value; a change copies only the path to what it changed. The
+  airline looked things up by name in association lists, a few of them
+  quadratic (`share-of`, naming a candidate's day); a map makes each
+  lookup a few steps. Rejected: a balanced tree, which needs an order on
+  keys that slight's values don't have, where every value has a `hash`
+  and `eq?`; a table in C (D157's other option), a type of its own in
+  the runtime, to be copied, collected, printed and compared; and the
+  map in the prelude, which every program would compile.
+- **Two builtins:** `tuple/insert` and `tuple/remove`, a copy one longer
+  or one shorter, which a node needs as keys come and go. In slight they
+  were two slices, two lists, an `append` and `list->tuple` on every
+  write at every level.
+- **The trie:** a map is `#(size root)`; a node `#(bitmap slot ...)`,
+  a slot for each bit set; a slot a leaf, `(k v h)`, or a node a level
+  down. 5 bits of the hash a level, the lowest first, so a node has up
+  to 32 slots and its bitmap fits in an integer (64 wouldn't, in 63
+  bits). `hash` gives 62 bits, so past 13 levels keys with the same hash
+  share a bucket, `#(leaf ...)`, in the order they came. A leaf keeps
+  its key's hash, so splitting it needn't hash the key again, and a test
+  can give keys hashes of its choosing (`map/put-hashed` and the like),
+  collisions included, which real keys can't be found for.
+- **The same entries make the same map:** a slot is a leaf only when
+  one key alone is under it, so deleting folds a node left with one
+  leaf back into it, and a map's shape depends only on its keys (but for
+  a bucket's order, which needs two keys with the same 62-bit hash). So
+  `eq?` and `hash` work on maps as on any value.
+- **The names,** under `map/`: `new`, `get` (`:not-found` for a missing
+  key, as `lookup`), `has?`, `put`, `delete`, `update`, `size`, `fold`,
+  and `map->list` and `list->map`. Claude proposed `map/empty` and
+  `map/remove`; it became `(map/new)`, since a library can define only
+  functions, and `map/delete`, and `map/update` takes a default, as
+  `lib/ds.slight`'s `dict/` has them. `map/` beside the prelude's `map`,
+  as `str/` beside `str`. Not added: `map/keys` and `map/values`, which
+  `map->list` covers.
+- **What a map is:** a tuple, not a type: `tuple?` says `#true` of one,
+  and `pprint` shows the trie. Sharing ends at a process's edge: a send,
+  a fork's captured values and an exit record copy a map whole, as they
+  copy everything (D25); so a map serves a process's own data, and
+  copying that keeps sharing would be a proposal of its own.
+- **Not done here:** `bit/count`, `tuple/get`, `tuple/len` and `tuple?`
+  are calls into C, several a level; compiling them inline waits for a
+  profile that asks. 100,000 puts, a fold and 200,000 deletes take 0.2 s
+  on the cloud machine. `hash` isn't seeded, so keys picked to collide
+  pile into one bucket.
+- **The airline,** its first user, in a commit of its own: its runs,
+  kept as an association list and looked up by name about fifteen
+  times, are a map and the list of names, newest first, for the order
+  the history, the JSON and `--keep` write them in; `--shard`'s
+  `share-of` finds each branch's parent and tree's number in maps, where
+  it walked lists; and `days-of` counts the candidates that come to each
+  day in a map, where it sorted them by hash and folded neighbours. Its
+  output is the same, byte for byte, golden tests 256 to 260 and the
+  live checks unchanged, and the JSON and kept histories compared with
+  the program before. It's no faster at 1,000 what-ifs on the big day
+  (140 s either way): the simulating is the cost there, and the lists
+  would have told only at many times that.
+- **Checked:** golden test 274 (`tuple/insert` and `tuple/remove`, by
+  hand), and 275: the API and the trie's layout by hand, collisions and
+  a path 13 levels deep through the hashed functions, and a seeded run
+  of 3,000 puts and deletes checked against an association list at
+  every step, its entries, their order and their hash from
+  `t/models/map.py`, a Python dict with slight's `hash` and generator
+  in Python, the order worked out from the hashes.

@@ -12,5 +12,5 @@
 (let me   $$)
 (let ring (map (lambda (id) (fork (member id me))) (range 1 504)))
 (map (lambda (pair) (send (car pair) (list :next (cadr pair)))) (zip ring (append (cdr ring) (list (car ring)))))
-(send (car ring) (string->int (car @ARGV)))
+(send (car ring) (str->int (car @ARGV)))
 (recv (id id))

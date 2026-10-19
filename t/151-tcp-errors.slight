@@ -23,7 +23,7 @@
             (pprint (failed (join (connect :tcp/listen port (never))) port))
             (send l (list :write "nope"))
             (disconnect l)
-            (let where (concat "localhost:" port))
+            (let where (str "localhost:" port))
             (failed (join (connect :tcp where (never))) where))))
 
 (pprint (join (connect :tcp/listen 0 (first))))

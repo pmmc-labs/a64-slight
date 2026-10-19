@@ -1,0 +1,38 @@
+"3"
+"-3"
+"1"
+"2"
+"0.13"
+"1.00"
+"1.4"
+"8.35"
+"100.00"
+"10.0"
+"123.5"
+"-0.00"
+"0.00"
+"0"
+"0.000"
+"0.0000010"
+"1234.5678000000"
+"100000000000000000000.00"
+"1e+21"
+"-1e+21"
+"3.14159265358979311600"
+"3"
+"5.000"
+"-7.0"
+"inf"
+"nan"
+"1.0"
+"5.0"
+"0.1"
+"1e+21"
+fault in #<pid 2>: out of range: 101 (float->str at t/271-float-to-str.slight:38:21)
+out-of-range
+fault in #<pid 3>: out of range: -1 (float->str at t/271-float-to-str.slight:39:21)
+out-of-range
+fault in #<pid 4>: not an integer: 2.0 (float->str at t/271-float-to-str.slight:40:21)
+not-an-int
+fault in #<pid 5>: not a number: "1.5" (float->str at t/271-float-to-str.slight:41:13)
+not-a-number

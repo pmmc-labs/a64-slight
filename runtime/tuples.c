@@ -62,6 +62,31 @@ rt_value_t rt_tuple_set(rt_value_t t, rt_value_t i, rt_value_t v, const char *si
     return tagged(box);
 }
 
+// A copy of t one longer, v at index i and what was there from i on after
+// it: i is from 0 to t's length, so v can go at the end. A node of a hash
+// trie grows a slot this way (D223).
+rt_value_t rt_tuple_insert(rt_value_t t, rt_value_t i, rt_value_t v, const char *site) {
+    need_tuple(t, site);
+    int64_t  k = rt_need_int(i, site);
+    uint64_t n = rt_tuple_len(t);
+    if (k < 0 || (uint64_t)k > n) rt_fault(RT_FAULT_RANGE, i, site);
+    uint64_t *box = new_tuple(n + 1, site);
+    memcpy(box + 1, rt_box(t) + 1, 8 * (uint64_t)k);
+    box[1 + k] = v;
+    memcpy(box + 2 + k, rt_box(t) + 1 + k, 8 * (n - (uint64_t)k));
+    return tagged(box);
+}
+
+// A copy of t one shorter, without the element at index i.
+rt_value_t rt_tuple_remove(rt_value_t t, rt_value_t i, const char *site) {
+    uint64_t  k   = index_of(t, i, site);
+    uint64_t  n   = rt_tuple_len(t);
+    uint64_t *box = new_tuple(n - 1, site);
+    memcpy(box + 1, rt_box(t) + 1, 8 * k);
+    memcpy(box + 1 + k, rt_box(t) + 2 + k, 8 * (n - 1 - k));
+    return tagged(box);
+}
+
 // n elements, each v.
 rt_value_t rt_tuple_make(rt_value_t n, rt_value_t v, const char *site) {
     int64_t k = rt_need_int(n, site);

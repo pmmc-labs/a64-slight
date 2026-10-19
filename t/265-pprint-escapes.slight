@@ -1,0 +1,21 @@
+; pprint shows a string as the reader takes it back (D219): in double
+; quotes, with " and \ escaped, and the control characters (C0, DEL and
+; C1), so it stays on one line and a terminal shows it as it is; other
+; characters, and stray bytes, as they are. str and tty/write give a
+; string's bytes; sexp/print quotes a string as pprint does.
+
+(pprint "plain")
+(pprint "say \"hi\"")
+(pprint "back\\slash")
+(pprint "line\nbreak, tab\there, return\r, escape\e[0m")
+(pprint (codes->str (list 0 1 7 8 11 12 31 127)))
+(pprint (codes->str (list 128 133 155 159 160 255)))
+(pprint "é 日本 😀")
+(pprint (list "a\"b" (list "c\\d") 'sym "e\nf"))
+(pprint (str->bytes (bytes->str (list 34 255 10))))
+(pprint (str/len "say \"hi\""))
+(tty/write "tty/write: " "say \"hi\"" \n)
+(pprint (str "str: " "\"q\"" " " (list "\"q\"")))
+(let s (codes->str (list 97 34 92 10 9 27 155 233)))
+(pprint (list (eq? (sexp/print s) (bytes/slice (str (list s)) 1 -1)) (eq? (cadr (sexp/parse (sexp/print s))) s)))
+s

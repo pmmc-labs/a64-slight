@@ -25,7 +25,7 @@ each one into receive functions, D167, and `classify.ts` checks the
 `recv` rule),
 `$$`, `^$$`, `yield`, preemption, a FIFO run queue, pooled stacks that a
 process waiting in `recv` gives back, and the lifecycle: `join`,
-`monitor`, `kill`, `raise`, exit records, and faults that end just their
+`monitor`, `kill`, `raise`, `join/race` (D220), exit records, and faults that end just their
 process with `(:error (kind value site))` (`runtime/process.c`). Timers:
 `after`, `sleep`, and a virtual clock for tests (`SLIGHT_CLOCK=virtual`);
 `clock/us`, that clock in microseconds (D208).
@@ -74,13 +74,25 @@ and reductions) and the runtime, from a table of function names the
 compiler emits, which the deadlock message uses too (D171).
 A second target, x86-64: the code generator emits through a target
 interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
-`slightc --target x86_64` builds for it (D145, D146). Strings are bytes;
-beside the byte builtins, the `utf8/` ones count characters (a bad byte
-is a character of its own, as in Go), with `ord` and `chr` in the
-prelude, and `string->float` (D148).
-`examples/` has twenty-three example programs (all but
-`ping-pong-tournament`, `top`, `chat` and `airline-gen` are golden
-tests), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149), the latest
+`slightc --target x86_64` builds for it (D145, D146). Strings are bytes,
+UTF-8 by convention: the `str/` builtins count characters (a bad byte is
+a character of its own, as in Go), and the `bytes/` ones count bytes
+(D148, D219).
+`examples/` has twenty-nine example programs (all but
+`ping-pong-tournament`, `top`, `chat`, `airline-gen`, `forest`, `sieve`,
+`snails`, `coral`, `waves` and `etch` are golden tests; `etch`, an
+Etch A Sketch on the keyboard, whose every step is a persistent map kept
+for undo and redo, is interactive; `waves`, strings on sine
+waves, a scroller, a case wave and a Lissajous snake, draws with
+`math/sin`, D76; `coral`, Collatz's ways to 1
+walked out from 1 and drawn in Braille, draws with `math/sin`, D76; `snails`, a race whose winner an oracle
+of ghost snails, forked from the same seed, foretells, runs on the real
+clock; `forest`, a forest grown by a process per
+branch, drawn in Braille, the same picture under any schedule, draws
+with `math/sin`, whose last bits differ between machines, D76; `sieve`,
+the prime sieve as a chain of processes, a process per prime, drawn as
+Ulam's spiral in half blocks, writes its pixels in the order its
+messages come), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149), the latest
 `airline`, a simulated day branched with what-ifs, each run till it
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it
@@ -152,7 +164,30 @@ with no write barrier, since nothing old can point at anything young
 (D200, 244); and phase 3, Chez Scheme and five more programs (`tak`,
 `nqueens`, `deriv`, `spectral-norm`, `fan-in`, D201), and what its
 profiles found: the prelude's list functions as loops, and its `not`
-compiled inline (D203, golden tests 247 and 248). **Next:** to settle with
+compiled inline (D203, golden tests 247 and 248). Strings, cleaned up
+(D219): one set of builtins in place of the byte ones and the `utf8/`
+ones, `str/` with JavaScript's methods' names and edge cases over
+characters, `bytes/` over bytes, conversions as `a->b`, Unicode's case
+mapping and white space (`runtime/unicode.c`), ASCII strings marked so
+they're indexed in one step, and `pprint` escaping strings; golden
+tests 261 to 265, from `t/models/strings.py`. Waiting for the first of
+several processes (D220): `join/race` in the runtime, and `join/any` and
+`join/all` in the prelude, JavaScript's `Promise.race`, `any` and `all`,
+each keeping its caller's stack as `join` does; golden tests 266 to
+268. Numbers (D221): the math builtins under `math/`, with the rest of
+JavaScript's `Math`, `math/pow` exact on two integers, `math/mod`,
+`math/nan?`, `math/E` and `math/INF`, `int->float`, `float->str` as
+`toFixed`, and the bit operations, `bit/`, compiled inline; golden tests
+269 to 272. Random numbers (D222): a generator in each process,
+SplitMix64 as Java's `SplittableRandom`, `rand/int`, `rand/float` and
+`rand/seed`, and `rand/pick` and `rand/shuffle` in the prelude; a fork's
+split from its parent's, so the numbers don't depend on the order
+processes run in, and the run's seed recorded for a replay; golden test
+273, from Java's own (`t/models/Rand273.java`). Maps (D223): a
+persistent hash trie of tuples in slight, `lib/map.slight`, with
+`tuple/insert` and `tuple/remove` for its nodes; golden tests 274 and
+275, from `t/models/map.py`.
+**Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
@@ -265,11 +300,11 @@ to get them back from git (`3fd71e0`).
 | `bin/slightc.ts` | The driver: read and expand (with the files it includes), compile, write `out.S`, link with clang |
 | `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `pattern.ts` (`match`'s and `recv`'s patterns, as tests and bindings), `split.ts` (a `recv` anywhere a tail call could go, made the whole body of a generated receive function), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
-| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c`, `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
-| `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c` (the string builtins, D219), `unicode.c` (Unicode's case mappings and the properties they need, made by `gen-unicode.py`; don't edit it), `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
+| `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `map.slight` (a persistent map, a hash trie, D223), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, and `.ss` for Chez Scheme); `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
-| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's); `headers.c`; `models/` (Python models that produced expected output); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
+| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
 ## Commands
@@ -335,6 +370,9 @@ to get them back from git (`3fd71e0`).
   touching nothing but stdout and stderr (D170).
 - `SLIGHT_SCHED=n` runs processes in an order picked by a generator seeded
   with `n`, the same for each `n`, to look for races (D170).
+- `SLIGHT_SEED=n` seeds the random numbers (`rand/`); without it they
+  come from the system's entropy, different every run, and are recorded
+  for a replay either way (D222). `t/run.sh` sets `1`.
 - `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` name files for a lookup to read
   in place of `/etc/hosts` and `/etc/resolv.conf`; there a `nameserver`
   line may give a port (`127.0.0.1:5353`), so a test can be its own name

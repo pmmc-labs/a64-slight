@@ -27,7 +27,7 @@
     (recv
         ((:line _ s)
             (cond
-                ((eq? s (concat name " " i)) (check c name (+ i 1) n))
+                ((eq? s (str name " " i)) (check c name (+ i 1) n))
                 (#true                       (raise (list :out-of-order name i s)))))))
 
 (defun listener (names)
@@ -35,7 +35,7 @@
         ((:open l port)
             (let me $$)
             (map (lambda (name)
-                     (fork (send me (list :done (join (connect :tcp (concat "localhost:" port) (client name 300)))))))
+                     (fork (send me (list :done (join (connect :tcp (str "localhost:" port) (client name 300)))))))
                  names)
             (serving l names (length names) ()))))
 

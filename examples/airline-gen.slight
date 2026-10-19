@@ -53,7 +53,7 @@
         ((== n 0) (reverse acc))
         (#true
             (let x (roll seed :code k 17576))
-            (let code (concat (chr (+ 65 (div x 676))) (chr (+ 65 (% (div x 26) 26))) (chr (+ 65 (% x 26)))))
+            (let code (str (codes->str (list (+ 65 (div x 676)))) (codes->str (list (+ 65 (% (div x 26) 26)))) (codes->str (list (+ 65 (% x 26))))))
             (if (member? code acc)
                 (codes seed (inc k) n acc)
                 (codes seed (inc k) (dec n) (cons code acc))))))
@@ -64,7 +64,7 @@
         ((#(_ x1 y1) #(_ x2 y2))
             (let dx (- x2 x1))
             (let dy (- y2 y1))
-            (+ 25 (div (round (sqrt (+ (* dx dx) (* dy dy)))) 8)))))
+            (+ 25 (div (math/round (math/sqrt (+ (* dx dx) (* dy dy)))) 8)))))
 
 ; --- the schedule -------------------------------------------------------------
 
@@ -98,8 +98,8 @@
 (defun leg/dep (l) (tuple/get l 4))
 (defun leg/block (l) (tuple/get l 5))
 
-(defun flight (l) (concat "SL" (+ 1000 (leg/n l))))
-(defun tail (a) (concat "N" (+ 100 a)))
+(defun flight (l) (str "SL" (+ 1000 (leg/n l))))
+(defun tail (a) (str "N" (+ 100 a)))
 
 ; Each (in out passengers): from a leg that lands at a hub to one of
 ; another aircraft that leaves there 35 to 120 minutes after it's due.
@@ -126,7 +126,7 @@
 
 ; --- writing it ---------------------------------------------------------------
 
-(defun q (s) (concat "\"" s "\""))
+(defun q (s) (str "\"" s "\""))
 
 (defun write-day (seed)
     (let ports (airports seed))
@@ -135,7 +135,7 @@
     (let connects (connections seed legs))
     (tty/write "; A day made by examples/airline-gen.slight, seed " seed ": " (aircraft-count) " aircraft, "
                (airport-count) " airports, " (length legs) " legs, " (length connects) " connections.\n"
-               "; The hubs: " (str-join " " (map (lambda (i) (tuple/get (tuple/get ports i) 0)) (range 0 (hub-count)))) ".\n\n")
+               "; The hubs: " (str/join " " (map (lambda (i) (tuple/get (tuple/get ports i) 0)) (range 0 (hub-count)))) ".\n\n")
     (map (lambda (i)
              (match (tuple/get ports i)
                  (#(c x y) (tty/write "(:airport " (q c) " " x " " y " " (if (< i (hub-count)) "#true" "#false") ")\n"))))
@@ -173,4 +173,4 @@
                "(:branch \"b10\" \"base\" (:close " (code (+ (hub-count) 11)) " 720 780))\n\n")
     (list :day seed (length legs) (length connects)))
 
-(write-day (match @ARGV ((s & _) (string->int s)) (_ 1)))
+(write-day (match @ARGV ((s & _) (str->int s)) (_ 1)))

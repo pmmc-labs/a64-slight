@@ -5,7 +5,7 @@
 ; (alignment), and away from any too close (separation). The sky wraps
 ; around at its edges. q quits. Its arguments, each optional: how many
 ; birds (30); a number of frames, to draw them one under another and stop
-; rather than redraw the screen till q; and a seed, from 1 to 2147483646:
+; rather than redraw the screen till q; and a seed for the random numbers:
 ;
 ;     node bin/slightc.ts -o boids examples/boids.slight
 ;     ./boids                                      (q quits)
@@ -111,7 +111,7 @@
 
 ; Not faster than max-speed, nor slower than min-speed unless still.
 (defun limit (v)
-    (let speed (sqrt (dot v v)))
+    (let speed (math/sqrt (dot v v)))
     (cond
         ((> speed (max-speed))                    (v* v (/ (max-speed) speed)))
         ((and (< speed (min-speed)) (> speed 0))  (v* v (/ (min-speed) speed)))
@@ -214,8 +214,8 @@
 ; halfway between an axis and a diagonal.
 (defun arrow (vx vy)
     (cond
-        ((<= (abs vy) (* (abs vx) 0.41421356)) (if (< vx 0) "←" "→"))
-        ((<= (abs vx) (* (abs vy) 0.41421356)) (if (< vy 0) "↑" "↓"))
+        ((<= (math/abs vy) (* (math/abs vx) 0.41421356)) (if (< vx 0) "←" "→"))
+        ((<= (math/abs vx) (* (math/abs vy) 0.41421356)) (if (< vy 0) "↑" "↓"))
         ((< vx 0)                              (if (< vy 0) "↖" "↙"))
         (#true                                 (if (< vy 0) "↗" "↘"))))
 
@@ -225,8 +225,8 @@
 (defun put (grid bird)
     (match bird
         (#(_ x y vx vy)
-            (let row (% (floor (/ y 2)) (tuple/len grid)))
-            (let col (% (floor x) (tuple/len (tuple/get grid 0))))
+            (let row (% (math/floor (/ y 2)) (tuple/len grid)))
+            (let col (% (math/floor x) (tuple/len (tuple/get grid 0))))
             (tuple/set grid row (tuple/set (tuple/get grid row) col (arrow vx vy))))))
 
 ; Each frame redraws the whole screen from the top left, or, when there's
@@ -236,14 +236,14 @@
         ((w h)
             (let live (< frames 1))
             (let grid (fold/l (tuple/make (div h 2) (tuple/make w " ")) put birds))
-            (let edge (concat "+" (str-repeat "-" w) "+\n"))
+            (let edge (str "+" (str/repeat "-" w) "+\n"))
             (tty/write
-                (if live (concat \e "[H") "")
+                (if live (str \e "[H") "")
                 edge
-                (str-join "" (map (lambda (row) (concat "|" (str-join "" (tuple->list row)) "|\n")) (tuple->list grid)))
+                (str/join "" (map (lambda (row) (str "|" (str/join "" (tuple->list row)) "|\n")) (tuple->list grid)))
                 edge
                 "tick " tick ", " (length birds) " birds"
-                (if (nil? took) "" (concat ", " took " ms a tick"))
+                (if (nil? took) "" (str ", " took " ms a tick"))
                 (if live ", q quits" "\n")))))
 
 (defun keys (shown)
@@ -253,25 +253,20 @@
 
 ; --- the flock ----------------------------------------------------------------
 
-; Park and Miller's minimal standard generator: 16807 times anything
-; below 2^31 stays far below 2^62, so nothing overflows.
-(defun random (s) (% (* s 16807) 2147483647))
-(defun fraction (s) (/ s 2147483647))
-
-; n birds anywhere in the sky, going any way, from seed.
-(defun hatch (n sky seed birds)
+; n birds anywhere in the sky, going any way, from the root's random
+; numbers (D222), four a bird, in this order.
+(defun hatch (n sky birds)
     (cond
         ((== n 0) (reverse birds))
         (#true
-            (let a (random seed))
-            (let b (random a))
-            (let c (random b))
-            (let d (random c))
+            (let a (rand/float))
+            (let b (rand/float))
+            (let c (rand/float))
+            (let d (rand/float))
             (match sky
                 ((w h)
-                    (let bird (tuple (* (fraction a) w) (* (fraction b) h)
-                        (* (- (* (fraction c) 2) 1) (max-speed)) (* (- (* (fraction d) 2) 1) (max-speed))))
-                    (hatch (dec n) sky d (cons bird birds)))))))
+                    (let bird (tuple (* a w) (* b h) (* (- (* c 2) 1) (max-speed)) (* (- (* d 2) 1) (max-speed))))
+                    (hatch (dec n) sky (cons bird birds)))))))
 
 ; The i'th argument as a number, or default if there isn't one.
 (defun arg (i args default)
@@ -282,11 +277,12 @@
 
 ; --- the program --------------------------------------------------------------
 
-(let args (map string->int @ARGV))
+(let args (map str->int @ARGV))
 (let n (arg 0 args 30))
 (let frames (arg 1 args 0))
 (let sky (list (- (tty/screen/cols) 2) (* 2 (- (tty/screen/rows) 3))))
-(let states (hatch n sky (arg 2 args 2026) ()))
+(rand/seed (arg 2 args 2026))
+(let states (hatch n sky ()))
 
 (when (< frames 1) (tty/write \e "[?25l" \e "[2J"))
 (let shown (connect :system (display-on n sky frames)))
@@ -300,4 +296,4 @@
 (map kill (cons keyboard birds))
 (when (< frames 1) (tty/write \e "[?25h\n"))
 (match drawn
-    ((:ok k) (concat k " frames")))
+    ((:ok k) (str k " frames")))

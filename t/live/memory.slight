@@ -7,7 +7,7 @@
 ;            big at 64 MB, and the rest never held (D204)
 ;   deep     30 million arrays, each in the one before, from a command:
 ;            too big to build, the open ones counted (D205)
-;   wide     format-num to a width of 4 GB: the heap's fault, at once,
+;   wide     str/pad-start to a width of 4 GB: the heap's fault, at once,
 ;            with nothing built outside the heap first (D205)
 
 (defun reading ()
@@ -22,6 +22,6 @@
     (match name
         ("endless" (command "printf '\"'; head -c 536870912 /dev/zero | tr '\\000' a"))
         ("deep"    (command "head -c 31457280 /dev/zero | tr '\\000' '['; head -c 31457280 /dev/zero | tr '\\000' ']'"))
-        ("wide"    (join (fork (format-num 1 4000000000 "x"))))))
+        ("wide"    (join (fork (str/pad-start (str 1) 4000000000 "x"))))))
 
 (pprint (run-case (car @ARGV)))

@@ -2,7 +2,7 @@
 ; last one reports back to the root, once for each ping; then an :EXIT
 ; goes down the chain, and each process ends as it passes it on. The
 ; chain's length and the number of pings after the first come from
-; @ARGV, through string->int, and default to 1000 and 3. Each round is
+; @ARGV, through str->int, and default to 1000 and 3. Each round is
 ; reported as it completes.
 
 (defun test-actor (reply-to next)
@@ -36,8 +36,8 @@
             :done)))
 
 (let self $$)
-(let actor-count (if (nil? @ARGV) 1000 (string->int (car  @ARGV))))
-(let ping-count  (if (nil? @ARGV) 3    (string->int (cadr @ARGV))))
+(let actor-count (if (nil? @ARGV) 1000 (str->int (car     @ARGV))))
+(let ping-count  (if (nil? @ARGV) 3    (str->int (cadr @ARGV))))
 
 (tty/write "INIT with " actor-count " actors, sending " (+ ping-count 1) " pings" \n)
 (let last (setup actor-count self (fork (test-actor self ()))))

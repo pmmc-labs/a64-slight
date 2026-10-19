@@ -18,4 +18,4 @@
             (+ (if (ok? q 1 z) (try-it (append rest y) () (cons q z)) 0)
                (try-it rest (cons q y) z)))))
 
-(try-it (range 1 (+ (string->int (car @ARGV)) 1)) () ())
+(try-it (range 1 (+ (str->int (car @ARGV)) 1)) () ())

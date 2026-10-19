@@ -28,7 +28,7 @@
             (:-      (Point (list oid :- (o :oid ())) (- x (o :x ())) (- y (o :y ()))))
             (:==     (and (== x (o :x ())) (== y (o :y ()))))
             (:!=     (or  (!= x (o :x ())) (!= y (o :y ()))))
-            (:to-str (concat "Point:" x ":" y))
+            (:to-str (str "Point:" x ":" y))
             (_       (super m o)))))
 
 (defun Point-3D (oid x y z)
@@ -42,7 +42,7 @@
             (:-      (Point-3D (list oid :- (o :oid ())) (- x (o :x ())) (- y (o :y ())) (- z (o :z ()))))
             (:==     (and (== z (o :z ())) (super :== o)))
             (:!=     (or  (!= z (o :z ())) (super :!= o)))
-            (:to-str (concat "Point-3D:" x ":" y ":" z))
+            (:to-str (str "Point-3D:" x ":" y ":" z))
             (_       (super m o)))))
 
 ; The process holding an object: (m o to) is a message for it, whose

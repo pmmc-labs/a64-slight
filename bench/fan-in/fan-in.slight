@@ -9,7 +9,7 @@
 (defun gather (n sum)
     (if (== n 0) sum (recv (s (gather (- n 1) (+ sum s))))))
 
-(let n  (string->int (car @ARGV)))
+(let n  (str->int (car @ARGV)))
 (let me $$)
 (dotimes 1 101 (lambda (s) (fork (sender me s (div n 100)))))
 (gather n 0)

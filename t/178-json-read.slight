@@ -77,9 +77,9 @@
 (defun objects (i n acc)
     (cond
         ((== i n) acc)
-        (#true    (objects (+ i 1) n (cons (concat ",{\"n\": " i "}") acc)))))
+        (#true    (objects (+ i 1) n (cons (str ",{\"n\": " i "}") acc)))))
 
-(write-file "build/t/178-big.json" (list "[{\"n\": 0}" (str-join "" (reverse (objects 1 20000 ()))) "]"))
+(write-file "build/t/178-big.json" (list "[{\"n\": 0}" (str/join "" (reverse (objects 1 20000 ()))) "]"))
 
 (defun summing (total count)
     (recv
