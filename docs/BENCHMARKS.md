@@ -142,26 +142,34 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
-### Rust on the cloud machine: not a floor after all (D224)
+### Rust: a floor for a message, not for a process (D224)
 
-`bench/results/2026-10-20-0926-linux-intel-xeon-processor-2-10ghz.md`:
-the actor programs in slight, Go and Rust (no Erlang there), 3 runs
-each. Rust was added as the floor; on one core it isn't one:
+The M2 Max, `bench/results/2026-10-20-1137-macos-apple-m2-max.md`,
+against slight on one core:
 
-- **slight is faster than tokio** at everything the runtime does:
-  `ping-pong` 1.8 times (210 ns a round trip, tokio 370), `thread-ring`
-  2.0, `spawn` 2.0, `idle-memory` 2.3. A waiting task with a mailbox
-  costs 1,040 bytes, a slight process 451 (Go's goroutine 2,800): the
-  task is small, but tokio's channel, with its fields padded to cache
-  lines and its first block of 32 slots, isn't.
-- **tokio wins** `fan-in` (0.81 of slight's time), where its queue
-  holds a message in about 10 bytes, slight's in 64 (98 MB at ten
-  million, slight's 640); and `parallel-fib` (0.38), which is LLVM's
-  `fib` against slight's.
-- **`rust-mc` is the slowest at all but `parallel-fib`** (0.11, 64 tasks
-  on 4 cores): `main`'s future runs on a thread of its own, outside the
-  workers (`#[tokio::main]`'s way), so each of `ping-pong`'s 2 million
-  round trips wakes a sleeping thread (78 s, 185 times slight).
+- **A message, tokio is faster:** `ping-pong` 0.83 of slight's time
+  (148 ns a round trip, slight's 179), and `fan-in` 0.69, its queue
+  holding ten million messages in 93 MB, slight's in 484.
+- **A process, slight is:** `thread-ring` 1.3 times faster, `spawn` 2.8
+  (fastest against fastest: Rust's runs went from 0.38 s to 0.73, its
+  median), and `idle-memory` 2.2. A waiting process is 575 bytes; a task
+  with its channel 1,105 (a goroutine 2,886, an Erlang process 2,741):
+  the task is small, but tokio's channel, its fields padded to cache
+  lines and its first block of 32 slots made with it, isn't.
+- **`parallel-fib`:** 0.54, LLVM's `fib` against slight's; `rust-mc`
+  0.06, on 12 cores.
+- **`rust-mc` is the slowest at messages:** `main`'s future runs on a
+  thread of its own, outside the workers (`#[tokio::main]`'s way), so
+  each of `ping-pong`'s round trips wakes a sleeping thread (12 s, 34
+  times slight); `fan-in` takes 4.0 s and 46 s of CPU, 12 workers
+  contending for one channel.
+
+The cloud machine, `bench/results/2026-10-20-0926-linux-intel-xeon-processor-2-10ghz.md`
+(no Erlang there), puts slight ahead at the messages too: `ping-pong`
+1.8 times faster (210 ns a round trip, tokio 370), `thread-ring` 2.0,
+`spawn` 2.0, `idle-memory` 2.3 (451 bytes to 1,040); tokio still wins
+`fan-in` (0.81) and `parallel-fib` (0.38). `rust-mc`'s `ping-pong`
+there takes 78 s.
 
 ### The airline at a small airline's size (D210)
 

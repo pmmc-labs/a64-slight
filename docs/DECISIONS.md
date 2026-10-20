@@ -4354,13 +4354,14 @@ actors?")* `bench/Cargo.toml`, `bench/rt.rs`, `bench/NAME/NAME.rs`.
   be method calls, and `thread-ring` and `fan-in` something else again
   (D194's "doing the same work"); and its pool has a thread per core,
   with no ordinary way to one.
-- **Found,** on the cloud machine (BENCHMARKS.md, "Rust on the cloud
-  machine"): not a floor on one core. slight is faster than tokio's
-  current-thread runtime at `ping-pong` (1.8 times), `thread-ring`
-  (2.0), `spawn` (2.0) and `idle-memory` (2.3), where a waiting task
-  with its channel takes 1,040 bytes, a slight process 451; tokio wins
-  `fan-in` (0.81 of slight's time) and `parallel-fib` (0.38, LLVM's
-  code). `rust-mc` runs `main`'s future outside its workers, as
+- **Found** (BENCHMARKS.md, "Rust: a floor for a message, not for a
+  process"): on the M2 Max, tokio on one core is faster at a message
+  (`ping-pong` 0.83 of slight's time, `fan-in` 0.69), and slight at a
+  process (`thread-ring` 1.3 times, `spawn` 2.8, `idle-memory` 2.2,
+  where a waiting task with its channel takes 1,105 bytes and a slight
+  process 575); on the cloud machine slight is ahead at the messages
+  too (`ping-pong` 1.8 times). `parallel-fib` is LLVM's code (0.54).
+  `rust-mc` runs `main`'s future outside its workers, as
   `#[tokio::main]` does, so `ping-pong`'s every round trip wakes a
-  thread: 78 s. Kept as it is, as Rust is usually written; the M2 Max's
-  numbers are to come.
+  thread: 12 s on the M2, 78 on the cloud machine. Kept as it is, as
+  Rust is usually written.
