@@ -610,7 +610,10 @@ them:
   has it.
 - More than 8 arguments to a function, on the stack (DESIGN.md).
 - Sockets: IPv6, and more than the 1,000 or so that `select()` holds
-  (D113), with `poll`, `kqueue` or `epoll`.
+  (D113), with `poll`, `kqueue` or `epoll`: `kqueue` on macOS and
+  `epoll` on Linux, as tokio waits (D224), for everything `select()`
+  waits on now, sockets, files, commands and the terminal; an HTTP
+  server meets the limit first.
 - Dropping exit records, and bounded mailboxes (D88).
 - Optimizations, when profiling asks for them: the heap pointer in a
   register (D57), captured values read from the closure (D79), denser
@@ -656,6 +659,14 @@ tokio in the actor programs, their floor (D224).
   named for `:system`, D80's namespaces, and the eight argument
   registers. Worth it once programs show folds with lambdas on their hot
   paths.
+- **Later, to look into: a mailbox in blocks** (D224). A message with
+  nothing to copy (an integer, a symbol: D199) still takes a malloc of
+  its own (D177), 48 to 64 bytes; tokio's channel keeps messages in
+  blocks of 32 slots, about 10 bytes each. Such messages in slots of a
+  block, the mailbox a list of blocks, would take `fan-in`'s ten
+  million from 484 MB on the M2 to about 100, and cut a malloc and a
+  free from every such send. Messages with something to copy keep
+  their chunks.
 
 ### Runs that branch (begun Oct 2026)
 
