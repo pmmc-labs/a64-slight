@@ -2,6 +2,7 @@ node_modules/
 *.o
 *.S.out
 /build/
+/bench/target/
 .DS_Store
 sketch
 sketch.*

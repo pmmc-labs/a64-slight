@@ -1,0 +1,47 @@
+# The Rust programs (D224): one package, each benchmark a binary of it,
+# and rt.rs, the runtime they start, its library. bench/run.py builds
+# them into build/bench/rust, with --locked, so tokio is Cargo.lock's.
+[package]
+name = "slight-bench"
+version = "0.0.0"
+edition = "2024"
+publish = false
+autobins = false
+autoexamples = false
+autotests = false
+autobenches = false
+
+[lib]
+name = "rt"
+path = "rt.rs"
+
+[dependencies]
+tokio = { version = "1", features = ["rt", "rt-multi-thread", "sync"] }
+
+[[bin]]
+name = "startup"
+path = "startup/startup.rs"
+
+[[bin]]
+name = "ping-pong"
+path = "ping-pong/ping-pong.rs"
+
+[[bin]]
+name = "thread-ring"
+path = "thread-ring/thread-ring.rs"
+
+[[bin]]
+name = "fan-in"
+path = "fan-in/fan-in.rs"
+
+[[bin]]
+name = "spawn"
+path = "spawn/spawn.rs"
+
+[[bin]]
+name = "idle-memory"
+path = "idle-memory/idle-memory.rs"
+
+[[bin]]
+name = "parallel-fib"
+path = "parallel-fib/parallel-fib.rs"

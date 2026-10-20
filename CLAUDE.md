@@ -164,7 +164,9 @@ with no write barrier, since nothing old can point at anything young
 (D200, 244); and phase 3, Chez Scheme and five more programs (`tak`,
 `nqueens`, `deriv`, `spectral-norm`, `fan-in`, D201), and what its
 profiles found: the prelude's list functions as loops, and its `not`
-compiled inline (D203, golden tests 247 and 248). Strings, cleaned up
+compiled inline (D203, golden tests 247 and 248); and Rust, with tokio,
+in the actor programs, their floor as C is the sequential ones' (D224).
+Strings, cleaned up
 (D219): one set of builtins in place of the byte ones and the `utf8/`
 ones, `str/` with JavaScript's methods' names and edge cases over
 characters, `bytes/` over bytes, conversions as `a->b`, Unicode's case
@@ -303,7 +305,7 @@ to get them back from git (`3fd71e0`).
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c` (the string builtins, D219), `unicode.c` (Unicode's case mappings and the properties they need, made by `gen-unicode.py`; don't edit it), `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `map.slight` (a persistent map, a hash trie, D223), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
-| `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, and `.ss` for Chez Scheme); `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
+| `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, `.ss` for Chez Scheme, and `.rs` for Rust, the actor programs alone, on tokio, D224); `Cargo.toml` and `Cargo.lock`, the Rust programs as one package, and `rt.rs`, the runtime they start; `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
@@ -324,7 +326,7 @@ to get them back from git (`3fd71e0`).
   (default 60) is killed and fails.
 - `make check`: `tsc --noEmit`.
 - `make bench`: the benchmarks, slight against C, Go, Erlang, Node, Perl,
-  Python and Chez Scheme (`bench/run.py`; `BENCH=--quick` for small sizes, and see
+  Python, Chez Scheme and Rust (`bench/run.py`; `BENCH=--quick` for small sizes, and see
   `--help`). Not part of `make test`. Measure on the Mac: timings under
   qemu mean nothing, and the cloud machine's are noisy.
 - `bench/airline.py`: `examples/airline.slight` on a made-up day, with

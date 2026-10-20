@@ -12,10 +12,12 @@ turns, so that the machine's drift falls on all of them alike. One whose
 check took long gets fewer runs, but at least 3 (or --runs, if that's
 fewer), to keep each to about --budget seconds.
 
-Go and Erlang run twice: on one core, as slight does (GOMAXPROCS=1, +S
-1:1), and with their defaults, every core (go-mc, erlang-mc). Chez Scheme
-is found as chez, chezscheme or scheme, and its programs are compiled
-ahead of time, as slight's are.
+Go, Erlang and Rust run twice: on one core, as slight does
+(GOMAXPROCS=1, +S 1:1, tokio's current-thread runtime), and with their
+defaults, every core (go-mc, erlang-mc, rust-mc). Chez Scheme is found as
+chez, chezscheme or scheme, and its programs are compiled ahead of time,
+as slight's are. Rust, with tokio, is in the actor programs alone, their
+floor as C is the sequential ones' (D224), and in startup.
 
 The results go to bench/results/, as JSON and as a Markdown summary, named
 for the date and the machine.
@@ -43,7 +45,7 @@ BUILD = os.path.join(ROOT, 'build', 'bench')
 # --- what's run --------------------------------------------------------------
 
 ALL    = ('slight', 'c', 'go', 'erlang', 'node', 'perl', 'python', 'chez')
-ACTORS = ('slight', 'go', 'erlang')
+ACTORS = ('slight', 'go', 'erlang', 'rust')
 
 Benchmark = collections.namedtuple('Benchmark', 'langs quick full expected')
 
@@ -104,7 +106,7 @@ def deriv(n):
 # whatever C prints (or, without C, what most print), since there's no
 # shorter way to them.
 BENCHMARKS = {
-    'startup':       Benchmark(ALL,    '0',     '0',        lambda n: [0]),
+    'startup':       Benchmark(ALL + ('rust',), '0',     '0',        lambda n: [0]),
     'fib':           Benchmark(ALL,    '25',    '38',       lambda n: [fib(n)]),
     'tak':           Benchmark(ALL,    '6',     '10',       tak),
     'binary-trees':  Benchmark(ALL,    '12',    '18',       binary_trees),
@@ -133,6 +135,8 @@ IMPLS = {
     'perl':      Impl('perl', {}, []),
     'python':    Impl('python', {}, []),
     'chez':      Impl('chez', {}, []),
+    'rust':      Impl('rust', {}, []),
+    'rust-mc':   Impl('rust', {'BENCH_MC': '1'}, []),
 }
 
 
@@ -164,9 +168,17 @@ TOOLS = {
     'perl':   (['perl'], ['perl', '-e', 'print "perl $^V"']),
     'python': (['python3'], ['python3', '--version']),
     'chez':   ([CHEZ], [CHEZ, '--version']),
+    'rust':   (['cargo', 'rustc'], ['rustc', '--version']),
 }
 
-EXT = {'slight': 'slight', 'c': 'c', 'go': 'go', 'erlang': 'erl', 'node': 'js', 'perl': 'pl', 'python': 'py', 'chez': 'ss'}
+EXT = {'slight': 'slight', 'c': 'c', 'go': 'go', 'erlang': 'erl', 'node': 'js', 'perl': 'pl', 'python': 'py', 'chez': 'ss',
+       'rust': 'rs'}
+
+
+# The tokio that bench/Cargo.lock pins.
+def tokio_version():
+    found = re.search(r'name = "tokio"\nversion = "([^"]+)"', open(os.path.join(ROOT, 'bench', 'Cargo.lock')).read())
+    return found.group(1) if found else '?'
 
 
 def slight_target():
@@ -179,7 +191,7 @@ def source(bench, lang):
 
 
 def output_of(bench, lang):
-    return os.path.join(BUILD, lang, bench)
+    return os.path.join(BUILD, 'rust', 'release', bench) if lang == 'rust' else os.path.join(BUILD, lang, bench)
 
 
 # The command that builds bench in lang, or None if it runs from source.
@@ -195,6 +207,9 @@ def build_command(bench, lang):
         return ['erlc', '-o', os.path.join(BUILD, 'erlang'), src]
     if lang == 'chez':
         return [CHEZ, '--script', os.path.join(ROOT, 'bench', 'chez-compile.ss'), src, out]
+    if lang == 'rust':
+        return ['cargo', 'build', '--release', '--locked', '--quiet', '--manifest-path', os.path.join(ROOT, 'bench', 'Cargo.toml'),
+                '--target-dir', os.path.join(BUILD, 'rust'), '--bin', bench]
     return None
 
 
@@ -213,7 +228,7 @@ def process_limit(n):
 
 def run_command(bench, name, arg):
     impl = IMPLS[name]
-    if impl.lang in ('slight', 'c', 'go'):
+    if impl.lang in ('slight', 'c', 'go', 'rust'):
         return [output_of(bench, impl.lang), arg]
     if impl.lang == 'chez':
         return [CHEZ, '--program', output_of(bench, 'chez'), arg]
@@ -225,7 +240,7 @@ def run_command(bench, name, arg):
 
 
 def run_env(name):
-    env = {k: v for k, v in os.environ.items() if not k.startswith('SLIGHT_') and k != 'GOMAXPROCS'}
+    env = {k: v for k, v in os.environ.items() if not k.startswith('SLIGHT_') and k not in ('GOMAXPROCS', 'BENCH_MC')}
     env.update(IMPLS[name].env)
     return env
 
@@ -338,6 +353,8 @@ def main():
     versions['slight'] = commit() + ', its runtime built by ' + versions.get('slight', '')
     if 'chez' in versions:
         versions['chez'] = 'Chez Scheme ' + versions['chez']
+    if 'rust' in versions:
+        versions['rust'] += ', tokio ' + tokio_version()
     missing  = sorted({IMPLS[n].lang for n in names if not found[IMPLS[n].lang]})
     if missing:
         print('not found, so left out: ' + ', '.join(missing))
