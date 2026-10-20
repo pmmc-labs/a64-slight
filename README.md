@@ -113,8 +113,9 @@ settles.
 
 ## License
 
-Copyright (c) 2026 Stevan Little. Released under the MIT License; the
-text is in [`LICENSE`](LICENSE).
+Copyright (c) 2026 Stevan Little. Released under the MIT No Attribution
+License (MIT-0), so neither copies of it nor the programs it compiles
+need carry the notice; the text is in [`LICENSE`](LICENSE).
 
 Two parts come from elsewhere, under their own licences:
 `t/data/json-suite/` is JSONTestSuite's parsing tests (MIT, Nicolas
