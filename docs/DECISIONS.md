@@ -4306,3 +4306,51 @@ airline asked for, after strings, joins and numbers.)*
   every step, its entries, their order and their hash from
   `t/models/map.py`, a Python dict with slight's `hash` and generator
   in Python, the order worked out from the hashes.
+
+**D224. Rust, with tokio, as the actor programs' floor.** *(Stevan, Oct
+2026: "Yes, let's write it up", to Claude's answer to "would it be
+useful to add a Rust benchmark with tokio? Or Scala with Akka? Or Swift
+actors?")* `bench/Cargo.toml`, `bench/rt.rs`, `bench/NAME/NAME.rs`.
+
+- **Why:** D194 left Rust out as being about C. It is, for the
+  sequential programs, which C already floors; but the actor programs
+  had no floor, only peers (Erlang, the same model) and Go. tokio is
+  about as fast as tasks get, and its tasks are stackless, a waiting
+  one only its future's state: the nearest thing to a slight process
+  waiting in `recv` with nothing on its stack. So `spawn` and
+  `idle-memory` against it show what slight's design gets close to.
+- **Where:** `ping-pong`, `thread-ring`, `fan-in`, `spawn`,
+  `idle-memory` and `parallel-fib`, and `startup`, which `idle-memory`'s
+  bytes a process needs. None of the sequential ones.
+- **A floor, not a peer:** tokio doesn't preempt (a task runs till it
+  waits), has no heap per task, and moves a message, where slight copies
+  it. Erlang stays the comparison with the same model.
+- **One core and every core,** as Go and Erlang: `rust`, tokio's
+  current-thread runtime, every task on the thread that runs `main`;
+  and `rust-mc`, its multi-thread one, a worker per core, as
+  `#[tokio::main]` makes it. `bench/rt.rs` picks one, by `BENCH_MC`,
+  which the harness sets for `rust-mc`. A multi-thread runtime with one
+  worker isn't one core: `main`'s future runs on a thread of its own,
+  so every message to it crosses threads.
+- **A mailbox is an unbounded channel** (`tokio::sync::mpsc`), as
+  slight's and Erlang's are: a send never waits. So `fan-in`'s senders,
+  as slight's and Erlang's (D201), are never slowed, and its messages
+  pile up in the receiver's; Go's channel, which holds 1,024, is the
+  odd one out. `idle-memory`'s waiting tasks each hold a channel of
+  their own, as a process holds its mailbox, not a `oneshot`, which
+  would leave out what a mailbox costs.
+- **Built** by cargo, one package for every program (`bench/Cargo.toml`,
+  each a `[[bin]]` by its directory, and `rt.rs` its library), with
+  `--locked`, so tokio is the version `bench/Cargo.lock` says; the first
+  build fetches and compiles tokio, which that build's time includes.
+  The harness gives tokio's version with rustc's.
+- **Rejected:** Scala with Akka, on the JVM, whose warming up D194 left
+  Java out for; Akka has been under the Business Source License since
+  2022 (Apache Pekko is its open fork); and its model, actors with
+  mailboxes, is what Erlang already covers, more faithfully (preemption,
+  a heap per process). Swift's actors, which aren't processes with
+  mailboxes: an actor is an object whose async methods run one at a
+  time on a shared pool, with nothing like `recv`, so `ping-pong` would
+  be method calls, and `thread-ring` and `fan-in` something else again
+  (D194's "doing the same work"); and its pool has a thread per core,
+  with no ordinary way to one.
