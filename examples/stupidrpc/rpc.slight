@@ -1,0 +1,129 @@
+; A sketch of stupidrpc in slight: a feasibility check, not a library.
+;
+; The wire is stupidrpc's: a JSON array a line,
+;     ["CALL", id, name, args...]  ["NEXT", id, v]  ["DONE", id, v]
+;     ["FAIL", id, e]              ["STOP", id]
+; CALL and STOP go from the caller to the callee, NEXT, DONE and FAIL
+; back, so an id need only be unique among the calls one end makes.
+;
+; One process, the nexus, owns the connection. Its state:
+;   c        the connection
+;   prefix   for the ids of calls made from here
+;   seq      the number of the last one
+;   mine     ((id to) ...): calls made from here, and who waits for each
+;   theirs   ((id pid) ...): calls made from there, and the process
+;            running each
+;   handlers ((name f) ...): f takes ctx and the call's arguments as a
+;            list; ctx is (c id nexus)
+
+(defun rpc/write (c msg) (send c (list :write (json/print msg) \n)))
+
+(defun rpc/without (k table) (remove (lambda (e) (eq? (car e) k)) table))
+
+(defun rpc/key-of (v table)
+    (match (filter (lambda (e) (eq? (car (cdr e)) v)) table)
+        (((k _) & _) k)
+        (()          :not-found)))
+
+(defun rpc/tell (id msg mine)
+    (match (lookup id mine)
+        (:not-found ())
+        (to (send to msg))))
+
+; connect's expression: (connect :tcp "host:port" (rpc/nexus handlers "a:"))
+(defun rpc/nexus (handlers prefix)
+    (recv
+        ((:open c) (send c (list :read :json)) (rpc/loop c prefix 0 () () handlers))))
+
+; A listener's: each connection gets a nexus of its own.
+(defun rpc/listen (handlers prefix)
+    (recv
+        ((:open l port)  (rpc/listen handlers prefix))
+        ((:accept l c)   (connect c (rpc/nexus handlers prefix)) (rpc/listen handlers prefix))))
+
+(defun rpc/loop (c prefix seq mine theirs handlers)
+    (recv
+        ; from the other end
+        ((:json _ ("CALL" id name & args))
+            (match (lookup name handlers)
+                (:not-found
+                    (rpc/write c (list "FAIL" id (str "CALL " name " unsupported by this endpoint")))
+                    (rpc/loop c prefix seq mine theirs handlers))
+                (f
+                    (let n $$)
+                    (let p (fork (rpc/run c id n f args)))
+                    (monitor p)
+                    (rpc/loop c prefix seq mine (assoc id p theirs) handlers))))
+        ((:json _ ("STOP" id))
+            (match (lookup id theirs)
+                (:not-found (rpc/loop c prefix seq mine theirs handlers))
+                (p (kill p) (rpc/loop c prefix seq mine (rpc/without id theirs) handlers))))
+        ((:json _ ("NEXT" id v))
+            (rpc/tell id (list :rpc/next v) mine)
+            (rpc/loop c prefix seq mine theirs handlers))
+        ((:json _ ("DONE" id v))
+            (rpc/tell id (list :rpc/done v) mine)
+            (rpc/loop c prefix seq (rpc/without id mine) theirs handlers))
+        ((:json _ ("FAIL" id e))
+            (rpc/tell id (list :rpc/fail e) mine)
+            (rpc/loop c prefix seq (rpc/without id mine) theirs handlers))
+        ((:json _ _)
+            (rpc/loop c prefix seq mine theirs handlers))
+        ; a handler ended: it wrote its DONE itself, so only a failure is
+        ; left to say, unless the call was stopped, when nothing is
+        ((:exit p result)
+            (let id (rpc/key-of p theirs))
+            (match (list id result)
+                ((:not-found _) ())
+                ((_ (:ok _))    ())
+                ((_ (:error r)) (rpc/write c (list "FAIL" id (str r)))))
+            (rpc/loop c prefix seq mine (rpc/without id theirs) handlers))
+        ; from processes here
+        ((:call name args to)
+            (let id (str prefix (+ seq 1)))
+            (rpc/write c (cons "CALL" (cons id (cons name args))))
+            (rpc/loop c prefix (+ seq 1) (assoc id to mine) theirs handlers))
+        ((:stop to)
+            (let id (rpc/key-of to mine))
+            (when (not (eq? id :not-found)) (rpc/write c (list "STOP" id)))
+            (rpc/loop c prefix seq (rpc/without id mine) theirs handlers))
+        ((:eof _)
+            (map (lambda (e) (send (car (cdr e)) (list :rpc/fail "disconnected"))) mine)
+            (map (lambda (e) (kill (car (cdr e)))) theirs)
+            (disconnect c))))
+
+; A handler's process: what f gives is the DONE. json/print is done here,
+; so a value JSON can't hold faults the handler, and so is a FAIL, not a
+; fault in the nexus.
+(defun rpc/run (c id n f args)
+    (rpc/write c (list "DONE" id (f (list c id n) args))))
+
+; For a handler that streams.
+(defun rpc/next (ctx v)
+    (match ctx ((c id _) (rpc/write c (list "NEXT" id v)))))
+
+; The nexus a handler was called by, to call the other end back.
+(defun rpc/nexus-of (ctx) (car (cdr (cdr ctx))))
+
+; (:ok v) or (:error e); NEXTs are dropped, as SimpleResultReceiver does.
+(defun rpc/call (n name args)
+    (match (join (fork (rpc/await n name args)))
+        ((:ok r)    r)
+        ((:error r) (list :error r))))
+
+(defun rpc/await (n name args)
+    (send n (list :call name args $$))
+    (monitor n)
+    (rpc/awaiting))
+
+(defun rpc/awaiting ()
+    (recv
+        ((:rpc/next _)    (rpc/awaiting))
+        ((:rpc/done v)    (list :ok v))
+        ((:rpc/fail e)    (list :error e))
+        ((:exit _ r)      (list :error (list :nexus-ended r)))))
+
+; Streams: to hears (:rpc/next v) ..., then (:rpc/done v) or (:rpc/fail e);
+; (rpc/stop n to) ends the call early, and to hears nothing more of it.
+(defun rpc/iter (n name args to) (send n (list :call name args to)))
+(defun rpc/stop (n to) (send n (list :stop to)))

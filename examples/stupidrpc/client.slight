@@ -1,0 +1,41 @@
+; The other end: connects to @ARGV's port, calls the server, and serves
+; "mul", which the server calls back.
+(@include "rpc.slight")
+
+(let handlers (list
+    (list "mul" (lambda (ctx args) (* (car args) (car (cdr args)))))))
+
+; a stream's consumer: stops the call after k values
+(defun consume (n k got)
+    (recv
+        ((:rpc/next v)
+            (cond
+                ((== (length got) (- k 1)) (rpc/stop n $$) (sleep 300) (list :stopped (reverse (cons v got))))
+                (#true (consume n k (cons v got)))))
+        ((:rpc/done v) (list :done (reverse got) v))
+        ((:rpc/fail e) (list :fail (reverse got) e))))
+
+(defun collect (got)
+    (recv
+        ((:rpc/next v) (collect (cons v got)))
+        ((:rpc/done v) (list :done (reverse got) v))
+        ((:rpc/fail e) (list :fail (reverse got) e))))
+
+(let port (car @ARGV))
+(let n (connect :tcp (str "localhost:" port) (rpc/nexus handlers "client:")))
+
+(pprint (rpc/call n "basic" (list "foo" 1 2.5 #true :null (list 1 2))))
+(pprint (rpc/call n "add" (list 1 2 3 4611686018427387900)))
+(pprint (rpc/call n "generate" (list "a" "b" "c")))
+(pprint (rpc/call n "fail" ()))
+(pprint (rpc/call n "symbol" ()))
+(pprint (rpc/call n "nope" ()))
+(pprint (rpc/call n "square-via-you" (list 12)))
+(let me $$)
+(pprint (join (fork (do (rpc/iter n "generate" (list 1 2 3) $$) (collect ())))))
+(pprint (join (fork (do (rpc/iter n "count" (list 1000) $$) (consume n 3 ())))))
+; many calls in flight at once, answered in any order
+(pprint (map (lambda (p) (join p))
+    (map (lambda (i) (fork (rpc/call n "add" (list i i)))) (range 0 5))))
+(disconnect n)
+(kill n)

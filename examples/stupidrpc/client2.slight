@@ -1,0 +1,16 @@
+(@include "rpc.slight")
+
+(defun collect (got)
+    (recv
+        ((:rpc/next v) (collect (cons v got)))
+        ((:rpc/done v) (list :done (reverse got) v))
+        ((:rpc/fail e) (list :fail (reverse got) e))))
+
+(let n (connect :tcp (str "localhost:" (car @ARGV)) (rpc/nexus () "sl:")))
+(pprint (rpc/call n "echo" (list "a" 4611686018427387903 1.0 (list :object (list "k" :null)))))
+(pprint (join (fork (do (rpc/iter n "generate" (list 1 2 3) $$) (collect ())))))
+(pprint (rpc/call n "throwError" ()))
+(pprint (rpc/call n "rejectNothing" ()))
+(pprint (rpc/call n "big" ()))
+(pprint (rpc/call n "missing" ()))
+(kill n)

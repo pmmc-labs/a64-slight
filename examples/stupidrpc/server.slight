@@ -1,0 +1,23 @@
+; One end: listens on @ARGV's port, serves these calls.
+(@include "rpc.slight")
+
+(defun counting (ctx i n)
+    (cond
+        ((== i n) "counted")
+        (#true (rpc/next ctx i) (sleep 50) (counting ctx (+ i 1) n))))
+
+(let handlers (list
+    (list "basic"    (lambda (ctx args) args))
+    (list "add"      (lambda (ctx args) (sum args)))
+    (list "generate" (lambda (ctx args) (map (lambda (a) (rpc/next ctx a)) args) (car (reverse args))))
+    (list "fail"     (lambda (ctx args) (raise (list :no "reason"))))
+    (list "symbol"   (lambda (ctx args) :oops))
+    (list "count"    (lambda (ctx args) (counting ctx 0 (car args))))
+    ; calls the caller back while handling: the protocol is symmetric
+    (list "square-via-you" (lambda (ctx args)
+        (match (rpc/call (rpc/nexus-of ctx) "mul" (list (car args) (car args)))
+            ((:ok v)    (list "you said" v))
+            ((:error e) (raise e)))))))
+
+(let port (str->int (car @ARGV)))
+(connect :tcp/listen port (rpc/listen handlers "server:"))
