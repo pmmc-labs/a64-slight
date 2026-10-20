@@ -110,3 +110,14 @@ settles.
   later (other targets, multiple cores, WebAssembly).
 - [`CLAUDE.md`](CLAUDE.md): working notes for development: toolchain,
   layout, commands and conventions.
+
+## License
+
+Copyright (c) 2026 Stevan Little. Released under the MIT License; the
+text is in [`LICENSE`](LICENSE).
+
+Two parts come from elsewhere, under their own licences:
+`t/data/json-suite/` is JSONTestSuite's parsing tests (MIT, Nicolas
+Seriot; its `LICENSE` is beside them), and `runtime/unicode.c` is made
+from the Unicode Character Database, under the Unicode License v3
+(<https://www.unicode.org/license.txt>).
