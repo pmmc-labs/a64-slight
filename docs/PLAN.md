@@ -619,7 +619,8 @@ them:
 ### Benchmarks (phases 1 to 3 done, Oct 2026)
 
 slight against C, Go, Erlang, Node, Perl and Python (D194,
-`docs/BENCHMARKS.md`, `make bench`), and Chez Scheme (D201).
+`docs/BENCHMARKS.md`, `make bench`), Chez Scheme (D201), and Rust with
+tokio in the actor programs, their floor (D224).
 
 - **Phase 1:** `fib`, `binary-trees`, `n-body`, `ping-pong`,
   `thread-ring`, `spawn`, `idle-memory` and `parallel-fib`, on the cloud

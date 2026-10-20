@@ -12,7 +12,8 @@ A full run takes about an hour, mostly Perl and Python. Languages whose
 tools aren't installed are left out, and said to be. On a Mac, `brew
 install go erlang chezscheme`; Node, Perl and Python are there already
 (Node for the compiler, the others with Xcode's tools). On Debian or
-Ubuntu, `apt-get install chezscheme`.
+Ubuntu, `apt-get install chezscheme`. Rust needs cargo and rustc (from
+rustup), and its first build fetches tokio from crates.io.
 
 ## What's measured
 
@@ -26,7 +27,8 @@ Three questions, which need different programs:
 2. **The actor runtime:** what a message, a switch between processes, a
    process started, and a process waiting cost. Against Erlang, the same
    model (per-process heaps, copied messages, preemption by reductions),
-   and Go, goroutines and channels.
+   and Go, goroutines and channels; and Rust with tokio, whose tasks are
+   stackless, the floor, as C is for the sequential programs (D224).
 3. **slight against itself, over time:** later, with the examples
    (boids), `html->text`, JSON and HTTP: comparing those across
    languages would mostly compare libraries.
@@ -82,7 +84,8 @@ itself (or, for `n-body`, against C's).
   times to one, which sums them: many senders, one mailbox. Go's channel
   holds 1,024 (unbuffered, every message is a switch, 4.7 times slower;
   from 100 up the size makes no difference); Erlang's receiver keeps its
-  queue off its heap, as `spawn`'s does.
+  queue off its heap, as `spawn`'s does. Rust's mailbox is unbounded, as
+  slight's and Erlang's are, so it doesn't slow its senders either.
 - **`spawn 1000000`:** processes started one after another, each sending
   its number back and ending.
 - **`idle-memory 1000000`:** a million processes all waiting for a
@@ -93,7 +96,10 @@ itself (or, for `n-body`, against C's).
   than one core can share.
 
 The sequential ones are in all eight languages, the actor ones in slight,
-Go and Erlang. Each is written the way its language is usually written,
+Go, Erlang and Rust (D224), and `startup` in all nine. Rust's are on
+tokio, each process a task, its mailbox an unbounded channel
+(`tokio::sync::mpsc`); a task waiting in `idle-memory` holds a channel
+of its own, as a process holds its mailbox. Each is written the way its language is usually written,
 and does the same work: the same algorithm, the same output. slight's
 bend to slight (D84): nothing was added to the language for them, and
 the Benchmarks Game programs that need what it hasn't got (arrays that
@@ -102,7 +108,9 @@ change, hash tables, bignums, regular expressions) aren't here.
 ## How it's measured
 
 - Each program is built once (slight's for the machine's own target,
-  Chez's with `compile-program`, so its runs don't include compiling),
+  Chez's with `compile-program`, so its runs don't include compiling,
+  Rust's by cargo, `--release --locked`, one package for them all, so
+  the first one's build includes tokio's),
   run once to check it, then timed 5 times; the programs take turns, so
   the machine's drift falls on all of them alike. One that takes long
   gets fewer runs, never under 3. The summary gives the median, the
@@ -110,10 +118,13 @@ change, hash tables, bignums, regular expressions) aren't here.
 - Time, CPU and memory come from `wait4`, in `bench/rusage.c`, a small
   process that starts each program: on Linux a process forked from
   Python starts with Python's memory counted in its peak.
-- **Cores:** slight runs every process on one core. Go and Erlang run on
-  one core too (`GOMAXPROCS=1`, `+S 1:1`), the fair comparison, and again
-  with their defaults, every core (`go-mc`, `erlang-mc`), to see what
-  that gains. Node's collector has threads of its own either way.
+- **Cores:** slight runs every process on one core. Go, Erlang and Rust
+  run on one core too (`GOMAXPROCS=1`, `+S 1:1`, tokio's current-thread
+  runtime), the fair comparison, and again with their defaults, every
+  core (`go-mc`, `erlang-mc`, `rust-mc`, tokio's multi-thread runtime, as
+  `#[tokio::main]` makes it), to see what that gains. `bench/rt.rs`
+  picks Rust's runtime, by `BENCH_MC`, which the harness sets for
+  `rust-mc`. Node's collector has threads of its own either way.
 - CPU time over wall time shows more than one core at work. Erlang's
   schedulers spin a while before they sleep, so its CPU time overstates
   its work.
