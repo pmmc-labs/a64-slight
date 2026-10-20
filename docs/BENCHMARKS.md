@@ -142,6 +142,27 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### Rust on the cloud machine: not a floor after all (D224)
+
+`bench/results/2026-10-20-0926-linux-intel-xeon-processor-2-10ghz.md`:
+the actor programs in slight, Go and Rust (no Erlang there), 3 runs
+each. Rust was added as the floor; on one core it isn't one:
+
+- **slight is faster than tokio** at everything the runtime does:
+  `ping-pong` 1.8 times (210 ns a round trip, tokio 370), `thread-ring`
+  2.0, `spawn` 2.0, `idle-memory` 2.3. A waiting task with a mailbox
+  costs 1,040 bytes, a slight process 451 (Go's goroutine 2,800): the
+  task is small, but tokio's channel, with its fields padded to cache
+  lines and its first block of 32 slots, isn't.
+- **tokio wins** `fan-in` (0.81 of slight's time), where its queue
+  holds a message in about 10 bytes, slight's in 64 (98 MB at ten
+  million, slight's 640); and `parallel-fib` (0.38), which is LLVM's
+  `fib` against slight's.
+- **`rust-mc` is the slowest at all but `parallel-fib`** (0.11, 64 tasks
+  on 4 cores): `main`'s future runs on a thread of its own, outside the
+  workers (`#[tokio::main]`'s way), so each of `ping-pong`'s 2 million
+  round trips wakes a sleeping thread (78 s, 185 times slight).
+
 ### The airline at a small airline's size (D210)
 
 Not a benchmark of the others' kind, since it's only in slight:
