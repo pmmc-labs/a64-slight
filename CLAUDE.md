@@ -189,7 +189,7 @@ processes run in, and the run's seed recorded for a replay; golden test
 persistent hash trie of tuples in slight, `lib/map.slight`, with
 `tuple/insert` and `tuple/remove` for its nodes; golden tests 274 and
 275, from `t/models/map.py`. Calls between programs, and people (D225):
-`lib/rpc.slight`, stupidrpc (a friend's line protocol) finished in
+`lib/rpc.slight`, stupidrpc (Matt S Trout's line protocol) finished in
 s-expressions, `(call id name arg ...)`, `next`, `done`, `fail`, `stop`,
 `helo` and `barf`, typed at `nc` as readily as sent; handlers with typed
 parameters that `help` gives, each call in a process of its own,

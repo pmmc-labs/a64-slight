@@ -556,8 +556,8 @@ one conversation to the next (D191, golden test 237; done), and other
 agents asked as tools, `agent/ask` (D192, golden test 238; done), and
 a fetched page's links kept, and Escape in the chat stopping a command
 (D193, golden tests 233 and 235; done); and programs, and people,
-calling each other between machines: `lib/rpc.slight`, stupidrpc
-finished in s-expressions (D225, golden tests 277–279; done), and a
+calling each other between machines: `lib/rpc.slight`, Matt S
+Trout's stupidrpc finished in s-expressions (D225, golden tests 277–279; done), and a
 listener at an address of its own, `127.0.0.1` say, for it (D226,
 golden test 276; done). Next, to settle with the user: offering an
 agent's tools over `rpc`, and to whom a remote call's `approve` goes;

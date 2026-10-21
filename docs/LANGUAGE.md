@@ -2022,9 +2022,9 @@ else.
 ### (@include :rpc)
 
 `lib/rpc.slight`: calls between slight programs, and people, over a
-connection (D225). The protocol is stupidrpc's, finished, in
-s-expressions, so a person can take part by typing the messages, with
-`nc`.
+connection (D225). The protocol is Matt S Trout's stupidrpc, finished,
+in s-expressions, so a person can take part by typing the messages,
+with `nc`.
 
     (@include :rpc)
 

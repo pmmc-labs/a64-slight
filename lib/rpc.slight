@@ -10,8 +10,8 @@
 ;     (match (rpc/connect "localhost:7317" ())
 ;         ((:ok conn) (rpc/call conn "add" (list 2 3))))     ; (:ok 5)
 ;
-; The protocol is stupidrpc's, finished, in s-expressions, a message a
-; datum:
+; The protocol is Matt S Trout's stupidrpc, finished, in s-expressions,
+; a message a datum:
 ;
 ;     (call id name arg ...)   (next id v)    (done id v)   (fail id reason)
 ;     (stop id)                (helo rpc 1)   (barf reason)

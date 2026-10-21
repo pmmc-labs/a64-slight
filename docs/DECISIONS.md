@@ -4367,7 +4367,7 @@ actors?")* `bench/Cargo.toml`, `bench/rt.rs`, `bench/NAME/NAME.rs`.
   Rust is usually written.
 
 **D225. `rpc`: stupidrpc, finished, in s-expressions.** *(Stevan, Oct
-2026: asked whether stupidrpc, a friend's protocol, would do to connect
+2026: asked whether stupidrpc, Matt S Trout's protocol, would do to connect
 two slight programs, and whether people could use it too, "as kind of a
 REPL", to share the tools agents use; then, to Claude's proposal:
 s-expressions, not JSON; "always require IDs, we can always hide this
@@ -4376,8 +4376,9 @@ where we can, but strings are fine too"; a bind address (D226), Unix
 sockets later; and "rpc" as the name.)* `lib/rpc.slight`, opt-in,
 `(@include :rpc)`.
 
-- **Where it comes from:** stupidrpc (github.com/mst-ripples/stupidrpc),
-  a line protocol after IRC's, meant for machines and people alike: a
+- **Where it comes from:** stupidrpc, by Matt S Trout (mst, of Perl's
+  community; github.com/mst-ripples/stupidrpc), a line protocol after
+  IRC's, meant for machines and people alike: a
   JavaScript `Nexus` speaking `CALL`, `NEXT`, `DONE`, `FAIL` and `STOP`
   as JSON arrays, a line each, and notes for more (`HELO`/`EHLO`,
   `cast`, `barf`, subscriptions, interception, calls announced). Not

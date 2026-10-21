@@ -483,8 +483,8 @@ another fetch to ask about (D205). A
 command ends with the process that ran it, so a call that's killed takes
 its command with it, which is how Escape in the chat stops one (D193).
 
-**Calls between programs:** `lib/rpc.slight` (D225) is stupidrpc, a
-friend of Stevan's line protocol, finished, in s-expressions: `(call id
+**Calls between programs:** `lib/rpc.slight` (D225) is Matt S Trout's
+line protocol, stupidrpc, finished, in s-expressions: `(call id
 name arg ...)`, `(next id v)`, `(done id v)`, `(fail id reason)`,
 `(stop id)`, `(helo rpc 1)` and `(barf reason)`, a datum each, read with
 `(:read :sexp)` and written with `sexp/print`, so a person can type them
