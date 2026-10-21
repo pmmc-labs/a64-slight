@@ -280,18 +280,23 @@ static int take_answer(rt_lookup_t *l, const unsigned char *m, size_t len, uint3
     return next_name(l);
 }
 
-int rt_lookup_begin(rt_lookup_t **out, const char *host, uint32_t *addr) {
+int rt_lookup_local(const char *host, uint32_t *addr) {
     struct in_addr in;
-    *out = NULL;
     if (inet_pton(AF_INET, host, &in) == 1) {
         *addr = in.s_addr;
-        return RT_LOOKUP_DONE;
+        return 1;
     }
-    if (in_hosts(host, addr)) return RT_LOOKUP_DONE;
+    if (in_hosts(host, addr)) return 1;
     if (strcasecmp(host, "localhost") == 0) {  // as RFC 6761 has it, if the hosts file doesn't say
         *addr = htonl(INADDR_LOOPBACK);
-        return RT_LOOKUP_DONE;
+        return 1;
     }
+    return 0;
+}
+
+int rt_lookup_begin(rt_lookup_t **out, const char *host, uint32_t *addr) {
+    *out = NULL;
+    if (rt_lookup_local(host, addr)) return RT_LOOKUP_DONE;
     if (strlen(host) >= MAX_NAME - 1) return RT_LOOKUP_NOTFOUND;
     rt_lookup_t *l = rt_must(calloc(1, sizeof *l));
     l->fd   = -1;

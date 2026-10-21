@@ -251,7 +251,7 @@
 #define RT_FS_WRITE          1    // creating it, or emptying it
 #define RT_FS_APPEND         2    // creating it
 #define RT_TCP_CONNECT       0    // to "host:port"
-#define RT_TCP_LISTEN        1    // on a port, 0 for one the system picks
+#define RT_TCP_LISTEN        1    // on a port (0 for one the system picks), or "host:port"
 
 // What rt_compare is asked.
 #define RT_CMP_EQ            0
@@ -479,8 +479,8 @@ rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, c
                          rt_value_t path, uint64_t mode) RT_ASM(rt_connect_fs);
 
 // Sockets (process.c). rt_connect_tcp forks, and connects to "host:port"
-// (RT_TCP_CONNECT) or listens on a port (RT_TCP_LISTEN) on a device the
-// new process owns. rt_connect_device forks, and hands the new process
+// (RT_TCP_CONNECT) or listens on a port, or at "host:port" (RT_TCP_LISTEN),
+// on a device the new process owns. rt_connect_device forks, and hands the new process
 // the device dev.
 rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                           rt_value_t where, uint64_t mode) RT_ASM(rt_connect_tcp);
@@ -883,7 +883,9 @@ int  rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *c
 // rt_lookup_timeout ms have passed since the last RT_LOOKUP_ASKED, calls
 // rt_lookup_ready: RT_LOOKUP_WAIT to wait on, RT_LOOKUP_ASKED, DONE,
 // NOTFOUND, or RT_LOOKUP_TIMEOUT, no server answered. rt_lookup_free when
-// it's done, or no longer wanted.
+// it's done, or no longer wanted. rt_lookup_local gives 1, with *addr, for
+// an address, a name in the hosts file, or localhost: those that need no
+// name server; otherwise 0.
 #define RT_LOOKUP_WAIT     0
 #define RT_LOOKUP_ASKED    1
 #define RT_LOOKUP_DONE     2
@@ -893,6 +895,7 @@ int  rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *c
 typedef struct rt_lookup rt_lookup_t;
 
 int      rt_lookup_begin(rt_lookup_t **out, const char *host, uint32_t *addr);
+int      rt_lookup_local(const char *host, uint32_t *addr);
 int      rt_lookup_fd(const rt_lookup_t *l, int *write);
 uint64_t rt_lookup_timeout(const rt_lookup_t *l);
 int      rt_lookup_ready(rt_lookup_t *l, int timed_out, uint32_t *addr);

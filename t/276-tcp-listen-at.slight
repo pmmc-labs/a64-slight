@@ -1,0 +1,62 @@
+; env: SLIGHT_HOSTS=t/data/hosts
+; connect :tcp/listen takes "host:port" as well as a port (D226), and
+; listens at that address alone. The host is an address, a name the hosts
+; file has, or localhost, but never one a name server is asked about,
+; since it must be this machine's. A listener's errors name the address
+; it was given.
+
+(defun never ()
+    (recv
+        ((:open c) (pprint :not-reached) ())))
+
+(defun echo ()
+    (recv
+        ((:open c)   (echo))
+        ((:line c s) (send c (list :write "echo: " s \n)) (echo))
+        ((:eof c)    (disconnect c))))
+
+(defun talker ()
+    (recv
+        ((:open c)   (send c (list :write "hi" \n)) (talker))
+        ((:line c s) (disconnect c) s)))
+
+; Listens at where, has a client connect to it at to-host and say hi,
+; and gives what came back.
+(defun listen-at (where to-host)
+    (join (connect :tcp/listen where (listening to-host))))
+
+(defun listening (to-host)
+    (recv
+        ((:open l port)
+            (let me $$)
+            (fork (send me (list :client (join (connect :tcp (str to-host ":" port) (talker))))))
+            (serving l))))
+
+(defun serving (l)
+    (recv
+        ((:accept _ conn) (connect conn (echo)) (serving l))
+        ((:client r)      (disconnect l) r)))
+
+(pprint (listen-at "127.0.0.1:0" "localhost"))
+(pprint (listen-at "localhost:0" "127.0.0.1"))
+(pprint (listen-at "alias.test:0" "127.0.0.1"))
+(pprint (listen-at "0.0.0.0:0" "127.0.0.1"))
+
+; an address that isn't this machine's; names that aren't in the hosts
+; file, which aren't looked up; one that's there for IPv6 alone; no port;
+; and a port too big
+(pprint (join (connect :tcp/listen "8.8.8.8:0" (never))))
+(pprint (join (connect :tcp/listen "nowhere.invalid:0" (never))))
+(pprint (join (connect :tcp/listen "ip6only.test:0" (never))))
+(pprint (join (connect :tcp/listen "127.0.0.1" (never))))
+(pprint (join (connect :tcp/listen "127.0.0.1:65536" (never))))
+
+; an address that's taken: the error names it as it was given
+(defun taken ()
+    (recv
+        ((:open l port)
+            (let where (str "127.0.0.1:" port))
+            (match (join (connect :tcp/listen where (never)))
+                ((:error (name w)) (disconnect l) (list name (eq? w where)))))))
+
+(pprint (join (connect :tcp/listen "127.0.0.1:0" (taken))))

@@ -1,14 +1,14 @@
-; A port must be from 0 to 65535, and an address a string; connect can
-; only hand over an open device. A port that's taken, a connection that's
-; refused and an address that can't be found end the connected process
-; before it runs, with (:error (name where)). A listener takes nothing.
+; A port must be from 0 to 65535 (or "host:port", t/276), an address a
+; string; connect can only hand over an open device. A port that's taken,
+; a connection refused and an address that can't be found end the connected
+; process before it runs, with (:error (name where)). A listener takes nothing.
 
 (defun never ()
     (recv
         ((:open c) (pprint :not-reached) ())))
 
 (pprint (join (fork (connect :tcp/listen 70000 (never)))))
-(pprint (join (fork (connect :tcp/listen "80" (never)))))
+(pprint (join (fork (connect :tcp/listen :eighty (never)))))
 (pprint (join (fork (connect :tcp 80 (never)))))
 (pprint (join (fork (connect 5 (never)))))
 (pprint (join (fork (connect $$ (never)))))
