@@ -1,0 +1,90 @@
+; lib/rpc.slight's messages as a person types them (D225): a raw client
+; sends lines to a server made with rpc/serve, and shows what it sends
+; (>) and each line that comes back (<). An id is any datum; a name and a
+; string argument can be bare words; help says what can be called; a call
+; can stream, and be stopped, after which its id can be used again; the
+; server can call the client back while it waits; what isn't a message is
+; barfed at, and messages about calls that aren't in flight are let be.
+; Comments, and a message over lines, are read as the compiler reads
+; them. A helo for another version ends the connection.
+
+(@include :rpc)
+
+(defun stuck () (recv (:never ())))
+
+(defun handlers ()
+    (list
+        (rpc/handler "add" "The sum of two integers."
+            (list (list "a" :integer "One") (list "b" :integer "The other"))
+            (lambda (a b) (+ a b)))
+        (rpc/handler "path" "Its argument, a string." (list (list "p" :string "A path"))
+            (lambda (p) p))
+        (rpc/handler "count" "0 to n - 1, a value at a time; then n."
+            (list (list "n" :integer "How many"))
+            (lambda (n) (map rpc/next (range 0 n)) n))
+        (rpc/handler "hold" "Says held, then waits for ever." ()
+            (lambda () (rpc/next :held) (join (fork (stuck)))))
+        (rpc/handler "ask" "Asks the caller to approve, and gives the answer." ()
+            (lambda () (rpc/call ^$$ "approve" (list "may I?"))))))
+
+; Each line to send, and how many lines to wait for before the next.
+(defun script ()
+    (list
+        (list "(helo rpc 1)" 0)
+        (list "(call 1 add 2 3)" 1)
+        (list "(call a1 add 2 x)" 1)
+        (list "(call 2 path notes.txt)" 1)
+        (list "(call 3 path \"my notes.txt\")" 1)
+        (list "(call 4 path 42)" 1)
+        (list "(call 5 nope)" 1)
+        (list "(call 6 add 1)" 1)
+        (list "(call \"7\" \"add\" 1 1)" 1)
+        (list "(call (8 x) add 1 1)" 1)
+        (list "(not a message)" 1)
+        (list "42" 1)
+        (list "(call 9)" 1)
+        (list "(call 10 count 2)" 3)
+        (list "(call 11 hold)" 1)
+        (list "(call 11 add 1 1)" 1)
+        (list "(stop 11)" 0)
+        (list "(call 11 add 1 1)" 1)
+        (list "(stop 99)" 0)
+        (list "(done 99 1)" 0)
+        (list "(barf (whatever))" 0)
+        (list "(call 12 ask)" 1)
+        (list "(done 1 #true)" 1)
+        (list "(call 13 ask)" 1)
+        (list "(fail 2 no)" 1)
+        (list "(call 14 help)" 1)
+        (list "; a comment, and a message over two lines\n(call 15\n    add 40 2)" 1)
+        (list "(helo rpc 2)" 2)))
+
+(defun client (script)
+    (recv
+        ((:open c) (client-wait c script 1))))
+
+; Waits for n lines, then sends the next line of the script.
+(defun client-wait (c script n)
+    (cond
+        ((> n 0)
+            (recv
+                ((:line _ s) (tty/write "< " s \n) (client-wait c script (- n 1)))
+                ((:eof _)    (tty/write "eof" \n) (disconnect c))))
+        (#true (client-send c script))))
+
+(defun client-send (c script)
+    (match script
+        (() (disconnect c))
+        (((text n) & rest)
+            (tty/write "> " text \n)
+            (send c (list :write text \n))
+            (client-wait c rest n))))
+
+(defun main (l)
+    (recv
+        ((:listening port)
+            (join (connect :tcp (str "127.0.0.1:" port) (client (script))))
+            (kill l)
+            :done)))
+
+(main (rpc/serve "127.0.0.1:0" (handlers)))

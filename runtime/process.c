@@ -1446,21 +1446,22 @@ static int idle(void) {
 // can keep a read waiting (a FIFO, a terminal) waits with the whole
 // runtime.
 //
-// A socket (connect :tcp "host:port" expr, connect :tcp/listen port expr)
-// is waited for in select(), with stdin and the next timer. Its host is
-// looked up first (dns.c): a name the hosts file doesn't have is asked of a
-// name server, over a socket of the lookup's own, waited for in select()
-// too. A connection sends (:open c) once it's connected, then reads as a
-// file does (but only while its owner waits for what it has, so a fast
-// sender is held back by TCP), and (:eof c) when the other end closes; it
-// can still be written to then. It takes
+// A socket (connect :tcp "host:port" expr, connect :tcp/listen port expr,
+// or connect :tcp/listen "host:port" expr) is waited for in select(), with
+// stdin and the next timer. Its host is looked up first (dns.c): a name the
+// hosts file doesn't have is asked of a name server, over a socket of the
+// lookup's own, waited for in select() too. A connection sends (:open c)
+// once it's connected, then reads as a file does (but only while its owner
+// waits for what it has, so a fast sender is held back by TCP), and (:eof
+// c) when the other end closes; it can still be written to then. It takes
 // (:write x ...) as a file does, but keeps what the socket can't take yet,
 // and writes it when it can; closing it waits for that, and until then it
-// keeps the program running. A listener sends (:open l port), port being
-// the one it got (0 lets the system pick), then (:accept l conn) for each
-// connection; conn reads nothing until (connect conn expr) hands it to a
-// process. An open socket counts as something that can still happen while
-// select() can wait on it (wants, below). IPv4 only, for now.
+// keeps the program running. A listener, on every interface or at the
+// address given (D226), sends (:open l port), port being the one it got (0
+// lets the system pick), then (:accept l conn) for each connection; conn
+// reads nothing until (connect conn expr) hands it to a process. An open
+// socket counts as something that can still happen while select() can wait
+// on it (wants, below). IPv4 only, for now.
 //
 // A command (connect :exec (list name arg ...) expr, D185) runs in a
 // process group of its own, its input and its output (stdout and stderr
@@ -2096,15 +2097,17 @@ static int setup(int fd) {
     return rt_io_setup(fd, 1);
 }
 
-static int tcp_listen(rt_proc_t *p, const char *site, int64_t port) {
+// Listens on port at addr (network order). where, "host:port", is what
+// the listener's errors name, or its port if where is NULL.
+static int tcp_listen(rt_proc_t *p, const char *site, uint32_t addr, int64_t port, const char *where, size_t len) {
     int fd = rt_io_socket(SOCK_STREAM);
     if (fd < 0) return errno;
     int got, err;
-    if ((err = setup(fd)) != 0 || (err = rt_io_listen(fd, (int)port, &got)) != 0) {
+    if ((err = setup(fd)) != 0 || (err = rt_io_listen(fd, addr, (int)port, &got)) != 0) {
         rt_io_close(fd);
         return err;
     }
-    rt_device_t *d = new_device(p, DEV_LISTEN, fd, site, NULL, 0);
+    rt_device_t *d = new_device(p, DEV_LISTEN, fd, site, where, len);
     d->port = got;
     tell_open(d);
     return 0;
@@ -2124,23 +2127,46 @@ static int open_connection(uint32_t addr, int64_t port, int *fd) {
     return err;
 }
 
-static void lookup_step(rt_device_t *d, int r, uint32_t addr);
-
-// Starts connecting to "host:port" (split at the last colon; the port is a
-// number). Even if it has connected already, (:open c) comes from the
-// event loop, so it always comes in the same order; and a host that has to
-// be asked about is looked up first, the device waiting for that. A host
-// of more than 255 bytes, longer than any name (253, dns.c), isn't found.
-static int tcp_connect(rt_proc_t *p, const char *site, const char *where, size_t len) {
-    char   host[256];
+// Splits "host:port" at the last colon, the port a number from 0 to
+// 65535: 0, with the host in host, or ERR_NOTFOUND. A host of more than
+// 255 bytes, longer than any name (253, dns.c), isn't found.
+static int split_where(const char *where, size_t len, char host[256], int64_t *port) {
     size_t colon = len;
     while (colon > 0 && where[colon - 1] != ':') colon--;
-    if (colon == 0 || colon == len || colon > sizeof host || memchr(where, '\0', len)) return ERR_NOTFOUND;
-    int64_t port = 0;
-    for (size_t i = colon; i < len && port <= 65535; i++) port = where[i] >= '0' && where[i] <= '9' ? port * 10 + where[i] - '0' : 65536;
-    if (port > 65535) return ERR_NOTFOUND;
+    if (colon == 0 || colon == len || colon > 256 || memchr(where, '\0', len)) return ERR_NOTFOUND;
+    int64_t n = 0;
+    for (size_t i = colon; i < len && n <= 65535; i++) n = where[i] >= '0' && where[i] <= '9' ? n * 10 + where[i] - '0' : 65536;
+    if (n > 65535) return ERR_NOTFOUND;
     memcpy(host, where, colon - 1);
     host[colon - 1] = '\0';
+    *port = n;
+    return 0;
+}
+
+// Listens on a port, on every interface; or at "host:port" (D226), the
+// host an address or a name the hosts file has, or localhost, but never
+// one a name server is asked about: what's listened at is this machine's.
+static int listen_at(rt_proc_t *p, const char *site, rt_value_t where) {
+    if (!rt_is_string(where)) return tcp_listen(p, site, htonl(INADDR_ANY), rt_int_value(where), NULL, 0);
+    const char *s   = rt_string_bytes(where);
+    size_t      len = rt_string_len(where);
+    char        host[256];
+    int64_t     port;
+    uint32_t    addr;
+    if (split_where(s, len, host, &port) != 0 || !rt_lookup_local(host, &addr)) return ERR_NOTFOUND;
+    return tcp_listen(p, site, addr, port, s, len);
+}
+
+static void lookup_step(rt_device_t *d, int r, uint32_t addr);
+
+// Starts connecting to "host:port". Even if it has connected already,
+// (:open c) comes from the event loop, so it always comes in the same
+// order; and a host that has to be asked about is looked up first, the
+// device waiting for that.
+static int tcp_connect(rt_proc_t *p, const char *site, const char *where, size_t len) {
+    char    host[256];
+    int64_t port;
+    if (split_where(where, len, host, &port) != 0) return ERR_NOTFOUND;
     rt_lookup_t *l;
     uint32_t     addr;
     int          fd, r = rt_lookup_begin(&l, host, &addr), err;
@@ -2182,7 +2208,7 @@ static void lookup_timed_out(rt_device_t *d, uint64_t seq) {
 
 rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                           rt_value_t where, uint64_t mode) {
-    if (mode == RT_TCP_LISTEN) {
+    if (mode == RT_TCP_LISTEN && !rt_is_string(where)) {
         int64_t port = rt_need_int(where, site);
         if (port < 0 || port > 65535) rt_fault(RT_FAULT_RANGE, where, site);
     } else if (!rt_is_string(where)) {
@@ -2190,7 +2216,7 @@ rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, 
     }
     rt_value_t pid = rt_fork(code, n, values, site);
     rt_proc_t *p   = procs[pid >> RT_PID_SHIFT].proc;
-    int        err = mode == RT_TCP_LISTEN ? tcp_listen(p, site, rt_int_value(where))
+    int        err = mode == RT_TCP_LISTEN ? listen_at(p, site, where)
                                            : tcp_connect(p, site, rt_string_bytes(where), rt_string_len(where));
     if (err) {
         _Alignas(16) rt_value_t cells[4];

@@ -1,0 +1,107 @@
+; lib/rpc.slight (D225): calls between the two ends of a connection,
+; both in this program, over TCP on 127.0.0.1. Answers; arguments checked
+; against the parameters, and a bare word taken for a string; failures;
+; help; a stream; a call back to the caller while it waits; a stream
+; stopped, and a call whose caller ends, the other end's process for each
+; killed; and the end of the connection, which fails the calls in flight
+; from here and stops those from there.
+
+(@include :rpc)
+
+(defun stuck () (recv (:never ())))
+
+; What the server offers. w hears (:running p) from each call to hold, p
+; being the process that runs it, which never ends of its own accord.
+(defun handlers (w)
+    (list
+        (rpc/handler "add" "The sum of two integers."
+            (list (list "a" :integer "One") (list "b" :integer "The other"))
+            (lambda (a b) (+ a b)))
+        (rpc/handler "echo" "Its argument." (list (list "x" :any "Anything"))
+            (lambda (x) x))
+        (rpc/handler "path" "Its argument, a string." (list (list "p" :string "A path"))
+            (lambda (p) (list p (str? p))))
+        (rpc/handler "count" "0 to n - 1, a value at a time; then n."
+            (list (list "n" :integer "How many"))
+            (lambda (n) (map rpc/next (range 0 n)) n))
+        (rpc/handler "boom" "Raises." () (lambda () (raise (list :boom "why"))))
+        (rpc/handler "square" "n * n, worked out by the caller."
+            (list (list "n" :number "n"))
+            (lambda (n) (rpc/call ^$$ :mul (list n n))))
+        (rpc/handler "hold" "Says held, then never ends." ()
+            (lambda () (send w (list :running $$)) (rpc/next :held) (join (fork (stuck)))))))
+
+; What the client offers, for square to call back.
+(defun mul ()
+    (rpc/handler "mul" "a * b" (list (list "a" :number "") (list "b" :number ""))
+        (lambda (a b) (* a b))))
+
+(defun values-of (acc)
+    (recv
+        ((:next _ v) (values-of (cons v acc)))
+        ((:done _ v) (list :done (reverse acc) v))
+        ((:fail _ r) (list :fail (reverse acc) r))))
+
+(defun main (l)
+    (recv
+        ((:listening port)
+            (match (rpc/connect (str "127.0.0.1:" port) (list (mul)))
+                ((:ok conn) (calls l port conn))))))
+
+(defun calls (l port conn)
+    (pprint (rpc/call conn "add" (list 2 3)))
+    (pprint (rpc/call conn :add (list 2 "x")))
+    (pprint (rpc/call conn "add" (list 2)))
+    (pprint (rpc/call conn "echo" (list (list 1 2.5 "s" #true (tuple 1 :a) :null ()))))
+    (pprint (rpc/call conn "path" (list "notes.txt")))
+    (pprint (rpc/call conn "path" (list :notes)))
+    (pprint (rpc/call conn "path" (list 42)))
+    (pprint (rpc/call conn :nope ()))
+    (pprint (rpc/call conn "boom" ()))
+    (pprint (rpc/call conn "square" (list 12)))
+    (pprint (map car (cadr (rpc/call conn "help" ()))))
+    (pprint (join (fork (do (rpc/stream conn "count" (list 3)) (values-of ())))))
+    (stopping l port conn))
+
+; A stream killed once it has said held: the other end is told to stop,
+; and kills the process running the call.
+(defun stopping (l port conn)
+    (let s (rpc/stream conn "hold" ()))
+    (recv
+        ((:running p)
+            (monitor p)
+            (recv
+                ((:next _ v)
+                    (kill s)
+                    (pprint (list :stream v))
+                    (recv ((:exit _ r) (pprint (list :stopped r)) (caller-ends l port conn))))))))
+
+; A call whose caller is killed is stopped too.
+(defun caller-ends (l port conn)
+    (let caller (fork (rpc/call conn "hold" ())))
+    (recv
+        ((:running p)
+            (monitor p)
+            (kill caller)
+            (recv ((:exit _ r) (pprint (list :caller-ended r)) (closing l port conn))))))
+
+; Closing the connection with a stream in flight: the stream fails, and
+; the other end, seeing the connection end, kills the call's process.
+(defun closing (l port conn)
+    (let s (rpc/stream conn "hold" ()))
+    (recv
+        ((:running p)
+            (monitor p)
+            (recv
+                ((:next _ v)
+                    (pprint (list :stream v))
+                    (rpc/close conn)
+                    (recv ((:fail _ r) (pprint (list :fail r))))
+                    (recv ((:exit _ r) (pprint (list :handler-ended r))))
+                    (pprint (rpc/call conn "add" (list 1 1)))
+                    (kill l)
+                    (match (rpc/connect (str "127.0.0.1:" port) ())
+                        ((:error (name _)) (pprint (list :error name))))
+                    :done)))))
+
+(main (rpc/serve "127.0.0.1:0" (handlers $$)))

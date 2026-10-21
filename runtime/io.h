@@ -54,7 +54,7 @@ int      rt_io_close(int fd);
 int     rt_io_socket(int type);
 int     rt_io_setup(int fd, int tcp);
 int     rt_io_connect(int fd, const struct sockaddr *a, socklen_t len);
-int     rt_io_listen(int fd, int port, int *got);   // bind, listen, and the port it got
+int     rt_io_listen(int fd, uint32_t addr, int port, int *got);   // bind, listen, and the port it got
 int     rt_io_accept(int fd, char *where, size_t size);   // and "address:port" of the peer
 int     rt_io_socket_error(int fd);                 // SO_ERROR, or errno if that can't be had
 ssize_t rt_io_send(int fd, const void *buf, size_t len);

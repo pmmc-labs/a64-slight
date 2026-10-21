@@ -1,0 +1,28 @@
+; rpc/exec (D225): a connection over a command's input and output. With
+; cat, what's sent comes back, so each call made here is also a call from
+; the other end, which a handler here answers, and that answer comes back
+; as the answer to the first. An id names a call among those one end
+; makes, and the verb says which way it goes, so the two calls with id 1
+; don't clash. And a command that isn't there.
+
+(@include :rpc)
+
+(defun values-of (acc)
+    (recv
+        ((:next _ v) (values-of (cons v acc)))
+        ((:done _ v) (list :done (reverse acc) v))
+        ((:fail _ r) (list :fail (reverse acc) r))))
+
+(let add (rpc/handler "add" "The sum of two integers."
+    (list (list "a" :integer "One") (list "b" :integer "The other"))
+    (lambda (a b) (+ a b))))
+(let count (rpc/handler "count" "0 to n - 1, a value at a time; then n."
+    (list (list "n" :integer "How many"))
+    (lambda (n) (map rpc/next (range 0 n)) n)))
+
+(match (rpc/exec (list "cat") (list add count))
+    ((:ok conn)
+        (pprint (rpc/call conn "add" (list 2 3)))
+        (pprint (join (fork (do (rpc/stream conn "count" (list 3)) (values-of ())))))
+        (rpc/close conn)))
+(pprint (rpc/exec (list "no-such-command-for-t279") ()))

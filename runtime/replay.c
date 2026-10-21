@@ -312,9 +312,10 @@ int rt_io_connect(int fd, const struct sockaddr *a, socklen_t len) {
     return (int)done(IO_CONNECT, connect(fd, a, len));
 }
 
-// Binds fd to port on every interface, and listens: 0, with the port it
-// got in *got (port 0 lets the system pick), or an errno.
-int rt_io_listen(int fd, int port, int *got) {
+// Binds fd to port at addr (network order; INADDR_ANY for every
+// interface), and listens: 0, with the port it got in *got (port 0 lets
+// the system pick), or an errno.
+int rt_io_listen(int fd, uint32_t addr, int port, int *got) {
     int32_t p = 0;
     if (mode == REPLAY) {
         int err = (int)next(IO_LISTEN, &p, sizeof p, NULL);
@@ -326,7 +327,7 @@ int rt_io_listen(int fd, int port, int *got) {
     struct sockaddr_in a = { 0 };
     a.sin_family      = AF_INET;
     a.sin_port        = htons((uint16_t)port);
-    a.sin_addr.s_addr = htonl(INADDR_ANY);
+    a.sin_addr.s_addr = addr;
     socklen_t alen    = sizeof a;
     if ((bind(fd, (struct sockaddr *)&a, sizeof a) < 0 && (err = errno))
         || (listen(fd, 128) < 0 && (err = errno))

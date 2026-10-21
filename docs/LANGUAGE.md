@@ -873,6 +873,7 @@ still open in it included (D205).
 
     (connect :tcp "host:port" expr)
     (connect :tcp/listen port expr)
+    (connect :tcp/listen "host:port" expr)
 
 TCP, IPv4 only, and about 1,000 sockets at once (the limit of
 `select()`). The port is a number. Neither connecting nor looking up the
@@ -889,9 +890,15 @@ It can still be written to after that. It takes `(:write x ...)` as a
 file does, and keeps what the socket can't take yet, so `send` still
 never blocks. Closing it waits until that's written.
 
-A listener (on all interfaces) first sends `(:open l port)`, `port`
-being the one it got: port 0 lets the system pick. Then
-`(:accept l conn)` for each connection. `conn` reads nothing until
+A listener on a port listens on all interfaces; one at `"host:port"`
+listens at that address alone, so `"127.0.0.1:7317"` takes connections
+from this machine and no other (D226). The host there is an address, a
+name in the hosts file, or `localhost`, but never a name the name
+servers are asked about, since it must be this machine's: any other is
+`:enotfound`, and an address that isn't this machine's is
+`:eaddrnotavail`. A listener first sends `(:open l port)`, `port` being
+the one it got: port 0 lets the system pick. Then `(:accept l conn)`
+for each connection. `conn` reads nothing until
 `(connect conn expr)` hands it to a process of its own, which then hears
 `(:open conn)`.
 
@@ -900,7 +907,7 @@ argument, hands an open device to a new process in this way. Anything
 that isn't an open device faults (`:not-a-device`).
 
 A connection that fails ends its owner with `(:error (name "host:port"))`
-(a listener's, with its port): errno's names, such as `:econnrefused`,
+(a listener's, with its port, or the `"host:port"` it was given): errno's names, such as `:econnrefused`,
 `:econnreset`, `:epipe` and `:eaddrinuse`, and `:enotfound` for a host
 that can't be found, or `:etimedout` when no name server answered. Open
 sockets keep the program running, and so does a host being looked up.
@@ -2011,3 +2018,101 @@ else.
   it can't be started, such as `(:error (:enoent "ls"))`. There's no time
   limit: a command that doesn't end keeps it waiting. If the caller ends
   first, killed, say, the command is killed too (D193).
+
+### (@include :rpc)
+
+`lib/rpc.slight`: calls between slight programs, and people, over a
+connection (D225). The protocol is stupidrpc's, finished, in
+s-expressions, so a person can take part by typing the messages, with
+`nc`.
+
+    (@include :rpc)
+
+    (let add (rpc/handler "add" "The sum of two integers."
+        (list (list "a" :integer "One") (list "b" :integer "The other"))
+        (lambda (a b) (+ a b))))
+    (rpc/serve "127.0.0.1:7317" (list add))     ; the listener's pid
+
+    (match (rpc/connect "localhost:7317" ())
+        ((:ok conn) (rpc/call conn "add" (list 2 3))))     ; (:ok 5)
+
+The library keeps the ids: a program makes calls and answers them, and
+never sees a message. A connection is a process, `conn`, which owns the
+socket. Either end can call the other, whichever connected.
+
+- `(rpc/handler name description params f)` is something the other end
+  can call: `name` a string, `description` what it does, `params` a list
+  of `(name type description)`, at most 8, and `f` a function of the
+  arguments, in that order. `type` is `:string`, `:integer`, `:number`,
+  `:boolean` or `:any`, and a `:string` takes a bare word too, as its
+  name: `(read-file notes.txt)`. Each call runs `f` in a process of its
+  own, so calls run at once. What `f` gives is the answer; if it raises
+  or faults, the caller is told why. An answer that isn't data (a pid, a
+  function) faults the call.
+- `(rpc/next v)` sends `v` to the caller at once, from a handler that
+  streams; its answer comes after its values. Only from the call's own
+  process, whose parent (`^$$`) is the connection: so a handler calls its
+  caller back with `(rpc/call ^$$ name args)`.
+- `(rpc/serve where handlers)` listens at `where`, a port or
+  `"host:port"`, and gives the listener's pid, which `kill` stops. The
+  caller is sent `(:listening port)`, `port` being the one it got. Each
+  connection gets a process of its own, whose other end can call
+  `handlers`.
+- `(rpc/connect "host:port" handlers)` connects, and once it's open
+  gives `(:ok conn)`; or `(:error reason)`, the socket's, such as
+  `(:econnrefused "localhost:7317")`. The other end can call `handlers`.
+- `(rpc/exec cmd handlers)` is `rpc/connect` over a command's input and
+  output, `cmd` as `:exec` takes it: ssh, say, to a machine whose
+  program listens at `127.0.0.1`, `(list "ssh" "-q" "host" "nc"
+  "127.0.0.1" "7317")`. Its stderr comes with its stdout, so it mustn't
+  write anything else there.
+- `(rpc/call conn name args)` calls `name`, a string or a symbol, on the
+  other end with the list `args`, and waits for the answer: `(:ok v)`,
+  or `(:error reason)`. It waits in `join`, so it works anywhere, a
+  lambda or a handler included. A stream's values are dropped. `args`
+  that aren't data fault in the caller (`:not-sexp`).
+- `(rpc/stream conn name args)` makes the same call, and gives the
+  caller what comes as it comes: `(:next s v)` for each value, then
+  `(:done s v)` or `(:fail s reason)`. It gives `s`, the stream's pid,
+  at once. `(kill s)` stops the call: the other end is told, and kills
+  the process running it, and the caller hears nothing more. A call
+  whose caller ends, `rpc/call`'s included, is stopped the same way.
+- `(rpc/close conn)` closes the connection: calls in flight from here
+  fail with `:disconnected`, and those from the other end are stopped.
+  The other end hanging up does the same.
+
+The reasons a call fails, besides a handler's own: `(:no-such-call
+name)`; `(:arity name n)`, `n` being how many arguments it takes;
+`(:bad-arg name param type value)`; `:disconnected`; and the
+connection's own error, if it ended with one.
+
+A message is a datum, which may run over lines, and comments between
+them are skipped:
+
+    (call id name arg ...)    (next id v)    (done id v)    (fail id reason)
+    (stop id)                 (helo rpc 1)   (barf reason)
+
+`call` and `stop` go from the caller to the callee, and `next`, `done`
+and `fail` back, so an id need only be unique among the calls in flight
+that one end has made, and any datum will do. A call gets any number of
+`next`s, then one `done` or `fail`; after `stop` it gets nothing more.
+Each end says `(helo rpc 1)` first; a person needn't, and a `helo` for
+another protocol or version is barfed at, and the connection closed.
+`(call id help)`, which every connection answers, gives what can be
+called, `(name description params)` for each. Anything that isn't a
+message gets `(barf (:bad-message msg))`, and a `call` whose id is in
+use `(barf (:id-in-use id))`; a message about a call that isn't in
+flight is let be, since one can cross a `stop`. A person at `nc`:
+
+    (helo rpc 1)
+    (call 1 add 2 3)
+    (done 1 5)
+    (call 2 run "make test")
+    (call 1 approve "run: make test")       ; the program asks the person
+    (done 1 #true)
+    (done 2 "ok   000-int ...")
+
+A datum that can't be read, such as a stray `)`, ends the connection
+(`:bad-sexp`). There's no flow control: a stream's values are sent as
+fast as they're made. Nor any authentication: listen at `127.0.0.1`, and
+reach it from elsewhere over ssh.

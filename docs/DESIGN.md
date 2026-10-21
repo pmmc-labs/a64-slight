@@ -483,6 +483,23 @@ another fetch to ask about (D205). A
 command ends with the process that ran it, so a call that's killed takes
 its command with it, which is how Escape in the chat stops one (D193).
 
+**Calls between programs:** `lib/rpc.slight` (D225) is stupidrpc, a
+friend of Stevan's line protocol, finished, in s-expressions: `(call id
+name arg ...)`, `(next id v)`, `(done id v)`, `(fail id reason)`,
+`(stop id)`, `(helo rpc 1)` and `(barf reason)`, a datum each, read with
+`(:read :sexp)` and written with `sexp/print`, so a person can type them
+at `nc`, and a name or a string argument can be a bare word. The verb
+says which way a message goes, so an id is unique only among one end's
+calls in flight, and either end can call the other. A connection is a
+process that owns the socket; a call from the other end runs in a
+process of its own, which the connection monitors, so a fault or a
+`raise` is a `fail` and `stop` is `kill`; a call from here waits in a
+process of its own too, which the connection monitors, so a caller that
+ends stops its call. A handler has a name, a description and typed
+parameters, which `help` gives and the connection checks. No remote
+pids: another program is reached only by calls. Opt-in: `(@include
+:rpc)`.
+
 ### Strings
 
 Settled in D219, which replaced the byte builtins of step 5a and the
@@ -926,8 +943,10 @@ processes that allocate and then wait turn out to hold too much).
   what it has. One whose owner has its last message and isn't waiting,
   or that no process has been handed, can't do anything till a process
   runs, so when none can, that's a deadlock, not a wait.
-  `(connect :tcp/listen port expr)` listens on all interfaces; its first
-  message is `(:open l port)`, port being the one it got (0 lets the
+  `(connect :tcp/listen port expr)` listens on all interfaces, and
+  `(connect :tcp/listen "host:port" expr)` at that address alone, the
+  host an address, a name in the hosts file or `localhost`, never one a
+  name server is asked about (D226); its first message is `(:open l port)`, port being the one it got (0 lets the
   system pick, which tests use, with server and client in one program),
   then `(:accept l conn)` for each connection. `conn` belongs to the
   listener's owner and reads nothing till `(connect conn expr)` hands it to

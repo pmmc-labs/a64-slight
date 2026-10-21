@@ -1,0 +1,388 @@
+; rpc: calls between slight programs, and people, over a connection
+; (D225). Not part of the prelude, so a program that wants it says
+; (@include :rpc).
+;
+;     (let add (rpc/handler "add" "The sum of two integers."
+;         (list (list "a" :integer "One") (list "b" :integer "The other"))
+;         (lambda (a b) (+ a b))))
+;     (rpc/serve "127.0.0.1:7317" (list add))    ; the listener's pid
+;
+;     (match (rpc/connect "localhost:7317" ())
+;         ((:ok conn) (rpc/call conn "add" (list 2 3))))     ; (:ok 5)
+;
+; The protocol is stupidrpc's, finished, in s-expressions, a message a
+; datum:
+;
+;     (call id name arg ...)   (next id v)    (done id v)   (fail id reason)
+;     (stop id)                (helo rpc 1)   (barf reason)
+;
+; call and stop go from the caller to the callee, and next, done and fail
+; back, so the verb says which way a message goes, and an id need only be
+; unique among the calls one end has in flight. Either end can call the
+; other. Each end says (helo rpc 1) first. A name, and a string argument,
+; can be a bare word, so a person can type the messages, with nc: help
+; is a call that says what can be called.
+;
+; A connection is a process, which owns the socket. A call from the other
+; end runs in a process of its own, which the connection monitors; one
+; from here waits in a process of its own, which the connection monitors
+; too, so a caller that ends stops its call.
+
+(defun rpc/version () 1)
+
+; --- handlers --------------------------------------------------------------
+
+; What the other end can call: a name, a description and parameters for
+; help to give, and f, a function of the arguments, in the parameters'
+; order. A parameter is (name type description), type being :string,
+; :integer, :number, :boolean or :any; a :string takes a bare word too,
+; as its name. Each call runs f in a process of its own: what f gives is
+; the answer, done, and if f faults or raises, fail says why. At most 8
+; parameters, as apply takes.
+(defun rpc/handler (name description params f)
+    (cond
+        ((> (length params) 8) (raise (list :too-many-params name)))
+        (#true                 (list :rpc/handler name description (map rpc/param params) f))))
+
+(defun rpc/param (param)
+    (match param
+        ((name type description)
+            (cond
+                ((and (str? name) (member? type (list :string :integer :number :boolean :any))) param)
+                (#true (raise (list :bad-param param)))))))
+
+; help, which every connection has, after the program's own handlers, so
+; one of those named help comes first.
+(defun rpc/help (handlers)
+    (let text "What can be called here: each call's name, what it does, and its parameters.")
+    (let described (append (map cdr (map rpc/without-f handlers)) (list (list "help" text ()))))
+    (rpc/handler "help" text () (lambda () described)))
+
+(defun rpc/without-f (h) (reverse (cdr (reverse h))))
+
+; For a call that streams: (next id v) goes to the caller at once. Only
+; from the call's own process, whose parent is the connection.
+(defun rpc/next (v) (send ^$$ (list :rpc/next $$ (sexp/print v))))
+
+; --- calling ---------------------------------------------------------------
+
+; Calls name, a string or a symbol, on the other end of conn with args,
+; and waits for the answer: (:ok v), or (:error reason), the other end's
+; reason, or :disconnected, or the connection's own error. A stream's
+; values are dropped. It waits in join, so it works anywhere, a lambda
+; or a handler included: a handler calls its caller back with (rpc/call
+; ^$$ name args). args that aren't data fault here (:not-sexp).
+(defun rpc/call (conn name args)
+    (let text (rpc/printed name args))
+    (let caller $$)
+    (rpc/result (join (fork (rpc/calling conn caller text)))))
+
+(defun rpc/calling (conn caller text)
+    (monitor conn)
+    (monitor caller)
+    (send conn (list :rpc/call text $$))
+    (rpc/awaiting))
+
+(defun rpc/awaiting ()
+    (recv
+        ((:rpc/next _) (rpc/awaiting))
+        ((:rpc/done v) (list :ok v))
+        ((:rpc/fail r) (list :error r))
+        ((:exit _ r)   (list :error (rpc/gone r)))))
+
+; Calls name with args, and gives the caller what comes as it comes:
+; (:next s v) for each value, then (:done s v) or (:fail s reason). Gives
+; s, the stream's pid, at once. (kill s) stops the call: the other end is
+; told (stop id), and the caller hears nothing more. A stream whose caller
+; ends is stopped too.
+(defun rpc/stream (conn name args)
+    (let text (rpc/printed name args))
+    (let caller $$)
+    (fork (rpc/streaming conn caller text)))
+
+(defun rpc/streaming (conn caller text)
+    (monitor conn)
+    (monitor caller)
+    (send conn (list :rpc/call text $$))
+    (rpc/forwarding conn caller))
+
+(defun rpc/forwarding (conn caller)
+    (recv
+        ((:rpc/next v) (send caller (list :next $$ v)) (rpc/forwarding conn caller))
+        ((:rpc/done v) (send caller (list :done $$ v)))
+        ((:rpc/fail r) (send caller (list :fail $$ r)))
+        ((:exit p r)   (when (eq? p conn) (send caller (list :fail $$ (rpc/gone r)))))))
+
+; (name arg ...) printed, the name as a bare word if it reads back as
+; that word, so that whoever reads the messages sees (call 1 approve ...).
+(defun rpc/printed (name args)
+    (str "(" (rpc/bare name) (if (nil? args) "" " ") (bytes/slice (sexp/print args) 1)))
+
+(defun rpc/bare (name)
+    (match (if (str? name) (sexp/parse name) :not-a-string)
+        ((:ok x) (if (eq? (rpc/word x) name) name (sexp/print name)))
+        (_       (sexp/print name))))
+
+; Why a connection that ended did: its error, or :disconnected.
+(defun rpc/gone (result)
+    (match result
+        ((:error r) r)
+        (_          :disconnected)))
+
+(defun rpc/result (joined)
+    (match joined
+        ((:ok r)    r)
+        ((:error r) (list :error r))))
+
+; --- connections -----------------------------------------------------------
+
+; Connects to "host:port", and once the connection is open gives (:ok
+; conn), conn being its pid, for rpc/call, rpc/stream and rpc/close; or
+; (:error reason), the socket's, such as (:econnrefused "localhost:1").
+; The other end can call handlers.
+(defun rpc/connect (where handlers)
+    (rpc/result (join (fork (rpc/connecting where handlers)))))
+
+(defun rpc/connecting (where handlers)
+    (let me $$)
+    (rpc/opened (connect :tcp where (rpc/opening handlers me))))
+
+; As rpc/connect, over a command's input and output: ssh, say, to a
+; machine whose program listens at 127.0.0.1 alone,
+;     (rpc/exec (list "ssh" "-q" "host" "nc" "127.0.0.1" "7317") ())
+; The command's stderr comes with its stdout, so it mustn't write
+; anything but messages there.
+(defun rpc/exec (cmd handlers)
+    (rpc/result (join (fork (rpc/exec-connecting cmd handlers)))))
+
+(defun rpc/exec-connecting (cmd handlers)
+    (let me $$)
+    (rpc/opened (connect :exec cmd (rpc/opening handlers me))))
+
+(defun rpc/opened (conn)
+    (monitor conn)
+    (rpc/opening-wait conn))
+
+(defun rpc/opening-wait (conn)
+    (recv
+        ((:rpc/open _) (list :ok conn))
+        ((:exit _ r)   (list :error (rpc/gone r)))))
+
+; Listens at where, a port or "host:port" (D226), and gives the
+; listener's pid, which kill stops; the caller is sent (:listening port),
+; port being the one it got. Each connection gets a process of its own,
+; whose other end can call handlers.
+(defun rpc/serve (where handlers)
+    (let told $$)
+    (connect :tcp/listen where (rpc/accepting handlers told)))
+
+(defun rpc/accepting (handlers told)
+    (recv
+        ((:open _ port) (send told (list :listening port)) (rpc/accepting handlers told))
+        ((:accept _ c)  (connect c (rpc/opening handlers ())) (rpc/accepting handlers told))))
+
+; Closes conn: calls made over it fail with :disconnected, and calls from
+; the other end are stopped.
+(defun rpc/close (conn) (send conn (list :rpc/close)))
+
+; --- the connection --------------------------------------------------------
+
+; told, if a pid, hears (:rpc/open conn) once the connection is open.
+(defun rpc/opening (handlers told)
+    (recv
+        ((:open c)
+            (send c (list :read :sexp))
+            (rpc/send c (list :helo :rpc (rpc/version)))
+            (when (pid? told) (send told (list :rpc/open $$)))
+            (rpc/loop c 0 () () (append handlers (list (rpc/help handlers)))))))
+
+; c is the socket; seq the last id this end gave a call; mine, ((id to)
+; ...), the calls made from here, to being the process that waits for
+; each; theirs, ((id p) ...), the calls from the other end, p being the
+; process that runs each.
+(defun rpc/loop (c seq mine theirs handlers)
+    (recv
+        ((:sexp _ msg)
+            (rpc/heard c seq mine theirs handlers msg))
+        ; a call's answer, printed in its own process
+        ((:rpc/next p text)
+            (match (rpc/key-of p theirs)
+                (()   ())
+                ((id) (rpc/write c (str "(next " (sexp/print id) " " text ")"))))
+            (rpc/loop c seq mine theirs handlers))
+        ((:rpc/done p text)
+            (match (rpc/key-of p theirs)
+                (()   (rpc/loop c seq mine theirs handlers))
+                ((id)
+                    (rpc/write c (str "(done " (sexp/print id) " " text ")"))
+                    (rpc/loop c seq mine (rpc/without id theirs) handlers))))
+        ; a call from here: text is (name arg ...), printed
+        ((:rpc/call text to)
+            (let id (+ seq 1))
+            (rpc/write c (str "(call " id " " (bytes/slice text 1)))
+            (monitor to)
+            (rpc/loop c id (assoc id to mine) theirs handlers))
+        ((:exit p result)
+            (rpc/ended c seq mine theirs handlers p result))
+        ((:rpc/close)
+            (rpc/hang-up c mine theirs))
+        ((:eof _)
+            (rpc/hang-up c mine theirs))))
+
+; A message from the other end.
+(defun rpc/heard (c seq mine theirs handlers msg)
+    (match msg
+        ((:call id name & args)
+            (rpc/loop c seq mine (rpc/called c theirs handlers id name args) handlers))
+        ((:stop id)
+            (match (lookup id theirs)
+                (:not-found ())
+                (p          (kill p)))
+            (rpc/loop c seq mine (rpc/without id theirs) handlers))
+        ((:next id v)
+            (rpc/tell mine id (list :rpc/next v))
+            (rpc/loop c seq mine theirs handlers))
+        ((:done id v)
+            (rpc/tell mine id (list :rpc/done v))
+            (rpc/loop c seq (rpc/without id mine) theirs handlers))
+        ((:fail id reason)
+            (rpc/tell mine id (list :rpc/fail reason))
+            (rpc/loop c seq (rpc/without id mine) theirs handlers))
+        ((:helo :rpc 1)
+            (rpc/loop c seq mine theirs handlers))
+        ((:helo & _)
+            (rpc/send c (list :barf (list :unknown-protocol msg)))
+            (rpc/hang-up c mine theirs))
+        ((:barf _)
+            (rpc/loop c seq mine theirs handlers))
+        (_
+            (rpc/send c (list :barf (list :bad-message msg)))
+            (rpc/loop c seq mine theirs handlers))))
+
+; A call from the other end: answered at once if it can't be made, or
+; started in a process of its own. Gives theirs, with it if it started.
+(defun rpc/called (c theirs handlers id name args)
+    (cond
+        ((not (eq? (lookup id theirs) :not-found))
+            (rpc/send c (list :barf (list :id-in-use id)))
+            theirs)
+        (#true
+            (match (rpc/find (rpc/word name) handlers)
+                (()
+                    (rpc/send c (list :fail id (list :no-such-call name)))
+                    theirs)
+                ((:rpc/handler hname _ params f)
+                    (match (rpc/args hname params args)
+                        ((:error reason)
+                            (rpc/send c (list :fail id reason))
+                            theirs)
+                        ((:ok values)
+                            (let p (fork (rpc/run f values)))
+                            (monitor p)
+                            (assoc id p theirs))))))))
+
+; A call's process. Its answer is printed here, so one that isn't data
+; faults the call, not the connection.
+(defun rpc/run (f values)
+    (send ^$$ (list :rpc/done $$ (sexp/print (apply f values)))))
+
+; A process the connection monitors has ended: a call from there, whose
+; answer, if it ended well, has gone already; or the process that waits
+; for a call from here, which is stopped if it's still going.
+(defun rpc/ended (c seq mine theirs handlers p result)
+    (match (list (rpc/key-of p theirs) (rpc/key-of p mine) result)
+        (((id) _ (:error reason))
+            (rpc/send c (list :fail id (rpc/data reason)))
+            (rpc/loop c seq mine (rpc/without id theirs) handlers))
+        (((id) _ _)
+            (rpc/loop c seq mine (rpc/without id theirs) handlers))
+        ((() (id) _)
+            (rpc/send c (list :stop id))
+            (rpc/loop c seq (rpc/without id mine) theirs handlers))
+        (_
+            (rpc/loop c seq mine theirs handlers))))
+
+; The end of the connection: calls from here fail, and calls from there
+; are stopped.
+(defun rpc/hang-up (c mine theirs)
+    (map (lambda (e) (send (cadr e) (list :rpc/fail :disconnected))) mine)
+    (map (lambda (e) (kill (cadr e))) theirs)
+    (disconnect c))
+
+; --- the pieces ------------------------------------------------------------
+
+(defun rpc/write (c text) (send c (list :write text \n)))
+(defun rpc/send (c msg) (rpc/write c (sexp/print msg)))
+
+(defun rpc/tell (mine id msg)
+    (match (lookup id mine)
+        (:not-found ())
+        (to         (send to msg))))
+
+(defun rpc/without (k table) (remove (lambda (e) (eq? (car e) k)) table))
+
+; (k) for the first entry whose value is v, or (): an id can be any
+; datum, :not-found included.
+(defun rpc/key-of (v table)
+    (match table
+        (()             ())
+        (((k x) & rest) (if (eq? x v) (list k) (rpc/key-of v rest)))))
+
+(defun rpc/find (name handlers)
+    (match handlers
+        (()         ())
+        ((h & rest) (if (eq? (cadr h) name) h (rpc/find name rest)))))
+
+; A name or a string argument as it came: a string, or a bare word, a
+; symbol, or (:symbol "name") for one this program doesn't mention; or
+; #false for anything else.
+(defun rpc/word (x)
+    (cond
+        ((str? x) x)
+        ((sym? x) (sym->str x))
+        (#true
+            (match x
+                ((:symbol s) (if (str? s) s #false))
+                (_           #false)))))
+
+; The arguments as f takes them, (:ok values), or (:error reason): (:arity
+; name n) for the wrong number of them, n being how many it takes, or
+; (:bad-arg name param type value) for one of the wrong type.
+(defun rpc/args (name params args)
+    (cond
+        ((== (length params) (length args)) (rpc/args-loop name params args ()))
+        (#true                              (list :error (list :arity name (length params))))))
+
+(defun rpc/args-loop (name params args acc)
+    (match (list params args)
+        ((() ()) (list :ok (reverse acc)))
+        ((((pname type _) & ps) (a & more))
+            (match (rpc/typed type a)
+                ((:ok v) (rpc/args-loop name ps more (cons v acc)))
+                (_       (list :error (list :bad-arg name pname type a)))))))
+
+(defun rpc/typed (type a)
+    (cond
+        ((eq? type :string)
+            (match (rpc/word a)
+                (#false :bad)
+                (s      (list :ok s))))
+        ((rpc/is? type a) (list :ok a))
+        (#true            :bad)))
+
+(defun rpc/is? (type a)
+    (cond
+        ((eq? type :integer) (int? a))
+        ((eq? type :number)  (num? a))
+        ((eq? type :boolean) (bool? a))
+        (#true               #true)))
+
+; reason as data, so it can be printed: a pid, a function, nan or inf as
+; str shows it.
+(defun rpc/data (x)
+    (cond
+        ((cons? x)                 (map rpc/data x))
+        ((tuple? x)                (list->tuple (map rpc/data (tuple->list x))))
+        ((or (pid? x) (lambda? x)) (str x))
+        ((float? x)                (if (< (math/abs x) math/INF) x (str x)))
+        (#true                     x)))

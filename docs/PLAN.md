@@ -555,9 +555,13 @@ done), and `calc`, arithmetic parsed and worked out in slight
 one conversation to the next (D191, golden test 237; done), and other
 agents asked as tools, `agent/ask` (D192, golden test 238; done), and
 a fetched page's links kept, and Escape in the chat stopping a command
-(D193, golden tests 233 and 235; done). Next, to settle with the user:
-`log`, a builtin; agents talking to each other between machines
-(s-expressions over TCP, D155); or 12c. TLS (12c) and a reader of server-sent events, for a hosted
+(D193, golden tests 233 and 235; done); and programs, and people,
+calling each other between machines: `lib/rpc.slight`, stupidrpc
+finished in s-expressions (D225, golden tests 277–279; done), and a
+listener at an address of its own, `127.0.0.1` say, for it (D226,
+golden test 276; done). Next, to settle with the user: offering an
+agent's tools over `rpc`, and to whom a remote call's `approve` goes;
+`log`, a builtin; or 12c. TLS (12c) and a reader of server-sent events, for a hosted
 model, wait (the user, Oct 2026: local models first, and curl for
 HTTPS).
 
@@ -569,7 +573,8 @@ HTTPS).
   actor when it needs state (D187, rather than an actor answering with
   `reply`, as first planned).
 - Agents talk to each other in messages, and between machines in
-  printed s-expressions over TCP (D155).
+  printed s-expressions over TCP (D155), as calls (`lib/rpc.slight`,
+  D225).
 - Models run outside slight, behind HTTP: a local server such as ollama
   for generative models (it streams JSON lines, which 12a's way of
   reading JSON makes one message each), a hosted API over HTTPS (12c),

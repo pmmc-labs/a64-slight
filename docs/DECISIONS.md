@@ -4365,3 +4365,139 @@ actors?")* `bench/Cargo.toml`, `bench/rt.rs`, `bench/NAME/NAME.rs`.
   `#[tokio::main]` does, so `ping-pong`'s every round trip wakes a
   thread: 12 s on the M2, 78 on the cloud machine. Kept as it is, as
   Rust is usually written.
+
+**D225. `rpc`: stupidrpc, finished, in s-expressions.** *(Stevan, Oct
+2026: asked whether stupidrpc, a friend's protocol, would do to connect
+two slight programs, and whether people could use it too, "as kind of a
+REPL", to share the tools agents use; then, to Claude's proposal:
+s-expressions, not JSON; "always require IDs, we can always hide this
+with library code"; no `cast`; no flow control for now; "barewords
+where we can, but strings are fine too"; a bind address (D226), Unix
+sockets later; and "rpc" as the name.)* `lib/rpc.slight`, opt-in,
+`(@include :rpc)`.
+
+- **Where it comes from:** stupidrpc (github.com/mst-ripples/stupidrpc),
+  a line protocol after IRC's, meant for machines and people alike: a
+  JavaScript `Nexus` speaking `CALL`, `NEXT`, `DONE`, `FAIL` and `STOP`
+  as JSON arrays, a line each, and notes for more (`HELO`/`EHLO`,
+  `cast`, `barf`, subscriptions, interception, calls announced). Not
+  followed as it was, but finished: a sketch in slight, talking JSON to
+  the `Nexus` and to itself, showed the model fits processes (and found
+  `STOP` lost at both ends of the JavaScript), and the rest was settled
+  from there.
+- **The messages,** a datum each, read with `(:read :sexp)` and written
+  with `sexp/print` (D155): `(call id name arg ...)`, `(next id v)`,
+  `(done id v)`, `(fail id reason)`, `(stop id)`, `(helo rpc 1)` and
+  `(barf reason)`. S-expressions rather than JSON because slight reads
+  them already, keeps symbols and tuples through them, and a person can
+  type them; the JavaScript side, the reason for JSON, is gone. What a
+  person types and what a program sends are the same text, so there's
+  no second syntax, as Redis has its inline commands beside RESP.
+- **Ids always:** every `call` has one, chosen by the caller, any datum.
+  The verb says which way a message goes (`call` and `stop` to the
+  callee, the rest back), so an id is unique only among the calls one
+  end has in flight, and the two ends' ids never clash; that rule is
+  also what the `Nexus`'s `STOP` lacked. The library chooses them,
+  counting from 1 on each connection, and a program never sees them.
+  Rejected: a call without an id as a person's shorthand, answered in
+  order (stupidrpc's "async-or-barf"), which the library can do for a
+  program and a person can do without.
+- **Dropped from the notes:** `cast`, a call with no answer, which isn't
+  needed; subscriptions (`listen`, `notify`), which are calls that
+  stream, ended with `stop`; interception (`trap`, `wrap`), which is a
+  call the other end makes to you; `nope`, which is a `fail` with
+  `(:no-such-call name)`; and calls announced (`callable`), which
+  `help`, a call every connection answers, replaces: asking beats being
+  told, and a person can type it.
+- **Bare words:** a name, and an argument a `:string` parameter takes,
+  can be a bare word, its name the string: a symbol, or `(:symbol
+  "name")` for one the program doesn't mention (D155), which prints back
+  as the bare word, so a relay passes it on. A call's name goes out bare
+  if it reads back as that word. Other arguments go as they are, since
+  an `:any` parameter may want a symbol.
+- **Handlers:** `(rpc/handler name description params f)`, the shape of
+  `tool/new` (D187), but `f` takes the arguments in order, as parameters
+  of its own, and each parameter is typed (`:string`, `:integer`,
+  `:number`, `:boolean`, `:any`), so `help` can say what a call takes and
+  the connection can check it: a wrong count is `(:arity name n)`, a
+  wrong type `(:bad-arg name param type value)`. Each call runs in a
+  process of its own, which the connection monitors: its answer is
+  `done`, a fault or a `raise` is `fail`, and `stop` is `kill`. Its
+  answer and its values are printed in its own process, so one that
+  isn't data faults the call, not the connection. A handler reaches the
+  connection as `^$$`, which `rpc/next` sends to, and which it calls its
+  caller back on: so no context is passed in.
+- **Calling:** `rpc/call` waits in `join` for a process that makes the
+  call and waits for its answer, so it works anywhere; `rpc/stream`
+  gives that process's pid at once, as `http/stream` does (D181), and
+  the caller hears `(:next s v)`, then `(:done s v)` or `(:fail s
+  reason)`. The connection monitors each waiting process, and a call
+  whose process ends before its answer is stopped: so `(kill s)` stops a
+  stream, and a caller that ends stops its call, as a command ends with
+  the process that ran it (D193).
+- **Connections:** `rpc/serve` (a port or `"host:port"`, giving the
+  listener's pid and telling the caller `(:listening port)`, as
+  `http/serve` does), `rpc/connect`, which gives the connection once
+  it's open, so nothing is sent before it can be, and `rpc/exec`, the
+  same over a command, for ssh, as stupidrpc's own `outpost` reached
+  other machines. Either end can call the other. The connection's end,
+  `rpc/close` or the other end hanging up, fails the calls from here
+  with `:disconnected` and stops those from there.
+- **Rejected:** remote pids, Erlang's distribution, where a send can go
+  to another machine: it brings monitors across machines, names, and
+  what a pid means after a reconnect; another program is reached only
+  by calls, which give a result, values as they come, cancelling, and a
+  failure when the connection ends. Calls whose arguments are calls,
+  which would evaluate what a person types: an interpreter by another
+  name (D6). Flow control (credits, `(more id n)`): left out for now,
+  as stupidrpc had none; a reader holds back the sender through TCP
+  (D158), but a stream's values pile up in its caller's mailbox. JSON,
+  for the `Nexus`, and a second syntax for people.
+- **Not yet:** to whom a remote call's `approve` goes, which offering an
+  agent's tools (D188) over `rpc` needs first: never to the caller just
+  because it called. Who the other end is (a `helo` carries only the
+  protocol and its version), and any authentication: listen at
+  `127.0.0.1` (D226) and come in over ssh. A stray `)` from a person
+  ends the connection, as bad text ends a device's owner (`:bad-sexp`).
+  A connection that ends with an error leaves the calls from the other
+  end running to their ends. Unix sockets.
+- **Checked:** golden tests 277 (two ends in one program: answers,
+  checks, bare words, failures, `help`, a stream, a call back to the
+  caller, a stream stopped and a caller that ends, the processes for
+  both killed, and the connection's end), 278 (the messages as a person
+  types them, from a raw client: ids of any datum, bare words, `barf`,
+  an id in use and used again after `stop`, the server calling the
+  client back, comments and a message over lines, a `helo` for another
+  version), and 279 (`rpc/exec`, with `cat` as the other end: a call
+  made here comes back as a call from there, its answer as the answer,
+  the two calls numbered 1 kept apart), each worked out by hand; and by hand, two
+  programs, one reaching the other through `rpc/exec` and `nc`, and a
+  person at `nc`, approving a command the program asked about.
+
+**D226. A listener at an address.** *(Stevan, Oct 2026, with D225: "add
+the bind address (we can do unix sockets later)".)* `(connect
+:tcp/listen "host:port" expr)` listens at that address alone, and
+`(connect :tcp/listen port expr)` stays on every interface. Without it,
+a program offering `rpc` calls that change things (D225) would offer
+them to the network.
+
+- **The host** is an address, a name in the hosts file, or `localhost`,
+  as a connection's would be found, but never a name the name servers
+  are asked about (`rt_lookup_local`, the first steps of
+  `rt_lookup_begin`): what's listened at is this machine's, and a
+  lookup would hold up the listener for nothing. Any other is
+  `:enotfound`, as a `"host:port"` that doesn't parse is, the same
+  splitting as a connection's; an address that isn't this machine's is
+  `:eaddrnotavail`, from `bind()`.
+- **Errors** name the `"host:port"` given, where a listener on a port
+  names the port (D139).
+- **Rejected:** a third argument, or a keyword (`:tcp/listen-at`), when
+  a string where a port goes says it; and Unix sockets now, which need
+  a device of their own and a path's permissions, for later.
+- **Checked:** golden test 276 (listening at `127.0.0.1`, `localhost`, a
+  name the hosts file has and `0.0.0.0`, each connected to; an address
+  that isn't this machine's, names not in the hosts file, which aren't
+  looked up, one there for IPv6 alone, no port, a port too big, and an
+  address in use, the error naming it as given), and 151, where a string
+  is now an address; and by hand, a listener at `127.0.0.1` refusing a
+  connection to the machine's own address.
