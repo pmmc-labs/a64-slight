@@ -763,6 +763,24 @@ with Stevan first.
   settle: the syntax; that a receive function starts again from the top
   after each message, dead letters included, so the deadline must be set
   once per wait, not per start; and how it goes through `split.ts`.
+- **Timers that can be cancelled** (Stevan, Oct 2026: "it has come up a
+  few times already"). `after` gives `()`, so a timer can't be taken
+  back, and a pending one keeps the program running till it's due
+  (D112), so a timeout no longer wanted holds up the program's end for
+  as long as it had left. It came up in D112, which turned down
+  dropping a process's timers when it ends; `ask-within` (D157) and
+  `http/request-within` (D173), whose timers stay pending, and HTTP's
+  default timeout, left out for it (D173, a 30-second one would have
+  held every program's end for up to 30 s); the `run` tool's time limit,
+  left out for it (D187); a timeout that a reply can cancel (14, above);
+  a `recv` with a timeout (above); and a keeper closed while it waits to
+  dial again (D228, up to 10 s). The runtime cancels its own (a lookup's
+  timer: `own_alarm`, `unset_alarm`). To settle: `after` giving a timer
+  that a builtin cancels, `(timer/cancel t)`; or a timer whose process
+  has ended no longer keeping the program running, reopening D112 (whose
+  cost was a list of each process's timers, or the heap searched), which
+  covers a killed box and a closed keeper but not a process that goes on;
+  or both.
 - **Processes as data.** A waiting process is a function, its arguments
   and a mailbox (D8), and its data has no cycles, so it can be written
   out, with functions and closures by name. For: saving and restoring a
