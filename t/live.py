@@ -36,6 +36,9 @@ program, or the system to measure the run.
   sleeper's, one sent to a process that has ended, one taken back, and
   ask-within's once it's answered) don't hold up the program's end
   (D232).
+- run limit: a command still running at exec/run-within's limit, or the
+  run tool's, is killed with its group, and gives what it printed till
+  then (D234).
 - sockets: a listener at a Unix socket's path (D231) answers there, and a
   second program can't take the path from it; killed with SIGKILL, it
   leaves the socket behind, which the next to listen there replaces; and
@@ -465,6 +468,17 @@ def timers():
         check(what, False, f'still running after {DEADLINE} s')
 
 
+def run_limit():
+    prog = build('run-limit', 't/live/run-limit.slight')
+    what = 'a command still running at its limit is killed, and gives what it printed'
+    expected = b'(ok ((timeout 1000) "started\\n"))\n(ok "started\\n[stopped after 1 s, still running]")\ndone\n'
+    try:
+        r = subprocess.run(RUN + [prog], capture_output=True, env=ENV, timeout=DEADLINE)
+        check(what, r.returncode == 0 and r.stdout == expected, f'exit {r.returncode}, said {r.stdout!r}')
+    except subprocess.TimeoutExpired:
+        check(what, False, f'still running after {DEADLINE} s')
+
+
 # What a connection to the socket at path says first, or None.
 def hello(path):
     try:
@@ -513,6 +527,7 @@ airline()
 signals()
 memory_limit()
 timers()
+run_limit()
 sockets()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

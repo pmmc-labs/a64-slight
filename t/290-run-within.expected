@@ -1,0 +1,5 @@
+(ok (2 "quick\n"))
+"Runs a shell command, once the user agrees, and gives what it printed and its exit status. One still running after 120 s is stopped."
+"Runs a shell command, once the user agrees, and gives what it printed and its exit status. One still running after 300 ms is stopped."
+(ok "hi\n[exit status: 0]")
+()

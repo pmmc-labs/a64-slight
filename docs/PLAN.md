@@ -778,8 +778,9 @@ with Stevan first.
   timer's number, which `(timer/cancel t)` takes back; and a timer whose
   process has ended no longer keeps the program running, which frees
   `ask-within` (D157), `http/request-within` (D173) and a closed keeper
-  (D228). Left for when they're wanted: HTTP's default timeout (D173)
-  and the `run` tool's time limit (D187), each now possible.
+  (D228). And so HTTP's default timeout (D173) and the `run` tool's
+  time limit (D187), turned down for holding up a program's end, are
+  in too (D234).
 - **Processes as data.** A waiting process is a function, its arguments
   and a mailbox (D8), and its data has no cycles, so it can be written
   out, with functions and closures by name. For: saving and restoring a

@@ -1807,12 +1807,14 @@ waits for TLS (step 12c).
   no body) give `(:ok response)`, the response in the same shape, or
   `(:error reason)`. A reason is the device's, such as `(:econnrefused
   "127.0.0.1:1")`, or one of `(:bad-http what)` for a reply that isn't
-  HTTP, `(:bad-url url)`, `:no-tls` for an `https` URL, and `:closed` for
-  a connection that closed before its reply.
+  HTTP, `(:bad-url url)`, `:no-tls` for an `https` URL, `:closed` for
+  a connection that closed before its reply, and `:timeout` for a reply
+  that hasn't all come in 30 seconds (D234).
 - `(http/request-within ms method url headers body)` is `http/request`
-  with `(:error :timeout)` if no reply comes in `ms` milliseconds. Its
-  timer keeps the program running till it's due, as `ask-within`'s does,
-  so `http/request` is the one to use unless a timeout is wanted.
+  with `(:error :timeout)` if the reply hasn't all come in `ms`
+  milliseconds, in place of 30 seconds. Its timer doesn't hold up the
+  program's end once the reply has come (D232). `http/stream` has no
+  limit, since a model can stream for minutes; its caller kills it.
 - What a server refuses: a start line that isn't HTTP is a 400, a head
   over 64 KB a 431, and a body over 8 MB a 413, which is answered before
   the body is read. Chunked bodies are read both ways. A reply with no
@@ -2002,8 +2004,11 @@ argument it needs, or with one that isn't a string.
   as it was, its last newline included. `approve` is shown the change,
   `old`'s lines after `- ` and `new`'s after `+ `.
 - `(tools/run approve)`: `run(command)`, a shell command (`sh -c`), run
-  to its end, and what it printed and its exit status. `approve` is shown
-  `run: command`.
+  to its end, and what it printed and its exit status; one still running
+  after 2 minutes is killed, and the model gets what it printed and
+  `[stopped after 120 s, still running]` (D234). `(tools/run-within ms
+  approve)` sets another limit. The tool's description tells the model
+  its limit. `approve` is shown `run: command`.
 - `(tools/fetch approve)`: `fetch(url)`, an `http://` or `https://` URL
   (anything else raises), with curl, for at most 20 seconds and 5 MB.
   `approve` is shown `fetch url`, every time, since a URL can carry
@@ -2085,6 +2090,11 @@ else.
   it can't be started, such as `(:error (:enoent "ls"))`. There's no time
   limit: a command that doesn't end keeps it waiting. If the caller ends
   first, killed, say, the command is killed too (D193).
+- `(exec/run-within ms cmd)` is `exec/run`, but a command still running
+  after `ms` milliseconds is killed, its process group with it, and its
+  status is `(:timeout ms)`, its output what it printed till then (D234).
+  On the virtual clock, time stands still while a command runs (D185),
+  so there it has no limit.
 
 ### (@include :rpc)
 

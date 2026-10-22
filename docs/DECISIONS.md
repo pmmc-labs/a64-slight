@@ -1948,7 +1948,7 @@ connections.** *(User, asked with Claude's recommendation for each.)*
   sides. Keep-alive comes later, with no runtime change.
 
 The rest of the proposal in PLAN.md's step 14 is taken as written, with
-one change: there is no default timeout. A timer stays pending until it's
+one change: there is no default timeout (until D234: 30 seconds). A timer stays pending until it's
 due and keeps the program running (as `ask-within` does), so a
 30-second default would hold every program's exit for up to 30 seconds
 after its last request. A timeout is asked for with `http/request-within`.
@@ -2566,7 +2566,8 @@ the calls.
   "the user didn't let it run"), and another command asked about
   meanwhile waits its turn. The keyboard's process makes the agent, so
   the tools can name it (`$$` in the `connect`). Calls and results are
-  shown as they happen. The `run` tool has no time limit, unlike what
+  shown as they happen. The `run` tool has no time limit (2 minutes since
+  D234), unlike what
   the proposal suggested a tool might set: a timer can't be cancelled
   yet, so one set for every command would keep the chat running after
   Ctrl-D till it was due; a command that doesn't end is stopped with
@@ -4904,3 +4905,49 @@ to a quarter, also Claude's recommendation.)*
   `--memory 256m` gives a cap of 64 MB, and the program goes on; with no
   limit, 1 GB; and with `SLIGHT_HEAP_MAX=1G`, the old default, the
   kernel kills it, 137.
+
+**D234. Default timeouts: 30 seconds for an HTTP request, and 2 minutes
+for the `run` tool.** *(Stevan, Oct 2026: "Let's do 2"; then, to
+Claude's questions, both as recommended. D173 and D187 had turned these
+down only because a timer held up a program's end till it was due,
+which D232 ended.)*
+
+- **HTTP:** `http/request` and `http/get` are `http/request-within` with
+  30 seconds, `(http/timeout)`, for the whole reply, and give `(:error
+  :timeout)` after it. The timer is a sleeper's, killed when the reply
+  has come, so it doesn't hold up the program's end (D232).
+  `http/stream` has none: a model can stream for minutes, and its
+  caller can kill it. Rejected: a limit on a stream's head, or between
+  its pieces, which a caller can do itself; and no default, as before,
+  which leaves a caller of a server that never answers waiting for ever.
+- **A risk, not yet seen:** on the virtual clock, a pending timer makes
+  the clock jump when no socket is ready at that instant (D110), so a
+  reply on loopback that isn't readable at once would be overtaken by
+  the timeout, in a golden test. Linux delivers loopback TCP at once,
+  and every HTTP test passes with the 30-second timer pending; macOS
+  delayed a UDP answer that way (D165), and isn't checked here. If it
+  does the same with TCP, the virtual clock should wait a moment, for
+  real, for a connection waiting for its reply, as it does for a
+  lookup.
+- **`run`:** `exec/run-within ms cmd` is `exec/run` with a limit: a
+  command still running at `ms` milliseconds is killed, its group with
+  it, as closing its device does (D185), and its status is `(:timeout
+  ms)`, its output what it printed till then. The timer is the command's
+  process's, which ends with the command, so it doesn't hold up the end
+  either. `tools/run` uses 120 seconds, as Claude Code's own does, and
+  `tools/run-within ms approve` another; the model gets what it printed
+  and `[stopped after 120 s, still running]`, and the tool's description
+  tells it the limit. On the virtual clock, time stands still while a
+  command runs (D185), so there a command has no limit, and a test can't
+  see one reached. Rejected: 10 minutes; and no limit, as before, where
+  only Escape or Ctrl-C stops a command that never ends.
+- **Checked:** golden tests 289 (on the virtual clock, `http/get` and
+  `http/request` to a server that never answers give up 30,000 ms after
+  asking, and a reply after 29,000 ms is in time) and 290
+  (`exec/run-within` and the run tool on a command that ends, and the
+  limit in the tool's description), worked out by hand; every HTTP,
+  agent and tool test as before, with the 30-second timer pending. 289
+  waits for ever without the default. t/live.py's run limit, on the real
+  clock: `exec/run-within` and `tools/run-within` with 1 second, on a
+  command that prints, then sleeps 10 minutes, each killed with what it
+  printed; no `sleep` left after.

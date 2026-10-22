@@ -1,0 +1,15 @@
+; exec/run-within, and the run tool's limit (D234). On the virtual clock,
+; time stands still while a command runs (D185), so a command ends as it
+; would with no limit; the limit itself is checked on the real clock, by
+; t/live.py. The run tool tells the model its limit: 2 minutes, or what
+; tools/run-within says.
+
+(@include :tools)
+
+(defun description (tool) (lookup "description" (cdr (lookup "function" (cdr (caddr tool))))))
+
+(let yes (lambda (what) #true))
+(pprint (exec/run-within 100 (list "sh" "-c" "echo quick; exit 2")))
+(pprint (description (tools/run yes)))
+(pprint (description (tools/run-within 300 yes)))
+(pprint (join (fork (tool/call (tools/run-within 100 yes) (list (list "command" "echo hi"))))))

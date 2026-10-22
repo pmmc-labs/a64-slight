@@ -11,6 +11,17 @@
 (defun exec/run (cmd)
     (join (connect :exec cmd (exec/collecting))))
 
+; As exec/run, but a command still running after ms milliseconds is
+; killed, its group with it, and its status is (:timeout ms), its output
+; what it printed till then (D234). On the virtual clock, time stands
+; still while a command runs (D185), so there it has no limit.
+(defun exec/run-within (ms cmd)
+    (join (connect :exec cmd (exec/collecting-within ms))))
+
+(defun exec/collecting-within (ms)
+    (after ms $$ (list :exec/timeout ms))
+    (exec/collecting))
+
 ; The command's process watches its caller, and ends with it, which closes
 ; the device and so kills the command's group.
 (defun exec/collecting ()
@@ -20,8 +31,9 @@
 ; chunks is the output so far, last first.
 (defun exec/collect (chunks)
     (recv
-        ((:open p)     (send p (list :read :chunks)) (send p (list :eof)) (exec/collect chunks))
-        ((:chunk p s)  (exec/collect (cons s chunks)))
-        ((:eof p)      (exec/collect chunks))
-        ((:exited p n) (list n (str/join "" (reverse chunks))))
-        ((:exit _ _)   :caller-ended)))
+        ((:open p)          (send p (list :read :chunks)) (send p (list :eof)) (exec/collect chunks))
+        ((:chunk p s)       (exec/collect (cons s chunks)))
+        ((:eof p)           (exec/collect chunks))
+        ((:exited p n)      (list n (str/join "" (reverse chunks))))
+        ((:exec/timeout ms) (list (list :timeout ms) (str/join "" (reverse chunks))))
+        ((:exit _ _)        :caller-ended)))

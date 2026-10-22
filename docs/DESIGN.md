@@ -978,7 +978,8 @@ processes that allocate and then wait turn out to hold too much).
   path's permissions, say who may connect. HTTP is a
   slight library on top, `lib/http.slight` (D132, D140, D173, D174), whose
   client can also give a reply's body to its caller as it comes, in
-  messages, as a device does (`http/stream`, D181, D182).
+  messages, as a device does (`http/stream`, D181, D182), and gives up
+  on a whole reply after 30 seconds (D234).
 - **Commands are devices too** (D185). `(connect :exec (list "ls" "-l")
   expr)` runs a command, a list of strings with no shell unless one is
   asked for, found in `PATH` by the runtime itself, with `posix_spawn`,
