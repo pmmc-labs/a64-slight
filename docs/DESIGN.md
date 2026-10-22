@@ -497,8 +497,12 @@ process of its own, which the connection monitors, so a fault or a
 process of its own too, which the connection monitors, so a caller that
 ends stops its call. A handler has a name, a description and typed
 parameters, which `help` gives and the connection checks. No remote
-pids: another program is reached only by calls. Opt-in: `(@include
-:rpc)`.
+pids: another program is reached only by calls. For fleets (D228): a
+handler's `^$$` is its connection, so a hub calls a device over the
+connection the device made; `rpc/keep` keeps a connection up, dialing
+again with growing waits and running an `on-open` function on each new
+one; and `rpc/system` answers with what `:system` says. Opt-in:
+`(@include :rpc)`.
 
 ### Strings
 

@@ -197,7 +197,10 @@ streams, `stop`, either end calling the other, over TCP or a command
 (`rpc/exec`, for ssh); golden tests 277 to 279. And a listener at an
 address, `(connect :tcp/listen "127.0.0.1:7317" expr)` (D226, golden
 test 276). Programs run in containers: static on Linux, and SIGTERM ends
-one that's PID 1 (D227, t/live.py's signals).
+one that's PID 1 (D227, t/live.py's signals); and `rpc` for fleets: a
+hub calls its devices over the connections they made (a handler's
+`^$$`), `rpc/keep` keeps a connection up, and `rpc/system` answers with
+what `:system` says (D228, golden tests 280 to 282).
 **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local

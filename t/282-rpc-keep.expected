@@ -1,0 +1,8 @@
+(error disconnected)
+(opened (ok "hello, keeper"))
+(ok 3)
+(error disconnected)
+(opened (ok "hello, keeper"))
+(ok 5)
+(error disconnected)
+done

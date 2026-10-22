@@ -2088,6 +2088,38 @@ socket. Either end can call the other, whichever connected.
 - `(rpc/close conn)` closes the connection: calls in flight from here
   fail with `:disconnected`, and those from the other end are stopped.
   The other end hanging up does the same.
+- `(rpc/keep "host:port" handlers on-open)` keeps a connection up
+  (D228). It gives a keeper's pid, `k`, at once, which `rpc/call`,
+  `rpc/stream` and `rpc/close` take as they take a connection. It dials,
+  and when the connection drops, or can't be made, dials again after
+  100 ms, then twice as long each time, up to 10 s, and from 100 ms again
+  once one opens. While it's down, a call fails at once with
+  `:disconnected`; a call doesn't wait for it to come back. Each time a
+  connection opens, `(on-open conn)` runs in a process of its own, `conn`
+  being that connection: to say who this end is, say. `(rpc/close k)`
+  closes the connection and stops the keeping; if the keeper was waiting
+  to dial again, that wait's timer keeps the program running till it's
+  due.
+- `(rpc/system)` is a handler, `system`, that answers with what the
+  `:system` device says (under Devices): `((runtime info) (processes
+  (info ...)))`, both of one moment, a pid in them as its printed form,
+  `"#<pid 3>"`, so that it can go as data. A program offers it if it
+  wants to be looked into from outside: `(call 1 system)` at `nc`.
+
+A program that serves can call whoever connects to it, over the
+connection they made, so a device behind a firewall can still be called:
+inside a handler, `^$$` is the connection the call came on, which
+`rpc/call` takes. A hub keeps its devices in a registry, a process of
+its own, which `monitor`s each connection, so one that hangs up is let
+go:
+
+    (rpc/handler "register" "Says who a device is." (list (list "name" :string "Its name"))
+        (lambda (name) (send registry (list :add name ^$$)) :registered))
+
+and a device keeps its connection up and registers each time it opens:
+
+    (rpc/keep "hub.example:7317" (list reader)
+        (lambda (conn) (rpc/call conn :register (list "kitchen"))))
 
 The reasons a call fails, besides a handler's own: `(:no-such-call
 name)`; `(:arity name n)`, `n` being how many arguments it takes;

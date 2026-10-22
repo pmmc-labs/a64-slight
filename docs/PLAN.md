@@ -557,10 +557,14 @@ agents asked as tools, `agent/ask` (D192, golden test 238; done), and
 a fetched page's links kept, and Escape in the chat stopping a command
 (D193, golden tests 233 and 235; done); and programs, and people,
 calling each other between machines: `lib/rpc.slight`, Matt S
-Trout's stupidrpc finished in s-expressions (D225, golden tests 277–279; done), and a
-listener at an address of its own, `127.0.0.1` say, for it (D226,
-golden test 276; done). Next, to settle with the user: offering an
-agent's tools over `rpc`, and to whom a remote call's `approve` goes;
+Trout's stupidrpc finished in s-expressions (D225, golden tests
+277–279; done), and a listener at an address of its own, `127.0.0.1`
+say, for it (D226, golden test 276; done); and running in containers, static binaries on
+Linux and SIGTERM ending PID 1 (D227; done), and `rpc` for fleets, a hub
+calling its devices, connections kept up and `:system` asked from
+outside (D228, golden tests 280–282; done). Next, to settle with the
+user: offering an agent's tools over `rpc`, and to whom a remote call's
+`approve` goes;
 `log`, a builtin; or 12c. TLS (12c) and a reader of server-sent events, for a hosted
 model, wait (the user, Oct 2026: local models first, and curl for
 HTTPS).

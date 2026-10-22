@@ -4546,3 +4546,67 @@ on SIGTERM.)*
   such containers on a network, one calling the other by its name,
   `server:7317`, through Docker's name server, and a name that isn't
   there giving `:enotfound`.
+
+**D228. `rpc` for fleets: a hub calling its devices, connections kept
+up, and `:system` asked from outside.** *(Stevan, Oct 2026: "your
+proposals sound good", to Claude's three, for programs on machines that
+come and go, a device behind a firewall among them.)*
+
+- **A hub calls its devices with nothing new:** inside a handler, `^$$`
+  is the connection the call came on, which `rpc/call` takes. So a
+  device connects out, and calls the hub's `register`, whose handler
+  hands `^$$` to a registry, a process of the program's own, which
+  `monitor`s each connection and lets go of one that hangs up; and the
+  hub calls the device over the connection the device made, with no
+  port open on it. Written up in LANGUAGE.md, not made a library: a
+  registry is a few lines, and what it keeps (a name, tags, what the
+  device offers) is the program's to say. Rejected: `rpc/serve` telling
+  its caller of each connection, `(:connected conn)`, which a program
+  that doesn't want it would get anyway, as dead letters; it needed a
+  second `rpc/serve`, where a handler already has its connection.
+- **`(rpc/keep where handlers on-open)`:** a keeper, a process that
+  `rpc/call`, `rpc/stream` and `rpc/close` take as they take a
+  connection. It dials, and when the connection drops, or can't be
+  made, dials again: after 100 ms, then twice as long each time, up to
+  10 s, and from 100 ms again once one opens. Each new connection runs
+  `(on-open conn)` in a process of its own, so a device can say who it
+  is again after the hub comes back. While it's down, a call fails at
+  once with `:disconnected`. Rejected: calls waiting for the connection
+  to come back, which needs a bound, a timeout and an order for them,
+  and hides from a caller that the other end is gone; and the delays as
+  arguments, till a program needs other ones.
+- **A call sent through a keeper** goes to the connection it had, which
+  may have ended a moment before (its `(:exit ...)` not yet taken), so
+  the call would go nowhere and its caller wait for ever, watching only
+  the keeper. So the keeper tells the caller's waiting process the
+  connection it sent it on, `(:rpc/via c)`, and that process monitors
+  `c` too: had `c` ended, it hears so at once, and the call fails with
+  `:disconnected`.
+- **`(rpc/system)`:** a handler, `system`, that answers with what the
+  `:system` device says (D171): `((runtime info) (processes (info
+  ...)))`, asked of the device at once, so both tell of one moment, and
+  a pid in them as its printed form, `"#<pid 3>"`, since a pid can't go
+  as data. Not one every connection has, as `help` is: it shows a
+  program's insides (its functions' names, its heaps), so a program
+  offers it if it wants to be looked into, at `nc` say.
+- **Not yet:** a timer can't be taken back, so a keeper closed while it
+  waits to dial again leaves that wait's timer, which keeps the program
+  running till it's due, 10 s at the most. A timer whose process has
+  ended could stop counting as something that can still happen, which
+  would be a change to the runtime, for a proposal of its own.
+- **Checked:** golden tests 280 (a hub, a registry and three devices in
+  one program: the hub reads each, a device that hangs up is let go and
+  the registry told, and a call to it fails), 281 (`system`'s keys, as
+  many processes as the runtime says, the root first, and the listener
+  and both ends of the connection waiting where they should) and 282 (a
+  call to a keeper before anything listens fails at once; once a server
+  listens, the keeper's next dial opens, and on-open says hello; the
+  server hanging up brings a new connection and a new hello; a call to
+  a keeper that's closed fails), each worked out by hand; all six `rpc`
+  tests under `SLIGHT_GC_STRESS` 1 and 7, `SLIGHT_GC_VERIFY` and seeded
+  orders. By hand, on the real clock, two programs: a device kept up,
+  and a hub that it registers with, killed and started again; the
+  device registered again by itself, and the hub went on reading it;
+  and `(call 1 system)` at `nc` to the hub. And a keeper closed while
+  waiting to dial again: the program ended 1.4 s later, when that wait
+  was due.

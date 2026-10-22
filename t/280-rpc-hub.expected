@@ -1,0 +1,5 @@
+(("a" (ok 21)) ("b" (ok 19)) ("c" (ok 23)))
+(gone "b")
+("a" "c")
+(error disconnected)
+done

@@ -1,0 +1,50 @@
+; rpc/keep (D228): a connection kept up. Before anything listens, a call
+; fails at once with :disconnected; once a server listens, the keeper's
+; next dial opens a connection, on which on-open says hello; when the
+; server hangs up, the keeper dials again, and says hello again; and once
+; it's closed, a call fails as on a connection that has ended.
+
+(@include :rpc)
+
+; A port nothing listens on: one the system gave a listener, closed.
+(defun free-port ()
+    (recv ((:open l port) (disconnect l) port)))
+
+(defun server-handlers ()
+    (list
+        (rpc/handler "add" "The sum of two integers."
+            (list (list "a" :integer "One") (list "b" :integer "The other"))
+            (lambda (a b) (+ a b)))
+        (rpc/handler "hello" "Says hello back." (list (list "who" :string "Who's there"))
+            (lambda (who) (str "hello, " who)))
+        (rpc/handler "hang-up" "Closes the connection it came on." ()
+            (lambda () (rpc/close ^$$) :closing))))
+
+(defun main (port)
+    (let me $$)
+    (let where (str "127.0.0.1:" port))
+    (let k (rpc/keep where () (lambda (conn) (send me (list :opened (rpc/call conn :hello (list "keeper")))))))
+    (pprint (rpc/call k :add (list 1 2)))
+    (let l (rpc/serve where (server-handlers)))
+    (recv ((:listening _) (opened k l))))
+
+(defun opened (k l)
+    (recv
+        ((:opened r)
+            (pprint (list :opened r))
+            (pprint (rpc/call k :add (list 1 2)))
+            (pprint (rpc/call k :hang-up ()))
+            (opened-again k l))))
+
+(defun opened-again (k l)
+    (recv
+        ((:opened r)
+            (pprint (list :opened r))
+            (pprint (rpc/call k :add (list 2 3)))
+            (rpc/close k)
+            (pprint (rpc/call k :add (list 3 4)))
+            (kill l)
+            :done)))
+
+(match (join (connect :tcp/listen "127.0.0.1:0" (free-port)))
+    ((:ok port) (main port)))

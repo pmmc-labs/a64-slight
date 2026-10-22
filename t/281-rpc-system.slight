@@ -1,0 +1,29 @@
+; rpc/system (D228): a handler that tells what the :system device does,
+; as data, a pid as its printed form: the runtime's info and each
+; process's, both of one moment. Here, the keys of each; that there are
+; as many processes as the runtime says; that the first is the root; and
+; that the listener and both ends of the connection wait where they
+; should, all being in this program.
+
+(@include :rpc)
+
+(defun waiting-in (name ps)
+    (length (filter (lambda (p) (eq? (lookup :in p) name)) ps)))
+
+(defun main (l)
+    (recv
+        ((:listening port)
+            (match (rpc/connect (str "127.0.0.1:" port) ())
+                ((:ok conn)
+                    (match (rpc/call conn :system ())
+                        ((:ok ((:runtime runtime) (:processes ps)))
+                            (tty/write (sexp/print (map car runtime)) \n)
+                            (tty/write (sexp/print (map car (car ps))) \n)
+                            (pprint (eq? (length ps) (lookup :processes runtime)))
+                            (pprint (lookup :pid (car ps)))
+                            (pprint (list (waiting-in "rpc/accepting" ps) (waiting-in "rpc/loop" ps)))
+                            (rpc/close conn)
+                            (kill l)
+                            :done)))))))
+
+(main (rpc/serve "127.0.0.1:0" (list (rpc/system))))

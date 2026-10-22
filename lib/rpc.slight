@@ -64,6 +64,33 @@
 ; from the call's own process, whose parent is the connection.
 (defun rpc/next (v) (send ^$$ (list :rpc/next $$ (sexp/print v))))
 
+; A handler, system, that tells what the :system device does (D171, D228):
+; ((runtime info) (processes (info ...))), each info the device's, a pid
+; in it as its printed form, so that it can go as data. Not a handler
+; every connection has, since it shows the program's insides.
+(defun rpc/system ()
+    (rpc/handler "system" "This program's runtime, and each of its processes: its state, the function it's in, its mailbox and heap." ()
+        (lambda ()
+            (match (join (connect :system (rpc/system-asking)))
+                ((:ok told) (rpc/data told))
+                ((:error r) (raise r))))))
+
+; Both asked at once, so they tell of one moment.
+(defun rpc/system-asking ()
+    (recv
+        ((:open s)
+            (send s (list :runtime))
+            (send s (list :processes))
+            (rpc/system-runtime s))))
+
+(defun rpc/system-runtime (s)
+    (recv ((:runtime _ info) (rpc/system-processes s info ()))))
+
+(defun rpc/system-processes (s runtime infos)
+    (recv
+        ((:process _ info) (rpc/system-processes s runtime (cons info infos)))
+        ((:end _)          (disconnect s) (list (list :runtime runtime) (list :processes (reverse infos))))))
+
 ; --- calling ---------------------------------------------------------------
 
 ; Calls name, a string or a symbol, on the other end of conn with args,
@@ -83,8 +110,12 @@
     (send conn (list :rpc/call text $$))
     (rpc/awaiting))
 
+; Any end it hears of is the caller's, which leaves no one to answer, or
+; the connection's: one it was given, or the one a keeper sent the call
+; on, (:rpc/via c), which may have ended before it got there.
 (defun rpc/awaiting ()
     (recv
+        ((:rpc/via c)  (monitor c) (rpc/awaiting))
         ((:rpc/next _) (rpc/awaiting))
         ((:rpc/done v) (list :ok v))
         ((:rpc/fail r) (list :error r))
@@ -108,10 +139,11 @@
 
 (defun rpc/forwarding (conn caller)
     (recv
+        ((:rpc/via c)  (monitor c) (rpc/forwarding conn caller))
         ((:rpc/next v) (send caller (list :next $$ v)) (rpc/forwarding conn caller))
         ((:rpc/done v) (send caller (list :done $$ v)))
         ((:rpc/fail r) (send caller (list :fail $$ r)))
-        ((:exit p r)   (when (eq? p conn) (send caller (list :fail $$ (rpc/gone r)))))))
+        ((:exit p r)   (when (not (eq? p caller)) (send caller (list :fail $$ (rpc/gone r)))))))
 
 ; (name arg ...) printed, the name as a bare word if it reads back as
 ; that word, so that whoever reads the messages sees (call 1 approve ...).
@@ -182,8 +214,49 @@
         ((:accept _ c)  (connect c (rpc/opening handlers ())) (rpc/accepting handlers told))))
 
 ; Closes conn: calls made over it fail with :disconnected, and calls from
-; the other end are stopped.
+; the other end are stopped. Or ends a keeper, closing its connection.
 (defun rpc/close (conn) (send conn (list :rpc/close)))
+
+; --- keeping a connection --------------------------------------------------
+
+; A connection to "host:port" kept up (D228): gives a keeper's pid, k, at
+; once, which rpc/call, rpc/stream and rpc/close take as they take a
+; connection. It dials, and dials again when the connection drops or
+; can't be made, after 100 ms, then twice as long each time, up to 10 s,
+; and 100 ms again once one opens. While it's down, a call fails at once
+; with :disconnected. Each time a connection opens, (on-open conn) runs
+; in a process of its own: to say who this end is, say.
+(defun rpc/keep (where handlers on-open)
+    (fork (rpc/dial where handlers on-open 100)))
+
+(defun rpc/dial (where handlers on-open delay)
+    (let me $$)
+    (let c (connect :tcp where (rpc/opening handlers me)))
+    (monitor c)
+    (rpc/keeping where handlers on-open delay c #false))
+
+; c is the connection, opening or open (up), or () while the keeper waits
+; to dial again.
+(defun rpc/keeping (where handlers on-open delay c up)
+    (recv
+        ((:rpc/open _)
+            (fork (on-open c))
+            (rpc/keeping where handlers on-open 100 c #true))
+        ((:rpc/call text to)
+            (if up
+                (do (send c (list :rpc/call text to)) (send to (list :rpc/via c)))
+                (send to (list :rpc/fail :disconnected)))
+            (rpc/keeping where handlers on-open delay c up))
+        ((:exit p _)
+            (cond
+                ((eq? p c)
+                    (after delay $$ (list :rpc/dial))
+                    (rpc/keeping where handlers on-open (math/min (* delay 2) 10000) () #false))
+                (#true (rpc/keeping where handlers on-open delay c up))))
+        ((:rpc/dial)
+            (rpc/dial where handlers on-open delay))
+        ((:rpc/close)
+            (when (pid? c) (rpc/close c)))))
 
 ; --- the connection --------------------------------------------------------
 
