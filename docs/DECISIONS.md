@@ -4502,3 +4502,47 @@ them to the network.
   address in use, the error naming it as given), and 151, where a string
   is now an address; and by hand, a listener at `127.0.0.1` refusing a
   connection to the machine's own address.
+
+**D227. Running in a container: static binaries on Linux, and SIGTERM
+as PID 1.** *(Stevan, Oct 2026: "Let's start", to the first of Claude's
+steps for running slight in containers and on edge machines, now that
+programs can call each other, D225: build statically on Linux, and end
+on SIGTERM.)*
+
+- **Static on Linux:** `slightc` links a native build with `-static`,
+  as it already linked cross builds. A program built for x86-64 on Linux
+  was linked against glibc, so in an empty image (`FROM scratch`) it
+  couldn't start: `exec /serve: no such file or directory`, the loader
+  missing. Static, it runs on any Linux of its kind, the image no more
+  than the binary (about 2 MB). The runtime calls nothing that a static
+  glibc can't do: it looks host names up itself (D165), reading the
+  hosts file and `resolv.conf` that a container is given, so two
+  containers find each other by name without `getaddrinfo`. Not on
+  macOS, which has no static binaries.
+- **SIGTERM as PID 1:** the kernel ignores a signal sent to PID 1 that
+  it hasn't a handler for, and a container's first process is PID 1. The
+  runtime set its handlers for SIGINT, SIGTERM and SIGHUP only when it
+  started a command (D185), and they died of the signal again, so a
+  program in a container ignored `docker stop`, which waited its 10
+  seconds and sent SIGKILL. Now the handlers are set at the start, with
+  the stack of their own they run on; each kills the commands, gives the
+  terminal back (which raw mode had kept, D117 being Ctrl-C's alone),
+  and takes the signal again, unblocked, so the program dies of it as
+  before; and if that comes back, as it does for PID 1, it exits with
+  128 and the signal, 143 for SIGTERM, as a shell would say it died.
+  `docker stop` now takes a fifth of a second, and says 143.
+- **Rejected:** SIGTERM as a message to the root, for a program to stop
+  gracefully (finish its calls, say): a way in for the outside world,
+  to be proposed when a program needs it; `--init` (tini) in every
+  container, which works but is one more thing to remember; and
+  `-static-pie`, which the toolchains handle less evenly.
+- **Checked:** t/live.py's signals, on both targets (AArch64 under
+  qemu): a program waiting dies of SIGTERM, as it did; and as PID 1, in
+  a PID namespace of its own (`unshare`, as root, on Linux; skipped
+  without one), SIGTERM ends it with 143. Against the runtime before,
+  the second fails, the program still running. By hand, in Docker: a
+  program serving `rpc` from an image `FROM scratch`, called from the
+  host with `nc`, stopped by `docker stop` in 0.22 s with 143; and two
+  such containers on a network, one calling the other by its name,
+  `server:7317`, through Docker's name server, and a name that isn't
+  there giving `:enotfound`.

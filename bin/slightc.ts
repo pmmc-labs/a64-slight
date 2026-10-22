@@ -104,7 +104,9 @@ function compilerCommand(arch: Arch): Compiler {
     const override = process.env['SLIGHT_CC'];
     if (override) return { cc: override.split(/\s+/).filter((s) => s !== ''), link: [] };
     const cc = process.platform === 'darwin' ? 'cc' : 'clang';
-    if (process.arch === arch.node) return { cc: [cc], link: [] };
+    // Static on Linux, so a binary runs on any Linux, an empty container's
+    // included (D227); macOS has no static binaries.
+    if (process.arch === arch.node) return { cc: [cc], link: process.platform === 'darwin' ? [] : ['-static'] };
     if (process.platform === 'darwin') return { cc: [cc, '-arch', arch.clang === 'aarch64' ? 'arm64' : arch.clang], link: [] };
     // No --sysroot: clang finds Debian/Ubuntu's cross toolchain itself, and
     // with --sysroot lld can't follow the absolute paths in the sysroot's

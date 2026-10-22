@@ -20,6 +20,11 @@ program, or the system to measure the run.
   start of the day with no checkpoints (D212); random what-ifs in two
   rounds come to what they do in one (D214); and in three shares, run
   apart, to what they do in one run (D218).
+- signals: a program dies of SIGTERM, as it always has; and as PID 1, as
+  in a container, where the kernel ignores a signal left to its default
+  action, SIGTERM still ends it, with status 143 (D227). Being PID 1
+  takes a PID namespace (unshare, as root, on Linux); without one, that
+  half is skipped.
 
 Nothing here depends on how long anything takes: each step waits for
 what it expects to see, and DEADLINE seconds is only how long it waits
@@ -320,10 +325,44 @@ def airline():
           f'minutes {counted} against {branch_minutes(one)}')
 
 
+# t/live/wait.slight run, and once it says it's waiting, sent SIGTERM:
+# whether it said so, and its exit status as subprocess gives it (minus
+# the signal for one that died of it), or None if it didn't end. With
+# unshare in front, the signal goes to unshare's child, the program,
+# which is PID 1 in a namespace of its own.
+def terminated(prog, prefix):
+    p = subprocess.Popen(prefix + RUN + [prog], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=ENV)
+    ready = select.select([p.stdout], [], [], DEADLINE)[0] != [] and p.stdout.readline() == b'waiting\n'
+    target = p.pid
+    if prefix:
+        children = subprocess.run(['pgrep', '-P', str(p.pid)], capture_output=True, text=True).stdout.split()
+        target = int(children[0]) if children else p.pid
+    os.kill(target, signal.SIGTERM)
+    try:
+        return ready, p.wait(timeout=DEADLINE)
+    except subprocess.TimeoutExpired:
+        os.kill(target, signal.SIGKILL)
+        p.wait()
+        return ready, None
+
+
+def signals():
+    prog = build('wait', 't/live/wait.slight')
+    ready, status = terminated(prog, [])
+    check('SIGTERM: the program dies of it', ready and status == -signal.SIGTERM, f'ready {ready}, status {status}')
+    unshare = ['unshare', '--pid', '--fork']
+    if subprocess.run(unshare + ['true'], capture_output=True).returncode != 0:
+        print('skip SIGTERM to PID 1: no PID namespace to be had here')
+        return
+    ready, status = terminated(prog, unshare)
+    check('SIGTERM to PID 1: the program ends, with status 143', ready and status == 143, f'ready {ready}, status {status}')
+
+
 os.makedirs(DIR, exist_ok=True)
 keys()
 memory()
 chat()
 airline()
+signals()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

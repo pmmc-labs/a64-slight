@@ -17,7 +17,9 @@ below point there).
     ./hello
 
 `slightc` compiles for AArch64 unless given `--target x86_64`. Several
-files can be given, and together they're one program, read in order.
+files can be given, and together they're one program, read in order. On
+Linux the program is a static binary, which runs on any Linux of its
+machine's kind, in an empty container (`FROM scratch`) too (D227).
 
 A program is a sequence of top-level forms:
 
@@ -65,6 +67,12 @@ These also go to stderr, as they happen:
   (`raise` or `kill`).
 - `dead letter: message (recv at prog.slight:9:5)`: a message that no
   clause of a `recv` matched (Processes, below).
+
+SIGINT, SIGTERM and SIGHUP end the program at once, as they end most
+programs, killing its commands (`:exec`) and giving back a terminal in
+raw mode. As PID 1, a container's first process, which the system lets
+ignore a signal it hasn't asked for, they still end it, with status 128
+and the signal: 143 for SIGTERM, which `docker stop` sends (D227).
 
 A compile error is `prog.slight:line:col: message`, and `slightc` exits
 1 without writing a program.

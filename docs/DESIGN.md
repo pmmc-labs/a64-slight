@@ -975,9 +975,10 @@ processes that allocate and then wait turn out to hold too much).
   `waitpid(WNOHANG)`. Closing the device before the command has ended
   (`disconnect`, or the owner ending) kills its group with SIGKILL and
   waits for it; so does the program's end, however it ends (`atexit`,
-  and handlers for SIGINT, SIGTERM and SIGHUP). One that can't be
-  started ends the owner with `(:error (:enoent "ls"))` and the like. A
-  command counts as something that can still happen while there's
+  and handlers for SIGINT, SIGTERM and SIGHUP, set at the start, which
+  then die of the signal, or as PID 1 exit with 128 and it, D227). One
+  that can't be started ends the owner with `(:error (:enoent "ls"))`
+  and the like. A command counts as something that can still happen while there's
   something to wait for: output its owner waits for, input to write, or
   its end once its output has ended.
 - **`:system` is a device too** (D171). `(connect :system expr)`; its

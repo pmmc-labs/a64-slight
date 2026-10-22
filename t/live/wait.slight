@@ -1,0 +1,5 @@
+; t/live.py's signals: says it's waiting, then waits, on the real clock,
+; for a signal to end it.
+
+(tty/write "waiting" \n)
+(sleep 600000)

@@ -841,7 +841,7 @@ grows. BACKGROUND.md has the discussions so far.
 - 32-bit microcontrollers (RP2040, STM32, ESP32, ...): a 32-bit value
   layout, and budgets of a few hundred KB ("Embedded boards", "Other
   targets"). AArch64 Linux boards, a Raspberry Pi say, run slight's
-  static binaries already.
+  static binaries already, and so do containers, `FROM scratch` (D227).
 
 ### Parallelism
 

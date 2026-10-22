@@ -2437,33 +2437,51 @@ static void kill_groups(void) {
     }
 }
 
+// The program's end by a signal: its commands killed, the terminal given
+// back, and the signal taken again, now as it would have been, so the
+// program dies of it. Unless it's PID 1, in a container, whose signals the
+// kernel ignores when they're left to their default action: then it exits
+// as a shell would say it died, 128 and the signal (D227).
 static void on_end(int sig) {
+    sigset_t s;
     kill_groups();
+    rt_tty_raw(0);
     signal(sig, SIG_DFL);
+    sigemptyset(&s);
+    sigaddset(&s, sig);
+    sigprocmask(SIG_UNBLOCK, &s, NULL);         // blocked while its handler runs
     raise(sig);
+    _exit(128 + sig);
 }
 
-// Before the first command: SIGCHLD's pipe, and the handlers, on a stack
-// of their own, since a process's may be nearly full. 0, or an errno. A
-// replay runs no command, so no signal comes.
-static int start_commands(void) {
+// At the start, so PID 1 can be stopped: SIGINT, SIGTERM and SIGHUP end
+// the program by on_end, on a stack of their own, since a process's may
+// be nearly full, which SIGCHLD's handler uses too.
+static void catch_ends(void) {
     static char      altstack[64 << 10];
     struct sigaction sa = { 0 }, old;
     int              ends[] = { SIGINT, SIGTERM, SIGHUP };
-    if (child_pipe[0] >= 0) return 0;
-    if (rt_io_pipe(child_pipe) < 0) return errno;
-    if (rt_io_replaying()) return 0;
-    stack_t ss = { .ss_sp = altstack, .ss_size = sizeof altstack };
+    stack_t          ss     = { .ss_sp = altstack, .ss_size = sizeof altstack };
     sigaltstack(&ss, NULL);
     sigemptyset(&sa.sa_mask);
-    sa.sa_handler = on_child;
-    sa.sa_flags   = SA_RESTART | SA_NOCLDSTOP | SA_ONSTACK;
-    sigaction(SIGCHLD, &sa, NULL);
     sa.sa_handler = on_end;
     sa.sa_flags   = SA_ONSTACK;
     for (int i = 0; i < 3; i++) {               // not one that's ignored, as nohup has SIGHUP
         if (sigaction(ends[i], NULL, &old) == 0 && old.sa_handler == SIG_DFL) sigaction(ends[i], &sa, NULL);
     }
+}
+
+// Before the first command: SIGCHLD's pipe and handler. 0, or an errno. A
+// replay runs no command, so no signal comes.
+static int start_commands(void) {
+    struct sigaction sa = { 0 };
+    if (child_pipe[0] >= 0) return 0;
+    if (rt_io_pipe(child_pipe) < 0) return errno;
+    if (rt_io_replaying()) return 0;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = on_child;
+    sa.sa_flags   = SA_RESTART | SA_NOCLDSTOP | SA_ONSTACK;
+    sigaction(SIGCHLD, &sa, NULL);
     atexit(kill_groups);
     return 0;
 }
@@ -2889,6 +2907,7 @@ static size_t bytes_of(const char *s) {
 int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
+    catch_ends();
     poison    = getenv("SLIGHT_POISON") != NULL;
     gc_verify = getenv("SLIGHT_GC_VERIFY") != NULL;
     const char *stress = getenv("SLIGHT_GC_STRESS");
