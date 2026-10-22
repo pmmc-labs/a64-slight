@@ -2410,6 +2410,25 @@ rt_value_t rt_disconnect(rt_value_t pid, const char *site) {
     return RT_NIL;
 }
 
+// The other end's credentials, as the kernel had them when it connected:
+// on this machine, a Unix socket's peer is a process with a uid that file
+// permissions were checked against, which is all a program needs to
+// decide whom it answers (D235).
+rt_value_t rt_socket_peer(rt_value_t c, const char *site) {
+    rt_device_t *d = entry(c, site)->device;
+    int64_t      who[3];
+    if (!d || !d->unix_sock || d->mode != DEV_TCP || d->fd < 0 || rt_io_peer(d->fd, who) != 0) return RT_NIL;
+    rt_value_t keys[3] = {
+        rt_symbol(RT_SYM_PEER + RT_PEER_UID), rt_symbol(RT_SYM_PEER + RT_PEER_GID), rt_symbol(RT_SYM_SYSTEM + RT_SYS_PID),
+    };
+    rt_value_t *cells = rt_alloc(9 * 2 * sizeof *cells, site), info = RT_NIL;
+    for (int i = 2; i >= 0; i--, cells += 6) {
+        rt_value_t pair = rt_cons_at(cells, keys[i], rt_cons_at(cells + 2, rt_int(who[i]), RT_NIL));
+        info = rt_cons_at(cells + 4, pair, info);
+    }
+    return info;
+}
+
 // A listener has connections to accept: each becomes a device of the
 // listener's owner, which hears (:accept l conn).
 static void accept_all(rt_device_t *l) {

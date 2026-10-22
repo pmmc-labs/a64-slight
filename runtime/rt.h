@@ -247,6 +247,14 @@
 #define RT_EXEC_TERM        16    // :term
 #define RT_EXEC_COUNT       17
 
+// Who's at the other end of a Unix connection (socket/peer, process.c,
+// D235): ((:uid u) (:gid g) (:pid p)), :pid being RT_SYS_PID's. RT_PEER_x
+// is symbol RT_SYM_PEER + x.
+#define RT_SYM_PEER        143    // RT_SYM_EXEC + RT_EXEC_COUNT
+#define RT_PEER_UID          0    // :uid
+#define RT_PEER_GID          1    // :gid
+#define RT_PEER_COUNT        2
+
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it
@@ -497,6 +505,10 @@ rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *value
 rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                            rt_value_t cmd) RT_ASM(rt_connect_exec);
 rt_value_t rt_disconnect(rt_value_t pid, const char *site) RT_ASM(rt_disconnect);
+
+// (socket/peer c): who's at the other end of the Unix connection c, as
+// ((:uid u) (:gid g) (:pid p)), or () for any other pid (D235).
+rt_value_t rt_socket_peer(rt_value_t c, const char *site) RT_ASM(rt_socket_peer);
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
 rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
 void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_letter);

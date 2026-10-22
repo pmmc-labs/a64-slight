@@ -1,0 +1,71 @@
+; socket/peer and rpc/peer (D235): who's at the other end of a Unix
+; connection, as the kernel says: its uid, gid and pid. Here both ends
+; are this program, so each is this program's own, as id and the shell
+; give them, from either end; a process has none, and anything that
+; isn't a pid faults. And an rpc handler asks who called it: over a Unix
+; socket, the same three; over TCP, ().
+
+(@include :rpc)
+(@include :exec)
+
+; What a command printed, as a number.
+(defun number-of (cmd)
+    (match (exec/run (list "sh" "-c" cmd))
+        ((:ok (0 out)) (str->int (str/trim out)))))
+
+(defun server (w)
+    (recv
+        ((:open l at)  (send w (list :listening at)) (server w))
+        ((:accept l c) (connect c (accepted w)) (server w))))
+
+; The accepted end: tells w who connected, and closes.
+(defun accepted (w)
+    (recv ((:open c) (send w (list :peer (socket/peer c))) (disconnect c))))
+
+; The connecting end: gives who it connected to.
+(defun client ()
+    (recv ((:open c) (let who (socket/peer c)) (disconnect c) who)))
+
+(defun main (path l mine)
+    (recv
+        ((:listening _)
+            (let connected (join (connect :unix path (client))))
+            (recv
+                ((:peer who)
+                    (pprint (list :accepted (eq? who mine)))
+                    (pprint (list :connected (eq? connected (list :ok mine))))
+                    (pprint (map car who))
+                    (pprint (socket/peer $$))
+                    (kill l)
+                    (rpc-part mine))))))
+
+(defun whoami ()
+    (rpc/handler "whoami" "Who called." () (lambda () (rpc/peer))))
+
+(defun rpc-part (mine)
+    (let path "build/t/291-rpc.sock")
+    (let l (rpc/serve path (list (whoami))))
+    (recv ((:listening _) (rpc-unix mine l path))))
+
+(defun rpc-unix (mine l path)
+    (match (rpc/connect path ())
+        ((:ok conn)
+            (pprint (list :unix (eq? (rpc/call conn "whoami" ()) (list :ok mine))))
+            (rpc/close conn)))
+    (kill l)
+    (let t (rpc/serve "127.0.0.1:0" (list (whoami))))
+    (recv ((:listening port) (rpc-tcp t port))))
+
+(defun rpc-tcp (t port)
+    (match (rpc/connect (str "127.0.0.1:" port) ())
+        ((:ok conn)
+            (pprint (list :tcp (rpc/call conn "whoami" ())))
+            (rpc/close conn)))
+    (kill t)
+    :done)
+
+(pprint (join (fork (socket/peer 42))))
+(let mine (list (list :uid (number-of "id -u")) (list :gid (number-of "id -g")) (list :pid (number-of "echo $PPID"))))
+(let path "build/t/291-socket-peer.sock")
+(let me $$)
+(main path (connect :unix/listen path (server me)) mine)

@@ -225,6 +225,7 @@ reply refs.
 | `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
 | `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
 | `(connect :unix path expr)`, `(connect :unix/listen path expr)` | The same, at a Unix socket's path (D231). |
+| `(socket/peer c)` | The uid, gid and pid at the other end of the Unix connection `c`, or `()` (D235). |
 | `(connect :exec cmd expr)` | `fork`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
 | `(connect :system expr)` | `fork`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
 | `(connect dev expr)` | `fork`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
@@ -511,7 +512,8 @@ connection the device made; `rpc/keep` keeps a connection up, dialing
 again with growing waits and running an `on-open` function on each new
 one; and `rpc/system` answers with what `:system` says. Where
 `"host:port"` goes, a path (a string with a `/` in it) is a Unix
-socket's, whose permissions say who may call (D231). Opt-in:
+socket's, whose permissions say who may call (D231), and a handler can
+ask who called, `(rpc/peer)`, the kernel's word for it (D235). Opt-in:
 `(@include :rpc)`.
 
 ### Strings

@@ -985,6 +985,13 @@ may call a program there. A path with nothing there is `:enoent`, and
 one too long for a socket (more than 103 bytes on macOS, 107 on Linux)
 `:enametoolong`.
 
+`(socket/peer c)` says who's at the other end of the Unix connection
+`c`, either end of it: `((:uid u) (:gid g) (:pid p))`, as the kernel
+had them when it connected, which a program can trust as it can't
+trust what the other end says of itself (D235). For any other pid, a
+TCP connection or a process, it's `()`; anything that isn't a pid
+faults.
+
 In a container, a socket in a directory shared with the host is how a
 program on the host reaches one inside without a port: `docker run -v
 /run/app:/run/app`, and `--user` with the host user's ids, so that the
@@ -2126,6 +2133,10 @@ socket. Either end can call the other, whichever connected.
   own, so calls run at once. What `f` gives is the answer; if it raises
   or faults, the caller is told why. An answer that isn't data (a pid, a
   function) faults the call.
+- `(rpc/peer)` says who called, from a handler: `((:uid u) (:gid g)
+  (:pid p))` for a caller at the other end of a Unix socket, as
+  `socket/peer` gives it, or `()` over TCP or a command (D235). Only
+  from the call's own process, as `rpc/next`.
 - `(rpc/next v)` sends `v` to the caller at once, from a handler that
   streams; its answer comes after its values. Only from the call's own
   process, whose parent (`^$$`) is the connection: so a handler calls its

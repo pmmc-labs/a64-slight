@@ -76,9 +76,12 @@ export const EXEC_WORDS: readonly string[] = [
     'pipe', 'alrm', 'term',
 ];
 
+// Who's at the other end of a Unix connection, in RT_PEER_ order (D235).
+export const PEER_WORDS: readonly string[] = ['uid', 'gid'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
-    ...SYSTEM_WORDS, ...EXEC_WORDS,
+    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS,
 ];

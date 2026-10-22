@@ -4460,7 +4460,7 @@ sockets later; and "rpc" as the name.)* `lib/rpc.slight`, opt-in,
   for the `Nexus`, and a second syntax for people.
 - **Not yet:** to whom a remote call's `approve` goes, which offering an
   agent's tools (D188) over `rpc` needs first: never to the caller just
-  because it called. Who the other end is (a `helo` carries only the
+  because it called. Who the other end is (on a Unix socket, D235; a `helo` carries only the
   protocol and its version), and any authentication: listen at
   `127.0.0.1` (D226) and come in over ssh. A stray `)` from a person
   ends the connection, as bad text ends a device's owner (`:bad-sexp`).
@@ -4769,7 +4769,7 @@ own, a socket left behind replaced, and the umask.)*
   in a container, `--user` with the host user's ids makes the socket
   theirs. Rejected: always 0600, which shuts a group out; and a mode
   argument, for a need not yet seen. Who the other end is (`SO_PEERCRED`,
-  `getpeereid`), for a program to decide by: later.
+  `getpeereid`), for a program to decide by: later (D235).
 - **`rpc`:** `rpc/serve`, `rpc/connect` and `rpc/keep` take a path
   wherever `"host:port"` goes, any string with a `/` in it, so one here
   is `"./ctl.sock"`, and `(:listening at)` gives the path. Over ssh:
@@ -4951,3 +4951,44 @@ which D232 ended.)*
   clock: `exec/run-within` and `tools/run-within` with 1 second, on a
   command that prints, then sleeps 10 minutes, each killed with what it
   printed; no `sleep` left after.
+
+**D235. Who's at the other end of a Unix socket: `socket/peer`, and
+`rpc/peer`.** *(Stevan, Oct 2026: "Let's do 2"; then, to Claude's
+question, a builtin and `rpc/peer`, as recommended. D231 left it for
+later, and D225 had "who the other end is" open; the first to use it
+will be where a remote call's `approve` goes, step 15.)*
+
+- **`(socket/peer c)`:** for a Unix connection, either end of it,
+  `((:uid u) (:gid g) (:pid p))`, the other process's as the kernel had
+  them at its `connect` (or, from the connecting end, at the listener's
+  `listen`): Linux's `SO_PEERCRED`; macOS's `getpeereid`, and
+  `LOCAL_PEERPID` for the pid, 0 where it can't be had. The other end
+  can't say otherwise, as it could say anything of itself in a `helo`,
+  so a program can decide by it whom it answers, beside what the path's
+  permissions already let in (D231). For any other pid, a TCP
+  connection, a command or a process, `()`; anything else faults, as
+  for any pid. `:uid` and `:gid` are new runtime symbols, a group of
+  their own after the commands' words, so nothing before them moves;
+  `:pid` is `:system`'s.
+- **A builtin, not a message:** the devices are otherwise asked by
+  messages, `:system` too, answered to their owner; but a peer doesn't
+  change, and `rpc`'s loop, which owns the socket, would have to keep
+  track of who asked. Rejected: `(send c (list :peer))` answered with
+  `(:peer c info)`, for that; and putting it in a Unix connection's
+  `(:accept l c)` or `(:open c)`, which would change their shape, and
+  every pattern that takes them.
+- **`(rpc/peer)`:** from a handler, its caller's, asked of the
+  connection, which answers with `socket/peer` of its socket: so `()`
+  over TCP or a command. Only from the call's own process, as
+  `rpc/next`, since it asks its parent.
+- **Replay:** `rt_io_peer` is recorded, so a replay gives back the
+  uid, gid and pid of the run it replays, though it runs as another
+  process.
+- **Checked:** golden test 291: a Unix connection made and accepted in
+  one program, each end's peer this program's own, as `id -u`, `id -g`
+  and the shell's `$PPID` say; `()` for a process, a fault for 42; an
+  `rpc` handler's caller over a Unix socket, the same, and over TCP,
+  `()`; on both targets, `SO_PEERCRED` going through qemu. t/replay.sh's
+  net asks its Unix connection's peer, and the replay prints the
+  recorded pid. By hand: a server as root, its socket's umask 000,
+  called by root and by `nobody`, each seen as itself, 0 and 65534.

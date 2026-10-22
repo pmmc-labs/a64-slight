@@ -17,6 +17,7 @@
 // flushed after every entry, so a run that crashes leaves a record of all
 // it did up to the crash.
 
+#define _GNU_SOURCE                     // Linux's struct ucred, for SO_PEERCRED
 #include "rt.h"
 
 #include <errno.h>
@@ -45,7 +46,7 @@ enum { OFF, RECORD, REPLAY };
 enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
-    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX,
+    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER,
 };
 
 static const char *const names[] = {
@@ -56,6 +57,7 @@ static const char *const names[] = {
     [IO_FOPEN] = "a text file", [IO_FGETS] = "a line of a text file", [IO_SEED] = "a seed",
     [IO_WINSIZE] = "the screen's size", [IO_SPAWN] = "a command", [IO_WAIT] = "a wait for a command",
     [IO_KILL] = "a kill", [IO_PIPE] = "a pipe", [IO_LISTEN_UNIX] = "a listen at a path",
+    [IO_PEER] = "a socket's peer",
 };
 
 static int      mode;
@@ -391,6 +393,27 @@ int rt_io_accept(int fd, char *where, size_t size) {
         snprintf(where, size, "%s:%d", addr, ntohs(in->sin_port));
     }
     return (int)done_with(IO_ACCEPT, r, where, strlen(where));
+}
+
+// Linux's SO_PEERCRED; macOS's getpeereid, and LOCAL_PEERPID for the pid,
+// which an older one may not give (0).
+int rt_io_peer(int fd, int64_t who[3]) {
+    if (mode == REPLAY) return (int)next(IO_PEER, who, 3 * sizeof *who, NULL);
+    int err = 0;
+#ifdef SO_PEERCRED
+    struct ucred c;
+    socklen_t    len = sizeof c;
+    if (getsockopt(fd, SOL_SOCKET, SO_PEERCRED, &c, &len) < 0) err = errno;
+    else who[0] = c.uid, who[1] = c.gid, who[2] = c.pid;
+#else
+    uid_t     u;
+    gid_t     g;
+    pid_t     p   = 0;
+    socklen_t len = sizeof p;
+    if (getpeereid(fd, &u, &g) < 0) err = errno;
+    else who[0] = u, who[1] = g, who[2] = getsockopt(fd, SOL_LOCAL, LOCAL_PEERPID, &p, &len) == 0 ? p : 0;
+#endif
+    return (int)done_with(IO_PEER, err, who, 3 * sizeof *who);
 }
 
 int rt_io_socket_error(int fd) {

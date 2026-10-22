@@ -63,6 +63,7 @@ int     rt_io_connect(int fd, const struct sockaddr *a, socklen_t len);
 int     rt_io_listen(int fd, uint32_t addr, int port, int *got);   // bind, listen, and the port it got
 int     rt_io_listen_unix(int fd, const char *path);
 int     rt_io_accept(int fd, char *where, size_t size);   // and "address:port" of the peer, "" for a Unix one
+int     rt_io_peer(int fd, int64_t who[3]);         // a Unix peer's uid, gid and pid, as at its connect: 0, or an errno
 
 // path as a Unix socket's address: 0, or an errno. It must fit, with its
 // NUL (104 bytes on macOS, 108 on Linux), and not be empty, which Linux

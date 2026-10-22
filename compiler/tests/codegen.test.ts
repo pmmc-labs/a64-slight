@@ -739,6 +739,8 @@ test('after, timer/cancel and sleep are builtins in the runtime, and can be valu
     assert.match(compile('(let f sleep)'), /LOADADDR x0, bi_sleep_closure/);
     fails('(after 10 $$)', 'test.slight:1:1: after takes 3 arguments, not 2');
     fails('(timer/cancel)', 'test.slight:1:1: timer/cancel takes 1 argument, not 0');
+    assert.match(compile('(socket/peer $$)'), /LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_socket_peer\n/);
+    fails('(socket/peer)', 'test.slight:1:1: socket/peer takes 1 argument, not 0');
     fails('(sleep)', 'test.slight:1:1: sleep takes 1 argument, not 0');
     fails('(defun sleep (ms) ms)', "test.slight:1:8: can't define sleep: it's a builtin");
 });

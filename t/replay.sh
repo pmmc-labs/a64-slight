@@ -104,7 +104,7 @@ if [ -e "$dir/net.sock" ]; then check "net's socket goes with its listener" no; 
 echo kept >"$dir/net.sock"
 run SLIGHT_REPLAY="$dir/net.record" net other </dev/null >"$dir/net.replayed"
 if cmp -s "$dir/net.recorded" "$dir/net.replayed" && grep -q '^(ok ("echo one" "echo two" "echo three"))$' "$dir/net.recorded" \
-   && grep -q '^(ok ("echo four" "echo five"))$' "$dir/net.recorded"; then
+   && grep -q '^(ok ("echo four" "echo five"))$' "$dir/net.recorded" && grep -q '^(ok ((uid [0-9]*) (gid [0-9]*) (pid [0-9]*)))$' "$dir/net.recorded"; then
     check "net replays as recorded" ok
 else
     diff -u "$dir/net.recorded" "$dir/net.replayed"

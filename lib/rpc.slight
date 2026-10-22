@@ -65,6 +65,23 @@
 ; from the call's own process, whose parent is the connection.
 (defun rpc/next (v) (send ^$$ (list :rpc/next $$ (sexp/print v))))
 
+; Who called (D235): ((uid u) (gid g) (pid p)) for a caller at the other
+; end of a Unix socket, as socket/peer gives it, the kernel's word for
+; it; or () over TCP or a command. Only from the call's own process, as
+; rpc/next. It asks the connection, which holds the socket.
+(defun rpc/peer ()
+    (let conn ^$$)
+    (match (join (fork (rpc/asking-peer conn)))
+        ((:ok who) who)
+        (_         ())))
+
+(defun rpc/asking-peer (conn)
+    (monitor conn)
+    (send conn (list :rpc/peer $$))
+    (recv
+        ((:rpc/peer who) who)
+        ((:exit _ _)     ())))
+
 ; A handler, system, that tells what the :system device does (D171, D228):
 ; ((runtime info) (processes (info ...))), each info the device's, a pid
 ; in it as its printed form, so that it can go as data. Not a handler
@@ -315,6 +332,9 @@
             (rpc/loop c id (assoc id to mine) theirs handlers))
         ((:exit p result)
             (rpc/ended c seq mine theirs handlers p result))
+        ((:rpc/peer to)
+            (send to (list :rpc/peer (socket/peer c)))
+            (rpc/loop c seq mine theirs handlers))
         ((:rpc/close)
             (rpc/hang-up c mine theirs))
         ((:eof _)
