@@ -223,7 +223,10 @@ minutes for the run tool, `exec/run-within` and `tools/run-within` for
 others (D234, golden tests 289 and 290, t/live.py's run limit); and
 who's at the other end of a Unix socket, `(socket/peer c)`, its uid, gid
 and pid as the kernel has them, and `(rpc/peer)` in a handler (D235,
-golden test 291).
+golden test 291); and the virtual clock waiting, for real, for an
+answer to what was just sent before it moves to a timer, which macOS's
+loopback, or another program, gives a moment later (D236, golden test
+292).
 **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
@@ -407,7 +410,8 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
   big the heap.
 - `SLIGHT_CLOCK=virtual` when running a compiled program swaps the real
   clock for a virtual one: it starts at 0 and moves only when nothing can
-  run, straight to the next timer. `t/run.sh` sets it too.
+  run, straight to the next timer, once it has waited up to 200 ms, for
+  real, for an answer to what the program has just sent (D236). `t/run.sh` sets it too.
 - `SLIGHT_RECORD=file` when running a compiled program writes everything
   it takes from the world (the clock, keys, reads, sockets, lookups) to
   `file`; `SLIGHT_REPLAY=file` runs it again from the record, exactly,

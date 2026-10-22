@@ -4962,7 +4962,8 @@ will be where a remote call's `approve` goes, step 15.)*
   `((:uid u) (:gid g) (:pid p))`, the other process's as the kernel had
   them at its `connect` (or, from the connecting end, at the listener's
   `listen`): Linux's `SO_PEERCRED`; macOS's `getpeereid`, and
-  `LOCAL_PEERPID` for the pid, 0 where it can't be had. The other end
+  `LOCAL_PEERPID` for the pid, 0 where it can't be had (on macOS, once
+  the other end has closed, D236). The other end
   can't say otherwise, as it could say anything of itself in a `helo`,
   so a program can decide by it whom it answers, beside what the path's
   permissions already let in (D231). For any other pid, a TCP
@@ -4992,3 +4993,53 @@ will be where a remote call's `approve` goes, step 15.)*
   net asks its Unix connection's peer, and the replay prints the
   recorded pid. By hand: a server as root, its socket's umask 000,
   called by root and by `nobody`, each seen as itself, 0 and 65534.
+
+**D236. The virtual clock waits for an answer on its way, and
+`socket/peer`'s pid on macOS.** *(Stevan, Oct 2026: the first `make
+test` on the Mac after D234 and D235, twelve tests failing; the fix for
+the first was the one he'd agreed to for that case, in D234's question.)*
+
+- **What failed:** on the Mac, every HTTP test that gets a reply, from
+  204 to 212, the airline's recoveries (256, 258, 259) and 289, gave
+  `(:error :timeout)`; and 211's connection to a port nobody listens on
+  timed out where it was refused. With D234 a 30-second timer is pending
+  while a request waits, and the virtual clock moves to the next timer
+  when nothing can run and no socket is ready at the instant it looks
+  (D110). macOS's loopback delivers a moment after a send, and its
+  refusal of a connection a moment after the connect, so the clock
+  found nothing and went to the timeout, every time. Linux's delivers at
+  once, so the cloud machine never saw it; but a reply from another
+  program, a Python server, lost to the timeout on Linux too, every
+  time, while on the real clock it took 9 ms.
+- **Now:** the runtime notes when the program writes to a socket or a
+  command, or starts a connection, and forgets it when anything comes
+  from the sockets. Before the virtual clock moves to a timer, if
+  something was sent and nothing has come since, it waits for the
+  sockets, for real, up to 200 ms, as it already did before a lookup's
+  timer (D165): as long as the answer takes, or 200 ms if none comes,
+  once. So a timeout that's meant to fire costs that much real time,
+  once, and nothing else does. The first try waited after every send,
+  whether or not its answer had come, and test 179, which sends a byte
+  to each 1 ms tick, took over a minute; with the note forgotten when
+  anything comes, the golden tests take as long as before (64 s on the
+  cloud machine for x86-64). Rejected: waiting before every move of the
+  clock while any socket is open, which an idle listener would make cost
+  200 ms a tick; and a wait of a few milliseconds, for a machine whose
+  other program is slow.
+- **`socket/peer` on macOS:** 291 said `(accepted #false)`: the
+  accepted end asked its peer once the connecting end had closed, and
+  macOS's `LOCAL_PEERPID` answers only while the other end is connected,
+  so the pid was 0 (`getpeereid`'s uid and gid are kept). The test now
+  has each end ask while the other is still connected, and LANGUAGE.md
+  says the pid is 0 on macOS after the other end has gone. `rpc/peer`
+  asks during a call, so its caller is connected. Rejected for now:
+  asking at accept and keeping the answer, which would make the pid the
+  same everywhere, for a device field and a call per connection.
+- **Checked:** golden test 292: a command, its input left open so time
+  doesn't stand still for it (D185), is sent a line and echoes it in its
+  own time, with a timer pending a second away: the answer comes, at a
+  clock of 0, where before the timer came first, every time; the same
+  on both targets five times over. A Python HTTP server asked on the
+  virtual clock answers in time, where before it timed out. The golden
+  tests, the replay and the live checks pass on both targets here; the
+  Mac is where both fixes have to show, the next time it runs.

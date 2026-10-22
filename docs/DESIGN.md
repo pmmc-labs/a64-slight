@@ -894,8 +894,12 @@ processes that allocate and then wait turn out to hold too much).
   first; then a command whose input is closed, which can only be working
   on its own, is waited for, for real (D185); then a key; then the clock
   moves to the next timer; only when nothing else can happen does it
-  wait for real (D139). But before it moves to a lookup's timer, it
-  waits for real, up to 200 ms, for the sockets (D165).
+  wait for real (D139). But before it moves to a lookup's timer, or to
+  any timer once the program has written to a socket or a command, or
+  started a connection, and nothing has come since, it waits for real,
+  up to 200 ms, for the sockets (D165, D236): an answer from another
+  program, or over macOS's loopback, which delivers a moment after a
+  send, isn't beaten by a timeout.
 - **`:keypress`** (`runtime/tty.c`) sends each key as `(key mods...)`
   (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style

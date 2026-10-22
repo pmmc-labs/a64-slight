@@ -18,13 +18,33 @@
         ((:open l at)  (send w (list :listening at)) (server w))
         ((:accept l c) (connect c (accepted w)) (server w))))
 
-; The accepted end: tells w who connected, and closes.
+; Each end asks who's at the other while the other is still connected,
+; since macOS gives a peer's pid only then: the connecting end asks, and
+; says so; the accepted end then asks, tells w, and says so; and only
+; then does the connecting end close, and the accepted end after it.
 (defun accepted (w)
-    (recv ((:open c) (send w (list :peer (socket/peer c))) (disconnect c))))
+    (recv ((:open c) (accepted-asks w c))))
+
+(defun accepted-asks (w c)
+    (recv
+        ((:line _ _)
+            (send w (list :peer (socket/peer c)))
+            (send c (list :write "asked" \n))
+            (accepted-ends c))))
+
+(defun accepted-ends (c)
+    (recv ((:eof _) (disconnect c))))
 
 ; The connecting end: gives who it connected to.
 (defun client ()
-    (recv ((:open c) (let who (socket/peer c)) (disconnect c) who)))
+    (recv
+        ((:open c)
+            (let who (socket/peer c))
+            (send c (list :write "asked" \n))
+            (client-ends c who))))
+
+(defun client-ends (c who)
+    (recv ((:line _ _) (disconnect c) who)))
 
 (defun main (path l mine)
     (recv
