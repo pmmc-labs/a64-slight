@@ -217,16 +217,14 @@ ended is dropped as soon as nothing else can run (D232, golden tests
 286 to 288, t/live.py's timers); and in a container, each process's
 heap capped at a quarter of its memory limit, so a runaway process
 faults on its own rather than the kernel killing the program (D233,
-t/live.py's memory limit); and default timeouts, now that a timer no
-longer holds up the end: 30 s for an HTTP request (not a stream), and 2
-minutes for the run tool, `exec/run-within` and `tools/run-within` for
-others (D234, golden tests 289 and 290, t/live.py's run limit); and
-who's at the other end of a Unix socket, `(socket/peer c)`, its uid, gid
-and pid as the kernel has them, and `(rpc/peer)` in a handler (D235,
-golden test 291); and the virtual clock waiting, for real, for an
-answer to what was just sent before it moves to a timer, which macOS's
-loopback, or another program, gives a moment later (D236, golden test
-292).
+t/live.py's memory limit); and a time limit for the run tool, now that
+a timer no longer holds up the end: 2 minutes, `exec/run-within` and
+`tools/run-within` for others (D234, golden test 290, t/live.py's run
+limit; its 30 s default for an HTTP request was withdrawn, D236, since
+the virtual clock moved to it while a reply crossed macOS's loopback);
+and who's at the other end of a Unix socket, `(socket/peer c)`, its
+uid, gid and pid as the kernel has them, and `(rpc/peer)` in a handler
+(D235, golden test 291).
 **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
@@ -410,8 +408,7 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
   big the heap.
 - `SLIGHT_CLOCK=virtual` when running a compiled program swaps the real
   clock for a virtual one: it starts at 0 and moves only when nothing can
-  run, straight to the next timer, once it has waited up to 200 ms, for
-  real, for an answer to what the program has just sent (D236). `t/run.sh` sets it too.
+  run, straight to the next timer. `t/run.sh` sets it too.
 - `SLIGHT_RECORD=file` when running a compiled program writes everything
   it takes from the world (the clock, keys, reads, sockets, lookups) to
   `file`; `SLIGHT_REPLAY=file` runs it again from the record, exactly,

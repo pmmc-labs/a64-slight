@@ -20,8 +20,8 @@
 ;
 ; Errors are (:error reason): what the device gave (D136), (:bad-http what)
 ; for a reply that isn't HTTP, (:bad-url url), :no-tls (HTTPS waits for 12c),
-; :closed for a connection that closed before its reply, or :timeout: a
-; request gives up after 30 s, or what http/request-within says (D234).
+; :closed for a connection that closed before its reply, or :timeout, from
+; http/request-within. http/request waits as long as it takes (D236).
 ;
 ; http/stream gives a reply's body to its caller as it comes, in messages, as
 ; a device does (D181):
@@ -32,15 +32,14 @@
 ; GET url, with no headers and no body.
 (defun http/get (url) (http/request :get url () ""))
 
-; How long http/request and http/get wait for the whole reply, in
-; milliseconds, before (:error :timeout) (D234). A stream has no limit,
-; since a model can stream for minutes.
-(defun http/timeout () 30000)
-
 ; Any method, headers (a list of (name value)) and a body (a string, "" for
 ; none). Gives (:ok response), or (:error reason).
 (defun http/request (method url headers body)
-    (http/request-within (http/timeout) method url headers body))
+    (let ctx (list :client (http/method-name method)))
+    (match (http/parse-url url)
+        ((:ok host port target)
+            (http/unwrap (join (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx)))))
+        ((:error reason) (list :error reason))))
 
 ; As http/request, but gives (:error :timeout) if no answer comes within ms
 ; milliseconds. Its timer is a sleeper's, killed once the reply has come, so

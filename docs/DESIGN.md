@@ -894,12 +894,11 @@ processes that allocate and then wait turn out to hold too much).
   first; then a command whose input is closed, which can only be working
   on its own, is waited for, for real (D185); then a key; then the clock
   moves to the next timer; only when nothing else can happen does it
-  wait for real (D139). But before it moves to a lookup's timer, or to
-  any timer once the program has written to a socket or a command, or
-  started a connection, and nothing has come since, it waits for real,
-  up to 200 ms, for the sockets (D165, D236): an answer from another
-  program, or over macOS's loopback, which delivers a moment after a
-  send, isn't beaten by a timeout.
+  wait for real (D139). But before it moves to a lookup's timer, it
+  waits for real, up to 200 ms, for the sockets (D165). It can't tell
+  that a reply is still crossing macOS's loopback, which delivers a
+  moment after a send, so a test mustn't have a timer pending while it
+  waits for one, unless the timer is meant to win (D236).
 - **`:keypress`** (`runtime/tty.c`) sends each key as `(key mods...)`
   (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style
@@ -984,8 +983,7 @@ processes that allocate and then wait turn out to hold too much).
   path's permissions, say who may connect. HTTP is a
   slight library on top, `lib/http.slight` (D132, D140, D173, D174), whose
   client can also give a reply's body to its caller as it comes, in
-  messages, as a device does (`http/stream`, D181, D182), and gives up
-  on a whole reply after 30 seconds (D234).
+  messages, as a device does (`http/stream`, D181, D182).
 - **Commands are devices too** (D185). `(connect :exec (list "ls" "-l")
   expr)` runs a command, a list of strings with no shell unless one is
   asked for, found in `PATH` by the runtime itself, with `posix_spawn`,

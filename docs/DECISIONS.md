@@ -1948,7 +1948,8 @@ connections.** *(User, asked with Claude's recommendation for each.)*
   sides. Keep-alive comes later, with no runtime change.
 
 The rest of the proposal in PLAN.md's step 14 is taken as written, with
-one change: there is no default timeout (until D234: 30 seconds). A timer stays pending until it's
+one change: there is no default timeout (D234 gave it 30 seconds, and
+D236 took them out again). A timer stays pending until it's
 due and keeps the program running (as `ask-within` does), so a
 30-second default would hold every program's exit for up to 30 seconds
 after its last request. A timeout is asked for with `http/request-within`.
@@ -4910,7 +4911,8 @@ to a quarter, also Claude's recommendation.)*
 for the `run` tool.** *(Stevan, Oct 2026: "Let's do 2"; then, to
 Claude's questions, both as recommended. D173 and D187 had turned these
 down only because a timer held up a program's end till it was due,
-which D232 ended.)*
+which D232 ended.)* (D236 took the HTTP half out again, since on the
+virtual clock it overtook replies crossing macOS's loopback.)
 
 - **HTTP:** `http/request` and `http/get` are `http/request-within` with
   30 seconds, `(http/timeout)`, for the whole reply, and give `(:error
@@ -4994,52 +4996,56 @@ will be where a remote call's `approve` goes, step 15.)*
   recorded pid. By hand: a server as root, its socket's umask 000,
   called by root and by `nobody`, each seen as itself, 0 and 65534.
 
-**D236. The virtual clock waits for an answer on its way, and
-`socket/peer`'s pid on macOS.** *(Stevan, Oct 2026: the first `make
-test` on the Mac after D234 and D235, twelve tests failing; the fix for
-the first was the one he'd agreed to for that case, in D234's question.)*
+**D236. HTTP's default timeout taken out again, and `socket/peer`'s pid
+on macOS.** *(Stevan, Oct 2026: the first `make test` on the Mac after
+D234 and D235, twelve tests failing; then, after a first fix left six,
+to Claude's question, "withdraw HTTP's default", as recommended over two
+ways of keeping it.)*
 
 - **What failed:** on the Mac, every HTTP test that gets a reply, from
   204 to 212, the airline's recoveries (256, 258, 259) and 289, gave
   `(:error :timeout)`; and 211's connection to a port nobody listens on
-  timed out where it was refused. With D234 a 30-second timer is pending
-  while a request waits, and the virtual clock moves to the next timer
-  when nothing can run and no socket is ready at the instant it looks
-  (D110). macOS's loopback delivers a moment after a send, and its
-  refusal of a connection a moment after the connect, so the clock
-  found nothing and went to the timeout, every time. Linux's delivers at
-  once, so the cloud machine never saw it; but a reply from another
-  program, a Python server, lost to the timeout on Linux too, every
-  time, while on the real clock it took 9 ms.
-- **Now:** the runtime notes when the program writes to a socket or a
-  command, or starts a connection, and forgets it when anything comes
-  from the sockets. Before the virtual clock moves to a timer, if
-  something was sent and nothing has come since, it waits for the
-  sockets, for real, up to 200 ms, as it already did before a lookup's
-  timer (D165): as long as the answer takes, or 200 ms if none comes,
-  once. So a timeout that's meant to fire costs that much real time,
-  once, and nothing else does. The first try waited after every send,
-  whether or not its answer had come, and test 179, which sends a byte
-  to each 1 ms tick, took over a minute; with the note forgotten when
-  anything comes, the golden tests take as long as before (64 s on the
-  cloud machine for x86-64). Rejected: waiting before every move of the
-  clock while any socket is open, which an idle listener would make cost
-  200 ms a tick; and a wait of a few milliseconds, for a machine whose
-  other program is slow.
+  timed out where it was refused. With D234's default, a 30-second timer
+  is pending while a request waits, and the virtual clock moves to the
+  next timer when nothing can run and no socket is ready at the instant
+  it looks (D110). macOS's loopback delivers a moment after a send, and
+  refuses a connection a moment after the connect, so the clock found
+  nothing and went to the timeout. Linux's delivers at once, so the
+  cloud machine never saw it; a reply from another program, a Python
+  server, lost the same way on Linux, every time.
+- **A first fix, taken out:** the runtime noted a write to a socket or a
+  command, or a connection started, and forgot it when anything came
+  from the sockets; before moving the clock with that noted, it waited
+  for the sockets, for real, up to 200 ms, as it does before a lookup's
+  timer (D165). The Mac then failed six (206, 209, 212, 256, 258, 259),
+  each with replies on their way at once: the first to come cleared the
+  note while the others were still crossing, and the clock went to their
+  timeouts. Six requests at once to the Python server timed out every
+  one, on Linux. One note for the program can't say what's still on its
+  way.
+- **Now:** `http/request` and `http/get` wait as long as the reply
+  takes, as before D234, and the runtime is as it was. A timeout is
+  asked for with `http/request-within`. The weakness is the virtual
+  clock's, and stays: a test mustn't have a timer pending while it waits
+  for a reply on loopback, unless the timer is meant to win, as 211's
+  `/silent` is. No test but 289 did, which is taken out, with 292, the
+  first fix's. D234's other half, the run tool's 2 minutes, stays:
+  commands stop the virtual clock while they run (D185). Rejected: the
+  virtual clock counting the bytes in flight between the program's own
+  connections, each paired with its other end by port, about 80 lines
+  of runtime for one default; and waiting 20 ms of quiet after every
+  send, which costs the byte-at-a-time tests seconds and still loses on
+  a loaded machine.
 - **`socket/peer` on macOS:** 291 said `(accepted #false)`: the
   accepted end asked its peer once the connecting end had closed, and
   macOS's `LOCAL_PEERPID` answers only while the other end is connected,
   so the pid was 0 (`getpeereid`'s uid and gid are kept). The test now
   has each end ask while the other is still connected, and LANGUAGE.md
-  says the pid is 0 on macOS after the other end has gone. `rpc/peer`
-  asks during a call, so its caller is connected. Rejected for now:
-  asking at accept and keeping the answer, which would make the pid the
-  same everywhere, for a device field and a call per connection.
-- **Checked:** golden test 292: a command, its input left open so time
-  doesn't stand still for it (D185), is sent a line and echoes it in its
-  own time, with a timer pending a second away: the answer comes, at a
-  clock of 0, where before the timer came first, every time; the same
-  on both targets five times over. A Python HTTP server asked on the
-  virtual clock answers in time, where before it timed out. The golden
-  tests, the replay and the live checks pass on both targets here; the
-  Mac is where both fixes have to show, the next time it runs.
+  says the pid is 0 on macOS once the other end has gone. `rpc/peer`
+  asks during a call, while its caller is connected. With the first fix
+  in, 291 passed on the Mac. Rejected for now: asking at accept and
+  keeping the answer, which would make the pid the same everywhere, for
+  a device field and a call per connection.
+- **Checked:** the golden tests, the replay and the live checks on both
+  targets here, the runtime's idle as before D234, and `lib/http.slight`
+  as before but its comments.

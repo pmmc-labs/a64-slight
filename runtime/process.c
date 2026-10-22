@@ -1392,12 +1392,7 @@ static int      socket_events(fd_set *in, fd_set *out);
 
 #define IO_KEYS    1                    // what wait_for saw: stdin has something to read...
 #define IO_SOCKETS 2                    // ...or a socket did something
-#define SETTLE_US  200000               // how long the virtual clock waits for what's on its way, for real
-
-// Whether the program has written to a socket or a command, or started a
-// connection, and nothing has come since, nor has the virtual clock
-// waited for it (D236).
-static int sent;
+#define SETTLE_US  200000               // how long the virtual clock waits for a lookup's answer, for real
 
 // Waits up to us microseconds (forever, if negative) for stdin to have
 // something to read, if anyone's listening and what was read before has
@@ -1472,30 +1467,20 @@ static int idle(void) {
     if (virtual_clock) {
         int saw = wait_for(0);
         if ((saw & IO_KEYS) && input_at == input_len) read_input();
-        if (saw & IO_SOCKETS) {
-            sent = 0;                           // something has come since: the program goes on before the clock does
-            return 1;
-        }
+        if (saw & IO_SOCKETS) return 1;
         if (working()) {
             if (wait_for(-1) & IO_KEYS) read_input();
             return 1;
         }
         if (listening() && next_key()) return 1;
-        // A timer mustn't beat an answer on its way: a lookup's, from a name
-        // server in the same program, say, or one to what the program has
-        // just written, or a connection it has just started, from another
-        // program, or over a loopback that delivers a moment after a send,
-        // not by the time select() looks, as macOS's does. So before the
-        // clock moves to a lookup's timer, or to any once something was
-        // sent, the sockets are waited for, for real, a little (D165, D236):
-        // as long as an answer takes, and SETTLE_US when none comes.
-        int lookup = nalarms && !alarms[0].msg && procs[alarms[0].pid >> RT_PID_SHIFT].device;
-        if (nalarms && (lookup || sent)) {
-            sent = 0;
-            if ((saw = wait_for(SETTLE_US))) {
-                if ((saw & IO_KEYS) && input_at == input_len) read_input();
-                return 1;
-            }
+        // A lookup's timer is the runtime's, not the program's, so it
+        // mustn't beat an answer on its way: from a name server in the same
+        // program, say, which on macOS's loopback arrives a moment after
+        // it's sent, not by the time select() looks. So before the clock
+        // moves to one, the sockets are waited for, for real, a little.
+        if (nalarms && !alarms[0].msg && procs[alarms[0].pid >> RT_PID_SHIFT].device && (saw = wait_for(SETTLE_US))) {
+            if ((saw & IO_KEYS) && input_at == input_len) read_input();
+            return 1;
         }
         if (nalarms) {
             virtual_now = alarms[0].due;
@@ -2116,7 +2101,6 @@ static int flush(rt_device_t *d) {
         if (n < 0 && errno == EINTR) continue;
         if (n < 0) return errno == EAGAIN || errno == EWOULDBLOCK ? 0 : -1;
         d->out_at += (size_t)n;
-        sent       = 1;
     }
     d->out_at = d->out_len = 0;
     return 0;
@@ -2235,8 +2219,7 @@ static int open_connection(uint32_t addr, int64_t port, int *fd) {
     int s = rt_io_socket(AF_INET, SOCK_STREAM), err = s < 0 ? errno : setup(s);
     if (!err && rt_io_connect(s, (struct sockaddr *)&a, sizeof a) < 0 && errno != EINPROGRESS) err = errno;
     if (err && s >= 0) rt_io_close(s);
-    *fd  = err ? -1 : s;
-    sent = sent || !err;                        // refused or not, it's told a moment later on macOS
+    *fd = err ? -1 : s;
     return err;
 }
 
@@ -2376,7 +2359,6 @@ static int unix_connect(rt_proc_t *p, const char *site, const char *path, size_t
     rt_device_t *d = new_device(p, DEV_TCP, fd, site, path, len);
     d->connecting  = 1;
     d->unix_sock   = 1;
-    sent           = 1;
     return 0;
 }
 

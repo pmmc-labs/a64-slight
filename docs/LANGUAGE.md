@@ -87,9 +87,7 @@ A compile error is `prog.slight:line:col: message`, and `slightc` exits
 
 Some environment variables matter when running a program, mainly for
 tests: `SLIGHT_CLOCK=virtual` swaps the real clock for one that starts at
-0 and moves only when nothing can run, straight to the next timer, but
-first waits a moment, for real, for an answer to what the program has
-just sent (D236);
+0 and moves only when nothing can run, straight to the next timer;
 `SLIGHT_POISON=1` makes the collector fill what it frees with garbage;
 and `SLIGHT_GC_STRESS=n` makes it collect at the entry of every nth
 function called (n from 1, every call, which is slow, to 1,000), and at
@@ -1817,14 +1815,13 @@ waits for TLS (step 12c).
   no body) give `(:ok response)`, the response in the same shape, or
   `(:error reason)`. A reason is the device's, such as `(:econnrefused
   "127.0.0.1:1")`, or one of `(:bad-http what)` for a reply that isn't
-  HTTP, `(:bad-url url)`, `:no-tls` for an `https` URL, `:closed` for
-  a connection that closed before its reply, and `:timeout` for a reply
-  that hasn't all come in 30 seconds (D234).
+  HTTP, `(:bad-url url)`, `:no-tls` for an `https` URL, and `:closed` for
+  a connection that closed before its reply. They wait as long as the
+  reply takes (D236).
 - `(http/request-within ms method url headers body)` is `http/request`
   with `(:error :timeout)` if the reply hasn't all come in `ms`
-  milliseconds, in place of 30 seconds. Its timer doesn't hold up the
-  program's end once the reply has come (D232). `http/stream` has no
-  limit, since a model can stream for minutes; its caller kills it.
+  milliseconds. Its timer doesn't hold up the program's end once the
+  reply has come (D232).
 - What a server refuses: a start line that isn't HTTP is a 400, a head
   over 64 KB a 431, and a body over 8 MB a 413, which is answered before
   the body is read. Chunked bodies are read both ways. A reply with no
