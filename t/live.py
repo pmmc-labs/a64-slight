@@ -27,6 +27,11 @@ program, or the system to measure the run.
   as PID 1, it waits for what a command left running when that ends, so
   no zombie stays (D229). Being PID 1 takes a PID namespace (unshare, as
   root, on Linux); without one, those are skipped.
+- memory limit: in a cgroup of 256 MB, the heap's cap is a quarter of that,
+  and a process that keeps all it makes faults there, on its own, the
+  program going on and the limit never reached (D233). Making the cgroup
+  takes root and a memory controller to write to (v1, or v2 with it
+  delegated); without them, it's skipped.
 - timers: timers of an hour that nothing can come of (a killed
   sleeper's, one sent to a process that has ended, one taken back, and
   ask-within's once it's answered) don't hold up the program's end
@@ -405,6 +410,51 @@ def signals():
           f'ready {ready}, zombies {left}')
 
 
+# A cgroup of the program's own under this one, limited to limit bytes:
+# its cgroup.procs, to write the program's pid to, and its directory, or
+# None if one can't be made here.
+def memory_cgroup(limit):
+    try:
+        with open('/proc/self/cgroup') as f:
+            lines = [line.rstrip('\n').split(':', 2) for line in f]
+    except OSError:
+        return None
+    for _, controllers, path in lines:
+        if controllers == '':
+            parent, name = '/sys/fs/cgroup' + path.rstrip('/'), 'memory.max'
+        elif 'memory' in controllers.split(','):
+            parent, name = '/sys/fs/cgroup/memory' + path.rstrip('/'), 'memory.limit_in_bytes'
+        else:
+            continue
+        group = os.path.join(parent, f'slight-live-{TARGET}')
+        try:
+            os.makedirs(group, exist_ok=True)
+            with open(os.path.join(group, name), 'w') as f:
+                f.write(str(limit))
+            return os.path.join(group, 'cgroup.procs'), group
+        except OSError:
+            try:
+                os.rmdir(group)
+            except OSError:
+                pass
+    return None
+
+
+def memory_limit():
+    group = memory_cgroup(256 << 20)
+    if not group:
+        print('skip memory limit: no cgroup to be had here')
+        return
+    procs, path = group
+    prog = build('runaway', 't/live/runaway.slight')
+    r = subprocess.run(['sh', '-c', 'echo $$ >"$0" && exec "$@"', procs, *RUN, prog],
+                       capture_output=True, env=ENV, timeout=DEADLINE)
+    os.rmdir(path)
+    check('in 256 MB, the cap is a quarter, and a runaway process faults on its own',
+          r.returncode == 0 and r.stdout == b'(ok 67108864)\n(error heap)\nsurvived\n',
+          f'exit {r.returncode}, said {r.stdout!r}')
+
+
 def timers():
     prog = build('timers', 't/live/timers.slight')
     what = "timers of an hour that nothing can come of don't hold up the program's end"
@@ -461,6 +511,7 @@ memory()
 chat()
 airline()
 signals()
+memory_limit()
 timers()
 sockets()
 print(f'live: {failed} failed')

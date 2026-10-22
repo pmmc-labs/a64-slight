@@ -3181,7 +3181,8 @@ put after phase 2's fixes.)*
 - The harness reads a version from stderr when stdout has none, as
   Chez's `--version` prints it there.
 
-**D202. A heap's cap is 1 GB, or what `SLIGHT_HEAP_MAX` says.** *(User,
+**D202. A heap's cap is 1 GB, or what `SLIGHT_HEAP_MAX` says.** (Or a
+quarter of a container's memory limit, since D233.) *(User,
 Oct 2026: the second of three options, as Claude recommended; the
 others were keeping 64 MB, and no cap, as in Erlang and Go, where one
 runaway process takes the program down when `malloc` fails.)* The 64 MB
@@ -4857,3 +4858,49 @@ a timeout, and D228's keeper.)*
   sleeper's, one sent to a process that has ended, one taken back,
   `ask-within`'s once answered) ends at once; without the drop it was
   still running five seconds later.
+
+**D233. In a container, a heap's cap is a quarter of the memory
+limit.** *(Stevan, Oct 2026: "Let's do 2", the list of what D231 and
+D232 made possible, its first item PLAN.md's "Containers, what's left";
+then, to Claude's question, half the limit, which a measurement turned
+to a quarter, also Claude's recommendation.)*
+
+- **What it was:** each process's heap may grow to 1 GB (D202), and in
+  a container limited to less, a process that runs away takes the
+  program over the limit, and the kernel kills it whole: in Docker with
+  `--memory 256m`, exit 137, nothing said.
+- **Now:** with no `SLIGHT_HEAP_MAX`, the runtime reads the limit at its
+  start, on Linux, from `/proc/self/cgroup`: v2's `memory.max` or v1's
+  `memory.limit_in_bytes`, for the program's cgroup and each above it,
+  the least of them. In a container with a view of its own the path is
+  `/`; in one without (v1, as on the cloud machine), the host's path
+  isn't there to read, and the walk up comes to the container's own at
+  the top. v2's `max` and v1's figure for none are no limit. The cap is
+  a quarter of the limit if that's less than 1 GB, and at least 1 MB.
+  It's one of the settings a record keeps (D202), so a replay has it,
+  wherever it runs. `:system`'s runtime info has it now, `(:heap-max
+  bytes)`.
+- **Why a quarter, not half:** a process that keeps all it makes holds
+  about twice its cap at the collection where it faults, the old chunks
+  and the new: measured, 134 MB at a 64 MB cap, 269 at 128, 537 at 256.
+  At half the limit, such a process reaches the limit itself: in a
+  cgroup of 256 MB it faulted and the program went on, but the kernel
+  had reclaimed at the limit 1,132 times to get there. At a quarter it
+  peaks at half the limit, and the other half is the rest of the
+  program's. Rejected: half, as first chosen, for that; a third; and
+  only saying in the docs to set `SLIGHT_HEAP_MAX`.
+- **Not yet:** a cap on all the heaps together. Each process's is
+  capped, but many processes can still take a program over its limit;
+  a total would fault the process that asks, whatever holds the memory,
+  which is a proposal of its own. Mailboxes and stacks aren't counted
+  either, as before.
+- **Checked:** t/live.py's memory limit, on both targets (AArch64 under
+  qemu): in a cgroup of 256 MB, made under the program's own, the cap is
+  64 MB, and a process that grows without end faults, `(error heap)`,
+  and the program goes on; skipped without root or a memory controller
+  to write to. Test 281's keys now have `heap-max`. By hand, in a cgroup
+  of 256 MB: the most it used was 134 MB, the limit never reached; with
+  the old 1 GB, killed. In Docker, from an image `FROM scratch`:
+  `--memory 256m` gives a cap of 64 MB, and the program goes on; with no
+  limit, 1 GB; and with `SLIGHT_HEAP_MAX=1G`, the old default, the
+  kernel kills it, 137.

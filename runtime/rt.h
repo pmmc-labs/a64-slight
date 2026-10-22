@@ -219,14 +219,15 @@
 #define RT_SYS_TIMERS       18    // :timers        timers pending
 #define RT_SYS_STACKS       19    // :stacks        stacks held
 #define RT_SYS_CLOCK        20    // :clock         milliseconds since the program started
-#define RT_SYS_COUNT        21
+#define RT_SYS_HEAP_MAX     21    // :heap-max      the most a process's heap holds (D202, D233)
+#define RT_SYS_COUNT        22
 
 // A command's last message (connect :exec, process.c, D185) is (:exited p
 // status): status is the exit code, or (:signal name) if a signal ended
 // it, name being one of these (the same on macOS and Linux, where some of
 // their numbers aren't), or the number of any other. RT_EXEC_x is symbol
 // RT_SYM_EXEC + x.
-#define RT_SYM_EXEC        125    // RT_SYM_SYSTEM + RT_SYS_COUNT
+#define RT_SYM_EXEC        126    // RT_SYM_SYSTEM + RT_SYS_COUNT
 #define RT_EXEC_EXITED       0    // :exited
 #define RT_EXEC_SIGNAL       1    // :signal
 #define RT_EXEC_HUP          2    // :hup           the signals' names, without SIG

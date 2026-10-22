@@ -214,7 +214,10 @@ and one left by SIGKILL replaced, which `rpc` takes wherever
 sockets); and timers that can be cancelled: `after` gives its timer's
 number, `(timer/cancel t)` takes it back, and a timer whose process has
 ended is dropped as soon as nothing else can run (D232, golden tests
-286 to 288, t/live.py's timers).
+286 to 288, t/live.py's timers); and in a container, each process's
+heap capped at a quarter of its memory limit, so a runaway process
+faults on its own rather than the kernel killing the program (D233,
+t/live.py's memory limit).
 **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
@@ -334,7 +337,8 @@ to get them back from git (`3fd71e0`).
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `map.slight` (a persistent map, a hash trie, D223), `rpc.slight` (calls between programs, and people, over a connection, D225), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, `.ss` for Chez Scheme, and `.rs` for Rust, the actor programs alone, on tokio, D224); `Cargo.toml` and `Cargo.lock`, the Rust programs as one package, and `rt.rs`, the runtime they start; `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
-| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's; SIGTERM, as PID 1 too, and a command's orphan, as PID 1; timers that
+| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's; SIGTERM, as PID 1 too, and a command's orphan, as PID 1; a runaway
+process in a cgroup of 256 MB, faulting at its cap; timers that
 nothing can come of, which don't hold up the end; a Unix socket left by
 SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers, and `timer-ids.py`, a model of `timer/cancel`'s index); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
@@ -390,7 +394,8 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
   slow.
 - `SLIGHT_HEAP_MAX=n` (bytes, or with `K`, `M` or `G` after it, at least
   `1M`) when running a compiled program caps each process's heap there,
-  in place of 1 GB (D202). `t/run.sh` sets `64M`, the cap the tests were
+  in place of 1 GB, or a quarter of the cgroup's memory limit if that's
+  smaller, as in a container (D202, D233). `t/run.sh` sets `64M`, the cap the tests were
   written for. A device's line, count or value is held to 64 MB however
   big the heap.
 - `SLIGHT_CLOCK=virtual` when running a compiled program swaps the real

@@ -67,7 +67,7 @@ export const SEXP_WORDS: readonly string[] = ['symbol', 'quote'];
 // What :system is asked and answers with, in RT_SYS_ order (D171).
 export const SYSTEM_WORDS: readonly string[] = [
     'processes', 'process', 'runtime', 'end', 'ended', 'pid', 'parent', 'state', 'in', 'mail', 'reductions',
-    'devices', 'joining', 'running', 'ready', 'recv', 'sleeping', 'pids', 'timers', 'stacks', 'clock',
+    'devices', 'joining', 'running', 'ready', 'recv', 'sleeping', 'pids', 'timers', 'stacks', 'clock', 'heap-max',
 ];
 
 // How a command ends, and the signals' names, in RT_EXEC_ order (D185).

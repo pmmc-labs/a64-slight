@@ -765,7 +765,13 @@ and other orders").
 Each process's heap holds up to 1 GB, unless `SLIGHT_HEAP_MAX` in the
 program's environment says otherwise (a number of bytes, or with `K`,
 `M` or `G` after it, and at least `1M`); past that, an allocation faults
-(`:heap`), and just that process ends. It's collected when a receive function asks
+(`:heap`), and just that process ends. On Linux, when the program's
+memory is limited to less than 4 GB, as in a container (`docker run
+--memory`, the cgroup's limit), the cap is a quarter of the limit
+instead (D233): a process that grows without end then holds about half
+the limit when it faults, as its last collection copies, so it ends on
+its own and the kernel doesn't kill the program. That caps each
+process, not all of them together. It's collected when a receive function asks
 for its next message, or at the entry of the next function called
 (D166), in two generations (D200): what's new is allocated in a nursery
 (from 4 KB, growing to 1 MB), and once that's full, what's still
@@ -1115,7 +1121,8 @@ which `lookup` reads; more keys may come. A process's:
 The runtime's: `(:processes n)` that haven't ended; `(:pids n)` made,
 processes and devices, ended or not; `(:ready n)` in the run queue;
 `(:timers n)` pending; `(:devices n)` open; `(:heap bytes)` in use by
-all the processes; `(:stacks n)` held; `(:clock ms)` since the program
+all the processes; `(:heap-max bytes)`, the most one process's heap
+holds (D233); `(:stacks n)` held; `(:clock ms)` since the program
 started; and `(:reductions n)`, made by every process, ended or not.
 
 A timer's message to the device is answered when it's due, so this

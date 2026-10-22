@@ -688,7 +688,9 @@ function's entry, where it's collected. The **old generation** is a list
 of chunks too: what collections have kept, the messages taken, a fork's
 values, joined results, and big strings. All of a process's chunks
 together, in both, are capped, at 1 GB unless `SLIGHT_HEAP_MAX` says
-otherwise (D202), and past that the allocation faults (`:heap`). The
+otherwise (D202), or at a quarter of a smaller limit on the program's
+memory, its cgroup's, as in a container (D233), and past that the
+allocation faults (`:heap`). The
 cap costs nothing till it's used, since chunks come as they're needed;
 it keeps a runaway process from taking the program's memory, ending it
 instead, where its monitor sees it. The heap pointer and limit live in the process struct

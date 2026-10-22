@@ -1,0 +1,18 @@
+; t/live.py's memory limit (D233): run in a cgroup of 256 MB, says its
+; heap's cap, a quarter of that; then a process that keeps all it makes
+; faults at that cap, on its own, and the program goes on, never near
+; the limit.
+
+(defun ask ()
+    (recv ((:open s) (send s (list :runtime)) (answer s))))
+
+(defun answer (s)
+    (recv ((:runtime _ i) (disconnect s) (lookup :heap-max i))))
+
+(defun grow (acc) (grow (cons (str/repeat "x" 1000) acc)))
+
+(pprint (join (connect :system (ask))))
+(pprint (match (join (fork (grow ())))
+    ((:error (kind _ _)) (list :error kind))
+    (r                   r)))
+:survived

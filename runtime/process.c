@@ -2949,7 +2949,7 @@ static void tell_runtime(rt_device_t *d) {
         calls  += calls_of(p);
     }
     for (const rt_proc_t *p = ready_head; p; p = p->next_ready) ready++;
-    _Alignas(16) rt_value_t space[9 * 6 + 2], *at = space;
+    _Alignas(16) rt_value_t space[10 * 6 + 2], *at = space;
     rt_value_t fields[] = {
         field(&at, SYS(PROCESSES), rt_int((int64_t)live)),
         field(&at, SYS(PIDS), rt_int((int64_t)nprocs)),
@@ -2957,6 +2957,7 @@ static void tell_runtime(rt_device_t *d) {
         field(&at, SYS(TIMERS), rt_int((int64_t)nalarms)),
         field(&at, SYS(DEVICES), rt_int((int64_t)ndevices)),
         field(&at, RT_SYM_FAULTS - 1 + RT_FAULT_HEAP, rt_int((int64_t)heap)),
+        field(&at, SYS(HEAP_MAX), rt_int((int64_t)heap_max)),
         field(&at, SYS(STACKS), rt_int((int64_t)stacks)),
         field(&at, SYS(CLOCK), rt_int((int64_t)((now() - started) / 1000000))),
         field(&at, SYS(REDUCTIONS), rt_int((int64_t)calls)),
@@ -3098,6 +3099,61 @@ static size_t bytes_of(const char *s) {
     return n > (SIZE_MAX >> shift) ? 0 : (size_t)n << shift;
 }
 
+// A cgroup limit's bytes, read from file: v2's "max", v1's figure for no
+// limit (the most a page counter holds, near 2^63), or nothing there, is 0.
+static size_t limit_in(const char *file) {
+    FILE *f = fopen(file, "r");
+    char  line[32];
+    int   ok = f && fgets(line, sizeof line, f) && line[0] >= '0' && line[0] <= '9';
+    if (f) fclose(f);
+    unsigned long long n = ok ? strtoull(line, NULL, 10) : 0;
+    return n >= 1ull << 62 || n > SIZE_MAX ? 0 : (size_t)n;
+}
+
+// The memory this program may use, as its cgroup says (D233): the least
+// of the limits on its own cgroup and those above it, v2's memory.max or
+// v1's memory.limit_in_bytes, the path to each from /proc/self/cgroup;
+// or 0 if none is found (no limit, or not Linux). In a container that
+// has its own view of the cgroups, the path is / and the limit the
+// container's; one that hasn't keeps the host's path, which isn't there
+// to read, so the walk up comes to the container's own at the top.
+static size_t memory_limit(void) {
+    FILE  *f = fopen("/proc/self/cgroup", "r");
+    char   line[512], file[1024];
+    size_t least = 0;
+    while (f && fgets(line, sizeof line, f)) {
+        char *colon = strchr(line, ':'), *path = colon ? strchr(colon + 1, ':') : NULL;
+        if (!path) continue;
+        *path++ = '\0';
+        path[strcspn(path, "\n")] = '\0';
+        const char *controllers = colon + 1, *base, *name;
+        if (*controllers == '\0') {                           // v2: "0::/path"
+            base = "/sys/fs/cgroup";
+            name = "memory.max";
+        } else {                                                // v1: "4:memory:/path", the controllers by commas
+            size_t at = 0, len = strlen("memory");
+            while (controllers[at] && !(strncmp(controllers + at, "memory", len) == 0
+                                        && (controllers[at + len] == ',' || controllers[at + len] == '\0'))) {
+                at += strcspn(controllers + at, ",");
+                at += controllers[at] == ',';
+            }
+            if (!controllers[at]) continue;
+            base = "/sys/fs/cgroup/memory";
+            name = "memory.limit_in_bytes";
+        }
+        for (size_t len = strlen(path);; ) {                   // path, then each above it, to /
+            while (len > 1 && path[len - 1] == '/') len--;
+            snprintf(file, sizeof file, "%s%.*s/%s", base, len == 1 ? 0 : (int)len, path, name);
+            size_t n = limit_in(file);
+            if (n && (!least || n < least)) least = n;
+            if (len <= 1) break;
+            while (len > 1 && path[len - 1] != '/') len--;
+        }
+    }
+    if (f) fclose(f);
+    return least;
+}
+
 int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
@@ -3121,8 +3177,15 @@ int main(int argc, char **argv) {
         fputs("slight: SLIGHT_HEAP_MAX is the most a process's heap holds, in bytes or with K, M or G after it, and at least 1M\n", stderr);
         return 2;
     }
+    // Without SLIGHT_HEAP_MAX, 1 GB, or a quarter of a smaller limit on the
+    // program's memory, as in a container (D233): a process that runs
+    // away holds about twice its cap at its last collection, the old
+    // chunks and the new, so it faults on its own at half the limit, and
+    // the kernel doesn't kill the program.
+    size_t limit = cap ? 0 : memory_limit();
+    size_t room  = limit && limit / 4 < HEAP_DEFAULT ? (limit / 4 > CHUNK_MAX ? limit / 4 : CHUNK_MAX) : HEAP_DEFAULT;
     rt_io_settings_t settings = {
-        mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0, cap ? bytes_of(cap) : HEAP_DEFAULT,
+        mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0, cap ? bytes_of(cap) : room,
     };
     char           **env      = environ;
     rt_io_start(&argc, &argv, &env, &settings); // replaying, the record's settings, arguments and environment

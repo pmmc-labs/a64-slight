@@ -617,12 +617,10 @@ them:
   one, so a terminal UI can't line up such text yet; `str/width`,
   `str/graphemes` and `str/normalize`, from utf8proc, vendored as D151
   has it.
-- **Containers, what's left** (after D227 and D229, Oct 2026): each
-  process's heap may grow to 1 GB with no cap on them all, so in a
-  container with less, the kernel kills the whole program; the runtime
-  could take its default from the container's limit (cgroup
-  `memory.max`), or at least the docs say to set `SLIGHT_HEAP_MAX`.
-  SIGTERM ends a program at once, so a call in flight fails at its
+- **Containers, what's left** (after D227, D229 and D233, Oct 2026):
+  each process's heap is capped at a quarter of the container's limit
+  (D233), but not all of them together, so many processes can still
+  take the program past it. SIGTERM ends a program at once, so a call in flight fails at its
   caller: hearing it as a message, to finish within the grace period,
   needs a way in for signals, a proposal of its own. A Dockerfile in the
   docs, a build stage and `FROM scratch`, and both targets as one
