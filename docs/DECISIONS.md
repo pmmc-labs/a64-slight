@@ -4610,3 +4610,44 @@ come and go, a device behind a firewall among them.)*
   and `(call 1 system)` at `nc` to the hub. And a keeper closed while
   waiting to dial again: the program ended 1.4 s later, when that wait
   was due.
+
+**D229. Running in a container: output that goes out when the program
+waits, and orphans waited for as PID 1.** *(Stevan, Oct 2026: "Yes", to
+Claude's two fixes for what checking the runtime against a container
+turned up, both seen to fail first.)*
+
+- **Output when the program waits:** `pprint` writes through stdio, and
+  nothing flushed it but `tty/write`, a fault's or a dead letter's
+  message, and the program's end. A container's stdout is a pipe, so
+  stdio held the output till 4 KB of it had come, and a program that
+  SIGTERM ended lost what it held: one that printed a line and waited
+  gave the pipe nothing at all. Now the runtime flushes stdout whenever
+  nothing can run and it's about to wait (`idle`): a log has the
+  program's output as soon as it waits, and a program stopped while it
+  waits, as a server mostly is, has lost none of it. It costs a write
+  per wait that has output to write, not one per line. What a program
+  printed while busy and was stopped before waiting is still lost: a
+  handler can't flush stdio safely. Rejected: stdout flushed by line
+  (`_IOLBF`), or by `pprint`, which costs a system call a line in a
+  program that prints a lot.
+- **Orphans, as PID 1:** what a command starts and leaves running (`sh
+  -c "worker &"`) is PID 1's once the command has ended, and when it
+  ends stays a zombie till PID 1 waits for it. The runtime waited only
+  for its commands, so as PID 1 a `sleep` left that way stayed a zombie
+  for the program's life. Now, as PID 1 (`getpid()` at the start), the
+  runtime waits on SIGCHLD's pipe from its first command on, not only
+  while one runs, and after waiting for its commands, waits for every
+  other child that has ended: each is looked at first with `waitid`'s
+  `WNOWAIT`, which leaves it as it is, and a command's own is left to
+  the wait that's recorded for a replay. Not as any other process, whose
+  orphans go to its init. Rejected: `docker run --init` (tini), which
+  works but must be remembered, and which D227 set out to need no more;
+  and `waitpid(-1)` alone, which could take a command's status from the
+  wait a replay depends on.
+- **Checked:** t/live.py's signals, on both targets: its program now
+  says it's waiting with `pprint`, so seeing that line before SIGTERM
+  needs the flush; and as PID 1, a command that leaves a `sleep` behind,
+  the program's children looked at in `/proc` from outside till no
+  zombie is left. With the runtime as it was, all three fail; with only
+  the orphans' wait taken out, the last fails, a zombie left. By hand:
+  the same two, a log line through a pipe and `ps` as PID 1.

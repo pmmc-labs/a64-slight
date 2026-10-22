@@ -403,7 +403,8 @@ names no program can write.
 - I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols` (the terminal's
   size, asked each time; 24 and 80 when stdout isn't a terminal), `pprint`
   (prints its argument and a newline, and returns `()`: D43;
-  symbols print without the colon, so `:ping` prints as `ping`),
+  symbols print without the colon, so `:ping` prints as `ping`; what it
+  writes is flushed whenever the runtime waits, D229),
   `sleep`. Files come through `connect`; `slurp` and `spew` are in
   `lib/fs.slight`.
 - functions: `apply` (`(apply f xs)`, at most 8 elements; a tail call in
@@ -976,7 +977,10 @@ processes that allocate and then wait turn out to hold too much).
   closes its input once that's written; input it doesn't take goes
   nowhere. SIGCHLD's handler writes a byte to a pipe that `select()`
   waits on while any command runs, and then each is asked with
-  `waitpid(WNOHANG)`. Closing the device before the command has ended
+  `waitpid(WNOHANG)`; as PID 1, the pipe is waited on from the first
+  command on, and any other child that has ended, one a command left,
+  is waited for too, a command's own only looked at (`WNOWAIT`), as an
+  init would (D229). Closing the device before the command has ended
   (`disconnect`, or the owner ending) kills its group with SIGKILL and
   waits for it; so does the program's end, however it ends (`atexit`,
   and handlers for SIGINT, SIGTERM and SIGHUP, set at the start, which

@@ -72,7 +72,15 @@ SIGINT, SIGTERM and SIGHUP end the program at once, as they end most
 programs, killing its commands (`:exec`) and giving back a terminal in
 raw mode. As PID 1, a container's first process, which the system lets
 ignore a signal it hasn't asked for, they still end it, with status 128
-and the signal: 143 for SIGTERM, which `docker stop` sends (D227).
+and the signal: 143 for SIGTERM, which `docker stop` sends (D227). As
+PID 1 the program also waits for whatever its commands leave running
+when it ends, as an init does, so no zombie stays (D229).
+
+What `pprint` writes goes out whenever the program has nothing to run
+and waits (for a message, a timer, a socket, a key), and when it ends;
+`tty/write` writes at once. So a log read through a pipe, as a
+container's is, has a program's output as soon as it waits, and a
+program stopped while it waits has lost none of it (D229).
 
 A compile error is `prog.slight:line:col: message`, and `slightc` exits
 1 without writing a program.

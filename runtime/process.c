@@ -1372,6 +1372,7 @@ static void events(void) {
 // real, keys and time standing still meanwhile (D185); then a key, then
 // the clock moves; only when nothing else can happen does it wait for real.
 static int idle(void) {
+    fflush(stdout);                             // so a program stopped as it waits has lost none of it (D229)
     if (!listening() && !nalarms && !sockets_waiting()) return 0;
     if (virtual_clock) {
         int saw = wait_for(0);
@@ -2304,6 +2305,14 @@ static int sockets_waiting(void) {
 
 static int      child_pipe[2] = { -1, -1 };     // SIGCHLD writes a byte to it
 static uint64_t nchildren;                      // commands not yet waited for
+static int      is_init;                        // PID 1, as in a container: orphans are its (D229)
+
+// Whether SIGCHLD's pipe is waited on: while a command runs; and as PID 1,
+// once one has, since what a command left running is PID 1's to wait for
+// when it ends.
+static int watching_children(void) {
+    return child_pipe[0] >= 0 && (nchildren || is_init);
+}
 
 // The file descriptors select() waits on for d: to read, and to write (a
 // command's input).
@@ -2327,7 +2336,7 @@ static void socket_fds(fd_set *in, fd_set *out, int *max) {
         if (r && rfd > *max) *max = rfd;
         if (w && wfd > *max) *max = wfd;
     }
-    if (nchildren) {
+    if (watching_children()) {
         FD_SET(child_pipe[0], in);
         if (child_pipe[0] > *max) *max = child_pipe[0];
     }
@@ -2400,7 +2409,7 @@ static int socket_events(fd_set *in, fd_set *out) {
         ready     = rt_must(realloc(ready, ready_cap * sizeof *ready));
     }
     uint64_t n = 0;
-    int      ended = nchildren && FD_ISSET(child_pipe[0], in);
+    int      ended = watching_children() && FD_ISSET(child_pipe[0], in);
     for (rt_device_t *d = sockets; d; d = d->next_socket) {
         int rfd, wfd;
         fds_of(d, &rfd, &wfd);
@@ -2544,6 +2553,8 @@ static int exited(rt_device_t *d) {
     return 1;
 }
 
+static void reap_orphans(void);
+
 // SIGCHLD has come since select() last looked: sees which commands have
 // ended. One whose output has ended too, and whose owner is waiting,
 // sends its last message.
@@ -2558,6 +2569,23 @@ static void reap(void) {
         d->status = status;
         nchildren--;
         if (d->eof_sent && !d->sent) exited(d);
+    }
+    if (is_init) reap_orphans();
+}
+
+// As PID 1, what a command started and left running is this program's
+// once the command has ended, and stays a zombie when it ends unless the
+// program waits for it, as an init does (D229). Each that has ended is
+// waited for, but not a command's own, which is only looked at
+// (WNOWAIT): reap waits for that, as a replay has it.
+static void reap_orphans(void) {
+    for (;;) {
+        siginfo_t info = { 0 };
+        if (waitid(P_ALL, 0, &info, WEXITED | WNOHANG | WNOWAIT) != 0 || info.si_pid == 0) return;
+        for (rt_device_t *d = sockets; d; d = d->next_socket) {
+            if (d->mode == DEV_EXEC && d->child == info.si_pid) return;
+        }
+        waitpid(info.si_pid, NULL, 0);
     }
 }
 
@@ -2908,6 +2936,7 @@ int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
     catch_ends();
+    is_init = getpid() == 1;
     poison    = getenv("SLIGHT_POISON") != NULL;
     gc_verify = getenv("SLIGHT_GC_VERIFY") != NULL;
     const char *stress = getenv("SLIGHT_GC_STRESS");

@@ -20,11 +20,13 @@ program, or the system to measure the run.
   start of the day with no checkpoints (D212); random what-ifs in two
   rounds come to what they do in one (D214); and in three shares, run
   apart, to what they do in one run (D218).
-- signals: a program dies of SIGTERM, as it always has; and as PID 1, as
-  in a container, where the kernel ignores a signal left to its default
-  action, SIGTERM still ends it, with status 143 (D227). Being PID 1
-  takes a PID namespace (unshare, as root, on Linux); without one, that
-  half is skipped.
+- signals: a program dies of SIGTERM, as it always has, what it printed
+  with pprint having gone out when it began to wait (D229); and as PID 1,
+  as in a container, where the kernel ignores a signal left to its
+  default action, SIGTERM still ends it, with status 143 (D227); and,
+  as PID 1, it waits for what a command left running when that ends, so
+  no zombie stays (D229). Being PID 1 takes a PID namespace (unshare, as
+  root, on Linux); without one, those are skipped.
 
 Nothing here depends on how long anything takes: each step waits for
 what it expects to see, and DEADLINE seconds is only how long it waits
@@ -326,18 +328,24 @@ def airline():
           f'minutes {counted} against {branch_minutes(one)}')
 
 
-# t/live/wait.slight run, and once it says it's waiting, sent SIGTERM:
-# whether it said so, and its exit status as subprocess gives it (minus
-# the signal for one that died of it), or None if it didn't end. With
-# unshare in front, the signal goes to unshare's child, the program,
-# which is PID 1 in a namespace of its own.
-def terminated(prog, prefix):
+# prog run, with prefix in front, and the line it says once it's ready:
+# the Popen, whether it said it, and the program's pid. With unshare in
+# front, the program is unshare's child, PID 1 in a namespace of its own.
+def started(prog, prefix, line):
     p = subprocess.Popen(prefix + RUN + [prog], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=ENV)
-    ready = select.select([p.stdout], [], [], DEADLINE)[0] != [] and p.stdout.readline() == b'waiting\n'
+    ready = select.select([p.stdout], [], [], DEADLINE)[0] != [] and p.stdout.readline() == line
     target = p.pid
     if prefix:
         children = subprocess.run(['pgrep', '-P', str(p.pid)], capture_output=True, text=True).stdout.split()
         target = int(children[0]) if children else p.pid
+    return p, ready, target
+
+
+# t/live/wait.slight run, and once it says it's waiting, sent SIGTERM:
+# whether it said so, and its exit status as subprocess gives it (minus
+# the signal for one that died of it), or None if it didn't end.
+def terminated(prog, prefix):
+    p, ready, target = started(prog, prefix, b'waiting\n')
     os.kill(target, signal.SIGTERM)
     try:
         return ready, p.wait(timeout=DEADLINE)
@@ -358,6 +366,33 @@ def signals():
         return
     ready, status = terminated(prog, unshare)
     check('SIGTERM to PID 1: the program ends, with status 143', ready and status == 143, f'ready {ready}, status {status}')
+
+    # The zombies among the program's children, from /proc, as the
+    # program's namespace has no /proc of its own here; looked at till
+    # there are none, or the deadline.
+    def zombies(pid):
+        found = []
+        for entry in os.listdir('/proc'):
+            try:
+                with open(f'/proc/{entry}/status') as f:
+                    fields = dict(line.split(':', 1) for line in f if ':' in line)
+            except (OSError, ValueError):
+                continue
+            if fields.get('PPid', '').strip() == str(pid) and fields.get('State', '').strip().startswith('Z'):
+                found.append(int(entry))
+        return found
+
+    p, ready, target = started(build('orphans', 't/live/orphans.slight'), unshare, b'left\n')
+    left = zombies(target)
+    for _ in range(DEADLINE * 10):
+        if not left:
+            break
+        select.select([], [], [], 0.1)
+        left = zombies(target)
+    os.kill(target, signal.SIGKILL)
+    p.wait()
+    check('PID 1 waits for what a command left running, so no zombie stays', ready and not left,
+          f'ready {ready}, zombies {left}')
 
 
 os.makedirs(DIR, exist_ok=True)
