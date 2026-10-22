@@ -1084,6 +1084,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'kill':               fixed('rt_kill', 1),
     'raise':              fixed('rt_raise', 1),
     'after':              fixed('rt_after', 3),
+    'timer/cancel':       fixed('rt_timer_cancel', 1),
     'disconnect':         fixed('rt_disconnect', 1),
     'sleep':              fixed('rt_sleep', 1),
     'clock/us':           fixed('rt_clock_us', 0),

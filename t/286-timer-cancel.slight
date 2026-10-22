@@ -1,0 +1,34 @@
+; timer/cancel (D232): after gives its timer's number, 1 up in the order
+; after is called (sleep takes none), and (timer/cancel t) takes the
+; timer back if it hasn't fired: #true, and its message never comes; or
+; #false, for one that has fired, one taken back already, or a number no
+; timer has. Any process can take a timer back. One taken back doesn't
+; keep the program running: a root waiting for what only it would have
+; sent is deadlocked once nothing else can come.
+
+; Hears a, and takes the rest back, or tries to.
+(defun after-a (a c)
+    (recv
+        (msg
+            (pprint msg)
+            (pprint (timer/cancel a))
+            (pprint (timer/cancel 99))
+            (pprint (timer/cancel 0))
+            (pprint (join (fork (timer/cancel c))))
+            (sleep 5)
+            (let d (after 40 $$ :d))
+            (pprint d)
+            (pprint (join (fork (timer/cancel :x))))
+            (timer/cancel d)
+            (never))))
+
+(defun never ()
+    (recv (msg (pprint (list :came msg)))))
+
+(let a (after 10 $$ :a))
+(let b (after 20 $$ :b))
+(let c (after 30 $$ :c))
+(pprint (list a b c))
+(pprint (timer/cancel b))
+(pprint (timer/cancel b))
+(after-a a c)

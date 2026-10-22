@@ -691,7 +691,8 @@ counts depend on the machine anyway). Rejected: also moving the clock 1 ms
 per used-up quota of reductions (busy programs would see time pass, but
 expected output would shift whenever codegen or the prelude changed).
 
-**D111. `after` and `sleep` return `()`.** *(User.)* Neither can fail, so
+**D111. `after` and `sleep` return `()`.** *(User.)* (`after` gives its
+timer's number since D232.) Neither can fail, so
 a Result would always be `:ok`. DESIGN's "blocking calls return a Result"
 now covers the ones that can fail: `slurp` gives `(:ok string)` or
 `(:error reason)`, and `spew` `(:ok ())` or `(:error reason)` (10c).
@@ -699,7 +700,7 @@ Rejected: `(:ok ())` from `sleep`, for uniformity. (`slurp` and `spew`
 became slight functions in 10c, and `slurp` gives lines: D129.)
 
 **D112. A timer whose process has ended is dropped when it's due.**
-*(User.)* An `after` aimed at a process that has ended, or the wake-up of
+*(User.)* (Reopened by D232: dropped sooner, at no cost.) An `after` aimed at a process that has ended, or the wake-up of
 a sleeper that was killed, stays in the timer heap until it's due, and is
 dropped then, as a message to an ended process is (D92). Pids aren't
 reused, so a late timer can't reach the wrong process. Until then it
@@ -4592,7 +4593,8 @@ come and go, a device behind a firewall among them.)*
   offers it if it wants to be looked into, at `nc` say.
 - **Not yet:** a timer can't be taken back, so a keeper closed while it
   waits to dial again leaves that wait's timer, which keeps the program
-  running till it's due, 10 s at the most. A timer whose process has
+  running till it's due, 10 s at the most. (D232: no longer, since the
+  keeper has ended.) A timer whose process has
   ended could stop counting as something that can still happen, which
   would be a change to the runtime, for a proposal of its own.
 - **Checked:** golden tests 280 (a hub, a registry and three devices in
@@ -4793,3 +4795,65 @@ own, a socket left behind replaced, and the umask.)*
   left and refusing, and the next start replacing it; with the usual
   umask, `nobody` refused (`:eacces`), and with `--user 1000:1000` the
   socket that user's, which it could call.
+
+**D232. Timers that can be cancelled, and a timer whose process has
+ended no longer holding up the program's end.** *(Stevan, Oct 2026: "we
+also need to work out how timers can be cancelled, and do that one";
+then, to Claude's options, both, as recommended. PLAN.md had the cases:
+D112, D157, D173, D187, 14's timeout that a reply cancels, a `recv` with
+a timeout, and D228's keeper.)*
+
+- **`timer/cancel`:** `after` gives its timer's number, an integer, 1
+  for the program's first and one more for each after it (`sleep` takes
+  none), where it gave `()` (D111). `(timer/cancel t)` takes the timer
+  back if it hasn't fired: its message never comes, it no longer keeps
+  the program running, and it gives `#true`; or `#false`, if it had
+  fired (its message may be in the mailbox), had been taken back, or `t`
+  is no timer's number. `#false` is what tells a caller that a timeout
+  it no longer wants is on its way. Any process can take a timer back,
+  as any can kill any process. For a process that goes on: a timeout a
+  reply cancels, and later a `recv` with a timeout.
+- **The index:** the pending timers are a binary heap by when they're
+  due; `timer/cancel` finds one by its number in a table beside it,
+  open addressing, the number multiplied by 2^64 over the golden ratio
+  for its slot, updated as the heap moves a timer, and a slot emptied by
+  moving back the ones after it that belong before it, so none is ever
+  marked deleted. Taking a timer back is a lookup and the heap's own
+  removal, O(log n). Rejected: a search of the heap, which the
+  runtime's own timers use (`unset_alarm`), simpler but O(n) a cancel;
+  numbers that reuse slots, with a generation, which aren't 1 up and
+  can be mistaken for an old timer's; and a value of a kind of its own,
+  `#<timer 3>`, which can't be mistaken for a number but takes a box
+  type, printing, `eq?`, `hash`, copying and `sexp/print` refusing it.
+- **A timer whose process has ended,** a killed sleeper's or an `after`
+  aimed at a process that has gone (or a device that has closed), is
+  dropped when nothing can run and it's the next due, so the program
+  doesn't wait for it, nor the virtual clock move to it. D112 kept such
+  a timer till it was due, turning down dropping a process's timers as
+  it ends, which takes a list of them for each process, or a search of
+  the heap. This takes neither: only the top of the heap is looked at,
+  and one further down is dropped when it gets there, or when it's
+  due, as before; nothing a process can see changes, but when the
+  program ends. It frees, with no change to them: `ask-within` (D157),
+  whose timer is its box's, which ends with the answer;
+  `http/request-within` (D173), which kills the sleeper it raced; and a
+  keeper closed while it waits to dial again (D228). HTTP's default
+  timeout (D173) and the `run` tool's limit (D187), turned down for
+  holding up a program's end, are now possible, for when they're
+  wanted.
+- **Checked:** golden tests 286 (numbers 1 up, a timer taken back that
+  never comes, taken back again or after it fired or by a number no
+  timer has, by another process, a fault for one that isn't a number,
+  and a root waiting for what only a timer taken back would have sent,
+  deadlocked), 287 (2,000 timers, a third taken back, last first, the
+  rest coming in the order they're due and then were set) and 288 (4,040
+  set and taken back so that their numbers meet in the table, each
+  found once, from `t/models/timer-ids.py`, a model of the table, in
+  which one that left a gap where a timer was taken back loses six; the
+  runtime made to do that gives the six, 4,034); 135, where `after` now
+  gives 1, and 137, where a killed sleeper's timer and one sent to it are
+  dropped. t/live.py's timers: on the real clock, a program whose only
+  pending timers are an hour long and come to nothing (a killed
+  sleeper's, one sent to a process that has ended, one taken back,
+  `ask-within`'s once answered) ends at once; without the drop it was
+  still running five seconds later.

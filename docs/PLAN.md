@@ -510,7 +510,7 @@ Left for later: keep-alive; bodies streamed in pieces, which agents need
 HTTPS (12c); the limits
 as parameters; a lingering close, so a server that answers before it has
 read the whole request doesn't reset the connection; and a timeout that a
-reply can cancel, which needs cancellable timers (see "Later").
+reply can cancel, which cancellable timers (D232) now allow.
 
 ### After 14: what the boids example led to (done, Oct 2026)
 
@@ -769,31 +769,19 @@ with Stevan first.
 - **Numerical vectors and matrices,** only if a program needs them
   (D179, D221): embeddings for the agent's notes are the likeliest.
   Floats that need no box would come first.
-- **A `recv` with a timeout.** Today it's `after` and a message, and a
-  late timeout can arrive after the answer, to be told apart by hand. A
-  clause such as `(:after ms body...)`, as Erlang's, needs timers that
-  can be cancelled (the runtime has them for its own, `unset_alarm`). To
-  settle: the syntax; that a receive function starts again from the top
+- **A `recv` with a timeout.** Today it's `after` and a message, and
+  `timer/cancel` once the answer has come (D232), which says whether the
+  timeout came first, to be told apart by hand. A clause such as
+  `(:after ms body...)`, as Erlang's, would do that itself. To settle:
+  the syntax; that a receive function starts again from the top
   after each message, dead letters included, so the deadline must be set
   once per wait, not per start; and how it goes through `split.ts`.
-- **Timers that can be cancelled** (Stevan, Oct 2026: "it has come up a
-  few times already"). `after` gives `()`, so a timer can't be taken
-  back, and a pending one keeps the program running till it's due
-  (D112), so a timeout no longer wanted holds up the program's end for
-  as long as it had left. It came up in D112, which turned down
-  dropping a process's timers when it ends; `ask-within` (D157) and
-  `http/request-within` (D173), whose timers stay pending, and HTTP's
-  default timeout, left out for it (D173, a 30-second one would have
-  held every program's end for up to 30 s); the `run` tool's time limit,
-  left out for it (D187); a timeout that a reply can cancel (14, above);
-  a `recv` with a timeout (above); and a keeper closed while it waits to
-  dial again (D228, up to 10 s). The runtime cancels its own (a lookup's
-  timer: `own_alarm`, `unset_alarm`). To settle: `after` giving a timer
-  that a builtin cancels, `(timer/cancel t)`; or a timer whose process
-  has ended no longer keeping the program running, reopening D112 (whose
-  cost was a list of each process's timers, or the heap searched), which
-  covers a killed box and a closed keeper but not a process that goes on;
-  or both.
+- **Timers that can be cancelled** (done, D232): both. `after` gives its
+  timer's number, which `(timer/cancel t)` takes back; and a timer whose
+  process has ended no longer keeps the program running, which frees
+  `ask-within` (D157), `http/request-within` (D173) and a closed keeper
+  (D228). Left for when they're wanted: HTTP's default timeout (D173)
+  and the `run` tool's time limit (D187), each now possible.
 - **Processes as data.** A waiting process is a function, its arguments
   and a mailbox (D8), and its data has no cycles, so it can be written
   out, with functions and closures by name. For: saving and restoring a

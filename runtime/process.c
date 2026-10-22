@@ -1122,9 +1122,11 @@ void rt_yield(void) {
 // after and sleep set timers, kept in a binary heap in the order they're
 // due, and then in the order they were set. after's timer holds its
 // message, copied when it was set, as send's would be; sleep's wakes the
-// sleeper. A timer whose process has ended by the time it's due is dropped
-// then, as a message to it would be (D92); until then it's something that
-// can still happen, so the program waits for it.
+// sleeper. after's timers are numbered, 1 up, and timer/cancel takes one
+// back by its number, found in ids (D232). A timer whose process has
+// ended is dropped when it's due, as a message to it would be (D92), or
+// sooner, when nothing can run and it's next: nothing can come of it, so
+// the program doesn't wait for it, and the clock doesn't move to it.
 //
 // The clock is the system's monotonic one, in nanoseconds, read through
 // replay.c like everything else from outside (D170); or, with
@@ -1134,12 +1136,21 @@ void rt_yield(void) {
 
 typedef struct {                        // (timer_t is POSIX's)
     uint64_t    due, seq;
+    uint64_t    id;                     // after's number, or 0
     rt_value_t  pid;
     rt_msg_t   *msg;                    // after's message, or NULL: sleep
 } alarm_t;
 
 static alarm_t  *alarms;                // alarms[0] is the next due
 static uint64_t  nalarms, alarms_cap, alarms_set;
+static uint64_t  afters;                // after's timers numbered so far
+
+// Where each of after's pending timers is in alarms, by its number:
+// open addressing, a slot of number 0 empty, and a slot emptied by
+// moving back the ones after it that belong before it, so none is ever
+// marked deleted. Updated as the heap moves them.
+static uint64_t *ids, *places;
+static uint64_t  ids_cap, nids;         // ids_cap a power of two, or 0
 static int       virtual_clock;
 static uint64_t  virtual_now;
 static uint64_t  started;               // when the program started, for :system
@@ -1161,28 +1172,78 @@ static int before(const alarm_t *a, const alarm_t *b) {
     return a->due < b->due || (a->due == b->due && a->seq < b->seq);
 }
 
-static void set_alarm(uint64_t due, rt_value_t pid, rt_msg_t *msg) {
+static uint64_t id_home(uint64_t id) {
+    return (id * 0x9E3779B97F4A7C15u) & (ids_cap - 1);
+}
+
+// id's slot in ids, or the empty one where it would go.
+static uint64_t id_slot(uint64_t id) {
+    uint64_t i = id_home(id);
+    while (ids[i] && ids[i] != id) i = (i + 1) & (ids_cap - 1);
+    return i;
+}
+
+static void id_add(uint64_t id) {
+    if ((nids + 1) * 2 > ids_cap) {
+        uint64_t *old_ids = ids, *old_places = places, old_cap = ids_cap;
+        ids_cap = ids_cap ? ids_cap * 2 : 64;
+        ids     = rt_must(calloc(ids_cap, sizeof *ids));
+        places  = rt_must(malloc(ids_cap * sizeof *places));
+        for (uint64_t i = 0; i < old_cap; i++) {
+            if (!old_ids[i]) continue;
+            uint64_t j = id_slot(old_ids[i]);
+            ids[j]    = old_ids[i];
+            places[j] = old_places[i];
+        }
+        free(old_ids);
+        free(old_places);
+    }
+    ids[id_slot(id)] = id;
+    nids++;
+}
+
+static void id_drop(uint64_t id) {
+    uint64_t mask = ids_cap - 1, i = id_slot(id);
+    for (uint64_t j = (i + 1) & mask; ids[j]; j = (j + 1) & mask) {
+        if (((j - id_home(ids[j])) & mask) < ((j - i) & mask)) continue;   // its home is after i: it stays
+        ids[i]    = ids[j];
+        places[i] = places[j];
+        i         = j;
+    }
+    ids[i] = 0;
+    nids--;
+}
+
+// alarms[i] = a, and where it is noted if it's after's.
+static void put(uint64_t i, alarm_t a) {
+    alarms[i] = a;
+    if (a.id) places[id_slot(a.id)] = i;
+}
+
+static void set_alarm(uint64_t due, rt_value_t pid, rt_msg_t *msg, uint64_t id) {
     if (nalarms == alarms_cap) {
         alarms_cap = alarms_cap ? alarms_cap * 2 : 64;
         alarms     = rt_must(realloc(alarms, alarms_cap * sizeof *alarms));
     }
-    alarm_t  a = { due, alarms_set++, pid, msg };
+    if (id) id_add(id);
+    alarm_t  a = { due, alarms_set++, id, pid, msg };
     uint64_t i = nalarms++;
-    for (; i > 0 && before(&a, &alarms[(i - 1) / 2]); i = (i - 1) / 2) alarms[i] = alarms[(i - 1) / 2];
-    alarms[i] = a;
+    for (; i > 0 && before(&a, &alarms[(i - 1) / 2]); i = (i - 1) / 2) put(i, alarms[(i - 1) / 2]);
+    put(i, a);
 }
 
 // Takes alarms[i] out, the last one going in its place, up or down.
 static void remove_alarm(uint64_t i) {
+    if (alarms[i].id) id_drop(alarms[i].id);
     alarm_t last = alarms[--nalarms];
     if (i == nalarms) return;
-    for (; i > 0 && before(&last, &alarms[(i - 1) / 2]); i = (i - 1) / 2) alarms[i] = alarms[(i - 1) / 2];
+    for (; i > 0 && before(&last, &alarms[(i - 1) / 2]); i = (i - 1) / 2) put(i, alarms[(i - 1) / 2]);
     for (uint64_t c; (c = 2 * i + 1) < nalarms; i = c) {
         if (c + 1 < nalarms && before(&alarms[c + 1], &alarms[c])) c++;
         if (!before(&alarms[c], &last)) break;
-        alarms[i] = alarms[c];
+        put(i, alarms[c]);
     }
-    alarms[i] = last;
+    put(i, last);
 }
 
 static alarm_t next_alarm(void) {
@@ -1194,7 +1255,7 @@ static alarm_t next_alarm(void) {
 // A timer a device sets itself (a lookup's), unset when it's no longer
 // wanted, since a pending timer keeps the program running: its seq + 1.
 static uint64_t own_alarm(uint64_t due, rt_value_t pid) {
-    set_alarm(due, pid, NULL);
+    set_alarm(due, pid, NULL, 0);
     return alarms_set;
 }
 
@@ -1228,13 +1289,41 @@ static void ring(void) {
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) {
     uint64_t due = due_in(ms, site);
     entry(pid, site);
-    set_alarm(due, pid, new_msg(msg));
-    return RT_NIL;
+    set_alarm(due, pid, new_msg(msg), ++afters);
+    return rt_int((int64_t)afters);
+}
+
+rt_value_t rt_timer_cancel(rt_value_t t, const char *site) {
+    int64_t id = rt_need_int(t, site);
+    if (id <= 0 || !ids_cap || ids[id_slot((uint64_t)id)] != (uint64_t)id) return RT_FALSE;
+    uint64_t  i = places[id_slot((uint64_t)id)];
+    rt_msg_t *m = alarms[i].msg;
+    remove_alarm(i);
+    free_msg(m);
+    return RT_TRUE;
+}
+
+// Whether nothing can come of a: its process has ended, or its device
+// closed (D232).
+static int orphaned(const alarm_t *a) {
+    uint64_t at = a->pid >> RT_PID_SHIFT;
+    return !procs[at].proc && !procs[at].device;
+}
+
+// Drops the timers next due that nothing can come of, so that the
+// program neither waits for them nor moves the clock to them. Only from
+// the top of the heap, so it costs no search: one further down is
+// dropped when it comes to the top, or is due.
+static void drop_orphans(void) {
+    while (nalarms && orphaned(&alarms[0])) {
+        alarm_t a = next_alarm();
+        if (a.msg) free_msg(a.msg);
+    }
 }
 
 rt_value_t rt_sleep(rt_value_t ms, const char *site) {
     rt_proc_t *p = rt_current;
-    set_alarm(due_in(ms, site), p->pid, NULL);
+    set_alarm(due_in(ms, site), p->pid, NULL, 0);
     p->state = RT_SLEEPING;
     p->at    = (uintptr_t)__builtin_return_address(0);
     to_scheduler(p);                            // until ring wakes it
@@ -1373,6 +1462,7 @@ static void events(void) {
 // the clock moves; only when nothing else can happen does it wait for real.
 static int idle(void) {
     fflush(stdout);                             // so a program stopped as it waits has lost none of it (D229)
+    drop_orphans();
     if (!listening() && !nalarms && !sockets_waiting()) return 0;
     if (virtual_clock) {
         int saw = wait_for(0);

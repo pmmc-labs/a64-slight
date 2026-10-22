@@ -28,8 +28,8 @@
 (defun ask (pid msg) (ask/via (fork (ask/box pid)) pid msg))
 
 ; As ask, but raises (:timeout pid) if no answer comes within ms
-; milliseconds. (The timer stays pending until then, and a pending timer
-; keeps a program running.)
+; milliseconds. The timer is the box's, which ends with the answer, so
+; it doesn't hold up the program's end after that (D232).
 (defun ask-within (ms pid msg)
     (let box (fork (ask/box pid)))
     (after ms box :timeout)

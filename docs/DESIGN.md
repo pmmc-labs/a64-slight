@@ -235,7 +235,8 @@ reply refs.
 | `(join/race pids)` | **Blocking** wait for the first of `pids` to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
 | `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has. Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
 | `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
-| `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns `()`. |
+| `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns the timer's number (D232). |
+| `(timer/cancel t)` | Takes back `after`'s timer `t` if it hasn't fired: `#true`, or `#false` (D232). |
 | `(sleep ms)` | **Blocking** wait for `ms` milliseconds, keeping the stack. Works anywhere. Returns `()`. |
 | `(clock/us)` | The microseconds since the program started, on the timers' clock (D208). |
 | `(raise reason)` | Ends the current process with `(:error reason)`. |
@@ -287,12 +288,16 @@ reply refs.
   and `spew` are written in slight with `connect` and `join`
   (`lib/fs.slight`), so they block only their caller too, and give
   Results: `(:ok lines)` and `(:ok ())`, or `(:error reason)` (D129).
-- **Timers** (D112, D114). `after` and `sleep` take an integer number of
-  milliseconds; a negative one counts as 0. Timers due at the same time
-  fire in the order they were set, at the scheduler's next decision (so
-  `(sleep 0)` lets the processes already waiting go first). A timer whose
-  process has ended by the time it's due is dropped then, as a message to
-  it would be.
+- **Timers** (D112, D114, D232). `after` and `sleep` take an integer
+  number of milliseconds; a negative one counts as 0. Timers due at the
+  same time fire in the order they were set, at the scheduler's next
+  decision (so `(sleep 0)` lets the processes already waiting go first).
+  `after` gives its timer's number, 1 up, and `timer/cancel` takes one
+  back by it, found in an index of the pending ones, kept as the heap
+  moves them. A timer whose process has ended is dropped when it's due,
+  as a message to it would be, or sooner: when nothing can run, those
+  next due whose process has ended are dropped, so the program neither
+  waits for them nor moves the clock to them.
 - **The clock** (D208). `clock/us` reads the timers' clock: the
   system's monotonic one, through `replay.c`, so a replay gives the
   same readings, or the virtual one, which moves only as the timers do.

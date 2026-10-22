@@ -514,10 +514,12 @@ rt_value_t rt_kill(rt_value_t pid, const char *site) RT_ASM(rt_kill);
 __attribute__((noreturn))
 rt_value_t rt_raise(rt_value_t reason, const char *site) RT_ASM(rt_raise);
 
-// Timers (process.c). rt_after sends msg to pid in ms milliseconds;
-// rt_sleep waits that long, keeping the stack. A negative ms counts as 0.
-// Each returns ().
+// Timers (process.c). rt_after sends msg to pid in ms milliseconds, and
+// returns the timer's number; rt_timer_cancel takes one back by its
+// number, RT_TRUE if it hadn't fired (D232); rt_sleep waits that long,
+// keeping the stack, and returns (). A negative ms counts as 0.
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_after);
+rt_value_t rt_timer_cancel(rt_value_t t, const char *site) RT_ASM(rt_timer_cancel);
 rt_value_t rt_sleep(rt_value_t ms, const char *site) RT_ASM(rt_sleep);
 
 // (clock/us): the microseconds since the program started, on the clock

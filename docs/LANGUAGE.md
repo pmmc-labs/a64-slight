@@ -710,14 +710,32 @@ or `monitor` still gets it.
 ### Time
 
 - `(after ms pid msg)` sends `msg` to `pid` once `ms` milliseconds have
-  passed. `msg` is copied when `after` is called. Returns `()`.
+  passed. `msg` is copied when `after` is called. Returns the timer's
+  number, an integer: 1 for the program's first, and one more for each
+  after it.
+- `(timer/cancel t)` takes back `after`'s timer `t`, its number, if it
+  hasn't fired: its message never comes, and it no longer keeps the
+  program running. Gives `#true` if it took it back, or `#false` if it
+  had fired already (its message may be in the mailbox, or taken), had
+  been taken back, or is no timer's number. Any process can take a
+  timer back (D232).
 - `(sleep ms)` blocks the calling process, and only that one, for `ms`
   milliseconds. Returns `()`.
 
 Both take an integer, and a negative one counts as 0. Timers due at the
 same time fire in the order they were set. A pending timer keeps the
-program running, and one for a process that has ended is dropped when
-it's due.
+program running, but not one for a process that has ended, which is
+dropped (D232): a sleeper that's killed, or a timeout sent to a process
+that has gone, doesn't hold up the program's end.
+
+    (let t (after 5000 $$ :timeout))
+    (send worker (list :job $$))
+    (recv
+        ((:done v)  (timer/cancel t) v)
+        (:timeout   (kill worker) :timed-out))
+
+`timer/cancel` giving `#false` there would mean the `:timeout` came
+first, and is still to be taken.
 
 - `(clock/us)`: the microseconds since the program started, an integer,
   on the clock the timers go by. It's for timing a part of a program:

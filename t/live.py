@@ -27,6 +27,10 @@ program, or the system to measure the run.
   as PID 1, it waits for what a command left running when that ends, so
   no zombie stays (D229). Being PID 1 takes a PID namespace (unshare, as
   root, on Linux); without one, those are skipped.
+- timers: timers of an hour that nothing can come of (a killed
+  sleeper's, one sent to a process that has ended, one taken back, and
+  ask-within's once it's answered) don't hold up the program's end
+  (D232).
 - sockets: a listener at a Unix socket's path (D231) answers there, and a
   second program can't take the path from it; killed with SIGKILL, it
   leaves the socket behind, which the next to listen there replaces; and
@@ -401,6 +405,16 @@ def signals():
           f'ready {ready}, zombies {left}')
 
 
+def timers():
+    prog = build('timers', 't/live/timers.slight')
+    what = "timers of an hour that nothing can come of don't hold up the program's end"
+    try:
+        r = subprocess.run(RUN + [prog], capture_output=True, env=ENV, timeout=DEADLINE)
+        check(what, r.returncode == 0 and r.stdout == b'(1 done)\n', f'exit {r.returncode}, said {r.stdout!r}')
+    except subprocess.TimeoutExpired:
+        check(what, False, f'still running after {DEADLINE} s')
+
+
 # What a connection to the socket at path says first, or None.
 def hello(path):
     try:
@@ -447,6 +461,7 @@ memory()
 chat()
 airline()
 signals()
+timers()
 sockets()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)
