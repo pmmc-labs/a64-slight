@@ -494,7 +494,8 @@ says which way a message goes, so an id is unique only among one end's
 calls in flight, and either end can call the other. A connection is a
 process that owns the socket; a call from the other end runs in a
 process of its own, which the connection monitors, so a fault or a
-`raise` is a `fail` and `stop` is `kill`; a call from here waits in a
+`raise` is a `fail` and `stop` is `kill`, and which a watcher stops if
+the connection ends first, however it ends (D230); a call from here waits in a
 process of its own too, which the connection monitors, so a caller that
 ends stops its call. A handler has a name, a description and typed
 parameters, which `help` gives and the connection checks. No remote

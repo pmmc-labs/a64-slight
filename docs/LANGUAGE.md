@@ -2095,7 +2095,9 @@ socket. Either end can call the other, whichever connected.
   whose caller ends, `rpc/call`'s included, is stopped the same way.
 - `(rpc/close conn)` closes the connection: calls in flight from here
   fail with `:disconnected`, and those from the other end are stopped.
-  The other end hanging up does the same.
+  The other end hanging up does the same; and so does the connection
+  ending with an error, such as a reset, but the calls from here fail
+  with that error (D230).
 - `(rpc/keep "host:port" handlers on-open)` keeps a connection up
   (D228). It gives a keeper's pid, `k`, at once, which `rpc/call`,
   `rpc/stream` and `rpc/close` take as they take a connection. It dials,
@@ -2161,6 +2163,6 @@ flight is let be, since one can cross a `stop`. A person at `nc`:
     (done 2 "ok   000-int ...")
 
 A datum that can't be read, such as a stray `)`, ends the connection
-(`:bad-sexp`). There's no flow control: a stream's values are sent as
+(`:bad-sexp`), and with it the calls on it. There's no flow control: a stream's values are sent as
 fast as they're made. Nor any authentication: listen at `127.0.0.1`, and
 reach it from elsewhere over ssh.

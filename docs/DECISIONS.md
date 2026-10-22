@@ -4385,7 +4385,8 @@ sockets later; and "rpc" as the name.)* `lib/rpc.slight`, opt-in,
   followed as it was, but finished: a sketch in slight, talking JSON to
   the `Nexus` and to itself, showed the model fits processes (and found
   `STOP` lost at both ends of the JavaScript), and the rest was settled
-  from there.
+  from there. Mojo-StupidRPC, an earlier implementation, in Perl, of
+  the notes, and Hydling, which uses it, were looked at after (D230).
 - **The messages,** a datum each, read with `(:read :sexp)` and written
   with `sexp/print` (D155): `(call id name arg ...)`, `(next id v)`,
   `(done id v)`, `(fail id reason)`, `(stop id)`, `(helo rpc 1)` and
@@ -4461,7 +4462,7 @@ sockets later; and "rpc" as the name.)* `lib/rpc.slight`, opt-in,
   `127.0.0.1` (D226) and come in over ssh. A stray `)` from a person
   ends the connection, as bad text ends a device's owner (`:bad-sexp`).
   A connection that ends with an error leaves the calls from the other
-  end running to their ends. Unix sockets.
+  end running to their ends (D230 stops them). Unix sockets.
 - **Checked:** golden tests 277 (two ends in one program: answers,
   checks, bare words, failures, `help`, a stream, a call back to the
   caller, a stream stopped and a caller that ends, the processes for
@@ -4651,3 +4652,77 @@ turned up, both seen to fail first.)*
   zombie is left. With the runtime as it was, all three fail; with only
   the orphans' wait taken out, the last fails, a zombie left. By hand:
   the same two, a log line through a pipe and `ps` as PID 1.
+
+**D230. `rpc` beside mst's own: a call stopped however its connection
+ends, and `barf`.** *(Stevan, Oct 2026: "Let's do 1 and 2 here", to
+Claude's review of two more of Matt S Trout's, Mojo-StupidRPC and
+Hydling, beside `lib/rpc.slight`: the fix below, and this record.)*
+
+- **What they are:** Mojo-StupidRPC (github.com/mst-ripples/Mojo-StupidRPC,
+  Sep 2021, about 540 lines of Perl on Mojolicious) is the one
+  implementation of stupidrpc's early notes (`sketches/early`, which
+  Hydling keeps as its spec): JSON arrays, a line each over TCP or a
+  Unix socket, or a WebSocket frame each; `call`, `cast`, `listen` and
+  `wrap` with an id, `unlisten` and `unwrap` by name, answered with
+  `done`, `fail` and `data`, and `notify` keyed by a channel's name. A
+  handler is given the request, and answers through it (`$req->done`).
+  A `listen` is acknowledged with a `done`, which may carry the current
+  value, and then notifies; a `wrap` registers for an event, and the
+  server calls the client back for each, whose `done`, `done stop` or
+  `done next args` lets it through, vetoes it, or changes it. No
+  cancelling a call, no `helo`, no `barf`. Hydling
+  (github.com/mst-ripples/Hydling, Sep 2021) uses it: an IRC bot with a
+  control port on a Unix socket, and `dev/rawctl`, a command-line client
+  that reads JSONY (bare words allowed), numbers the calls itself, and
+  prints each answer.
+- **What they confirm of D225 and D228:** ids always, hidden by a
+  library: Mojo requires them, and `rawctl` keeps them for a person.
+  Interception as a call the other end makes to you: that is how Mojo's
+  `wrap` works. Subscriptions as calls that stream: the `Nexus` made the
+  same move, and Mojo's, keyed by name, are where two of its bugs are.
+  People typing the messages: the notes' bare words, `rawctl`'s JSONY.
+  And D228's hub: stupidrpc's `outpost` plugins (`send-identity`,
+  `save-identity`, `route-to`) are the same design, a device connecting
+  out and saying who it is, and the hub keeping each connection's
+  identity and routing calls by it.
+- **Its bugs,** each run against it, its own test passing: `cast` goes
+  out without its verb; an id reused while in flight gets two `done`s
+  that can't be told apart, and one equal to an id of its own going out
+  dies, since it looks in the wrong table; an `unlisten` that crosses a
+  `notify` dies, and two `listen`s to one channel leave one that can't
+  be stopped; an unknown verb is a bare `die`; and a handler that dies
+  leaves its caller waiting for ever. `lib/rpc.slight` gets each right
+  (golden tests 277 to 279).
+- **And one it shared:** a connection that ends with an error never
+  hangs up: text that isn't an s-expression (a person's stray `)`), or
+  a reset (`:econnreset`, `:epipe`), from a peer killed with data
+  unread, or a write to one that has gone. Nothing then stopped the
+  calls from the other end: a stream used as a subscription ran for
+  ever, and a program kept up with `rpc/keep` (D228) would gather them,
+  a set for each connection that dropped. D225 had it under "not yet",
+  as calls running to their ends. Now each call from the other end has
+  a watcher, a process the connection forks beside it, that monitors
+  both and kills the call if the connection ends first (`rpc/watch`):
+  a process for each call, and the loop, and how it reads, holding back
+  a sender through TCP (D158), as they were. Rejected: a process that
+  owns the socket and passes what it reads to the loop, so the loop
+  hears the error, which takes what it reads as fast as it comes and
+  loses that; links, a runtime change for this alone; and bad text told
+  to the owner as a message, which changes every device (D159) and
+  leaves a reader to find where the next datum starts.
+- **`barf`:** in the notes, a `barf` is fatal, and a close follows.
+  `lib/rpc.slight` closes only after barfing at a `helo` for another
+  protocol or version; a message it can't take, or an id in use, is
+  barfed at and the connection goes on, so a person at `nc` who
+  mistypes doesn't lose the connection and every call on it.
+- **Checked:** golden test 283, worked out by hand: a raw client starts
+  two calls that never end on a server, then sends a stray `)`, and both
+  calls' processes are killed; and a raw server calls a client, is
+  called by it, and sends one, and the client's call fails with
+  `:bad-sexp` and the process running the server's call is killed. It
+  deadlocks without the watcher. All seven `rpc` tests under
+  `SLIGHT_GC_STRESS` 1 and 7, `SLIGHT_GC_VERIFY` and five seeded orders.
+  By hand, on the real clock: a stream running when a Python client
+  resets the connection (`SO_LINGER` 0), which before ran to its end and
+  now stops; and a stream of a million values, then a stray `)`, which
+  before ran every value.

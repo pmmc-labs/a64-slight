@@ -202,7 +202,9 @@ it waits, and which as PID 1 waits for what its commands leave (D229);
 and `rpc` for fleets: a hub calls its devices over the connections they
 made (a handler's `^$$`), `rpc/keep` keeps a connection up, and
 `rpc/system` answers with what `:system` says (D228, golden tests 280 to
-282).
+282); and, after a look at mst's Mojo-StupidRPC and Hydling, a call from
+the other end stopped however its connection ends, an error included
+(D230, golden test 283).
 **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local

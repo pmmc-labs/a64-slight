@@ -24,9 +24,10 @@
 ; is a call that says what can be called.
 ;
 ; A connection is a process, which owns the socket. A call from the other
-; end runs in a process of its own, which the connection monitors; one
-; from here waits in a process of its own, which the connection monitors
-; too, so a caller that ends stops its call.
+; end runs in a process of its own, which the connection monitors, and
+; which is stopped if the connection ends first; one from here waits in a
+; process of its own, which the connection monitors too, so a caller that
+; ends stops its call.
 
 (defun rpc/version () 1)
 
@@ -352,7 +353,17 @@
                         ((:ok values)
                             (let p (fork (rpc/run f values)))
                             (monitor p)
+                            (fork (rpc/watch p))
                             (assoc id p theirs))))))))
+
+; Stops p, a call from the other end, if the connection, the parent,
+; ends first. One that ends with an error (text that isn't an
+; s-expression, a reset) never hangs up, so its calls would run on, and a
+; stream for ever (D230).
+(defun rpc/watch (p)
+    (monitor ^$$)
+    (monitor p)
+    (recv ((:exit q _) (when (eq? q ^$$) (kill p)))))
 
 ; A call's process. Its answer is printed here, so one that isn't data
 ; faults the call, not the connection.
