@@ -45,7 +45,7 @@ enum { OFF, RECORD, REPLAY };
 enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
-    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE,
+    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX,
 };
 
 static const char *const names[] = {
@@ -55,7 +55,7 @@ static const char *const names[] = {
     [IO_SOCKET_ERROR] = "a socket's error", [IO_SEND] = "a send", [IO_RECV] = "a receive",
     [IO_FOPEN] = "a text file", [IO_FGETS] = "a line of a text file", [IO_SEED] = "a seed",
     [IO_WINSIZE] = "the screen's size", [IO_SPAWN] = "a command", [IO_WAIT] = "a wait for a command",
-    [IO_KILL] = "a kill", [IO_PIPE] = "a pipe",
+    [IO_KILL] = "a kill", [IO_PIPE] = "a pipe", [IO_LISTEN_UNIX] = "a listen at a path",
 };
 
 static int      mode;
@@ -288,9 +288,9 @@ int rt_io_close(int fd) {
     return (int)done(IO_CLOSE, close(fd));
 }
 
-int rt_io_socket(int type) {
+int rt_io_socket(int family, int type) {
     if (mode == REPLAY) return (int)replayed(IO_SOCKET);
-    return (int)done(IO_SOCKET, socket(AF_INET, type, 0));
+    return (int)done(IO_SOCKET, socket(family, type, 0));
 }
 
 int rt_io_setup(int fd, int tcp) {
@@ -340,8 +340,39 @@ int rt_io_listen(int fd, uint32_t addr, int port, int *got) {
     return (int)done_with(IO_LISTEN, err, &p, sizeof p);
 }
 
+// Whether the socket at a is one that nothing accepts on: a program that
+// listened there has ended without removing it. Asked without waiting,
+// so one whose queue is full (EAGAIN on Linux) counts as alive; macOS
+// says ECONNREFUSED for that too, so there a socket so busy that a second
+// copy of its program starts can be taken for dead.
+static int stale(const struct sockaddr_un *a) {
+    struct stat st;
+    if (lstat(a->sun_path, &st) < 0 || !S_ISSOCK(st.st_mode)) return 0;
+    int s = socket(AF_UNIX, SOCK_STREAM, 0), dead = 0;
+    if (s < 0) return 0;
+    int flags = fcntl(s, F_GETFL);
+    if (flags >= 0 && fcntl(s, F_SETFL, flags | O_NONBLOCK) == 0) {
+        dead = connect(s, (const struct sockaddr *)a, sizeof *a) < 0 && errno == ECONNREFUSED;
+    }
+    close(s);
+    return dead;
+}
+
+int rt_io_listen_unix(int fd, const char *path) {
+    if (mode == REPLAY) return (int)replayed(IO_LISTEN_UNIX);
+    struct sockaddr_un a;
+    int                err = rt_unix_address(&a, path);
+    if (!err && bind(fd, (struct sockaddr *)&a, sizeof a) < 0) {
+        err = errno;
+        if (err == EADDRINUSE && stale(&a)) err = unlink(path) < 0 || bind(fd, (struct sockaddr *)&a, sizeof a) < 0 ? errno : 0;
+    }
+    if (!err && listen(fd, 128) < 0) err = errno;
+    return (int)done(IO_LISTEN_UNIX, err);
+}
+
 // A connection from fd's queue: its descriptor, with the peer as
-// "address:port" in where; or -1, with errno set.
+// "address:port" in where, or "" for a Unix socket's, which has none; or
+// -1, with errno set.
 int rt_io_accept(int fd, char *where, size_t size) {
     if (mode == REPLAY) {
         uint32_t len;
@@ -349,14 +380,15 @@ int rt_io_accept(int fd, char *where, size_t size) {
         where[r >= 0 ? len : 0] = '\0';
         return r;
     }
-    struct sockaddr_in a;
-    socklen_t          alen = sizeof a;
-    int                r    = accept(fd, (struct sockaddr *)&a, &alen);
+    struct sockaddr_storage a;
+    socklen_t               alen = sizeof a;
+    int                     r    = accept(fd, (struct sockaddr *)&a, &alen);
     where[0] = '\0';
-    if (r >= 0) {
+    if (r >= 0 && a.ss_family == AF_INET) {
+        const struct sockaddr_in *in = (const struct sockaddr_in *)&a;
         char addr[INET_ADDRSTRLEN];
-        inet_ntop(AF_INET, &a.sin_addr, addr, sizeof addr);
-        snprintf(where, size, "%s:%d", addr, ntohs(a.sin_port));
+        inet_ntop(AF_INET, &in->sin_addr, addr, sizeof addr);
+        snprintf(where, size, "%s:%d", addr, ntohs(in->sin_port));
     }
     return (int)done_with(IO_ACCEPT, r, where, strlen(where));
 }

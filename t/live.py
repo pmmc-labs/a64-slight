@@ -27,6 +27,10 @@ program, or the system to measure the run.
   as PID 1, it waits for what a command left running when that ends, so
   no zombie stays (D229). Being PID 1 takes a PID namespace (unshare, as
   root, on Linux); without one, those are skipped.
+- sockets: a listener at a Unix socket's path (D231) answers there, and a
+  second program can't take the path from it; killed with SIGKILL, it
+  leaves the socket behind, which the next to listen there replaces; and
+  ended by SIGTERM, it removes it.
 
 Nothing here depends on how long anything takes: each step waits for
 what it expects to see, and DEADLINE seconds is only how long it waits
@@ -42,6 +46,8 @@ import select
 import shlex
 import shutil
 import signal
+import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -331,8 +337,8 @@ def airline():
 # prog run, with prefix in front, and the line it says once it's ready:
 # the Popen, whether it said it, and the program's pid. With unshare in
 # front, the program is unshare's child, PID 1 in a namespace of its own.
-def started(prog, prefix, line):
-    p = subprocess.Popen(prefix + RUN + [prog], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=ENV)
+def started(prog, prefix, line, args=()):
+    p = subprocess.Popen(prefix + RUN + [prog, *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=ENV)
     ready = select.select([p.stdout], [], [], DEADLINE)[0] != [] and p.stdout.readline() == line
     target = p.pid
     if prefix:
@@ -395,11 +401,52 @@ def signals():
           f'ready {ready}, zombies {left}')
 
 
+# What a connection to the socket at path says first, or None.
+def hello(path):
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(DEADLINE)
+            s.connect(path)
+            return s.makefile('rb').readline()
+    except OSError:
+        return None
+
+
+def is_socket(path):
+    try:
+        return stat.S_ISSOCK(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def sockets():
+    prog = build('listen', 't/live/listen.slight')
+    path = os.path.join(DIR, 'listen.sock')
+    if os.path.lexists(path):
+        os.unlink(path)
+    a, ready, target = started(prog, [], b'listening\n', [path])
+    check('a listener at a path answers there', ready and is_socket(path) and hello(path) == b'hello\n')
+    second = subprocess.run(RUN + [prog, path], capture_output=True, env=ENV, timeout=DEADLINE)
+    check("a second can't take the path from it, which it still answers at",
+          second.stdout == f'(error (eaddrinuse "{path}"))\n'.encode() and hello(path) == b'hello\n',
+          f'second said {second.stdout!r}')
+    os.kill(target, signal.SIGKILL)
+    a.wait()
+    check('SIGKILL leaves the socket behind', is_socket(path) and hello(path) is None)
+    b, ready, target = started(prog, [], b'listening\n', [path])
+    check('the next to listen there replaces it', ready and hello(path) == b'hello\n')
+    os.kill(target, signal.SIGTERM)
+    status = b.wait(timeout=DEADLINE)
+    check('SIGTERM ends a listener, which removes its socket', status == -signal.SIGTERM and not os.path.lexists(path),
+          f'status {status}')
+
+
 os.makedirs(DIR, exist_ok=True)
 keys()
 memory()
 chat()
 airline()
 signals()
+sockets()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

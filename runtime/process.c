@@ -1494,6 +1494,7 @@ typedef struct rt_device {
     rt_value_t        path;             // a file's path, a connection's "host:port", a command's name, as a
     uint64_t         *path_space;       // string in path_space (string_in), for (:error (name path)); or 0
     int64_t           port;             // a listener's, or the port a connection is to be made to
+    int               unix_sock;        // a Unix socket's, at path (D231)
     rt_lookup_t      *lookup;           // while a connection's host is looked up...
     uint64_t          alarm;            // ...the timer for its query (own_alarm)
     char             *buf;              // what's been read, but not yet sent...
@@ -1612,8 +1613,11 @@ static void end_command(rt_device_t *d);
 
 // Closes d's file descriptor. A socket is freed later (bury), since an
 // event in hand may still refer to it.
+static void forget_path(int fd);
+
 static void close_now(rt_device_t *d) {
     if (d->mode == DEV_EXEC) end_command(d);
+    if (d->mode == DEV_LISTEN && d->unix_sock) forget_path(d->fd);
     if (d->fd >= 0) rt_io_close(d->fd);
     if (d->lookup) {
         unset_alarm(&d->alarm);
@@ -1720,12 +1724,13 @@ static void tell_string(rt_device_t *d, uint64_t word, const char *bytes, size_t
     free(space);
 }
 
-// The device's first message: (:open f), or a listener's (:open l port).
+// The device's first message: (:open f), or a listener's (:open l port),
+// or (:open l path) at a Unix socket's.
 // :system's reads on too, so that one handed over in the middle of
 // sending its processes goes on to its new owner.
 static void tell_open(rt_device_t *d) {
     _Alignas(16) rt_value_t cell[2];
-    if (d->mode == DEV_LISTEN) tell_list(d, RT_DEV_OPEN, rt_cons_at(cell, rt_int(d->port), RT_NIL), 0);
+    if (d->mode == DEV_LISTEN) tell_list(d, RT_DEV_OPEN, rt_cons_at(cell, d->unix_sock ? d->path : rt_int(d->port), RT_NIL), 0);
     else                       tell(d, RT_DEV_OPEN, d->mode != RT_FS_WRITE && d->mode != RT_FS_APPEND);
 }
 
@@ -2101,7 +2106,7 @@ static int setup(int fd) {
 // Listens on port at addr (network order). where, "host:port", is what
 // the listener's errors name, or its port if where is NULL.
 static int tcp_listen(rt_proc_t *p, const char *site, uint32_t addr, int64_t port, const char *where, size_t len) {
-    int fd = rt_io_socket(SOCK_STREAM);
+    int fd = rt_io_socket(AF_INET, SOCK_STREAM);
     if (fd < 0) return errno;
     int got, err;
     if ((err = setup(fd)) != 0 || (err = rt_io_listen(fd, addr, (int)port, &got)) != 0) {
@@ -2121,7 +2126,7 @@ static int open_connection(uint32_t addr, int64_t port, int *fd) {
     a.sin_family      = AF_INET;
     a.sin_port        = htons((uint16_t)port);
     a.sin_addr.s_addr = addr;
-    int s = rt_io_socket(SOCK_STREAM), err = s < 0 ? errno : setup(s);
+    int s = rt_io_socket(AF_INET, SOCK_STREAM), err = s < 0 ? errno : setup(s);
     if (!err && rt_io_connect(s, (struct sockaddr *)&a, sizeof a) < 0 && errno != EINPROGRESS) err = errno;
     if (err && s >= 0) rt_io_close(s);
     *fd = err ? -1 : s;
@@ -2207,6 +2212,73 @@ static void lookup_timed_out(rt_device_t *d, uint64_t seq) {
     lookup_step(d, rt_lookup_ready(d->lookup, 1, &addr), addr);
 }
 
+// Unix sockets (D231): a connection reads and writes as a TCP one does,
+// and a listener at a path makes the socket there, replacing only one
+// that nothing accepts on, left by a program that has ended (replay.c).
+// The path is removed when the listener closes, and when the program
+// ends however it ends, a signal included; one left by SIGKILL is
+// replaced next time. paths holds each listener's, by its descriptor, for
+// on_end, which a signal runs, to find; none in a replay, which makes no
+// socket.
+static char *paths[FD_SETSIZE];
+
+static void unlink_paths(void) {
+    for (int fd = 0; fd < FD_SETSIZE; fd++) {
+        if (paths[fd]) unlink(paths[fd]);
+    }
+}
+
+static void forget_path(int fd) {
+    if (fd < 0 || !paths[fd]) return;
+    char *path = paths[fd];
+    paths[fd]  = NULL;
+    unlink(path);
+    free(path);
+}
+
+static int unix_listen(rt_proc_t *p, const char *site, const char *path, size_t len) {
+    static int ends;
+    int        fd = rt_io_socket(AF_UNIX, SOCK_STREAM), err;
+    if (fd < 0) return errno;
+    if ((err = rt_io_setup(fd, 0)) != 0 || (err = rt_io_listen_unix(fd, path)) != 0) {
+        rt_io_close(fd);
+        return err;
+    }
+    if (!rt_io_replaying()) {
+        paths[fd] = rt_must(strdup(path));
+        if (!ends++) atexit(unlink_paths);
+    }
+    rt_device_t *d = new_device(p, DEV_LISTEN, fd, site, path, len);
+    d->unix_sock = 1;
+    tell_open(d);
+    return 0;
+}
+
+// A Unix socket connects at once or not at all; its (:open c) still comes
+// from the event loop, as a TCP connection's does.
+static int unix_connect(rt_proc_t *p, const char *site, const char *path, size_t len) {
+    struct sockaddr_un a;
+    int                fd, err = rt_unix_address(&a, path);
+    if (err) return err;
+    if ((fd = rt_io_socket(AF_UNIX, SOCK_STREAM)) < 0) return errno;
+    if ((err = rt_io_setup(fd, 0)) == 0 && rt_io_connect(fd, (struct sockaddr *)&a, sizeof a) < 0 && errno != EINPROGRESS) err = errno;
+    if (err) {
+        rt_io_close(fd);
+        return err;
+    }
+    rt_device_t *d = new_device(p, DEV_TCP, fd, site, path, len);
+    d->connecting  = 1;
+    d->unix_sock        = 1;
+    return 0;
+}
+
+static int unix_at(rt_proc_t *p, const char *site, rt_value_t where, uint64_t mode) {
+    const char *path = rt_string_bytes(where);
+    size_t      len  = rt_string_len(where);
+    if (memchr(path, '\0', len)) return EINVAL;                 // :io-error, as a file's path (D130)
+    return mode == RT_UNIX_LISTEN ? unix_listen(p, site, path, len) : unix_connect(p, site, path, len);
+}
+
 rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                           rt_value_t where, uint64_t mode) {
     if (mode == RT_TCP_LISTEN && !rt_is_string(where)) {
@@ -2217,8 +2289,9 @@ rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, 
     }
     rt_value_t pid = rt_fork(code, n, values, site);
     rt_proc_t *p   = procs[pid >> RT_PID_SHIFT].proc;
-    int        err = mode == RT_TCP_LISTEN ? listen_at(p, site, where)
-                                           : tcp_connect(p, site, rt_string_bytes(where), rt_string_len(where));
+    int        err = mode == RT_TCP_LISTEN  ? listen_at(p, site, where)
+                   : mode == RT_TCP_CONNECT ? tcp_connect(p, site, rt_string_bytes(where), rt_string_len(where))
+                                            : unix_at(p, site, where, mode);
     if (err) {
         _Alignas(16) rt_value_t cells[4];
         end_other(p, io_reason(cells, err, where));
@@ -2256,11 +2329,13 @@ static void accept_all(rt_device_t *l) {
         int  fd = rt_io_accept(l->fd, where, sizeof where);
         if (fd < 0 && errno == EINTR) continue;
         if (fd < 0) return;                     // none left, or none to be had for now
-        if (setup(fd) != 0) {
+        if (rt_io_setup(fd, !l->unix_sock) != 0) {
             rt_io_close(fd);
             continue;
         }
-        rt_device_t *c = new_device(owner, DEV_TCP, fd, l->site, where, strlen(where));
+        rt_device_t *c = l->unix_sock ? new_device(owner, DEV_TCP, fd, l->site, rt_string_bytes(l->path), rt_string_len(l->path))
+                                 : new_device(owner, DEV_TCP, fd, l->site, where, strlen(where));
+        c->unix_sock    = l->unix_sock;
         c->waiting = 1;
         _Alignas(16) rt_value_t cell[2];
         tell_list(l, RT_DEV_ACCEPT, rt_cons_at(cell, c->pid, RT_NIL), 0);
@@ -2454,6 +2529,7 @@ static void kill_groups(void) {
 static void on_end(int sig) {
     sigset_t s;
     kill_groups();
+    unlink_paths();
     rt_tty_raw(0);
     signal(sig, SIG_DFL);
     sigemptyset(&s);

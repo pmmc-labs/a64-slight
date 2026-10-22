@@ -1,0 +1,13 @@
+; t/live.py's sockets: listens at the Unix socket whose path is in @ARGV
+; (D231), says so, and answers each connection with a line, on the real
+; clock, till a signal ends it; or ends, its value why it can't listen.
+
+(defun server ()
+    (recv
+        ((:open l path) (pprint :listening) (server))
+        ((:accept l c)  (connect c (hello)) (server))))
+
+(defun hello ()
+    (recv ((:open c) (send c (list :write "hello" \n)) (disconnect c))))
+
+(join (connect :unix/listen (car @ARGV) (server)))

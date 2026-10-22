@@ -93,17 +93,24 @@ else
 fi
 if [ -e "$dir/out.txt" ]; then check "world's replay writes no file" no; else check "world's replay writes no file" ok; fi
 
-# net: a server and a client, the client finding it in a hosts file.
+# net: a server and a client, the client finding it in a hosts file; and
+# the same over a Unix socket, whose path the recorded run removes as its
+# listener closes, and the replay neither makes nor removes: a file put
+# there before it stays.
 printf '127.0.0.1 echo.test\n' >"$dir/hosts"
-run SLIGHT_HOSTS="$dir/hosts" SLIGHT_RECORD="$dir/net.record" net </dev/null >"$dir/net.recorded"
+run SLIGHT_HOSTS="$dir/hosts" SLIGHT_RECORD="$dir/net.record" net "$dir/net.sock" </dev/null >"$dir/net.recorded"
 rm -f "$dir/hosts"
-run SLIGHT_REPLAY="$dir/net.record" net </dev/null >"$dir/net.replayed"
-if cmp -s "$dir/net.recorded" "$dir/net.replayed" && grep -q '^(ok ("echo one" "echo two" "echo three"))$' "$dir/net.recorded"; then
+if [ -e "$dir/net.sock" ]; then check "net's socket goes with its listener" no; else check "net's socket goes with its listener" ok; fi
+echo kept >"$dir/net.sock"
+run SLIGHT_REPLAY="$dir/net.record" net other </dev/null >"$dir/net.replayed"
+if cmp -s "$dir/net.recorded" "$dir/net.replayed" && grep -q '^(ok ("echo one" "echo two" "echo three"))$' "$dir/net.recorded" \
+   && grep -q '^(ok ("echo four" "echo five"))$' "$dir/net.recorded"; then
     check "net replays as recorded" ok
 else
     diff -u "$dir/net.recorded" "$dir/net.replayed"
     check "net replays as recorded" no
 fi
+if [ "$(cat "$dir/net.sock" 2>/dev/null)" = kept ]; then check "net's replay leaves its socket's path alone" ok; else check "net's replay leaves its socket's path alone" no; fi
 
 # exec: commands, recorded; replayed without running them, so the file
 # the first wrote isn't written again.

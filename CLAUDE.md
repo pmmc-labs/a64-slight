@@ -36,7 +36,7 @@ size (`runtime/tty.c`). Files: `connect :fs/read` (`:fs/write`,
 `lib/fs.slight`; data structures as processes (a cell, a dictionary, a
 queue, a channel, and `ask`) are in `lib/ds.slight` (D157). Sockets:
 `connect :tcp "host:port"` and `connect :tcp/listen port` open sockets
-as devices too, waited for in `select()`, and `(connect conn expr)`
+as devices too (and `:unix` and `:unix/listen` at a path, D231), waited for in `select()`, and `(connect conn expr)`
 hands an accepted connection to a process; the runtime looks host names
 up itself, in the hosts file and then from the name servers in
 `resolv.conf`, its queries waited for in `select()` too (`runtime/dns.c`,
@@ -204,7 +204,12 @@ made (a handler's `^$$`), `rpc/keep` keeps a connection up, and
 `rpc/system` answers with what `:system` says (D228, golden tests 280 to
 282); and, after a look at mst's Mojo-StupidRPC and Hydling, a call from
 the other end stopped however its connection ends, an error included
-(D230, golden test 283).
+(D230, golden test 283); and Unix sockets, `connect :unix` and
+`:unix/listen`, a path's permissions saying who may connect, the socket
+removed when its listener closes or the program ends, SIGTERM included,
+and one left by SIGKILL replaced, which `rpc` takes wherever
+`"host:port"` goes (D231, golden tests 284 and 285, t/live.py's
+sockets).
 **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
@@ -324,7 +329,8 @@ to get them back from git (`3fd71e0`).
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `map.slight` (a persistent map, a hash trie, D223), `rpc.slight` (calls between programs, and people, over a connection, D225), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, `.ss` for Chez Scheme, and `.rs` for Rust, the actor programs alone, on tokio, D224); `Cargo.toml` and `Cargo.lock`, the Rust programs as one package, and `rt.rs`, the runtime they start; `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
-| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's; SIGTERM, as PID 1 too, and a command's orphan, as PID 1); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
+| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's; SIGTERM, as PID 1 too, and a command's orphan, as PID 1; a Unix
+socket left by SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
 ## Commands

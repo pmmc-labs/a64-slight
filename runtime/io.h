@@ -16,11 +16,14 @@
 #ifndef RT_IO_H
 #define RT_IO_H
 
+#include <errno.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <string.h>
 #include <sys/select.h>
 #include <sys/socket.h>
 #include <sys/types.h>
+#include <sys/un.h>
 
 // What a run's log keeps besides what the world gave it: the settings
 // that change how a run goes, its arguments and its environment.
@@ -49,13 +52,30 @@ ssize_t  rt_io_write(int fd, const void *buf, size_t len);
 int      rt_io_open(const char *path, int flags);
 int      rt_io_close(int fd);
 
-// Sockets. rt_io_setup makes one not block, not be inherited, and send
-// at once (TCP_NODELAY when tcp): 0, or an errno.
-int     rt_io_socket(int type);
+// Sockets, AF_INET or AF_UNIX. rt_io_setup makes one not block, not be
+// inherited, and send at once (TCP_NODELAY when tcp): 0, or an errno.
+// rt_io_listen_unix binds to a path and listens: 0, or an errno; a socket
+// already there that refuses a connection is left from a program that has
+// ended, and is replaced, and anything else there is EADDRINUSE (D231).
+int     rt_io_socket(int family, int type);
 int     rt_io_setup(int fd, int tcp);
 int     rt_io_connect(int fd, const struct sockaddr *a, socklen_t len);
 int     rt_io_listen(int fd, uint32_t addr, int port, int *got);   // bind, listen, and the port it got
-int     rt_io_accept(int fd, char *where, size_t size);   // and "address:port" of the peer
+int     rt_io_listen_unix(int fd, const char *path);
+int     rt_io_accept(int fd, char *where, size_t size);   // and "address:port" of the peer, "" for a Unix one
+
+// path as a Unix socket's address: 0, or an errno. It must fit, with its
+// NUL (104 bytes on macOS, 108 on Linux), and not be empty, which Linux
+// would take for its abstract names, which have no permissions.
+static inline int rt_unix_address(struct sockaddr_un *a, const char *path) {
+    size_t len = strlen(path);
+    memset(a, 0, sizeof *a);
+    a->sun_family = AF_UNIX;
+    if (len == 0)                  return ENOENT;
+    if (len >= sizeof a->sun_path) return ENAMETOOLONG;
+    memcpy(a->sun_path, path, len + 1);
+    return 0;
+}
 int     rt_io_socket_error(int fd);                 // SO_ERROR, or errno if that can't be had
 ssize_t rt_io_send(int fd, const void *buf, size_t len);
 ssize_t rt_io_recv(int fd, void *buf, size_t len);

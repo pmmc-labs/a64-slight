@@ -169,16 +169,32 @@
 
 ; --- connections -----------------------------------------------------------
 
-; Connects to "host:port", and once the connection is open gives (:ok
-; conn), conn being its pid, for rpc/call, rpc/stream and rpc/close; or
-; (:error reason), the socket's, such as (:econnrefused "localhost:1").
-; The other end can call handlers.
+; Connects to "host:port", or to the Unix socket at a path (D231), and
+; once the connection is open gives (:ok conn), conn being its pid, for
+; rpc/call, rpc/stream and rpc/close; or (:error reason), the socket's,
+; such as (:econnrefused "localhost:1"). The other end can call handlers.
 (defun rpc/connect (where handlers)
     (rpc/result (join (fork (rpc/connecting where handlers)))))
 
 (defun rpc/connecting (where handlers)
     (let me $$)
-    (rpc/opened (connect :tcp where (rpc/opening handlers me))))
+    (rpc/opened (rpc/dial-to where handlers me)))
+
+; A path, a string with a / in it, is a Unix socket's (D231): "./ctl.sock"
+; for one here. Anything else is a port or "host:port".
+(defun rpc/path? (where) (and (str? where) (str/includes? where "/")))
+
+; A connection to where, which tells told once it's open; or a listener
+; at where, which tells told where it listens.
+(defun rpc/dial-to (where handlers told)
+    (if (rpc/path? where)
+        (connect :unix where (rpc/opening handlers told))
+        (connect :tcp where (rpc/opening handlers told))))
+
+(defun rpc/listen-at (where handlers told)
+    (if (rpc/path? where)
+        (connect :unix/listen where (rpc/accepting handlers told))
+        (connect :tcp/listen where (rpc/accepting handlers told))))
 
 ; As rpc/connect, over a command's input and output: ssh, say, to a
 ; machine whose program listens at 127.0.0.1 alone,
@@ -201,17 +217,18 @@
         ((:rpc/open _) (list :ok conn))
         ((:exit _ r)   (list :error (rpc/gone r)))))
 
-; Listens at where, a port or "host:port" (D226), and gives the
-; listener's pid, which kill stops; the caller is sent (:listening port),
-; port being the one it got. Each connection gets a process of its own,
-; whose other end can call handlers.
+; Listens at where, a port or "host:port" (D226), or a path (D231), and
+; gives the listener's pid, which kill stops; the caller is sent
+; (:listening at), at being the port it got, or the path. Each
+; connection gets a process of its own, whose other end can call
+; handlers.
 (defun rpc/serve (where handlers)
     (let told $$)
-    (connect :tcp/listen where (rpc/accepting handlers told)))
+    (rpc/listen-at where handlers told))
 
 (defun rpc/accepting (handlers told)
     (recv
-        ((:open _ port) (send told (list :listening port)) (rpc/accepting handlers told))
+        ((:open _ at)   (send told (list :listening at)) (rpc/accepting handlers told))
         ((:accept _ c)  (connect c (rpc/opening handlers ())) (rpc/accepting handlers told))))
 
 ; Closes conn: calls made over it fail with :disconnected, and calls from
@@ -220,9 +237,9 @@
 
 ; --- keeping a connection --------------------------------------------------
 
-; A connection to "host:port" kept up (D228): gives a keeper's pid, k, at
-; once, which rpc/call, rpc/stream and rpc/close take as they take a
-; connection. It dials, and dials again when the connection drops or
+; A connection to "host:port", or a path, kept up (D228): gives a
+; keeper's pid, k, at once, which rpc/call, rpc/stream and rpc/close take
+; as they take a connection. It dials, and dials again when the connection drops or
 ; can't be made, after 100 ms, then twice as long each time, up to 10 s,
 ; and 100 ms again once one opens. While it's down, a call fails at once
 ; with :disconnected. Each time a connection opens, (on-open conn) runs
@@ -232,7 +249,7 @@
 
 (defun rpc/dial (where handlers on-open delay)
     (let me $$)
-    (let c (connect :tcp where (rpc/opening handlers me)))
+    (let c (rpc/dial-to where handlers me))
     (monitor c)
     (rpc/keeping where handlers on-open delay c #false))
 

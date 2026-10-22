@@ -1,0 +1,7 @@
+(listening "build/t/285-rpc-unix.sock")
+(ok 5)
+("add" "help")
+(ok 42)
+(error (enoent "build/t/285-rpc-unix.sock"))
+(error (enotfound "285.sock"))
+done

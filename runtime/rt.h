@@ -252,6 +252,8 @@
 #define RT_FS_APPEND         2    // creating it
 #define RT_TCP_CONNECT       0    // to "host:port"
 #define RT_TCP_LISTEN        1    // on a port (0 for one the system picks), or "host:port"
+#define RT_UNIX_CONNECT      2    // to the Unix socket at a path (D231)
+#define RT_UNIX_LISTEN       3    // at a path
 
 // What rt_compare is asked.
 #define RT_CMP_EQ            0
@@ -480,7 +482,8 @@ rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, c
 
 // Sockets (process.c). rt_connect_tcp forks, and connects to "host:port"
 // (RT_TCP_CONNECT) or listens on a port, or at "host:port" (RT_TCP_LISTEN),
-// on a device the new process owns. rt_connect_device forks, and hands the new process
+// or connects to or listens at a Unix socket's path (RT_UNIX_CONNECT,
+// RT_UNIX_LISTEN), on a device the new process owns. rt_connect_device forks, and hands the new process
 // the device dev.
 rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                           rt_value_t where, uint64_t mode) RT_ASM(rt_connect_tcp);

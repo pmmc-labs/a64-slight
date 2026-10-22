@@ -4462,7 +4462,7 @@ sockets later; and "rpc" as the name.)* `lib/rpc.slight`, opt-in,
   `127.0.0.1` (D226) and come in over ssh. A stray `)` from a person
   ends the connection, as bad text ends a device's owner (`:bad-sexp`).
   A connection that ends with an error leaves the calls from the other
-  end running to their ends (D230 stops them). Unix sockets.
+  end running to their ends (D230 stops them). Unix sockets (D231).
 - **Checked:** golden tests 277 (two ends in one program: answers,
   checks, bare words, failures, `help`, a stream, a call back to the
   caller, a stream stopped and a caller that ends, the processes for
@@ -4495,7 +4495,7 @@ them to the network.
   names the port (D139).
 - **Rejected:** a third argument, or a keyword (`:tcp/listen-at`), when
   a string where a port goes says it; and Unix sockets now, which need
-  a device of their own and a path's permissions, for later.
+  a device of their own and a path's permissions, for later (D231).
 - **Checked:** golden test 276 (listening at `127.0.0.1`, `localhost`, a
   name the hosts file has and `0.0.0.0`, each connected to; an address
   that isn't this machine's, names not in the hosts file, which aren't
@@ -4726,3 +4726,70 @@ Hydling, beside `lib/rpc.slight`: the fix below, and this record.)*
   resets the connection (`SO_LINGER` 0), which before ran to its end and
   now stops; and a stream of a million values, then a stray `)`, which
   before ran every value.
+
+**D231. Unix sockets: `:unix` and `:unix/listen`, a path's permissions
+saying who may connect.** *(Stevan, Oct 2026: "do 3, taking into account
+the container work", after D230's review found both of mst's own uses of
+stupidrpc on Unix sockets; then, to Claude's questions, devices of their
+own, a socket left behind replaced, and the umask.)*
+
+- **The devices:** `(connect :unix path expr)` and `(connect
+  :unix/listen path expr)`, read and written as TCP's are; a listener
+  says `(:open l path)` and `(:accept l conn)`, and errors name the path,
+  an accepted connection's too, since a Unix peer has no address.
+  Rejected: `:tcp` taking a path, which would have `:tcp` mean something
+  that isn't TCP; `rpc` alone reaching sockets through `rpc/exec`, with
+  `socat` or `nc -U`, which leaves a program no way to serve on one; and
+  Linux's abstract names, which have no permissions and aren't on macOS,
+  so an empty path is `:enoent`.
+- **The file:** listening makes the socket as a file at the path, and
+  `bind` won't make it over anything there. A program killed with
+  SIGKILL, or one that crashed, leaves its socket behind, and in a
+  container restarted on the same volume the path would be taken for
+  ever. So a listener replaces a socket that refuses a connection,
+  asked without waiting, so that on Linux a live one whose queue is full
+  counts as alive (macOS refuses for that too, so there a socket so busy
+  that a second copy of its program starts can be taken for dead); and
+  anything else there is `:eaddrinuse`, a live listener or a file that
+  isn't a socket. It removes the path when it closes, and at the
+  program's end however it ends: `atexit`, and the handler for SIGINT,
+  SIGTERM and SIGHUP (D227), from a table of the listeners' paths by
+  descriptor, as it kills commands from one. Rejected: removing whatever
+  is there first, as Hydling does, which takes a live program's socket
+  from it unseen; and leaving it to the program, which has no builtin to
+  remove a file, so a crash and a restart would never recover.
+- **Who may connect:** connecting takes write permission on the socket,
+  which the umask sets, as for every program: with the usual 022 it's
+  0755, and only its owner, and root, can connect. So the path's
+  permissions are the access control D225 left open, on one machine;
+  in a container, `--user` with the host user's ids makes the socket
+  theirs. Rejected: always 0600, which shuts a group out; and a mode
+  argument, for a need not yet seen. Who the other end is (`SO_PEERCRED`,
+  `getpeereid`), for a program to decide by: later.
+- **`rpc`:** `rpc/serve`, `rpc/connect` and `rpc/keep` take a path
+  wherever `"host:port"` goes, any string with a `/` in it, so one here
+  is `"./ctl.sock"`, and `(:listening at)` gives the path. Over ssh:
+  `rpc/exec` with `nc -U`, or `socat - UNIX-CONNECT:path`, as
+  stupidrpc's `outpost` reaches its sockets.
+- **Replay:** listening at a path is one recorded call
+  (`rt_io_listen_unix`, the look for a socket left behind within it),
+  so a replay makes no socket, and removes nothing, since a path is
+  noted for removing only when a socket was made.
+- **Checked:** golden tests 284 (a listener's path, a connection echoed,
+  `:eaddrinuse` at a live listener and at a file, `:enoent` for nothing
+  there and for an empty path, `:enametoolong`, and a killed listener's
+  path gone) and 285 (`rpc` at a path: a call, `help`, a keeper and its
+  on-open, the path gone with the server, and a name without a `/` taken
+  as `"host:port"`), worked out by hand; both under `SLIGHT_GC_STRESS` 1
+  and 7, `SLIGHT_GC_VERIFY` and three seeded orders. t/replay.sh's net,
+  over a Unix socket too: the socket gone with its listener, and the
+  replay leaving a file put at the path alone. t/live.py's sockets: a
+  listener answers at its path; a second copy gets `:eaddrinuse`, and
+  the first still answers; SIGKILL leaves the socket, the next to listen
+  there replaces it, and SIGTERM removes it. By hand, in Docker: a
+  program serving `rpc` from an image `FROM scratch`, its socket in a
+  directory shared with the host, called from the host; `docker stop`
+  in 0.23 s, with 143, and the socket gone; `docker kill`, the socket
+  left and refusing, and the next start replacing it; with the usual
+  umask, `nobody` refused (`:eacces`), and with `--user 1000:1000` the
+  socket that user's, which it could call.

@@ -941,6 +941,32 @@ sockets keep the program running, and so does a host being looked up.
 
     (connect :tcp/listen 7000 (server))
 
+A Unix socket, at a path on this machine, is the same but for where it
+is (D231):
+
+    (connect :unix "/run/app/ctl.sock" expr)
+    (connect :unix/listen "/run/app/ctl.sock" expr)
+
+A connection reads and writes as a TCP one does, and a listener sends
+`(:open l path)`, then `(:accept l conn)` for each connection, whose
+errors name the path. Listening makes the socket, as a file at the
+path, and removes it when the listener closes, and when the program
+ends, however it ends, SIGTERM included. If something is there already,
+listening is `:eaddrinuse`, unless it's a socket that refuses a
+connection: one left by a program that was killed with SIGKILL, or
+crashed, which is replaced. Connecting needs write permission on the
+socket, which the program's umask sets: with the usual one, 022, only
+its owner (and root) can connect, so the path's permissions say who
+may call a program there. A path with nothing there is `:enoent`, and
+one too long for a socket (more than 103 bytes on macOS, 107 on Linux)
+`:enametoolong`.
+
+In a container, a socket in a directory shared with the host is how a
+program on the host reaches one inside without a port: `docker run -v
+/run/app:/run/app`, and `--user` with the host user's ids, so that the
+socket is theirs. `docker stop` removes it, and after `docker kill` the
+next start replaces it.
+
 HTTP is built on these, in `lib/http.slight` (Libraries, below). A
 request's head comes as lines up to a blank one, and its body as a count,
 which the reader asks for while it handles that blank line, so none of
@@ -2070,17 +2096,21 @@ socket. Either end can call the other, whichever connected.
   process, whose parent (`^$$`) is the connection: so a handler calls its
   caller back with `(rpc/call ^$$ name args)`.
 - `(rpc/serve where handlers)` listens at `where`, a port or
-  `"host:port"`, and gives the listener's pid, which `kill` stops. The
-  caller is sent `(:listening port)`, `port` being the one it got. Each
-  connection gets a process of its own, whose other end can call
-  `handlers`.
-- `(rpc/connect "host:port" handlers)` connects, and once it's open
-  gives `(:ok conn)`; or `(:error reason)`, the socket's, such as
-  `(:econnrefused "localhost:7317")`. The other end can call `handlers`.
+  `"host:port"`, or a Unix socket's path, and gives the listener's pid,
+  which `kill` stops. The caller is sent `(:listening at)`, `at` being
+  the port it got, or the path. Each connection gets a process of its
+  own, whose other end can call `handlers`. A path is any string with a
+  `/` in it, so one here is `"./ctl.sock"`; that holds wherever `rpc`
+  takes `"host:port"` (D231).
+- `(rpc/connect where handlers)` connects to `"host:port"` or a path,
+  and once it's open gives `(:ok conn)`; or `(:error reason)`, the
+  socket's, such as `(:econnrefused "localhost:7317")`. The other end
+  can call `handlers`.
 - `(rpc/exec cmd handlers)` is `rpc/connect` over a command's input and
   output, `cmd` as `:exec` takes it: ssh, say, to a machine whose
   program listens at `127.0.0.1`, `(list "ssh" "-q" "host" "nc"
-  "127.0.0.1" "7317")`. Its stderr comes with its stdout, so it mustn't
+  "127.0.0.1" "7317")`, or at a path, `(list "ssh" "-q" "host" "nc" "-U"
+  "/run/app/ctl.sock")`. Its stderr comes with its stdout, so it mustn't
   write anything else there.
 - `(rpc/call conn name args)` calls `name`, a string or a symbol, on the
   other end with the list `args`, and waits for the answer: `(:ok v)`,
@@ -2098,7 +2128,7 @@ socket. Either end can call the other, whichever connected.
   The other end hanging up does the same; and so does the connection
   ending with an error, such as a reset, but the calls from here fail
   with that error (D230).
-- `(rpc/keep "host:port" handlers on-open)` keeps a connection up
+- `(rpc/keep where handlers on-open)` keeps a connection up
   (D228). It gives a keeper's pid, `k`, at once, which `rpc/call`,
   `rpc/stream` and `rpc/close` take as they take a connection. It dials,
   and when the connection drops, or can't be made, dials again after
@@ -2163,6 +2193,7 @@ flight is let be, since one can cross a `stop`. A person at `nc`:
     (done 2 "ok   000-int ...")
 
 A datum that can't be read, such as a stray `)`, ends the connection
-(`:bad-sexp`), and with it the calls on it. There's no flow control: a stream's values are sent as
-fast as they're made. Nor any authentication: listen at `127.0.0.1`, and
-reach it from elsewhere over ssh.
+(`:bad-sexp`), and with it the calls on it. There's no flow control: a
+stream's values are sent as fast as they're made. Nor any
+authentication: listen at `127.0.0.1`, or better at a path, whose
+permissions say who may connect, and reach it from elsewhere over ssh.

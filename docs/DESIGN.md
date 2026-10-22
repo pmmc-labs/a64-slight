@@ -81,7 +81,7 @@ Booleans are the reserved symbols `#true` and `#false`.
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
 | `(fork expr)` | Runs `expr` in a new process and returns its pid. |
-| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
+| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`, or a Unix socket, `(connect :unix path expr)` or `(connect :unix/listen path expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
 | `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
@@ -224,6 +224,7 @@ reply refs.
 | `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
 | `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
 | `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
+| `(connect :unix path expr)`, `(connect :unix/listen path expr)` | The same, at a Unix socket's path (D231). |
 | `(connect :exec cmd expr)` | `fork`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
 | `(connect :system expr)` | `fork`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
 | `(connect dev expr)` | `fork`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
@@ -503,7 +504,9 @@ pids: another program is reached only by calls. For fleets (D228): a
 handler's `^$$` is its connection, so a hub calls a device over the
 connection the device made; `rpc/keep` keeps a connection up, dialing
 again with growing waits and running an `on-open` function on each new
-one; and `rpc/system` answers with what `:system` says. Opt-in:
+one; and `rpc/system` answers with what `:system` says. Where
+`"host:port"` goes, a path (a string with a `/` in it) is a Unix
+socket's, whose permissions say who may call (D231). Opt-in:
 `(@include :rpc)`.
 
 ### Strings
@@ -960,7 +963,12 @@ processes that allocate and then wait turn out to hold too much).
   names are errno's (`:econnrefused`, `:econnreset`, `:epipe`,
   `:eaddrinuse`, ...), and `:enotfound` (Node's) for a host that can't be
   found, or `:etimedout` when no name server answers; SIGPIPE is ignored, so writing to a closed connection is
-  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. HTTP is a
+  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. A Unix
+  socket (`:unix`, `:unix/listen`, D231) is the same device at a path:
+  a listener makes the socket there, replacing only one that refuses a
+  connection, left by a program that was killed, and removes it when it
+  closes or the program ends, a signal included; the umask, and so the
+  path's permissions, say who may connect. HTTP is a
   slight library on top, `lib/http.slight` (D132, D140, D173, D174), whose
   client can also give a reply's body to its caller as it comes, in
   messages, as a device does (`http/stream`, D181, D182).
