@@ -38,6 +38,7 @@ import pty
 import re
 import select
 import shlex
+import shutil
 import signal
 import struct
 import subprocess
@@ -351,7 +352,8 @@ def signals():
     ready, status = terminated(prog, [])
     check('SIGTERM: the program dies of it', ready and status == -signal.SIGTERM, f'ready {ready}, status {status}')
     unshare = ['unshare', '--pid', '--fork']
-    if subprocess.run(unshare + ['true'], capture_output=True).returncode != 0:
+    if not (shutil.which('unshare') and shutil.which('pgrep')) \
+            or subprocess.run(unshare + ['true'], capture_output=True).returncode != 0:
         print('skip SIGTERM to PID 1: no PID namespace to be had here')
         return
     ready, status = terminated(prog, unshare)
