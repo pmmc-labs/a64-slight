@@ -809,12 +809,15 @@ with Stevan first.
   count of its users, as the BEAM's large binaries are. To settle: the
   size from which a string is shared, and how the count goes down when a
   heap is collected or freed.
-- **Distribution, as a library first:** a process that stands for one on
-  another machine, forwarding messages as s-expressions over TCP (D155),
-  as Termite Scheme does, with no runtime change until it's proved
-  itself. To settle: what a remote pid looks like, monitoring across
-  machines (the connection ending), and what can't be sent (a closure,
-  between different builds).
+- **Distribution, as calls, not remote pids** (settled by D225). Programs
+  on other machines reach each other through `lib/rpc.slight`: calls,
+  streams, `stop`, and a failure when the connection ends (D225), a hub
+  calling the devices that dial it, and connections kept up (D228).
+  Turned down there: remote pids, a process standing for one on another
+  machine as in Termite Scheme or Erlang's distribution, which bring
+  monitors across machines, names, and what a pid means after a
+  reconnect. What's left is under 15 and 16: to whom a remote call's
+  `approve` goes, a token in `helo`, then TLS (12c).
 - **Smaller, left out of D168 and D169:** guards in `match` and `recv`;
   and what `#(...)` means outside a pattern (D176 left it open): a tuple
   made of its elements' values, as Clojure's vectors, or a constant, as
