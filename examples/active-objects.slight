@@ -53,7 +53,7 @@
         ((m o to) (reply to (obj m o)) (ActorRef obj))))
 
 (defun PointActor (oid x y)
-    (let ref (fork (ActorRef (Point oid x y))))
+    (let ref (spawn (ActorRef (Point oid x y))))
     (lambda (m o)
         (match m
             (:EXIT (send ref :EXIT))

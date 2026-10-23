@@ -55,4 +55,4 @@
 > (helo rpc 2)
 < (barf (unknown-protocol (helo rpc 2)))
 eof
-done
+(ok done)

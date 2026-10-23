@@ -30,7 +30,7 @@
         ((:error _ reason)        (reverse (cons (list :error reason) acc)))))
 
 (defun streamed (url)
-    (cadr (join (fork (heard (http/stream :post url () "{\"prompt\":\"hi\"}" :lines) ())))))
+    (cadr (join (spawn (heard (http/stream :post url () "{\"prompt\":\"hi\"}" :lines) ())))))
 
 ; The "response" of each line, joined.
 (defun answer (said)
@@ -47,4 +47,8 @@
             (map pprint said)
             (answer said))))
 
-(main)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main))
+
+(join (spawn (top-level)))

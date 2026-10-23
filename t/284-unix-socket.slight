@@ -50,6 +50,10 @@
             (pprint (join (connect :unix path (client ()))))
             :done)))
 
-(let path "build/t/284-unix.sock")
-(let me $$)
-(main path (connect :unix/listen path (server me)))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (let path "build/t/284-unix.sock")
+    (let me $$)
+    (main path (connect :unix/listen path (server me))))
+
+(join (spawn (top-level)))

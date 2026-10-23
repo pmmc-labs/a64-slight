@@ -16,7 +16,7 @@
     (pprint :not-reached))
 
 ; waiting in recv; a message sent after it's killed goes nowhere
-(let s (fork (server)))
+(let s (spawn (server)))
 (send s :one)
 (yield ())
 (pprint (kill s))
@@ -35,7 +35,7 @@
 (pprint (join busy))
 
 ; blocked in join; then what it was joining ends, and mustn't wake it
-(let s2 (fork (server)))
+(let s2 (spawn (server)))
 (let blocked (fork (join s2)))
 (yield ())
 (kill blocked)

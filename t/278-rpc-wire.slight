@@ -23,7 +23,7 @@
             (list (list "n" :integer "How many"))
             (lambda (n) (map rpc/next (range 0 n)) n))
         (rpc/handler "hold" "Says held, then waits for ever." ()
-            (lambda () (rpc/next :held) (join (fork (stuck)))))
+            (lambda () (rpc/next :held) (join (spawn (stuck)))))
         (rpc/handler "ask" "Asks the caller to approve, and gives the answer." ()
             (lambda () (rpc/call ^$$ "approve" (list "may I?"))))))
 
@@ -87,4 +87,8 @@
             (kill l)
             :done)))
 
-(main (rpc/serve "127.0.0.1:0" (handlers)))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main (rpc/serve "127.0.0.1:0" (handlers))))
+
+(join (spawn (top-level)))

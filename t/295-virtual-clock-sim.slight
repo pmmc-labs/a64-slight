@@ -21,7 +21,7 @@
     (when (> n 0)
         (let y (draw x))
         (let z (draw y))
-        (fork (customer bank (+ 1 (math/mod y 5399))))
+        (spawn (customer bank (+ 1 (math/mod y 5399))))
         (sleep (+ 1 (math/mod z 1999)))
         (source bank (- n 1) z)))
 
@@ -52,7 +52,7 @@
 ; The result, and how long it took on the clock, in ms.
 (defun timed (n)
     (let t0 (clock/us))
-    (let r  (cadr (join (fork (simulate n)))))
+    (let r  (cadr (join (spawn (simulate n)))))
     (list r (div (- (clock/us) t0) 1000)))
 
 (defun with-listener (n)

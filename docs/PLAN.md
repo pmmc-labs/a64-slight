@@ -1064,13 +1064,17 @@ only `fork` to `spawn`; those that join an actor, monitor it; 9 with a
    when it goes after that, and when a pid's entry goes for either kind,
    is the item above.
 
-**The order, each step with passing tests:** (1) `spawn`, the kinds and
-their rules, actors keeping no value; `fork` to `spawn` for the actors,
-and an actor for the 9 tests' top-level `recv`; (2) addresses, `read`
-and `read/any`, `ask` in the prelude, and `lib/ds`, `rpc`'s calls,
-`agent/ask` and the coordinators moved to them; (3) `open`, a device's
-failure told to a task, and `lib/fs`, `lib/exec`, `http`'s client and
-`lib/tools` moved; (4) the rest of exit records.
+**The order, each step with passing tests:** (1) `spawn`, the two
+kinds, and the rules that hold without the rest: a task can't wait, nor
+be sent to, timed or monitor, and the root is a task (done, D243's
+"Step 1"); (2) addresses, `read` and `read/any`, `ask` in the prelude,
+and `lib/ds`, `rpc`'s calls, `agent/ask` and the coordinators moved to
+them; (3) `open`, a device's failure told to a task, and `lib/fs`,
+`lib/exec`, `http`'s client and `lib/tools` moved; (4) an actor can't be
+joined and keeps no value, told late as `:ended`; (5) the rest of exit
+records. (4) was part of (1) as agreed, and moved: until (2) and (3)
+give a task other ways to have an answer, the hybrids (`ask`'s box,
+`slurp`, an HTTP request) are actors that are joined.
 
 Replaces, if taken, parts of: D8 and D167 (the `recv` rule is an
 actor's), D19 (`join` is a task's), D88 and D216 (an actor's value isn't

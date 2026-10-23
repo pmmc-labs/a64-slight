@@ -10,20 +10,22 @@
     (let h (lookup "SLIGHT_TEST_HOST" env))
     (if (eq? h :not-found) "localhost:11434" h))
 
-(pprint (lookup "SLIGHT_TEST_HOST" %ENV))
-(pprint (lookup "SLIGHT_TEST_EMPTY" %ENV))
-(pprint (lookup "SLIGHT_TEST_EQ" %ENV))
-(pprint (lookup "SLIGHT_TEST_UNSET" %ENV))
-(pprint (host-of %ENV))
-(pprint (host-of ()))
-(pprint @ARGV)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level (argv env)
+    (pprint (lookup "SLIGHT_TEST_HOST" env))
+    (pprint (lookup "SLIGHT_TEST_EMPTY" env))
+    (pprint (lookup "SLIGHT_TEST_EQ" env))
+    (pprint (lookup "SLIGHT_TEST_UNSET" env))
+    (pprint (host-of env))
+    (pprint (host-of ()))
+    (pprint argv)
+    ; Every entry is a name and a value, both strings; three are the test's.
+    (pprint (nil? (remove (lambda (e) (and (str? (car e)) (str? (cadr e)) (nil? (cddr e)))) env)))
+    (pprint (length (filter (lambda (e) (str/starts-with? (car e) "SLIGHT_TEST_")) env)))
+    (pprint ((lambda () (lookup "SLIGHT_TEST_EQ" env))))
+    (pprint (join (fork (lookup "SLIGHT_TEST_HOST" env))))
+    (send $$ :go)
+    (recv
+        (:go (pprint (list :after-recv (lookup "SLIGHT_TEST_HOST" env) argv)))))
 
-; Every entry is a name and a value, both strings; three are the test's.
-(pprint (nil? (remove (lambda (e) (and (str? (car e)) (str? (cadr e)) (nil? (cddr e)))) %ENV)))
-(pprint (length (filter (lambda (e) (str/starts-with? (car e) "SLIGHT_TEST_")) %ENV)))
-
-(pprint ((lambda () (lookup "SLIGHT_TEST_EQ" %ENV))))
-(pprint (join (fork (lookup "SLIGHT_TEST_HOST" %ENV))))
-(send $$ :go)
-(recv
-    (:go (pprint (list :after-recv (lookup "SLIGHT_TEST_HOST" %ENV) @ARGV))))
+(join (spawn (top-level @ARGV %ENV)))

@@ -38,7 +38,7 @@
         ((:status from)  (send from (list :status state)) (cell x y state next neighbors root))
         (:count
             (let me $$)
-            (fork (watch me neighbors 0))
+            (spawn (watch me neighbors 0))
             (cell x y state next neighbors root))
         ((:counted n)
             (send root :ready)
@@ -109,10 +109,13 @@
         (#true
             (recv ((:cell x y state) (gather cells (put states x y state) n gen (- left 1)))))))
 
-(let root $$)
-(let cells (grid 6 8 (lambda (x y) (fork (cell x y (glider-cell x y) () () root)))))
-(dotimes 0 6 (lambda (x)
-    (dotimes 0 8 (lambda (y)
-        (send (at cells x y) (list :neighbors (neighbors-of cells x y)))))))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (let root $$)
+    (let cells (grid 6 8 (lambda (x y) (spawn (cell x y (glider-cell x y) () () root)))))
+    (dotimes 0 6 (lambda (x)
+        (dotimes 0 8 (lambda (y)
+            (send (at cells x y) (list :neighbors (neighbors-of cells x y)))))))
+    (generation cells (grid 6 8 glider-cell) 4 0))
 
-(generation cells (grid 6 8 glider-cell) 4 0)
+(join (spawn (top-level)))

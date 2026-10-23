@@ -16,4 +16,4 @@ server < (call 1 anything)
 server > )
 (error bad-sexp)
 (stopped (error killed))
-done
+(ok done)

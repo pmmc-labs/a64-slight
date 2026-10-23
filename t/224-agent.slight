@@ -55,7 +55,7 @@
 
 ; Each text asked at once, by a caller of its own, and what it heard.
 (defun ask-all (a texts)
-    (cadr (join (fork (asking a texts)))))
+    (cadr (join (spawn (asking a texts)))))
 
 (defun asking (a texts)
     (map (lambda (text) (agent/say a text)) texts)
@@ -92,4 +92,8 @@
     (kill raw)
     :done)
 
-(main)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main))
+
+(join (spawn (top-level)))

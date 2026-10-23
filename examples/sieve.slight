@@ -46,7 +46,7 @@
         ((:end total) (send painter (list :end total)))
         (p
             (send painter (list :prime p))
-            (sieve p (fork (end-of-chain painter)) painter 1))))
+            (sieve p (spawn (end-of-chain painter)) painter 1))))
 
 ; 2 up to last, into the chain, a pause every batch, so it can be watched.
 (defun count-up (first n last batch)
@@ -126,9 +126,9 @@
 (let side (if (== (% fits 2) 0) (dec fits) fits))
 (let last (* side side))
 (tty/write \e "[?25l" \e "[2J")
-(let painter (fork (paint (map/new) (tuple cols (div cols 2) (div (* 2 rows) 2) (inc rows)) 0)))
+(let painter (spawn (paint (map/new) (tuple cols (div cols 2) (div (* 2 rows) 2) (inc rows)) 0)))
 (send painter (list :caught 1 1))
-(count-up (fork (end-of-chain painter)) 2 last (math/max 1 (div last 2000)))
+(count-up (spawn (end-of-chain painter)) 2 last (math/max 1 (div last 2000)))
 (match (join painter)
     ((:ok (primes total))
         (tty/write \e "[" (inc rows) ";1H" \e "[0m" \e "[K" \e "[?25h"

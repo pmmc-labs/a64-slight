@@ -42,9 +42,9 @@
     (let n (recv (n n)))
     n)
 
-(let k (fork (keeper ())))
+(let k (spawn (keeper ())))
 (dotimes 0 100 (lambda (i) (send k (list :add (range 0 1000)))))
-(pprint (join (fork (ask-sum k))))
+(pprint (join (spawn (ask-sum k))))
 (match (join (fork (range 0 10000)))
     ((:ok xs) (pprint (sum xs))))
 

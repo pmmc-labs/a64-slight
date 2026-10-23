@@ -29,7 +29,7 @@
         ((:done t) (answer r t0 k (div (- t t0) 1000) samples due))
         (:pong     (pinger r t0 (+ k 1) last (if (> k last) samples (cons (- (clock/us) due) samples))))))
 
-(defun pings (last) (pinger (fork (responder)) (clock/us) 1 last ()))
+(defun pings (last) (pinger (spawn (responder)) (clock/us) 1 last ()))
 
 (defun report (name samples)
     (let s (sort (lambda (a b) (< a b)) samples))
@@ -61,13 +61,13 @@
 ; doesn't keep the first blocks alive.
 (defun heap (k n size)
     (let blocks (map (lambda (j) (range j (+ j size))) (range 0 k)))
-    (churn (fork (pings 1000000000)) blocks 0 n size))
+    (churn (spawn (pings 1000000000)) blocks 0 n size))
 
 (defun result (r) (match r ((:ok v) v)))
 
 (let s (str->int (car @ARGV)))
-(report "idle" (result (join (fork (pings 500)))))
-(let p1 (fork (pings 1000000000)))
+(report "idle" (result (join (spawn (pings 500)))))
+(let p1 (spawn (pings 1000000000)))
 (let w1 (fork (busy p1 (+ 30 s))))
 (report "busy" (result (join p1)))
 (tty/write (result (join w1)) \n)

@@ -25,10 +25,14 @@
 (defun never ()
     (recv (msg (pprint (list :came msg)))))
 
-(let a (after 10 $$ :a))
-(let b (after 20 $$ :b))
-(let c (after 30 $$ :c))
-(pprint (list a b c))
-(pprint (timer/cancel b))
-(pprint (timer/cancel b))
-(after-a a c)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (let a (after 10 $$ :a))
+    (let b (after 20 $$ :b))
+    (let c (after 30 $$ :c))
+    (pprint (list a b c))
+    (pprint (timer/cancel b))
+    (pprint (timer/cancel b))
+    (after-a a c))
+
+(join (spawn (top-level)))

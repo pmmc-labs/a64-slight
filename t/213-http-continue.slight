@@ -15,4 +15,8 @@
             (kill server)
             (map (lambda (p) (car (str/split p "\r\n"))) (str/split reply "\r\n\r\n")))))
 
-(main)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main))
+
+(join (spawn (top-level)))

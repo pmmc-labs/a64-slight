@@ -9,6 +9,11 @@
 (defun gather (n acc)
     (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
 
-(let n (str->int (car @ARGV)))
-(start 0 n $$)
-(gather n 0)
+; The top level is a task, which can't wait (D243), so an actor does its
+; work, and the root gives its value.
+(defun top-level (argv)
+    (let n (str->int (car argv)))
+    (start 0 n $$)
+    (gather n 0))
+
+(cadr (join (spawn (top-level @ARGV))))

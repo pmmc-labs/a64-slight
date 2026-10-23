@@ -30,9 +30,13 @@
     (after 10 $$ :quiet)
     (let next (recv (m m)))
     (pprint (list head line seen next))
-    (pprint (join (fork (leave (str base "/chunks")))))
+    (pprint (join (spawn (leave (str base "/chunks")))))
     (let seen-too (recv ((:raw what) (list :server what))))
     (kill raw)
     seen-too)
 
-(main)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main))
+
+(join (spawn (top-level)))

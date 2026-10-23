@@ -84,8 +84,12 @@
     (kill t)
     :done)
 
-(pprint (join (fork (socket/peer 42))))
-(let mine (list (list :uid (number-of "id -u")) (list :gid (number-of "id -g")) (list :pid (number-of "echo $PPID"))))
-(let path "build/t/291-socket-peer.sock")
-(let me $$)
-(main path (connect :unix/listen path (server me)) mine)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (pprint (join (fork (socket/peer 42))))
+    (let mine (list (list :uid (number-of "id -u")) (list :gid (number-of "id -g")) (list :pid (number-of "echo $PPID"))))
+    (let path "build/t/291-socket-peer.sock")
+    (let me $$)
+    (main path (connect :unix/listen path (server me)) mine))
+
+(join (spawn (top-level)))

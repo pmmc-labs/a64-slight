@@ -1,0 +1,42 @@
+; Tasks and actors (D243): fork starts a task, which computes a value and
+; is joined; spawn starts an actor, which takes messages. A task can't be
+; sent a message, nor a timer, and can't monitor, since it has nowhere to
+; take what comes: each faults :not-an-actor, in the process that tried.
+; A message to a task that has ended still just disappears (D92). And
+; :system tells the kinds apart.
+
+(defun counter (n)
+    (recv
+        (:inc  (counter (inc n)))
+        (:stop n)))
+
+(defun kinds (pids)
+    (recv ((:open s) (ask-kinds s pids ()))))
+
+(defun ask-kinds (s pids acc)
+    (if (nil? pids)
+        (reverse acc)
+        (do (send s (list :process (car pids)))
+            (recv ((:process _ info) (ask-kinds s (cdr pids) (cons (lookup :kind info) acc)))))))
+
+(pprint (join (fork (+ 1 2))))
+
+(let c (spawn (counter 0)))
+(send c :inc)
+(send c :inc)
+(send c :stop)
+(pprint (join c))
+
+(pprint (join (fork (send (fork (sleep 10)) :hi))))
+(pprint (join (fork (after 10 (fork (sleep 10)) :hi))))
+(pprint (join (fork (monitor ^$$))))
+
+(let t (fork :done))
+(join t)
+(pprint (send t :late))
+
+(let w (spawn (recv)))
+(let z (fork (sleep 100)))
+(let root $$)
+(pprint (join (connect :system (kinds (list root w z)))))
+:end

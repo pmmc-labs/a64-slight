@@ -17,7 +17,7 @@
                     (player name))))
         ((:done n) (list name n))))
 
-(let a (fork (player :a)))
-(let b (fork (player :b)))
+(let a (spawn (player :a)))
+(let b (spawn (player :b)))
 (send a (list :serve b))
 (list (join a) (join b))

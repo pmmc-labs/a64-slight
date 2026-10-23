@@ -9,6 +9,6 @@
 (let s (fork (sleep 3600000)))
 (kill s)
 (after 3600000 s :late)
-(timer/cancel (after 3600000 $$ :never))
+(timer/cancel (after 3600000 (spawn (recv)) :never))   ; an actor: a task can't be timed (D243)
 (let c (cell/new 1))
 (list (ask-within 3600000 c (list :get)) :done)

@@ -3,4 +3,4 @@
 (error killed)
 (ok (0 ("gone")))
 (ok (ok (0 ("handed"))))
-()
+(ok ())

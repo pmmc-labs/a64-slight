@@ -8,4 +8,4 @@
 (pprint (kind (fork (join/race 5))))
 (pprint (kind (fork (join/race (list (fork (sleep 5)) 3)))))
 (pprint (kind (fork (join/race (list $$)))))
-(join/race (list (fork (recv (_ :a))) (fork (recv (_ :b)))))
+(join/race (list (spawn (recv (_ :a))) (spawn (recv (_ :b)))))

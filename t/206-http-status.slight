@@ -22,4 +22,8 @@
             (kill server)
             (list r1 r2 r3))))
 
-(main)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main))
+
+(join (spawn (top-level)))

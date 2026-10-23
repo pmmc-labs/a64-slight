@@ -36,5 +36,9 @@
             (pprint (rpc/connect "285.sock" ()))
             :done)))
 
-(let path "build/t/285-rpc-unix.sock")
-(main path (rpc/serve path (handlers)))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (let path "build/t/285-rpc-unix.sock")
+    (main path (rpc/serve path (handlers))))
+
+(join (spawn (top-level)))

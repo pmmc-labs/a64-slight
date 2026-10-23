@@ -121,10 +121,10 @@
 (defun box () (recv (msg msg)))
 (defun answer (box) (match (join box) ((:ok (_ v)) v)))
 
-(let dns-box (fork (box)))
+(let dns-box (spawn (box)))
 (let dns (connect :tcp/listen 0 (dns-server dns-box)))
 (let dns-port (answer dns-box))
-(let echo-box (fork (box)))
+(let echo-box (spawn (box)))
 (let echo (connect :tcp/listen 0 (echo-server echo-box)))
 (let echo-port (answer echo-box))
 

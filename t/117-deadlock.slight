@@ -1,3 +1,8 @@
 (defun wait-forever () (recv (msg msg)))
-(pprint :waiting)
-(wait-forever)
+
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (pprint :waiting)
+    (wait-forever))
+
+(join (spawn (top-level)))

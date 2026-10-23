@@ -1,0 +1,5 @@
+; The root is a task (D243), so a program stuck in its actors shows as the
+; root waiting in join; the deadlock message follows each join to the
+; process it waits for. Two tasks that join each other make a cycle, so
+; it stops after eight, with "and so on".
+(join (fork (join (fork (join ^$$)))))

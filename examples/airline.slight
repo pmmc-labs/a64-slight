@@ -368,7 +368,7 @@
                        (let now (aircraft-at day changes i restore))
                        (let status (car now))
                        (let legs (cadr now))
-                       (fork (aircraft ctx status legs)))
+                       (spawn (aircraft ctx status legs)))
                    (range 0 (tuple/len (day/aircraft day)))))
     (let swaps (map (lambda (s) (match s ((a b m) (list (aircraft-named day a) (aircraft-named day b) m)))) (changes-of :swap changes)))
     (minute (tuple day pids targets every swaps) (if (nil? restore) (start) (tuple/get restore 0)) (books-at day restore)))
@@ -725,7 +725,7 @@
     (let restore (if (nil? cp) () (restore-of runs parent cp)))
     (let begun (if (nil? cp) (start) (car cp)))
     (let t0 (clock/us))
-    (match (join (fork (simulate day changes targets restore (if keeps every 0))))
+    (match (join (spawn (simulate day changes targets restore (if keeps every 0))))
         ((:ok (stop rejoined digests totals flown checkpoints))
             (let took (- (clock/us) t0))
             (let minutes (+ (- stop begun) 1))
@@ -829,7 +829,7 @@
             (go-on day opts h (runs/of kept) 0 0))
         (#true
             (let every (opt/every opts))
-            (match (join (fork (simulate day () () () every)))
+            (match (join (spawn (simulate day () () () every)))
                 ((:ok (_ _ digests totals flown checkpoints))
                     (let t2 (clock/us))
                     (if (opt/record opts)
@@ -1233,7 +1233,7 @@
 
 ; A stand-in, listening where the system says: its URL and its pid.
 (defun stand-in (handler)
-    (match (join (fork (serve-for handler)))
+    (match (join (spawn (serve-for handler)))
         ((:ok (port pid)) (list (str "http://127.0.0.1:" port "/") pid))))
 
 (defun serve-for (handler)

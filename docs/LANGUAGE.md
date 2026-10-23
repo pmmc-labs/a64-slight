@@ -51,13 +51,16 @@ message or for another process, with nothing left that could wake it,
 never ends; when that's the root, the program says so on stderr and
 exits 1:
 
-    deadlock: the root process is waiting in wait-forever for a
-    message, and nothing else can run
+    deadlock: the root process is waiting in the top level for #<pid 2>
+    to end, which is waiting in wait-forever for a message, and nothing
+    else can run
 
-(on one line; the others are `... waiting in the top level for #<pid
-2> to end, ...`, in `join`, and `... for the first of #<pid 2>, #<pid
-3> to end, ...`, in `join/race`). It names the function the root waits
-in, as `:system` does (under Devices).
+(on one line). The root is a task, so it waits in `join` or `join/race`
+(`... for the first of #<pid 2>, #<pid 3> to end, ...`); the message
+follows a `join` to the process it waits for, and so on, till it comes
+to one waiting for a message or racing, or after eight, `..., and so
+on`. It names the function each waits in, as `:system` does (under
+Devices).
 
 These also go to stderr, as they happen:
 
@@ -373,15 +376,25 @@ by every process.
 
     (fork expr)
 
-Starts a new process that evaluates `expr`, and returns its pid. The
-locals `expr` uses are deep-copied into the new process, at most 8 of
-them. A local is copied whole, however little of it `expr` uses, so a
-big one is worth narrowing first: `(let mine (part-of big i))`, then
-`(fork (worker mine))`. Inside `expr`, `$$` is the new process. `expr`
-may tail-call a function that waits in `recv`, which is the usual way to
-start an actor:
+Starts a new process, a **task**, that evaluates `expr`, and returns
+its pid. The locals `expr` uses are deep-copied into the new process, at
+most 8 of them. A local is copied whole, however little of it `expr`
+uses, so a big one is worth narrowing first: `(let mine (part-of big
+i))`, then `(fork (worker mine))`. Inside `expr`, `$$` is the new
+process. A task computes a value, which `join` gives: it can't wait in
+`recv`, nor be sent to (Processes, D243).
 
-    (let c (fork (counter 0)))
+    (join (fork (+ 1 2)))                (:ok 3)
+
+### spawn
+
+    (spawn expr)
+
+As `fork`, but the new process is an **actor**: it has a mailbox, can be
+sent to, and can wait in `recv`. `expr` may tail-call a function that
+waits, which is the usual way to start one:
+
+    (let c (spawn (counter 0)))
 
 ### connect
 
@@ -392,8 +405,8 @@ start an actor:
     (connect :system expr)
     (connect device expr)
 
-A `fork` whose new process is also connected to a source of messages.
-See Devices.
+A `spawn` whose new process, an actor, is also connected to a source of
+messages. See Devices.
 
 ### recv
 
@@ -405,7 +418,7 @@ See Devices.
 Takes the next message, and gives the value of the clause whose pattern
 it fits (Patterns, under "The forms that become cond"); `(recv)` gives
 the message itself. A `recv` can go anywhere a tail call could, and
-inside a call there. See Processes.
+inside a call there, in an actor. See Processes.
 
 ### yield
 
@@ -530,15 +543,32 @@ Everything runs in processes, on one core. Each has its own heap and a
 mailbox. Processes share nothing; they talk by sending messages, which
 are copied.
 
-`(fork expr)` starts one and gives its pid. `$$` is the current process,
-and `^$$` the one that started it (the root's is `()`).
+There are two kinds (D243). A **task**, started with `(fork expr)`,
+computes a value: it can't wait in `recv`, nor be sent to, and `join`
+gives its result. An **actor**, started with `(spawn expr)` (or
+`connect`, under Devices), has a mailbox: it's sent messages, and takes
+them with `recv`, as a loop with its state in its arguments. The root is
+a task. Each gives its pid. `$$` is the current process, and `^$$` the
+one that started it (the root's is `()`).
+
+A program whose top level would wait for messages spawns an actor to do
+it, and joins it:
+
+    (defun main ()
+        (send $$ :hi)
+        (recv (m m)))
+
+    (join (spawn (main)))                (:ok hi)
 
 ### Messages
 
 `(send pid msg)` puts a deep copy of `msg` at the end of `pid`'s mailbox,
 and returns `()`. It never blocks. A message can be any value, and is
 conventionally a list headed by a keyword: `(list :add 5)`. A message to
-a process that has ended disappears.
+a process that has ended disappears. Sending to a task that hasn't
+faults (`:not-an-actor`), as does setting a timer for one (`after`), so
+whatever sends its caller messages (`http/stream`, `agent/say`,
+`rpc/stream`) is called from an actor.
 
 A function whose whole body is a `recv` is a **receive function**:
 
@@ -575,7 +605,7 @@ takes the next.
 ### The recv rule
 
 A `recv` can go anywhere a tail call could (D167): as a form of a body
-in tail position (a function's, the top level's, a `fork`'s, or a `cond`
+in tail position (a function's, a `spawn`'s or `connect`'s, or a `cond`
 or `recv` clause's), or as a `let`'s value there:
 
     (defun ask (c)
@@ -595,8 +625,11 @@ become a receive function of their own, which the function tail-calls
 with the locals the rest uses. So a function with a `recv` in it is a
 **state function**, as is any function that tail-calls one. The compiler
 works out which functions they are, and a state function can only be
-called in tail position, or as the body of a `fork` or `connect`. It
-can't be used as a value, and a lambda can't call it.
+called in tail position, or as the body of a `spawn` or `connect`. It
+can't be used as a value, and a lambda can't call it. A task (a `fork`'s
+body, or the top level) can't wait at all: a `recv` there, or a call to
+a state function, is an error (`a task (a fork's body, or the top
+level) can't wait for messages, ...: spawn an actor for it`).
 
 So when a process waits, there's nothing on its stack: it's just the
 receive function, its arguments and the mailbox. A waiting process holds
@@ -656,6 +689,10 @@ The fault kinds:
 - `:not-sexp`: `sexp/print` given something that isn't data
 - `:no-match`: a `match` that no clause matched
 - `:not-a-tuple`: a tuple operation given something else
+- `:not-an-actor`: a task sent a message, or a timer, or monitoring
+  something, which would tell it with a message it can't take (D243)
+- `:not-a-task`: for joining an actor, which D243 will forbid once a task
+  can wait for an actor's answer in other ways; nothing gives it yet
 
 ### Waiting for a process
 
@@ -697,7 +734,7 @@ The fault kinds:
 - `(monitor pid)` asks to be told when `pid` ends: the caller is sent
   `(:exit pid result)` then, or at once if it already has. Monitoring
   twice means two messages. Nothing is sent to a parent unless it asks.
-  Returns `()`. A monitor lasts while both processes do: if the caller
+  Only an actor can monitor (`:not-an-actor`). Returns `()`. A monitor lasts while both processes do: if the caller
   ends first, its monitor goes with it, so short-lived processes can
   monitor a long-lived one as often as they like, as `ask`'s boxes do.
 - `(kill pid)` ends `pid`, wherever it is: running, waiting in `recv` or
@@ -726,7 +763,8 @@ Both take an integer, and a negative one counts as 0. Timers due at the
 same time fire in the order they were set. A pending timer keeps the
 program running, but not one for a process that has ended, which is
 dropped (D232): a sleeper that's killed, or a timeout sent to a process
-that has gone, doesn't hold up the program's end.
+that has gone, doesn't hold up the program's end. An `after` is for an
+actor, since a task can't be sent to. In one:
 
     (let t (after 5000 $$ :timeout))
     (send worker (list :job $$))
@@ -750,7 +788,7 @@ Processes take turns from a run queue, first in, first out. A running
 process counts **reductions**, slight's measure of a process's work (the
 word is Erlang's): one each time it enters a function compiled from
 slight, by a call or a tail call alike. That's a `defun`, the prelude's
-included; a lambda; a `fork`'s or `connect`'s body; and a receive
+included; a lambda; a `fork`'s, `spawn`'s or `connect`'s body; and a receive
 function, which counts again when it starts over after waiting for a
 message (one already in the mailbox it takes without starting over). A
 builtin, such as `car`, `+` or `send`, runs inline or in C, and counts
@@ -1105,6 +1143,7 @@ which `lookup` reads; more keys may come. A process's:
 
 - `(:pid p)`, and `(:parent q)`, the process that forked it (`()` for
   the root).
+- `(:kind k)`: `:task` or `:actor` (D243).
 - `(:state st)`: `:running` (the one asking, unless a timer asked),
   `:ready` (in the run queue), `:recv` (waiting for a message),
   `:joining` (in `join` or `join/race`) or `:sleeping`.
@@ -1116,7 +1155,8 @@ which `lookup` reads; more keys may come. A process's:
   preempted; or the one it starts in. A `recv` in the middle of a function waits in a receive
   function of its own, named for both: `"server (recv at
   prog.slight:7:12)"`. The top level is `"the top level"`, a `fork`'s
-  body `"fork at prog.slight:3:9"` (a `connect`'s, `"connect at ..."`),
+  body `"fork at prog.slight:3:9"` (a `spawn`'s, `"spawn at ..."`, and a
+  `connect`'s, `"connect at ..."`),
   and a lambda `"lambda at ..."`.
 - `(:mail n)`: the messages waiting for it.
 - `(:heap bytes)`: its heap in use, both generations.
@@ -1770,7 +1810,7 @@ answers with `(reply to v)`, `to` being that box.
             (:inc      (counter (+ n 1)))
             ((:get to) (reply to n) (counter n))))
 
-    (let k (fork (counter 0)))
+    (let k (spawn (counter 0)))
     (send k :inc)
     (ask k (list :get))                  1
 

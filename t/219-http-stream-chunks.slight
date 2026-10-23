@@ -26,7 +26,7 @@
             (_                   (cons (list :chunk bytes) acc))))))
 
 (defun streamed (method url)
-    (cadr (join (fork (heard (http/stream method url () "" :chunks) ())))))
+    (cadr (join (spawn (heard (http/stream method url () "" :chunks) ())))))
 
 (defun main ()
     (let me $$)
@@ -55,4 +55,8 @@
             (map pprint r)
             :done)))
 
-(main)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main))
+
+(join (spawn (top-level)))

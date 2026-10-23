@@ -71,7 +71,7 @@
 ; rpc/next. It asks the connection, which holds the socket.
 (defun rpc/peer ()
     (let conn ^$$)
-    (match (join (fork (rpc/asking-peer conn)))
+    (match (join (spawn (rpc/asking-peer conn)))
         ((:ok who) who)
         (_         ())))
 
@@ -120,7 +120,7 @@
 (defun rpc/call (conn name args)
     (let text (rpc/printed name args))
     (let caller $$)
-    (rpc/result (join (fork (rpc/calling conn caller text)))))
+    (rpc/result (join (spawn (rpc/calling conn caller text)))))
 
 (defun rpc/calling (conn caller text)
     (monitor conn)
@@ -147,7 +147,7 @@
 (defun rpc/stream (conn name args)
     (let text (rpc/printed name args))
     (let caller $$)
-    (fork (rpc/streaming conn caller text)))
+    (spawn (rpc/streaming conn caller text)))
 
 (defun rpc/streaming (conn caller text)
     (monitor conn)
@@ -191,7 +191,7 @@
 ; rpc/call, rpc/stream and rpc/close; or (:error reason), the socket's,
 ; such as (:econnrefused "localhost:1"). The other end can call handlers.
 (defun rpc/connect (where handlers)
-    (rpc/result (join (fork (rpc/connecting where handlers)))))
+    (rpc/result (join (spawn (rpc/connecting where handlers)))))
 
 (defun rpc/connecting (where handlers)
     (let me $$)
@@ -219,7 +219,7 @@
 ; The command's stderr comes with its stdout, so it mustn't write
 ; anything but messages there.
 (defun rpc/exec (cmd handlers)
-    (rpc/result (join (fork (rpc/exec-connecting cmd handlers)))))
+    (rpc/result (join (spawn (rpc/exec-connecting cmd handlers)))))
 
 (defun rpc/exec-connecting (cmd handlers)
     (let me $$)
@@ -262,7 +262,7 @@
 ; with :disconnected. Each time a connection opens, (on-open conn) runs
 ; in a process of its own: to say who this end is, say.
 (defun rpc/keep (where handlers on-open)
-    (fork (rpc/dial where handlers on-open 100)))
+    (spawn (rpc/dial where handlers on-open 100)))
 
 (defun rpc/dial (where handlers on-open delay)
     (let me $$)
@@ -390,7 +390,7 @@
                         ((:ok values)
                             (let p (fork (rpc/run f values)))
                             (monitor p)
-                            (fork (rpc/watch p))
+                            (spawn (rpc/watch p))
                             (assoc id p theirs))))))))
 
 ; Stops p, a call from the other end, if the connection, the parent,

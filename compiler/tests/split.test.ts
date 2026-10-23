@@ -59,20 +59,22 @@ test('a name a pattern binds comes across under another name if the rest needs t
     // the rest's x is f's; in the clause, x is the message's
     const params = defun('(defun f (x) (let y (recv ((:a x) x))) (list x y))', 'f (recv at t:1:21)')[2]!;
     assert.deepEqual(toArray(params)!.map(show), ['x (before recv at t:1:21)']);
-    assert.doesNotThrow(() => compileProgram(read('(defun f (x) (let y (recv ((:a x) x) ((:b z) z))) (list x y)) (f 1)', 't')));
+    assert.doesNotThrow(() => compileProgram(read('(defun f (x) (let y (recv ((:a x) x) ((:b z) z))) (list x y)) (spawn (f 1))', 't')));
 });
 
 test('more than 8 locals come across as one list', () => {
     const src = '(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (recv (m (list a b c d e f g h i m)))';
     const g = defun(src, 'the top level (recv at t:1:91)');
     assert.equal(toArray(g[2]!)!.length, 1);
-    assert.doesNotThrow(() => compileProgram(read(src, 't')));
+    // the top level is a task (D243), so it compiles in an actor
+    const actor = (s: string): string => `(defun a () ${s}) (spawn (a))`;
+    assert.doesNotThrow(() => compileProgram(read(actor(src), 't')));
     // a local named car is fine where it comes across under another name,
     // but not into the function for the rest, whose parameters are the
     // names themselves
     const car = src.replace('(let i 9)', '(let car 9)').replace(' i m', ' car m');
-    assert.doesNotThrow(() => compileProgram(read(car, 't')));
-    assert.throws(() => compileProgram(read(car.replace('(recv (m (list', '(let m (recv ((:x x) x) ((:y y) y))) (pprint (list').replace(' m)))', ' m))'), 't')),
+    assert.doesNotThrow(() => compileProgram(read(actor(car), 't')));
+    assert.throws(() => compileProgram(read(actor(car).replace('(recv (m (list', '(let m (recv ((:x x) x) ((:y y) y))) (pprint (list').replace(' m)))', ' m))'), 't')),
         (e: unknown) => e instanceof CompileError && /a local is named car/.test(e.message));
 });
 
@@ -102,7 +104,8 @@ test('@ARGV comes across under another name, since it can\'t be a parameter', ()
     const both = '(let m (recv)) (pprint (list %ENV m @ARGV))';
     assert.deepEqual(toArray(defun(both, 'the top level (recv at t:1:8)')[2]!)!.map(show),
                      ['@ARGV (carried across recv at t:1:8)', '%ENV (carried across recv at t:1:8)']);
-    assert.doesNotThrow(() => compileProgram(read(src, 't')));
+    // split.ts still carries them, but the top level is a task, which can't wait (D243)
+    assert.throws(() => compileProgram(read(src, 't')), (e: unknown) => e instanceof CompileError && /a task .* can't wait/.test(e.message));
 });
 
 test('a recv in a fork is split in the new process', () => {

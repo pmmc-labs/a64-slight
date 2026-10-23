@@ -40,7 +40,7 @@
     (recv
         (:inc      (counter (+ n 1)))
         ((:get to) (reply to n) (counter n))))
-(let k (fork (counter 0)))
+(let k (spawn (counter 0)))
 (send k :inc)
 (send k :inc)
 (pprint (ask k (list :get)))
@@ -52,6 +52,6 @@
 
 ; and one that never answers, (:timeout pid)
 (defun sink () (recv (_ (sink))))
-(let s (fork (sink)))
+(let s (spawn (sink)))
 (let t (join (fork (ask-within 100 s (list :anything)))))
 (list (car t) (car (cadr t)) (eq? (cadr (cadr t)) s))

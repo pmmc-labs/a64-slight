@@ -5436,3 +5436,52 @@ heap), which hides where a wait can go but not what it takes from the
 mailbox; receivers as values, `recv/with`, which makes actors' loops
 pleasanter and leaves the boxes; and a reply slot alone, which `address`
 generalizes.
+
+**Step 1, built** *(Claude, Oct 2026, on Stevan's "yes, start step 1")*:
+`spawn`, the two kinds, and the rules that hold without the rest.
+
+- **The order changed:** an actor can't be joined, and keeps no value,
+  moved from step 1 to after addresses and `open` (PLAN.md's step 4),
+  since till then the hybrids (`ask`'s box, `slurp`, `http/request`,
+  `rpc/call`) can only be actors that are joined. So for now an actor's
+  value is kept, and `join` takes one; `:not-a-task` is in `rt.h`, for
+  then.
+- **What a task can't do:** wait (the compiler refuses a state function
+  called in a `fork`'s body or the top level, `classify.ts`'s
+  classification as it was, and `rt_recv` faults as a backstop); be sent
+  to, or timed with `after` (`:not-an-actor`, in the sender: a message
+  that can't be taken is a bug in whoever sent it); and monitor, since
+  the notice would be a message it can't take, which D243 didn't say and
+  follows from it. A message to a task that has ended disappears, as
+  before (D92).
+- **In the runtime:** a flag in `rt_proc_t` (`keypress` and it share the
+  word `keypress` had), `rt_spawn`, `connect`'s processes actors, and
+  `:system`'s `(:kind k)`. Two fault kinds and the three words of
+  `:kind` move every runtime symbol after the faults up by two, which
+  only the tables see.
+- **The deadlock message follows the root's join:** the root, a task,
+  now waits in `join` where it waited in `recv`, so `... waiting in the
+  top level for #<pid 2> to end` alone would hide where the program is
+  stuck. It goes on, `, which is waiting in wait-forever for a message`,
+  through each join, and stops after eight with `, and so on`, since
+  tasks that join each other make a cycle.
+- **Programs:** `fork` became `spawn` for every process whose body waits
+  (a script asked the compiler, about 150 places, the hybrids among
+  them). 66 programs whose top level waited (53 golden tests, three
+  examples, the replay and live checks' three programs, seven
+  benchmarks) have it moved into `(defun top-level ...)`, which the root
+  spawns and joins; a benchmark takes its value back out with `cadr`, so
+  the harness's check is unchanged. Two tests, and the live check of
+  timers, set timers on a sleeper or the root, now an actor that never
+  takes them; one keeps its
+  root and moves only its round trip into an actor, so the hash of the
+  root's pid it checks stays the model's.
+- **Expected output:** a golden test's was changed only as the move
+  explains, and checked so: its old expected output, with every pid one
+  more (the top level's actor is pid 2) and the root's value as `(ok
+  v)`, against what it prints, which left only deadlock messages (the
+  longer one above) and sites in moved code, each checked to be the same
+  expression. New: 296 (tasks and actors: a task joined, an actor sent
+  to, a task sent to, timed and monitoring, a message to an ended task,
+  and `:kind`) and 297 (a cycle of joins, and so on), worked out by
+  hand.

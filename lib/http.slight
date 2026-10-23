@@ -79,7 +79,7 @@
     (let s      (match (http/parse-url url)
         ((:ok host port target) (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx)))
         ((:error reason)        (fork (raise reason)))))
-    (fork (http/watch s caller))
+    (spawn (http/watch s caller))
     s)
 
 ; A stream cuts its body into :lines or :chunks; anything else faults, in the

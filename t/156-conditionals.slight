@@ -40,7 +40,7 @@
                 (:stop n)
                 (#true (if (int? msg) (counter (+ n msg)) (counter n)))))))
 
-(let c (fork (counter 0)))
+(let c (spawn (counter 0)))
 (send c :inc)
 (send c 10)
 (send c :ignored)

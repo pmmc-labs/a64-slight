@@ -26,9 +26,6 @@
         ((:open p)   (raises))
         ((:line p s) (raise (list :pid s)))))
 
-(match (join (connect :exec (waits) (raises)))
-    ((:error (:pid pid)) (pprint (gone pid))))
-
 ; Its owner disconnects, and goes on: nothing more comes, and what's
 ; written to it goes nowhere.
 (defun disconnects ()
@@ -42,25 +39,29 @@
                 (:next (gone s))
                 (m     (list :unexpected m))))))
 
-(pprint (join (connect :exec (waits) (disconnects))))
-
 ; Its owner is killed, by the process it told the pid to.
 (defun tells (whom)
     (recv
         ((:open p)   (tells whom))
         ((:line p s) (send whom (list :pid s)) (tells whom))))
 
-(let me $$)
-(let owner (connect :exec (waits) (tells me)))
-(recv
-    ((:pid pid)
-        (kill owner)
-        (pprint (join owner))
-        (pprint (gone pid))))
-
 ; Handed over, from the process connect made to another.
 (defun hands ()
     (recv
         ((:open p) (join (connect p (run ()))))))
 
-(pprint (join (connect :exec (list "sh" "-c" "echo handed") (hands))))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (match (join (connect :exec (waits) (raises)))
+        ((:error (:pid pid)) (pprint (gone pid))))
+    (pprint (join (connect :exec (waits) (disconnects))))
+    (let me $$)
+    (let owner (connect :exec (waits) (tells me)))
+    (recv
+        ((:pid pid)
+            (kill owner)
+            (pprint (join owner))
+            (pprint (gone pid))))
+    (pprint (join (connect :exec (list "sh" "-c" "echo handed") (hands)))))
+
+(join (spawn (top-level)))

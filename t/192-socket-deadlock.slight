@@ -13,5 +13,5 @@
     (disconnect conn)
     (disconnect (car lp))
     (join h))
-(let q (fork (blocker)))
+(let q (spawn (blocker)))
 (join (connect :tcp/listen 0 (server q)))

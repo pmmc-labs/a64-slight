@@ -75,10 +75,14 @@
     (let boss   (agent/new base "main" ""
                     (list (tools/ask-agent "ask_expert" "Asks an expert, who knows arithmetic." helper)
                           (tools/ask-agent "ask_broken" "Asks one who isn't there." (agent/new base "missing" "" ())))))
-    (pprint (cadr (join (fork (asking boss "consult")))))
-    (pprint (cadr (join (fork (asking boss "consult the broken one")))))
+    (pprint (cadr (join (spawn (asking boss "consult")))))
+    (pprint (cadr (join (spawn (asking boss "consult the broken one")))))
     (pprint (agent/ask helper "and again"))
     (kill srv)
     :done)
 
-(main)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main))
+
+(join (spawn (top-level)))

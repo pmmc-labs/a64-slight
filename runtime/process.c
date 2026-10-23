@@ -948,13 +948,31 @@ static entry_t *entry(rt_value_t pid, const char *site) {
     return &procs[pid >> RT_PID_SHIFT];
 }
 
-rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
-    (void)site;
+// A task (fork) or an actor (spawn, and connect's processes): only an
+// actor can recv or be sent to (D243).
+static rt_proc_t *new_child(rt_code_t code, uint64_t n, const rt_value_t *values, int actor) {
     rt_proc_t  *p = rt_new_process(code, rt_current->pid);
+    p->actor = (uint8_t)actor;
     rt_rand_split(rt_current, p);
     rt_chunk_t *c = copy_values(values, p->args, n);
     if (c) adopt(p, c);
-    return p->pid;
+    return p;
+}
+
+rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
+    (void)site;
+    return new_child(code, n, values, 0)->pid;
+}
+
+rt_value_t rt_spawn(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
+    (void)site;
+    return new_child(code, n, values, 1)->pid;
+}
+
+// A live process that's sent a message, a timer's included, or told of
+// another's end, must be an actor: a task has nowhere to take it (D243).
+static void need_actor(const entry_t *e, rt_value_t pid, const char *site) {
+    if (e->proc && !e->proc->actor) rt_fault(RT_FAULT_NOT_ACTOR, pid, site);
 }
 
 // A message holding a copy of msg: the message's record and the copy in
@@ -988,6 +1006,7 @@ static void read_on(rt_proc_t *p, rt_value_t pid);
 // device takes it at once.
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
     entry_t *e = entry(pid, site);
+    need_actor(e, pid, site);
     if (e->proc) {
         deliver(e->proc, new_msg(msg));
     } else if (e->device) {
@@ -1002,6 +1021,7 @@ rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
 // how) or disconnect, applies to the next (D158).
 rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) {
     rt_proc_t *p = rt_current;
+    if (!p->actor) rt_fault(RT_FAULT_NOT_ACTOR, p->pid, "recv");   // the compiler refuses it; this is a backstop
     if (p->reading) {
         rt_value_t device = p->reading;
         p->reading = 0;
@@ -1207,6 +1227,7 @@ rt_value_t rt_join_race(rt_value_t pids, const char *site) {
 
 rt_value_t rt_monitor(rt_value_t pid, const char *site) {
     entry_t *e = entry(pid, site);
+    if (!rt_current->actor) rt_fault(RT_FAULT_NOT_ACTOR, rt_current->pid, site);   // the notice would go nowhere
     if (!e->proc) notify(rt_current->pid, pid, e);
     else          watch(e->proc, rt_current, 0);
     return RT_NIL;
@@ -1431,7 +1452,7 @@ static void ring(void) {
 
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) {
     uint64_t due = due_in(ms, site);
-    entry(pid, site);
+    need_actor(entry(pid, site), pid, site);
     set_alarm(due, pid, new_msg(msg), ++afters);
     return rt_int((int64_t)afters);
 }
@@ -1503,7 +1524,7 @@ static int             input_ended;
 static uint64_t        input_seen;      // when stdin was last looked at while busy
 
 rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
-    rt_value_t pid = rt_fork(code, n, values, site);
+    rt_value_t pid = rt_spawn(code, n, values, site);
     if (nconnected == connected_cap) {
         connected_cap = connected_cap ? connected_cap * 2 : 8;
         connected     = rt_must(realloc(connected, connected_cap * sizeof *connected));
@@ -2318,7 +2339,7 @@ static void command(rt_device_t *d, rt_value_t msg) {
 rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                          rt_value_t path, uint64_t mode) {
     if (!rt_is_string(path)) rt_fault(RT_FAULT_NOT_STRING, path, site);
-    rt_value_t  pid   = rt_fork(code, n, values, site);
+    rt_value_t  pid   = rt_spawn(code, n, values, site);
     rt_proc_t  *p     = procs[pid >> RT_PID_SHIFT].proc;
     const char *bytes = rt_string_bytes(path);
     size_t      len   = rt_string_len(path);
@@ -2523,7 +2544,7 @@ rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, 
     } else if (!rt_is_string(where)) {
         rt_fault(RT_FAULT_NOT_STRING, where, site);
     }
-    rt_value_t pid = rt_fork(code, n, values, site);
+    rt_value_t pid = rt_spawn(code, n, values, site);
     rt_proc_t *p   = procs[pid >> RT_PID_SHIFT].proc;
     int        err = mode == RT_TCP_LISTEN  ? listen_at(p, site, where)
                    : mode == RT_TCP_CONNECT ? tcp_connect(p, site, rt_string_bytes(where), rt_string_len(where))
@@ -2539,7 +2560,7 @@ rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *value
                              rt_value_t dev) {
     rt_device_t *d = entry(dev, site)->device;
     if (!d) rt_fault(RT_FAULT_NOT_DEVICE, dev, site);
-    rt_value_t pid = rt_fork(code, n, values, site);
+    rt_value_t pid = rt_spawn(code, n, values, site);
     rt_proc_t *p   = procs[pid >> RT_PID_SHIFT].proc;
     unown(d);
     d->owner   = pid;
@@ -2834,7 +2855,7 @@ rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values,
     for (; rt_is_cons(x); x = rt_cdr(x), len++) {
         if (!rt_is_string(rt_car(x))) rt_fault(RT_FAULT_NOT_STRING, rt_car(x), site);
     }
-    rt_value_t pid  = rt_fork(code, n, values, site);
+    rt_value_t pid  = rt_spawn(code, n, values, site);
     rt_proc_t *p    = procs[pid >> RT_PID_SHIFT].proc;
     rt_value_t name = rt_car(cmd);
     char     **argv = rt_must(calloc(len + 1, sizeof *argv));
@@ -2993,6 +3014,7 @@ typedef struct snapshot {
     uint64_t   devices, ndevices;       // its devices: snap_pids from devices
     uint64_t   racing, nracing;         // the pids it races, after them
     int        state, stack;            // an RT_SYS_ state; whether it holds a stack
+    int        actor;                   // its kind (D243)
 } snapshot_t;
 
 typedef struct {
@@ -3048,7 +3070,7 @@ static snapshot_t take(rt_device_t *d, const rt_proc_t *p) {
     snapshot_t r = {
         .pid   = p->pid, .parent = p->parent, .joining = p->state == RT_JOINING ? p->joining : RT_NIL,
         .in    = where(p), .heap = in_use(p), .calls = calls_of(p),
-        .state = states[p->state], .stack = p->stack != NULL, .devices = d->snap_npids,
+        .state = states[p->state], .stack = p->stack != NULL, .devices = d->snap_npids, .actor = p->actor,
     };
     for (rt_msg_t *m = p->mail; m; m = m->next) r.mail++;
     for (rt_device_t *x = p->devices; x; x = x->next) snap_pid(d, x->pid);
@@ -3080,7 +3102,7 @@ static void tell_process(rt_device_t *d, const snapshot_t *r, int more) {
     const char *name  = r->in ? function_name(r->in) : NULL;
     size_t      len   = name ? strlen(name) : 0;
     uint64_t    words = (len / 8 + 7) & ~(uint64_t)1;     // the name's string, then cells
-    rt_value_t *space = rt_must(malloc((words + 62 + 2 * (r->ndevices + r->nracing)) * sizeof *space)), *at = space + words;
+    rt_value_t *space = rt_must(malloc((words + 68 + 2 * (r->ndevices + r->nracing)) * sizeof *space)), *at = space + words;
     rt_value_t  in    = name ? string_in(space, name, len) : RT_NIL;
     rt_value_t  devices = RT_NIL;                          // they're newest first: the list is oldest first
     for (uint64_t i = 0; i < r->ndevices; i++, at += 2) devices = rt_cons_at(at, d->snap_pids[r->devices + i], devices);
@@ -3088,6 +3110,7 @@ static void tell_process(rt_device_t *d, const snapshot_t *r, int more) {
     rt_value_t fields[] = {
         field(&at, SYS(PID), r->pid),
         field(&at, SYS(PARENT), r->parent),
+        field(&at, RT_SYM_KIND + RT_KIND_KIND, rt_symbol(RT_SYM_KIND + (r->actor ? RT_KIND_ACTOR : RT_KIND_TASK))),
         field(&at, SYS(STATE), rt_symbol(RT_SYM_SYSTEM + (uint64_t)r->state)),
         field(&at, SYS(JOINING), joining),
         field(&at, SYS(IN), in),
@@ -3180,7 +3203,7 @@ static void system_command(rt_device_t *d, rt_value_t msg) {
 }
 
 rt_value_t rt_connect_system(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
-    rt_value_t pid = rt_fork(code, n, values, site);
+    rt_value_t pid = rt_spawn(code, n, values, site);
     tell_open(new_device(procs[pid >> RT_PID_SHIFT].proc, DEV_SYSTEM, -1, site, NULL, 0));
     return pid;
 }
@@ -3319,6 +3342,39 @@ static size_t memory_limit(void) {
     return least;
 }
 
+// Where p waits, for the deadlock message: in a recv, or for a process to
+// end, and then where that one waits, and so on, since the root is a task
+// that joins the actors doing the work (D243). Processes that join each
+// other make a cycle, so the chain is cut short after a few.
+static void tell_waiting(const rt_proc_t *p) {
+    for (int hops = 0;; hops++) {
+        if (hops == 8) {
+            fprintf(stderr, ", and so on");
+            return;
+        }
+        const char *in = function_name(where(p));
+        fprintf(stderr, "%swaiting in %s for ", hops ? ", which is " : "", in ? in : "?");
+        if (p->state == RT_RACING) {
+            fprintf(stderr, "the first of");
+            const char *sep = " ";
+            for (const rt_watch_t *w = race_last(p); w; w = w->prev_held) {
+                if (!w->wakes) continue;
+                fprintf(stderr, "%s#<pid %" PRIu64 ">", sep, w->watched->pid >> RT_PID_SHIFT);
+                sep = ", ";
+            }
+            fprintf(stderr, " to end");
+            return;
+        }
+        if (p->state != RT_JOINING) {
+            fprintf(stderr, "a message");
+            return;
+        }
+        fprintf(stderr, "#<pid %" PRIu64 "> to end", p->joining >> RT_PID_SHIFT);
+        p = procs[p->joining >> RT_PID_SHIFT].proc;
+        if (!p) return;
+    }
+}
+
 int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
@@ -3365,23 +3421,10 @@ int main(int argc, char **argv) {
     rt_run();
     const entry_t *root = &procs[1];
     if (root->proc) {
-        const char *in = function_name(where(root->proc));
         fflush(stdout);
-        if (root->proc->state == RT_JOINING) {
-            fprintf(stderr, "deadlock: the root process is waiting in %s for #<pid %" PRIu64 "> to end, and nothing else can run\n",
-                    in ? in : "?", root->proc->joining >> RT_PID_SHIFT);
-        } else if (root->proc->state == RT_RACING) {
-            fprintf(stderr, "deadlock: the root process is waiting in %s for the first of", in ? in : "?");
-            const char *sep = " ";
-            for (const rt_watch_t *w = race_last(root->proc); w; w = w->prev_held) {
-                if (!w->wakes) continue;
-                fprintf(stderr, "%s#<pid %" PRIu64 ">", sep, w->watched->pid >> RT_PID_SHIFT);
-                sep = ", ";
-            }
-            fprintf(stderr, " to end, and nothing else can run\n");
-        } else {
-            fprintf(stderr, "deadlock: the root process is waiting in %s for a message, and nothing else can run\n", in ? in : "?");
-        }
+        fprintf(stderr, "deadlock: the root process is ");
+        tell_waiting(root->proc);
+        fprintf(stderr, ", and nothing else can run\n");
         return 1;
     }
     if (!root->ok) return 1;

@@ -152,7 +152,7 @@
              (lambda (i)
                  (let a (+ angle (+ (* 0.42 (- i (/ (- children 1) 2.0))) (+ (* 0.5 (- (rand/float) 0.5)) lean))))
                  (let l (* len (+ 0.66 (* 0.16 (rand/float)))))
-                 (let b (fork (bud painter x1 y1 a l (inc depth) lean)))
+                 (let b (spawn (bud painter x1 y1 a l (inc depth) lean)))
                  (after (+ 150 (rand/int 250)) b :grow))))
 
 ; --- the night ------------------------------------------------------------------
@@ -164,7 +164,7 @@
 (let w (* 2 cols))
 (let h (* 4 rows))
 (let trees (+ 3 (rand/int 3)))
-(let painter (fork (paint (map/new) (tuple cols rows) trees 0)))
+(let painter (spawn (paint (map/new) (tuple cols rows) trees 0)))
 (tty/write \e "[?25l" \e "[2J")
 
 (send painter (list :dots (map (lambda (i) (list (rand/int w) (rand/int (div h 2)))) (range 0 (div (* w h) 120))) (rank/star)))
@@ -179,7 +179,7 @@
          (lambda (i)
              (let x (math/round (+ (/ (* w (+ i 0.5)) trees) (* (/ w (* 3.0 trees)) (- (rand/float) 0.5)))))
              (let len (* h (+ 0.13 (* 0.06 (rand/float)))))
-             (let b (fork (bud painter x (ground h x) (+ (/ math/PI 2) (* 0.2 (- (rand/float) 0.5))) len 0 lean)))
+             (let b (spawn (bud painter x (ground h x) (+ (/ math/PI 2) (* 0.2 (- (rand/float) 0.5))) len 0 lean)))
              (after (* 700 i) b :grow)))
 
 (match (join painter)

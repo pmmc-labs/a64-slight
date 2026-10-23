@@ -11,7 +11,7 @@
         (:bump (store (map inc xs) label ratio add))
         (:stop (list (sum xs) label ratio (add 1)))))
 
-(let s (fork (store (range 0 10000) (~ "count" "er") (/ 1 4) (adder (list 100 200)))))
+(let s (spawn (store (range 0 10000) (~ "count" "er") (/ 1 4) (adder (list 100 200)))))
 (dotimes 0 300 (lambda (i) (send s :bump)))
 (send s :stop)
 (join s)

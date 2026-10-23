@@ -26,4 +26,8 @@
                             (kill l)
                             :done)))))))
 
-(main (rpc/serve "127.0.0.1:0" (list (rpc/system))))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main (rpc/serve "127.0.0.1:0" (list (rpc/system)))))
+
+(join (spawn (top-level)))

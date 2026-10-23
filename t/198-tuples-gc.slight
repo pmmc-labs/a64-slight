@@ -9,15 +9,18 @@
         ((:push x)   (keeper (tuple/set state 1 (cons x (tuple/get state 1)))))
         ((:get from) (send from (tuple->list state)) (keeper state))))
 
-(let k (fork (keeper (tuple 0 ()))))
-(dotimes 0 100000 (lambda (i) (send k (list :add i)) (when (== (% i 1000) 0) (send k (list :push (tuple i))))))
-(send k (list :get $$))
-(let got (recv))
-(match got
-    ((total pushed) (pprint (list total (length pushed) (car pushed) (car (reverse pushed))))))
-(kill k)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (let k (spawn (keeper (tuple 0 ()))))
+    (dotimes 0 100000 (lambda (i) (send k (list :add i)) (when (== (% i 1000) 0) (send k (list :push (tuple i))))))
+    (send k (list :get $$))
+    (let got (recv))
+    (match got
+        ((total pushed) (pprint (list total (length pushed) (car pushed) (car (reverse pushed))))))
+    (kill k)
+    (let squares (map (lambda (i) (tuple i (* i i))) (range 0 200000)))
+    (pprint (fold/l (tuple 0 0)
+                    (lambda (acc t) (tuple (+ (tuple/get acc 0) (tuple/get t 0)) (+ (tuple/get acc 1) (tuple/get t 1))))
+                    squares)))
 
-(let squares (map (lambda (i) (tuple i (* i i))) (range 0 200000)))
-(pprint (fold/l (tuple 0 0)
-                (lambda (acc t) (tuple (+ (tuple/get acc 0) (tuple/get t 0)) (+ (tuple/get acc 1) (tuple/get t 1))))
-                squares))
+(join (spawn (top-level)))

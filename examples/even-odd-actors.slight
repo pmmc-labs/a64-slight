@@ -1,9 +1,10 @@
 ; even-odd-actors: two processes decide whether a number is even by
 ; passing it back and forth, counting down, until one of them reaches 0
-; and tells the root. Each is a receive function that prints what it got
-; and matches it: a count of 0 is the answer, and any other is passed on;
-; anything else (:STOP) ends it. The root takes the four answers as they
-; come, then stops both.
+; and tells the actor that asked (the root's top-level, since the root
+; is a task and can't take messages, D243). Each is a receive function
+; that prints what it got and matches it: a count of 0 is the answer, and
+; any other is passed on; anything else (:STOP) ends it. The asker takes
+; the four answers as they come, then stops both.
 
 (defun is-it-even? (reply-to)
     (recv
@@ -31,7 +32,7 @@
                     (is-it-odd? reply-to))
                 (_ ())))))
 
-; the root: wait for n answers, print them, and stop both actors
+; the asker: wait for n answers, print them, and stop both actors
 (defun collect (n answers is-even? is-odd?)
     (cond
         ((== n 0)
@@ -40,15 +41,16 @@
             (send is-odd?  (list :STOP)))
         (#true (collect (- n 1) (cons (recv) answers) is-even? is-odd?))))
 
-(let $reply-to $$)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (let $reply-to $$)
+    (let is-even? (spawn (is-it-even? $reply-to)))
+    (let is-odd?  (spawn (is-it-odd?  $reply-to)))
+    (pprint $reply-to)
+    (send is-even? (list :IS-EVEN? 21 is-odd?))
+    (send is-even? (list :IS-EVEN? 36 is-odd?))
+    (send is-even? (list :IS-EVEN? 57 is-odd?))
+    (send is-even? (list :IS-EVEN? 92 is-odd?))
+    (collect 4 () is-even? is-odd?))
 
-(let is-even? (fork (is-it-even? $reply-to)))
-(let is-odd?  (fork (is-it-odd?  $reply-to)))
-
-(pprint $reply-to)
-(send is-even? (list :IS-EVEN? 21 is-odd?))
-(send is-even? (list :IS-EVEN? 36 is-odd?))
-(send is-even? (list :IS-EVEN? 57 is-odd?))
-(send is-even? (list :IS-EVEN? 92 is-odd?))
-
-(collect 4 () is-even? is-odd?)
+(join (spawn (top-level)))

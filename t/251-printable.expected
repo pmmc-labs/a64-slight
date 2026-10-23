@@ -7,4 +7,4 @@
 "\\u{1b}[1m"
 "the user didn't let it run"
 "run: echo shown\\u{1b}[8m; echo hidden\\u{1b}[28m"
-()
+(ok ())

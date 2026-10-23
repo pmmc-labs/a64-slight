@@ -41,5 +41,9 @@
         ("/page"     (tty/write "the page was fetched" \n) (list 200 (list (list "content-type" "text/plain")) "a page"))
         (_           (list 404 () ""))))
 
-(http/serve 0 handler)
-(recv ((:listening port) (tty/write port \n)))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (http/serve 0 handler)
+    (recv ((:listening port) (tty/write port \n))))
+
+(join (spawn (top-level)))

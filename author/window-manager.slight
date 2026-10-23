@@ -52,7 +52,7 @@
     (recv
         ((:newWindow name dims coords)
             (send logger (list :log $$ :ALERT (str "+ new Window(" name ")")))
-            (let win (fork (Window name dims coords () logger)))
+            (let win (spawn (Window name dims coords () logger)))
             (send win :refresh)
             (yield (WindowManager rows cols (cons win windows) logger))
         )
@@ -76,11 +76,11 @@
 (let screen-rows (- (tty/screen/rows) 10))
 (let screen-cols (- (tty/screen/cols) 1))
 
-(let logger (fork (Logger (Dimensions screen-rows 50) (Coords 1 (- screen-cols 52)) ())))
+(let logger (spawn (Logger (Dimensions screen-rows 50) (Coords 1 (- screen-cols 52)) ())))
 (send logger :init)
 (send logger (list :log $$ :DEBUG "... Logger Initialized"))
 
-(let wm (fork (WindowManager screen-rows screen-cols () logger)))
+(let wm (spawn (WindowManager screen-rows screen-cols () logger)))
 (let kb (connect :keypress (Keyboard wm logger)))
 
 (send wm (list

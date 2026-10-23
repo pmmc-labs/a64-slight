@@ -545,7 +545,7 @@
 ; starts (a file that isn't there, or is empty, is no notes; one that
 ; isn't notes ends the store, rather than be written over), and writes
 ; them all back after each change, so they outlast the program.
-(defun notes/open (path) (fork (notes/loop path (notes/read path))))
+(defun notes/open (path) (spawn (notes/loop path (notes/read path))))
 
 (defun notes/get (store key) (ask store (list :get key)))
 (defun notes/keys (store) (ask store (list :keys)))

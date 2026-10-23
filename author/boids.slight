@@ -291,7 +291,7 @@
 (when (< frames 1) (tty/write \e "[?25l" \e "[2J"))
 (let shown (connect :system (display-on n sky frames)))
 (let birds (map
-    (lambda (b) (match b ((i #(x y vx vy)) (fork (bird i (tuple i x y vx vy) sky shown ())))))
+    (lambda (b) (match b ((i #(x y vx vy)) (spawn (bird i (tuple i x y vx vy) sky shown ())))))
     (zip (range 0 n) states)))
 (map (lambda (b) (send b (list :flock birds))) birds)
 (let keyboard (connect :keypress (keys shown)))

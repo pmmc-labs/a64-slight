@@ -36,6 +36,7 @@ export const FAULT_KINDS: readonly string[] = [
     'not-an-int', 'overflow', 'not-a-bool', 'no-clause', 'stack', 'not-a-cons', 'not-a-list', 'heap',
     'not-a-string', 'not-a-symbol', 'out-of-range', 'not-a-number', 'div-by-zero', 'not-a-function',
     'arity', 'not-a-pid', 'join-self', 'not-a-device', 'not-json', 'not-sexp', 'no-match', 'not-a-tuple',
+    'not-an-actor', 'not-a-task',
 ];
 
 // The names of keys from :keypress, then the modifiers, in RT_KEY_ order.
@@ -79,9 +80,12 @@ export const EXEC_WORDS: readonly string[] = [
 // Who's at the other end of a Unix connection, in RT_PEER_ order (D235).
 export const PEER_WORDS: readonly string[] = ['uid', 'gid'];
 
+// What kind a process is, in :system's info (D243), in RT_KIND_ order.
+export const KIND_WORDS: readonly string[] = ['kind', 'task', 'actor'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
-    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS,
+    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS,
 ];

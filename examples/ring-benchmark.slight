@@ -23,7 +23,7 @@
             (tty/write "READY" \n)
             next)
         (#true
-            (setup (- n 1) reply-to (fork (test-actor reply-to next))))))
+            (setup (- n 1) reply-to (spawn (test-actor reply-to next))))))
 
 (defun send-ping (pid count)
     (cond
@@ -35,11 +35,14 @@
             (send pid (list :EXIT 0))
             :done)))
 
-(let self $$)
-(let actor-count (if (nil? @ARGV) 1000 (str->int (car     @ARGV))))
-(let ping-count  (if (nil? @ARGV) 3    (str->int (cadr @ARGV))))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level (argv)
+    (let self $$)
+    (let actor-count (if (nil? argv) 1000 (str->int (car     argv))))
+    (let ping-count  (if (nil? argv) 3    (str->int (cadr argv))))
+    (tty/write "INIT with " actor-count " actors, sending " (+ ping-count 1) " pings" \n)
+    (let last (setup actor-count self (spawn (test-actor self ()))))
+    (tty/write "START" \n)
+    (send-ping last ping-count))
 
-(tty/write "INIT with " actor-count " actors, sending " (+ ping-count 1) " pings" \n)
-(let last (setup actor-count self (fork (test-actor self ()))))
-(tty/write "START" \n)
-(send-ping last ping-count)
+(join (spawn (top-level @ARGV)))

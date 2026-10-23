@@ -38,7 +38,7 @@
     (recv
         ((:point #(x y)) (points (cons (+ x y) seen)))
         (:done           (reverse seen))))
-(let p (fork (points ())))
+(let p (spawn (points ())))
 (send p (list :point (tuple 1 2)))
 (send p (list :point (list 3 4)))
 (send p (list :point (tuple 5 6 7)))
@@ -55,7 +55,7 @@
             (let y (recv (#(:add2 z) z)))
             (let f (lambda (k) (+ k (+ x y))))
             (join (fork (f n))))))
-(let tw (fork (twice 1)))
+(let tw (spawn (twice 1)))
 (send tw (tuple :add 2))
 (pprint (join tw))
 

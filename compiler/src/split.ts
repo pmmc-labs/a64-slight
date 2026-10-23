@@ -134,7 +134,7 @@ function children(x: Sexp, env: readonly string[], fn: string, st: St): [Sexp, S
             const [b, st1] = childrenBody(body, [...env, ...params], fn, st);
             return [form(x.pos, ...items.slice(0, 2), ...b), st1];
         }
-        case 'fork': case 'connect': {
+        case 'fork': case 'spawn': case 'connect': {
             if (items.length < 2) return [x, st];
             const [args, st1] = mapSt(items.slice(1, -1), st, (a, s) => children(a, env, fn, s));
             const [body, st2] = splitFunction([items[items.length - 1]!], env, fn, false, st1);
@@ -480,7 +480,7 @@ function ownRecv(x: Sexp): boolean {
     if (x.t !== 'pair') return false;
     const head = x.car.t === 'sym' ? x.car.name : '';
     if (head === 'recv') return true;
-    if (head === 'quote' || head === 'lambda' || head === 'defun' || head === 'fork') return false;
+    if (head === 'quote' || head === 'lambda' || head === 'defun' || head === 'fork' || head === 'spawn') return false;
     const items = toArray(x) ?? [];
     return (head === 'connect' ? items.slice(1, -1) : items).some(ownRecv);
 }
@@ -490,7 +490,7 @@ function ownRecv(x: Sexp): boolean {
 function firstRecv(x: Sexp): Pos | null | undefined {
     if (x.t !== 'pair') return undefined;
     if (isForm(x, 'recv')) return x.pos;
-    if (isForm(x, 'quote') || isForm(x, 'fork')) return undefined;
+    if (isForm(x, 'quote') || isForm(x, 'fork') || isForm(x, 'spawn')) return undefined;
     const items = toArray(x) ?? [];
     for (const i of isForm(x, 'connect') ? items.slice(1, -1) : items) {
         const p = firstRecv(i);

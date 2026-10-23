@@ -6,4 +6,4 @@
 (error (enoent ""))
 enametoolong
 (error (enoent "build/t/284-unix.sock"))
-done
+(ok done)

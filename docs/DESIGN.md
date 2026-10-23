@@ -220,15 +220,16 @@ reply refs.
 
 | | |
 |---|---|
-| `(fork expr)` | The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. `expr` runs at the base of the child's stack, so it may tail-call a state function. Inside `expr`, `$$` is the child. |
-| `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
-| `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
-| `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
+| `(fork expr)` | Starts a **task** (D243). The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. A task can't wait in `recv` (the compiler refuses a state function in `expr`, or in the top level, which is the root's task), nor be sent to, timed (`after`) or monitor (`:not-an-actor`). Inside `expr`, `$$` is the child. |
+| `(spawn expr)` | As `fork`, but starts an **actor** (D243): `expr` runs at the base of the child's stack, so it may tail-call a state function, and the actor can be sent to. |
+| `(connect :keypress expr)` | `spawn`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
+| `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `spawn`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
+| `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `spawn`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
 | `(connect :unix path expr)`, `(connect :unix/listen path expr)` | The same, at a Unix socket's path (D231). |
 | `(socket/peer c)` | The uid, gid and pid at the other end of the Unix connection `c`, or `()` (D235). |
-| `(connect :exec cmd expr)` | `fork`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
-| `(connect :system expr)` | `fork`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
-| `(connect dev expr)` | `fork`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
+| `(connect :exec cmd expr)` | `spawn`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
+| `(connect :system expr)` | `spawn`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
+| `(connect dev expr)` | `spawn`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
 | `(disconnect f)` | Closes the device `f`. Anything that isn't an open device it ignores. Returns `()`. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
@@ -239,7 +240,9 @@ reply refs.
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns the timer's number (D232). |
 | `(timer/cancel t)` | Takes back `after`'s timer `t` if it hasn't fired: `#true`, or `#false` (D232). |
 
-**Tasks and actors (D243; agreed, being built).** Two kinds of process.
+**Tasks and actors (D243; step 1 built: `spawn`, the kinds, and what a
+task can't do; an actor is still joined, and its value kept, till step
+4).** Two kinds of process.
 An actor, started with `(spawn expr)`, has a mailbox and the `recv`
 rule; it can be sent to, monitored and killed, not joined, and its value
 isn't kept when it ends: monitors are told, and one that asks later

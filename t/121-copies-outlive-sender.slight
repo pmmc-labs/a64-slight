@@ -17,6 +17,6 @@
     (fork (pprint (list :forked xs)))
     :maker-done)
 
-(let p (fork (printer)))
+(let p (spawn (printer)))
 (fork (maker p))
 (fork (churn 2000))

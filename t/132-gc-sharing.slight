@@ -19,7 +19,7 @@
         (:churn (holder dag (+ churned (length (range 0 5000)))))
         (:stop  (list (depth dag) (eq? (car dag) (cadr dag)) churned))))
 
-(let h (fork (holder (double :leaf 30) 0)))
+(let h (spawn (holder (double :leaf 30) 0)))
 (dotimes 0 200 (lambda (i) (send h :churn)))
 (send h :stop)
 (join h)

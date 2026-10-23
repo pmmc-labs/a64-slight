@@ -92,7 +92,7 @@
             (lambda (args) (+ (lookup "a" args) (lookup "b" args))))
         (tool/new "broken" "Fails." () (lambda (args) (raise "the tool broke")))
         (tool/new "big" "Says a lot." () (lambda (args) (str/repeat "x" 20000)))
-        (tool/new "stuck" "Never answers." () (lambda (args) (send me (list :stuck $$)) (join (fork (forever)))))))
+        (tool/new "stuck" "Never answers." () (lambda (args) (send me (list :stuck $$)) (join (spawn (forever)))))))
 
 ; --- asking ------------------------------------------------------------
 
@@ -107,7 +107,7 @@
         ((:error _ reason)      (reverse (cons (list :error reason) acc)))))
 
 (defun ask (a text)
-    (cadr (join (fork (asking a text)))))
+    (cadr (join (spawn (asking a text)))))
 
 (defun asking (a text)
     (agent/say a text)
@@ -143,4 +143,8 @@
     (kill srv)
     :done)
 
-(main)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main))
+
+(join (spawn (top-level)))

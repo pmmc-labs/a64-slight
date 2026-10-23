@@ -71,7 +71,7 @@
     (match n
         (0 :served)
         (_ (recv ((:tick) (serve (- n 1)))))))
-(let s (fork (serve 2)))
+(let s (spawn (serve 2)))
 (send s (list :tick))
 (send s (list :tick))
 (pprint (join s))

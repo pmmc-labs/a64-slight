@@ -137,7 +137,7 @@
                                    (math/round (- (- h 2) (* scale (- (cadr p) y0)))))))
         (let longest (fold/l 1 (lambda (m wk) (math/max m (length (cadr wk)))) walks))
         (tty/write \e "[?25l" \e "[2J")
-        (let painter (fork (paint (map/new) (tuple cols rows))))
+        (let painter (spawn (paint (map/new) (tuple cols rows))))
         (draw walks painter fit longest 1)
         (match (join painter)
             ((:ok lit)

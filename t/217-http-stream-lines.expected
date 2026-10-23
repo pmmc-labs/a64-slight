@@ -4,4 +4,4 @@
 (line (ok (object ("response" " world") ("done" #false))))
 (line (ok (object ("response" "") ("done" #true))))
 (eof)
-"Hello world"
+(ok "Hello world")

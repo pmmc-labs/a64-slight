@@ -22,11 +22,11 @@
 
 ; A watcher, once it has set its monitors.
 (defun started (name targets told)
-    (cadr (join (fork (start name targets told)))))
+    (cadr (join (spawn (start name targets told)))))
 
 (defun start (name targets told)
     (let me $$)
-    (let w  (fork (watcher name targets told me)))
+    (let w  (spawn (watcher name targets told me)))
     (recv (:ready w)))
 
 (defun server () (recv (_ (server))))
@@ -41,9 +41,9 @@
         (m      (heard (cons m acc)))))
 
 (defun main ()
-    (let me (fork (heard ())))
-    (let t  (fork (server)))
-    (let u  (fork (server)))
+    (let me (spawn (heard ())))
+    (let t  (spawn (server)))
+    (let u  (spawn (server)))
     (let a  (started :a (list t) me))
     (let b  (started :b (list t) me))
     (let c  (started :c (list t t) me))
@@ -56,7 +56,7 @@
     (kill g)
     (let ended (list (list :a (join a)) (list :c (join c)) (list :e (join e)) (list :g (join g))))
     (let f  (started :f (list t) me))
-    (let s  (fork (self-watch)))
+    (let s  (spawn (self-watch)))
     (yield (kill s))
     (kill t)
     (kill u)

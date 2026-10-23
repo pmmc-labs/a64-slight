@@ -18,7 +18,7 @@
         ((:error p reason)  (reverse (cons (list :error reason (eq? p s)) acc)))))
 
 (defun streamed (url)
-    (cadr (join (fork (heard (http/stream :get url () "" :lines) ())))))
+    (cadr (join (spawn (heard (http/stream :get url () "" :lines) ())))))
 
 (defun main ()
     (let me $$)
@@ -44,4 +44,8 @@
             (map pprint r)
             :done)))
 
-(main)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main))
+
+(join (spawn (top-level)))

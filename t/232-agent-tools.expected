@@ -9,4 +9,4 @@
 ((piece "after") (piece " [user]") (answer "after [user]"))
 ((piece "not-found") (answer "not-found"))
 ((calling "stuck" ()) (#true (error killed)))
-done
+(ok done)

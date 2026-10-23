@@ -68,7 +68,7 @@
 ; An agent for model at url ("http://host:port"), its system prompt system
 ; ("" for none), with tools (() for none). Gives its pid.
 (defun agent/new (url model system tools)
-    (fork (agent/idle (list url model tools) (if (eq? system "") () (list (agent/message "system" system))) ())))
+    (spawn (agent/idle (list url model tools) (if (eq? system "") () (list (agent/message "system" system))) ())))
 
 ; Asks a for an answer to text, which comes to the caller.
 (defun agent/say (a text) (send a (list :say text $$)))
@@ -77,7 +77,7 @@
 ; (:ended a result) if a ends first. A process of its own asks, so the
 ; pieces and calls it's told of go nowhere else, and this can be called
 ; anywhere, a lambda or a tool included (D192).
-(defun agent/ask (a text) (join (fork (agent/asking a text))))
+(defun agent/ask (a text) (join (spawn (agent/asking a text))))
 
 (defun agent/asking (a text)
     (monitor a)
@@ -110,7 +110,7 @@
 (defun agent/start (settings history waiting text from)
     (let a     $$)
     (let asked (cons (agent/message "user" text) history))
-    (let turn  (fork (agent/turn settings (reverse asked) from a)))
+    (let turn  (spawn (agent/turn settings (reverse asked) from a)))
     (monitor turn)
     (agent/busy settings asked history waiting from))
 

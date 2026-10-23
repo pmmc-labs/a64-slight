@@ -33,4 +33,8 @@
         ((== k 997) (race 998))
         (#true      :finished)))
 
-(race 997)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (race 997))
+
+(join (spawn (top-level)))

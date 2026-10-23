@@ -6,4 +6,4 @@
 ((error (http 404 "model 'missing' not found")))
 ((error (econnrefused "127.0.0.1:1")))
 ((piece "Once") (server closed) quiet)
-done
+(ok done)

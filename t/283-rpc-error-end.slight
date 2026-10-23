@@ -12,7 +12,7 @@
 ; Says held, then tells w of the process running it, which never ends.
 (defun hold (w)
     (rpc/handler "hold" "Says held, then never ends." ()
-        (lambda () (rpc/next :held) (send w (list :running $$)) (join (fork (stuck))))))
+        (lambda () (rpc/next :held) (send w (list :running $$)) (join (spawn (stuck))))))
 
 ; --- a raw client, and the server's calls ----------------------------------
 
@@ -108,4 +108,8 @@
             (kill l)
             (stopped 2))))
 
-(main (rpc/serve "127.0.0.1:0" (list (hold $$))))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main (rpc/serve "127.0.0.1:0" (list (hold $$)))))
+
+(join (spawn (top-level)))
