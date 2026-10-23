@@ -167,7 +167,21 @@ with no write barrier, since nothing old can point at anything young
 `nqueens`, `deriv`, `spectral-norm`, `fan-in`, D201), and what its
 profiles found: the prelude's list functions as loops, and its `not`
 compiled inline (D203, golden tests 247 and 248); and Rust, with tokio,
-in the actor programs, their floor as C is the sequential ones' (D224).
+in the actor programs, their floor as C is the sequential ones' (D224);
+and `payload`, ping-pong with 100 integers in each message, what copying
+a message costs, and one core as the comparison, every core a table of
+its own in the summary (D237); and `latency`, how long a message waits
+while other processes work: idle, beside a process that never waits,
+and beside a big heap (D238); and the collector's walk, its state in
+registers and a list's spine copied without its stack, 21 instructions a
+cell where it took 52 (D239, golden test 293); and the message copy's
+walk made the collector's, 41 instructions a cell where it took 68, and
+values with no pointer in them not walked at all (D240, golden test
+294); and `bank`, a simulation, SimPy's bank example, slight's on the
+virtual clock against SimPy's and an event list in C, all coming to the
+same waits (D241), and the virtual clock no longer calling `select()` at
+each step when nothing's open, 1.55 times faster there (D242, golden
+test 295).
 Strings, cleaned up
 (D219): one set of builtins in place of the byte ones and the `utf8/`
 ones, `str/` with JavaScript's methods' names and edge cases over
@@ -226,7 +240,8 @@ and who's at the other end of a Unix socket, `(socket/peer c)`, its
 uid, gid and pid as the kernel has them, and `(rpc/peer)` in a handler
 (D235, golden test 291).
 **Next:** to settle with
-Stevan (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
+Stevan (`docs/PLAN.md`, 15), and when an exit record goes, open
+(`docs/PLAN.md`, "Exit records"). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
 first (`docs/PLAN.md`). Self-hosting waits
@@ -368,7 +383,7 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
   (default 60) is killed and fails.
 - `make check`: `tsc --noEmit`.
 - `make bench`: the benchmarks, slight against C, Go, Erlang, Node, Perl,
-  Python, Chez Scheme and Rust (`bench/run.py`; `BENCH=--quick` for small sizes, and see
+  Python, Chez Scheme and Rust, and SimPy in `bank`, if it's installed (`bench/run.py`; `BENCH=--quick` for small sizes, and see
   `--help`). Not part of `make test`. Measure on the Mac: timings under
   qemu mean nothing, and the cloud machine's are noisy.
 - `bench/airline.py`: `examples/airline.slight` on a made-up day, with

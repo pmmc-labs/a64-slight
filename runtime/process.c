@@ -345,149 +345,199 @@ static size_t box_bytes(rt_value_t v) {
     }
 }
 
-// Copying a value is one walk over it, with a work stack (D147), into a
-// scratch buffer kept from one copy to the next; then a chunk of just the
-// size the copy came to takes it, so the receiver's heap holds nothing it
-// doesn't use. Scratch can grow, and move, while the copy is made, so the
-// copy refers to itself by offsets into scratch: a pointer in it is an
-// offset with its tag, and slots[] says where each such word is. Moving
-// the copy into its chunk adds the chunk's address to each. (Copying was
-// two walks till the boids example's broadcasts showed the first, which
-// only added up the bytes, to be half the time a send took.)
-//
-// The walk goes along a list's cdrs, dealing with an element that's an
-// atom, a string or a float on the spot, and goes down into an element
-// that's a list or a box of values (a closure or a tuple), keeping the
-// rest of the list (and the box's values) on the stack. So the stack
-// grows only as deep as the value nests, and a flat list never touches
-// it. Sharing isn't kept: a DAG is copied as a tree.
+// Both walks over values below, the message copy and the collector's,
+// keep what changes at every word in a struct of their own that only
+// their helpers point at, and the helpers are always inlined, so the
+// compiler can keep that struct in registers. Kept in globals, or in a
+// struct handed to a function that isn't inlined, it was loaded and
+// stored again around every word copied, a word copied being, as far as
+// the compiler knew, one of them (D239, D240). What would let the struct
+// escape, an array growing, is a function given values, not pointers.
+#define WALK static inline __attribute__((always_inline))
 
-// What copying does with a value, worked out once for each: keep it as it
-// is (an immediate, (), or static data), or copy a cons cell, a box with
-// nothing in it to copy (a string or a float), or a box of values (a
-// closure or a tuple).
-enum { KEEP, CELL, LEAF, VALUES };
-
-static inline int kind(rt_value_t v) {
-    if (rt_is_cons(v))                      return is_static(v) ? KEEP : CELL;
-    if ((v & RT_TAG_MASK) != RT_TAG_BOXED || is_static(v)) return KEEP;
-    return rt_box_holds_values(rt_box(v)[0]) ? VALUES : LEAF;
+// A work stack twice the size of todo, which held cap words and began as
+// local, on the C stack.
+static rt_value_t *stack_grow(rt_value_t *todo, size_t cap, rt_value_t *local) {
+    rt_value_t *more = rt_must(malloc(2 * cap * sizeof *more));
+    memcpy(more, todo, cap * sizeof *more);
+    if (todo != local) free(todo);
+    return more;
 }
 
-static char   *scratch;                 // the copy being made
-static size_t  scratch_used, scratch_cap;
+// Copying a value is one walk over it (D147), into a scratch buffer kept
+// from one copy to the next; then a chunk of just the size the copy came
+// to takes it, so the receiver's heap holds nothing it doesn't use.
+// Scratch can grow, and move, while the copy is made, so the copy refers
+// to itself by offsets into scratch: a pointer in it is an offset with its
+// tag, and slots[] says where each such word is. Moving the copy into its
+// chunk adds the chunk's address to each. (Copying was two walks till the
+// boids example's broadcasts showed the first, which only added up the
+// bytes, to be half the time a send took.)
+//
+// The walk is the collector's, with nothing to forward (D240): a box is
+// copied when the walk comes to it, and a cell with the rest of its list,
+// each cdr as the walk comes to it; a car that's a list, and a box of
+// values (a closure or a tuple), goes on the stack, with where its copy
+// is, for after. So a flat list never touches the stack. Sharing isn't
+// kept: a DAG is copied as a tree.
+
+static char   *scratch;                 // the copy being made, kept from one copy to the next
 static size_t *slots;                   // the offsets in scratch of words that point into it
-static size_t  nslots, slots_cap;
+static size_t  scratch_cap;             // in bytes; slots has room for one for each word
 
 #define SCRATCH_KEPT (1 << 20)          // scratch bigger than this is let go after a copy
 
+typedef struct {
+    char       *scratch;
+    size_t     *slots;
+    size_t      used, cap, nslots;
+    rt_value_t *todo, *local;           // pairs: the offset of a copy, and what it's a copy of
+    size_t      n, todo_cap;
+    uintptr_t   lo, hi;                 // static data's bounds, and its two ranges:
+    uintptr_t   r0, r1, c0, c1;         // read-only, and the quoted constants
+} copying_t;
+
+// Whether v is copied: a cell or a box, but not static data, which is
+// tested in full only between the lowest and the highest of its bounds,
+// where no heap pointer has been.
+WALK int copied(const copying_t *c, rt_value_t v) {
+    uint64_t tag = v & RT_TAG_MASK;
+    if ((tag != RT_TAG_LIST && tag != RT_TAG_BOXED) || v == RT_NIL) return 0;
+    uintptr_t a = v & ~(uintptr_t)RT_TAG_MASK;
+    return a - c->lo >= c->hi - c->lo || !(a - c->r0 < c->r1 - c->r0 || a - c->c0 < c->c1 - c->c0);
+}
+
 // The offset of n more bytes at the end of scratch (n a multiple of 16, so
-// every offset is 16-aligned, as a cell or a box must be).
-static inline size_t scratch_take(size_t n) {
-    if (scratch_used + n > scratch_cap) {
-        while (scratch_used + n > scratch_cap) scratch_cap = scratch_cap ? scratch_cap * 2 : 4096;
-        scratch = rt_must(realloc(scratch, scratch_cap));
+// every offset is 16-aligned, as a cell or a box must be). Slots grow with
+// it, so that noting one never needs to.
+WALK size_t scratch_take(copying_t *c, size_t n) {
+    if (c->used + n > c->cap) {
+        size_t cap = c->cap;
+        while (c->used + n > cap) cap = cap ? cap * 2 : 4096;
+        c->scratch = rt_must(realloc(c->scratch, cap));
+        c->slots   = rt_must(realloc(c->slots, cap / 8 * sizeof *c->slots));
+        c->cap     = cap;
     }
-    size_t at = scratch_used;
-    scratch_used += n;
+    size_t at = c->used;
+    c->used  += n;
     return at;
 }
 
-// v into the word at offset at; inner says v is an offset into scratch.
-static inline void scratch_put(size_t at, rt_value_t v, int inner) {
-    *(rt_value_t *)(scratch + at) = v;
-    if (!inner) return;
-    if (nslots == slots_cap) {
-        slots_cap = slots_cap ? slots_cap * 2 : 256;
-        slots     = rt_must(realloc(slots, slots_cap * sizeof *slots));
+// The tagged offset of a copy into the word at offset at, noted.
+WALK void scratch_link(copying_t *c, size_t at, rt_value_t v) {
+    *(rt_value_t *)(c->scratch + at) = v;
+    c->slots[c->nslots++] = at;
+}
+
+WALK void copy_push(copying_t *c, size_t at, rt_value_t v) {
+    if (c->n + 2 > c->todo_cap) {
+        c->todo      = stack_grow(c->todo, c->todo_cap, c->local);
+        c->todo_cap *= 2;
     }
-    slots[nslots++] = at;
+    c->todo[c->n++] = at;
+    c->todo[c->n++] = v;
 }
 
-// A copy of the box v in scratch: its offset, tagged. A float, the box
-// most often sent, is two words, copied as such rather than by memcpy.
-static inline rt_value_t copy_box(rt_value_t v) {
-    size_t          bytes = box_bytes(v), at = scratch_take(bytes);
-    uint64_t       *to    = (uint64_t *)(scratch + at);
-    const uint64_t *from  = rt_box(v);
-    if (bytes == 16) to[0] = from[0], to[1] = from[1];
-    else             memcpy(to, from, bytes);
-    return (rt_value_t)at | RT_TAG_BOXED;
-}
-
-// Copies v into scratch, putting it in the word at offset at. The work
-// stack holds pairs: the offset of a word for a copy, and the value to
-// copy there.
-static void copy(rt_value_t v, size_t at) {
-    rt_work_t w;
-    rt_work_init(&w);
-    for (;;) {
-        int k = kind(v);
-        if (k == KEEP) {
-            scratch_put(at, v, 0);
-        } else if (k == CELL) {
-            size_t     cell = scratch_take(16);
-            rt_value_t x    = rt_car(v);
-            int        kx   = kind(x);
-            scratch_put(at, (rt_value_t)cell | RT_TAG_LIST, 1);
-            if (kx == CELL || kx == VALUES) {
-                rt_work_push(&w, cell + 8);
-                rt_work_push(&w, rt_cdr(v));
-                at = cell;
-                v  = x;
-                continue;
-            }
-            if (kx == LEAF) scratch_put(cell, copy_box(x), 1);
-            else            scratch_put(cell, x, 0);
-            at = cell + 8;
-            v  = rt_cdr(v);
-            continue;
+// v into the word at offset at: v itself, if it isn't copied, or where its
+// copy is. A box is copied now, and a cell taken for a list, whose cells,
+// like a box's values, are copied from the stack.
+WALK void copy_word(copying_t *c, rt_value_t v, size_t at) {
+    if (!copied(c, v)) {
+        *(rt_value_t *)(c->scratch + at) = v;
+    } else if ((v & RT_TAG_MASK) == RT_TAG_LIST) {
+        size_t cell = scratch_take(c, 16);
+        scratch_link(c, at, (rt_value_t)cell | RT_TAG_LIST);
+        copy_push(c, cell, v);
+    } else {
+        size_t          bytes = box_bytes(v), box = scratch_take(c, bytes);
+        uint64_t       *to    = (uint64_t *)(c->scratch + box);
+        const uint64_t *from  = rt_box(v);
+        if (bytes <= 64) {
+            for (size_t i = 0; i < bytes / 8; i++) to[i] = from[i];
         } else {
-            rt_value_t box = copy_box(v);
-            scratch_put(at, box, 1);
-            if (k == VALUES) {
-                size_t   base  = box & ~(rt_value_t)RT_TAG_MASK;
-                uint64_t first = rt_box_first_value(rt_box(v)[0]);
-                for (uint64_t i = 0; i < rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; i++) {
-                    rt_work_push(&w, base + 8 * (first + i));
-                    rt_work_push(&w, rt_box(v)[first + i]);
-                }
-            }
+            memcpy(to, from, bytes);
         }
-        if (!w.n) break;
-        v  = rt_work_pop(&w);
-        at = (size_t)rt_work_pop(&w);
+        scratch_link(c, at, (rt_value_t)box | RT_TAG_BOXED);
+        if (rt_box_holds_values(from[0])) copy_push(c, box, v);
     }
-    rt_work_free(&w);
+}
+
+// Copies v into the word at offset at, and all it leads to.
+WALK void copy(copying_t *c, rt_value_t v, size_t at) {
+    copy_word(c, v, at);
+    while (c->n) {
+        v  = c->todo[--c->n];
+        at = (size_t)c->todo[--c->n];
+        if (rt_is_cons(v)) {
+            // Along the list: each cdr to copy is taken as the walk comes
+            // to it, and the walk goes on into it.
+            for (;;) {
+                copy_word(c, rt_car(v), at);
+                rt_value_t d = rt_cdr(v);
+                if ((d & RT_TAG_MASK) != RT_TAG_LIST || !copied(c, d)) {
+                    copy_word(c, d, at + 8);
+                    break;
+                }
+                size_t cell = scratch_take(c, 16);
+                scratch_link(c, at + 8, (rt_value_t)cell | RT_TAG_LIST);
+                at = cell;
+                v  = d;
+            }
+        } else {
+            const uint64_t *in    = rt_box(v);
+            uint64_t        first = rt_box_first_value(in[0]), count = in[0] >> RT_BOX_SIZE_SHIFT;
+            for (uint64_t i = 0; i < count; i++) copy_word(c, in[first + i], at + 8 * (first + i));
+        }
+    }
 }
 
 // Copies n values into one new chunk, after reserve bytes (a multiple of
-// 16) that the caller fills; NULL if that would be no bytes at all. The
+// 16) left for the caller, and puts what to use for each in into. The
 // values themselves go first in scratch, as words that point into it like
-// any other, and are taken out of it at the end.
-static rt_chunk_t *copy_values_after(const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve) {
+// any other, and are taken out of it at the end. Each word noted is made
+// where it will be before the copy is moved.
+static rt_chunk_t *copy_walk(const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve) {
+    rt_value_t local[RT_WORK_LOCAL];
+    copying_t  c = {
+        .scratch = scratch, .slots = slots, .cap = scratch_cap,
+        .todo = local, .local = local, .todo_cap = RT_WORK_LOCAL,
+        .r0 = (uintptr_t)slight_rodata_start, .r1 = (uintptr_t)slight_rodata_end,
+        .c0 = (uintptr_t)slight_const_start, .c1 = (uintptr_t)slight_const_end,
+    };
+    c.lo = c.r0 < c.c0 ? c.r0 : c.c0;
+    c.hi = c.r1 > c.c1 ? c.r1 : c.c1;
     size_t roots = (8 * n + 15) & ~(size_t)15;
-    scratch_used = nslots = 0;
-    scratch_take(roots);
-    for (uint64_t i = 0; i < n; i++) copy(from[i], 8 * i);
-    size_t      bytes = scratch_used - roots;
-    rt_chunk_t *c     = reserve + bytes ? new_chunk(reserve + bytes) : NULL;
+    scratch_take(&c, roots);
+    for (uint64_t i = 0; i < n; i++) copy(&c, from[i], 8 * i);
+    if (c.todo != local) free(c.todo);
+    size_t      bytes = c.used - roots;
+    rt_chunk_t *chunk = reserve + bytes ? new_chunk(reserve + bytes) : NULL;
     if (bytes) {
-        char      *data  = (char *)(c + 1) + reserve;
-        rt_value_t shift = (rt_value_t)data - roots;    // offset + shift: where it is now
-        memcpy(data, scratch + roots, bytes);
-        for (size_t i = 0; i < nslots; i++) {
-            size_t at = slots[i];
-            *(rt_value_t *)(at < roots ? scratch + at : data + (at - roots)) += shift;
-        }
+        char      *data  = (char *)(chunk + 1) + reserve;
+        rt_value_t shift = (rt_value_t)data - roots;    // offset + shift: where it will be
+        for (size_t i = 0; i < c.nslots; i++) *(rt_value_t *)(c.scratch + c.slots[i]) += shift;
+        memcpy(data, c.scratch + roots, bytes);
     }
-    for (uint64_t i = 0; i < n; i++) into[i] = ((rt_value_t *)scratch)[i];
-    if (scratch_cap > SCRATCH_KEPT) {
-        free(scratch), free(slots);
-        scratch = NULL, slots = NULL;
-        scratch_cap = slots_cap = 0;
+    for (uint64_t i = 0; i < n; i++) into[i] = ((rt_value_t *)c.scratch)[i];
+    if (c.cap > SCRATCH_KEPT) {
+        free(c.scratch), free(c.slots);
+        c.scratch = NULL, c.slots = NULL;
+        c.cap = 0;
     }
-    return c;
+    scratch     = c.scratch;
+    slots       = c.slots;
+    scratch_cap = c.cap;
+    return chunk;
+}
+
+// Values with no pointer among them, as fork's and join's often are, and
+// many messages, need no walk.
+static rt_chunk_t *copy_values_after(const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve) {
+    for (uint64_t i = 0; i < n; i++) {
+        if (rt_is_cons(from[i]) || (from[i] & RT_TAG_MASK) == RT_TAG_BOXED) return copy_walk(from, into, n, reserve);
+    }
+    for (uint64_t i = 0; i < n; i++) into[i] = from[i];
+    return reserve ? new_chunk(reserve) : NULL;
 }
 
 static rt_chunk_t *copy_values(const rt_value_t *from, rt_value_t *into, uint64_t n) {
@@ -533,10 +583,10 @@ static rt_value_t copy_here(rt_value_t v) {
 //
 // Copying leaves a forwarding pointer behind, so sharing is kept: a DAG
 // stays a DAG. Cons cells have no header, so to-space can't be scanned in
-// order as Cheney's algorithm would; instead, each copied cons, closure or
-// tuple goes on a stack of objects whose fields still point at the old
-// heap.
-// Taking the cdr first keeps that stack short along a list.
+// order as Cheney's algorithm would; instead, each copied closure, tuple,
+// and cons that heads a list goes on a stack of objects whose fields still
+// point at the old heap. A list's spine never does: along a list the walk
+// copies each cdr as it comes to it and goes on from the copy (D239).
 
 #define GC_MOVED_CONS RT_TAG_BOXED      // in a moved cell's car: a boxed null, which no value is
 #define GC_MOVED_BOX  0                 // in a moved box's header: no box has type 0
@@ -546,24 +596,18 @@ typedef struct {
     rt_chunk_t      *chunks;            // to-space, newest first: in a minor collection, the old generation
     uintptr_t        ptr, limit;
     size_t           bytes, live, size; // to-space's capacity, what's been copied, the size of a new chunk
-    rt_work_t        todo;              // copied, with fields still to forward
 } gc_t;
 
-static void *gc_alloc(gc_t *g, size_t bytes) {
-    if (g->limit - g->ptr < bytes) {
-        size_t      size = bytes > g->size ? bytes : g->size;
-        rt_chunk_t *c    = new_chunk(size);
-        c->next   = g->chunks;
-        g->chunks = c;
-        g->bytes += size;
-        g->ptr    = (uintptr_t)(c + 1);
-        g->limit  = g->ptr + size;
-        g->size   = g->size * 2 < CHUNK_MAX ? g->size * 2 : CHUNK_MAX;
-    }
-    void *at = (void *)g->ptr;
-    g->ptr  += bytes;
-    g->live += bytes;
-    return at;
+// A new chunk of to-space, for at least bytes: where it starts.
+static uintptr_t gc_chunk(gc_t *g, size_t bytes) {
+    size_t      size = bytes > g->size ? bytes : g->size;
+    rt_chunk_t *c    = new_chunk(size);
+    c->next   = g->chunks;
+    g->chunks = c;
+    g->bytes += size;
+    g->limit  = (uintptr_t)(c + 1) + size;
+    g->size   = g->size * 2 < CHUNK_MAX ? g->size * 2 : CHUNK_MAX;
+    return (uintptr_t)(c + 1);
 }
 
 // Whether v, a pointer, is into p's nursery or what it overflowed into
@@ -576,54 +620,153 @@ static int is_young(const rt_proc_t *p, rt_value_t v) {
     return 0;
 }
 
+// What changes at every object the walk copies: where the next copy goes,
+// and the copies whose fields still point at the old heap. It's kept out
+// of gc_t, which the walk hands to gc_chunk, so it can live in registers
+// (D239, and WALK, above). The walk is compiled twice, for a minor
+// collection and a major one, and what moves is worked out once: in a
+// minor one the young chunks, the nursery and the chunk it overflowed
+// into, if just one (if more, a walk along them all); in a major one, all
+// but static data, which is two ranges, tested only for what's between
+// the lowest and the highest of their bounds, where no heap pointer has
+// been.
+typedef struct {
+    uintptr_t        ptr, limit;
+    size_t           live;
+    rt_value_t      *todo, *local;      // the stack, and the one it starts as, on the C stack
+    size_t           n, cap;
+    const rt_proc_t *young;
+    uintptr_t        n0, n1, o0, o1;    // the nursery, and the chunk it overflowed into
+    int              more;              // it overflowed into more than one
+    uintptr_t        lo, hi;            // static data's bounds, and its two ranges:
+    uintptr_t        r0, r1, c0, c1;    // read-only, and the quoted constants
+} walk_t;
+
+WALK void gc_push(walk_t *w, rt_value_t v) {
+    if (w->n == w->cap) {
+        w->todo  = stack_grow(w->todo, w->cap, w->local);
+        w->cap  *= 2;
+    }
+    w->todo[w->n++] = v;
+}
+
+WALK int gc_moves(const walk_t *w, uintptr_t a, int minor) {
+    if (minor) {
+        if (a - w->n0 < w->n1 - w->n0 || a - w->o0 < w->o1 - w->o0) return 1;
+        return w->more && is_young(w->young, a);
+    }
+    if (a - w->lo >= w->hi - w->lo) return 1;
+    return !(a - w->r0 < w->r1 - w->r0 || a - w->c0 < w->c1 - w->c0);
+}
+
+WALK void *gc_take(gc_t *g, walk_t *w, size_t bytes) {
+    if (w->limit - w->ptr < bytes) {
+        w->ptr   = gc_chunk(g, bytes);
+        w->limit = g->limit;
+    }
+    void *at = (void *)w->ptr;
+    w->ptr  += bytes;
+    w->live += bytes;
+    return at;
+}
+
+// The copy of the cell old, made now; old says where it went.
+WALK rt_value_t gc_move_cons(gc_t *g, walk_t *w, rt_value_t *old) {
+    rt_value_t *new = gc_take(g, w, 16);
+    rt_value_t  to  = (rt_value_t)new | RT_TAG_LIST;
+    new[0] = old[0];
+    new[1] = old[1];
+    old[0] = GC_MOVED_CONS;
+    old[1] = to;
+    return to;
+}
+
 // Where v lives now, copying it there if it hasn't been yet. In a minor
 // collection, only what's young moves.
-static rt_value_t forward(gc_t *g, rt_value_t v) {
-    if (!rt_is_cons(v) && (v & RT_TAG_MASK) != RT_TAG_BOXED) return v;
-    if (g->young ? !is_young(g->young, v) : is_static(v)) return v;
-    if (rt_is_cons(v)) {
+WALK rt_value_t forward(gc_t *g, walk_t *w, rt_value_t v, int minor) {
+    uint64_t tag = v & RT_TAG_MASK;
+    if ((tag != RT_TAG_LIST && tag != RT_TAG_BOXED) || v == RT_NIL || !gc_moves(w, v & ~(uintptr_t)RT_TAG_MASK, minor)) return v;
+    if (tag == RT_TAG_LIST) {
         rt_value_t *old = (rt_value_t *)(v - RT_TAG_LIST);
         if (old[0] == GC_MOVED_CONS) return old[1];
-        rt_value_t *new = gc_alloc(g, 16);
-        new[0] = old[0];
-        new[1] = old[1];
-        old[0] = GC_MOVED_CONS;
-        old[1] = (rt_value_t)new | RT_TAG_LIST;
-        rt_work_push(&g->todo, old[1]);
-        return old[1];
+        rt_value_t to = gc_move_cons(g, w, old);
+        gc_push(w, to);
+        return to;
     }
     uint64_t *old = (uint64_t *)(v - RT_TAG_BOXED);
     if (old[0] == GC_MOVED_BOX) return old[1];
-    size_t    bytes = box_bytes(v);
-    uint64_t *new   = gc_alloc(g, bytes);
-    memcpy(new, old, bytes);
+    size_t     bytes = box_bytes(v);
+    uint64_t  *new   = gc_take(g, w, bytes);
+    rt_value_t to    = (rt_value_t)new | RT_TAG_BOXED;
+    if (bytes <= 64) {
+        for (size_t i = 0; i < bytes / 8; i++) new[i] = old[i];
+    } else {
+        memcpy(new, old, bytes);
+    }
     old[0] = GC_MOVED_BOX;
-    old[1] = (rt_value_t)new | RT_TAG_BOXED;
-    if (rt_box_holds_values(new[0])) rt_work_push(&g->todo, old[1]);
-    return old[1];
+    old[1] = to;
+    if (rt_box_holds_values(new[0])) gc_push(w, to);
+    return to;
 }
 
 // Forwards roots[0..n), and the frames below fp, if it's given, and then
 // all they lead to.
-static void trace(gc_t *g, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
-    rt_work_init(&g->todo);
-    for (uint64_t i = 0; i < n; i++) roots[i] = forward(g, roots[i]);
-    for (; fp && fp[0]; fp = (const uintptr_t *)fp[0]) {
-        for (rt_value_t *s = (rt_value_t *)(fp + 2); s < (rt_value_t *)fp[0]; s++) *s = forward(g, *s);
+WALK void walk(gc_t *g, rt_value_t *roots, uint64_t n, const uintptr_t *fp, int minor) {
+    rt_value_t local[RT_WORK_LOCAL];
+    walk_t     w = {
+        .ptr = g->ptr, .limit = g->limit, .live = g->live,
+        .todo = local, .local = local, .cap = RT_WORK_LOCAL,
+        .young = g->young,
+        .r0 = (uintptr_t)slight_rodata_start, .r1 = (uintptr_t)slight_rodata_end,
+        .c0 = (uintptr_t)slight_const_start, .c1 = (uintptr_t)slight_const_end,
+    };
+    w.lo = w.r0 < w.c0 ? w.r0 : w.c0;
+    w.hi = w.r1 > w.c1 ? w.r1 : w.c1;
+    if (minor) {
+        const rt_chunk_t *c = g->young->nursery, *o = c->next;
+        w.n0   = (uintptr_t)(c + 1);
+        w.n1   = w.n0 + c->size;
+        w.o0   = o ? (uintptr_t)(o + 1) : 0;
+        w.o1   = o ? w.o0 + o->size : 0;
+        w.more = o && o->next;
     }
-    while (g->todo.n) {
-        rt_value_t v = rt_work_pop(&g->todo);
+    for (uint64_t i = 0; i < n; i++) roots[i] = forward(g, &w, roots[i], minor);
+    for (; fp && fp[0]; fp = (const uintptr_t *)fp[0]) {
+        for (rt_value_t *s = (rt_value_t *)(fp + 2); s < (rt_value_t *)fp[0]; s++) *s = forward(g, &w, *s, minor);
+    }
+    while (w.n) {
+        rt_value_t v = w.todo[--w.n];
         if (rt_is_cons(v)) {
+            // Along the list: each cdr still to move is copied as the walk
+            // comes to it, and the walk goes on from the copy.
             rt_value_t *cell = (rt_value_t *)(v - RT_TAG_LIST);
-            cell[1] = forward(g, cell[1]);
-            cell[0] = forward(g, cell[0]);
+            for (;;) {
+                cell[0] = forward(g, &w, cell[0], minor);
+                rt_value_t  d    = cell[1];
+                rt_value_t *next = (rt_value_t *)(d - RT_TAG_LIST);
+                if (!rt_is_cons(d) || !gc_moves(&w, (uintptr_t)next, minor) || next[0] == GC_MOVED_CONS) {
+                    cell[1] = forward(g, &w, d, minor);
+                    break;
+                }
+                rt_value_t to = gc_move_cons(g, &w, next);
+                cell[1] = to;
+                cell    = (rt_value_t *)(to - RT_TAG_LIST);
+            }
         } else {
             uint64_t *box   = (uint64_t *)(v - RT_TAG_BOXED);
-            uint64_t  first = rt_box_first_value(box[0]);
-            for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) box[first + i] = forward(g, box[first + i]);
+            uint64_t  first = rt_box_first_value(box[0]), count = box[0] >> RT_BOX_SIZE_SHIFT;
+            for (uint64_t i = 0; i < count; i++) box[first + i] = forward(g, &w, box[first + i], minor);
         }
     }
-    rt_work_free(&g->todo);
+    if (w.todo != local) free(w.todo);
+    g->ptr   = w.ptr;
+    g->limit = w.limit;
+    g->live  = w.live;
+}
+
+static void trace(gc_t *g, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+    if (g->young) walk(g, roots, n, fp, 1);
+    else          walk(g, roots, n, fp, 0);
 }
 
 static size_t chunk_size(size_t bytes) {
@@ -1405,6 +1548,9 @@ static int wait_for(int64_t us) {
     FD_ZERO(&out);
     if (keys) FD_SET(STDIN_FILENO, &in);
     socket_fds(&in, &out, &max);
+    // Nothing to look at and no time to wait: the virtual clock asks at
+    // every step it takes, which in a simulation is every event (D242).
+    if (max < 0 && us == 0) return 0;
     struct timeval tv, *timeout = NULL;
     if (us >= 0) {
         if (us > 3600000000) us = 3600000000;  // macOS's select refuses more than 10^8 s

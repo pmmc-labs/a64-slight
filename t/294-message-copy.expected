@@ -1,0 +1,18 @@
+(#true #true #true #true #true #true #true #true #true #true #true #true #true #true #true #true #true #true #true)
+#true
+(147 1225 1225.0 2450 3875)
+(20000 199990000)
+(1000 500500)
+(2000 1999000)
+(0 1 2 3 4 5 6 7 8 9 10 11)
+(() (1 "t") (2 "t") (3 "t") (4 "t") (5 "t") (6 "t") (7 "t") (8 "t") (9 "t") (10 "t") (11 "t"))
+(100 4950 "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+((1 2 (3 4) "five" 6.5) (0 1 2 3 4 7 8 9) ((a b) (c d) (0 1 2)))
+(499500 499500 499500)
+(46 68)
+4950.0
+(42 sym #true () 2.5 "short")
+(ok 199990010)
+1999000
+(ok 8)
+done

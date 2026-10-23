@@ -781,7 +781,15 @@ Lalloc_N:
 - Copying leaves a forwarding pointer, so sharing is kept: a DAG stays a
   DAG. Cons cells have no header, so to-space can't be scanned in order
   as in Cheney's algorithm; a stack of copied objects whose fields still
-  need forwarding takes its place (D107).
+  need forwarding takes its place (D107). A list's spine never goes on
+  it: along a list the walk copies each cdr as it comes to it and goes on
+  from the copy, so only cars that are lists or boxes of values do. The
+  walk is compiled twice, for a minor collection and a major one; what
+  moves is worked out once for each (the nursery and the chunk it
+  overflowed into as two ranges, or all but static data); and what
+  changes at every object (where the next copy goes, the stack) is kept
+  where the compiler can hold it in registers, out of the struct the
+  walk passes to the function that gets it a new chunk (D239).
 - **C builtins never see an object move.** No handles, no rooting API, no
   stack maps, no write barrier.
 - **A frame keeps everything in its slots** until it returns, so a `let`
@@ -805,10 +813,12 @@ Lalloc_N:
   a test sets.
 - **No walk over a value recurses in C** (D147): the collector, printing,
   copying (a message, a fork's values, a result) and `eq?` keep a work
-  stack (`rt_work_t`) instead, which grows only as deep as the value nests
-  in its cars. So a value can nest as deep as the heap allows, and
-  nothing about it depends on the size of a C frame on one target or
-  another.
+  stack instead: printing and `eq?` an `rt_work_t`, which grows only as
+  deep as the value nests in its cars, and the collector and the copy
+  one of their own, which holds the cars still to do that are lists or
+  boxes of values (D239, D240). So a value can nest as deep as the heap
+  allows, and nothing about it depends on the size of a C frame on one
+  target or another.
 
 Turned down (D200): aging, keeping survivors in the nursery till they
 survive a second minor collection, as the BEAM does (what en masse costs,
@@ -830,7 +840,11 @@ processes that allocate and then wait turn out to hold too much).
   The copy is one walk over the value, into a scratch buffer, which then
   moves into a chunk of just its size; the message's record (its place in
   the mailbox) is at the front of the same chunk, so a send is one malloc
-  (D177).
+  (D177). The walk is the collector's, with nothing to forward: along a
+  list's spine, only cars that are lists and boxes of values going on its
+  stack, and what changes at every word kept where the compiler can hold
+  it in registers; values with no pointer among them aren't walked
+  (D240).
 - `recv` links the chunk into the receiver's heap. Nothing is copied twice.
   A message with nothing to copy (an integer, a keyword, static data) is
   a chunk of just its record, which `recv` frees instead (D199).
@@ -853,15 +867,18 @@ processes that allocate and then wait turn out to hold too much).
   mailbox, the stack and the process struct are freed (D102). Nothing
   on a stack needs cleaning up, so `kill` frees a process wherever it is
   (D103).
-- The record is the pid's 32-byte entry in the process table: the value
-  (or the error's reason), and a chunk holding a copy of it if it needs
-  memory. `(:ok v)` and `(:exit pid result)` are built when asked for.
+- The record is the pid's 40-byte entry in the process table (32 till
+  devices added a pointer to it): the value (or the error's reason), and
+  a chunk holding a copy of it if it needs memory. `(:ok v)` and `(:exit pid result)` are built when asked for.
 - Exit records are kept forever (D88). That doesn't matter at hundreds or
-  thousands of processes, and a million cost 32 MB. A system that churns
+  thousands of processes, and a million cost 40 MB. A system that churns
   through many millions will need a retention policy, such as dropping
   the record once the parent has seen it. So will one whose processes
   end with big values, since a record keeps a copy of its value: the
-  airline's runs each leave theirs (D216).
+  airline's runs each leave theirs (D216). **(open)** A rule for when a
+  record goes, after Unix's zombies or Erlang's `noproc`, with
+  `detach` for children nobody joins, is in `docs/PLAN.md` ("Exit
+  records"), with what it was weighed on.
 
 ### Scheduler
 
@@ -898,7 +915,10 @@ processes that allocate and then wait turn out to hold too much).
   waits for real, up to 200 ms, for the sockets (D165). It can't tell
   that a reply is still crossing macOS's loopback, which delivers a
   moment after a send, so a test mustn't have a timer pending while it
-  waits for one, unless the timer is meant to win (D236).
+  waits for one, unless the timer is meant to win (D236). With nothing
+  to look at (no key wanted, no socket or command open) it doesn't call
+  `select()` to look, so a simulation's clock moves at each event without
+  a system call (D242).
 - **`:keypress`** (`runtime/tty.c`) sends each key as `(key mods...)`
   (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style

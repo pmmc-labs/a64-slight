@@ -1,0 +1,67 @@
+; A simulation on the virtual clock (D241, D242): bench/bank's bank, 3
+; tellers and 2,000 customers, a process for each, its times from Park and
+; Miller's generator. The clock moves at every event; with nothing open it
+; no longer asks select() each time whether anything has come, and with a
+; listener open it still does. Both runs come to the same waits, and take
+; the same time on the clock, its last teller coming free:
+; t/models/bank.py works them out by Kiefer and Wolfowitz's recursion.
+
+(defun draw (x) (math/mod (* 48271 x) 2147483647))
+
+(defun customer (bank took)
+    (let arrived (clock/us))
+    (send bank (list :request $$))
+    (recv
+        (:granted
+            (let waited (div (- (clock/us) arrived) 1000))
+            (sleep took)
+            (send bank (list :release waited)))))
+
+(defun source (bank n x)
+    (when (> n 0)
+        (let y (draw x))
+        (let z (draw y))
+        (fork (customer bank (+ 1 (math/mod y 5399))))
+        (sleep (+ 1 (math/mod z 1999)))
+        (source bank (- n 1) z)))
+
+(defun q/push (q x) (list (car q) (cons x (cadr q))))
+(defun q/norm (q) (if (nil? (car q)) (list (reverse (cadr q)) ()) q))
+
+(defun bank (free waiting served total delayed n)
+    (recv
+        ((:request c)
+            (cond
+                ((> free 0) (send c :granted) (bank (- free 1) waiting served total delayed n))
+                (#true      (bank free (q/push waiting c) served total delayed n))))
+        ((:release w)
+            (let s (+ served 1))
+            (let t (+ total w))
+            (let d (if (> w 0) (+ delayed 1) delayed))
+            (let q (q/norm waiting))
+            (cond
+                ((== s n)       (list n t d))
+                ((nil? (car q)) (bank (+ free 1) q s t d n))
+                (#true          (send (caar q) :granted) (bank free (list (cdar q) (cadr q)) s t d n))))))
+
+(defun simulate (n)
+    (let me $$)
+    (fork (source me n 1))
+    (bank 3 (list () ()) 0 0 0 n))
+
+; The result, and how long it took on the clock, in ms.
+(defun timed (n)
+    (let t0 (clock/us))
+    (let r  (cadr (join (fork (simulate n)))))
+    (list r (div (- (clock/us) t0) 1000)))
+
+(defun with-listener (n)
+    (recv
+        ((:open l port)
+            (let r (timed n))
+            (disconnect l)
+            r)))
+
+(pprint (timed 2000))
+(pprint (join (connect :tcp/listen 0 (with-listener 2000))))
+:done

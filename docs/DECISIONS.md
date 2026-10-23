@@ -5049,3 +5049,312 @@ ways of keeping it.)*
 - **Checked:** the golden tests, the replay and the live checks on both
   targets here, the runtime's idle as before D234, and `lib/http.slight`
   as before but its comments.
+
+**D237. Messages with something in them, and every core reported
+apart.** *(Stevan, Oct 2026: "Yes, let's go", to Claude's recommendations
+after the 23 Oct run on the M2 Max: what to add to the benchmarks,
+whether Rust should run the sequential ones, and what the every-core
+runs are for.)*
+
+- **`payload 1000000`:** ping-pong with each message carrying the same
+  list of 100 integers, which goes there and back a million times; it
+  prints the round trips and the list's sum. The actor programs' messages
+  were a token or a tagged pair: `thread-ring`'s and `fan-in`'s a bare
+  integer, nothing to copy (D199), `ping-pong`'s three words. A message
+  that carries data is what slight's model costs most, and none showed
+  it: slight and Erlang copy it into the receiver's heap, Go passes a
+  slice and tokio moves a `Vec`, neither copying. In slight, Go, Erlang
+  and Rust, beside `ping-pong`, which it differs from only in the list.
+- **Found** on the cloud machine, x86-64: slight 1.1 s, against 0.17 for
+  `ping-pong` at the same million; Go on one core 0.4 s and tokio 0.3
+  (Erlang isn't installed there). Under callgrind, 84 per cent of the
+  instructions are `copy_values_after`, about 73 a cell: checking that
+  each cell isn't static data (both address ranges, their four bounds
+  loaded each time), scratch's bounds, and noting each pointer for the
+  move into the chunk, which goes over them again; and in the code
+  clang makes, scratch's and the notes' sizes, which are globals, are
+  loaded and stored back at each cell rather than kept in registers. A
+  copy with less of this is for later, its own decision.
+- **One core is the comparison:** slight runs on one, so the summary's
+  tables now have Go, Erlang and Rust on one core. Their defaults, every
+  core, still run, and are a table of their own at the end: each one's
+  time over the same language's on one core (what every core gains or
+  costs) and over slight's. `bench/run.py --summary` wrote the 23 Oct
+  run's again this way. The every-core runs stay because `parallel-fib`
+  means nothing without them (on one core it's `fib` 64 times); because
+  they show what more cores cost at messages (tokio's multi-thread
+  runtime 34 times slight's `ping-pong`, Go 9 times its `fan-in`),
+  evidence for slight's one core; and because they're what Go, Erlang
+  and Rust give their users unless told otherwise.
+- **Erlang on one scheduler on the Mac** (D194: on a core 37 to 60 per
+  cent of the time it takes, unexplained) is to be looked into there,
+  since the one-core comparison needs it: the new table shows it as
+  every core making `fib` and `tak` take 0.55 of their one-core time,
+  which a sequential program can't gain. Till then the text in
+  BENCHMARKS.md, and the page that reads the 23 Oct run, quote Erlang at
+  its every-core numbers.
+- **Next, in order:** latency under load, the worst and 99th-percentile
+  round trip while another process works without waiting (what counting
+  reductions buys, which `fib` shows only the cost of) or collects a
+  big heap (what one core costs: a major collection holds everything
+  up, 0.5 to 1 ms a MB live, D202), which needs the harness to take a
+  measurement from a program's output; then a map, `lib/map.slight`
+  against each language's own (Erlang's, persistent too, the like for
+  like). Later, D194's third question: strings, JSON and HTTP, which
+  mostly compare libraries.
+- **Rejected:** Rust in the sequential programs, D194's reason still
+  holding: its code is LLVM's, as C's is, and seven more programs would
+  land beside C's. And dropping the every-core runs, for the reasons
+  above.
+
+**D238. Latency: how long a message waits while other processes work.**
+*(Stevan, Oct 2026: "Yes, go with your recommendations", to Claude's
+design for D237's next step: pings paced by yielding, the pinger inside
+the program, 160 MB live at full size, and tokio's busy task written
+plainly.)*
+
+- **`latency s`:** a pinger pings a responder, ping k due k ms after it
+  starts; till then the pinger yields and looks at the clock again, so
+  it sees a ping is due as soon as it next gets a turn. A ping's latency
+  is from when it was due to when its answer came, so a stall counts
+  against every ping it held up, as wrk2 counts them. Three phases:
+  idle; busy, beside a process working out `fib(30+s)` without ever
+  waiting, what counting reductions buys (`fib` shows only its cost);
+  and heap, beside one holding 100s blocks of 10,000 integers and
+  replacing the oldest 1,000s times, yielding after each, its pinger
+  started once the blocks are made: what a collection costs everyone
+  else. In slight, Go, Erlang and Rust; full size 10 (`fib 40`, 160 MB
+  of lists in slight), quick 1.
+- **The harness:** a program's lines that start with `#` are
+  measurements, `# phase p50 p99 max n` in microseconds, taken out
+  before its output is checked (fib's result and the heap's checksum)
+  and kept with each run. The summary gives `latency` tables of its own,
+  each phase's figures the median over the runs: one core, then every
+  core.
+- **Rejected:** pacing the pings by timers: Go's on Linux, tokio's and
+  Erlang's are good to a millisecond, so the idle floor would be their
+  timers' (Go's 0.6 ms on the cloud machine), not a message's wait. And,
+  for now, a client outside the program over a socket, which would also
+  show how often a runtime looks at its sockets while busy (every 10 ms
+  in slight, D122), for a client in C and phases kept in step with it.
+- **tokio:** its busy task never waits, written plainly; tokio doesn't
+  preempt, so on one thread every ping waits for `fib` to end
+  (`spawn_blocking` would give it a thread of its own, which isn't one
+  core). On every core, `yield_now` leaves the pinger on its own worker,
+  which the busy task then holds: 130 ms at the median, where a pinger
+  that spins without yielding waits 8 µs (and starves what's deferred on
+  its worker, the heap phase taking 28 s). So `rust-mc` would show how
+  tokio defers a yield, not what every core gains, and is left out
+  (`SKIP` in `bench/run.py`).
+- **Found** on the cloud machine, x86-64, at full size: slight idle under
+  a microsecond at the median; busy 5 to 7 µs at the median, its tails
+  0.2 to 12 ms from run to run on a shared machine; heap 12 ms at the
+  median, 375 at the 99th percentile and 400 at most, 488 MB at its peak:
+  a major collection of a 160 MB heap holds every process up, about 2.5
+  ms a MB. Go on one core: busy 9.9 ms at the median, 20 at the 99th
+  (it preempts every 10 ms), heap 13 µs and 0.9 ms. tokio on one thread:
+  busy 125 ms at the median and 249 at most, all of `fib`; heap 8 and
+  22 µs. Go on every core: 4 µs at the median, busy and heap.
+- **A slip on the way:** slight's heap phase first kept its first blocks
+  alive, in the frame of a function that called `churn` outside tail
+  position (a frame's slots are all roots, D166), so twice the live data
+  was copied at each major collection: 241 ms at the median, 967 MB.
+  `churn` is a tail call now, and joins the pinger itself.
+
+**D239. The collector's walk, faster.** *(Stevan, Oct 2026: "Let's do A
+for now, and wait for C until we are sure we need it, or we find other
+reasons to add additional threads", from Claude's options for the pauses
+`latency` showed, D238.)*
+
+- **The options:** A, a faster copy; B, collecting when nothing else can
+  run; C, big major collections on a second thread, probably what keeps
+  Erlang's pauses from showing (D238), the collector as it is and the
+  process collected not runnable while its heap is copied; D, major
+  collections in pieces on one core, which immutability allows with no
+  barrier (the copy made while the process goes on using the originals,
+  which can't change, then the roots and what was made meanwhile
+  switched over), with forwarding in a side table, and the most to get
+  right; E, an old generation that isn't moved (D200 turned it down);
+  F, advice alone. A is done here. C waits till it's needed, or till
+  another reason for a thread comes, since it would be the runtime's
+  first (D153). B, D and E aren't taken up.
+- **Where the time went:** `latency`'s heap phase alone (a list of
+  blocks, the oldest replaced again and again), under callgrind on the
+  cloud machine: 81 per cent of the instructions collecting, 52 a cell
+  copied. Each copied cell went on the work stack and off again; each
+  pointer was checked against both ranges of static data, its four
+  bounds loaded each time; and the walk's to-space pointer, the bytes
+  copied and the work stack lived in `gc_t`, which the walk hands to the
+  function that gets a new chunk, so the compiler loaded and stored them
+  around every word copied, a word copied being, as far as it knew, one
+  of them.
+- **Now:** what changes at every object is a struct of its own that only
+  always-inlined helpers point at, so it lives in registers; the walk is
+  compiled twice, for a minor collection and a major one; what moves is
+  worked out once (in a minor one the nursery and the chunk it
+  overflowed into, as two ranges, and a walk along the chunks if there
+  are more; in a major one, all but static data, tested in full only
+  between the lowest and the highest of its bounds); along a list, each
+  cdr still to move is copied as the walk comes to it and the walk goes
+  on from the copy, so a list's spine never goes on the stack, only cars
+  that are lists or boxes of values; and a box of 64 bytes or less is
+  copied a word at a time. The same objects are copied as before,
+  forwarded the same way, sharing kept.
+- **Measured** on the cloud machine, x86-64. Instructions: the heap phase
+  alone at size 2, collecting 4,575 million to 1,839 (21 a cell), the
+  program 48 per cent fewer; `binary-trees 14` collecting 163 million to
+  125, the program 8 per cent fewer. Times, noisy there: the heap phase
+  alone at size 4, 1.28 s to 0.95; `binary-trees 18` 2.05 s to 1.89 (the
+  medians of five); `latency`'s heap phase, five runs each, the worst
+  pause 195–206 ms to 131–153 (medians 197 and 133), the 99th
+  percentile 164–186 ms to 122–135, the phase 3.1 s to 2.2; test 162
+  under `SLIGHT_GC_STRESS=100`, 55 s to 43. On the M2 Max (Stevan's run,
+  `2026-10-23-1516`): `binary-trees 18` 1.03 s to 0.79, 1.30 times
+  faster, now ahead of C (1.26 times) and level with Erlang on one
+  scheduler; `latency`'s heap phase at the median, the 99th percentile
+  and the worst 0.23, 57 and 61 ms to 0.12, 44 and 47, about 0.3 ms a MB
+  live.
+- **Tested:** `make test` on both targets, 282 golden tests each.
+  `SLIGHT_GC_VERIFY=1 make golden`: all of x86-64's; under qemu, 059,
+  130 and 240, which fill a 64 MB heap, killed at 60 s, 130 and 240
+  passing given 15 minutes and 059 not finishing in that (it passes on
+  x86-64; the old collector wasn't run so, which would take as long).
+  `SLIGHT_GC_STRESS=7 make golden`: timeouts only, 14 under qemu and 8 on
+  x86-64 (D200 had 14 and 10), 293 among them before it was made smaller,
+  as it now is, passing at 7; the rest pass at 100 but 059, 130 and 240,
+  as before (162 under qemu given 15 minutes). Golden test 293: lists of
+  lists and of boxes, a list run onto an old one and onto a quoted one, a
+  tail shared by 1,000 lists and a list held 1,000 times (80 MB each,
+  unshared, over the tests' 64 MB), a list of 2,000 lists filling the
+  walk's stack, and major collections brought on by big strings.
+- **Not done:** the message copy (D237), with the same kind of
+  bookkeeping, about 73 instructions a cell: next, if wanted.
+
+**D240. The message copy, faster.** *(Stevan, Oct 2026: "Yes, lets apply
+this to the message copy as well", after D239.)*
+
+- **Where the time went:** `payload` under callgrind on the cloud
+  machine, x86-64: the copy's walk 68 instructions a cell, malloc and the
+  memcpy into the chunk aside. Scratch's fill and size, the words noted
+  and their count were globals, and the work stack an `rt_work_t` in a
+  function of its own, so the compiler loaded and stored them around the
+  words it wrote; each value was sorted into one of four kinds and then
+  dispatched on; noting a word checked the room for notes each time; and
+  the move into the chunk asked of each word noted whether it was among
+  the values at the front of scratch or in the copy.
+- **Now:** the walk is the collector's (D239), with nothing to forward.
+  What changes at every word (scratch, its fill, the words noted, the
+  stack) is a struct that only always-inlined helpers point at, so it
+  lives in registers. A box is copied when the walk comes to it, and a
+  cell along with the rest of its list, each cdr as the walk comes to
+  it; cars that are lists, and boxes of values, go on the stack, with
+  where their copies are, for after. Static data is tested in full only
+  between the lowest and the highest of its bounds, and a box of 64
+  bytes or less is copied a word at a time. The notes grow with scratch,
+  room for one a word, so noting one checks nothing (each is a different
+  word of scratch). Every word noted is made where it will be while it's
+  still in scratch, the values at the front included, so that's one loop
+  with no test in it, and then the copy is moved. And values with no
+  pointer among them (integers, keywords, pids), as fork's values and a
+  process's result often are, and many messages, aren't walked at all.
+- **Kept:** D177's one walk, into scratch, by offsets, then a chunk of
+  just its size; sharing still isn't kept. The stack now grows, as the
+  collector's does, with how many cars that are lists wait on it, not
+  with how deep they nest: a list of 2,000 lists puts 2,000 pairs on it,
+  32 KB.
+- **Measured** on the cloud machine, x86-64. Instructions: `payload
+  20000`, 334 million to 223 (33 per cent fewer), the walk 41 a cell;
+  `spawn 20000` 9 per cent fewer, `thread-ring 200000` 8, `fan-in
+  200000` 7, `idle-memory 20000` 3; `ping-pong 20000` 0.6 per cent more,
+  its messages being two and three cells, so that what a copy costs
+  whatever its size (the struct set up, more registers saved) outweighs
+  what the walk saves. Times, noisy there, medians of five: `payload
+  300000` 0.48 s to 0.34; `ping-pong 2000000` 0.56 to 0.49, within the
+  noise. On the M2 Max (Stevan's run, `2026-10-23-1701`, the other
+  languages within 6 per cent of the run before): `payload 1000000` 0.84
+  s to 0.56, 1.51 times faster, 2.8 times Go's where it was 4.3, about
+  2.0 ns a cell copied where it was 3.3; `ping-pong 2000000` 0.348 to
+  0.301, 1.16 times faster, level with tokio; `spawn`, `fan-in` and
+  `thread-ring` 8, 9 and 4 per cent faster.
+- **Tested:** `make test` on both targets, 283 golden tests each.
+  `SLIGHT_GC_VERIFY=1 make golden`: all of x86-64's; under qemu, 059 and
+  240 killed at 60 s, 240 passing given 15 minutes (059 doesn't finish
+  in that, D239). `SLIGHT_GC_STRESS=7 make golden`: timeouts only, 14
+  under qemu and 8 on x86-64, as with D239, each passing at 100 but 059,
+  130 and 240, as before.
+  Golden test 294: values taken into a fork, kept as its result, given
+  back by `join` and `join/race`, and sent there and back, alone and all
+  in one message: lists of lists and of boxes (strings, floats, tuples,
+  closures), a list 20,000 long, one nested 1,000 deep in its cars, a
+  list of 2,000 lists, tuples, strings and closures each side of 64
+  bytes, quoted lists whole and as a list's tail, one list three times
+  in another, and values with no pointer in them.
+- **Not tried:** two walks again, one adding up the bytes and one copying
+  straight into a chunk of that size, with nothing to note or move.
+  D177 chose one walk when a walk was dear (the boids example's sends
+  spent half their time adding up the bytes); now that it's cheaper, two
+  might beat one for big messages, the first walk about ten instructions
+  a cell, the second about twenty. It would undo D177, so it's for
+  Stevan to say.
+
+**D241. A simulation benchmark: `bank`.** *(Stevan, Oct 2026: "Yes, add
+to bench/", after Claude measured an M/M/c queue in slight, SimPy and C,
+asking where slight fits as a simulation platform.)*
+
+- **What:** SimPy's bank example, the one its documentation starts with:
+  3 tellers and n customers, a process for each customer, and the bank a
+  process (in SimPy a `Resource`) that each asks for a teller and gives
+  it back to. slight's runs on the virtual clock, which the harness sets
+  for it alone (`BENCH_ENV`). Against it, SimPy, the usual
+  process-oriented simulator, and C as an event list, not a process for
+  each customer: the floor under any simulation engine. Python is left
+  out if SimPy can't be imported (`pip install simpy`).
+- **The same answer in every language:** the gaps between arrivals and
+  the times served are whole milliseconds, uniform from 1 to 1,999 and
+  from 1 to 5,399 (the tellers 90 per cent busy), from Park and Miller's
+  generator, the same in each. With whole milliseconds and the queue
+  first come, first served, each customer's wait follows from the times
+  alone, whatever order the events at one moment run in (Kiefer and
+  Wolfowitz's recursion: each customer takes the teller free soonest),
+  so every version prints the same three numbers, the customers, their
+  waits in all and how many waited, and the harness works them out.
+- **Rejected:** exponential times from each language's own generator, as
+  the measurement before it had (each agreed with Erlang C, slight's over
+  40 seeds within one standard error, so its forked random streams show
+  no bias), since the versions would then agree only in distribution,
+  and `log`'s last bits differ between libms; and Python's own event
+  list on `heapq`, since SimPy is what people use.
+- **Measured** on the cloud machine, x86-64, a million customers, before
+  D242: C 0.037 s, slight 1.50 s, SimPy 10.9 (7.3 times slower than
+  slight). slight's 42 MB peak is the exit records, 40 MB a million
+  processes that have ended (D88): 13.6 MB at 250,000 customers, 83.7 at
+  2 million. Under callgrind, about 6,800 instructions a customer, 28 per
+  cent in malloc and free (each message, process and timer is one), and
+  a quarter of the time in the kernel, which D242 took out.
+
+**D242. The virtual clock doesn't ask `select()` when there's nothing to
+look at.** *(Stevan, Oct 2026: "lets do #1", from Claude's list after
+`bank`.)*
+
+- **Why:** on the virtual clock, each time nothing can run the runtime
+  looks for keys, sockets and commands with `select()`, a timeout of 0,
+  before it moves the clock (D139). With none of them open that's a
+  system call that can see nothing. A simulation moves the clock at
+  every event: `bank` made two calls a customer, two million a run, a
+  quarter of its time.
+- **Now:** `wait_for` returns at once when it has no descriptor to look
+  at and no time to wait. It still calls `select()` to wait (on the real
+  clock, to the next timer, or forever), and to look whenever a key is
+  wanted or a socket or command is open. A recording and its replay make
+  the same calls, since a replay's devices have the descriptors the
+  recording got.
+- **Measured** on the cloud machine, x86-64: `bank 1000000` 1.50 s to
+  0.96, the median of five, its system time 0.42 s to 0.03; SimPy is now
+  11.3 times slower than slight, C 27 times faster. Nothing on the real
+  clock changes, nor anything with a device open.
+- **Tested:** `make test` on both targets, 284 golden tests each.
+  Golden test 295: `bench/bank`'s model, 2,000 customers, alone and
+  then with a listener open, which strace shows still calling
+  `select()` at each step (3,998 calls, where both runs made 7,996
+  before), the waits and the time the last teller came free from
+  `t/models/bank.py`, by the recursion.

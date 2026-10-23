@@ -14,10 +14,15 @@ fewer), to keep each to about --budget seconds.
 
 Go, Erlang and Rust run twice: on one core, as slight does
 (GOMAXPROCS=1, +S 1:1, tokio's current-thread runtime), and with their
-defaults, every core (go-mc, erlang-mc, rust-mc). Chez Scheme is found as
+defaults, every core (go-mc, erlang-mc, rust-mc). One core is the
+comparison; the summary gives every core a table of its own, what it
+gains or costs each language (D237). Chez Scheme is found as
 chez, chezscheme or scheme, and its programs are compiled ahead of time,
 as slight's are. Rust, with tokio, is in the actor programs alone, their
-floor as C is the sequential ones' (D224), and in startup.
+floor as C is the sequential ones' (D224), and in startup. bank, a
+simulation, is slight's on the virtual clock against SimPy's and an
+event list in C (D241); Python is left out of it if SimPy can't be
+imported (pip install simpy).
 
 The results go to bench/results/, as JSON and as a Markdown summary, named
 for the date and the machine.
@@ -26,6 +31,7 @@ for the date and the machine.
 import argparse
 import collections
 import datetime
+import heapq
 import json
 import os
 import platform
@@ -102,6 +108,30 @@ def deriv(n):
     return [n * len(d(DERIV_OF)), atoms(d(DERIV_OF))]
 
 
+# latency's: fib(30 + s), then the first numbers of the heap's last 100s
+# blocks, those its last 100s replacements began with.
+def latency(s):
+    k, n = 100 * s, 1000 * s
+    return [fib(30 + s), sum(1000000 + i for i in range(n - k, n))]
+
+
+# bank's waits, by Kiefer and Wolfowitz's recursion: each customer, in
+# order, takes the teller free soonest, or waits for it. With whole
+# milliseconds and the queue first come, first served, that's what any
+# order of the events at one moment comes to.
+def bank(n):
+    free, x, t, total, delayed = [0, 0, 0], 1, 0, 0, 0
+    for _ in range(n):
+        y = 48271 * x % 2147483647
+        x = 48271 * y % 2147483647
+        start = max(t, heapq.heappop(free))
+        total += start - t
+        delayed += start > t
+        heapq.heappush(free, start + 1 + y % 5399)
+        t += 1 + x % 1999
+    return [n, total, delayed]
+
+
 # What each prints, worked out here; n-body's and spectral-norm's are
 # whatever C prints (or, without C, what most print), since there's no
 # shorter way to them.
@@ -115,11 +145,14 @@ BENCHMARKS = {
     'n-body':        Benchmark(ALL,    '1000',  '1000000',  None),
     'spectral-norm': Benchmark(ALL,    '100',   '1000',     None),
     'ping-pong':     Benchmark(ACTORS, '10000', '2000000',  lambda n: [n]),
+    'payload':       Benchmark(ACTORS, '10000', '1000000',  lambda n: [n, 5050]),
     'thread-ring':   Benchmark(ACTORS, '10000', '10000000', lambda n: [n % 503 + 1]),
     'fan-in':        Benchmark(ACTORS, '10000', '10000000', lambda n: [n // 100 * 5050]),
     'spawn':         Benchmark(ACTORS, '10000', '1000000',  lambda n: [n * (n - 1) // 2]),
     'idle-memory':   Benchmark(ACTORS, '10000', '1000000',  lambda n: [n]),
     'parallel-fib':  Benchmark(ACTORS, '15',    '30',       lambda k: [64 * fib(k)]),
+    'latency':       Benchmark(ACTORS, '1',     '10',       latency),
+    'bank':          Benchmark(('slight', 'c', 'python'), '10000', '1000000', bank),
 }
 
 Impl = collections.namedtuple('Impl', 'lang env flags')
@@ -213,6 +246,16 @@ def build_command(bench, lang):
     return None
 
 
+# Implementations a benchmark leaves out: on every core, tokio's yield_now
+# leaves latency's pinger on its own worker, which the busy task then
+# holds, so it would say how tokio defers a yield, not what every core
+# gains (D238).
+SKIP = {('latency', 'rust-mc')}
+
+# What a benchmark's slight program runs with: bank is a simulation, on
+# the virtual clock (D241).
+BENCH_ENV = {('bank', 'slight'): {'SLIGHT_CLOCK': 'virtual'}}
+
 # Erlang allows 262,144 processes unless told otherwise, and a higher limit
 # costs memory from the start (47 MB for 4M), so it's raised only where
 # that many are wanted, and only as far as they need.
@@ -239,9 +282,10 @@ def run_command(bench, name, arg):
     return [{'node': 'node', 'perl': 'perl', 'python': 'python3'}[impl.lang], source(bench, impl.lang), arg]
 
 
-def run_env(name):
+def run_env(bench, name):
     env = {k: v for k, v in os.environ.items() if not k.startswith('SLIGHT_') and k not in ('GOMAXPROCS', 'BENCH_MC')}
     env.update(IMPLS[name].env)
+    env.update(BENCH_ENV.get((bench, name), {}))
     return env
 
 
@@ -275,8 +319,20 @@ def run_once(cmd, env, timeout):
         }
 
 
+# What a program prints, but its measurements: lines starting with #,
+# which are latency's (D238).
 def lines(text):
-    return [line.rstrip() for line in text.strip().split('\n')]
+    return [line.rstrip() for line in text.strip().split('\n') if not line.startswith('#')]
+
+
+# latency's measurements, "# phase p50 p99 max n" in microseconds, by phase.
+def measures(text):
+    found = {}
+    for line in text.split('\n'):
+        words = line.split()
+        if line.startswith('# ') and len(words) == 6:
+            found[words[1]] = [int(w) for w in words[2:]]
+    return found
 
 
 # The first line a command prints: on stdout, or on stderr if it prints
@@ -355,6 +411,13 @@ def main():
         versions['chez'] = 'Chez Scheme ' + versions['chez']
     if 'rust' in versions:
         versions['rust'] += ', tokio ' + tokio_version()
+    if found['python'] and 'bank' in benches and 'python' in names:
+        simpy = capture(['python3', '-c', 'import simpy; print(simpy.__version__)'])
+        if re.match(r'\d+\.', simpy):
+            versions['python'] += ', SimPy ' + simpy
+        else:
+            print('SimPy not found, so bank leaves out python')
+            SKIP.add(('bank', 'python'))
     missing  = sorted({IMPLS[n].lang for n in names if not found[IMPLS[n].lang]})
     if missing:
         print('not found, so left out: ' + ', '.join(missing))
@@ -389,9 +452,9 @@ def main():
         entry = results[b] = {'size': size, 'impls': {}}
         checks = {}
         for n in names:
-            if IMPLS[n].lang not in bench.langs:
+            if IMPLS[n].lang not in bench.langs or (b, n) in SKIP:
                 continue
-            r = run_once(run_command(b, n, size), run_env(n), args.timeout)
+            r = run_once(run_command(b, n, size), run_env(b, n), args.timeout)
             checks[n] = r
             print('%-13s %-10s %8.3fs  %s' % (b, n, r['wall'], 'status %d' % r['status'] if r['status'] else 'ran'))
         if bench.expected:
@@ -418,11 +481,14 @@ def main():
         for b, n, size, runs in jobs:
             if i >= runs:
                 continue
-            r = run_once(run_command(b, n, size), run_env(n), args.timeout)
+            r = run_once(run_command(b, n, size), run_env(b, n), args.timeout)
             if r['status'] != 0 or lines(r['out']) != results[b]['expected']:
                 results[b]['impls'][n]['ok']    = False
                 results[b]['impls'][n]['error'] = (r['out'] + r['err'])[-2000:]
-            results[b]['impls'][n]['runs'].append({k: r[k] for k in ('wall', 'cpu', 'rss')})
+            run = {k: r[k] for k in ('wall', 'cpu', 'rss')}
+            if measures(r['out']):
+                run['latency'] = measures(r['out'])
+            results[b]['impls'][n]['runs'].append(run)
 
     stamp  = datetime.datetime.now()
     report = {
@@ -460,6 +526,15 @@ def megabytes(b):
     return '%.1f' % (b / 1e6)
 
 
+# Each implementation on every core, and the one-core one it's compared
+# with: one core is the comparison, every core a table of its own (D237).
+MC = {'go-mc': 'go', 'erlang-mc': 'erlang', 'rust-mc': 'rust'}
+
+
+def median(r, key='wall'):
+    return statistics.median(x[key] for x in r['runs']) if r and r['ok'] and r['runs'] else None
+
+
 def summary(report):
     m   = report['machine']
     out = ['# Benchmarks, %s' % report['date'].replace('T', ' '), '',
@@ -469,18 +544,23 @@ def summary(report):
                 '(see startup: Erlang\'s VM takes about a seventh of a second). CPU is user and system time '
                 'together, which goes past the time taken when more than one core works; memory is the peak '
                 'resident set, in MB. "÷ slight" is the median over slight\'s, so under 1 is faster than slight. '
-                'A `-mc` implementation is the language\'s default, every core; without it, one core.', '']
+                'Go, Erlang and Rust are on one core here, as slight is; their defaults, every core, are in a table '
+                'of their own, at the end.', '']
     startup = report['results'].get('startup', {}).get('impls', {})
     for b, entry in report['results'].items():
         impls = entry['impls']
-        base  = impls.get('slight')
-        base  = statistics.median(r['wall'] for r in base['runs']) if base and base['ok'] and base['runs'] else None
+        if any(x.get('latency') for r in impls.values() for x in r['runs']):
+            out += latency_tables(b, entry)
+            continue
+        base  = median(impls.get('slight'))
         extra = b == 'idle-memory' and startup
         out  += ['## %s %s' % (b, entry['size']), '',
                  '| | time | fastest | CPU | memory | ÷ slight |' + (' bytes a process |' if extra else ''),
                  '|---|---:|---:|---:|---:|---:|' + ('---:|' if extra else '')]
         rows = []
         for n, r in impls.items():
+            if n in MC:
+                continue
             if not r['ok'] or not r['runs']:
                 rows.append((float('inf'), '| %s | wrong output or failed | | | | |%s' % (n, ' |' if extra else '')))
                 continue
@@ -496,11 +576,74 @@ def summary(report):
                 row += ' %s |' % ('%.0f' % per if per is not None else '')
             rows.append((wall, row))
         out += [row for _, row in sorted(rows, key=lambda r: r[0])] + ['']
+    out += every_core(report)
     if report['builds']:
         out += ['## Builds', '', '| | seconds | bytes |', '|---|---:|---:|']
         out += ['| %s | %.2f | %d |' % (k, v['seconds'], v['bytes']) for k, v in sorted(report['builds'].items())]
         out += ['']
     return '\n'.join(out)
+
+
+def microseconds(us):
+    return '%d µs' % us if us < 1000 else '%.1f ms' % (us / 1e3) if us < 1e6 else '%.2f s' % (us / 1e6)
+
+
+# latency's phases (D238): how long a ping waited, at the median, the 99th
+# percentile and the most, each the median over the runs; one core, then
+# every core.
+PHASES = (('idle', 2), ('busy', 3), ('heap', 3))
+
+
+def latency_tables(b, entry):
+    head = ' | '.join('%s %s' % (phase, stat) for phase, k in PHASES for stat in ('p50', 'p99', 'max')[:k])
+    out  = ['## %s %s' % (b, entry['size']), '',
+            'How long a ping waited for its answer, from when it was due: idle, then beside a process that never '
+            'waits (busy), then beside one holding a big heap (heap); each the median over the runs (D238).', '']
+    for title, names in (('', [n for n in entry['impls'] if n not in MC]), ('Every core:', [n for n in entry['impls'] if n in MC])):
+        if not names:
+            continue
+        out += ([title, ''] if title else []) + ['| | ' + head + ' | memory |', '|---|' + '---:|' * (head.count('|') + 2)]
+        for n in names:
+            r = entry['impls'][n]
+            runs = [x['latency'] for x in r['runs'] if x.get('latency')] if r['ok'] else []
+            if not runs:
+                out.append('| %s | wrong output or failed |' % n)
+                continue
+            cells = [microseconds(statistics.median(x[phase][i] for x in runs)) for phase, k in PHASES for i in range(k)]
+            out.append('| %s | %s | %s |' % (n, ' | '.join(cells), megabytes(median(r, 'rss'))))
+        out.append('')
+    return out
+
+
+# What every core gains or costs Go, Erlang and Rust: each one's time on
+# every core, over its time on one core and over slight's.
+def every_core(report):
+    rows = []
+    for b, entry in report['results'].items():
+        impls = entry['impls']
+        if any(x.get('latency') for r in impls.values() for x in r['runs']):
+            continue
+        first = True
+        for n, one in MC.items():
+            if n not in impls:
+                continue
+            r = impls[n]
+            if not r['ok'] or not r['runs']:
+                rows.append('| %s | %s | wrong output or failed | | | | |' % (b if first else '', n))
+            else:
+                wall, solo, base = median(r), median(impls.get(one)), median(impls.get('slight'))
+                rows.append('| %s | %s | %s | %s | %s | %s | %s |' % (
+                    b if first else '', n, seconds(wall), seconds(median(r, 'cpu')), megabytes(median(r, 'rss')),
+                    '%.2f' % (wall / solo) if solo else '', '%.2f' % (wall / base) if base else ''))
+            first = False
+    if not rows:
+        return []
+    return (['## Every core', '',
+             'Go, Erlang and Rust with their defaults, every core. "÷ one core" is the median over the same '
+             'language\'s on one core, so under 1 is what every core gains, over 1 what it costs; "÷ slight" is '
+             'the median over slight\'s, on its one core.', '',
+             '| | | time | CPU | memory | ÷ one core | ÷ slight |', '|---|---|---:|---:|---:|---:|---:|']
+            + rows + [''])
 
 
 if __name__ == '__main__':

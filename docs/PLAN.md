@@ -829,15 +829,58 @@ with Stevan first.
   within a function. Either is a proposal of its own; boids is the
   benchmark. Not this way (D179): fixed point in the example, or a type
   of numerical vectors.
-- **Exit records that keep big values** (D216). A record keeps the value
-  its process ended with for good (D88), so a program that forks many
-  processes, each ending with a big result it joins, keeps every
-  result: the airline's runs, about 0.15 MB each on the big day. The
-  ways out, when it's taken up: a record's value let go once its parent
-  has joined it, a later `join` then an error (Claude's recommendation);
-  or the airline's runs sending their results, which takes `run-branch`
-  and its callers made into state functions. Until then, it doesn't
-  matter at thousands.
+- **Exit records (open, talked over Oct 2026, for Stevan to decide).**
+  Every process's record is kept for good (D88), its 40-byte entry and
+  a copy of the value it ended with, outside every heap, so outside
+  every cap (D202, D233). D88 was decided for batch programs of small
+  results; since then slight has come to run for good, in containers
+  (D227, D229, D233), for fleets (D228), as an HTTP server (D173) and an
+  agent (D184 on), and these fork for every request or call. Measured:
+  `bank` (D241) keeps 40 MB a million customers; an HTTP server and its
+  client in one program keep about 22 KB a 10 KB request, each end a
+  copy of the response (12.5 MB at 500 requests, 89.5 at 4,000), which
+  at 100 requests a second would be about 1 MB a second; the airline's
+  runs about 0.15 MB each (D216). What a rule has to keep: sends, kills
+  and timers to an ended pid, and monitors and `join/race` (D92, D183,
+  D220, D232), need to know only that a pid has ended, and pids are
+  never reused, so a pid forgotten still reads as ended; and a rule
+  must be decided by what the program does, never by when the collector
+  runs, for replay, `SLIGHT_SCHED` and `SLIGHT_GC_STRESS` (D170). Every
+  join in `lib/` and the airline is a process joining what it has just
+  forked or connected. The ways weighed:
+  - **E2+V2, Unix's zombies:** a record kept till its parent joins it or
+    ends, then forgotten, a later `join` an error; joiners waiting then,
+    and monitors, told as now.
+  - **Erlang's, as far as slight can go** (Claude's recommendation):
+    Erlang keeps nothing and tells only those who asked first, values
+    coming back as messages picked out by selective receive, which
+    slight turned down (D8), so `join` and a record held for the parent
+    stay. After a process ends only its parent can join it, once;
+    anyone else gets `(:error :noproc)`, and a monitor then
+    `(:exit pid (:error :noproc))`. Stricter than E2, so that a late
+    join depends only on whether the process had ended, not on what its
+    parent has done; it changes t/122, t/125 and t/266, and a monitor
+    set after the end no longer gets the result.
+  - **For children nobody joins** (`bank`'s customers, a server's
+    connections, `rpc`'s calls), under either: `(detach pid)`, as
+    `pthread_detach`, the parent saying it won't join, so the record
+    goes as the child ends, for `fork` and `connect` alike (Claude's
+    recommendation); or `spawn`, as Erlang's, a fork nobody can join,
+    with `connect` needing one of its own; or the libraries reaping
+    their own, monitoring each child and joining it at its `:exit`.
+  - **What it takes:** the table in pages, each freed once every pid in
+    it is forgotten, a parent link, and each process's children not yet
+    joined; the value let go at the join (V2) is the small part. Without
+    a rule, entries could still shrink to a word each, 8 bytes for a
+    process that ended with an immediate, with no change to what any
+    program sees (E1).
+  - **To settle:** strict `noproc` or E2's looser rule; `detach`,
+    `spawn` or reaping; and the error's name. Rejected on the way: a
+    record forgotten once nothing can name its pid, which programs
+    couldn't see but needs a walk over every heap, mailbox, record and
+    timer, and fails silently if one is missed; and Erlang's model
+    as it is, which without selective receive would make every caller
+    of `(join (fork ...))` a state function.
 
 ### 17. Self-host
 
