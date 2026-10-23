@@ -241,8 +241,8 @@ uid, gid and pid as the kernel has them, and `(rpc/peer)` in a handler
 (D235, golden test 291).
 **Next:** to settle with
 Stevan (`docs/PLAN.md`, 15), and when an exit record goes, open
-(`docs/PLAN.md`, "Exit records"), and tasks and actors, proposed
-(`docs/PLAN.md`, "Tasks and actors"). 12c (C libraries vendored as source, D151, D152, then
+(`docs/PLAN.md`, "Exit records"), and tasks and actors, agreed and
+to build in four steps (D243, `docs/PLAN.md`, "Tasks and actors"). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
 first (`docs/PLAN.md`). Self-hosting waits

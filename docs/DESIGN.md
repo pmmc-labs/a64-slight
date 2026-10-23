@@ -238,6 +238,21 @@ reply refs.
 | `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns the timer's number (D232). |
 | `(timer/cancel t)` | Takes back `after`'s timer `t` if it hasn't fired: `#true`, or `#false` (D232). |
+
+**Tasks and actors (D243; agreed, being built).** Two kinds of process.
+An actor, started with `(spawn expr)`, has a mailbox and the `recv`
+rule; it can be sent to, monitored and killed, not joined, and its value
+isn't kept when it ends: monitors are told, and one that asks later
+hears `:ended`. A task, started with `(fork expr)`, computes a value: it
+can't `recv` or be sent to, and can be joined. The root is a task. A
+task waits for something other than a process's end through addresses
+it makes, `(address)`, which `send` and `after` take where they take a
+pid, and devices it opens, `(open how ...)`, with `(read src)` for the
+next message from one, or `(read/any srcs)` for the first of several, a
+pid's being its end; each keeps the stack, as `join` does. An address is
+an immediate under the pid tag. `ask` is a prelude function on them. An
+actor makes no address, so it can't `ask`; it may block in `join` and
+`sleep`. `connect` starts an actor that owns a device, as before.
 | `(sleep ms)` | **Blocking** wait for `ms` milliseconds, keeping the stack. Works anywhere. Returns `()`. |
 | `(clock/us)` | The microseconds since the program started, on the timers' clock (D208). |
 | `(raise reason)` | Ends the current process with `(:error reason)`. |
@@ -1272,10 +1287,6 @@ Collected from above:
 
 1. A worker thread for a C library that can only block, such as SQLite
    (D151): the runtime's first thread, if it comes.
-2. Tasks and actors: `spawn` for an actor, `fork` for a task, and
-   addresses, `read` and `open` for a task to wait on something other
-   than a process's end. A proposal, in `docs/PLAN.md` ("Tasks and
-   actors").
 
 Settled in step 2: program structure, the top-level forms as the root
 process (with its arguments as `@ARGV` since D144). In step 7: `recv`
@@ -1287,4 +1298,5 @@ step 9: collecting only at `recv` (D105). In step 10a: the virtual clock
 ended (D112), and waiting in `select()` (D113). In step 10b: feeding tests
 keys (D116), Ctrl-C (D117), the end of stdin (D118), and several
 connected processes (D119). In step 12b: collecting at a function's
-entry, with the frames as roots (D166).
+entry, with the frames as roots (D166). In Oct 2026: tasks and actors (D243, below
+Processes).

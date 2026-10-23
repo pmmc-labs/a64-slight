@@ -5358,3 +5358,81 @@ look at.** *(Stevan, Oct 2026: "lets do #1", from Claude's list after
   `select()` at each step (3,998 calls, where both runs made 7,996
   before), the waits and the time the last teller came free from
   `t/models/bank.py`, by the recursion.
+
+## Tasks and actors
+
+**D243. Two kinds of process: actors, which `recv`, and tasks, which
+compute a value.** *(Stevan, Oct 2026: "there are two forms of
+concurrency here ... perhaps we should spawn actors instead of fork
+them", then "go with your recommendations on the points to settle", on
+Claude's proposal in PLAN.md, "Tasks and actors".)* Agreed, not yet
+built. A census of every `fork` and `connect` in `lib/` and the
+examples (`docs/processes-2026-10-23.md`) found 49 actors, 14 tasks and
+33 that were both: 9 waiting for one reply, 18 reading a device to its
+end for a value, and 6 gathering several messages. Where the two meet,
+the costs found in Oct 2026's review come from: a process, an exit
+record and a held stack per `ask`; every value kept in case of a
+`join`; a helper's `recv` taking its caller's messages.
+
+- **`(spawn expr)` starts an actor.** The `recv` rule is an actor's
+  (D8, D167). An actor can be sent to, monitored and killed, not joined
+  (`:not-a-task`). When it ends its monitors are told `(:exit pid
+  result)`, and its value isn't kept. `connect` starts an actor, as it
+  started a process.
+- **`(fork expr)` starts a task.** A task can't `recv`: the compiler
+  refuses a wait in a `fork`'s expression or the top level, and the
+  runtime faults one as a backstop. It can't be sent to
+  (`:not-an-actor`). It can be joined, monitored and killed. The root is
+  a task.
+- **`(address)`, `(read src)`, `(read/any srcs)`:** a task makes
+  addresses to be sent to, and waits, keeping its stack, for the next
+  message from one, from a device it owns, or, with `read/any`, the first
+  of several, a pid's being its end. `send` and `after` take an address
+  where they take a pid; `disconnect` closes one. `join/race` becomes
+  `read/any` over pids. `ask` is a prelude function on them, with no box.
+- **`(open how ...)`** opens a device the calling task owns, with no
+  process, giving `(:ok d)` or `(:error reason)`; `(read d)` gives its
+  messages, cut at the `read` (D158), and its failure as `(:error d
+  reason)`, where an actor that owns a device still ends (D128).
+
+The points the proposal left open, each as Claude recommended:
+
+1. **Names:** `spawn`, `fork`, `address`, `read`, `read/any`, `open`.
+2. **An address is an immediate** under the pid tag: the task's number
+   and the address's, printed `#<address 3.2>`. Nothing to copy or
+   collect, `eq?` and `hash` a word's, and no way to make one from data,
+   as with a pid. Rejected: a tuple `#(pid n)`, which can be printed,
+   read back and faked.
+3. **An actor can't `ask`:** it makes no address, so it can't `read`. It
+   sends, and takes the answer as a message, or forks a task to wait. So
+   no handler waits on another, and D8's "no call-cycle deadlocks
+   between handlers" holds again for actors.
+4. **An actor may block in `join` and `sleep`,** as now, keeping its
+   stack while it does (`top`'s consumer sleeps).
+5. **An actor's end, told late:** `monitor` of an actor that has ended,
+   or `read/any` of its pid after its end, gives `:ended` as the result,
+   `(:exit pid :ended)`, since its value isn't kept. A change to D101 for
+   actors; a task's is as before.
+6. **`:keypress` stays as it is** (D131): the terminal programs whose
+   last state the root joins stay actors, and tell it through a monitor.
+7. **Tasks used as `try`** (3 of the 14) stay so: `join` still gives
+   `(:error reason)`. D17's "no `catch`" isn't reopened here.
+8. **`ask` raises** `(:ended pid result)` if the actor ends first, as
+   D157's does; `ask-within` raises `(:timeout pid)`. `http/request`,
+   `agent/ask` and the rest keep their Results.
+9. **The rest of exit records** (how long a task's value is kept, and
+   when a pid's entry goes) is still the open item in PLAN.md, "Exit
+   records".
+
+To be built in four steps, each with passing tests: the kinds and their
+rules; addresses, `read` and `read/any`, and `ask`; `open`; then exit
+records. It replaces, as each lands, parts of D8 and D167 (the `recv`
+rule is an actor's), D19 (`join` is a task's), D88 and D216 (an actor's
+value isn't kept), D101 (point 5), D124 and D128 (a task opens a
+device, and is told its failure), D157 (`ask` without a box) and D220
+(`join/race` over `read/any`). Rejected on the way: extending
+`split.ts` to split at every call that can wait (continuations on the
+heap), which hides where a wait can go but not what it takes from the
+mailbox; receivers as values, `recv/with`, which makes actors' loops
+pleasanter and leaves the boxes; and a reply slot alone, which `address`
+generalizes.

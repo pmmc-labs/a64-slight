@@ -882,12 +882,12 @@ with Stevan first.
     as it is, which without selective receive would make every caller
     of `(join (fork ...))` a state function.
 
-### Tasks and actors (proposed, Oct 2026, for Stevan to decide)
+### Tasks and actors (agreed, D243; to build)
 
 Claude's proposal, after Stevan's "there are two forms of concurrency
-here ... perhaps we should spawn actors instead of fork them". Nothing
-is built. It changes the `recv` rule and adds special forms and
-builtins, so each point below is to settle first.
+here ... perhaps we should spawn actors instead of fork them"; agreed
+with every point below settled as Claude recommended (D243). Not built
+yet: the order is at the end.
 
 **Why.** slight has two models of concurrency behind one `fork`:
 
@@ -1030,7 +1030,7 @@ examples; the golden tests, 142 of 265 using `fork` or `connect` (most
 only `fork` to `spawn`; those that join an actor, monitor it; 9 with a
 `recv` at the top level give it an actor); and the docs.
 
-**To settle:**
+**Settled (D243), each as Claude recommended:**
 
 1. **Names:** `spawn` and `fork`; `address`, `read`, `read/any` and
    `open`.
@@ -1048,16 +1048,18 @@ only `fork` to `spawn`; those that join an actor, monitor it; 9 with a
    (`top`'s consumer sleeps). Claude recommends yes, as now.
 5. **An actor's end, told late:** with no value kept, `monitor` of an
    actor that has ended, or `read/any` of its pid after its end, can't
-   say how it ended. `(:exit pid :ended)`, say. A change to D101 for
-   actors; it goes with the rule for exit records (above).
+   say how it ended: `(:exit pid :ended)`. A change to D101 for
+   actors.
 6. **`:keypress`** isn't a device (D131), so a task can't `read` keys.
    The 7 terminal programs whose last state the root joins stay actors
-   that tell their monitors; or `:keypress` becomes a device.
+   that tell their monitors; or `:keypress` becomes a device. Settled:
+   they stay actors, and D131 stands.
 7. **Tasks as `try`:** 3 of the 14 tasks fork only to turn a fault or
    a `raise` into a Result. They can stay so (`join` still gives `(:error
    reason)`), or this is when D17's "no `catch`" is looked at again.
+   Settled: they stay so.
 8. **`ask` and failure:** it raises, as D157's does; or gives a Result,
-   as `agent/ask` (D192) and `http/request` do.
+   as `agent/ask` (D192) and `http/request` do. Settled: it raises.
 9. **The rest of exit records:** a task's value is kept till it's joined;
    when it goes after that, and when a pid's entry goes for either kind,
    is the item above.
