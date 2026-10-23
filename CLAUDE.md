@@ -177,7 +177,11 @@ registers and a list's spine copied without its stack, 21 instructions a
 cell where it took 52 (D239, golden test 293); and the message copy's
 walk made the collector's, 41 instructions a cell where it took 68, and
 values with no pointer in them not walked at all (D240, golden test
-294).
+294); and `bank`, a simulation, SimPy's bank example, slight's on the
+virtual clock against SimPy's and an event list in C, all coming to the
+same waits (D241), and the virtual clock no longer calling `select()` at
+each step when nothing's open, 1.55 times faster there (D242, golden
+test 295).
 Strings, cleaned up
 (D219): one set of builtins in place of the byte ones and the `utf8/`
 ones, `str/` with JavaScript's methods' names and edge cases over
@@ -378,7 +382,7 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
   (default 60) is killed and fails.
 - `make check`: `tsc --noEmit`.
 - `make bench`: the benchmarks, slight against C, Go, Erlang, Node, Perl,
-  Python, Chez Scheme and Rust (`bench/run.py`; `BENCH=--quick` for small sizes, and see
+  Python, Chez Scheme and Rust, and SimPy in `bank`, if it's installed (`bench/run.py`; `BENCH=--quick` for small sizes, and see
   `--help`). Not part of `make test`. Measure on the Mac: timings under
   qemu mean nothing, and the cloud machine's are noisy.
 - `bench/airline.py`: `examples/airline.slight` on a made-up day, with

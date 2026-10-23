@@ -19,7 +19,10 @@ comparison; the summary gives every core a table of its own, what it
 gains or costs each language (D237). Chez Scheme is found as
 chez, chezscheme or scheme, and its programs are compiled ahead of time,
 as slight's are. Rust, with tokio, is in the actor programs alone, their
-floor as C is the sequential ones' (D224), and in startup.
+floor as C is the sequential ones' (D224), and in startup. bank, a
+simulation, is slight's on the virtual clock against SimPy's and an
+event list in C (D241); Python is left out of it if SimPy can't be
+imported (pip install simpy).
 
 The results go to bench/results/, as JSON and as a Markdown summary, named
 for the date and the machine.
@@ -28,6 +31,7 @@ for the date and the machine.
 import argparse
 import collections
 import datetime
+import heapq
 import json
 import os
 import platform
@@ -111,6 +115,23 @@ def latency(s):
     return [fib(30 + s), sum(1000000 + i for i in range(n - k, n))]
 
 
+# bank's waits, by Kiefer and Wolfowitz's recursion: each customer, in
+# order, takes the teller free soonest, or waits for it. With whole
+# milliseconds and the queue first come, first served, that's what any
+# order of the events at one moment comes to.
+def bank(n):
+    free, x, t, total, delayed = [0, 0, 0], 1, 0, 0, 0
+    for _ in range(n):
+        y = 48271 * x % 2147483647
+        x = 48271 * y % 2147483647
+        start = max(t, heapq.heappop(free))
+        total += start - t
+        delayed += start > t
+        heapq.heappush(free, start + 1 + y % 5399)
+        t += 1 + x % 1999
+    return [n, total, delayed]
+
+
 # What each prints, worked out here; n-body's and spectral-norm's are
 # whatever C prints (or, without C, what most print), since there's no
 # shorter way to them.
@@ -131,6 +152,7 @@ BENCHMARKS = {
     'idle-memory':   Benchmark(ACTORS, '10000', '1000000',  lambda n: [n]),
     'parallel-fib':  Benchmark(ACTORS, '15',    '30',       lambda k: [64 * fib(k)]),
     'latency':       Benchmark(ACTORS, '1',     '10',       latency),
+    'bank':          Benchmark(('slight', 'c', 'python'), '10000', '1000000', bank),
 }
 
 Impl = collections.namedtuple('Impl', 'lang env flags')
@@ -230,6 +252,10 @@ def build_command(bench, lang):
 # gains (D238).
 SKIP = {('latency', 'rust-mc')}
 
+# What a benchmark's slight program runs with: bank is a simulation, on
+# the virtual clock (D241).
+BENCH_ENV = {('bank', 'slight'): {'SLIGHT_CLOCK': 'virtual'}}
+
 # Erlang allows 262,144 processes unless told otherwise, and a higher limit
 # costs memory from the start (47 MB for 4M), so it's raised only where
 # that many are wanted, and only as far as they need.
@@ -256,9 +282,10 @@ def run_command(bench, name, arg):
     return [{'node': 'node', 'perl': 'perl', 'python': 'python3'}[impl.lang], source(bench, impl.lang), arg]
 
 
-def run_env(name):
+def run_env(bench, name):
     env = {k: v for k, v in os.environ.items() if not k.startswith('SLIGHT_') and k not in ('GOMAXPROCS', 'BENCH_MC')}
     env.update(IMPLS[name].env)
+    env.update(BENCH_ENV.get((bench, name), {}))
     return env
 
 
@@ -384,6 +411,13 @@ def main():
         versions['chez'] = 'Chez Scheme ' + versions['chez']
     if 'rust' in versions:
         versions['rust'] += ', tokio ' + tokio_version()
+    if found['python'] and 'bank' in benches and 'python' in names:
+        simpy = capture(['python3', '-c', 'import simpy; print(simpy.__version__)'])
+        if re.match(r'\d+\.', simpy):
+            versions['python'] += ', SimPy ' + simpy
+        else:
+            print('SimPy not found, so bank leaves out python')
+            SKIP.add(('bank', 'python'))
     missing  = sorted({IMPLS[n].lang for n in names if not found[IMPLS[n].lang]})
     if missing:
         print('not found, so left out: ' + ', '.join(missing))
@@ -420,7 +454,7 @@ def main():
         for n in names:
             if IMPLS[n].lang not in bench.langs or (b, n) in SKIP:
                 continue
-            r = run_once(run_command(b, n, size), run_env(n), args.timeout)
+            r = run_once(run_command(b, n, size), run_env(b, n), args.timeout)
             checks[n] = r
             print('%-13s %-10s %8.3fs  %s' % (b, n, r['wall'], 'status %d' % r['status'] if r['status'] else 'ran'))
         if bench.expected:
@@ -447,7 +481,7 @@ def main():
         for b, n, size, runs in jobs:
             if i >= runs:
                 continue
-            r = run_once(run_command(b, n, size), run_env(n), args.timeout)
+            r = run_once(run_command(b, n, size), run_env(b, n), args.timeout)
             if r['status'] != 0 or lines(r['out']) != results[b]['expected']:
                 results[b]['impls'][n]['ok']    = False
                 results[b]['impls'][n]['error'] = (r['out'] + r['err'])[-2000:]

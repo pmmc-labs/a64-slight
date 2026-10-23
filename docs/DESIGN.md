@@ -912,7 +912,10 @@ processes that allocate and then wait turn out to hold too much).
   waits for real, up to 200 ms, for the sockets (D165). It can't tell
   that a reply is still crossing macOS's loopback, which delivers a
   moment after a send, so a test mustn't have a timer pending while it
-  waits for one, unless the timer is meant to win (D236).
+  waits for one, unless the timer is meant to win (D236). With nothing
+  to look at (no key wanted, no socket or command open) it doesn't call
+  `select()` to look, so a simulation's clock moves at each event without
+  a system call (D242).
 - **`:keypress`** (`runtime/tty.c`) sends each key as `(key mods...)`
   (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style

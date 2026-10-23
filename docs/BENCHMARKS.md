@@ -108,9 +108,19 @@ itself (or, for `n-body`, against C's).
   1,000 blocks of 10,000 integers (160 MB in slight) and replacing the
   oldest 10,000 times, yielding after each. Its summary is each phase's
   percentiles, not times. tokio on every core is left out (D238).
+- **`bank 1000000`:** a simulation (D241), SimPy's bank example: 3
+  tellers and a million customers, a process for each, the bank a
+  process (in SimPy a `Resource`) each asks for a teller and gives it
+  back to; slight's runs on the virtual clock. Its times are whole
+  milliseconds, uniform, from Park and Miller's generator in every
+  version, so each comes to the same waits, which the harness works out
+  by Kiefer and Wolfowitz's recursion; it prints the customers, their
+  waits in all in ms, and how many waited. C's is an event list, not a
+  process for each customer: the floor under any simulation engine.
 
 The sequential ones are in all eight languages, the actor ones in slight,
-Go, Erlang and Rust (D224), and `startup` in all nine. Rust's are on
+Go, Erlang and Rust (D224), `startup` in all nine, and `bank` in slight,
+C and Python with SimPy. Rust's are on
 tokio, each process a task, its mailbox an unbounded channel
 (`tokio::sync::mpsc`); a task waiting in `idle-memory` holds a channel
 of its own, as a process holds its mailbox. Each is written the way its language is usually written,
@@ -142,6 +152,9 @@ change, hash tables, bignums, regular expressions) aren't here.
   (D237). `bench/rt.rs`
   picks Rust's runtime, by `BENCH_MC`, which the harness sets for
   `rust-mc`. Node's collector has threads of its own either way.
+- **`bank`:** slight's runs with `SLIGHT_CLOCK=virtual`, which the
+  harness sets for it alone. Python's needs SimPy (`pip install simpy`),
+  whose version the summary gives; without it, Python is left out.
 - **`latency`'s measurements:** a program's lines that start with `#`,
   `# phase p50 p99 max n` in microseconds, are taken out before its
   output is checked and kept with each run (D238).
@@ -161,6 +174,28 @@ change, hash tables, bignums, regular expressions) aren't here.
 ## Results
 
 Each run's full tables are in `bench/results/`. What they say:
+
+### The cloud machine, 23 Oct: `bank`, a simulation (D241, D242)
+
+x86-64, a million customers, the median of five, not saved (the cloud
+machine's numbers are for ratios):
+
+| | before D242 | after | memory |
+|---|---:|---:|---:|
+| C, an event list | 0.037 s | 0.036 s | 2.7 MB |
+| slight, a process for each customer | 1.50 s | 0.96 s | 42 MB |
+| SimPy 4.1.2, CPython 3.13 | 10.9 s | 10.9 s | 17 MB |
+
+- **Against SimPy:** 7.3 times faster, and 11.3 since D242, which took
+  out a `select()` the virtual clock made at every event with nothing to
+  look at, a quarter of the time (system time 0.42 s to 0.03).
+- **Against the floor:** C's event list is 27 times faster: a customer
+  there is two events in a heap, where slight's is a process, three
+  messages and two timers, each a malloc. Under callgrind, about 6,800
+  instructions a customer before D242, 28 per cent in malloc and free.
+- **Memory:** 40 MB for each million customers served, the exit records
+  of the processes that have ended (D88): 13.6 MB at 250,000, 83.7 at 2
+  million. SimPy's stays at 17.
 
 ### The M2 Max, 23 Oct, 17:01: the message copy, faster (D240)
 
@@ -843,6 +878,13 @@ to under 2. The M2's runs after each are above.
   waits till it's needed; D200's next steps, a bigger nursery or an old
   generation that isn't copied whole, would shorten the pauses too; so
   does keeping a process's heap small.
+- **Simulation** (`bank`, D241): slight is 11 times faster than SimPy
+  on the cloud machine, and 27 times slower than an event list in C. A
+  customer is a process, three messages and two timers, each a malloc;
+  and every process that ends keeps its exit record, 40 MB a million,
+  for good (D88), which a long simulation can't afford. And the virtual
+  clock is a switch for the whole program, so a simulation that also
+  talks to the world (the airline's services) keeps its own time.
 - **A mailbox under many senders** (`fan-in`, D201): nothing slows a
   sender whose receiver is behind, so on one core nearly every message
   waits at once, 640 MB at ten million, as in Erlang; Go's channel

@@ -1,0 +1,53 @@
+; bank (D241): SimPy's bank example, a simulation on the virtual clock
+; (run with SLIGHT_CLOCK=virtual): 3 tellers and n customers, a process
+; for each customer, and the bank a process each asks for a teller and
+; gives it back to. The gaps between arrivals and the times served are
+; whole milliseconds, uniform from 1 to 1,999 and from 1 to 5,399 (so the
+; tellers are 90 per cent busy), from Park and Miller's generator, the
+; same in every language, so each works out the same waits. Prints the
+; customers served, the milliseconds they waited in all, and how many
+; waited at all, one to a line.
+
+(defun draw (x) (math/mod (* 48271 x) 2147483647))
+
+(defun customer (bank took)
+    (let arrived (clock/us))
+    (send bank (list :request $$))
+    (recv
+        (:granted
+            (let waited (div (- (clock/us) arrived) 1000))
+            (sleep took)
+            (send bank (list :release waited)))))
+
+(defun source (bank n x)
+    (when (> n 0)
+        (let y (draw x))
+        (let z (draw y))
+        (fork (customer bank (+ 1 (math/mod y 5399))))
+        (sleep (+ 1 (math/mod z 1999)))
+        (source bank (- n 1) z)))
+
+; A queue as two lists: taken from the front, put on the back.
+(defun q/push (q x) (list (car q) (cons x (cadr q))))
+(defun q/norm (q) (if (nil? (car q)) (list (reverse (cadr q)) ()) q))
+
+(defun bank (free waiting served total delayed n)
+    (recv
+        ((:request c)
+            (cond
+                ((> free 0) (send c :granted) (bank (- free 1) waiting served total delayed n))
+                (#true      (bank free (q/push waiting c) served total delayed n))))
+        ((:release w)
+            (let s (+ served 1))
+            (let t (+ total w))
+            (let d (if (> w 0) (+ delayed 1) delayed))
+            (let q (q/norm waiting))
+            (cond
+                ((== s n)       (tty/write n \n t \n) d)
+                ((nil? (car q)) (bank (+ free 1) q s t d n))
+                (#true          (send (caar q) :granted) (bank free (list (cdar q) (cadr q)) s t d n))))))
+
+(let n  (str->int (car @ARGV)))
+(let me $$)
+(fork (source me n 1))
+(bank 3 (list () ()) 0 0 0 n)

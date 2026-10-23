@@ -1548,6 +1548,9 @@ static int wait_for(int64_t us) {
     FD_ZERO(&out);
     if (keys) FD_SET(STDIN_FILENO, &in);
     socket_fds(&in, &out, &max);
+    // Nothing to look at and no time to wait: the virtual clock asks at
+    // every step it takes, which in a simulation is every event (D242).
+    if (max < 0 && us == 0) return 0;
     struct timeval tv, *timeout = NULL;
     if (us >= 0) {
         if (us > 3600000000) us = 3600000000;  // macOS's select refuses more than 10^8 s

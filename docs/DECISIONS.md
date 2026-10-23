@@ -5296,3 +5296,65 @@ this to the message copy as well", after D239.)*
   might beat one for big messages, the first walk about ten instructions
   a cell, the second about twenty. It would undo D177, so it's for
   Stevan to say.
+
+**D241. A simulation benchmark: `bank`.** *(Stevan, Oct 2026: "Yes, add
+to bench/", after Claude measured an M/M/c queue in slight, SimPy and C,
+asking where slight fits as a simulation platform.)*
+
+- **What:** SimPy's bank example, the one its documentation starts with:
+  3 tellers and n customers, a process for each customer, and the bank a
+  process (in SimPy a `Resource`) that each asks for a teller and gives
+  it back to. slight's runs on the virtual clock, which the harness sets
+  for it alone (`BENCH_ENV`). Against it, SimPy, the usual
+  process-oriented simulator, and C as an event list, not a process for
+  each customer: the floor under any simulation engine. Python is left
+  out if SimPy can't be imported (`pip install simpy`).
+- **The same answer in every language:** the gaps between arrivals and
+  the times served are whole milliseconds, uniform from 1 to 1,999 and
+  from 1 to 5,399 (the tellers 90 per cent busy), from Park and Miller's
+  generator, the same in each. With whole milliseconds and the queue
+  first come, first served, each customer's wait follows from the times
+  alone, whatever order the events at one moment run in (Kiefer and
+  Wolfowitz's recursion: each customer takes the teller free soonest),
+  so every version prints the same three numbers, the customers, their
+  waits in all and how many waited, and the harness works them out.
+- **Rejected:** exponential times from each language's own generator, as
+  the measurement before it had (each agreed with Erlang C, slight's over
+  40 seeds within one standard error, so its forked random streams show
+  no bias), since the versions would then agree only in distribution,
+  and `log`'s last bits differ between libms; and Python's own event
+  list on `heapq`, since SimPy is what people use.
+- **Measured** on the cloud machine, x86-64, a million customers, before
+  D242: C 0.037 s, slight 1.50 s, SimPy 10.9 (7.3 times slower than
+  slight). slight's 42 MB peak is the exit records, 40 MB a million
+  processes that have ended (D88): 13.6 MB at 250,000 customers, 83.7 at
+  2 million. Under callgrind, about 6,800 instructions a customer, 28 per
+  cent in malloc and free (each message, process and timer is one), and
+  a quarter of the time in the kernel, which D242 took out.
+
+**D242. The virtual clock doesn't ask `select()` when there's nothing to
+look at.** *(Stevan, Oct 2026: "lets do #1", from Claude's list after
+`bank`.)*
+
+- **Why:** on the virtual clock, each time nothing can run the runtime
+  looks for keys, sockets and commands with `select()`, a timeout of 0,
+  before it moves the clock (D139). With none of them open that's a
+  system call that can see nothing. A simulation moves the clock at
+  every event: `bank` made two calls a customer, two million a run, a
+  quarter of its time.
+- **Now:** `wait_for` returns at once when it has no descriptor to look
+  at and no time to wait. It still calls `select()` to wait (on the real
+  clock, to the next timer, or forever), and to look whenever a key is
+  wanted or a socket or command is open. A recording and its replay make
+  the same calls, since a replay's devices have the descriptors the
+  recording got.
+- **Measured** on the cloud machine, x86-64: `bank 1000000` 1.50 s to
+  0.96, the median of five, its system time 0.42 s to 0.03; SimPy is now
+  11.3 times slower than slight, C 27 times faster. Nothing on the real
+  clock changes, nor anything with a device open.
+- **Tested:** `make test` on both targets, 284 golden tests each.
+  Golden test 295: `bench/bank`'s model, 2,000 customers, alone and
+  then with a listener open, which strace shows still calling
+  `select()` at each step (3,998 calls, where both runs made 7,996
+  before), the waits and the time the last teller came free from
+  `t/models/bank.py`, by the recursion.
