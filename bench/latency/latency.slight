@@ -1,0 +1,76 @@
+; latency (D238): how long a message waits for its turn while other
+; processes work. A pinger pings a responder, ping k due k ms after it
+; starts; till a ping is due the pinger yields and looks at the clock
+; again, so it sees it's due as soon as it next gets a turn. A ping's
+; latency is from when it was due to when its answer came, so a stall
+; counts against every ping it held up. Three phases: idle; busy, beside a
+; process working out (fib (+ 30 s)) without ever waiting; and heap,
+; beside one holding 100s blocks of 10,000 integers and replacing the
+; oldest with a new one 1,000s times, yielding after each, its pinger
+; started once the blocks are made. Prints "# phase p50 p99 max n"
+; (microseconds, and how many pings) for each, which the harness takes out
+; before it checks the rest: fib's result and the heap's checksum.
+
+(defun responder ()
+    (recv
+        ((:ping from) (send from :pong) (responder))
+        (:stop        :stopped)))
+
+(defun pinger (r t0 k last samples)
+    (let due (+ t0 (* 1000 k)))
+    (cond
+        ((> k last)         (send r :stop) samples)
+        ((< (clock/us) due) (yield (pinger r t0 k last samples)))
+        (#true              (send r (list :ping $$)) (answer r t0 k last samples due))))
+
+; The worker says when it's done, and pings due after that don't count.
+(defun answer (r t0 k last samples due)
+    (recv
+        ((:done t) (answer r t0 k (div (- t t0) 1000) samples due))
+        (:pong     (pinger r t0 (+ k 1) last (if (> k last) samples (cons (- (clock/us) due) samples))))))
+
+(defun pings (last) (pinger (fork (responder)) (clock/us) 1 last ()))
+
+(defun report (name samples)
+    (let s (sort (lambda (a b) (< a b)) samples))
+    (let n (length s))
+    (if (== n 0)
+        (tty/write "# " name " 0 0 0 0" \n)
+        (tty/write "# " name " " (nth (div n 2) s) " " (nth (div (* n 99) 100) s) " " (nth (- n 1) s) " " n \n)))
+
+(defun fib (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+
+(defun busy (p n)
+    (let v (fib n))
+    (send p (list :done (clock/us)))
+    v)
+
+; The newest block first; the oldest goes as each new one comes. Gives
+; the pinger's samples and the checksum.
+(defun churn (p blocks i n size)
+    (cond
+        ((== i n)
+            (send p (list :done (clock/us)))
+            (list (result (join p)) (sum (map car blocks))))
+        (#true
+            (let b (range (+ 1000000 i) (+ (+ 1000000 i) size)))
+            (yield (churn p (cons b (take (- (length blocks) 1) blocks)) (+ i 1) n size)))))
+
+; The blocks are made before the pinger starts, so the phase is a big heap
+; being changed, not one being made; churn is a tail call, so the frame
+; doesn't keep the first blocks alive.
+(defun heap (k n size)
+    (let blocks (map (lambda (j) (range j (+ j size))) (range 0 k)))
+    (churn (fork (pings 1000000000)) blocks 0 n size))
+
+(defun result (r) (match r ((:ok v) v)))
+
+(let s (str->int (car @ARGV)))
+(report "idle" (result (join (fork (pings 500)))))
+(let p1 (fork (pings 1000000000)))
+(let w1 (fork (busy p1 (+ 30 s))))
+(report "busy" (result (join p1)))
+(tty/write (result (join w1)) \n)
+(let h (result (join (fork (heap (* 100 s) (* 1000 s) 10000)))))
+(report "heap" (car h))
+(cadr h)

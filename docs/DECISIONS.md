@@ -5106,3 +5106,57 @@ runs are for.)*
   holding: its code is LLVM's, as C's is, and seven more programs would
   land beside C's. And dropping the every-core runs, for the reasons
   above.
+
+**D238. Latency: how long a message waits while other processes work.**
+*(Stevan, Oct 2026: "Yes, go with your recommendations", to Claude's
+design for D237's next step: pings paced by yielding, the pinger inside
+the program, 160 MB live at full size, and tokio's busy task written
+plainly.)*
+
+- **`latency s`:** a pinger pings a responder, ping k due k ms after it
+  starts; till then the pinger yields and looks at the clock again, so
+  it sees a ping is due as soon as it next gets a turn. A ping's latency
+  is from when it was due to when its answer came, so a stall counts
+  against every ping it held up, as wrk2 counts them. Three phases:
+  idle; busy, beside a process working out `fib(30+s)` without ever
+  waiting, what counting reductions buys (`fib` shows only its cost);
+  and heap, beside one holding 100s blocks of 10,000 integers and
+  replacing the oldest 1,000s times, yielding after each, its pinger
+  started once the blocks are made: what a collection costs everyone
+  else. In slight, Go, Erlang and Rust; full size 10 (`fib 40`, 160 MB
+  of lists in slight), quick 1.
+- **The harness:** a program's lines that start with `#` are
+  measurements, `# phase p50 p99 max n` in microseconds, taken out
+  before its output is checked (fib's result and the heap's checksum)
+  and kept with each run. The summary gives `latency` tables of its own,
+  each phase's figures the median over the runs: one core, then every
+  core.
+- **Rejected:** pacing the pings by timers: Go's on Linux, tokio's and
+  Erlang's are good to a millisecond, so the idle floor would be their
+  timers' (Go's 0.6 ms on the cloud machine), not a message's wait. And,
+  for now, a client outside the program over a socket, which would also
+  show how often a runtime looks at its sockets while busy (every 10 ms
+  in slight, D122), for a client in C and phases kept in step with it.
+- **tokio:** its busy task never waits, written plainly; tokio doesn't
+  preempt, so on one thread every ping waits for `fib` to end
+  (`spawn_blocking` would give it a thread of its own, which isn't one
+  core). On every core, `yield_now` leaves the pinger on its own worker,
+  which the busy task then holds: 130 ms at the median, where a pinger
+  that spins without yielding waits 8 µs (and starves what's deferred on
+  its worker, the heap phase taking 28 s). So `rust-mc` would show how
+  tokio defers a yield, not what every core gains, and is left out
+  (`SKIP` in `bench/run.py`).
+- **Found** on the cloud machine, x86-64, at full size: slight idle under
+  a microsecond at the median; busy 5 to 7 µs at the median, its tails
+  0.2 to 12 ms from run to run on a shared machine; heap 12 ms at the
+  median, 375 at the 99th percentile and 400 at most, 488 MB at its peak:
+  a major collection of a 160 MB heap holds every process up, about 2.5
+  ms a MB. Go on one core: busy 9.9 ms at the median, 20 at the 99th
+  (it preempts every 10 ms), heap 13 µs and 0.9 ms. tokio on one thread:
+  busy 125 ms at the median and 249 at most, all of `fib`; heap 8 and
+  22 µs. Go on every core: 4 µs at the median, busy and heap.
+- **A slip on the way:** slight's heap phase first kept its first blocks
+  alive, in the frame of a function that called `churn` outside tail
+  position (a frame's slots are all roots, D166), so twice the live data
+  was copied at each major collection: 241 ms at the median, 967 MB.
+  `churn` is a tail call now, and joins the pinger itself.

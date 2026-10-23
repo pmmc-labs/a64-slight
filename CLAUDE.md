@@ -170,7 +170,9 @@ compiled inline (D203, golden tests 247 and 248); and Rust, with tokio,
 in the actor programs, their floor as C is the sequential ones' (D224);
 and `payload`, ping-pong with 100 integers in each message, what copying
 a message costs, and one core as the comparison, every core a table of
-its own in the summary (D237).
+its own in the summary (D237); and `latency`, how long a message waits
+while other processes work: idle, beside a process that never waits,
+and beside a big heap (D238).
 Strings, cleaned up
 (D219): one set of builtins in place of the byte ones and the `utf8/`
 ones, `str/` with JavaScript's methods' names and edge cases over

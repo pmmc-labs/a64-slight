@@ -49,3 +49,7 @@ path = "idle-memory/idle-memory.rs"
 [[bin]]
 name = "parallel-fib"
 path = "parallel-fib/parallel-fib.rs"
+
+[[bin]]
+name = "latency"
+path = "latency/latency.rs"

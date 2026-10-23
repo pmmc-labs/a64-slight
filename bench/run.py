@@ -104,6 +104,13 @@ def deriv(n):
     return [n * len(d(DERIV_OF)), atoms(d(DERIV_OF))]
 
 
+# latency's: fib(30 + s), then the first numbers of the heap's last 100s
+# blocks, those its last 100s replacements began with.
+def latency(s):
+    k, n = 100 * s, 1000 * s
+    return [fib(30 + s), sum(1000000 + i for i in range(n - k, n))]
+
+
 # What each prints, worked out here; n-body's and spectral-norm's are
 # whatever C prints (or, without C, what most print), since there's no
 # shorter way to them.
@@ -123,6 +130,7 @@ BENCHMARKS = {
     'spawn':         Benchmark(ACTORS, '10000', '1000000',  lambda n: [n * (n - 1) // 2]),
     'idle-memory':   Benchmark(ACTORS, '10000', '1000000',  lambda n: [n]),
     'parallel-fib':  Benchmark(ACTORS, '15',    '30',       lambda k: [64 * fib(k)]),
+    'latency':       Benchmark(ACTORS, '1',     '10',       latency),
 }
 
 Impl = collections.namedtuple('Impl', 'lang env flags')
@@ -216,6 +224,12 @@ def build_command(bench, lang):
     return None
 
 
+# Implementations a benchmark leaves out: on every core, tokio's yield_now
+# leaves latency's pinger on its own worker, which the busy task then
+# holds, so it would say how tokio defers a yield, not what every core
+# gains (D238).
+SKIP = {('latency', 'rust-mc')}
+
 # Erlang allows 262,144 processes unless told otherwise, and a higher limit
 # costs memory from the start (47 MB for 4M), so it's raised only where
 # that many are wanted, and only as far as they need.
@@ -278,8 +292,20 @@ def run_once(cmd, env, timeout):
         }
 
 
+# What a program prints, but its measurements: lines starting with #,
+# which are latency's (D238).
 def lines(text):
-    return [line.rstrip() for line in text.strip().split('\n')]
+    return [line.rstrip() for line in text.strip().split('\n') if not line.startswith('#')]
+
+
+# latency's measurements, "# phase p50 p99 max n" in microseconds, by phase.
+def measures(text):
+    found = {}
+    for line in text.split('\n'):
+        words = line.split()
+        if line.startswith('# ') and len(words) == 6:
+            found[words[1]] = [int(w) for w in words[2:]]
+    return found
 
 
 # The first line a command prints: on stdout, or on stderr if it prints
@@ -392,7 +418,7 @@ def main():
         entry = results[b] = {'size': size, 'impls': {}}
         checks = {}
         for n in names:
-            if IMPLS[n].lang not in bench.langs:
+            if IMPLS[n].lang not in bench.langs or (b, n) in SKIP:
                 continue
             r = run_once(run_command(b, n, size), run_env(n), args.timeout)
             checks[n] = r
@@ -425,7 +451,10 @@ def main():
             if r['status'] != 0 or lines(r['out']) != results[b]['expected']:
                 results[b]['impls'][n]['ok']    = False
                 results[b]['impls'][n]['error'] = (r['out'] + r['err'])[-2000:]
-            results[b]['impls'][n]['runs'].append({k: r[k] for k in ('wall', 'cpu', 'rss')})
+            run = {k: r[k] for k in ('wall', 'cpu', 'rss')}
+            if measures(r['out']):
+                run['latency'] = measures(r['out'])
+            results[b]['impls'][n]['runs'].append(run)
 
     stamp  = datetime.datetime.now()
     report = {
@@ -486,6 +515,9 @@ def summary(report):
     startup = report['results'].get('startup', {}).get('impls', {})
     for b, entry in report['results'].items():
         impls = entry['impls']
+        if any(x.get('latency') for r in impls.values() for x in r['runs']):
+            out += latency_tables(b, entry)
+            continue
         base  = median(impls.get('slight'))
         extra = b == 'idle-memory' and startup
         out  += ['## %s %s' % (b, entry['size']), '',
@@ -518,12 +550,45 @@ def summary(report):
     return '\n'.join(out)
 
 
+def microseconds(us):
+    return '%d µs' % us if us < 1000 else '%.1f ms' % (us / 1e3) if us < 1e6 else '%.2f s' % (us / 1e6)
+
+
+# latency's phases (D238): how long a ping waited, at the median, the 99th
+# percentile and the most, each the median over the runs; one core, then
+# every core.
+PHASES = (('idle', 2), ('busy', 3), ('heap', 3))
+
+
+def latency_tables(b, entry):
+    head = ' | '.join('%s %s' % (phase, stat) for phase, k in PHASES for stat in ('p50', 'p99', 'max')[:k])
+    out  = ['## %s %s' % (b, entry['size']), '',
+            'How long a ping waited for its answer, from when it was due: idle, then beside a process that never '
+            'waits (busy), then beside one holding a big heap (heap); each the median over the runs (D238).', '']
+    for title, names in (('', [n for n in entry['impls'] if n not in MC]), ('Every core:', [n for n in entry['impls'] if n in MC])):
+        if not names:
+            continue
+        out += ([title, ''] if title else []) + ['| | ' + head + ' | memory |', '|---|' + '---:|' * (head.count('|') + 2)]
+        for n in names:
+            r = entry['impls'][n]
+            runs = [x['latency'] for x in r['runs'] if x.get('latency')] if r['ok'] else []
+            if not runs:
+                out.append('| %s | wrong output or failed |' % n)
+                continue
+            cells = [microseconds(statistics.median(x[phase][i] for x in runs)) for phase, k in PHASES for i in range(k)]
+            out.append('| %s | %s | %s |' % (n, ' | '.join(cells), megabytes(median(r, 'rss'))))
+        out.append('')
+    return out
+
+
 # What every core gains or costs Go, Erlang and Rust: each one's time on
 # every core, over its time on one core and over slight's.
 def every_core(report):
     rows = []
     for b, entry in report['results'].items():
         impls = entry['impls']
+        if any(x.get('latency') for r in impls.values() for x in r['runs']):
+            continue
         first = True
         for n, one in MC.items():
             if n not in impls:

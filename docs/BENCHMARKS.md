@@ -99,6 +99,15 @@ itself (or, for `n-body`, against C's).
   pid in a list, as every version keeps them).
 - **`parallel-fib 30`:** 64 processes each work out `fib(30)`: work more
   than one core can share.
+- **`latency 10`:** how long a message waits for its turn while other
+  processes work (D238). A pinger's ping k is due k ms after it starts,
+  and till then it yields and looks at the clock again; each ping's
+  latency is from when it was due to when its answer came, so a stall
+  counts against every ping it held up. Idle; then beside a process
+  working out `fib(40)` without ever waiting; then beside one holding
+  1,000 blocks of 10,000 integers (160 MB in slight) and replacing the
+  oldest 10,000 times, yielding after each. Its summary is each phase's
+  percentiles, not times. tokio on every core is left out (D238).
 
 The sequential ones are in all eight languages, the actor ones in slight,
 Go, Erlang and Rust (D224), and `startup` in all nine. Rust's are on
@@ -133,6 +142,9 @@ change, hash tables, bignums, regular expressions) aren't here.
   (D237). `bench/rt.rs`
   picks Rust's runtime, by `BENCH_MC`, which the harness sets for
   `rust-mc`. Node's collector has threads of its own either way.
+- **`latency`'s measurements:** a program's lines that start with `#`,
+  `# phase p50 p99 max n` in microseconds, are taken out before its
+  output is checked and kept with each run (D238).
 - CPU time over wall time shows more than one core at work. Erlang's
   schedulers spin a while before they sleep, so its CPU time overstates
   its work.
@@ -724,6 +736,14 @@ to under 2. The M2's runs after each are above.
   cell checked against both ranges of static data, scratch's bounds,
   each pointer noted for the move into the chunk, and the sizes of
   scratch and the notes, globals, loaded and stored back at each cell.
+- **Collection pauses** (`latency`, D238): a major collection holds up
+  every process, the program's one core copying the heap: about 2.5 ms
+  a MB live on the cloud machine, 400 ms for 160 MB, and a ping's wait
+  at the 99th percentile 375 ms beside such a heap. Busy processes cost
+  others little (5 to 7 µs at the median), where Go on one core costs
+  10 ms and tokio all of the busy task's time. D200's next steps, a
+  bigger nursery or an old generation that isn't copied whole, would
+  shorten the pauses; so does keeping a process's heap small.
 - **A mailbox under many senders** (`fan-in`, D201): nothing slows a
   sender whose receiver is behind, so on one core nearly every message
   waits at once, 640 MB at ten million, as in Erlang; Go's channel
