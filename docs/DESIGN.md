@@ -867,11 +867,11 @@ processes that allocate and then wait turn out to hold too much).
   mailbox, the stack and the process struct are freed (D102). Nothing
   on a stack needs cleaning up, so `kill` frees a process wherever it is
   (D103).
-- The record is the pid's 32-byte entry in the process table: the value
-  (or the error's reason), and a chunk holding a copy of it if it needs
-  memory. `(:ok v)` and `(:exit pid result)` are built when asked for.
+- The record is the pid's 40-byte entry in the process table (32 till
+  devices added a pointer to it): the value (or the error's reason), and
+  a chunk holding a copy of it if it needs memory. `(:ok v)` and `(:exit pid result)` are built when asked for.
 - Exit records are kept forever (D88). That doesn't matter at hundreds or
-  thousands of processes, and a million cost 32 MB. A system that churns
+  thousands of processes, and a million cost 40 MB. A system that churns
   through many millions will need a retention policy, such as dropping
   the record once the parent has seen it. So will one whose processes
   end with big values, since a record keeps a copy of its value: the
