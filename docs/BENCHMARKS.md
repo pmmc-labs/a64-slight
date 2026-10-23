@@ -142,6 +142,62 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 23 Oct: every program, Rust included
+
+`bench/results/2026-10-23-1047-macos-apple-m2-max.md`, at `3487cba`:
+the whole suite, the first since Rust came in (D224). A steady run:
+slight's sequential times are within 3 per cent of the run at `448aa6d`
+(17 Oct), though strings, numbers, random numbers, maps, `rpc` and Unix
+sockets have come in since; `ping-pong` is 7 per cent slower and `spawn`
+5, as they were on 20 Oct (not looked into). Every other implementation
+is within 5 per cent of its last run, but tokio's one-thread `spawn`,
+uneven (its fastest run 0.54 s, its median 1.09). Start-up is 2.3 ms,
+against 1.8 before, and C's 1.6 against 1.4: a few hundred microseconds
+of noise.
+
+Each one's time less its start, over slight's (under 1 is faster than
+slight); Go and Rust on one core, Erlang on every core (under "Two
+things the Mac shows"):
+
+| | slight | C | Go | Rust | Chez | Node | Erlang | Python | Perl |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+| `startup` | 2.3 ms | 0.70 | 0.94 | 0.84 | 15 | 25 | 38 | 8.5 | 1.39 |
+| `fib` | 0.198 s | 0.55 | 0.62 | | 0.96 | 1.30 | 1.43 | 23 | 65 |
+| `tak` | 0.140 s | 0.58 | 0.72 | | 1.11 | 1.65 | 1.41 | 26 | 99 |
+| `binary-trees` | 1.030 s | 0.96 | 1.34 | | 0.30 | 0.48 | 0.40 | 5.7 | 17 |
+| `nqueens` | 0.702 s | 0.44 | 0.82 | | 0.51 | 3.18 | 0.55 | 9.9 | 20 |
+| `deriv` | 0.378 s | 0.35 | 2.82 | | 0.40 | 1.49 | 0.60 | 11 | 21 |
+| `n-body` | 1.288 s | 0.03 | 0.04 | | 0.88 | 0.05 | 0.86 | 4.5 | 5.8 |
+| `spectral-norm` | 0.419 s | 0.11 | 0.11 | | 1.30 | 0.15 | 0.96 | 12 | 18 |
+| `ping-pong` | 0.348 s | | 1.11 | 0.83 | | | 2.78 | | |
+| `thread-ring` | 0.528 s | | 1.94 | 1.31 | | | 4.35 | | |
+| `fan-in` | 0.385 s | | 0.74 | 0.70 | | | 2.62 | | |
+| `spawn` | 0.135 s | | 3.14 | 8.06 | | | 6.17 | | |
+| `idle-memory` | 0.336 s | | 4.42 | 2.22 | | | 5.38 | | |
+| `parallel-fib` | 0.280 s | | 0.59 | 0.53 | | | 0.18 | | |
+
+- **Processes:** the fastest at starting one (135 ns) and at keeping one
+  waiting (571 bytes; a tokio task with its channel 1,105, a goroutine
+  2,900, an Erlang process 2,740).
+- **Messages:** the fastest round the ring (53 ns a hop); tokio on one
+  thread 1.2 times faster at `ping-pong` (87 ns a message in slight)
+  and 1.4 at `fan-in`, Go on one core 1.35 at `fan-in`.
+- **Sequential:** calls 1.4 to 1.8 times C's and Go's time, level with
+  Chez, ahead of Node and Erlang; lists 2.0 to 2.9 times C's and Chez's,
+  ahead of Node, and of Go at `deriv`; `binary-trees` 3.4 times Chez's;
+  floats 9 to 35 times C's and Go's, level with Chez and Erlang.
+- **Every core:** Rust and Go 17 and 15 times faster than slight at
+  `parallel-fib`; and slower at messages, tokio's multi-thread runtime
+  34 times slight's `ping-pong` and 11 its `fan-in`, Go 9 at `fan-in`.
+
+A page reading this run from slight's side, for someone deciding
+whether to use it (each benchmark's place and why, the benchmarks by
+feature, and slight against each language), is the "slight Performance
+Guide" (https://claude.ai/artifact/RHne7keXWUwADYqKHuHdmi, private to
+Stevan till he shares it). Unlike the tables here, it takes each
+language once, at the faster of its one-core and every-core runs, unless
+told to hold them to one core.
+
 ### Rust: a floor for a message, not for a process (D224)
 
 The M2 Max, `bench/results/2026-10-20-1137-macos-apple-m2-max.md`,
