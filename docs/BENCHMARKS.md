@@ -780,9 +780,13 @@ to under 2. The M2's runs after each are above.
   ms a MB, 61 ms at most, where Go, Erlang and tokio stay under 0.1
   ms. Busy processes cost
   others little (5 to 7 µs at the median), where Go on one core costs
-  10 ms and tokio all of the busy task's time. D200's next steps, a
-  bigger nursery or an old generation that isn't copied whole, would
-  shorten the pauses; so does keeping a process's heap small.
+  10 ms and tokio all of the busy task's time. D239 made the copy's
+  walk take 21 instructions a cell where it took 52: on the cloud
+  machine the worst pause beside 160 MB went from 197 ms to 133, at the
+  median of five runs. A second thread for big collections (D239's C)
+  waits till it's needed; D200's next steps, a bigger nursery or an old
+  generation that isn't copied whole, would shorten the pauses too; so
+  does keeping a process's heap small.
 - **A mailbox under many senders** (`fan-in`, D201): nothing slows a
   sender whose receiver is behind, so on one core nearly every message
   waits at once, 640 MB at ten million, as in Erlang; Go's channel

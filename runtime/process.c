@@ -533,10 +533,10 @@ static rt_value_t copy_here(rt_value_t v) {
 //
 // Copying leaves a forwarding pointer behind, so sharing is kept: a DAG
 // stays a DAG. Cons cells have no header, so to-space can't be scanned in
-// order as Cheney's algorithm would; instead, each copied cons, closure or
-// tuple goes on a stack of objects whose fields still point at the old
-// heap.
-// Taking the cdr first keeps that stack short along a list.
+// order as Cheney's algorithm would; instead, each copied closure, tuple,
+// and cons that heads a list goes on a stack of objects whose fields still
+// point at the old heap. A list's spine never does: along a list the walk
+// copies each cdr as it comes to it and goes on from the copy (D239).
 
 #define GC_MOVED_CONS RT_TAG_BOXED      // in a moved cell's car: a boxed null, which no value is
 #define GC_MOVED_BOX  0                 // in a moved box's header: no box has type 0
@@ -546,24 +546,18 @@ typedef struct {
     rt_chunk_t      *chunks;            // to-space, newest first: in a minor collection, the old generation
     uintptr_t        ptr, limit;
     size_t           bytes, live, size; // to-space's capacity, what's been copied, the size of a new chunk
-    rt_work_t        todo;              // copied, with fields still to forward
 } gc_t;
 
-static void *gc_alloc(gc_t *g, size_t bytes) {
-    if (g->limit - g->ptr < bytes) {
-        size_t      size = bytes > g->size ? bytes : g->size;
-        rt_chunk_t *c    = new_chunk(size);
-        c->next   = g->chunks;
-        g->chunks = c;
-        g->bytes += size;
-        g->ptr    = (uintptr_t)(c + 1);
-        g->limit  = g->ptr + size;
-        g->size   = g->size * 2 < CHUNK_MAX ? g->size * 2 : CHUNK_MAX;
-    }
-    void *at = (void *)g->ptr;
-    g->ptr  += bytes;
-    g->live += bytes;
-    return at;
+// A new chunk of to-space, for at least bytes: where it starts.
+static uintptr_t gc_chunk(gc_t *g, size_t bytes) {
+    size_t      size = bytes > g->size ? bytes : g->size;
+    rt_chunk_t *c    = new_chunk(size);
+    c->next   = g->chunks;
+    g->chunks = c;
+    g->bytes += size;
+    g->limit  = (uintptr_t)(c + 1) + size;
+    g->size   = g->size * 2 < CHUNK_MAX ? g->size * 2 : CHUNK_MAX;
+    return (uintptr_t)(c + 1);
 }
 
 // Whether v, a pointer, is into p's nursery or what it overflowed into
@@ -576,54 +570,164 @@ static int is_young(const rt_proc_t *p, rt_value_t v) {
     return 0;
 }
 
+// What changes at every object the walk copies: where the next copy goes,
+// and the copies whose fields still point at the old heap. It's kept out
+// of gc_t, and only the walk's inlined helpers point at it, so it can live
+// in registers; in gc_t, which the walk hands to gc_chunk, it was loaded
+// and stored again around every word copied, the copies being words that
+// could, as far as the compiler knew, be it (D239). The walk is compiled
+// twice, for a minor collection and a major one, and what moves is worked
+// out once: in a minor one the young chunks, the nursery and the chunk it
+// overflowed into, if just one (if more, a walk along them all); in a
+// major one, all but static data, which is two ranges, tested only for
+// what's between the lowest and the highest of their bounds, where no
+// heap pointer has been.
+typedef struct {
+    uintptr_t        ptr, limit;
+    size_t           live;
+    rt_value_t      *todo, *local;      // the stack, and the one it starts as, on the C stack
+    size_t           n, cap;
+    const rt_proc_t *young;
+    uintptr_t        n0, n1, o0, o1;    // the nursery, and the chunk it overflowed into
+    int              more;              // it overflowed into more than one
+    uintptr_t        lo, hi;            // static data's bounds, and its two ranges:
+    uintptr_t        r0, r1, c0, c1;    // read-only, and the quoted constants
+} walk_t;
+
+#define WALK static inline __attribute__((always_inline))
+
+static rt_value_t *gc_grow(rt_value_t *todo, size_t cap, rt_value_t *local) {
+    rt_value_t *more = rt_must(malloc(2 * cap * sizeof *more));
+    memcpy(more, todo, cap * sizeof *more);
+    if (todo != local) free(todo);
+    return more;
+}
+
+WALK void gc_push(walk_t *w, rt_value_t v) {
+    if (w->n == w->cap) {
+        w->todo  = gc_grow(w->todo, w->cap, w->local);
+        w->cap  *= 2;
+    }
+    w->todo[w->n++] = v;
+}
+
+WALK int gc_moves(const walk_t *w, uintptr_t a, int minor) {
+    if (minor) {
+        if (a - w->n0 < w->n1 - w->n0 || a - w->o0 < w->o1 - w->o0) return 1;
+        return w->more && is_young(w->young, a);
+    }
+    if (a - w->lo >= w->hi - w->lo) return 1;
+    return !(a - w->r0 < w->r1 - w->r0 || a - w->c0 < w->c1 - w->c0);
+}
+
+WALK void *gc_take(gc_t *g, walk_t *w, size_t bytes) {
+    if (w->limit - w->ptr < bytes) {
+        w->ptr   = gc_chunk(g, bytes);
+        w->limit = g->limit;
+    }
+    void *at = (void *)w->ptr;
+    w->ptr  += bytes;
+    w->live += bytes;
+    return at;
+}
+
+// The copy of the cell old, made now; old says where it went.
+WALK rt_value_t gc_move_cons(gc_t *g, walk_t *w, rt_value_t *old) {
+    rt_value_t *new = gc_take(g, w, 16);
+    rt_value_t  to  = (rt_value_t)new | RT_TAG_LIST;
+    new[0] = old[0];
+    new[1] = old[1];
+    old[0] = GC_MOVED_CONS;
+    old[1] = to;
+    return to;
+}
+
 // Where v lives now, copying it there if it hasn't been yet. In a minor
 // collection, only what's young moves.
-static rt_value_t forward(gc_t *g, rt_value_t v) {
-    if (!rt_is_cons(v) && (v & RT_TAG_MASK) != RT_TAG_BOXED) return v;
-    if (g->young ? !is_young(g->young, v) : is_static(v)) return v;
-    if (rt_is_cons(v)) {
+WALK rt_value_t forward(gc_t *g, walk_t *w, rt_value_t v, int minor) {
+    uint64_t tag = v & RT_TAG_MASK;
+    if ((tag != RT_TAG_LIST && tag != RT_TAG_BOXED) || v == RT_NIL || !gc_moves(w, v & ~(uintptr_t)RT_TAG_MASK, minor)) return v;
+    if (tag == RT_TAG_LIST) {
         rt_value_t *old = (rt_value_t *)(v - RT_TAG_LIST);
         if (old[0] == GC_MOVED_CONS) return old[1];
-        rt_value_t *new = gc_alloc(g, 16);
-        new[0] = old[0];
-        new[1] = old[1];
-        old[0] = GC_MOVED_CONS;
-        old[1] = (rt_value_t)new | RT_TAG_LIST;
-        rt_work_push(&g->todo, old[1]);
-        return old[1];
+        rt_value_t to = gc_move_cons(g, w, old);
+        gc_push(w, to);
+        return to;
     }
     uint64_t *old = (uint64_t *)(v - RT_TAG_BOXED);
     if (old[0] == GC_MOVED_BOX) return old[1];
-    size_t    bytes = box_bytes(v);
-    uint64_t *new   = gc_alloc(g, bytes);
-    memcpy(new, old, bytes);
+    size_t     bytes = box_bytes(v);
+    uint64_t  *new   = gc_take(g, w, bytes);
+    rt_value_t to    = (rt_value_t)new | RT_TAG_BOXED;
+    if (bytes <= 64) {
+        for (size_t i = 0; i < bytes / 8; i++) new[i] = old[i];
+    } else {
+        memcpy(new, old, bytes);
+    }
     old[0] = GC_MOVED_BOX;
-    old[1] = (rt_value_t)new | RT_TAG_BOXED;
-    if (rt_box_holds_values(new[0])) rt_work_push(&g->todo, old[1]);
-    return old[1];
+    old[1] = to;
+    if (rt_box_holds_values(new[0])) gc_push(w, to);
+    return to;
 }
 
 // Forwards roots[0..n), and the frames below fp, if it's given, and then
 // all they lead to.
-static void trace(gc_t *g, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
-    rt_work_init(&g->todo);
-    for (uint64_t i = 0; i < n; i++) roots[i] = forward(g, roots[i]);
-    for (; fp && fp[0]; fp = (const uintptr_t *)fp[0]) {
-        for (rt_value_t *s = (rt_value_t *)(fp + 2); s < (rt_value_t *)fp[0]; s++) *s = forward(g, *s);
+WALK void walk(gc_t *g, rt_value_t *roots, uint64_t n, const uintptr_t *fp, int minor) {
+    rt_value_t local[RT_WORK_LOCAL];
+    walk_t     w = {
+        .ptr = g->ptr, .limit = g->limit, .live = g->live,
+        .todo = local, .local = local, .cap = RT_WORK_LOCAL,
+        .young = g->young,
+        .r0 = (uintptr_t)slight_rodata_start, .r1 = (uintptr_t)slight_rodata_end,
+        .c0 = (uintptr_t)slight_const_start, .c1 = (uintptr_t)slight_const_end,
+    };
+    w.lo = w.r0 < w.c0 ? w.r0 : w.c0;
+    w.hi = w.r1 > w.c1 ? w.r1 : w.c1;
+    if (minor) {
+        const rt_chunk_t *c = g->young->nursery, *o = c->next;
+        w.n0   = (uintptr_t)(c + 1);
+        w.n1   = w.n0 + c->size;
+        w.o0   = o ? (uintptr_t)(o + 1) : 0;
+        w.o1   = o ? w.o0 + o->size : 0;
+        w.more = o && o->next;
     }
-    while (g->todo.n) {
-        rt_value_t v = rt_work_pop(&g->todo);
+    for (uint64_t i = 0; i < n; i++) roots[i] = forward(g, &w, roots[i], minor);
+    for (; fp && fp[0]; fp = (const uintptr_t *)fp[0]) {
+        for (rt_value_t *s = (rt_value_t *)(fp + 2); s < (rt_value_t *)fp[0]; s++) *s = forward(g, &w, *s, minor);
+    }
+    while (w.n) {
+        rt_value_t v = w.todo[--w.n];
         if (rt_is_cons(v)) {
+            // Along the list: each cdr still to move is copied as the walk
+            // comes to it, and the walk goes on from the copy.
             rt_value_t *cell = (rt_value_t *)(v - RT_TAG_LIST);
-            cell[1] = forward(g, cell[1]);
-            cell[0] = forward(g, cell[0]);
+            for (;;) {
+                cell[0] = forward(g, &w, cell[0], minor);
+                rt_value_t  d    = cell[1];
+                rt_value_t *next = (rt_value_t *)(d - RT_TAG_LIST);
+                if (!rt_is_cons(d) || !gc_moves(&w, (uintptr_t)next, minor) || next[0] == GC_MOVED_CONS) {
+                    cell[1] = forward(g, &w, d, minor);
+                    break;
+                }
+                rt_value_t to = gc_move_cons(g, &w, next);
+                cell[1] = to;
+                cell    = (rt_value_t *)(to - RT_TAG_LIST);
+            }
         } else {
             uint64_t *box   = (uint64_t *)(v - RT_TAG_BOXED);
-            uint64_t  first = rt_box_first_value(box[0]);
-            for (uint64_t i = 0; i < box[0] >> RT_BOX_SIZE_SHIFT; i++) box[first + i] = forward(g, box[first + i]);
+            uint64_t  first = rt_box_first_value(box[0]), count = box[0] >> RT_BOX_SIZE_SHIFT;
+            for (uint64_t i = 0; i < count; i++) box[first + i] = forward(g, &w, box[first + i], minor);
         }
     }
-    rt_work_free(&g->todo);
+    if (w.todo != local) free(w.todo);
+    g->ptr   = w.ptr;
+    g->limit = w.limit;
+    g->live  = w.live;
+}
+
+static void trace(gc_t *g, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+    if (g->young) walk(g, roots, n, fp, 1);
+    else          walk(g, roots, n, fp, 0);
 }
 
 static size_t chunk_size(size_t bytes) {

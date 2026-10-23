@@ -1,0 +1,43 @@
+; Lists through the collector (D239). Along a list's spine the walk copies
+; each cdr as it comes to it, and only cars that are lists or boxes of
+; values go on its stack. Here: lists of lists and of boxes (strings,
+; floats, tuples, closures); a list run onto an old one, where a minor
+; collection's walk must stop, and onto a quoted one, which is static and
+; never moves; a tail shared by 1,000 lists and a list held 1,000 times,
+; which must stay shared through every collection, since unshared they
+; wouldn't fit in the 64 MB the tests run with; and a list of 2,000
+; lists, whose cars fill the walk's stack. Big strings, which go straight
+; into the old generation, bring on major collections, which move it
+; all, and each part is checked after them. Small, so that it runs under
+; SLIGHT_GC_STRESS=7 too.
+
+(defun garbage (n acc)
+    (if (== n 0) acc (garbage (- n 1) (+ acc (length (range 0 100))))))
+
+(defun strings (n acc)
+    (if (== n 0) acc (strings (- n 1) (+ acc (bytes/len (str/repeat "x" 1000000))))))
+
+(let mixed
+    (map (lambda (i) (list (range 0 (- i (* 7 (div i 7)))) (int->str i) (int->float i) (tuple i (list i)) (lambda (x) (+ x i))))
+         (range 0 200)))
+(let old    (range 0 2000))
+(pprint (garbage 200 0))
+(let young  (append (range 0 100) old))
+(let quoted (append (range 0 100) '(7 8 9)))
+(let tail   (range 0 5000))
+(let heads  (map (lambda (i) (cons i tail)) (range 0 1000)))
+(let same   (map (lambda (i) tail) (range 0 1000)))
+(let lists  (map (lambda (i) (list i i)) (range 0 2000)))
+(pprint (strings 8 0))
+
+(pprint (sum (map (lambda (m) (length (car m))) mixed)))
+(pprint (sum (map (lambda (m) (str->int (cadr m))) mixed)))
+(pprint (length (filter (lambda (m) (== (caddr m) (int->float (str->int (cadr m))))) mixed)))
+(pprint (sum (map (lambda (m) (match (nth 3 m) (#(a (b)) (+ a b)))) mixed)))
+(pprint (sum (map (lambda (m) ((nth 4 m) 1)) mixed)))
+(pprint (list (length young) (sum young)))
+(pprint (list (length quoted) (sum quoted) (nth 102 quoted)))
+(pprint (list (length heads) (sum (map car heads)) (length (nth 999 heads)) (if (eq? (cdr (car heads)) (cdr (nth 999 heads))) 1 0)))
+(pprint (list (length same) (sum (car same)) (sum (nth 999 same))))
+(pprint (list (length lists) (sum (map car lists)) (sum (map cadr lists))))
+:done

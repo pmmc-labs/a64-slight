@@ -5160,3 +5160,67 @@ plainly.)*
   position (a frame's slots are all roots, D166), so twice the live data
   was copied at each major collection: 241 ms at the median, 967 MB.
   `churn` is a tail call now, and joins the pinger itself.
+
+**D239. The collector's walk, faster.** *(Stevan, Oct 2026: "Let's do A
+for now, and wait for C until we are sure we need it, or we find other
+reasons to add additional threads", from Claude's options for the pauses
+`latency` showed, D238.)*
+
+- **The options:** A, a faster copy; B, collecting when nothing else can
+  run; C, big major collections on a second thread, probably what keeps
+  Erlang's pauses from showing (D238), the collector as it is and the
+  process collected not runnable while its heap is copied; D, major
+  collections in pieces on one core, which immutability allows with no
+  barrier (the copy made while the process goes on using the originals,
+  which can't change, then the roots and what was made meanwhile
+  switched over), with forwarding in a side table, and the most to get
+  right; E, an old generation that isn't moved (D200 turned it down);
+  F, advice alone. A is done here. C waits till it's needed, or till
+  another reason for a thread comes, since it would be the runtime's
+  first (D153). B, D and E aren't taken up.
+- **Where the time went:** `latency`'s heap phase alone (a list of
+  blocks, the oldest replaced again and again), under callgrind on the
+  cloud machine: 81 per cent of the instructions collecting, 52 a cell
+  copied. Each copied cell went on the work stack and off again; each
+  pointer was checked against both ranges of static data, its four
+  bounds loaded each time; and the walk's to-space pointer, the bytes
+  copied and the work stack lived in `gc_t`, which the walk hands to the
+  function that gets a new chunk, so the compiler loaded and stored them
+  around every word copied, a word copied being, as far as it knew, one
+  of them.
+- **Now:** what changes at every object is a struct of its own that only
+  always-inlined helpers point at, so it lives in registers; the walk is
+  compiled twice, for a minor collection and a major one; what moves is
+  worked out once (in a minor one the nursery and the chunk it
+  overflowed into, as two ranges, and a walk along the chunks if there
+  are more; in a major one, all but static data, tested in full only
+  between the lowest and the highest of its bounds); along a list, each
+  cdr still to move is copied as the walk comes to it and the walk goes
+  on from the copy, so a list's spine never goes on the stack, only cars
+  that are lists or boxes of values; and a box of 64 bytes or less is
+  copied a word at a time. The same objects are copied as before,
+  forwarded the same way, sharing kept.
+- **Measured** on the cloud machine, x86-64. Instructions: the heap phase
+  alone at size 2, collecting 4,575 million to 1,839 (21 a cell), the
+  program 48 per cent fewer; `binary-trees 14` collecting 163 million to
+  125, the program 8 per cent fewer. Times, noisy there: the heap phase
+  alone at size 4, 1.28 s to 0.95; `binary-trees 18` 2.05 s to 1.89 (the
+  medians of five); `latency`'s heap phase, five runs each, the worst
+  pause 195–206 ms to 131–153 (medians 197 and 133), the 99th
+  percentile 164–186 ms to 122–135, the phase 3.1 s to 2.2; test 162
+  under `SLIGHT_GC_STRESS=100`, 55 s to 43. The M2 Max's to come.
+- **Tested:** `make test` on both targets, 282 golden tests each.
+  `SLIGHT_GC_VERIFY=1 make golden`: all of x86-64's; under qemu, 059,
+  130 and 240, which fill a 64 MB heap, killed at 60 s, 130 and 240
+  passing given 15 minutes and 059 not finishing in that (it passes on
+  x86-64; the old collector wasn't run so, which would take as long).
+  `SLIGHT_GC_STRESS=7 make golden`: timeouts only, 14 under qemu and 8 on
+  x86-64 (D200 had 14 and 10), 293 among them before it was made smaller,
+  as it now is, passing at 7; the rest pass at 100 but 059, 130 and 240,
+  as before (162 under qemu given 15 minutes). Golden test 293: lists of
+  lists and of boxes, a list run onto an old one and onto a quoted one, a
+  tail shared by 1,000 lists and a list held 1,000 times (80 MB each,
+  unshared, over the tests' 64 MB), a list of 2,000 lists filling the
+  walk's stack, and major collections brought on by big strings.
+- **Not done:** the message copy (D237), with the same kind of
+  bookkeeping, about 73 instructions a cell: next, if wanted.

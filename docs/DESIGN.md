@@ -781,7 +781,15 @@ Lalloc_N:
 - Copying leaves a forwarding pointer, so sharing is kept: a DAG stays a
   DAG. Cons cells have no header, so to-space can't be scanned in order
   as in Cheney's algorithm; a stack of copied objects whose fields still
-  need forwarding takes its place (D107).
+  need forwarding takes its place (D107). A list's spine never goes on
+  it: along a list the walk copies each cdr as it comes to it and goes on
+  from the copy, so only cars that are lists or boxes of values do. The
+  walk is compiled twice, for a minor collection and a major one; what
+  moves is worked out once for each (the nursery and the chunk it
+  overflowed into as two ranges, or all but static data); and what
+  changes at every object (where the next copy goes, the stack) is kept
+  where the compiler can hold it in registers, out of the struct the
+  walk passes to the function that gets it a new chunk (D239).
 - **C builtins never see an object move.** No handles, no rooting API, no
   stack maps, no write barrier.
 - **A frame keeps everything in its slots** until it returns, so a `let`
