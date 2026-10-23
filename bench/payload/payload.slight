@@ -1,0 +1,18 @@
+; payload: ping-pong with something in each message (D237): n round trips
+; between two processes, each message carrying the same list of 100
+; integers, which every send copies into its receiver's heap. Prints n,
+; and the list's sum as it ends up.
+
+(defun pong ()
+    (recv
+        ((:ping from data) (send from (list :pong data)) (pong))
+        ((:stop)           :stopped)))
+
+(defun ping (p i n data)
+    (cond
+        ((== i n) (send p (list :stop)) (tty/write n \n) (sum data))
+        (#true
+            (send p (list :ping $$ data))
+            (recv ((:pong back) (ping p (+ i 1) n back))))))
+
+(ping (fork (pong)) 0 (str->int (car @ARGV)) (range 1 101))

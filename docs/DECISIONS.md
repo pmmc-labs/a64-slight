@@ -5049,3 +5049,60 @@ ways of keeping it.)*
 - **Checked:** the golden tests, the replay and the live checks on both
   targets here, the runtime's idle as before D234, and `lib/http.slight`
   as before but its comments.
+
+**D237. Messages with something in them, and every core reported
+apart.** *(Stevan, Oct 2026: "Yes, let's go", to Claude's recommendations
+after the 23 Oct run on the M2 Max: what to add to the benchmarks,
+whether Rust should run the sequential ones, and what the every-core
+runs are for.)*
+
+- **`payload 1000000`:** ping-pong with each message carrying the same
+  list of 100 integers, which goes there and back a million times; it
+  prints the round trips and the list's sum. The actor programs' messages
+  were a token or a tagged pair: `thread-ring`'s and `fan-in`'s a bare
+  integer, nothing to copy (D199), `ping-pong`'s three words. A message
+  that carries data is what slight's model costs most, and none showed
+  it: slight and Erlang copy it into the receiver's heap, Go passes a
+  slice and tokio moves a `Vec`, neither copying. In slight, Go, Erlang
+  and Rust, beside `ping-pong`, which it differs from only in the list.
+- **Found** on the cloud machine, x86-64: slight 1.1 s, against 0.17 for
+  `ping-pong` at the same million; Go on one core 0.4 s and tokio 0.3
+  (Erlang isn't installed there). Under callgrind, 84 per cent of the
+  instructions are `copy_values_after`, about 73 a cell: checking that
+  each cell isn't static data (both address ranges, their four bounds
+  loaded each time), scratch's bounds, and noting each pointer for the
+  move into the chunk, which goes over them again; and in the code
+  clang makes, scratch's and the notes' sizes, which are globals, are
+  loaded and stored back at each cell rather than kept in registers. A
+  copy with less of this is for later, its own decision.
+- **One core is the comparison:** slight runs on one, so the summary's
+  tables now have Go, Erlang and Rust on one core. Their defaults, every
+  core, still run, and are a table of their own at the end: each one's
+  time over the same language's on one core (what every core gains or
+  costs) and over slight's. `bench/run.py --summary` wrote the 23 Oct
+  run's again this way. The every-core runs stay because `parallel-fib`
+  means nothing without them (on one core it's `fib` 64 times); because
+  they show what more cores cost at messages (tokio's multi-thread
+  runtime 34 times slight's `ping-pong`, Go 9 times its `fan-in`),
+  evidence for slight's one core; and because they're what Go, Erlang
+  and Rust give their users unless told otherwise.
+- **Erlang on one scheduler on the Mac** (D194: on a core 37 to 60 per
+  cent of the time it takes, unexplained) is to be looked into there,
+  since the one-core comparison needs it: the new table shows it as
+  every core making `fib` and `tak` take 0.55 of their one-core time,
+  which a sequential program can't gain. Till then the text in
+  BENCHMARKS.md, and the page that reads the 23 Oct run, quote Erlang at
+  its every-core numbers.
+- **Next, in order:** latency under load, the worst and 99th-percentile
+  round trip while another process works without waiting (what counting
+  reductions buys, which `fib` shows only the cost of) or collects a
+  big heap (what one core costs: a major collection holds everything
+  up, 0.5 to 1 ms a MB live, D202), which needs the harness to take a
+  measurement from a program's output; then a map, `lib/map.slight`
+  against each language's own (Erlang's, persistent too, the like for
+  like). Later, D194's third question: strings, JSON and HTTP, which
+  mostly compare libraries.
+- **Rejected:** Rust in the sequential programs, D194's reason still
+  holding: its code is LLVM's, as C's is, and seven more programs would
+  land beside C's. And dropping the every-core runs, for the reasons
+  above.

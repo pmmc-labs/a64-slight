@@ -27,6 +27,10 @@ name = "ping-pong"
 path = "ping-pong/ping-pong.rs"
 
 [[bin]]
+name = "payload"
+path = "payload/payload.rs"
+
+[[bin]]
 name = "thread-ring"
 path = "thread-ring/thread-ring.rs"
 

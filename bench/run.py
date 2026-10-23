@@ -14,7 +14,9 @@ fewer), to keep each to about --budget seconds.
 
 Go, Erlang and Rust run twice: on one core, as slight does
 (GOMAXPROCS=1, +S 1:1, tokio's current-thread runtime), and with their
-defaults, every core (go-mc, erlang-mc, rust-mc). Chez Scheme is found as
+defaults, every core (go-mc, erlang-mc, rust-mc). One core is the
+comparison; the summary gives every core a table of its own, what it
+gains or costs each language (D237). Chez Scheme is found as
 chez, chezscheme or scheme, and its programs are compiled ahead of time,
 as slight's are. Rust, with tokio, is in the actor programs alone, their
 floor as C is the sequential ones' (D224), and in startup.
@@ -115,6 +117,7 @@ BENCHMARKS = {
     'n-body':        Benchmark(ALL,    '1000',  '1000000',  None),
     'spectral-norm': Benchmark(ALL,    '100',   '1000',     None),
     'ping-pong':     Benchmark(ACTORS, '10000', '2000000',  lambda n: [n]),
+    'payload':       Benchmark(ACTORS, '10000', '1000000',  lambda n: [n, 5050]),
     'thread-ring':   Benchmark(ACTORS, '10000', '10000000', lambda n: [n % 503 + 1]),
     'fan-in':        Benchmark(ACTORS, '10000', '10000000', lambda n: [n // 100 * 5050]),
     'spawn':         Benchmark(ACTORS, '10000', '1000000',  lambda n: [n * (n - 1) // 2]),
@@ -460,6 +463,15 @@ def megabytes(b):
     return '%.1f' % (b / 1e6)
 
 
+# Each implementation on every core, and the one-core one it's compared
+# with: one core is the comparison, every core a table of its own (D237).
+MC = {'go-mc': 'go', 'erlang-mc': 'erlang', 'rust-mc': 'rust'}
+
+
+def median(r, key='wall'):
+    return statistics.median(x[key] for x in r['runs']) if r and r['ok'] and r['runs'] else None
+
+
 def summary(report):
     m   = report['machine']
     out = ['# Benchmarks, %s' % report['date'].replace('T', ' '), '',
@@ -469,18 +481,20 @@ def summary(report):
                 '(see startup: Erlang\'s VM takes about a seventh of a second). CPU is user and system time '
                 'together, which goes past the time taken when more than one core works; memory is the peak '
                 'resident set, in MB. "÷ slight" is the median over slight\'s, so under 1 is faster than slight. '
-                'A `-mc` implementation is the language\'s default, every core; without it, one core.', '']
+                'Go, Erlang and Rust are on one core here, as slight is; their defaults, every core, are in a table '
+                'of their own, at the end.', '']
     startup = report['results'].get('startup', {}).get('impls', {})
     for b, entry in report['results'].items():
         impls = entry['impls']
-        base  = impls.get('slight')
-        base  = statistics.median(r['wall'] for r in base['runs']) if base and base['ok'] and base['runs'] else None
+        base  = median(impls.get('slight'))
         extra = b == 'idle-memory' and startup
         out  += ['## %s %s' % (b, entry['size']), '',
                  '| | time | fastest | CPU | memory | ÷ slight |' + (' bytes a process |' if extra else ''),
                  '|---|---:|---:|---:|---:|---:|' + ('---:|' if extra else '')]
         rows = []
         for n, r in impls.items():
+            if n in MC:
+                continue
             if not r['ok'] or not r['runs']:
                 rows.append((float('inf'), '| %s | wrong output or failed | | | | |%s' % (n, ' |' if extra else '')))
                 continue
@@ -496,11 +510,41 @@ def summary(report):
                 row += ' %s |' % ('%.0f' % per if per is not None else '')
             rows.append((wall, row))
         out += [row for _, row in sorted(rows, key=lambda r: r[0])] + ['']
+    out += every_core(report)
     if report['builds']:
         out += ['## Builds', '', '| | seconds | bytes |', '|---|---:|---:|']
         out += ['| %s | %.2f | %d |' % (k, v['seconds'], v['bytes']) for k, v in sorted(report['builds'].items())]
         out += ['']
     return '\n'.join(out)
+
+
+# What every core gains or costs Go, Erlang and Rust: each one's time on
+# every core, over its time on one core and over slight's.
+def every_core(report):
+    rows = []
+    for b, entry in report['results'].items():
+        impls = entry['impls']
+        first = True
+        for n, one in MC.items():
+            if n not in impls:
+                continue
+            r = impls[n]
+            if not r['ok'] or not r['runs']:
+                rows.append('| %s | %s | wrong output or failed | | | | |' % (b if first else '', n))
+            else:
+                wall, solo, base = median(r), median(impls.get(one)), median(impls.get('slight'))
+                rows.append('| %s | %s | %s | %s | %s | %s | %s |' % (
+                    b if first else '', n, seconds(wall), seconds(median(r, 'cpu')), megabytes(median(r, 'rss')),
+                    '%.2f' % (wall / solo) if solo else '', '%.2f' % (wall / base) if base else ''))
+            first = False
+    if not rows:
+        return []
+    return (['## Every core', '',
+             'Go, Erlang and Rust with their defaults, every core. "÷ one core" is the median over the same '
+             'language\'s on one core, so under 1 is what every core gains, over 1 what it costs; "÷ slight" is '
+             'the median over slight\'s, on its one core.', '',
+             '| | | time | CPU | memory | ÷ one core | ÷ slight |', '|---|---|---:|---:|---:|---:|---:|']
+            + rows + [''])
 
 
 if __name__ == '__main__':

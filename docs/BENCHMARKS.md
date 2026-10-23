@@ -25,7 +25,8 @@ Three questions, which need different programs:
    and Chez Scheme, a native Lisp, the nearest thing to slight's
    compiled code (D201).
 2. **The actor runtime:** what a message, a switch between processes, a
-   process started, and a process waiting cost. Against Erlang, the same
+   process started, and a process waiting cost, and what copying a
+   message's data costs (D237). Against Erlang, the same
    model (per-process heaps, copied messages, preemption by reductions),
    and Go, goroutines and channels; and Rust with tokio, whose tasks are
    stackless, the floor, as C is for the sequential programs (D224).
@@ -78,6 +79,10 @@ itself (or, for `n-body`, against C's).
   (Python's in loops, since its `sum` of floats rounds differently from
   3.12 on); the norm printed times 10^9.
 - **`ping-pong 2000000`:** round trips between two processes.
+- **`payload 1000000`:** `ping-pong` with each message carrying the same
+  list of 100 integers there and back (D237): what copying a message's
+  data costs. slight and Erlang copy it into the receiver's heap; Go
+  passes a slice and tokio moves a `Vec`, neither copying.
 - **`thread-ring 10000000`:** the Benchmarks Game's: 503 processes in a
   ring pass a token on, 10 million times.
 - **`fan-in 10000000`:** 100 processes each send their number 100,000
@@ -120,9 +125,12 @@ change, hash tables, bignums, regular expressions) aren't here.
   Python starts with Python's memory counted in its peak.
 - **Cores:** slight runs every process on one core. Go, Erlang and Rust
   run on one core too (`GOMAXPROCS=1`, `+S 1:1`, tokio's current-thread
-  runtime), the fair comparison, and again with their defaults, every
+  runtime), the comparison, and again with their defaults, every
   core (`go-mc`, `erlang-mc`, `rust-mc`, tokio's multi-thread runtime, as
-  `#[tokio::main]` makes it), to see what that gains. `bench/rt.rs`
+  `#[tokio::main]` makes it), to see what that gains or costs. The
+  summary's tables are one core; every core is a table of its own at
+  the end, each one's time over its own on one core and over slight's
+  (D237). `bench/rt.rs`
   picks Rust's runtime, by `BENCH_MC`, which the harness sets for
   `rust-mc`. Node's collector has threads of its own either way.
 - CPU time over wall time shows more than one core at work. Erlang's
@@ -681,6 +689,14 @@ to under 2. The M2's runs after each are above.
   1.4 times slower than slight. D197 took 40 per cent of fib's
   instructions out; the rest is the frame (every local in a slot,
   zeroed when the function calls another) and the checks.
+- **Copying a message** (`payload`, D237): a list of 100 integers there
+  and back takes slight 1.1 s a million times on the cloud machine,
+  against 0.17 for `ping-pong`, Go's and tokio's 0.3 to 0.4 hardly more
+  than theirs, since they don't copy. 84 per cent of the instructions
+  are the copy's walk, about 73 a cell, most of them bookkeeping: each
+  cell checked against both ranges of static data, scratch's bounds,
+  each pointer noted for the move into the chunk, and the sizes of
+  scratch and the notes, globals, loaded and stored back at each cell.
 - **A mailbox under many senders** (`fan-in`, D201): nothing slows a
   sender whose receiver is behind, so on one core nearly every message
   waits at once, 640 MB at ten million, as in Erlang; Go's channel
