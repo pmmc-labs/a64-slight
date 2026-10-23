@@ -162,6 +162,43 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 23 Oct, 13:41: `latency` (D238)
+
+`bench/results/2026-10-23-1341-macos-apple-m2-max.md`, at `c8cbba4`,
+`latency` alone, five runs each, every one's figures within a few
+microseconds of its others' but the worst cases. Each phase's median,
+99th percentile and worst wait, the median over the runs:
+
+| | idle | busy | heap | peak |
+|---|---:|---:|---:|---:|
+| slight | 0, 4, 13 µs | 4, 6, 18 µs | 0.2, 57, 61 ms | 600 MB |
+| Go, one core | 0, 1, 4 µs | 11.5, 24, 25 ms | 4, 20, 20 µs | 167 MB |
+| Erlang, one scheduler | 5, 12, 15 µs | 28, 41, 50 µs | 8, 69, 84 µs | 1,748 MB |
+| tokio, one thread | 0, 0, 7 µs | 139, 274, 276 ms | 2, 9, 9 µs | 84 MB |
+| Go, every core | 0, 9, 17 µs | 1, 10, 14 µs | 1, 9, 9 µs | 168 MB |
+| Erlang, every core | 0, 4, 9 µs | 0, 4, 11 µs | 0, 4, 37 µs | 1,709 MB |
+
+- **Busy:** slight is the most responsive on one core, its busy process
+  preempted every 1,000 reductions; Erlang, preempting the same way,
+  waits 28 to 50 µs; Go on one core 11.5 to 25 ms, preempting about
+  every 10 ms; tokio all of `fib`, not preempting. On every core Go and
+  Erlang wait microseconds.
+- **Heap:** slight is the least responsive: a major collection of 160
+  MB holds every process up, 61 ms at most, about 0.4 ms a MB (a sixth
+  of the cloud machine's). Go, collecting concurrently, waits 20 µs at
+  most, tokio, with no collector, 9. Erlang, which collects each
+  process on its own as slight does, shows no pause either, 84 µs at
+  most, but peaks at 1.7 GB; why hasn't been looked into (a large heap
+  collected on a dirty scheduler, a thread of its own, or a heap let
+  grow rather than copied whole). Go's and tokio's heap phases are 66
+  and 20 ms, their work quicker, so their pings are fewer.
+- **Erlang on one scheduler** is on a core 63 per cent of the time it
+  takes here, the Mac's waiting (D194), so its CPU time can't say
+  whether another thread did its collecting.
+
+The guide (below) reads this run for `latency`, as a feature of its
+own, responsiveness under load.
+
 ### The M2 Max, 23 Oct, 12:08: `payload` (D237)
 
 `bench/results/2026-10-23-1208-macos-apple-m2-max.md`, at `b45e37d`:
@@ -739,7 +776,9 @@ to under 2. The M2's runs after each are above.
 - **Collection pauses** (`latency`, D238): a major collection holds up
   every process, the program's one core copying the heap: about 2.5 ms
   a MB live on the cloud machine, 400 ms for 160 MB, and a ping's wait
-  at the 99th percentile 375 ms beside such a heap. Busy processes cost
+  at the 99th percentile 375 ms beside such a heap; on the M2 Max 0.4
+  ms a MB, 61 ms at most, where Go, Erlang and tokio stay under 0.1
+  ms. Busy processes cost
   others little (5 to 7 µs at the median), where Go on one core costs
   10 ms and tokio all of the busy task's time. D200's next steps, a
   bigger nursery or an old generation that isn't copied whole, would
