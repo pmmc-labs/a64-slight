@@ -1,0 +1,111 @@
+; lib/rpc.slight (D230): a connection that ends with an error, here text
+; that isn't an s-expression, stops the calls from the other end, as a
+; hang-up does, and fails those from here with its error. First a raw
+; client starts two calls that never end on a server made with
+; rpc/serve, then sends a stray ); then a raw server, connected to with
+; rpc/connect, calls the client, is called by it, and sends one.
+
+(@include :rpc)
+
+(defun stuck () (recv (:never ())))
+
+; Says held, then tells w of the process running it, which never ends.
+(defun hold (w)
+    (rpc/handler "hold" "Says held, then never ends." ()
+        (lambda () (rpc/next :held) (send w (list :running $$)) (join (fork (stuck))))))
+
+; --- a raw client, and the server's calls ----------------------------------
+
+; Each line to send, and how many lines to wait for before the next.
+(defun script ()
+    (list
+        (list "(helo rpc 1)" 0)
+        (list "(call 1 hold)" 1)
+        (list "(call 2 hold)" 1)
+        (list ")" 1)))
+
+(defun client (script)
+    (recv
+        ((:open c) (client-wait c script 1))))
+
+(defun client-wait (c script n)
+    (cond
+        ((> n 0)
+            (recv
+                ((:line _ s) (tty/write "< " s \n) (client-wait c script (- n 1)))
+                ((:eof _)    (tty/write "eof" \n) (disconnect c))))
+        (#true (client-send c script))))
+
+(defun client-send (c script)
+    (match script
+        (() (disconnect c))
+        (((text n) & rest)
+            (tty/write "> " text \n)
+            (send c (list :write text \n))
+            (client-wait c rest n))))
+
+; How each of n calls' processes ended, as hold tells of them.
+(defun stopped (n)
+    (cond
+        ((== n 0) (to-raw))
+        (#true
+            (recv
+                ((:running p) (monitor p) (stopped n))
+                ((:exit _ r)  (pprint (list :stopped r)) (stopped (- n 1)))))))
+
+; --- a raw server, and the client's calls ----------------------------------
+
+(defun raw-server (w)
+    (recv
+        ((:open _ port) (send w (list :port port)) (raw-server w))
+        ((:accept _ c)  (connect c (raw-conn)) (raw-server w))))
+
+(defun raw-conn ()
+    (recv
+        ((:open c)
+            (raw-write c "(helo rpc 1)")
+            (raw-write c "(call 1 hold)")
+            (raw-read c 3))))
+
+(defun raw-write (c text)
+    (tty/write "server > " text \n)
+    (send c (list :write text \n)))
+
+; Reads n lines, then sends a stray ).
+(defun raw-read (c n)
+    (cond
+        ((== n 0) (raw-write c ")") (raw-done))
+        (#true    (recv ((:line _ s) (tty/write "server < " s \n) (raw-read c (- n 1)))))))
+
+(defun raw-done ()
+    (recv ((:eof c) (disconnect c))))
+
+(defun to-raw ()
+    (let me $$)
+    (from-here (connect :tcp/listen "127.0.0.1:0" (raw-server me))))
+
+(defun from-here (l)
+    (recv
+        ((:port port)
+            (match (rpc/connect (str "127.0.0.1:" port) (list (hold $$)))
+                ((:ok conn) (calling l conn))))))
+
+(defun calling (l conn)
+    (recv
+        ((:running p)
+            (monitor p)
+            (match (rpc/call conn "anything" ())
+                ((:error (kind _)) (pprint (list :error kind))))
+            (calling-ended l))))
+
+(defun calling-ended (l)
+    (recv ((:exit _ r) (pprint (list :stopped r)) (kill l) :done)))
+
+(defun main (l)
+    (recv
+        ((:listening port)
+            (join (connect :tcp (str "127.0.0.1:" port) (client (script))))
+            (kill l)
+            (stopped 2))))
+
+(main (rpc/serve "127.0.0.1:0" (list (hold $$))))

@@ -1,0 +1,40 @@
+; lib/rpc.slight over a Unix socket (D231): rpc/serve, rpc/connect and
+; rpc/keep take a path, a string with a / in it, wherever "host:port"
+; goes. A server at a path, a call to it and help; a keeper of a
+; connection to it, whose on-open runs, and a call through that; then,
+; with the server killed and its path gone, a connection finds nothing;
+; and a name with no / in it is "host:port", not a path.
+
+(@include :rpc)
+
+(defun handlers ()
+    (list
+        (rpc/handler "add" "The sum of two integers."
+            (list (list "a" :integer "One") (list "b" :integer "The other"))
+            (lambda (a b) (+ a b)))))
+
+(defun main (path l)
+    (recv
+        ((:listening at)
+            (pprint (list :listening at))
+            (match (rpc/connect path ())
+                ((:ok conn)
+                    (pprint (rpc/call conn "add" (list 2 3)))
+                    (pprint (map car (cadr (rpc/call conn "help" ()))))
+                    (rpc/close conn)
+                    (keeping path l))))))
+
+(defun keeping (path l)
+    (let me $$)
+    (let k (rpc/keep path () (lambda (conn) (send me :opened))))
+    (recv
+        (:opened
+            (pprint (rpc/call k "add" (list 40 2)))
+            (rpc/close k)
+            (kill l)
+            (pprint (rpc/connect path ()))
+            (pprint (rpc/connect "285.sock" ()))
+            :done)))
+
+(let path "build/t/285-rpc-unix.sock")
+(main path (rpc/serve path (handlers)))

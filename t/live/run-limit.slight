@@ -1,0 +1,11 @@
+; t/live.py's run limit (D234): on the real clock, a command still
+; running at its limit is killed, its group with it, and gives what it
+; printed till then; the run tool says so to the model. Each command
+; would run for ten minutes.
+
+(@include :tools)
+
+(let yes (lambda (what) #true))
+(pprint (exec/run-within 1000 (list "sh" "-c" "echo started; sleep 600")))
+(pprint (join (fork (tool/call (tools/run-within 1000 yes) (list (list "command" "echo started; sleep 600"))))))
+:done

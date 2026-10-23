@@ -67,7 +67,7 @@ export const SEXP_WORDS: readonly string[] = ['symbol', 'quote'];
 // What :system is asked and answers with, in RT_SYS_ order (D171).
 export const SYSTEM_WORDS: readonly string[] = [
     'processes', 'process', 'runtime', 'end', 'ended', 'pid', 'parent', 'state', 'in', 'mail', 'reductions',
-    'devices', 'joining', 'running', 'ready', 'recv', 'sleeping', 'pids', 'timers', 'stacks', 'clock',
+    'devices', 'joining', 'running', 'ready', 'recv', 'sleeping', 'pids', 'timers', 'stacks', 'clock', 'heap-max',
 ];
 
 // How a command ends, and the signals' names, in RT_EXEC_ order (D185).
@@ -76,9 +76,12 @@ export const EXEC_WORDS: readonly string[] = [
     'pipe', 'alrm', 'term',
 ];
 
+// Who's at the other end of a Unix connection, in RT_PEER_ order (D235).
+export const PEER_WORDS: readonly string[] = ['uid', 'gid'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
-    ...SYSTEM_WORDS, ...EXEC_WORDS,
+    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS,
 ];

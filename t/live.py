@@ -20,6 +20,29 @@ program, or the system to measure the run.
   start of the day with no checkpoints (D212); random what-ifs in two
   rounds come to what they do in one (D214); and in three shares, run
   apart, to what they do in one run (D218).
+- signals: a program dies of SIGTERM, as it always has, what it printed
+  with pprint having gone out when it began to wait (D229); and as PID 1,
+  as in a container, where the kernel ignores a signal left to its
+  default action, SIGTERM still ends it, with status 143 (D227); and,
+  as PID 1, it waits for what a command left running when that ends, so
+  no zombie stays (D229). Being PID 1 takes a PID namespace (unshare, as
+  root, on Linux); without one, those are skipped.
+- memory limit: in a cgroup of 256 MB, the heap's cap is a quarter of that,
+  and a process that keeps all it makes faults there, on its own, the
+  program going on and the limit never reached (D233). Making the cgroup
+  takes root and a memory controller to write to (v1, or v2 with it
+  delegated); without them, it's skipped.
+- timers: timers of an hour that nothing can come of (a killed
+  sleeper's, one sent to a process that has ended, one taken back, and
+  ask-within's once it's answered) don't hold up the program's end
+  (D232).
+- run limit: a command still running at exec/run-within's limit, or the
+  run tool's, is killed with its group, and gives what it printed till
+  then (D234).
+- sockets: a listener at a Unix socket's path (D231) answers there, and a
+  second program can't take the path from it; killed with SIGKILL, it
+  leaves the socket behind, which the next to listen there replaces; and
+  ended by SIGTERM, it removes it.
 
 Nothing here depends on how long anything takes: each step waits for
 what it expects to see, and DEADLINE seconds is only how long it waits
@@ -33,7 +56,10 @@ import pty
 import re
 import select
 import shlex
+import shutil
 import signal
+import socket
+import stat
 import struct
 import subprocess
 import sys
@@ -320,10 +346,188 @@ def airline():
           f'minutes {counted} against {branch_minutes(one)}')
 
 
+# prog run, with prefix in front, and the line it says once it's ready:
+# the Popen, whether it said it, and the program's pid. With unshare in
+# front, the program is unshare's child, PID 1 in a namespace of its own.
+def started(prog, prefix, line, args=()):
+    p = subprocess.Popen(prefix + RUN + [prog, *args], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=ENV)
+    ready = select.select([p.stdout], [], [], DEADLINE)[0] != [] and p.stdout.readline() == line
+    target = p.pid
+    if prefix:
+        children = subprocess.run(['pgrep', '-P', str(p.pid)], capture_output=True, text=True).stdout.split()
+        target = int(children[0]) if children else p.pid
+    return p, ready, target
+
+
+# t/live/wait.slight run, and once it says it's waiting, sent SIGTERM:
+# whether it said so, and its exit status as subprocess gives it (minus
+# the signal for one that died of it), or None if it didn't end.
+def terminated(prog, prefix):
+    p, ready, target = started(prog, prefix, b'waiting\n')
+    os.kill(target, signal.SIGTERM)
+    try:
+        return ready, p.wait(timeout=DEADLINE)
+    except subprocess.TimeoutExpired:
+        os.kill(target, signal.SIGKILL)
+        p.wait()
+        return ready, None
+
+
+def signals():
+    prog = build('wait', 't/live/wait.slight')
+    ready, status = terminated(prog, [])
+    check('SIGTERM: the program dies of it', ready and status == -signal.SIGTERM, f'ready {ready}, status {status}')
+    unshare = ['unshare', '--pid', '--fork']
+    if not (shutil.which('unshare') and shutil.which('pgrep')) \
+            or subprocess.run(unshare + ['true'], capture_output=True).returncode != 0:
+        print('skip SIGTERM to PID 1: no PID namespace to be had here')
+        return
+    ready, status = terminated(prog, unshare)
+    check('SIGTERM to PID 1: the program ends, with status 143', ready and status == 143, f'ready {ready}, status {status}')
+
+    # The zombies among the program's children, from /proc, as the
+    # program's namespace has no /proc of its own here; looked at till
+    # there are none, or the deadline.
+    def zombies(pid):
+        found = []
+        for entry in os.listdir('/proc'):
+            try:
+                with open(f'/proc/{entry}/status') as f:
+                    fields = dict(line.split(':', 1) for line in f if ':' in line)
+            except (OSError, ValueError):
+                continue
+            if fields.get('PPid', '').strip() == str(pid) and fields.get('State', '').strip().startswith('Z'):
+                found.append(int(entry))
+        return found
+
+    p, ready, target = started(build('orphans', 't/live/orphans.slight'), unshare, b'left\n')
+    left = zombies(target)
+    for _ in range(DEADLINE * 10):
+        if not left:
+            break
+        select.select([], [], [], 0.1)
+        left = zombies(target)
+    os.kill(target, signal.SIGKILL)
+    p.wait()
+    check('PID 1 waits for what a command left running, so no zombie stays', ready and not left,
+          f'ready {ready}, zombies {left}')
+
+
+# A cgroup of the program's own under this one, limited to limit bytes:
+# its cgroup.procs, to write the program's pid to, and its directory, or
+# None if one can't be made here.
+def memory_cgroup(limit):
+    try:
+        with open('/proc/self/cgroup') as f:
+            lines = [line.rstrip('\n').split(':', 2) for line in f]
+    except OSError:
+        return None
+    for _, controllers, path in lines:
+        if controllers == '':
+            parent, name = '/sys/fs/cgroup' + path.rstrip('/'), 'memory.max'
+        elif 'memory' in controllers.split(','):
+            parent, name = '/sys/fs/cgroup/memory' + path.rstrip('/'), 'memory.limit_in_bytes'
+        else:
+            continue
+        group = os.path.join(parent, f'slight-live-{TARGET}')
+        try:
+            os.makedirs(group, exist_ok=True)
+            with open(os.path.join(group, name), 'w') as f:
+                f.write(str(limit))
+            return os.path.join(group, 'cgroup.procs'), group
+        except OSError:
+            try:
+                os.rmdir(group)
+            except OSError:
+                pass
+    return None
+
+
+def memory_limit():
+    group = memory_cgroup(256 << 20)
+    if not group:
+        print('skip memory limit: no cgroup to be had here')
+        return
+    procs, path = group
+    prog = build('runaway', 't/live/runaway.slight')
+    r = subprocess.run(['sh', '-c', 'echo $$ >"$0" && exec "$@"', procs, *RUN, prog],
+                       capture_output=True, env=ENV, timeout=DEADLINE)
+    os.rmdir(path)
+    check('in 256 MB, the cap is a quarter, and a runaway process faults on its own',
+          r.returncode == 0 and r.stdout == b'(ok 67108864)\n(error heap)\nsurvived\n',
+          f'exit {r.returncode}, said {r.stdout!r}')
+
+
+def timers():
+    prog = build('timers', 't/live/timers.slight')
+    what = "timers of an hour that nothing can come of don't hold up the program's end"
+    try:
+        r = subprocess.run(RUN + [prog], capture_output=True, env=ENV, timeout=DEADLINE)
+        check(what, r.returncode == 0 and r.stdout == b'(1 done)\n', f'exit {r.returncode}, said {r.stdout!r}')
+    except subprocess.TimeoutExpired:
+        check(what, False, f'still running after {DEADLINE} s')
+
+
+def run_limit():
+    prog = build('run-limit', 't/live/run-limit.slight')
+    what = 'a command still running at its limit is killed, and gives what it printed'
+    expected = b'(ok ((timeout 1000) "started\\n"))\n(ok "started\\n[stopped after 1 s, still running]")\ndone\n'
+    try:
+        r = subprocess.run(RUN + [prog], capture_output=True, env=ENV, timeout=DEADLINE)
+        check(what, r.returncode == 0 and r.stdout == expected, f'exit {r.returncode}, said {r.stdout!r}')
+    except subprocess.TimeoutExpired:
+        check(what, False, f'still running after {DEADLINE} s')
+
+
+# What a connection to the socket at path says first, or None.
+def hello(path):
+    try:
+        with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+            s.settimeout(DEADLINE)
+            s.connect(path)
+            return s.makefile('rb').readline()
+    except OSError:
+        return None
+
+
+def is_socket(path):
+    try:
+        return stat.S_ISSOCK(os.lstat(path).st_mode)
+    except OSError:
+        return False
+
+
+def sockets():
+    prog = build('listen', 't/live/listen.slight')
+    path = os.path.join(DIR, 'listen.sock')
+    if os.path.lexists(path):
+        os.unlink(path)
+    a, ready, target = started(prog, [], b'listening\n', [path])
+    check('a listener at a path answers there', ready and is_socket(path) and hello(path) == b'hello\n')
+    second = subprocess.run(RUN + [prog, path], capture_output=True, env=ENV, timeout=DEADLINE)
+    check("a second can't take the path from it, which it still answers at",
+          second.stdout == f'(error (eaddrinuse "{path}"))\n'.encode() and hello(path) == b'hello\n',
+          f'second said {second.stdout!r}')
+    os.kill(target, signal.SIGKILL)
+    a.wait()
+    check('SIGKILL leaves the socket behind', is_socket(path) and hello(path) is None)
+    b, ready, target = started(prog, [], b'listening\n', [path])
+    check('the next to listen there replaces it', ready and hello(path) == b'hello\n')
+    os.kill(target, signal.SIGTERM)
+    status = b.wait(timeout=DEADLINE)
+    check('SIGTERM ends a listener, which removes its socket', status == -signal.SIGTERM and not os.path.lexists(path),
+          f'status {status}')
+
+
 os.makedirs(DIR, exist_ok=True)
 keys()
 memory()
 chat()
 airline()
+signals()
+memory_limit()
+timers()
+run_limit()
+sockets()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

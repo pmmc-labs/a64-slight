@@ -81,7 +81,7 @@ Booleans are the reserved symbols `#true` and `#false`.
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
 | `(fork expr)` | Runs `expr` in a new process and returns its pid. |
-| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
+| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`, or a Unix socket, `(connect :unix path expr)` or `(connect :unix/listen path expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
 | `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
@@ -224,6 +224,8 @@ reply refs.
 | `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
 | `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
 | `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
+| `(connect :unix path expr)`, `(connect :unix/listen path expr)` | The same, at a Unix socket's path (D231). |
+| `(socket/peer c)` | The uid, gid and pid at the other end of the Unix connection `c`, or `()` (D235). |
 | `(connect :exec cmd expr)` | `fork`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
 | `(connect :system expr)` | `fork`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
 | `(connect dev expr)` | `fork`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
@@ -234,7 +236,8 @@ reply refs.
 | `(join/race pids)` | **Blocking** wait for the first of `pids` to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
 | `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has. Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
 | `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
-| `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns `()`. |
+| `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns the timer's number (D232). |
+| `(timer/cancel t)` | Takes back `after`'s timer `t` if it hasn't fired: `#true`, or `#false` (D232). |
 | `(sleep ms)` | **Blocking** wait for `ms` milliseconds, keeping the stack. Works anywhere. Returns `()`. |
 | `(clock/us)` | The microseconds since the program started, on the timers' clock (D208). |
 | `(raise reason)` | Ends the current process with `(:error reason)`. |
@@ -286,12 +289,16 @@ reply refs.
   and `spew` are written in slight with `connect` and `join`
   (`lib/fs.slight`), so they block only their caller too, and give
   Results: `(:ok lines)` and `(:ok ())`, or `(:error reason)` (D129).
-- **Timers** (D112, D114). `after` and `sleep` take an integer number of
-  milliseconds; a negative one counts as 0. Timers due at the same time
-  fire in the order they were set, at the scheduler's next decision (so
-  `(sleep 0)` lets the processes already waiting go first). A timer whose
-  process has ended by the time it's due is dropped then, as a message to
-  it would be.
+- **Timers** (D112, D114, D232). `after` and `sleep` take an integer
+  number of milliseconds; a negative one counts as 0. Timers due at the
+  same time fire in the order they were set, at the scheduler's next
+  decision (so `(sleep 0)` lets the processes already waiting go first).
+  `after` gives its timer's number, 1 up, and `timer/cancel` takes one
+  back by it, found in an index of the pending ones, kept as the heap
+  moves them. A timer whose process has ended is dropped when it's due,
+  as a message to it would be, or sooner: when nothing can run, those
+  next due whose process has ended are dropped, so the program neither
+  waits for them nor moves the clock to them.
 - **The clock** (D208). `clock/us` reads the timers' clock: the
   system's monotonic one, through `replay.c`, so a replay gives the
   same readings, or the virtual one, which moves only as the timers do.
@@ -403,7 +410,8 @@ names no program can write.
 - I/O: `tty/write`, `tty/screen/rows`, `tty/screen/cols` (the terminal's
   size, asked each time; 24 and 80 when stdout isn't a terminal), `pprint`
   (prints its argument and a newline, and returns `()`: D43;
-  symbols print without the colon, so `:ping` prints as `ping`),
+  symbols print without the colon, so `:ping` prints as `ping`; what it
+  writes is flushed whenever the runtime waits, D229),
   `sleep`. Files come through `connect`; `slurp` and `spew` are in
   `lib/fs.slight`.
 - functions: `apply` (`(apply f xs)`, at most 8 elements; a tail call in
@@ -493,12 +501,20 @@ says which way a message goes, so an id is unique only among one end's
 calls in flight, and either end can call the other. A connection is a
 process that owns the socket; a call from the other end runs in a
 process of its own, which the connection monitors, so a fault or a
-`raise` is a `fail` and `stop` is `kill`; a call from here waits in a
+`raise` is a `fail` and `stop` is `kill`, and which a watcher stops if
+the connection ends first, however it ends (D230); a call from here waits in a
 process of its own too, which the connection monitors, so a caller that
 ends stops its call. A handler has a name, a description and typed
 parameters, which `help` gives and the connection checks. No remote
-pids: another program is reached only by calls. Opt-in: `(@include
-:rpc)`.
+pids: another program is reached only by calls. For fleets (D228): a
+handler's `^$$` is its connection, so a hub calls a device over the
+connection the device made; `rpc/keep` keeps a connection up, dialing
+again with growing waits and running an `on-open` function on each new
+one; and `rpc/system` answers with what `:system` says. Where
+`"host:port"` goes, a path (a string with a `/` in it) is a Unix
+socket's, whose permissions say who may call (D231), and a handler can
+ask who called, `(rpc/peer)`, the kernel's word for it (D235). Opt-in:
+`(@include :rpc)`.
 
 ### Strings
 
@@ -674,7 +690,9 @@ function's entry, where it's collected. The **old generation** is a list
 of chunks too: what collections have kept, the messages taken, a fork's
 values, joined results, and big strings. All of a process's chunks
 together, in both, are capped, at 1 GB unless `SLIGHT_HEAP_MAX` says
-otherwise (D202), and past that the allocation faults (`:heap`). The
+otherwise (D202), or at a quarter of a smaller limit on the program's
+memory, its cgroup's, as in a container (D233), and past that the
+allocation faults (`:heap`). The
 cap costs nothing till it's used, since chunks come as they're needed;
 it keeps a runaway process from taking the program's memory, ending it
 instead, where its monitor sees it. The heap pointer and limit live in the process struct
@@ -877,7 +895,10 @@ processes that allocate and then wait turn out to hold too much).
   on its own, is waited for, for real (D185); then a key; then the clock
   moves to the next timer; only when nothing else can happen does it
   wait for real (D139). But before it moves to a lookup's timer, it
-  waits for real, up to 200 ms, for the sockets (D165).
+  waits for real, up to 200 ms, for the sockets (D165). It can't tell
+  that a reply is still crossing macOS's loopback, which delivers a
+  moment after a send, so a test mustn't have a timer pending while it
+  waits for one, unless the timer is meant to win (D236).
 - **`:keypress`** (`runtime/tty.c`) sends each key as `(key mods...)`
   (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style
@@ -954,7 +975,12 @@ processes that allocate and then wait turn out to hold too much).
   names are errno's (`:econnrefused`, `:econnreset`, `:epipe`,
   `:eaddrinuse`, ...), and `:enotfound` (Node's) for a host that can't be
   found, or `:etimedout` when no name server answers; SIGPIPE is ignored, so writing to a closed connection is
-  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. HTTP is a
+  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. A Unix
+  socket (`:unix`, `:unix/listen`, D231) is the same device at a path:
+  a listener makes the socket there, replacing only one that refuses a
+  connection, left by a program that was killed, and removes it when it
+  closes or the program ends, a signal included; the umask, and so the
+  path's permissions, say who may connect. HTTP is a
   slight library on top, `lib/http.slight` (D132, D140, D173, D174), whose
   client can also give a reply's body to its caller as it comes, in
   messages, as a device does (`http/stream`, D181, D182).
@@ -972,12 +998,16 @@ processes that allocate and then wait turn out to hold too much).
   closes its input once that's written; input it doesn't take goes
   nowhere. SIGCHLD's handler writes a byte to a pipe that `select()`
   waits on while any command runs, and then each is asked with
-  `waitpid(WNOHANG)`. Closing the device before the command has ended
+  `waitpid(WNOHANG)`; as PID 1, the pipe is waited on from the first
+  command on, and any other child that has ended, one a command left,
+  is waited for too, a command's own only looked at (`WNOWAIT`), as an
+  init would (D229). Closing the device before the command has ended
   (`disconnect`, or the owner ending) kills its group with SIGKILL and
   waits for it; so does the program's end, however it ends (`atexit`,
-  and handlers for SIGINT, SIGTERM and SIGHUP). One that can't be
-  started ends the owner with `(:error (:enoent "ls"))` and the like. A
-  command counts as something that can still happen while there's
+  and handlers for SIGINT, SIGTERM and SIGHUP, set at the start, which
+  then die of the signal, or as PID 1 exit with 128 and it, D227). One
+  that can't be started ends the owner with `(:error (:enoent "ls"))`
+  and the like. A command counts as something that can still happen while there's
   something to wait for: output its owner waits for, input to write, or
   its end once its output has ended.
 - **`:system` is a device too** (D171). `(connect :system expr)`; its

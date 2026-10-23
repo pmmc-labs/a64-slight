@@ -1,0 +1,14 @@
+; t/live.py's timers (D232): on the real clock, timers of an hour that
+; nothing can come of don't keep the program running: a sleeper's, once
+; it's killed (as http/request-within's is, once the reply has come); one
+; sent to a process that has ended; one taken back; and ask-within's,
+; once it's answered.
+
+(@include :ds)
+
+(let s (fork (sleep 3600000)))
+(kill s)
+(after 3600000 s :late)
+(timer/cancel (after 3600000 $$ :never))
+(let c (cell/new 1))
+(list (ask-within 3600000 c (list :get)) :done)

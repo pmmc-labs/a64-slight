@@ -219,14 +219,15 @@
 #define RT_SYS_TIMERS       18    // :timers        timers pending
 #define RT_SYS_STACKS       19    // :stacks        stacks held
 #define RT_SYS_CLOCK        20    // :clock         milliseconds since the program started
-#define RT_SYS_COUNT        21
+#define RT_SYS_HEAP_MAX     21    // :heap-max      the most a process's heap holds (D202, D233)
+#define RT_SYS_COUNT        22
 
 // A command's last message (connect :exec, process.c, D185) is (:exited p
 // status): status is the exit code, or (:signal name) if a signal ended
 // it, name being one of these (the same on macOS and Linux, where some of
 // their numbers aren't), or the number of any other. RT_EXEC_x is symbol
 // RT_SYM_EXEC + x.
-#define RT_SYM_EXEC        125    // RT_SYM_SYSTEM + RT_SYS_COUNT
+#define RT_SYM_EXEC        126    // RT_SYM_SYSTEM + RT_SYS_COUNT
 #define RT_EXEC_EXITED       0    // :exited
 #define RT_EXEC_SIGNAL       1    // :signal
 #define RT_EXEC_HUP          2    // :hup           the signals' names, without SIG
@@ -246,12 +247,22 @@
 #define RT_EXEC_TERM        16    // :term
 #define RT_EXEC_COUNT       17
 
+// Who's at the other end of a Unix connection (socket/peer, process.c,
+// D235): ((:uid u) (:gid g) (:pid p)), :pid being RT_SYS_PID's. RT_PEER_x
+// is symbol RT_SYM_PEER + x.
+#define RT_SYM_PEER        143    // RT_SYM_EXEC + RT_EXEC_COUNT
+#define RT_PEER_UID          0    // :uid
+#define RT_PEER_GID          1    // :gid
+#define RT_PEER_COUNT        2
+
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it
 #define RT_FS_APPEND         2    // creating it
 #define RT_TCP_CONNECT       0    // to "host:port"
 #define RT_TCP_LISTEN        1    // on a port (0 for one the system picks), or "host:port"
+#define RT_UNIX_CONNECT      2    // to the Unix socket at a path (D231)
+#define RT_UNIX_LISTEN       3    // at a path
 
 // What rt_compare is asked.
 #define RT_CMP_EQ            0
@@ -480,7 +491,8 @@ rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, c
 
 // Sockets (process.c). rt_connect_tcp forks, and connects to "host:port"
 // (RT_TCP_CONNECT) or listens on a port, or at "host:port" (RT_TCP_LISTEN),
-// on a device the new process owns. rt_connect_device forks, and hands the new process
+// or connects to or listens at a Unix socket's path (RT_UNIX_CONNECT,
+// RT_UNIX_LISTEN), on a device the new process owns. rt_connect_device forks, and hands the new process
 // the device dev.
 rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                           rt_value_t where, uint64_t mode) RT_ASM(rt_connect_tcp);
@@ -493,6 +505,10 @@ rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *value
 rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                            rt_value_t cmd) RT_ASM(rt_connect_exec);
 rt_value_t rt_disconnect(rt_value_t pid, const char *site) RT_ASM(rt_disconnect);
+
+// (socket/peer c): who's at the other end of the Unix connection c, as
+// ((:uid u) (:gid g) (:pid p)), or () for any other pid (D235).
+rt_value_t rt_socket_peer(rt_value_t c, const char *site) RT_ASM(rt_socket_peer);
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
 rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
 void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_letter);
@@ -511,10 +527,12 @@ rt_value_t rt_kill(rt_value_t pid, const char *site) RT_ASM(rt_kill);
 __attribute__((noreturn))
 rt_value_t rt_raise(rt_value_t reason, const char *site) RT_ASM(rt_raise);
 
-// Timers (process.c). rt_after sends msg to pid in ms milliseconds;
-// rt_sleep waits that long, keeping the stack. A negative ms counts as 0.
-// Each returns ().
+// Timers (process.c). rt_after sends msg to pid in ms milliseconds, and
+// returns the timer's number; rt_timer_cancel takes one back by its
+// number, RT_TRUE if it hadn't fired (D232); rt_sleep waits that long,
+// keeping the stack, and returns (). A negative ms counts as 0.
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_after);
+rt_value_t rt_timer_cancel(rt_value_t t, const char *site) RT_ASM(rt_timer_cancel);
 rt_value_t rt_sleep(rt_value_t ms, const char *site) RT_ASM(rt_sleep);
 
 // (clock/us): the microseconds since the program started, on the clock

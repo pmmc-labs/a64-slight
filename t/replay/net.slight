@@ -1,6 +1,7 @@
 ; A server and a client in one program, over TCP, the client finding the
-; server by a name in the hosts file. t/replay.sh records a run and
-; replays it, with no hosts file and no sockets.
+; server by a name in the hosts file; then the same over a Unix socket at
+; the path in @ARGV (D231), whose peer is asked (D235). t/replay.sh
+; records a run and replays it, with no hosts file and no sockets.
 
 (defun echo ()
     (recv
@@ -28,3 +29,8 @@
 (let port (recv ((:port p) p)))
 (pprint (join (connect :tcp (str "echo.test:" port) (client (list "one" "two" "three") ()))))
 (kill l)
+(let u (connect :unix/listen (car @ARGV) (server me)))
+(let path (recv ((:port p) p)))
+(pprint (join (connect :unix path (client (list "four" "five") ()))))
+(pprint (join (connect :unix path (recv ((:open c) (let who (socket/peer c)) (disconnect c) who)))))
+(kill u)

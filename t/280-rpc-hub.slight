@@ -1,0 +1,65 @@
+; A hub that calls the devices that connect to it (D228), with nothing
+; but what lib/rpc.slight has: a device calls register, whose handler
+; hands a registry ^$$, the connection the call came on, which rpc/call
+; takes; the registry monitors each, so a device that hangs up is let go.
+; Hub, registry and devices in one program, over TCP on 127.0.0.1.
+
+(@include :rpc)
+
+; (name conn) for each device, and told, who hears (:gone name) when one
+; hangs up.
+(defun registry (devices told)
+    (recv
+        ((:add name conn)
+            (monitor conn)
+            (registry (cons (list name conn) devices) told))
+        ((:list to)
+            (send to (list :devices (sort (lambda (a b) (str/< (car a) (car b))) devices)))
+            (registry devices told))
+        ((:exit conn _)
+            (match (find (lambda (d) (eq? (cadr d) conn)) devices)
+                (()          (registry devices told))
+                ((name _)
+                    (send told (list :gone name))
+                    (registry (remove (lambda (d) (eq? (cadr d) conn)) devices) told))))))
+
+(defun hub-handlers (reg)
+    (list
+        (rpc/handler "register" "Says who a device is." (list (list "name" :string "Its name"))
+            (lambda (name) (send reg (list :add name ^$$)) :registered))))
+
+; A device: connects, offering read, and registers; gives its connection.
+(defun device (port name reading)
+    (let reader (rpc/handler "read" "The temperature here." () (lambda () reading)))
+    (match (rpc/connect (str "127.0.0.1:" port) (list reader))
+        ((:ok conn)
+            (rpc/call conn :register (list name))
+            conn)))
+
+; The registry's devices, asked from a process of its own, since a
+; function that waits in recv can't give a value back.
+(defun devices-of (reg)
+    (match (join (fork (listing reg)))
+        ((:ok ds) ds)))
+
+(defun listing (reg)
+    (send reg (list :list $$))
+    (recv ((:devices ds) ds)))
+
+(defun main (l reg)
+    (recv
+        ((:listening port)
+            (let conns (map (lambda (d) (device port (car d) (cadr d))) (list (list "b" 19) (list "a" 21) (list "c" 23))))
+            (let ds (devices-of reg))
+            (pprint (map (lambda (d) (list (car d) (rpc/call (cadr d) :read ()))) ds))
+            (rpc/close (car conns))
+            (recv ((:gone name) (pprint (list :gone name))))
+            (pprint (map car (devices-of reg)))
+            (pprint (rpc/call (cadr (find (lambda (d) (eq? (car d) "b")) ds)) :read ()))
+            (map rpc/close (cdr conns))
+            (kill l)
+            :done)))
+
+(let me $$)
+(let reg (fork (registry () me)))
+(main (rpc/serve "127.0.0.1:0" (hub-handlers reg)) reg)

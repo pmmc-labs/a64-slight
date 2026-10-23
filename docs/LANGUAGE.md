@@ -17,7 +17,9 @@ below point there).
     ./hello
 
 `slightc` compiles for AArch64 unless given `--target x86_64`. Several
-files can be given, and together they're one program, read in order.
+files can be given, and together they're one program, read in order. On
+Linux the program is a static binary, which runs on any Linux of its
+machine's kind, in an empty container (`FROM scratch`) too (D227).
 
 A program is a sequence of top-level forms:
 
@@ -65,6 +67,20 @@ These also go to stderr, as they happen:
   (`raise` or `kill`).
 - `dead letter: message (recv at prog.slight:9:5)`: a message that no
   clause of a `recv` matched (Processes, below).
+
+SIGINT, SIGTERM and SIGHUP end the program at once, as they end most
+programs, killing its commands (`:exec`) and giving back a terminal in
+raw mode. As PID 1, a container's first process, which the system lets
+ignore a signal it hasn't asked for, they still end it, with status 128
+and the signal: 143 for SIGTERM, which `docker stop` sends (D227). As
+PID 1 the program also waits for whatever its commands leave running
+when it ends, as an init does, so no zombie stays (D229).
+
+What `pprint` writes goes out whenever the program has nothing to run
+and waits (for a message, a timer, a socket, a key), and when it ends;
+`tty/write` writes at once. So a log read through a pipe, as a
+container's is, has a program's output as soon as it waits, and a
+program stopped while it waits has lost none of it (D229).
 
 A compile error is `prog.slight:line:col: message`, and `slightc` exits
 1 without writing a program.
@@ -694,14 +710,32 @@ or `monitor` still gets it.
 ### Time
 
 - `(after ms pid msg)` sends `msg` to `pid` once `ms` milliseconds have
-  passed. `msg` is copied when `after` is called. Returns `()`.
+  passed. `msg` is copied when `after` is called. Returns the timer's
+  number, an integer: 1 for the program's first, and one more for each
+  after it.
+- `(timer/cancel t)` takes back `after`'s timer `t`, its number, if it
+  hasn't fired: its message never comes, and it no longer keeps the
+  program running. Gives `#true` if it took it back, or `#false` if it
+  had fired already (its message may be in the mailbox, or taken), had
+  been taken back, or is no timer's number. Any process can take a
+  timer back (D232).
 - `(sleep ms)` blocks the calling process, and only that one, for `ms`
   milliseconds. Returns `()`.
 
 Both take an integer, and a negative one counts as 0. Timers due at the
 same time fire in the order they were set. A pending timer keeps the
-program running, and one for a process that has ended is dropped when
-it's due.
+program running, but not one for a process that has ended, which is
+dropped (D232): a sleeper that's killed, or a timeout sent to a process
+that has gone, doesn't hold up the program's end.
+
+    (let t (after 5000 $$ :timeout))
+    (send worker (list :job $$))
+    (recv
+        ((:done v)  (timer/cancel t) v)
+        (:timeout   (kill worker) :timed-out))
+
+`timer/cancel` giving `#false` there would mean the `:timeout` came
+first, and is still to be taken.
 
 - `(clock/us)`: the microseconds since the program started, an integer,
   on the clock the timers go by. It's for timing a part of a program:
@@ -731,7 +765,13 @@ and other orders").
 Each process's heap holds up to 1 GB, unless `SLIGHT_HEAP_MAX` in the
 program's environment says otherwise (a number of bytes, or with `K`,
 `M` or `G` after it, and at least `1M`); past that, an allocation faults
-(`:heap`), and just that process ends. It's collected when a receive function asks
+(`:heap`), and just that process ends. On Linux, when the program's
+memory is limited to less than 4 GB, as in a container (`docker run
+--memory`, the cgroup's limit), the cap is a quarter of the limit
+instead (D233): a process that grows without end then holds about half
+the limit when it faults, as its last collection copies, so it ends on
+its own and the kernel doesn't kill the program. That caps each
+process, not all of them together. It's collected when a receive function asks
 for its next message, or at the entry of the next function called
 (D166), in two generations (D200): what's new is allocated in a nursery
 (from 4 KB, growing to 1 MB), and once that's full, what's still
@@ -925,6 +965,40 @@ sockets keep the program running, and so does a host being looked up.
 
     (connect :tcp/listen 7000 (server))
 
+A Unix socket, at a path on this machine, is the same but for where it
+is (D231):
+
+    (connect :unix "/run/app/ctl.sock" expr)
+    (connect :unix/listen "/run/app/ctl.sock" expr)
+
+A connection reads and writes as a TCP one does, and a listener sends
+`(:open l path)`, then `(:accept l conn)` for each connection, whose
+errors name the path. Listening makes the socket, as a file at the
+path, and removes it when the listener closes, and when the program
+ends, however it ends, SIGTERM included. If something is there already,
+listening is `:eaddrinuse`, unless it's a socket that refuses a
+connection: one left by a program that was killed with SIGKILL, or
+crashed, which is replaced. Connecting needs write permission on the
+socket, which the program's umask sets: with the usual one, 022, only
+its owner (and root) can connect, so the path's permissions say who
+may call a program there. A path with nothing there is `:enoent`, and
+one too long for a socket (more than 103 bytes on macOS, 107 on Linux)
+`:enametoolong`.
+
+`(socket/peer c)` says who's at the other end of the Unix connection
+`c`, either end of it: `((:uid u) (:gid g) (:pid p))`, as the kernel
+had them when it connected, which a program can trust as it can't
+trust what the other end says of itself (D235). For any other pid, a
+TCP connection or a process, it's `()`; anything that isn't a pid
+faults. On macOS the pid can be had only while the other end is still
+connected, and is 0 after; the uid and gid stay (D236).
+
+In a container, a socket in a directory shared with the host is how a
+program on the host reaches one inside without a port: `docker run -v
+/run/app:/run/app`, and `--user` with the host user's ids, so that the
+socket is theirs. `docker stop` removes it, and after `docker kill` the
+next start replaces it.
+
 HTTP is built on these, in `lib/http.slight` (Libraries, below). A
 request's head comes as lines up to a blank one, and its body as a count,
 which the reader asks for while it handles that blank line, so none of
@@ -1055,7 +1129,8 @@ which `lookup` reads; more keys may come. A process's:
 The runtime's: `(:processes n)` that haven't ended; `(:pids n)` made,
 processes and devices, ended or not; `(:ready n)` in the run queue;
 `(:timers n)` pending; `(:devices n)` open; `(:heap bytes)` in use by
-all the processes; `(:stacks n)` held; `(:clock ms)` since the program
+all the processes; `(:heap-max bytes)`, the most one process's heap
+holds (D233); `(:stacks n)` held; `(:clock ms)` since the program
 started; and `(:reductions n)`, made by every process, ended or not.
 
 A timer's message to the device is answered when it's due, so this
@@ -1741,11 +1816,12 @@ waits for TLS (step 12c).
   `(:error reason)`. A reason is the device's, such as `(:econnrefused
   "127.0.0.1:1")`, or one of `(:bad-http what)` for a reply that isn't
   HTTP, `(:bad-url url)`, `:no-tls` for an `https` URL, and `:closed` for
-  a connection that closed before its reply.
+  a connection that closed before its reply. They wait as long as the
+  reply takes (D236).
 - `(http/request-within ms method url headers body)` is `http/request`
-  with `(:error :timeout)` if no reply comes in `ms` milliseconds. Its
-  timer keeps the program running till it's due, as `ask-within`'s does,
-  so `http/request` is the one to use unless a timeout is wanted.
+  with `(:error :timeout)` if the reply hasn't all come in `ms`
+  milliseconds. Its timer doesn't hold up the program's end once the
+  reply has come (D232).
 - What a server refuses: a start line that isn't HTTP is a 400, a head
   over 64 KB a 431, and a body over 8 MB a 413, which is answered before
   the body is read. Chunked bodies are read both ways. A reply with no
@@ -1935,8 +2011,11 @@ argument it needs, or with one that isn't a string.
   as it was, its last newline included. `approve` is shown the change,
   `old`'s lines after `- ` and `new`'s after `+ `.
 - `(tools/run approve)`: `run(command)`, a shell command (`sh -c`), run
-  to its end, and what it printed and its exit status. `approve` is shown
-  `run: command`.
+  to its end, and what it printed and its exit status; one still running
+  after 2 minutes is killed, and the model gets what it printed and
+  `[stopped after 120 s, still running]` (D234). `(tools/run-within ms
+  approve)` sets another limit. The tool's description tells the model
+  its limit. `approve` is shown `run: command`.
 - `(tools/fetch approve)`: `fetch(url)`, an `http://` or `https://` URL
   (anything else raises), with curl, for at most 20 seconds and 5 MB.
   `approve` is shown `fetch url`, every time, since a URL can carry
@@ -2018,6 +2097,11 @@ else.
   it can't be started, such as `(:error (:enoent "ls"))`. There's no time
   limit: a command that doesn't end keeps it waiting. If the caller ends
   first, killed, say, the command is killed too (D193).
+- `(exec/run-within ms cmd)` is `exec/run`, but a command still running
+  after `ms` milliseconds is killed, its process group with it, and its
+  status is `(:timeout ms)`, its output what it printed till then (D234).
+  On the virtual clock, time stands still while a command runs (D185),
+  so there it has no limit.
 
 ### (@include :rpc)
 
@@ -2049,22 +2133,30 @@ socket. Either end can call the other, whichever connected.
   own, so calls run at once. What `f` gives is the answer; if it raises
   or faults, the caller is told why. An answer that isn't data (a pid, a
   function) faults the call.
+- `(rpc/peer)` says who called, from a handler: `((:uid u) (:gid g)
+  (:pid p))` for a caller at the other end of a Unix socket, as
+  `socket/peer` gives it, or `()` over TCP or a command (D235). Only
+  from the call's own process, as `rpc/next`.
 - `(rpc/next v)` sends `v` to the caller at once, from a handler that
   streams; its answer comes after its values. Only from the call's own
   process, whose parent (`^$$`) is the connection: so a handler calls its
   caller back with `(rpc/call ^$$ name args)`.
 - `(rpc/serve where handlers)` listens at `where`, a port or
-  `"host:port"`, and gives the listener's pid, which `kill` stops. The
-  caller is sent `(:listening port)`, `port` being the one it got. Each
-  connection gets a process of its own, whose other end can call
-  `handlers`.
-- `(rpc/connect "host:port" handlers)` connects, and once it's open
-  gives `(:ok conn)`; or `(:error reason)`, the socket's, such as
-  `(:econnrefused "localhost:7317")`. The other end can call `handlers`.
+  `"host:port"`, or a Unix socket's path, and gives the listener's pid,
+  which `kill` stops. The caller is sent `(:listening at)`, `at` being
+  the port it got, or the path. Each connection gets a process of its
+  own, whose other end can call `handlers`. A path is any string with a
+  `/` in it, so one here is `"./ctl.sock"`; that holds wherever `rpc`
+  takes `"host:port"` (D231).
+- `(rpc/connect where handlers)` connects to `"host:port"` or a path,
+  and once it's open gives `(:ok conn)`; or `(:error reason)`, the
+  socket's, such as `(:econnrefused "localhost:7317")`. The other end
+  can call `handlers`.
 - `(rpc/exec cmd handlers)` is `rpc/connect` over a command's input and
   output, `cmd` as `:exec` takes it: ssh, say, to a machine whose
   program listens at `127.0.0.1`, `(list "ssh" "-q" "host" "nc"
-  "127.0.0.1" "7317")`. Its stderr comes with its stdout, so it mustn't
+  "127.0.0.1" "7317")`, or at a path, `(list "ssh" "-q" "host" "nc" "-U"
+  "/run/app/ctl.sock")`. Its stderr comes with its stdout, so it mustn't
   write anything else there.
 - `(rpc/call conn name args)` calls `name`, a string or a symbol, on the
   other end with the list `args`, and waits for the answer: `(:ok v)`,
@@ -2079,7 +2171,41 @@ socket. Either end can call the other, whichever connected.
   whose caller ends, `rpc/call`'s included, is stopped the same way.
 - `(rpc/close conn)` closes the connection: calls in flight from here
   fail with `:disconnected`, and those from the other end are stopped.
-  The other end hanging up does the same.
+  The other end hanging up does the same; and so does the connection
+  ending with an error, such as a reset, but the calls from here fail
+  with that error (D230).
+- `(rpc/keep where handlers on-open)` keeps a connection up
+  (D228). It gives a keeper's pid, `k`, at once, which `rpc/call`,
+  `rpc/stream` and `rpc/close` take as they take a connection. It dials,
+  and when the connection drops, or can't be made, dials again after
+  100 ms, then twice as long each time, up to 10 s, and from 100 ms again
+  once one opens. While it's down, a call fails at once with
+  `:disconnected`; a call doesn't wait for it to come back. Each time a
+  connection opens, `(on-open conn)` runs in a process of its own, `conn`
+  being that connection: to say who this end is, say. `(rpc/close k)`
+  closes the connection and stops the keeping; if the keeper was waiting
+  to dial again, that wait's timer keeps the program running till it's
+  due.
+- `(rpc/system)` is a handler, `system`, that answers with what the
+  `:system` device says (under Devices): `((runtime info) (processes
+  (info ...)))`, both of one moment, a pid in them as its printed form,
+  `"#<pid 3>"`, so that it can go as data. A program offers it if it
+  wants to be looked into from outside: `(call 1 system)` at `nc`.
+
+A program that serves can call whoever connects to it, over the
+connection they made, so a device behind a firewall can still be called:
+inside a handler, `^$$` is the connection the call came on, which
+`rpc/call` takes. A hub keeps its devices in a registry, a process of
+its own, which `monitor`s each connection, so one that hangs up is let
+go:
+
+    (rpc/handler "register" "Says who a device is." (list (list "name" :string "Its name"))
+        (lambda (name) (send registry (list :add name ^$$)) :registered))
+
+and a device keeps its connection up and registers each time it opens:
+
+    (rpc/keep "hub.example:7317" (list reader)
+        (lambda (conn) (rpc/call conn :register (list "kitchen"))))
 
 The reasons a call fails, besides a handler's own: `(:no-such-call
 name)`; `(:arity name n)`, `n` being how many arguments it takes;
@@ -2113,6 +2239,7 @@ flight is let be, since one can cross a `stop`. A person at `nc`:
     (done 2 "ok   000-int ...")
 
 A datum that can't be read, such as a stray `)`, ends the connection
-(`:bad-sexp`). There's no flow control: a stream's values are sent as
-fast as they're made. Nor any authentication: listen at `127.0.0.1`, and
-reach it from elsewhere over ssh.
+(`:bad-sexp`), and with it the calls on it. There's no flow control: a
+stream's values are sent as fast as they're made. Nor any
+authentication: listen at `127.0.0.1`, or better at a path, whose
+permissions say who may connect, and reach it from elsewhere over ssh.

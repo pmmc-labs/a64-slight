@@ -20,7 +20,8 @@
 ;
 ; Errors are (:error reason): what the device gave (D136), (:bad-http what)
 ; for a reply that isn't HTTP, (:bad-url url), :no-tls (HTTPS waits for 12c),
-; :closed for a connection that closed before its reply, or :timeout.
+; :closed for a connection that closed before its reply, or :timeout, from
+; http/request-within. http/request waits as long as it takes (D236).
 ;
 ; http/stream gives a reply's body to its caller as it comes, in messages, as
 ; a device does (D181):
@@ -41,8 +42,8 @@
         ((:error reason) (list :error reason))))
 
 ; As http/request, but gives (:error :timeout) if no answer comes within ms
-; milliseconds. The timer stays pending until then and keeps the program
-; running, as ask-within's does (D173).
+; milliseconds. Its timer is a sleeper's, killed once the reply has come, so
+; it doesn't hold up the program's end (D232).
 (defun http/request-within (ms method url headers body)
     (let ctx (list :client (http/method-name method)))
     (match (http/parse-url url)

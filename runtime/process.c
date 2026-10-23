@@ -1122,9 +1122,11 @@ void rt_yield(void) {
 // after and sleep set timers, kept in a binary heap in the order they're
 // due, and then in the order they were set. after's timer holds its
 // message, copied when it was set, as send's would be; sleep's wakes the
-// sleeper. A timer whose process has ended by the time it's due is dropped
-// then, as a message to it would be (D92); until then it's something that
-// can still happen, so the program waits for it.
+// sleeper. after's timers are numbered, 1 up, and timer/cancel takes one
+// back by its number, found in ids (D232). A timer whose process has
+// ended is dropped when it's due, as a message to it would be (D92), or
+// sooner, when nothing can run and it's next: nothing can come of it, so
+// the program doesn't wait for it, and the clock doesn't move to it.
 //
 // The clock is the system's monotonic one, in nanoseconds, read through
 // replay.c like everything else from outside (D170); or, with
@@ -1134,12 +1136,21 @@ void rt_yield(void) {
 
 typedef struct {                        // (timer_t is POSIX's)
     uint64_t    due, seq;
+    uint64_t    id;                     // after's number, or 0
     rt_value_t  pid;
     rt_msg_t   *msg;                    // after's message, or NULL: sleep
 } alarm_t;
 
 static alarm_t  *alarms;                // alarms[0] is the next due
 static uint64_t  nalarms, alarms_cap, alarms_set;
+static uint64_t  afters;                // after's timers numbered so far
+
+// Where each of after's pending timers is in alarms, by its number:
+// open addressing, a slot of number 0 empty, and a slot emptied by
+// moving back the ones after it that belong before it, so none is ever
+// marked deleted. Updated as the heap moves them.
+static uint64_t *ids, *places;
+static uint64_t  ids_cap, nids;         // ids_cap a power of two, or 0
 static int       virtual_clock;
 static uint64_t  virtual_now;
 static uint64_t  started;               // when the program started, for :system
@@ -1161,28 +1172,78 @@ static int before(const alarm_t *a, const alarm_t *b) {
     return a->due < b->due || (a->due == b->due && a->seq < b->seq);
 }
 
-static void set_alarm(uint64_t due, rt_value_t pid, rt_msg_t *msg) {
+static uint64_t id_home(uint64_t id) {
+    return (id * 0x9E3779B97F4A7C15u) & (ids_cap - 1);
+}
+
+// id's slot in ids, or the empty one where it would go.
+static uint64_t id_slot(uint64_t id) {
+    uint64_t i = id_home(id);
+    while (ids[i] && ids[i] != id) i = (i + 1) & (ids_cap - 1);
+    return i;
+}
+
+static void id_add(uint64_t id) {
+    if ((nids + 1) * 2 > ids_cap) {
+        uint64_t *old_ids = ids, *old_places = places, old_cap = ids_cap;
+        ids_cap = ids_cap ? ids_cap * 2 : 64;
+        ids     = rt_must(calloc(ids_cap, sizeof *ids));
+        places  = rt_must(malloc(ids_cap * sizeof *places));
+        for (uint64_t i = 0; i < old_cap; i++) {
+            if (!old_ids[i]) continue;
+            uint64_t j = id_slot(old_ids[i]);
+            ids[j]    = old_ids[i];
+            places[j] = old_places[i];
+        }
+        free(old_ids);
+        free(old_places);
+    }
+    ids[id_slot(id)] = id;
+    nids++;
+}
+
+static void id_drop(uint64_t id) {
+    uint64_t mask = ids_cap - 1, i = id_slot(id);
+    for (uint64_t j = (i + 1) & mask; ids[j]; j = (j + 1) & mask) {
+        if (((j - id_home(ids[j])) & mask) < ((j - i) & mask)) continue;   // its home is after i: it stays
+        ids[i]    = ids[j];
+        places[i] = places[j];
+        i         = j;
+    }
+    ids[i] = 0;
+    nids--;
+}
+
+// alarms[i] = a, and where it is noted if it's after's.
+static void put(uint64_t i, alarm_t a) {
+    alarms[i] = a;
+    if (a.id) places[id_slot(a.id)] = i;
+}
+
+static void set_alarm(uint64_t due, rt_value_t pid, rt_msg_t *msg, uint64_t id) {
     if (nalarms == alarms_cap) {
         alarms_cap = alarms_cap ? alarms_cap * 2 : 64;
         alarms     = rt_must(realloc(alarms, alarms_cap * sizeof *alarms));
     }
-    alarm_t  a = { due, alarms_set++, pid, msg };
+    if (id) id_add(id);
+    alarm_t  a = { due, alarms_set++, id, pid, msg };
     uint64_t i = nalarms++;
-    for (; i > 0 && before(&a, &alarms[(i - 1) / 2]); i = (i - 1) / 2) alarms[i] = alarms[(i - 1) / 2];
-    alarms[i] = a;
+    for (; i > 0 && before(&a, &alarms[(i - 1) / 2]); i = (i - 1) / 2) put(i, alarms[(i - 1) / 2]);
+    put(i, a);
 }
 
 // Takes alarms[i] out, the last one going in its place, up or down.
 static void remove_alarm(uint64_t i) {
+    if (alarms[i].id) id_drop(alarms[i].id);
     alarm_t last = alarms[--nalarms];
     if (i == nalarms) return;
-    for (; i > 0 && before(&last, &alarms[(i - 1) / 2]); i = (i - 1) / 2) alarms[i] = alarms[(i - 1) / 2];
+    for (; i > 0 && before(&last, &alarms[(i - 1) / 2]); i = (i - 1) / 2) put(i, alarms[(i - 1) / 2]);
     for (uint64_t c; (c = 2 * i + 1) < nalarms; i = c) {
         if (c + 1 < nalarms && before(&alarms[c + 1], &alarms[c])) c++;
         if (!before(&alarms[c], &last)) break;
-        alarms[i] = alarms[c];
+        put(i, alarms[c]);
     }
-    alarms[i] = last;
+    put(i, last);
 }
 
 static alarm_t next_alarm(void) {
@@ -1194,7 +1255,7 @@ static alarm_t next_alarm(void) {
 // A timer a device sets itself (a lookup's), unset when it's no longer
 // wanted, since a pending timer keeps the program running: its seq + 1.
 static uint64_t own_alarm(uint64_t due, rt_value_t pid) {
-    set_alarm(due, pid, NULL);
+    set_alarm(due, pid, NULL, 0);
     return alarms_set;
 }
 
@@ -1228,13 +1289,41 @@ static void ring(void) {
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) {
     uint64_t due = due_in(ms, site);
     entry(pid, site);
-    set_alarm(due, pid, new_msg(msg));
-    return RT_NIL;
+    set_alarm(due, pid, new_msg(msg), ++afters);
+    return rt_int((int64_t)afters);
+}
+
+rt_value_t rt_timer_cancel(rt_value_t t, const char *site) {
+    int64_t id = rt_need_int(t, site);
+    if (id <= 0 || !ids_cap || ids[id_slot((uint64_t)id)] != (uint64_t)id) return RT_FALSE;
+    uint64_t  i = places[id_slot((uint64_t)id)];
+    rt_msg_t *m = alarms[i].msg;
+    remove_alarm(i);
+    free_msg(m);
+    return RT_TRUE;
+}
+
+// Whether nothing can come of a: its process has ended, or its device
+// closed (D232).
+static int orphaned(const alarm_t *a) {
+    uint64_t at = a->pid >> RT_PID_SHIFT;
+    return !procs[at].proc && !procs[at].device;
+}
+
+// Drops the timers next due that nothing can come of, so that the
+// program neither waits for them nor moves the clock to them. Only from
+// the top of the heap, so it costs no search: one further down is
+// dropped when it comes to the top, or is due.
+static void drop_orphans(void) {
+    while (nalarms && orphaned(&alarms[0])) {
+        alarm_t a = next_alarm();
+        if (a.msg) free_msg(a.msg);
+    }
 }
 
 rt_value_t rt_sleep(rt_value_t ms, const char *site) {
     rt_proc_t *p = rt_current;
-    set_alarm(due_in(ms, site), p->pid, NULL);
+    set_alarm(due_in(ms, site), p->pid, NULL, 0);
     p->state = RT_SLEEPING;
     p->at    = (uintptr_t)__builtin_return_address(0);
     to_scheduler(p);                            // until ring wakes it
@@ -1372,6 +1461,8 @@ static void events(void) {
 // real, keys and time standing still meanwhile (D185); then a key, then
 // the clock moves; only when nothing else can happen does it wait for real.
 static int idle(void) {
+    fflush(stdout);                             // so a program stopped as it waits has lost none of it (D229)
+    drop_orphans();
     if (!listening() && !nalarms && !sockets_waiting()) return 0;
     if (virtual_clock) {
         int saw = wait_for(0);
@@ -1493,6 +1584,7 @@ typedef struct rt_device {
     rt_value_t        path;             // a file's path, a connection's "host:port", a command's name, as a
     uint64_t         *path_space;       // string in path_space (string_in), for (:error (name path)); or 0
     int64_t           port;             // a listener's, or the port a connection is to be made to
+    int               unix_sock;        // a Unix socket's, at path (D231)
     rt_lookup_t      *lookup;           // while a connection's host is looked up...
     uint64_t          alarm;            // ...the timer for its query (own_alarm)
     char             *buf;              // what's been read, but not yet sent...
@@ -1611,8 +1703,11 @@ static void end_command(rt_device_t *d);
 
 // Closes d's file descriptor. A socket is freed later (bury), since an
 // event in hand may still refer to it.
+static void forget_path(int fd);
+
 static void close_now(rt_device_t *d) {
     if (d->mode == DEV_EXEC) end_command(d);
+    if (d->mode == DEV_LISTEN && d->unix_sock) forget_path(d->fd);
     if (d->fd >= 0) rt_io_close(d->fd);
     if (d->lookup) {
         unset_alarm(&d->alarm);
@@ -1719,12 +1814,13 @@ static void tell_string(rt_device_t *d, uint64_t word, const char *bytes, size_t
     free(space);
 }
 
-// The device's first message: (:open f), or a listener's (:open l port).
+// The device's first message: (:open f), or a listener's (:open l port),
+// or (:open l path) at a Unix socket's.
 // :system's reads on too, so that one handed over in the middle of
 // sending its processes goes on to its new owner.
 static void tell_open(rt_device_t *d) {
     _Alignas(16) rt_value_t cell[2];
-    if (d->mode == DEV_LISTEN) tell_list(d, RT_DEV_OPEN, rt_cons_at(cell, rt_int(d->port), RT_NIL), 0);
+    if (d->mode == DEV_LISTEN) tell_list(d, RT_DEV_OPEN, rt_cons_at(cell, d->unix_sock ? d->path : rt_int(d->port), RT_NIL), 0);
     else                       tell(d, RT_DEV_OPEN, d->mode != RT_FS_WRITE && d->mode != RT_FS_APPEND);
 }
 
@@ -2100,7 +2196,7 @@ static int setup(int fd) {
 // Listens on port at addr (network order). where, "host:port", is what
 // the listener's errors name, or its port if where is NULL.
 static int tcp_listen(rt_proc_t *p, const char *site, uint32_t addr, int64_t port, const char *where, size_t len) {
-    int fd = rt_io_socket(SOCK_STREAM);
+    int fd = rt_io_socket(AF_INET, SOCK_STREAM);
     if (fd < 0) return errno;
     int got, err;
     if ((err = setup(fd)) != 0 || (err = rt_io_listen(fd, addr, (int)port, &got)) != 0) {
@@ -2120,7 +2216,7 @@ static int open_connection(uint32_t addr, int64_t port, int *fd) {
     a.sin_family      = AF_INET;
     a.sin_port        = htons((uint16_t)port);
     a.sin_addr.s_addr = addr;
-    int s = rt_io_socket(SOCK_STREAM), err = s < 0 ? errno : setup(s);
+    int s = rt_io_socket(AF_INET, SOCK_STREAM), err = s < 0 ? errno : setup(s);
     if (!err && rt_io_connect(s, (struct sockaddr *)&a, sizeof a) < 0 && errno != EINPROGRESS) err = errno;
     if (err && s >= 0) rt_io_close(s);
     *fd = err ? -1 : s;
@@ -2206,6 +2302,73 @@ static void lookup_timed_out(rt_device_t *d, uint64_t seq) {
     lookup_step(d, rt_lookup_ready(d->lookup, 1, &addr), addr);
 }
 
+// Unix sockets (D231): a connection reads and writes as a TCP one does,
+// and a listener at a path makes the socket there, replacing only one
+// that nothing accepts on, left by a program that has ended (replay.c).
+// The path is removed when the listener closes, and when the program
+// ends however it ends, a signal included; one left by SIGKILL is
+// replaced next time. paths holds each listener's, by its descriptor, for
+// on_end, which a signal runs, to find; none in a replay, which makes no
+// socket.
+static char *paths[FD_SETSIZE];
+
+static void unlink_paths(void) {
+    for (int fd = 0; fd < FD_SETSIZE; fd++) {
+        if (paths[fd]) unlink(paths[fd]);
+    }
+}
+
+static void forget_path(int fd) {
+    if (fd < 0 || !paths[fd]) return;
+    char *path = paths[fd];
+    paths[fd]  = NULL;
+    unlink(path);
+    free(path);
+}
+
+static int unix_listen(rt_proc_t *p, const char *site, const char *path, size_t len) {
+    static int ends;
+    int        fd = rt_io_socket(AF_UNIX, SOCK_STREAM), err;
+    if (fd < 0) return errno;
+    if ((err = rt_io_setup(fd, 0)) != 0 || (err = rt_io_listen_unix(fd, path)) != 0) {
+        rt_io_close(fd);
+        return err;
+    }
+    if (!rt_io_replaying()) {
+        paths[fd] = rt_must(strdup(path));
+        if (!ends++) atexit(unlink_paths);
+    }
+    rt_device_t *d = new_device(p, DEV_LISTEN, fd, site, path, len);
+    d->unix_sock = 1;
+    tell_open(d);
+    return 0;
+}
+
+// A Unix socket connects at once or not at all; its (:open c) still comes
+// from the event loop, as a TCP connection's does.
+static int unix_connect(rt_proc_t *p, const char *site, const char *path, size_t len) {
+    struct sockaddr_un a;
+    int                fd, err = rt_unix_address(&a, path);
+    if (err) return err;
+    if ((fd = rt_io_socket(AF_UNIX, SOCK_STREAM)) < 0) return errno;
+    if ((err = rt_io_setup(fd, 0)) == 0 && rt_io_connect(fd, (struct sockaddr *)&a, sizeof a) < 0 && errno != EINPROGRESS) err = errno;
+    if (err) {
+        rt_io_close(fd);
+        return err;
+    }
+    rt_device_t *d = new_device(p, DEV_TCP, fd, site, path, len);
+    d->connecting  = 1;
+    d->unix_sock   = 1;
+    return 0;
+}
+
+static int unix_at(rt_proc_t *p, const char *site, rt_value_t where, uint64_t mode) {
+    const char *path = rt_string_bytes(where);
+    size_t      len  = rt_string_len(where);
+    if (memchr(path, '\0', len)) return EINVAL;                 // :io-error, as a file's path (D130)
+    return mode == RT_UNIX_LISTEN ? unix_listen(p, site, path, len) : unix_connect(p, site, path, len);
+}
+
 rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                           rt_value_t where, uint64_t mode) {
     if (mode == RT_TCP_LISTEN && !rt_is_string(where)) {
@@ -2216,8 +2379,9 @@ rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, 
     }
     rt_value_t pid = rt_fork(code, n, values, site);
     rt_proc_t *p   = procs[pid >> RT_PID_SHIFT].proc;
-    int        err = mode == RT_TCP_LISTEN ? listen_at(p, site, where)
-                                           : tcp_connect(p, site, rt_string_bytes(where), rt_string_len(where));
+    int        err = mode == RT_TCP_LISTEN  ? listen_at(p, site, where)
+                   : mode == RT_TCP_CONNECT ? tcp_connect(p, site, rt_string_bytes(where), rt_string_len(where))
+                                            : unix_at(p, site, where, mode);
     if (err) {
         _Alignas(16) rt_value_t cells[4];
         end_other(p, io_reason(cells, err, where));
@@ -2246,6 +2410,25 @@ rt_value_t rt_disconnect(rt_value_t pid, const char *site) {
     return RT_NIL;
 }
 
+// The other end's credentials, as the kernel had them when it connected:
+// on this machine, a Unix socket's peer is a process with a uid that file
+// permissions were checked against, which is all a program needs to
+// decide whom it answers (D235).
+rt_value_t rt_socket_peer(rt_value_t c, const char *site) {
+    rt_device_t *d = entry(c, site)->device;
+    int64_t      who[3];
+    if (!d || !d->unix_sock || d->mode != DEV_TCP || d->fd < 0 || rt_io_peer(d->fd, who) != 0) return RT_NIL;
+    rt_value_t keys[3] = {
+        rt_symbol(RT_SYM_PEER + RT_PEER_UID), rt_symbol(RT_SYM_PEER + RT_PEER_GID), rt_symbol(RT_SYM_SYSTEM + RT_SYS_PID),
+    };
+    rt_value_t *cells = rt_alloc(9 * 2 * sizeof *cells, site), info = RT_NIL;
+    for (int i = 2; i >= 0; i--, cells += 6) {
+        rt_value_t pair = rt_cons_at(cells, keys[i], rt_cons_at(cells + 2, rt_int(who[i]), RT_NIL));
+        info = rt_cons_at(cells + 4, pair, info);
+    }
+    return info;
+}
+
 // A listener has connections to accept: each becomes a device of the
 // listener's owner, which hears (:accept l conn).
 static void accept_all(rt_device_t *l) {
@@ -2255,12 +2438,14 @@ static void accept_all(rt_device_t *l) {
         int  fd = rt_io_accept(l->fd, where, sizeof where);
         if (fd < 0 && errno == EINTR) continue;
         if (fd < 0) return;                     // none left, or none to be had for now
-        if (setup(fd) != 0) {
+        if (rt_io_setup(fd, !l->unix_sock) != 0) {
             rt_io_close(fd);
             continue;
         }
-        rt_device_t *c = new_device(owner, DEV_TCP, fd, l->site, where, strlen(where));
-        c->waiting = 1;
+        rt_device_t *c = l->unix_sock ? new_device(owner, DEV_TCP, fd, l->site, rt_string_bytes(l->path), rt_string_len(l->path))
+                                      : new_device(owner, DEV_TCP, fd, l->site, where, strlen(where));
+        c->unix_sock = l->unix_sock;
+        c->waiting   = 1;
         _Alignas(16) rt_value_t cell[2];
         tell_list(l, RT_DEV_ACCEPT, rt_cons_at(cell, c->pid, RT_NIL), 0);
     }
@@ -2304,6 +2489,14 @@ static int sockets_waiting(void) {
 
 static int      child_pipe[2] = { -1, -1 };     // SIGCHLD writes a byte to it
 static uint64_t nchildren;                      // commands not yet waited for
+static int      is_init;                        // PID 1, as in a container: orphans are its (D229)
+
+// Whether SIGCHLD's pipe is waited on: while a command runs; and as PID 1,
+// once one has, since what a command left running is PID 1's to wait for
+// when it ends.
+static int watching_children(void) {
+    return child_pipe[0] >= 0 && (nchildren || is_init);
+}
 
 // The file descriptors select() waits on for d: to read, and to write (a
 // command's input).
@@ -2327,7 +2520,7 @@ static void socket_fds(fd_set *in, fd_set *out, int *max) {
         if (r && rfd > *max) *max = rfd;
         if (w && wfd > *max) *max = wfd;
     }
-    if (nchildren) {
+    if (watching_children()) {
         FD_SET(child_pipe[0], in);
         if (child_pipe[0] > *max) *max = child_pipe[0];
     }
@@ -2400,7 +2593,7 @@ static int socket_events(fd_set *in, fd_set *out) {
         ready     = rt_must(realloc(ready, ready_cap * sizeof *ready));
     }
     uint64_t n = 0;
-    int      ended = nchildren && FD_ISSET(child_pipe[0], in);
+    int      ended = watching_children() && FD_ISSET(child_pipe[0], in);
     for (rt_device_t *d = sockets; d; d = d->next_socket) {
         int rfd, wfd;
         fds_of(d, &rfd, &wfd);
@@ -2437,33 +2630,52 @@ static void kill_groups(void) {
     }
 }
 
+// The program's end by a signal: its commands killed, the terminal given
+// back, and the signal taken again, now as it would have been, so the
+// program dies of it. Unless it's PID 1, in a container, whose signals the
+// kernel ignores when they're left to their default action: then it exits
+// as a shell would say it died, 128 and the signal (D227).
 static void on_end(int sig) {
+    sigset_t s;
     kill_groups();
+    unlink_paths();
+    rt_tty_raw(0);
     signal(sig, SIG_DFL);
+    sigemptyset(&s);
+    sigaddset(&s, sig);
+    sigprocmask(SIG_UNBLOCK, &s, NULL);         // blocked while its handler runs
     raise(sig);
+    _exit(128 + sig);
 }
 
-// Before the first command: SIGCHLD's pipe, and the handlers, on a stack
-// of their own, since a process's may be nearly full. 0, or an errno. A
-// replay runs no command, so no signal comes.
-static int start_commands(void) {
+// At the start, so PID 1 can be stopped: SIGINT, SIGTERM and SIGHUP end
+// the program by on_end, on a stack of their own, since a process's may
+// be nearly full, which SIGCHLD's handler uses too.
+static void catch_ends(void) {
     static char      altstack[64 << 10];
     struct sigaction sa = { 0 }, old;
     int              ends[] = { SIGINT, SIGTERM, SIGHUP };
-    if (child_pipe[0] >= 0) return 0;
-    if (rt_io_pipe(child_pipe) < 0) return errno;
-    if (rt_io_replaying()) return 0;
-    stack_t ss = { .ss_sp = altstack, .ss_size = sizeof altstack };
+    stack_t          ss     = { .ss_sp = altstack, .ss_size = sizeof altstack };
     sigaltstack(&ss, NULL);
     sigemptyset(&sa.sa_mask);
-    sa.sa_handler = on_child;
-    sa.sa_flags   = SA_RESTART | SA_NOCLDSTOP | SA_ONSTACK;
-    sigaction(SIGCHLD, &sa, NULL);
     sa.sa_handler = on_end;
     sa.sa_flags   = SA_ONSTACK;
     for (int i = 0; i < 3; i++) {               // not one that's ignored, as nohup has SIGHUP
         if (sigaction(ends[i], NULL, &old) == 0 && old.sa_handler == SIG_DFL) sigaction(ends[i], &sa, NULL);
     }
+}
+
+// Before the first command: SIGCHLD's pipe and handler. 0, or an errno. A
+// replay runs no command, so no signal comes.
+static int start_commands(void) {
+    struct sigaction sa = { 0 };
+    if (child_pipe[0] >= 0) return 0;
+    if (rt_io_pipe(child_pipe) < 0) return errno;
+    if (rt_io_replaying()) return 0;
+    sigemptyset(&sa.sa_mask);
+    sa.sa_handler = on_child;
+    sa.sa_flags   = SA_RESTART | SA_NOCLDSTOP | SA_ONSTACK;
+    sigaction(SIGCHLD, &sa, NULL);
     atexit(kill_groups);
     return 0;
 }
@@ -2526,6 +2738,8 @@ static int exited(rt_device_t *d) {
     return 1;
 }
 
+static void reap_orphans(void);
+
 // SIGCHLD has come since select() last looked: sees which commands have
 // ended. One whose output has ended too, and whose owner is waiting,
 // sends its last message.
@@ -2540,6 +2754,23 @@ static void reap(void) {
         d->status = status;
         nchildren--;
         if (d->eof_sent && !d->sent) exited(d);
+    }
+    if (is_init) reap_orphans();
+}
+
+// As PID 1, what a command started and left running is this program's
+// once the command has ended, and stays a zombie when it ends unless the
+// program waits for it, as an init does (D229). Each that has ended is
+// waited for, but not a command's own, which is only looked at
+// (WNOWAIT): reap waits for that, as a replay has it.
+static void reap_orphans(void) {
+    for (;;) {
+        siginfo_t info = { 0 };
+        if (waitid(P_ALL, 0, &info, WEXITED | WNOHANG | WNOWAIT) != 0 || info.si_pid == 0) return;
+        for (rt_device_t *d = sockets; d; d = d->next_socket) {
+            if (d->mode == DEV_EXEC && d->child == info.si_pid) return;
+        }
+        waitpid(info.si_pid, NULL, 0);
     }
 }
 
@@ -2737,7 +2968,7 @@ static void tell_runtime(rt_device_t *d) {
         calls  += calls_of(p);
     }
     for (const rt_proc_t *p = ready_head; p; p = p->next_ready) ready++;
-    _Alignas(16) rt_value_t space[9 * 6 + 2], *at = space;
+    _Alignas(16) rt_value_t space[10 * 6 + 2], *at = space;
     rt_value_t fields[] = {
         field(&at, SYS(PROCESSES), rt_int((int64_t)live)),
         field(&at, SYS(PIDS), rt_int((int64_t)nprocs)),
@@ -2745,6 +2976,7 @@ static void tell_runtime(rt_device_t *d) {
         field(&at, SYS(TIMERS), rt_int((int64_t)nalarms)),
         field(&at, SYS(DEVICES), rt_int((int64_t)ndevices)),
         field(&at, RT_SYM_FAULTS - 1 + RT_FAULT_HEAP, rt_int((int64_t)heap)),
+        field(&at, SYS(HEAP_MAX), rt_int((int64_t)heap_max)),
         field(&at, SYS(STACKS), rt_int((int64_t)stacks)),
         field(&at, SYS(CLOCK), rt_int((int64_t)((now() - started) / 1000000))),
         field(&at, SYS(REDUCTIONS), rt_int((int64_t)calls)),
@@ -2886,9 +3118,66 @@ static size_t bytes_of(const char *s) {
     return n > (SIZE_MAX >> shift) ? 0 : (size_t)n << shift;
 }
 
+// A cgroup limit's bytes, read from file: v2's "max", v1's figure for no
+// limit (the most a page counter holds, near 2^63), or nothing there, is 0.
+static size_t limit_in(const char *file) {
+    FILE *f = fopen(file, "r");
+    char  line[32];
+    int   ok = f && fgets(line, sizeof line, f) && line[0] >= '0' && line[0] <= '9';
+    if (f) fclose(f);
+    unsigned long long n = ok ? strtoull(line, NULL, 10) : 0;
+    return n >= 1ull << 62 || n > SIZE_MAX ? 0 : (size_t)n;
+}
+
+// The memory this program may use, as its cgroup says (D233): the least
+// of the limits on its own cgroup and those above it, v2's memory.max or
+// v1's memory.limit_in_bytes, the path to each from /proc/self/cgroup;
+// or 0 if none is found (no limit, or not Linux). In a container that
+// has its own view of the cgroups, the path is / and the limit the
+// container's; one that hasn't keeps the host's path, which isn't there
+// to read, so the walk up comes to the container's own at the top.
+static size_t memory_limit(void) {
+    FILE  *f = fopen("/proc/self/cgroup", "r");
+    char   line[512], file[1024];
+    size_t least = 0;
+    while (f && fgets(line, sizeof line, f)) {
+        char *colon = strchr(line, ':'), *path = colon ? strchr(colon + 1, ':') : NULL;
+        if (!path) continue;
+        *path++ = '\0';
+        path[strcspn(path, "\n")] = '\0';
+        const char *controllers = colon + 1, *base, *name;
+        if (*controllers == '\0') {                           // v2: "0::/path"
+            base = "/sys/fs/cgroup";
+            name = "memory.max";
+        } else {                                                // v1: "4:memory:/path", the controllers by commas
+            size_t at = 0, len = strlen("memory");
+            while (controllers[at] && !(strncmp(controllers + at, "memory", len) == 0
+                                        && (controllers[at + len] == ',' || controllers[at + len] == '\0'))) {
+                at += strcspn(controllers + at, ",");
+                at += controllers[at] == ',';
+            }
+            if (!controllers[at]) continue;
+            base = "/sys/fs/cgroup/memory";
+            name = "memory.limit_in_bytes";
+        }
+        for (size_t len = strlen(path);; ) {                   // path, then each above it, to /
+            while (len > 1 && path[len - 1] == '/') len--;
+            snprintf(file, sizeof file, "%s%.*s/%s", base, len == 1 ? 0 : (int)len, path, name);
+            size_t n = limit_in(file);
+            if (n && (!least || n < least)) least = n;
+            if (len <= 1) break;
+            while (len > 1 && path[len - 1] != '/') len--;
+        }
+    }
+    if (f) fclose(f);
+    return least;
+}
+
 int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
+    catch_ends();
+    is_init = getpid() == 1;
     poison    = getenv("SLIGHT_POISON") != NULL;
     gc_verify = getenv("SLIGHT_GC_VERIFY") != NULL;
     const char *stress = getenv("SLIGHT_GC_STRESS");
@@ -2907,8 +3196,15 @@ int main(int argc, char **argv) {
         fputs("slight: SLIGHT_HEAP_MAX is the most a process's heap holds, in bytes or with K, M or G after it, and at least 1M\n", stderr);
         return 2;
     }
+    // Without SLIGHT_HEAP_MAX, 1 GB, or a quarter of a smaller limit on the
+    // program's memory, as in a container (D233): a process that runs
+    // away holds about twice its cap at its last collection, the old
+    // chunks and the new, so it faults on its own at half the limit, and
+    // the kernel doesn't kill the program.
+    size_t limit = cap ? 0 : memory_limit();
+    size_t room  = limit && limit / 4 < HEAP_DEFAULT ? (limit / 4 > CHUNK_MAX ? limit / 4 : CHUNK_MAX) : HEAP_DEFAULT;
     rt_io_settings_t settings = {
-        mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0, cap ? bytes_of(cap) : HEAP_DEFAULT,
+        mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0, cap ? bytes_of(cap) : room,
     };
     char           **env      = environ;
     rt_io_start(&argc, &argv, &env, &settings); // replaying, the record's settings, arguments and environment

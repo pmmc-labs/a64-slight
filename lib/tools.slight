@@ -51,10 +51,14 @@
               (list "new" :string "What to put in its place"))
         (lambda (args) (tools/edit approve (tools/string args "path") (tools/string args "old") (tools/string args "new")))))
 
-(defun tools/run (approve)
-    (tool/new "run" "Runs a shell command, once the user agrees, and gives what it printed and its exit status."
+; A command still running after 2 minutes is stopped (D234), as Claude
+; Code's own are; tools/run-within sets another limit.
+(defun tools/run (approve) (tools/run-within 120000 approve))
+
+(defun tools/run-within (ms approve)
+    (tool/new "run" (str "Runs a shell command, once the user agrees, and gives what it printed and its exit status. One still running after " (tools/duration ms) " is stopped.")
         (list (list "command" :string "The command, for sh -c"))
-        (lambda (args) (tools/command approve (tools/string args "command")))))
+        (lambda (args) (tools/command approve ms (tools/string args "command")))))
 
 (defun tools/calc ()
     (tool/new "calc" "Works out arithmetic exactly: + - * / % and ^ (a power), parentheses, sqrt, abs, floor, ceil, round, sin, cos, tan, exp, min, max, pi and e."
@@ -176,13 +180,18 @@
             (tools/save path (str (bytes/slice text 0 at) new (bytes/slice text (+ at (bytes/len old)))))
             (str "changed " path))))
 
-(defun tools/command (approve command)
+(defun tools/command (approve ms command)
     (cond
         ((not (tools/allowed? approve (str "run: " command))) "the user didn't let it run")
         (#true
-            (match (exec/run (list "sh" "-c" command))
-                ((:ok (status output)) (str output "[exit status: " status "]"))
-                ((:error reason)       (raise reason))))))
+            (match (exec/run-within ms (list "sh" "-c" command))
+                ((:ok ((:timeout _) output)) (str output "[stopped after " (tools/duration ms) ", still running]"))
+                ((:ok (status output))       (str output "[exit status: " status "]"))
+                ((:error reason)             (raise reason))))))
+
+; ms as a person says it: "120 s", or "300 ms".
+(defun tools/duration (ms)
+    (if (== (math/mod ms 1000) 0) (str (div ms 1000) " s") (str ms " ms")))
 
 ; text's lines, each after mark, for the person to read; a last newline
 ; makes no line of its own.

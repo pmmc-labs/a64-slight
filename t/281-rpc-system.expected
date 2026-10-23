@@ -1,0 +1,6 @@
+(processes pids ready timers devices heap heap-max stacks clock reductions)
+(pid parent state joining in mail heap reductions stack devices)
+#true
+"#<pid 1>"
+(1 2)
+done

@@ -1,0 +1,9 @@
+(listening "build/t/284-unix.sock")
+(ok ("echo one" "echo two"))
+(error (eaddrinuse "build/t/284-unix.sock"))
+(error (eaddrinuse "build/t/284-unix.txt"))
+(error (enoent "build/t/284-unix-nothing.sock"))
+(error (enoent ""))
+enametoolong
+(error (enoent "build/t/284-unix.sock"))
+done

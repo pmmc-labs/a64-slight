@@ -3,6 +3,7 @@
 ; were set; one due at once fires when the scheduler next looks, after
 ; messages already sent. The message is copied when the timer is set, so
 ; it outlives the process that set it. A negative delay counts as 0.
+; after gives the timer's number, 1 for the first (D232).
 
 (defun show (n)
     (recv

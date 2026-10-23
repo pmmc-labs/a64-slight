@@ -510,7 +510,7 @@ Left for later: keep-alive; bodies streamed in pieces, which agents need
 HTTPS (12c); the limits
 as parameters; a lingering close, so a server that answers before it has
 read the whole request doesn't reset the connection; and a timeout that a
-reply can cancel, which needs cancellable timers (see "Later").
+reply can cancel, which cancellable timers (D232) now allow.
 
 ### After 14: what the boids example led to (done, Oct 2026)
 
@@ -557,10 +557,14 @@ agents asked as tools, `agent/ask` (D192, golden test 238; done), and
 a fetched page's links kept, and Escape in the chat stopping a command
 (D193, golden tests 233 and 235; done); and programs, and people,
 calling each other between machines: `lib/rpc.slight`, Matt S
-Trout's stupidrpc finished in s-expressions (D225, golden tests 277–279; done), and a
-listener at an address of its own, `127.0.0.1` say, for it (D226,
-golden test 276; done). Next, to settle with the user: offering an
-agent's tools over `rpc`, and to whom a remote call's `approve` goes;
+Trout's stupidrpc finished in s-expressions (D225, golden tests
+277–279; done), and a listener at an address of its own, `127.0.0.1`
+say, for it (D226, golden test 276; done); and running in containers, static binaries on
+Linux and SIGTERM ending PID 1 (D227; done), and `rpc` for fleets, a hub
+calling its devices, connections kept up and `:system` asked from
+outside (D228, golden tests 280–282; done). Next, to settle with the
+user: offering an agent's tools over `rpc`, and to whom a remote call's
+`approve` goes;
 `log`, a builtin; or 12c. TLS (12c) and a reader of server-sent events, for a hosted
 model, wait (the user, Oct 2026: local models first, and curl for
 HTTPS).
@@ -613,6 +617,17 @@ them:
   one, so a terminal UI can't line up such text yet; `str/width`,
   `str/graphemes` and `str/normalize`, from utf8proc, vendored as D151
   has it.
+- **Containers, what's left** (after D227, D229 and D233, Oct 2026):
+  each process's heap is capped at a quarter of the container's limit
+  (D233), but not all of them together, so many processes can still
+  take the program past it. SIGTERM ends a program at once, so a call in flight fails at its
+  caller: hearing it as a message, to finish within the grace period,
+  needs a way in for signals, a proposal of its own. A Dockerfile in the
+  docs, a build stage and `FROM scratch`, and both targets as one
+  image, since `slightc` makes both statically; health checks (a TCP
+  probe, or `/healthz` from `lib/http.slight`), as a scratch image has
+  no shell. And anyone on the network can call an `rpc` program: a
+  token in `helo` first, then TLS (12c).
 - More than 8 arguments to a function, on the stack (DESIGN.md).
 - Sockets: IPv6, and more than the 1,000 or so that `select()` holds
   (D113), with `poll`, `kqueue` or `epoll`: `kqueue` on macOS and
@@ -752,13 +767,19 @@ with Stevan first.
 - **Numerical vectors and matrices,** only if a program needs them
   (D179, D221): embeddings for the agent's notes are the likeliest.
   Floats that need no box would come first.
-- **A `recv` with a timeout.** Today it's `after` and a message, and a
-  late timeout can arrive after the answer, to be told apart by hand. A
-  clause such as `(:after ms body...)`, as Erlang's, needs timers that
-  can be cancelled (the runtime has them for its own, `unset_alarm`). To
-  settle: the syntax; that a receive function starts again from the top
+- **A `recv` with a timeout.** Today it's `after` and a message, and
+  `timer/cancel` once the answer has come (D232), which says whether the
+  timeout came first, to be told apart by hand. A clause such as
+  `(:after ms body...)`, as Erlang's, would do that itself. To settle:
+  the syntax; that a receive function starts again from the top
   after each message, dead letters included, so the deadline must be set
   once per wait, not per start; and how it goes through `split.ts`.
+- **Timers that can be cancelled** (done, D232): both. `after` gives its
+  timer's number, which `(timer/cancel t)` takes back; and a timer whose
+  process has ended no longer keeps the program running, which frees
+  `ask-within` (D157), `http/request-within` (D173) and a closed keeper
+  (D228). And so the `run` tool's time limit (D187) is in too (D234);
+  HTTP's default timeout (D173) was, and was taken out again (D236).
 - **Processes as data.** A waiting process is a function, its arguments
   and a mailbox (D8), and its data has no cycles, so it can be written
   out, with functions and closures by name. For: saving and restoring a
@@ -774,12 +795,15 @@ with Stevan first.
   count of its users, as the BEAM's large binaries are. To settle: the
   size from which a string is shared, and how the count goes down when a
   heap is collected or freed.
-- **Distribution, as a library first:** a process that stands for one on
-  another machine, forwarding messages as s-expressions over TCP (D155),
-  as Termite Scheme does, with no runtime change until it's proved
-  itself. To settle: what a remote pid looks like, monitoring across
-  machines (the connection ending), and what can't be sent (a closure,
-  between different builds).
+- **Distribution, as calls, not remote pids** (settled by D225). Programs
+  on other machines reach each other through `lib/rpc.slight`: calls,
+  streams, `stop`, and a failure when the connection ends (D225), a hub
+  calling the devices that dial it, and connections kept up (D228).
+  Turned down there: remote pids, a process standing for one on another
+  machine as in Termite Scheme or Erlang's distribution, which bring
+  monitors across machines, names, and what a pid means after a
+  reconnect. What's left is under 15 and 16: to whom a remote call's
+  `approve` goes, a token in `helo`, then TLS (12c).
 - **Smaller, left out of D168 and D169:** guards in `match` and `recv`;
   and what `#(...)` means outside a pattern (D176 left it open): a tuple
   made of its elements' values, as Clojure's vectors, or a constant, as
@@ -841,7 +865,7 @@ grows. BACKGROUND.md has the discussions so far.
 - 32-bit microcontrollers (RP2040, STM32, ESP32, ...): a 32-bit value
   layout, and budgets of a few hundred KB ("Embedded boards", "Other
   targets"). AArch64 Linux boards, a Raspberry Pi say, run slight's
-  static binaries already.
+  static binaries already, and so do containers, `FROM scratch` (D227).
 
 ### Parallelism
 

@@ -181,7 +181,7 @@ static void close_query(rt_lookup_t *l) {
 // yet: 0, or -1 if the socket failed, and the server is to be skipped.
 static int send_query(rt_lookup_t *l) {
     close_query(l);
-    int fd = rt_io_socket(l->tcp ? SOCK_STREAM : SOCK_DGRAM);
+    int fd = rt_io_socket(AF_INET, l->tcp ? SOCK_STREAM : SOCK_DGRAM);
     if (fd < 0) return -1;
     l->fd = fd;
     if (rt_io_setup(fd, 0) != 0) return -1;

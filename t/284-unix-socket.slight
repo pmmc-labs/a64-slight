@@ -1,0 +1,55 @@
+; :unix and :unix/listen (D231): a Unix socket at a path, read and
+; written as a TCP connection is. A listener says (:open l path), and its
+; connections echo; listening where a listener is, or where a file is, is
+; :eaddrinuse; a path with nothing there, or none at all, is :enoent, and
+; one too long for a socket :enametoolong; and a listener that's killed
+; takes its path with it, so a connection then finds nothing.
+
+(defun server (w)
+    (recv
+        ((:open l at)  (send w (list :listening at)) (server w))
+        ((:accept l c) (connect c (echo)) (server w))))
+
+(defun echo ()
+    (recv
+        ((:open c)   (echo))
+        ((:line c s) (send c (list :write "echo " s \n)) (echo))
+        ((:eof c)    (disconnect c))))
+
+; Sends each line in turn, and gives what came back for each.
+(defun client (lines)
+    (recv ((:open c) (client-send c lines ()))))
+
+(defun client-send (c lines acc)
+    (match lines
+        (()         (disconnect c) (reverse acc))
+        ((s & rest) (send c (list :write s \n)) (client-read c rest acc))))
+
+(defun client-read (c lines acc)
+    (recv ((:line _ s) (client-send c lines (cons s acc)))))
+
+(defun wrote ()
+    (recv ((:open f) (send f (list :write "not a socket" \n)) (disconnect f))))
+
+(defun kind (joined)
+    (match joined
+        ((:error (k _)) k)))
+
+(defun main (path l)
+    (recv
+        ((:listening at)
+            (pprint (list :listening at))
+            (pprint (join (connect :unix path (client (list "one" "two")))))
+            (pprint (join (connect :unix/listen path (server ()))))
+            (join (connect :fs/write "build/t/284-unix.txt" (wrote)))
+            (pprint (join (connect :unix/listen "build/t/284-unix.txt" (server ()))))
+            (pprint (join (connect :unix "build/t/284-unix-nothing.sock" (client ()))))
+            (pprint (join (connect :unix "" (client ()))))
+            (pprint (kind (join (connect :unix/listen (str "build/t/" (str/repeat "x" 120)) (server ())))))
+            (kill l)
+            (pprint (join (connect :unix path (client ()))))
+            :done)))
+
+(let path "build/t/284-unix.sock")
+(let me $$)
+(main path (connect :unix/listen path (server me)))

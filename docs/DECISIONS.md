@@ -691,7 +691,8 @@ counts depend on the machine anyway). Rejected: also moving the clock 1 ms
 per used-up quota of reductions (busy programs would see time pass, but
 expected output would shift whenever codegen or the prelude changed).
 
-**D111. `after` and `sleep` return `()`.** *(User.)* Neither can fail, so
+**D111. `after` and `sleep` return `()`.** *(User.)* (`after` gives its
+timer's number since D232.) Neither can fail, so
 a Result would always be `:ok`. DESIGN's "blocking calls return a Result"
 now covers the ones that can fail: `slurp` gives `(:ok string)` or
 `(:error reason)`, and `spew` `(:ok ())` or `(:error reason)` (10c).
@@ -699,7 +700,7 @@ Rejected: `(:ok ())` from `sleep`, for uniformity. (`slurp` and `spew`
 became slight functions in 10c, and `slurp` gives lines: D129.)
 
 **D112. A timer whose process has ended is dropped when it's due.**
-*(User.)* An `after` aimed at a process that has ended, or the wake-up of
+*(User.)* (Reopened by D232: dropped sooner, at no cost.) An `after` aimed at a process that has ended, or the wake-up of
 a sleeper that was killed, stays in the timer heap until it's due, and is
 dropped then, as a message to an ended process is (D92). Pids aren't
 reused, so a late timer can't reach the wrong process. Until then it
@@ -1947,7 +1948,8 @@ connections.** *(User, asked with Claude's recommendation for each.)*
   sides. Keep-alive comes later, with no runtime change.
 
 The rest of the proposal in PLAN.md's step 14 is taken as written, with
-one change: there is no default timeout. A timer stays pending until it's
+one change: there is no default timeout (D234 gave it 30 seconds, and
+D236 took them out again). A timer stays pending until it's
 due and keeps the program running (as `ask-within` does), so a
 30-second default would hold every program's exit for up to 30 seconds
 after its last request. A timeout is asked for with `http/request-within`.
@@ -2565,7 +2567,8 @@ the calls.
   "the user didn't let it run"), and another command asked about
   meanwhile waits its turn. The keyboard's process makes the agent, so
   the tools can name it (`$$` in the `connect`). Calls and results are
-  shown as they happen. The `run` tool has no time limit, unlike what
+  shown as they happen. The `run` tool has no time limit (2 minutes since
+  D234), unlike what
   the proposal suggested a tool might set: a timer can't be cancelled
   yet, so one set for every command would keep the chat running after
   Ctrl-D till it was due; a command that doesn't end is stopped with
@@ -3180,7 +3183,8 @@ put after phase 2's fixes.)*
 - The harness reads a version from stderr when stdout has none, as
   Chez's `--version` prints it there.
 
-**D202. A heap's cap is 1 GB, or what `SLIGHT_HEAP_MAX` says.** *(User,
+**D202. A heap's cap is 1 GB, or what `SLIGHT_HEAP_MAX` says.** (Or a
+quarter of a container's memory limit, since D233.) *(User,
 Oct 2026: the second of three options, as Claude recommended; the
 others were keeping 64 MB, and no cap, as in Erlang and Go, where one
 runaway process takes the program down when `malloc` fails.)* The 64 MB
@@ -4385,7 +4389,8 @@ sockets later; and "rpc" as the name.)* `lib/rpc.slight`, opt-in,
   followed as it was, but finished: a sketch in slight, talking JSON to
   the `Nexus` and to itself, showed the model fits processes (and found
   `STOP` lost at both ends of the JavaScript), and the rest was settled
-  from there.
+  from there. Mojo-StupidRPC, an earlier implementation, in Perl, of
+  the notes, and Hydling, which uses it, were looked at after (D230).
 - **The messages,** a datum each, read with `(:read :sexp)` and written
   with `sexp/print` (D155): `(call id name arg ...)`, `(next id v)`,
   `(done id v)`, `(fail id reason)`, `(stop id)`, `(helo rpc 1)` and
@@ -4456,12 +4461,12 @@ sockets later; and "rpc" as the name.)* `lib/rpc.slight`, opt-in,
   for the `Nexus`, and a second syntax for people.
 - **Not yet:** to whom a remote call's `approve` goes, which offering an
   agent's tools (D188) over `rpc` needs first: never to the caller just
-  because it called. Who the other end is (a `helo` carries only the
+  because it called. Who the other end is (on a Unix socket, D235; a `helo` carries only the
   protocol and its version), and any authentication: listen at
   `127.0.0.1` (D226) and come in over ssh. A stray `)` from a person
   ends the connection, as bad text ends a device's owner (`:bad-sexp`).
   A connection that ends with an error leaves the calls from the other
-  end running to their ends. Unix sockets.
+  end running to their ends (D230 stops them). Unix sockets (D231).
 - **Checked:** golden tests 277 (two ends in one program: answers,
   checks, bare words, failures, `help`, a stream, a call back to the
   caller, a stream stopped and a caller that ends, the processes for
@@ -4494,7 +4499,7 @@ them to the network.
   names the port (D139).
 - **Rejected:** a third argument, or a keyword (`:tcp/listen-at`), when
   a string where a port goes says it; and Unix sockets now, which need
-  a device of their own and a path's permissions, for later.
+  a device of their own and a path's permissions, for later (D231).
 - **Checked:** golden test 276 (listening at `127.0.0.1`, `localhost`, a
   name the hosts file has and `0.0.0.0`, each connected to; an address
   that isn't this machine's, names not in the hosts file, which aren't
@@ -4502,3 +4507,545 @@ them to the network.
   address in use, the error naming it as given), and 151, where a string
   is now an address; and by hand, a listener at `127.0.0.1` refusing a
   connection to the machine's own address.
+
+**D227. Running in a container: static binaries on Linux, and SIGTERM
+as PID 1.** *(Stevan, Oct 2026: "Let's start", to the first of Claude's
+steps for running slight in containers and on edge machines, now that
+programs can call each other, D225: build statically on Linux, and end
+on SIGTERM.)*
+
+- **Static on Linux:** `slightc` links a native build with `-static`,
+  as it already linked cross builds. A program built for x86-64 on Linux
+  was linked against glibc, so in an empty image (`FROM scratch`) it
+  couldn't start: `exec /serve: no such file or directory`, the loader
+  missing. Static, it runs on any Linux of its kind, the image no more
+  than the binary (about 2 MB). The runtime calls nothing that a static
+  glibc can't do: it looks host names up itself (D165), reading the
+  hosts file and `resolv.conf` that a container is given, so two
+  containers find each other by name without `getaddrinfo`. Not on
+  macOS, which has no static binaries.
+- **SIGTERM as PID 1:** the kernel ignores a signal sent to PID 1 that
+  it hasn't a handler for, and a container's first process is PID 1. The
+  runtime set its handlers for SIGINT, SIGTERM and SIGHUP only when it
+  started a command (D185), and they died of the signal again, so a
+  program in a container ignored `docker stop`, which waited its 10
+  seconds and sent SIGKILL. Now the handlers are set at the start, with
+  the stack of their own they run on; each kills the commands, gives the
+  terminal back (which raw mode had kept, D117 being Ctrl-C's alone),
+  and takes the signal again, unblocked, so the program dies of it as
+  before; and if that comes back, as it does for PID 1, it exits with
+  128 and the signal, 143 for SIGTERM, as a shell would say it died.
+  `docker stop` now takes a fifth of a second, and says 143.
+- **Rejected:** SIGTERM as a message to the root, for a program to stop
+  gracefully (finish its calls, say): a way in for the outside world,
+  to be proposed when a program needs it; `--init` (tini) in every
+  container, which works but is one more thing to remember; and
+  `-static-pie`, which the toolchains handle less evenly.
+- **Checked:** t/live.py's signals, on both targets (AArch64 under
+  qemu): a program waiting dies of SIGTERM, as it did; and as PID 1, in
+  a PID namespace of its own (`unshare`, as root, on Linux; skipped
+  without one), SIGTERM ends it with 143. Against the runtime before,
+  the second fails, the program still running. By hand, in Docker: a
+  program serving `rpc` from an image `FROM scratch`, called from the
+  host with `nc`, stopped by `docker stop` in 0.22 s with 143; and two
+  such containers on a network, one calling the other by its name,
+  `server:7317`, through Docker's name server, and a name that isn't
+  there giving `:enotfound`.
+
+**D228. `rpc` for fleets: a hub calling its devices, connections kept
+up, and `:system` asked from outside.** *(Stevan, Oct 2026: "your
+proposals sound good", to Claude's three, for programs on machines that
+come and go, a device behind a firewall among them.)*
+
+- **A hub calls its devices with nothing new:** inside a handler, `^$$`
+  is the connection the call came on, which `rpc/call` takes. So a
+  device connects out, and calls the hub's `register`, whose handler
+  hands `^$$` to a registry, a process of the program's own, which
+  `monitor`s each connection and lets go of one that hangs up; and the
+  hub calls the device over the connection the device made, with no
+  port open on it. Written up in LANGUAGE.md, not made a library: a
+  registry is a few lines, and what it keeps (a name, tags, what the
+  device offers) is the program's to say. Rejected: `rpc/serve` telling
+  its caller of each connection, `(:connected conn)`, which a program
+  that doesn't want it would get anyway, as dead letters; it needed a
+  second `rpc/serve`, where a handler already has its connection.
+- **`(rpc/keep where handlers on-open)`:** a keeper, a process that
+  `rpc/call`, `rpc/stream` and `rpc/close` take as they take a
+  connection. It dials, and when the connection drops, or can't be
+  made, dials again: after 100 ms, then twice as long each time, up to
+  10 s, and from 100 ms again once one opens. Each new connection runs
+  `(on-open conn)` in a process of its own, so a device can say who it
+  is again after the hub comes back. While it's down, a call fails at
+  once with `:disconnected`. Rejected: calls waiting for the connection
+  to come back, which needs a bound, a timeout and an order for them,
+  and hides from a caller that the other end is gone; and the delays as
+  arguments, till a program needs other ones.
+- **A call sent through a keeper** goes to the connection it had, which
+  may have ended a moment before (its `(:exit ...)` not yet taken), so
+  the call would go nowhere and its caller wait for ever, watching only
+  the keeper. So the keeper tells the caller's waiting process the
+  connection it sent it on, `(:rpc/via c)`, and that process monitors
+  `c` too: had `c` ended, it hears so at once, and the call fails with
+  `:disconnected`.
+- **`(rpc/system)`:** a handler, `system`, that answers with what the
+  `:system` device says (D171): `((runtime info) (processes (info
+  ...)))`, asked of the device at once, so both tell of one moment, and
+  a pid in them as its printed form, `"#<pid 3>"`, since a pid can't go
+  as data. Not one every connection has, as `help` is: it shows a
+  program's insides (its functions' names, its heaps), so a program
+  offers it if it wants to be looked into, at `nc` say.
+- **Not yet:** a timer can't be taken back, so a keeper closed while it
+  waits to dial again leaves that wait's timer, which keeps the program
+  running till it's due, 10 s at the most. (D232: no longer, since the
+  keeper has ended.) A timer whose process has
+  ended could stop counting as something that can still happen, which
+  would be a change to the runtime, for a proposal of its own.
+- **Checked:** golden tests 280 (a hub, a registry and three devices in
+  one program: the hub reads each, a device that hangs up is let go and
+  the registry told, and a call to it fails), 281 (`system`'s keys, as
+  many processes as the runtime says, the root first, and the listener
+  and both ends of the connection waiting where they should) and 282 (a
+  call to a keeper before anything listens fails at once; once a server
+  listens, the keeper's next dial opens, and on-open says hello; the
+  server hanging up brings a new connection and a new hello; a call to
+  a keeper that's closed fails), each worked out by hand; all six `rpc`
+  tests under `SLIGHT_GC_STRESS` 1 and 7, `SLIGHT_GC_VERIFY` and seeded
+  orders. By hand, on the real clock, two programs: a device kept up,
+  and a hub that it registers with, killed and started again; the
+  device registered again by itself, and the hub went on reading it;
+  and `(call 1 system)` at `nc` to the hub. And a keeper closed while
+  waiting to dial again: the program ended 1.4 s later, when that wait
+  was due.
+
+**D229. Running in a container: output that goes out when the program
+waits, and orphans waited for as PID 1.** *(Stevan, Oct 2026: "Yes", to
+Claude's two fixes for what checking the runtime against a container
+turned up, both seen to fail first.)*
+
+- **Output when the program waits:** `pprint` writes through stdio, and
+  nothing flushed it but `tty/write`, a fault's or a dead letter's
+  message, and the program's end. A container's stdout is a pipe, so
+  stdio held the output till 4 KB of it had come, and a program that
+  SIGTERM ended lost what it held: one that printed a line and waited
+  gave the pipe nothing at all. Now the runtime flushes stdout whenever
+  nothing can run and it's about to wait (`idle`): a log has the
+  program's output as soon as it waits, and a program stopped while it
+  waits, as a server mostly is, has lost none of it. It costs a write
+  per wait that has output to write, not one per line. What a program
+  printed while busy and was stopped before waiting is still lost: a
+  handler can't flush stdio safely. Rejected: stdout flushed by line
+  (`_IOLBF`), or by `pprint`, which costs a system call a line in a
+  program that prints a lot.
+- **Orphans, as PID 1:** what a command starts and leaves running (`sh
+  -c "worker &"`) is PID 1's once the command has ended, and when it
+  ends stays a zombie till PID 1 waits for it. The runtime waited only
+  for its commands, so as PID 1 a `sleep` left that way stayed a zombie
+  for the program's life. Now, as PID 1 (`getpid()` at the start), the
+  runtime waits on SIGCHLD's pipe from its first command on, not only
+  while one runs, and after waiting for its commands, waits for every
+  other child that has ended: each is looked at first with `waitid`'s
+  `WNOWAIT`, which leaves it as it is, and a command's own is left to
+  the wait that's recorded for a replay. Not as any other process, whose
+  orphans go to its init. Rejected: `docker run --init` (tini), which
+  works but must be remembered, and which D227 set out to need no more;
+  and `waitpid(-1)` alone, which could take a command's status from the
+  wait a replay depends on.
+- **Checked:** t/live.py's signals, on both targets: its program now
+  says it's waiting with `pprint`, so seeing that line before SIGTERM
+  needs the flush; and as PID 1, a command that leaves a `sleep` behind,
+  the program's children looked at in `/proc` from outside till no
+  zombie is left. With the runtime as it was, all three fail; with only
+  the orphans' wait taken out, the last fails, a zombie left. By hand:
+  the same two, a log line through a pipe and `ps` as PID 1.
+
+**D230. `rpc` beside mst's own: a call stopped however its connection
+ends, and `barf`.** *(Stevan, Oct 2026: "Let's do 1 and 2 here", to
+Claude's review of two more of Matt S Trout's, Mojo-StupidRPC and
+Hydling, beside `lib/rpc.slight`: the fix below, and this record.)*
+
+- **What they are:** Mojo-StupidRPC (github.com/mst-ripples/Mojo-StupidRPC,
+  Sep 2021, about 540 lines of Perl on Mojolicious) is the one
+  implementation of stupidrpc's early notes (`sketches/early`, which
+  Hydling keeps as its spec): JSON arrays, a line each over TCP or a
+  Unix socket, or a WebSocket frame each; `call`, `cast`, `listen` and
+  `wrap` with an id, `unlisten` and `unwrap` by name, answered with
+  `done`, `fail` and `data`, and `notify` keyed by a channel's name. A
+  handler is given the request, and answers through it (`$req->done`).
+  A `listen` is acknowledged with a `done`, which may carry the current
+  value, and then notifies; a `wrap` registers for an event, and the
+  server calls the client back for each, whose `done`, `done stop` or
+  `done next args` lets it through, vetoes it, or changes it. No
+  cancelling a call, no `helo`, no `barf`. Hydling
+  (github.com/mst-ripples/Hydling, Sep 2021) uses it: an IRC bot with a
+  control port on a Unix socket, and `dev/rawctl`, a command-line client
+  that reads JSONY (bare words allowed), numbers the calls itself, and
+  prints each answer.
+- **What they confirm of D225 and D228:** ids always, hidden by a
+  library: Mojo requires them, and `rawctl` keeps them for a person.
+  Interception as a call the other end makes to you: that is how Mojo's
+  `wrap` works. Subscriptions as calls that stream: the `Nexus` made the
+  same move, and Mojo's, keyed by name, are where two of its bugs are.
+  People typing the messages: the notes' bare words, `rawctl`'s JSONY.
+  And D228's hub: stupidrpc's `outpost` plugins (`send-identity`,
+  `save-identity`, `route-to`) are the same design, a device connecting
+  out and saying who it is, and the hub keeping each connection's
+  identity and routing calls by it.
+- **Its bugs,** each run against it, its own test passing: `cast` goes
+  out without its verb; an id reused while in flight gets two `done`s
+  that can't be told apart, and one equal to an id of its own going out
+  dies, since it looks in the wrong table; an `unlisten` that crosses a
+  `notify` dies, and two `listen`s to one channel leave one that can't
+  be stopped; an unknown verb is a bare `die`; and a handler that dies
+  leaves its caller waiting for ever. `lib/rpc.slight` gets each right
+  (golden tests 277 to 279).
+- **And one it shared:** a connection that ends with an error never
+  hangs up: text that isn't an s-expression (a person's stray `)`), or
+  a reset (`:econnreset`, `:epipe`), from a peer killed with data
+  unread, or a write to one that has gone. Nothing then stopped the
+  calls from the other end: a stream used as a subscription ran for
+  ever, and a program kept up with `rpc/keep` (D228) would gather them,
+  a set for each connection that dropped. D225 had it under "not yet",
+  as calls running to their ends. Now each call from the other end has
+  a watcher, a process the connection forks beside it, that monitors
+  both and kills the call if the connection ends first (`rpc/watch`):
+  a process for each call, and the loop, and how it reads, holding back
+  a sender through TCP (D158), as they were. Rejected: a process that
+  owns the socket and passes what it reads to the loop, so the loop
+  hears the error, which takes what it reads as fast as it comes and
+  loses that; links, a runtime change for this alone; and bad text told
+  to the owner as a message, which changes every device (D159) and
+  leaves a reader to find where the next datum starts.
+- **`barf`:** in the notes, a `barf` is fatal, and a close follows.
+  `lib/rpc.slight` closes only after barfing at a `helo` for another
+  protocol or version; a message it can't take, or an id in use, is
+  barfed at and the connection goes on, so a person at `nc` who
+  mistypes doesn't lose the connection and every call on it.
+- **Checked:** golden test 283, worked out by hand: a raw client starts
+  two calls that never end on a server, then sends a stray `)`, and both
+  calls' processes are killed; and a raw server calls a client, is
+  called by it, and sends one, and the client's call fails with
+  `:bad-sexp` and the process running the server's call is killed. It
+  deadlocks without the watcher. All seven `rpc` tests under
+  `SLIGHT_GC_STRESS` 1 and 7, `SLIGHT_GC_VERIFY` and five seeded orders.
+  By hand, on the real clock: a stream running when a Python client
+  resets the connection (`SO_LINGER` 0), which before ran to its end and
+  now stops; and a stream of a million values, then a stray `)`, which
+  before ran every value.
+
+**D231. Unix sockets: `:unix` and `:unix/listen`, a path's permissions
+saying who may connect.** *(Stevan, Oct 2026: "do 3, taking into account
+the container work", after D230's review found both of mst's own uses of
+stupidrpc on Unix sockets; then, to Claude's questions, devices of their
+own, a socket left behind replaced, and the umask.)*
+
+- **The devices:** `(connect :unix path expr)` and `(connect
+  :unix/listen path expr)`, read and written as TCP's are; a listener
+  says `(:open l path)` and `(:accept l conn)`, and errors name the path,
+  an accepted connection's too, since a Unix peer has no address.
+  Rejected: `:tcp` taking a path, which would have `:tcp` mean something
+  that isn't TCP; `rpc` alone reaching sockets through `rpc/exec`, with
+  `socat` or `nc -U`, which leaves a program no way to serve on one; and
+  Linux's abstract names, which have no permissions and aren't on macOS,
+  so an empty path is `:enoent`.
+- **The file:** listening makes the socket as a file at the path, and
+  `bind` won't make it over anything there. A program killed with
+  SIGKILL, or one that crashed, leaves its socket behind, and in a
+  container restarted on the same volume the path would be taken for
+  ever. So a listener replaces a socket that refuses a connection,
+  asked without waiting, so that on Linux a live one whose queue is full
+  counts as alive (macOS refuses for that too, so there a socket so busy
+  that a second copy of its program starts can be taken for dead); and
+  anything else there is `:eaddrinuse`, a live listener or a file that
+  isn't a socket. It removes the path when it closes, and at the
+  program's end however it ends: `atexit`, and the handler for SIGINT,
+  SIGTERM and SIGHUP (D227), from a table of the listeners' paths by
+  descriptor, as it kills commands from one. Rejected: removing whatever
+  is there first, as Hydling does, which takes a live program's socket
+  from it unseen; and leaving it to the program, which has no builtin to
+  remove a file, so a crash and a restart would never recover.
+- **Who may connect:** connecting takes write permission on the socket,
+  which the umask sets, as for every program: with the usual 022 it's
+  0755, and only its owner, and root, can connect. So the path's
+  permissions are the access control D225 left open, on one machine;
+  in a container, `--user` with the host user's ids makes the socket
+  theirs. Rejected: always 0600, which shuts a group out; and a mode
+  argument, for a need not yet seen. Who the other end is (`SO_PEERCRED`,
+  `getpeereid`), for a program to decide by: later (D235).
+- **`rpc`:** `rpc/serve`, `rpc/connect` and `rpc/keep` take a path
+  wherever `"host:port"` goes, any string with a `/` in it, so one here
+  is `"./ctl.sock"`, and `(:listening at)` gives the path. Over ssh:
+  `rpc/exec` with `nc -U`, or `socat - UNIX-CONNECT:path`, as
+  stupidrpc's `outpost` reaches its sockets.
+- **Replay:** listening at a path is one recorded call
+  (`rt_io_listen_unix`, the look for a socket left behind within it),
+  so a replay makes no socket, and removes nothing, since a path is
+  noted for removing only when a socket was made.
+- **Checked:** golden tests 284 (a listener's path, a connection echoed,
+  `:eaddrinuse` at a live listener and at a file, `:enoent` for nothing
+  there and for an empty path, `:enametoolong`, and a killed listener's
+  path gone) and 285 (`rpc` at a path: a call, `help`, a keeper and its
+  on-open, the path gone with the server, and a name without a `/` taken
+  as `"host:port"`), worked out by hand; both under `SLIGHT_GC_STRESS` 1
+  and 7, `SLIGHT_GC_VERIFY` and three seeded orders. t/replay.sh's net,
+  over a Unix socket too: the socket gone with its listener, and the
+  replay leaving a file put at the path alone. t/live.py's sockets: a
+  listener answers at its path; a second copy gets `:eaddrinuse`, and
+  the first still answers; SIGKILL leaves the socket, the next to listen
+  there replaces it, and SIGTERM removes it. By hand, in Docker: a
+  program serving `rpc` from an image `FROM scratch`, its socket in a
+  directory shared with the host, called from the host; `docker stop`
+  in 0.23 s, with 143, and the socket gone; `docker kill`, the socket
+  left and refusing, and the next start replacing it; with the usual
+  umask, `nobody` refused (`:eacces`), and with `--user 1000:1000` the
+  socket that user's, which it could call.
+
+**D232. Timers that can be cancelled, and a timer whose process has
+ended no longer holding up the program's end.** *(Stevan, Oct 2026: "we
+also need to work out how timers can be cancelled, and do that one";
+then, to Claude's options, both, as recommended. PLAN.md had the cases:
+D112, D157, D173, D187, 14's timeout that a reply cancels, a `recv` with
+a timeout, and D228's keeper.)*
+
+- **`timer/cancel`:** `after` gives its timer's number, an integer, 1
+  for the program's first and one more for each after it (`sleep` takes
+  none), where it gave `()` (D111). `(timer/cancel t)` takes the timer
+  back if it hasn't fired: its message never comes, it no longer keeps
+  the program running, and it gives `#true`; or `#false`, if it had
+  fired (its message may be in the mailbox), had been taken back, or `t`
+  is no timer's number. `#false` is what tells a caller that a timeout
+  it no longer wants is on its way. Any process can take a timer back,
+  as any can kill any process. For a process that goes on: a timeout a
+  reply cancels, and later a `recv` with a timeout.
+- **The index:** the pending timers are a binary heap by when they're
+  due; `timer/cancel` finds one by its number in a table beside it,
+  open addressing, the number multiplied by 2^64 over the golden ratio
+  for its slot, updated as the heap moves a timer, and a slot emptied by
+  moving back the ones after it that belong before it, so none is ever
+  marked deleted. Taking a timer back is a lookup and the heap's own
+  removal, O(log n). Rejected: a search of the heap, which the
+  runtime's own timers use (`unset_alarm`), simpler but O(n) a cancel;
+  numbers that reuse slots, with a generation, which aren't 1 up and
+  can be mistaken for an old timer's; and a value of a kind of its own,
+  `#<timer 3>`, which can't be mistaken for a number but takes a box
+  type, printing, `eq?`, `hash`, copying and `sexp/print` refusing it.
+- **A timer whose process has ended,** a killed sleeper's or an `after`
+  aimed at a process that has gone (or a device that has closed), is
+  dropped when nothing can run and it's the next due, so the program
+  doesn't wait for it, nor the virtual clock move to it. D112 kept such
+  a timer till it was due, turning down dropping a process's timers as
+  it ends, which takes a list of them for each process, or a search of
+  the heap. This takes neither: only the top of the heap is looked at,
+  and one further down is dropped when it gets there, or when it's
+  due, as before; nothing a process can see changes, but when the
+  program ends. It frees, with no change to them: `ask-within` (D157),
+  whose timer is its box's, which ends with the answer;
+  `http/request-within` (D173), which kills the sleeper it raced; and a
+  keeper closed while it waits to dial again (D228). HTTP's default
+  timeout (D173) and the `run` tool's limit (D187), turned down for
+  holding up a program's end, are now possible, for when they're
+  wanted.
+- **Checked:** golden tests 286 (numbers 1 up, a timer taken back that
+  never comes, taken back again or after it fired or by a number no
+  timer has, by another process, a fault for one that isn't a number,
+  and a root waiting for what only a timer taken back would have sent,
+  deadlocked), 287 (2,000 timers, a third taken back, last first, the
+  rest coming in the order they're due and then were set) and 288 (4,040
+  set and taken back so that their numbers meet in the table, each
+  found once, from `t/models/timer-ids.py`, a model of the table, in
+  which one that left a gap where a timer was taken back loses six; the
+  runtime made to do that gives the six, 4,034); 135, where `after` now
+  gives 1, and 137, where a killed sleeper's timer and one sent to it are
+  dropped. t/live.py's timers: on the real clock, a program whose only
+  pending timers are an hour long and come to nothing (a killed
+  sleeper's, one sent to a process that has ended, one taken back,
+  `ask-within`'s once answered) ends at once; without the drop it was
+  still running five seconds later.
+
+**D233. In a container, a heap's cap is a quarter of the memory
+limit.** *(Stevan, Oct 2026: "Let's do 2", the list of what D231 and
+D232 made possible, its first item PLAN.md's "Containers, what's left";
+then, to Claude's question, half the limit, which a measurement turned
+to a quarter, also Claude's recommendation.)*
+
+- **What it was:** each process's heap may grow to 1 GB (D202), and in
+  a container limited to less, a process that runs away takes the
+  program over the limit, and the kernel kills it whole: in Docker with
+  `--memory 256m`, exit 137, nothing said.
+- **Now:** with no `SLIGHT_HEAP_MAX`, the runtime reads the limit at its
+  start, on Linux, from `/proc/self/cgroup`: v2's `memory.max` or v1's
+  `memory.limit_in_bytes`, for the program's cgroup and each above it,
+  the least of them. In a container with a view of its own the path is
+  `/`; in one without (v1, as on the cloud machine), the host's path
+  isn't there to read, and the walk up comes to the container's own at
+  the top. v2's `max` and v1's figure for none are no limit. The cap is
+  a quarter of the limit if that's less than 1 GB, and at least 1 MB.
+  It's one of the settings a record keeps (D202), so a replay has it,
+  wherever it runs. `:system`'s runtime info has it now, `(:heap-max
+  bytes)`.
+- **Why a quarter, not half:** a process that keeps all it makes holds
+  about twice its cap at the collection where it faults, the old chunks
+  and the new: measured, 134 MB at a 64 MB cap, 269 at 128, 537 at 256.
+  At half the limit, such a process reaches the limit itself: in a
+  cgroup of 256 MB it faulted and the program went on, but the kernel
+  had reclaimed at the limit 1,132 times to get there. At a quarter it
+  peaks at half the limit, and the other half is the rest of the
+  program's. Rejected: half, as first chosen, for that; a third; and
+  only saying in the docs to set `SLIGHT_HEAP_MAX`.
+- **Not yet:** a cap on all the heaps together. Each process's is
+  capped, but many processes can still take a program over its limit;
+  a total would fault the process that asks, whatever holds the memory,
+  which is a proposal of its own. Mailboxes and stacks aren't counted
+  either, as before.
+- **Checked:** t/live.py's memory limit, on both targets (AArch64 under
+  qemu): in a cgroup of 256 MB, made under the program's own, the cap is
+  64 MB, and a process that grows without end faults, `(error heap)`,
+  and the program goes on; skipped without root or a memory controller
+  to write to. Test 281's keys now have `heap-max`. By hand, in a cgroup
+  of 256 MB: the most it used was 134 MB, the limit never reached; with
+  the old 1 GB, killed. In Docker, from an image `FROM scratch`:
+  `--memory 256m` gives a cap of 64 MB, and the program goes on; with no
+  limit, 1 GB; and with `SLIGHT_HEAP_MAX=1G`, the old default, the
+  kernel kills it, 137.
+
+**D234. Default timeouts: 30 seconds for an HTTP request, and 2 minutes
+for the `run` tool.** *(Stevan, Oct 2026: "Let's do 2"; then, to
+Claude's questions, both as recommended. D173 and D187 had turned these
+down only because a timer held up a program's end till it was due,
+which D232 ended.)* (D236 took the HTTP half out again, since on the
+virtual clock it overtook replies crossing macOS's loopback.)
+
+- **HTTP:** `http/request` and `http/get` are `http/request-within` with
+  30 seconds, `(http/timeout)`, for the whole reply, and give `(:error
+  :timeout)` after it. The timer is a sleeper's, killed when the reply
+  has come, so it doesn't hold up the program's end (D232).
+  `http/stream` has none: a model can stream for minutes, and its
+  caller can kill it. Rejected: a limit on a stream's head, or between
+  its pieces, which a caller can do itself; and no default, as before,
+  which leaves a caller of a server that never answers waiting for ever.
+- **A risk, not yet seen:** on the virtual clock, a pending timer makes
+  the clock jump when no socket is ready at that instant (D110), so a
+  reply on loopback that isn't readable at once would be overtaken by
+  the timeout, in a golden test. Linux delivers loopback TCP at once,
+  and every HTTP test passes with the 30-second timer pending; macOS
+  delayed a UDP answer that way (D165), and isn't checked here. If it
+  does the same with TCP, the virtual clock should wait a moment, for
+  real, for a connection waiting for its reply, as it does for a
+  lookup.
+- **`run`:** `exec/run-within ms cmd` is `exec/run` with a limit: a
+  command still running at `ms` milliseconds is killed, its group with
+  it, as closing its device does (D185), and its status is `(:timeout
+  ms)`, its output what it printed till then. The timer is the command's
+  process's, which ends with the command, so it doesn't hold up the end
+  either. `tools/run` uses 120 seconds, as Claude Code's own does, and
+  `tools/run-within ms approve` another; the model gets what it printed
+  and `[stopped after 120 s, still running]`, and the tool's description
+  tells it the limit. On the virtual clock, time stands still while a
+  command runs (D185), so there a command has no limit, and a test can't
+  see one reached. Rejected: 10 minutes; and no limit, as before, where
+  only Escape or Ctrl-C stops a command that never ends.
+- **Checked:** golden tests 289 (on the virtual clock, `http/get` and
+  `http/request` to a server that never answers give up 30,000 ms after
+  asking, and a reply after 29,000 ms is in time) and 290
+  (`exec/run-within` and the run tool on a command that ends, and the
+  limit in the tool's description), worked out by hand; every HTTP,
+  agent and tool test as before, with the 30-second timer pending. 289
+  waits for ever without the default. t/live.py's run limit, on the real
+  clock: `exec/run-within` and `tools/run-within` with 1 second, on a
+  command that prints, then sleeps 10 minutes, each killed with what it
+  printed; no `sleep` left after.
+
+**D235. Who's at the other end of a Unix socket: `socket/peer`, and
+`rpc/peer`.** *(Stevan, Oct 2026: "Let's do 2"; then, to Claude's
+question, a builtin and `rpc/peer`, as recommended. D231 left it for
+later, and D225 had "who the other end is" open; the first to use it
+will be where a remote call's `approve` goes, step 15.)*
+
+- **`(socket/peer c)`:** for a Unix connection, either end of it,
+  `((:uid u) (:gid g) (:pid p))`, the other process's as the kernel had
+  them at its `connect` (or, from the connecting end, at the listener's
+  `listen`): Linux's `SO_PEERCRED`; macOS's `getpeereid`, and
+  `LOCAL_PEERPID` for the pid, 0 where it can't be had (on macOS, once
+  the other end has closed, D236). The other end
+  can't say otherwise, as it could say anything of itself in a `helo`,
+  so a program can decide by it whom it answers, beside what the path's
+  permissions already let in (D231). For any other pid, a TCP
+  connection, a command or a process, `()`; anything else faults, as
+  for any pid. `:uid` and `:gid` are new runtime symbols, a group of
+  their own after the commands' words, so nothing before them moves;
+  `:pid` is `:system`'s.
+- **A builtin, not a message:** the devices are otherwise asked by
+  messages, `:system` too, answered to their owner; but a peer doesn't
+  change, and `rpc`'s loop, which owns the socket, would have to keep
+  track of who asked. Rejected: `(send c (list :peer))` answered with
+  `(:peer c info)`, for that; and putting it in a Unix connection's
+  `(:accept l c)` or `(:open c)`, which would change their shape, and
+  every pattern that takes them.
+- **`(rpc/peer)`:** from a handler, its caller's, asked of the
+  connection, which answers with `socket/peer` of its socket: so `()`
+  over TCP or a command. Only from the call's own process, as
+  `rpc/next`, since it asks its parent.
+- **Replay:** `rt_io_peer` is recorded, so a replay gives back the
+  uid, gid and pid of the run it replays, though it runs as another
+  process.
+- **Checked:** golden test 291: a Unix connection made and accepted in
+  one program, each end's peer this program's own, as `id -u`, `id -g`
+  and the shell's `$PPID` say; `()` for a process, a fault for 42; an
+  `rpc` handler's caller over a Unix socket, the same, and over TCP,
+  `()`; on both targets, `SO_PEERCRED` going through qemu. t/replay.sh's
+  net asks its Unix connection's peer, and the replay prints the
+  recorded pid. By hand: a server as root, its socket's umask 000,
+  called by root and by `nobody`, each seen as itself, 0 and 65534.
+
+**D236. HTTP's default timeout taken out again, and `socket/peer`'s pid
+on macOS.** *(Stevan, Oct 2026: the first `make test` on the Mac after
+D234 and D235, twelve tests failing; then, after a first fix left six,
+to Claude's question, "withdraw HTTP's default", as recommended over two
+ways of keeping it.)*
+
+- **What failed:** on the Mac, every HTTP test that gets a reply, from
+  204 to 212, the airline's recoveries (256, 258, 259) and 289, gave
+  `(:error :timeout)`; and 211's connection to a port nobody listens on
+  timed out where it was refused. With D234's default, a 30-second timer
+  is pending while a request waits, and the virtual clock moves to the
+  next timer when nothing can run and no socket is ready at the instant
+  it looks (D110). macOS's loopback delivers a moment after a send, and
+  refuses a connection a moment after the connect, so the clock found
+  nothing and went to the timeout. Linux's delivers at once, so the
+  cloud machine never saw it; a reply from another program, a Python
+  server, lost the same way on Linux, every time.
+- **A first fix, taken out:** the runtime noted a write to a socket or a
+  command, or a connection started, and forgot it when anything came
+  from the sockets; before moving the clock with that noted, it waited
+  for the sockets, for real, up to 200 ms, as it does before a lookup's
+  timer (D165). The Mac then failed six (206, 209, 212, 256, 258, 259),
+  each with replies on their way at once: the first to come cleared the
+  note while the others were still crossing, and the clock went to their
+  timeouts. Six requests at once to the Python server timed out every
+  one, on Linux. One note for the program can't say what's still on its
+  way.
+- **Now:** `http/request` and `http/get` wait as long as the reply
+  takes, as before D234, and the runtime is as it was. A timeout is
+  asked for with `http/request-within`. The weakness is the virtual
+  clock's, and stays: a test mustn't have a timer pending while it waits
+  for a reply on loopback, unless the timer is meant to win, as 211's
+  `/silent` is. No test but 289 did, which is taken out, with 292, the
+  first fix's. D234's other half, the run tool's 2 minutes, stays:
+  commands stop the virtual clock while they run (D185). Rejected: the
+  virtual clock counting the bytes in flight between the program's own
+  connections, each paired with its other end by port, about 80 lines
+  of runtime for one default; and waiting 20 ms of quiet after every
+  send, which costs the byte-at-a-time tests seconds and still loses on
+  a loaded machine.
+- **`socket/peer` on macOS:** 291 said `(accepted #false)`: the
+  accepted end asked its peer once the connecting end had closed, and
+  macOS's `LOCAL_PEERPID` answers only while the other end is connected,
+  so the pid was 0 (`getpeereid`'s uid and gid are kept). The test now
+  has each end ask while the other is still connected, and LANGUAGE.md
+  says the pid is 0 on macOS once the other end has gone. `rpc/peer`
+  asks during a call, while its caller is connected. With the first fix
+  in, 291 passed on the Mac. Rejected for now: asking at accept and
+  keeping the answer, which would make the pid the same everywhere, for
+  a device field and a call per connection.
+- **Checked:** the golden tests, the replay and the live checks on both
+  targets here, the runtime's idle as before D234, and `lib/http.slight`
+  as before but its comments.

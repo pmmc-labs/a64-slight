@@ -1,0 +1,22 @@
+; Timers set and taken back so that their numbers meet in the index
+; timer/cancel finds them by (D232), a table of open addressing: 40 that
+; stay, then 50 rounds of 80 more, each round taken back in a scrambled
+; order, then the 40, last first. Each is found, and taken back, once,
+; 4040 times #true, and none is left to fire. t/models/timer-ids.py
+; models the index: in a table that left a gap where one was taken back,
+; six of them would be lost.
+
+(defun set-timers (n) (map (lambda (i) (after 600000 $$ i)) (range 0 n)))
+
+(defun trues (bs) (length (filter (lambda (b) b) bs)))
+
+(defun one-round (ok)
+    (let block (set-timers 80))
+    (+ ok (trues (map (lambda (i) (timer/cancel (nth (math/mod (* i 37) 80) block))) (range 0 80)))))
+
+(defun rounds (r ok)
+    (if (== r 0) ok (rounds (- r 1) (one-round ok))))
+
+(let long (set-timers 40))
+(let ok (rounds 50 0))
+(+ ok (trues (map timer/cancel (reverse long))))

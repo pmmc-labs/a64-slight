@@ -704,7 +704,7 @@ test('join, monitor, kill and raise are builtins in the runtime, and can be valu
 test('connect is a fork whose process gets the keys, from :keypress', () => {
     assert.match(compile('(defun f (n) n) (let n 1) (connect :keypress (f n))'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_connect\n/);
     assert.match(compile('(connect :keypress 1)'), /\.asciz "connect at test\.slight:1:1"/);
-    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen or :exec, or a device, not (quote x)");
+    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not (quote x)");
     fails('(connect :keypress)', 'test.slight:1:1: connect takes 2 arguments, not 1');
     fails('(connect)', 'test.slight:1:1: connect takes 2 arguments, not 0');
     fails('(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (connect :keypress (list a b c d e f g h i))',
@@ -730,12 +730,17 @@ test('clock/us and hash are builtins in the runtime, and can be values', () => {
     fails('(hash)', 'test.slight:1:1: hash takes 1 argument, not 0');
 });
 
-test('after and sleep are builtins in the runtime, and can be values', () => {
+test('after, timer/cancel and sleep are builtins in the runtime, and can be values', () => {
     assert.match(compile('(after 10 $$ :tick)'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_after\n/);
+    assert.match(compile('(timer/cancel 1)'), /LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_timer_cancel\n/);
     assert.match(compile('(sleep 10)'), /LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_sleep\n/);
     assert.match(compile('(let f after)'), /LOADADDR x0, bi_after_closure/);
+    assert.match(compile('(let f timer/cancel)'), /LOADADDR x0, bi_timer_2fcancel_closure/);
     assert.match(compile('(let f sleep)'), /LOADADDR x0, bi_sleep_closure/);
     fails('(after 10 $$)', 'test.slight:1:1: after takes 3 arguments, not 2');
+    fails('(timer/cancel)', 'test.slight:1:1: timer/cancel takes 1 argument, not 0');
+    assert.match(compile('(socket/peer $$)'), /LOADADDR x1, Lsite_\d+\n {4}bl {3}rt_socket_peer\n/);
+    fails('(socket/peer)', 'test.slight:1:1: socket/peer takes 1 argument, not 0');
     fails('(sleep)', 'test.slight:1:1: sleep takes 1 argument, not 0');
     fails('(defun sleep (ms) ms)', "test.slight:1:8: can't define sleep: it's a builtin");
 });
@@ -748,7 +753,7 @@ test('connect to a file evaluates the path in the parent, and passes it and the 
     assert.match(compile('(connect :fs/read "a" 1)'), /mov {2}x5, #RT_FS_READ\n/);
     assert.match(compile('(connect :fs/append "a" 1)'), /mov {2}x5, #RT_FS_APPEND\n/);
     fails('(connect :fs/read "a")', 'test.slight:1:1: connect takes 3 arguments, not 2');
-    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen or :exec, or a device, not (quote fs)");
+    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not (quote fs)");
 });
 
 test('disconnect is a builtin in the runtime', () => {
@@ -760,6 +765,8 @@ test('disconnect is a builtin in the runtime', () => {
 test('connect over TCP passes the address or the port, and the mode', () => {
     assert.match(compile('(connect :tcp "localhost:80" 1)'), /ldr {2}x4, \[sp, #\d+\]\n {4}mov {2}x5, #RT_TCP_CONNECT\n {4}bl {3}rt_connect_tcp\n/);
     assert.match(compile('(connect :tcp/listen 0 1)'), /mov {2}x5, #RT_TCP_LISTEN\n {4}bl {3}rt_connect_tcp\n/);
+    assert.match(compile('(connect :unix "a.sock" 1)'), /mov {2}x5, #RT_UNIX_CONNECT\n {4}bl {3}rt_connect_tcp\n/);
+    assert.match(compile('(connect :unix/listen "a.sock" 1)'), /mov {2}x5, #RT_UNIX_LISTEN\n {4}bl {3}rt_connect_tcp\n/);
     fails('(connect :tcp/listen 0)', 'test.slight:1:1: connect takes 3 arguments, not 2');
 });
 

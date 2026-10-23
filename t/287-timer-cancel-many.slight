@@ -1,0 +1,21 @@
+; Many timers, a third of them taken back, last set first (D232): the
+; index timer/cancel finds them by grows, and keeps up as the heap moves
+; them; those taken back never come, and taking one back again is
+; #false; the rest come in the order they're due, and those due together
+; in the order they were set.
+
+(defun due (i) (math/mod (* i 7919) 1000))
+
+; Takes n messages, and gives whether they came in the order expected.
+(defun gather (n acc expected)
+    (if (== n 0)
+        (eq? (reverse acc) expected)
+        (recv (i (gather (- n 1) (cons i acc) expected)))))
+
+(let ids (map (lambda (i) (after (due i) $$ i)) (range 1 2001)))
+(pprint (eq? ids (range 1 2001)))
+(let gone (reverse (filter (lambda (t) (== (math/mod t 3) 0)) ids)))
+(pprint (list (length gone) (eq? (map timer/cancel gone) (map (lambda (t) #true) gone))))
+(pprint (eq? (map timer/cancel gone) (map (lambda (t) #false) gone)))
+(let kept (filter (lambda (t) (not (== (math/mod t 3) 0))) ids))
+(gather (length kept) () (sort-by due kept))
