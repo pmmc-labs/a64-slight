@@ -162,6 +162,30 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 23 Oct, 17:01: the message copy, faster (D240)
+
+`bench/results/2026-10-23-1701-macos-apple-m2-max.md`, at `b91d32a`,
+the five programs that send, against the run at 12:08 (the other
+languages within 6 per cent of it, most within 2):
+
+- **`payload 1000000`:** slight 0.84 s to 0.56, 1.51 times faster (the
+  cloud machine's 1.4). What the 100 integers add to a round trip,
+  `payload` less `ping-pong`, 0.49 µs to 0.26: about 1.3 ns a cell
+  copied, where it was 2.5. Go is now 2.8 times faster than slight,
+  where it was 4.3, and tokio 3.5, where it was 5.4; Erlang 4.7 times
+  slower on one scheduler and 2.6 on every core.
+- **`ping-pong 2000000`:** 0.348 s to 0.301, 1.16 times faster, where
+  x86-64's instructions were 0.6 per cent more: level with tokio (0.292)
+  and ahead of Go (0.387). AArch64's 31 registers probably hold more of
+  the walk's state than x86-64's 16, so what a copy costs whatever its
+  size fell there too; a guess, not measured.
+- **`spawn`, `fan-in` and `thread-ring`:** 0.137 s to 0.126, 0.383 to
+  0.352, and 0.528 to 0.509: 8, 9 and 4 per cent faster, beside the
+  cloud machine's 9, 7 and 8 per cent fewer instructions, most of it
+  values with no pointer in them no longer walked. In `fan-in`, Go and
+  tokio take 0.82 and 0.76 of slight's time, where they took 0.75 and
+  0.71.
+
 ### The M2 Max, 23 Oct, 15:16: the collector's walk, faster (D239)
 
 `bench/results/2026-10-23-1516-macos-apple-m2-max.md`, at `b56a719`,
@@ -796,11 +820,12 @@ to under 2. The M2's runs after each are above.
   scratch and the notes, globals, loaded and stored back at each cell.
   D240 made the walk the collector's: 41 instructions a cell where it
   took 68 (measured again), `payload` 33 per cent fewer instructions and
-  0.48 s to 0.34 at 300,000 on the cloud machine; and values with no
+  0.48 s to 0.34 at 300,000 on the cloud machine, and on the M2 Max
+  0.84 s to 0.56, 2.8 times Go's where it was 4.3; and values with no
   pointer in them aren't walked, `spawn`, `thread-ring` and `fan-in` 7 to
-  9 per cent fewer. Two walks, the first adding up the bytes and the
-  second copying straight into the chunk, might do better still, but
-  would undo D177.
+  9 per cent fewer instructions, 4 to 9 per cent faster on the M2. Two
+  walks, the first adding up the bytes and the second copying straight
+  into the chunk, might do better still, but would undo D177.
 - **Collection pauses** (`latency`, D238): a major collection holds up
   every process, the program's one core copying the heap: about 2.5 ms
   a MB live on the cloud machine, 400 ms for 160 MB, and a ping's wait
