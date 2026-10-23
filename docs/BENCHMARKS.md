@@ -150,6 +150,31 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 23 Oct, 12:08: `payload` (D237)
+
+`bench/results/2026-10-23-1208-macos-apple-m2-max.md`, at `b45e37d`:
+the first run with `payload`, and with every core in a table of its own.
+slight's times are within 1.5 per cent of the 10:47 run's (below), and
+everyone else's within 5 but a few that are uneven from run to run:
+Erlang's one-scheduler `spectral-norm` (0.66 s to 0.72), its every-core
+`ping-pong` (1.05 to 0.99), Go's every-core `idle-memory` (1.08 to
+1.02) and tokio's one-thread `spawn` (1.09 to 1.58, its fastest 0.37).
+`binary-trees`' peak, 106 to 191 MB over its five runs, is macOS's
+usual spread.
+
+- **`payload`:** a round trip with 100 integers each way takes slight
+  840 ns, against 173 in `ping-pong`, so the copy costs about 330 ns a
+  message, a little over 3 ns a cell. tokio on one thread takes 156 ns
+  and Go on one core 196, what their `ping-pong` round trips take, since
+  they don't copy: 5.4 and 4.3 times faster than slight. Erlang, which
+  copies too, takes 1,310 ns on every core, 1.6 times slight's (3.0 on
+  one scheduler).
+- **Every core**, the summary's last table: Erlang's `fib` and `tak`
+  take 0.55 of their one-core times on every core, which a sequential
+  program can't gain, so its one scheduler's waiting on the Mac (D194)
+  is still there; tokio's multi-thread runtime takes 38 times its
+  one-thread time at `payload`, 40 at `ping-pong`.
+
 ### The M2 Max, 23 Oct: every program, Rust included
 
 `bench/results/2026-10-23-1047-macos-apple-m2-max.md`, at `3487cba`:
@@ -198,11 +223,12 @@ things the Mac shows"):
   `parallel-fib`; and slower at messages, tokio's multi-thread runtime
   34 times slight's `ping-pong` and 11 its `fan-in`, Go 9 at `fan-in`.
 
-A page reading this run from slight's side, for someone deciding
+A page reading the runs from slight's side, for someone deciding
 whether to use it (each benchmark's place and why, the benchmarks by
 feature, and slight against each language), is the "slight Performance
 Guide" (https://claude.ai/artifact/RHne7keXWUwADYqKHuHdmi, private to
-Stevan till he shares it). Unlike the tables here, it takes each
+Stevan till he shares it); it reads the 12:08 run, above, since that
+came in. Unlike the tables here, it takes each
 language once, at the faster of its one-core and every-core runs, unless
 told to hold them to one core.
 
@@ -692,7 +718,8 @@ to under 2. The M2's runs after each are above.
 - **Copying a message** (`payload`, D237): a list of 100 integers there
   and back takes slight 1.1 s a million times on the cloud machine,
   against 0.17 for `ping-pong`, Go's and tokio's 0.3 to 0.4 hardly more
-  than theirs, since they don't copy. 84 per cent of the instructions
+  than theirs, since they don't copy; on the M2 Max 0.84 s, 4.3 times
+  Go's and 5.4 tokio's, and 1.6 times faster than Erlang's copy. 84 per cent of the instructions
   are the copy's walk, about 73 a cell, most of them bookkeeping: each
   cell checked against both ranges of static data, scratch's bounds,
   each pointer noted for the move into the chunk, and the sizes of
