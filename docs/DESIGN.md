@@ -1272,6 +1272,10 @@ Collected from above:
 
 1. A worker thread for a C library that can only block, such as SQLite
    (D151): the runtime's first thread, if it comes.
+2. Tasks and actors: `spawn` for an actor, `fork` for a task, and
+   addresses, `read` and `open` for a task to wait on something other
+   than a process's end. A proposal, in `docs/PLAN.md` ("Tasks and
+   actors").
 
 Settled in step 2: program structure, the top-level forms as the root
 process (with its arguments as `@ARGV` since D144). In step 7: `recv`
