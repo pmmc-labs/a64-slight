@@ -5272,7 +5272,11 @@ this to the message copy as well", after D239.)*
   300000` 0.48 s to 0.34; `ping-pong 2000000` 0.56 to 0.49, within the
   noise.
 - **Tested:** `make test` on both targets, 283 golden tests each.
-  `SLIGHT_GC_VERIFY=1` and `SLIGHT_GC_STRESS=7 make golden`: to come.
+  `SLIGHT_GC_VERIFY=1 make golden`: all of x86-64's; under qemu, 059 and
+  240 killed at 60 s, 240 passing given 15 minutes (059 doesn't finish
+  in that, D239). `SLIGHT_GC_STRESS=7 make golden`: timeouts only, 14
+  under qemu and 8 on x86-64, as with D239, each passing at 100 but 059,
+  130 and 240, as before.
   Golden test 294: values taken into a fork, kept as its result, given
   back by `join` and `join/race`, and sent there and back, alone and all
   in one message: lists of lists and of boxes (strings, floats, tuples,
