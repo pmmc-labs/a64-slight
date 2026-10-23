@@ -5208,7 +5208,12 @@ reasons to add additional threads", from Claude's options for the pauses
   medians of five); `latency`'s heap phase, five runs each, the worst
   pause 195–206 ms to 131–153 (medians 197 and 133), the 99th
   percentile 164–186 ms to 122–135, the phase 3.1 s to 2.2; test 162
-  under `SLIGHT_GC_STRESS=100`, 55 s to 43. The M2 Max's to come.
+  under `SLIGHT_GC_STRESS=100`, 55 s to 43. On the M2 Max (Stevan's run,
+  `2026-10-23-1516`): `binary-trees 18` 1.03 s to 0.79, 1.30 times
+  faster, now ahead of C (1.26 times) and level with Erlang on one
+  scheduler; `latency`'s heap phase at the median, the 99th percentile
+  and the worst 0.23, 57 and 61 ms to 0.12, 44 and 47, about 0.3 ms a MB
+  live.
 - **Tested:** `make test` on both targets, 282 golden tests each.
   `SLIGHT_GC_VERIFY=1 make golden`: all of x86-64's; under qemu, 059,
   130 and 240, which fill a 64 MB heap, killed at 60 s, 130 and 240

@@ -162,6 +162,25 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 23 Oct, 15:16: the collector's walk, faster (D239)
+
+`bench/results/2026-10-23-1516-macos-apple-m2-max.md`, at `b56a719`,
+`binary-trees` and `latency`, against the runs at 12:08 and 13:41:
+
+- **`binary-trees 18`:** slight 1.03 s to 0.79, 1.30 times faster, where
+  the cloud machine's was 1.08 times. Each one's time less its start,
+  over slight's: Chez 0.39, Erlang on every core 0.53, Node 0.63, Go on
+  every core 0.84, Erlang on one scheduler 0.98, C 1.26, Go on one core
+  1.74, Python 7.5, Perl 23. slight was behind C and Erlang on one
+  scheduler, and is now ahead of C and level with Erlang there. Its peak,
+  121 to 191 MB, the median 142, is macOS's usual spread.
+- **`latency`'s heap phase:** at the median, the 99th percentile and the
+  worst, 0.23, 57 and 61 ms to 0.12, 44 and 47: the worst pause beside
+  160 MB live about 0.3 ms a MB, where it was 0.4. The phase 1.42 s to
+  1.05. Busy, 4, 6 and 18 µs to 4, 5 and 12; the others as before.
+
+The guide reads this run for both, since it came in.
+
 ### The M2 Max, 23 Oct, 13:41: `latency` (D238)
 
 `bench/results/2026-10-23-1341-macos-apple-m2-max.md`, at `c8cbba4`,
@@ -733,7 +752,9 @@ to under 2. The M2's runs after each are above.
   comparisons and `sqrt` are still C. Erlang, which boxes them too, is
   only 1.2 times faster.
 - **Allocating and collecting** (`binary-trees`): 2.6 times Erlang on
-  the M2, whose heaps are per-process and copied as slight's are.
+  the M2, whose heaps are per-process and copied as slight's are (1.9
+  times Erlang on every core, and level with it on one scheduler, since
+  D239).
   Building tuples in place (D195) halved the allocation, and the
   generational collector (D200) copies what dies young no more; what's
   left is the trees bigger than the nursery, and major collections
@@ -783,7 +804,7 @@ to under 2. The M2's runs after each are above.
   10 ms and tokio all of the busy task's time. D239 made the copy's
   walk take 21 instructions a cell where it took 52: on the cloud
   machine the worst pause beside 160 MB went from 197 ms to 133, at the
-  median of five runs. A second thread for big collections (D239's C)
+  median of five runs, and on the M2 Max from 61 ms to 47. A second thread for big collections (D239's C)
   waits till it's needed; D200's next steps, a bigger nursery or an old
   generation that isn't copied whole, would shorten the pauses too; so
   does keeping a process's heap small.
