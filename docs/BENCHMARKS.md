@@ -170,10 +170,11 @@ languages within 6 per cent of it, most within 2):
 
 - **`payload 1000000`:** slight 0.84 s to 0.56, 1.51 times faster (the
   cloud machine's 1.4). What the 100 integers add to a round trip,
-  `payload` less `ping-pong`, 0.49 µs to 0.26: about 1.3 ns a cell
-  copied, where it was 2.5. Go is now 2.8 times faster than slight,
-  where it was 4.3, and tokio 3.5, where it was 5.4; Erlang 4.7 times
-  slower on one scheduler and 2.6 on every core.
+  `payload`'s less `ping-pong`'s (which makes twice as many), 0.67 µs to
+  0.41: about 2.0 ns a cell copied, where it was 3.3. Go is now 2.8
+  times faster than slight, where it was 4.3, and tokio 3.5, where it
+  was 5.4; Erlang 4.7 times slower on one scheduler and 2.6 on every
+  core.
 - **`ping-pong 2000000`:** 0.348 s to 0.301, 1.16 times faster, where
   x86-64's instructions were 0.6 per cent more: level with tokio (0.292)
   and ahead of Go (0.387). AArch64's 31 registers probably hold more of
@@ -185,6 +186,8 @@ languages within 6 per cent of it, most within 2):
   values with no pointer in them no longer walked. In `fan-in`, Go and
   tokio take 0.82 and 0.76 of slight's time, where they took 0.75 and
   0.71.
+
+The guide reads this run for all five, since it came in.
 
 ### The M2 Max, 23 Oct, 15:16: the collector's walk, faster (D239)
 

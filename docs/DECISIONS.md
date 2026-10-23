@@ -5273,7 +5273,7 @@ this to the message copy as well", after D239.)*
   noise. On the M2 Max (Stevan's run, `2026-10-23-1701`, the other
   languages within 6 per cent of the run before): `payload 1000000` 0.84
   s to 0.56, 1.51 times faster, 2.8 times Go's where it was 4.3, about
-  1.3 ns a cell copied where it was 2.5; `ping-pong 2000000` 0.348 to
+  2.0 ns a cell copied where it was 3.3; `ping-pong 2000000` 0.348 to
   0.301, 1.16 times faster, level with tokio; `spawn`, `fan-in` and
   `thread-ring` 8, 9 and 4 per cent faster.
 - **Tested:** `make test` on both targets, 283 golden tests each.
