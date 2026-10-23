@@ -875,7 +875,10 @@ processes that allocate and then wait turn out to hold too much).
   through many millions will need a retention policy, such as dropping
   the record once the parent has seen it. So will one whose processes
   end with big values, since a record keeps a copy of its value: the
-  airline's runs each leave theirs (D216).
+  airline's runs each leave theirs (D216). **(open)** A rule for when a
+  record goes, after Unix's zombies or Erlang's `noproc`, with
+  `detach` for children nobody joins, is in `docs/PLAN.md` ("Exit
+  records"), with what it was weighed on.
 
 ### Scheduler
 
