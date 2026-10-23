@@ -174,7 +174,10 @@ its own in the summary (D237); and `latency`, how long a message waits
 while other processes work: idle, beside a process that never waits,
 and beside a big heap (D238); and the collector's walk, its state in
 registers and a list's spine copied without its stack, 21 instructions a
-cell where it took 52 (D239, golden test 293).
+cell where it took 52 (D239, golden test 293); and the message copy's
+walk made the collector's, 41 instructions a cell where it took 68, and
+values with no pointer in them not walked at all (D240, golden test
+294).
 Strings, cleaned up
 (D219): one set of builtins in place of the byte ones and the `utf8/`
 ones, `str/` with JavaScript's methods' names and edge cases over

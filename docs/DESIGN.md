@@ -813,10 +813,12 @@ Lalloc_N:
   a test sets.
 - **No walk over a value recurses in C** (D147): the collector, printing,
   copying (a message, a fork's values, a result) and `eq?` keep a work
-  stack (`rt_work_t`) instead, which grows only as deep as the value nests
-  in its cars. So a value can nest as deep as the heap allows, and
-  nothing about it depends on the size of a C frame on one target or
-  another.
+  stack instead: printing and `eq?` an `rt_work_t`, which grows only as
+  deep as the value nests in its cars, and the collector and the copy
+  one of their own, which holds the cars still to do that are lists or
+  boxes of values (D239, D240). So a value can nest as deep as the heap
+  allows, and nothing about it depends on the size of a C frame on one
+  target or another.
 
 Turned down (D200): aging, keeping survivors in the nursery till they
 survive a second minor collection, as the BEAM does (what en masse costs,
@@ -838,7 +840,11 @@ processes that allocate and then wait turn out to hold too much).
   The copy is one walk over the value, into a scratch buffer, which then
   moves into a chunk of just its size; the message's record (its place in
   the mailbox) is at the front of the same chunk, so a send is one malloc
-  (D177).
+  (D177). The walk is the collector's, with nothing to forward: along a
+  list's spine, only cars that are lists and boxes of values going on its
+  stack, and what changes at every word kept where the compiler can hold
+  it in registers; values with no pointer among them aren't walked
+  (D240).
 - `recv` links the chunk into the receiver's heap. Nothing is copied twice.
   A message with nothing to copy (an integer, a keyword, static data) is
   a chunk of just its record, which `recv` frees instead (D199).

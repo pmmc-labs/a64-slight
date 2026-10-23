@@ -5229,3 +5229,61 @@ reasons to add additional threads", from Claude's options for the pauses
   walk's stack, and major collections brought on by big strings.
 - **Not done:** the message copy (D237), with the same kind of
   bookkeeping, about 73 instructions a cell: next, if wanted.
+
+**D240. The message copy, faster.** *(Stevan, Oct 2026: "Yes, lets apply
+this to the message copy as well", after D239.)*
+
+- **Where the time went:** `payload` under callgrind on the cloud
+  machine, x86-64: the copy's walk 68 instructions a cell, malloc and the
+  memcpy into the chunk aside. Scratch's fill and size, the words noted
+  and their count were globals, and the work stack an `rt_work_t` in a
+  function of its own, so the compiler loaded and stored them around the
+  words it wrote; each value was sorted into one of four kinds and then
+  dispatched on; noting a word checked the room for notes each time; and
+  the move into the chunk asked of each word noted whether it was among
+  the values at the front of scratch or in the copy.
+- **Now:** the walk is the collector's (D239), with nothing to forward.
+  What changes at every word (scratch, its fill, the words noted, the
+  stack) is a struct that only always-inlined helpers point at, so it
+  lives in registers. A box is copied when the walk comes to it, and a
+  cell along with the rest of its list, each cdr as the walk comes to
+  it; cars that are lists, and boxes of values, go on the stack, with
+  where their copies are, for after. Static data is tested in full only
+  between the lowest and the highest of its bounds, and a box of 64
+  bytes or less is copied a word at a time. The notes grow with scratch,
+  room for one a word, so noting one checks nothing (each is a different
+  word of scratch). Every word noted is made where it will be while it's
+  still in scratch, the values at the front included, so that's one loop
+  with no test in it, and then the copy is moved. And values with no
+  pointer among them (integers, keywords, pids), as fork's values and a
+  process's result often are, and many messages, aren't walked at all.
+- **Kept:** D177's one walk, into scratch, by offsets, then a chunk of
+  just its size; sharing still isn't kept. The stack now grows, as the
+  collector's does, with how many cars that are lists wait on it, not
+  with how deep they nest: a list of 2,000 lists puts 2,000 pairs on it,
+  32 KB.
+- **Measured** on the cloud machine, x86-64. Instructions: `payload
+  20000`, 334 million to 223 (33 per cent fewer), the walk 41 a cell;
+  `spawn 20000` 9 per cent fewer, `thread-ring 200000` 8, `fan-in
+  200000` 7, `idle-memory 20000` 3; `ping-pong 20000` 0.6 per cent more,
+  its messages being two and three cells, so that what a copy costs
+  whatever its size (the struct set up, more registers saved) outweighs
+  what the walk saves. Times, noisy there, medians of five: `payload
+  300000` 0.48 s to 0.34; `ping-pong 2000000` 0.56 to 0.49, within the
+  noise.
+- **Tested:** `make test` on both targets, 283 golden tests each.
+  `SLIGHT_GC_VERIFY=1` and `SLIGHT_GC_STRESS=7 make golden`: to come.
+  Golden test 294: values taken into a fork, kept as its result, given
+  back by `join` and `join/race`, and sent there and back, alone and all
+  in one message: lists of lists and of boxes (strings, floats, tuples,
+  closures), a list 20,000 long, one nested 1,000 deep in its cars, a
+  list of 2,000 lists, tuples, strings and closures each side of 64
+  bytes, quoted lists whole and as a list's tail, one list three times
+  in another, and values with no pointer in them.
+- **Not tried:** two walks again, one adding up the bytes and one copying
+  straight into a chunk of that size, with nothing to note or move.
+  D177 chose one walk when a walk was dear (the boids example's sends
+  spent half their time adding up the bytes); now that it's cheaper, two
+  might beat one for big messages, the first walk about ten instructions
+  a cell, the second about twenty. It would undo D177, so it's for
+  Stevan to say.

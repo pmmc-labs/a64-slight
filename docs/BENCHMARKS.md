@@ -794,6 +794,13 @@ to under 2. The M2's runs after each are above.
   cell checked against both ranges of static data, scratch's bounds,
   each pointer noted for the move into the chunk, and the sizes of
   scratch and the notes, globals, loaded and stored back at each cell.
+  D240 made the walk the collector's: 41 instructions a cell where it
+  took 68 (measured again), `payload` 33 per cent fewer instructions and
+  0.48 s to 0.34 at 300,000 on the cloud machine; and values with no
+  pointer in them aren't walked, `spawn`, `thread-ring` and `fan-in` 7 to
+  9 per cent fewer. Two walks, the first adding up the bytes and the
+  second copying straight into the chunk, might do better still, but
+  would undo D177.
 - **Collection pauses** (`latency`, D238): a major collection holds up
   every process, the program's one core copying the heap: about 2.5 ms
   a MB live on the cloud machine, 400 ms for 160 MB, and a ping's wait
