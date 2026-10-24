@@ -1326,6 +1326,8 @@ rt_value_t rt_join_race(rt_value_t pids, const char *site) {
     return copy_here(rt_cons_at(cells + 4, won, rt_cons_at(cells + 6, result, RT_NIL)));
 }
 
+static int owns(const rt_proc_t *p, const struct rt_device *d);
+
 // The first of srcs with something for the calling task: a message to one
 // of its addresses, or a process's end, taken in the order of srcs, as
 // join/race takes the first of its pids to have ended (D220); as (src
@@ -1346,34 +1348,41 @@ static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char 
             if (src == p->pid) rt_fault(RT_FAULT_JOIN_SELF, src, site);
         }
     }
+    if (p->reading) {                           // the device it took a message from last cuts its next (D158)
+        rt_value_t device = p->reading;
+        p->reading = 0;
+        read_on(p, device);
+    }
     for (;;) {
         for (rt_value_t xs = srcs; xs != RT_NIL; xs = rt_cdr(xs)) {
-            rt_value_t src = rt_car(xs);
-            if (rt_is_address(src)) {
-                rt_msg_t *last = NULL;
-                for (rt_msg_t **link = &p->mail; *link; link = &(*link)->next) {
-                    rt_msg_t *m = *link;
-                    if (m->device != src) {
-                        last = m;
-                        continue;
-                    }
-                    *link = m->next;
-                    if (p->mail_last == m) p->mail_last = last;
-                    rt_value_t v = m->value;
-                    if (m->chunk->size == sizeof *m) free_msg(m);
-                    else                             adopt(p, m->chunk);
-                    if (!pair) return v;
-                    rt_value_t *cells = rt_alloc(4 * sizeof *cells, site);
-                    return rt_cons_at(cells, src, rt_cons_at(cells + 2, v, RT_NIL));
+            rt_value_t     src = rt_car(xs);
+            const entry_t *e   = rt_is_address(src) ? NULL : &procs[src >> RT_PID_SHIFT];
+            rt_msg_t      *last = NULL;             // what waits for an address, or from a device, closed since or not
+            for (rt_msg_t **link = &p->mail; *link; link = &(*link)->next) {
+                rt_msg_t *m = *link;
+                if (m->device != src) {
+                    last = m;
+                    continue;
                 }
-            } else if (!procs[src >> RT_PID_SHIFT].proc) {
+                *link = m->next;
+                if (p->mail_last == m) p->mail_last = last;
+                rt_value_t v = m->value;
+                if (!rt_is_address(src)) p->reading = src;
+                if (m->chunk->size == sizeof *m) free_msg(m);
+                else                             adopt(p, m->chunk);
+                if (!pair) return v;
+                rt_value_t *cells = rt_alloc(4 * sizeof *cells, site);
+                return rt_cons_at(cells, src, rt_cons_at(cells + 2, v, RT_NIL));
+            }
+            if (e && !e->proc && !owns(p, e->device)) {   // ended, or a device closed or another's
                 _Alignas(16) rt_value_t cells[8];
                 rt_value_t result = result_at(cells, &procs[src >> RT_PID_SHIFT]);
                 return copy_here(pair ? rt_cons_at(cells + 4, src, rt_cons_at(cells + 6, result, RT_NIL)) : result);
             }
         }
         for (rt_value_t xs = srcs; xs != RT_NIL; xs = rt_cdr(xs)) {
-            if (!rt_is_address(rt_car(xs))) watch(procs[rt_car(xs) >> RT_PID_SHIFT].proc, p, 1);
+            rt_value_t src = rt_car(xs);
+            if (!rt_is_address(src) && procs[src >> RT_PID_SHIFT].proc) watch(procs[src >> RT_PID_SHIFT].proc, p, 1);
         }
         p->joining = srcs;
         p->state   = RT_READING;
@@ -1959,6 +1968,10 @@ typedef struct rt_device {
     uint64_t          snap_npids, snap_pids_cap;
 } rt_device_t;
 
+static int owns(const rt_proc_t *p, const rt_device_t *d) {
+    return d && d->owner == p->pid;
+}
+
 static rt_device_t *sockets;            // open sockets and commands, and closing sockets (nsockets counts them)
 static uint64_t     ndevices;           // open devices
 static rt_device_t *graveyard;          // closed sockets
@@ -2106,10 +2119,18 @@ static void close_all(rt_proc_t *p) {
     p->devices = NULL;
 }
 
+// A task reading d, which closes or is handed on, looks at its sources
+// again, and finds it ended (D243).
+static void wake_reader(rt_proc_t *owner, const rt_device_t *d) {
+    if (owner->state == RT_READING && among(owner->joining, d->pid)) enqueue(owner);
+}
+
 static void unown(rt_device_t *d) {
-    rt_device_t **link = &procs[d->owner >> RT_PID_SHIFT].proc->devices;
+    rt_proc_t    *owner = procs[d->owner >> RT_PID_SHIFT].proc;
+    rt_device_t **link  = &owner->devices;
     while (*link != d) link = &(*link)->next;
     *link = d->next;
+    wake_reader(owner, d);
 }
 
 static void close_device(rt_device_t *d) {
@@ -2125,8 +2146,18 @@ static void close_device(rt_device_t *d) {
 // reason is copied before d closes.
 static void fail(rt_device_t *d, int err) {
     rt_proc_t *owner = procs[d->owner >> RT_PID_SHIFT].proc;
-    _Alignas(16) rt_value_t cells[4];
+    _Alignas(16) rt_value_t cells[10];
     rt_value_t reason = io_reason(cells, err, d->path ? d->path : rt_int(d->port));
+    if (!owner->actor) {
+        // A task asked for the device (D243), so it's told, (:error d
+        // reason), where it reads the device, and goes on.
+        rt_value_t error = rt_cons_at(cells + 4, rt_symbol(RT_SYM_ERROR), rt_cons_at(cells + 6, d->pid, rt_cons_at(cells + 8, reason, RT_NIL)));
+        rt_msg_t  *m     = new_msg(error);
+        m->device = d->pid;
+        deliver(owner, m);
+        close_device(d);
+        return;
+    }
     if (owner == rt_current) rt_end(0, reason, 0);
     end_other(owner, reason);
 }
@@ -2134,10 +2165,11 @@ static void fail(rt_device_t *d, int err) {
 // Sends d's owner (sym f rest...); taking it reads on, if more says so.
 static void tell_sym(rt_device_t *d, rt_value_t sym, rt_value_t rest, int more) {
     _Alignas(16) rt_value_t cells[4];
-    rt_msg_t *m = new_msg(rt_cons_at(cells, sym, rt_cons_at(cells + 2, d->pid, rest)));
-    m->device = more ? d->pid : 0;
+    rt_msg_t  *m     = new_msg(rt_cons_at(cells, sym, rt_cons_at(cells + 2, d->pid, rest)));
+    rt_proc_t *owner = procs[d->owner >> RT_PID_SHIFT].proc;
+    m->device = more || !owner->actor ? d->pid : 0;     // a task reads it by the device, and reading on after one that doesn't need it does nothing
     d->sent   = d->sent || more;
-    deliver(procs[d->owner >> RT_PID_SHIFT].proc, m);
+    deliver(owner, m);
 }
 
 static void tell_list(rt_device_t *d, uint64_t word, rt_value_t rest, int more) {
@@ -2511,21 +2543,27 @@ static void command(rt_device_t *d, rt_value_t msg) {
     rt_buf_free(&b);
 }
 
-rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
-                         rt_value_t path, uint64_t mode) {
-    if (!rt_is_string(path)) rt_fault(RT_FAULT_NOT_STRING, path, site);
-    rt_value_t  pid   = rt_spawn(code, n, values, site);
-    rt_proc_t  *p     = procs[pid >> RT_PID_SHIFT].proc;
+// Opens the file at path for p: 0, or an errno.
+static int fs_open(rt_proc_t *p, const char *site, rt_value_t path, uint64_t mode) {
     const char *bytes = rt_string_bytes(path);
     size_t      len   = rt_string_len(path);
     int         flags = mode == RT_FS_READ ? O_RDONLY : O_WRONLY | O_CREAT | (mode == RT_FS_APPEND ? O_APPEND : O_TRUNC);
     int         fd    = memchr(bytes, '\0', len) ? (errno = EINVAL, -1) : rt_io_open(bytes, flags);
-    if (fd < 0) {
-        _Alignas(16) rt_value_t cells[4];
-        end_other(p, io_reason(cells, errno, path));
-        return pid;
-    }
+    if (fd < 0) return errno;
     tell_open(new_device(p, (int)mode, fd, site, bytes, len));
+    return 0;
+}
+
+rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+                         rt_value_t path, uint64_t mode) {
+    if (!rt_is_string(path)) rt_fault(RT_FAULT_NOT_STRING, path, site);
+    rt_value_t pid = rt_spawn(code, n, values, site);
+    rt_proc_t *p   = procs[pid >> RT_PID_SHIFT].proc;
+    int        err = fs_open(p, site, path, mode);
+    if (err) {
+        _Alignas(16) rt_value_t cells[4];
+        end_other(p, io_reason(cells, err, path));
+    }
     return pid;
 }
 
@@ -3027,20 +3065,22 @@ static int start_commands(void) {
     return 0;
 }
 
-rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
-                           rt_value_t cmd) {
-    uint64_t   len = 0;
-    rt_value_t x   = cmd;
-    if (!rt_is_cons(cmd)) rt_fault(RT_FAULT_NOT_CONS, cmd, site);     // a list of a name and its arguments
-    for (; rt_is_cons(x); x = rt_cdr(x), len++) {
+// A command, a list of a name and its arguments, which faults the caller
+// if it isn't one: its length.
+static uint64_t need_command(rt_value_t cmd, const char *site) {
+    uint64_t len = 0;
+    if (!rt_is_cons(cmd)) rt_fault(RT_FAULT_NOT_CONS, cmd, site);
+    for (rt_value_t x = cmd; rt_is_cons(x); x = rt_cdr(x), len++) {
         if (!rt_is_string(rt_car(x))) rt_fault(RT_FAULT_NOT_STRING, rt_car(x), site);
     }
-    rt_value_t pid  = rt_spawn(code, n, values, site);
-    rt_proc_t *p    = procs[pid >> RT_PID_SHIFT].proc;
-    rt_value_t name = rt_car(cmd);
+    return len;
+}
+
+// Starts cmd for p: 0, or an errno.
+static int exec_start(rt_proc_t *p, const char *site, rt_value_t cmd, uint64_t len) {
+    rt_value_t name = rt_car(cmd), x = cmd;
     char     **argv = rt_must(calloc(len + 1, sizeof *argv));
     int        err  = 0, child, in, out;
-    x = cmd;
     for (uint64_t i = 0; i < len; i++, x = rt_cdr(x)) {
         argv[i] = (char *)rt_string_bytes(rt_car(x));
         if (memchr(argv[i], '\0', rt_string_len(rt_car(x)))) err = EINVAL;     // :io-error, as a path's (D130)
@@ -3048,17 +3088,26 @@ rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values,
     if (!err) err = start_commands();
     if (!err) err = rt_io_spawn(argv, &child, &in, &out);
     free(argv);
-    if (err) {
-        _Alignas(16) rt_value_t cells[4];
-        end_other(p, io_reason(cells, err, name));
-        return pid;
-    }
+    if (err) return err;
     rt_device_t *d = new_device(p, DEV_EXEC, out, site, rt_string_bytes(name), rt_string_len(name));
     d->in_fd = in;
     d->child = d->group = child;
     nchildren++;
     if (!rt_io_replaying()) groups[out] = child;
     tell_open(d);
+    return 0;
+}
+
+rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+                           rt_value_t cmd) {
+    uint64_t   len = need_command(cmd, site);
+    rt_value_t pid = rt_spawn(code, n, values, site);
+    rt_proc_t *p   = procs[pid >> RT_PID_SHIFT].proc;
+    int        err = exec_start(p, site, cmd, len);
+    if (err) {
+        _Alignas(16) rt_value_t cells[4];
+        end_other(p, io_reason(cells, err, rt_car(cmd)));
+    }
     return pid;
 }
 
@@ -3389,6 +3438,44 @@ rt_value_t rt_connect_system(rt_code_t code, uint64_t n, const rt_value_t *value
     rt_value_t pid = rt_spawn(code, n, values, site);
     tell_open(new_device(procs[pid >> RT_PID_SHIFT].proc, DEV_SYSTEM, -1, site, NULL, 0));
     return pid;
+}
+
+// (open source arg): a device the calling task owns, with no process to
+// own it (D243), opened as connect opens one, then read till it's open:
+// (:ok d), or (:error reason). A listener, and the keyboard, are an
+// actor's (connect): something that waits for whatever comes is one.
+static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char *site);
+
+rt_value_t rt_open(rt_value_t source, rt_value_t arg, const char *site) {
+    rt_proc_t *p = rt_current;
+    if (p->actor) rt_fault(RT_FAULT_NOT_TASK, p->pid, site);   // an actor connects, and takes (:open f) with recv
+    uint64_t which = (source & RT_TAG_MASK) == RT_TAG_SYMBOL ? (source >> RT_SYMBOL_SHIFT) - RT_SYM_SOURCE : RT_SOURCE_COUNT;
+    if (which >= RT_SOURCE_COUNT) rt_fault(RT_FAULT_NOT_DEVICE, source, site);
+    if (which == RT_SOURCE_EXEC) {
+        need_command(arg, site);
+    } else if (which != RT_SOURCE_SYSTEM && !rt_is_string(arg)) {
+        rt_fault(RT_FAULT_NOT_STRING, arg, site);
+    }
+    rt_device_t *had = p->devices;
+    int          err = 0;
+    rt_value_t   where = arg;
+    switch (which) {
+        case RT_SOURCE_FS_READ:   err = fs_open(p, site, arg, RT_FS_READ); break;
+        case RT_SOURCE_FS_WRITE:  err = fs_open(p, site, arg, RT_FS_WRITE); break;
+        case RT_SOURCE_FS_APPEND: err = fs_open(p, site, arg, RT_FS_APPEND); break;
+        case RT_SOURCE_TCP:       err = tcp_connect(p, site, rt_string_bytes(arg), rt_string_len(arg)); break;
+        case RT_SOURCE_UNIX:      err = unix_at(p, site, arg, RT_UNIX_CONNECT); break;
+        case RT_SOURCE_EXEC:      err = exec_start(p, site, arg, need_command(arg, site)); where = rt_car(arg); break;
+        default:                  tell_open(new_device(p, DEV_SYSTEM, -1, site, NULL, 0)); break;
+    }
+    _Alignas(16) rt_value_t cells[8];
+    if (err) return copy_here(rt_cons_at(cells, rt_symbol(RT_SYM_ERROR), rt_cons_at(cells + 2, io_reason(cells + 4, err, where), RT_NIL)));
+    rt_value_t d = p->devices != had ? p->devices->pid : RT_NIL;   // new_device puts it first
+    rt_value_t m = read_from(rt_cons_at(cells, d, RT_NIL), 0, (uintptr_t)__builtin_return_address(0), site);
+    if (rt_car(m) == rt_symbol(RT_SYM_ERROR)) {                        // (:error d reason)
+        return copy_here(rt_cons_at(cells, rt_symbol(RT_SYM_ERROR), rt_cons_at(cells + 2, rt_car(rt_cdr(rt_cdr(m))), RT_NIL)));
+    }
+    return copy_here(rt_cons_at(cells, rt_symbol(RT_SYM_OK), rt_cons_at(cells + 2, d, RT_NIL)));
 }
 
 // --- the scheduler ------------------------------------------------------------

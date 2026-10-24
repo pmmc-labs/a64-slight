@@ -87,23 +87,23 @@
 (defun rpc/system ()
     (rpc/handler "system" "This program's runtime, and each of its processes: its state, the function it's in, its mailbox and heap." ()
         (lambda ()
-            (match (join (connect :system (rpc/system-asking)))
+            (match (join (fork (rpc/system-asking)))
                 ((:ok told) (rpc/data told))
                 ((:error r) (raise r))))))
 
 ; Both asked at once, so they tell of one moment.
 (defun rpc/system-asking ()
-    (recv
-        ((:open s)
+    (match (open :system)
+        ((:ok s)
             (send s (list :runtime))
             (send s (list :processes))
             (rpc/system-runtime s))))
 
 (defun rpc/system-runtime (s)
-    (recv ((:runtime _ info) (rpc/system-processes s info ()))))
+    (match (read s) ((:runtime _ info) (rpc/system-processes s info ()))))
 
 (defun rpc/system-processes (s runtime infos)
-    (recv
+    (match (read s)
         ((:process _ info) (rpc/system-processes s runtime (cons info infos)))
         ((:end _)          (disconnect s) (list (list :runtime runtime) (list :processes (reverse infos))))))
 

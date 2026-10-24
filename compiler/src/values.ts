@@ -84,9 +84,12 @@ export const PEER_WORDS: readonly string[] = ['uid', 'gid'];
 // What kind a process is, in :system's info (D243), in RT_KIND_ order.
 export const KIND_WORDS: readonly string[] = ['kind', 'task', 'actor'];
 
+// What open opens for a task (D243), in RT_SOURCE_ order.
+export const SOURCE_WORDS: readonly string[] = ['fs/read', 'fs/write', 'fs/append', 'tcp', 'unix', 'exec', 'system'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
-    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS,
+    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS,
 ];

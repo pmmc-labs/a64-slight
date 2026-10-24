@@ -144,11 +144,14 @@
 
 ; --- the day's data -----------------------------------------------------------
 
-(defun reading (records)
-    (recv
-        ((:open f)   (send f (list :read :sexp)) (reading records))
-        ((:sexp f r) (reading (cons r records)))
-        ((:eof f)    (reverse records))))
+(defun reading (f records)
+    (match (read f)
+        ((:sexp _ r) (reading f (cons r records)))
+        ((:eof _)    (reverse records))))
+
+(defun read-records (path)
+    (match (open :fs/read path)
+        ((:ok f) (send f (list :read :sexp)) (reading f ()))))
 
 ; The day: #(aircraft legs connects outs ins by-aircraft closed flew
 ; branches airports). The aircraft, legs and connections are tuples, numbered in
@@ -799,7 +802,7 @@
 (defun opt/remedies (o) (tuple/get o 10))
 (defun opt/shard (o) (tuple/get o 11))
 
-(defun read-sexps (path) (match (join (connect :fs/read path (reading ()))) ((:ok records) records)))
+(defun read-sexps (path) (match (join (fork (read-records path))) ((:ok records) records)))
 
 ; What decides a run but its changes: the model, its constants, and the
 ; day's aircraft, legs, connections, wind and closures; not its branches

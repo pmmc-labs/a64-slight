@@ -1,0 +1,42 @@
+; open (D243): a task opens a device of its own, with no process to own
+; it, and reads it; open gives (:ok d) once it's open, or (:error reason).
+; A reader's next message is cut at the next read (D158), so (:read how)
+; applies to it. A failure is (:error d reason), read where the device's
+; next message would be, and the task goes on. A device closed while its
+; reader waits ends the wait. Only a task opens, and not a listener.
+
+(let path "build/t/300-open.txt")
+(match (open :fs/write path)
+    ((:ok w) (send w (list :write "one" \n "two" \n "three")) (disconnect w)))
+(let r (open :fs/read path))
+(pprint r)
+(let f (cadr r))
+(pprint (read f))
+(send f (list :read :chunks))
+(pprint (read f))
+(pprint (read f))
+(pprint (read f))
+
+(pprint (open :fs/read "build/t/no-such-file"))
+(match (open :fs/read "t") ((:ok d) (pprint (read d))))
+
+(match (open :exec (list "sh" "-c" "read x; echo got $x"))
+    ((:ok c)
+        (send c (list :write "hi" \n))
+        (send c (list :eof))
+        (pprint (list (read c) (read c) (read c)))))
+(pprint (open :exec (list "no-such-command-300")))
+
+(match (open :system)
+    ((:ok s)
+        (send s (list :process $$))
+        (pprint (match (read s) ((:process _ info) (lookup :kind info))))))
+
+(match (open :system)
+    ((:ok s) (fork (disconnect s)) (pprint (read s))))
+
+(pprint (join (spawn (open :fs/read path))))
+(pprint (join (fork (open :tcp/listen 0))))
+(pprint (join (fork (open :fs/read 42))))
+(pprint (open :tcp "127.0.0.1:1"))
+:done

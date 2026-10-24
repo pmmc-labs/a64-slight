@@ -878,9 +878,38 @@ returns: a `let` at the top level keeps its value till the program ends.
 
 ## Devices
 
-`connect` is `fork` plus a connection: it starts a process to evaluate
-`expr`, as `fork` does, connects it to a source of messages, and returns
-the new process's pid.
+`connect` is `spawn` plus a connection: it starts an actor to evaluate
+`expr`, as `spawn` does, connects it to a source of messages, and
+returns the new process's pid. The actor takes the device's messages
+with `recv`, as below.
+
+A task opens a device of its own instead, and reads it (D243):
+
+- `(open source arg)` opens one, owned by the calling task, with no
+  process started: `source` is `:fs/read`, `:fs/write` or `:fs/append`
+  with a path, `:tcp` with `"host:port"`, `:unix` with a path, `:exec`
+  with a command, or `:system` alone. It waits till the device is open
+  (a connection connected, a command started) and gives `(:ok d)`; or
+  `(:error reason)`, as an actor that connected would have ended with.
+  A listener, and the keyboard, are an actor's: `open` faults
+  (`:not-a-device`) on `:tcp/listen`, `:unix/listen` and `:keypress`,
+  and in an actor, `:not-a-task`.
+- `(read d)` gives the device's next message, as an owner gets it below:
+  `(:line d s)`, `(:chunk d s)`, `(:eof d)`, a command's `(:exited d
+  status)`, `:system`'s answers. The next is cut at the `read` after it
+  (D158), so `(:read how)` sent in between applies to it. `read/any`
+  takes a device among its sources too. A device that fails (a read or
+  a write, bad JSON, `:too-big`) doesn't end the task: it closes, and
+  its next message is `(:error d reason)`. Once a device has closed and
+  its messages are read, `read` gives `(:ok ())`, as for a process that
+  has ended; so does a device closed while its reader waits.
+
+      (match (open :fs/read "notes.txt")
+          ((:ok f)         (read f))           ; (:line f "first line")
+          ((:error reason) reason))            ; (:enoent "notes.txt")
+
+`lib/fs`, `lib/exec` and `tools/read` work so, each in a task of its
+own, which an actor can join too.
 
 ### The keyboard
 
@@ -1765,8 +1794,8 @@ anything.
 
 ### (@include :fs)
 
-`lib/fs.slight`: whole files at once, on top of `connect`. Each blocks
-only its caller.
+`lib/fs.slight`: whole files at once, on top of `open`, each in a task
+of its own (D243). Each blocks only its caller.
 
 - `(slurp path)`: `(:ok lines)`, the file's lines without their
   newlines, as a list of strings.

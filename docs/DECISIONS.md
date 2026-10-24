@@ -5541,3 +5541,54 @@ addresses, `read`, `read/any`, and `ask` without a box.
   making an address, `read/any` of `()`, `read` of oneself) and 299
   (`:system` showing a reader and its source, and the deadlock message
   for `read/any`), worked out by hand.
+
+**Step 3, built** *(Claude, Oct 2026, on Stevan's "start step 3")*:
+`open`, a device a task owns.
+
+- **`(open source arg)` is a builtin,** not a special form as
+  `connect` is: its sources are runtime symbols (`:fs/read`,
+  `:fs/write`, `:fs/append`, `:tcp`, `:unix`, `:exec`, `:system`, a
+  group of their own), which the runtime tells apart, so `open` can be
+  a local's name (`lib/tools.slight` has one) and a value. Listeners
+  and `:keypress` aren't among them: what waits for whatever comes is
+  an actor, and connects.
+- **Opening** is `connect`'s, factored out of each `rt_connect_*`
+  (`fs_open`, `exec_start`, and the socket openers as they were), with
+  the task as the owner. `open` then reads the device's first message:
+  `(:open d)` gives `(:ok d)`; a failure, `(:error reason)`. One that
+  can't start at all (no such file or command) gives its reason with no
+  device made.
+- **Reading:** a device's message to a task is marked with the device,
+  as an address's is with the address, so `read` takes it by its
+  source; the mark is always there for a task, where for an actor it's
+  set only when the next message is to be cut (reading on after a
+  message that doesn't need it does nothing). The device whose message
+  a task took last is read on at its next `read`, as at an actor's next
+  `recv` (D158). A device's messages are read before it's taken as
+  ended, so `(:eof f)` comes though the file has closed.
+- **Failure:** D128 ends a device's owner; a task asked for its device,
+  so it's told instead: `(:error d reason)` where the device's next
+  message would be, and the device closes. `spew` and `tools/save`
+  read their file after closing it, so a write that failed raises, as
+  it ended the writer before.
+- **A device closed or handed on** while its task reads it wakes the
+  task, which finds it ended.
+- **Libraries:** `slurp`, `spew`, `exec/run`, `exec/run-within`,
+  `tools/read`, `tools/save`, the airline's `read-sexps` and
+  `rpc/system` open and read in a task of their own, which raises what
+  went wrong, so `join` gives what the actor did. `exec/run`'s task reads
+  its command, an address for its timer, and its caller's end, which
+  ends it and so the command (D193). Each starts a process and a
+  device, as `connect` did, so no output changed but one test's that
+  prints `lib/fs.slight`'s definitions (182).
+- **Left for step 4: HTTP's client.** Its connection's process shares
+  the head, framing and body readers with the server's (D182), all
+  `recv`; reading them with `read` would be a second copy of each. In
+  step 4 the connection sends its result to an address the caller
+  reads, as `http/stream` sends its pieces, which needs neither.
+- **Tests:** 300 (a file written and read, `(:read :chunks)` between
+  reads, the end, a file that isn't there, a directory failing at its
+  first read, a command written to and read, one that can't start,
+  `:system`, a device closed while its reader waits, a refused
+  connection, and the faults: an actor opening, a listener, a path
+  that isn't a string), worked out by hand.

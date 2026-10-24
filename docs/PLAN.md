@@ -1070,9 +1070,9 @@ be sent to, timed or monitor, and the root is a task (done, D243's
 "Step 1"); (2) addresses, `read` and `read/any`, `ask` in the prelude,
 and `lib/ds`, `rpc/peer`, `rpc/connect` and `agent/ask` moved to them
 (done, D243's "Step 2"); (3) `open`, a device's failure told to a task, and `lib/fs`,
-`lib/exec`, `http`'s client and `lib/tools` moved; (4) an actor can't be
-joined and keeps no value, told late as `:ended`, with `rpc/call`,
-`rpc/stream` and the coordinators (the games, the airline's desk, an
+`lib/exec` and `lib/tools` moved (done, D243's "Step 3"); (4) an actor can't be
+joined and keeps no value, told late as `:ended`, with HTTP's client,
+`rpc/call`, `rpc/stream` and the coordinators (the games, the airline's desk, an
 agent's turn) moved off joined actors first; (5) the rest of exit
 records. (4) was part of (1) as agreed, and moved: until (2) and (3)
 give a task other ways to have an answer, the hybrids (`ask`'s box,

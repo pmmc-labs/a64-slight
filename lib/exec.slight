@@ -9,31 +9,34 @@
 ; reason), if it can't be started: (:error (:enoent "ls")). If the caller
 ; ends first, killed, say, so does the command (D193).
 (defun exec/run (cmd)
-    (join (connect :exec cmd (exec/collecting))))
+    (join (fork (exec/running cmd ()))))
 
 ; As exec/run, but a command still running after ms milliseconds is
 ; killed, its group with it, and its status is (:timeout ms), its output
 ; what it printed till then (D234). On the virtual clock, time stands
 ; still while a command runs (D185), so there it has no limit.
 (defun exec/run-within (ms cmd)
-    (join (connect :exec cmd (exec/collecting-within ms))))
+    (join (fork (exec/running cmd ms))))
 
-(defun exec/collecting-within (ms)
-    (after ms $$ (list :exec/timeout ms))
-    (exec/collecting))
-
-; The command's process watches its caller, and ends with it, which closes
-; the device and so kills the command's group.
-(defun exec/collecting ()
-    (monitor ^$$)
-    (exec/collect ()))
+; The command's task (D243) opens it, and reads it, an address its timer
+; is for if it has one, and its caller's end, ending with the caller,
+; which closes the device and so kills the command's group (D193).
+(defun exec/running (cmd ms)
+    (match (open :exec cmd)
+        ((:ok p)
+            (send p (list :read :chunks))
+            (send p (list :eof))
+            (let to (address))
+            (when (int? ms) (after ms to :timeout))
+            (exec/collect (list p to ^$$) ms ()))
+        ((:error reason) (raise reason))))
 
 ; chunks is the output so far, last first.
-(defun exec/collect (chunks)
-    (recv
-        ((:open p)          (send p (list :read :chunks)) (send p (list :eof)) (exec/collect chunks))
-        ((:chunk p s)       (exec/collect (cons s chunks)))
-        ((:eof p)           (exec/collect chunks))
-        ((:exited p n)      (list n (str/join "" (reverse chunks))))
-        ((:exec/timeout ms) (list (list :timeout ms) (str/join "" (reverse chunks))))
-        ((:exit _ _)        :caller-ended)))
+(defun exec/collect (srcs ms chunks)
+    (match (read/any srcs)
+        ((_ (:chunk _ s))       (exec/collect srcs ms (cons s chunks)))
+        ((_ (:eof _))           (exec/collect srcs ms chunks))
+        ((_ (:exited _ n))      (list n (str/join "" (reverse chunks))))
+        ((_ (:error _ reason))  (raise reason))
+        ((_ :timeout)           (list (list :timeout ms) (str/join "" (reverse chunks))))
+        (_                      :caller-ended)))

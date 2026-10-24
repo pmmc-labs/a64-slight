@@ -249,8 +249,13 @@ actor and joins it; the deadlock message follows the root's join to
 where the program waits (golden tests 296, 297); and step 2: a task's
 addresses, `(address)`, which `send` and `after` take, `read` and
 `read/any`, which wait for a message to one or a process's end, and
-`ask` in the prelude on them, without a box (golden tests 298, 299).
-Next, step 3: `open`, a device a task owns and reads. 12c (C libraries vendored as source, D151, D152, then
+`ask` in the prelude on them, without a box (golden tests 298, 299);
+and step 3: `(open source arg)`, a device a task owns, no process
+started, read with `read`, its failure a message rather than the
+task's end, under `slurp`, `spew`, `exec/run` and `tools/read` (golden
+test 300). Next, step 4: an actor can't be joined, and keeps no
+value, once HTTP's client, `rpc/call` and the coordinators are off
+joined actors. 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
 first (`docs/PLAN.md`). Self-hosting waits

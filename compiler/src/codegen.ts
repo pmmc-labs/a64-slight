@@ -1095,6 +1095,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'address':            fixed('rt_address', 0),
     'read':               fixed('rt_read', 1),
     'read/any':           fixed('rt_read_any', 1),
+    'open':               fixed('rt_open', 1, 2),
     'monitor':            fixed('rt_monitor', 1),
     'kill':               fixed('rt_kill', 1),
     'raise':              fixed('rt_raise', 1),

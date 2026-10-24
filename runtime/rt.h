@@ -266,6 +266,18 @@
 #define RT_KIND_ACTOR        2    // :actor         started with spawn or connect
 #define RT_KIND_COUNT        3
 
+// What open (process.c, D243) opens for a task: RT_SOURCE_x is symbol
+// RT_SYM_SOURCE + x.
+#define RT_SYM_SOURCE      151    // RT_SYM_KIND + RT_KIND_COUNT
+#define RT_SOURCE_FS_READ    0    // :fs/read
+#define RT_SOURCE_FS_WRITE   1    // :fs/write
+#define RT_SOURCE_FS_APPEND  2    // :fs/append
+#define RT_SOURCE_TCP        3    // :tcp
+#define RT_SOURCE_UNIX       4    // :unix
+#define RT_SOURCE_EXEC       5    // :exec
+#define RT_SOURCE_SYSTEM     6    // :system
+#define RT_SOURCE_COUNT      7
+
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it
@@ -558,6 +570,10 @@ rt_value_t rt_monitor(rt_value_t pid, const char *site) RT_ASM(rt_monitor);
 rt_value_t rt_address(const char *site) RT_ASM(rt_address);
 rt_value_t rt_read(rt_value_t src, const char *site) RT_ASM(rt_read);
 rt_value_t rt_read_any(rt_value_t srcs, const char *site) RT_ASM(rt_read_any);
+// rt_open opens a device the calling task owns, from source (:fs/read and
+// the rest) and arg (a path, "host:port", a command, or () for :system),
+// and waits till it's open: (:ok d), or (:error reason).
+rt_value_t rt_open(rt_value_t source, rt_value_t arg, const char *site) RT_ASM(rt_open);
 rt_value_t rt_kill(rt_value_t pid, const char *site) RT_ASM(rt_kill);
 __attribute__((noreturn))
 rt_value_t rt_raise(rt_value_t reason, const char *site) RT_ASM(rt_raise);
