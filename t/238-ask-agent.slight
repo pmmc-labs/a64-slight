@@ -1,8 +1,8 @@
 ; Agents asking agents (D192), against a fake ollama. agent/ask waits for
 ; the whole answer, in a process of its own, so none of the pieces reach
 ; the caller: (:ok answer), (:error reason), or (:ended a result) for an
-; agent that has ended, result being :ended if it had before the ask
-; (D243). The helper answers with the question and the roles
+; agent that has ended, result kept for the task that started it (D245),
+; or :ended. The helper answers with the question and the roles
 ; of its own conversation, which goes on from one question to the next.
 ; Then a helper as another agent's tool, tools/ask-agent: the main agent
 ; calls it, and its answer is the call's result; and one whose model

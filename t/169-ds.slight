@@ -46,7 +46,7 @@
 (pprint (ask k (list :get)))
 
 ; asking a structure that has ended raises (:ended pid result), its
-; result :ended, since an actor's isn't kept (D243)
+; result kept for the root, which started it (D245)
 (kill c)
 (let r (join (fork (cell/get c))))
 (pprint (list (car r) (car (cadr r)) (eq? (cadr (cadr r)) c) (caddr (cadr r))))

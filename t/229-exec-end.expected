@@ -1,6 +1,6 @@
 (ok (0 ("gone")))
 (ok (0 ("gone")))
-ended
+(error killed)
 (ok (0 ("gone")))
 (0 ("handed"))
 ()

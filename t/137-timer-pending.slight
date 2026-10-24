@@ -14,7 +14,8 @@
         (:wake (pprint :woke) :root-done)))
 
 ; A killed sleeper, an actor so that a timer can be aimed at it, whose
-; result isn't kept (D243): read after it's killed, it has :ended.
+; result is kept for the root, its parent (D245): read after it's
+; killed, it says so.
 (let sleeper (spawn (late 20)))
 (after 30 sleeper :hello)
 (sleep 5)

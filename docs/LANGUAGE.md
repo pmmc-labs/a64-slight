@@ -396,8 +396,9 @@ waits, which is the usual way to start one:
 
     (let c (spawn (counter 0)))
 
-An actor can't be joined, and its value isn't kept: a task that wants
-it reads the actor's pid, from before it ends (Processes, D243).
+An actor can't be joined: a task that wants its value reads the actor's
+pid. Its value is kept for its parent if that's a task, till the parent
+has read it, and otherwise isn't kept (Processes, D243, D245).
 
 ### connect
 
@@ -551,9 +552,8 @@ computes a value: it can't wait in `recv`, nor be sent to, and `join`
 gives its result. An **actor**, started with `(spawn expr)` (or
 `connect`, under Devices), has a mailbox: it's sent messages, and takes
 them with `recv`, as a loop with its state in its arguments. It can't
-be joined (`:not-a-task`), and its value isn't kept once it has ended:
-a task that wants it reads the actor's pid (under Addresses), from
-before it ends. The root is a task. Each gives its pid. `$$` is the
+be joined (`:not-a-task`): a task that wants its value reads the
+actor's pid (under Addresses). The root is a task. Each gives its pid. `$$` is the
 current process, and `^$$` the one that started it (the root's is
 `()`).
 
@@ -758,14 +758,18 @@ The fault kinds:
   has ended does nothing. Returns `()`.
 
 When a process ends, its result goes to those waiting for it then: its
-joiners, the tasks reading it, a race it wins, and its monitors. An
-actor's isn't kept after that, and later ones get `:ended` (D243). A
-task's is kept for its parent, till the parent has had it: by joining
+joiners, the tasks reading it, a race it wins, and its monitors. After
+that it's kept for its parent, till the parent has had it: by joining
 or reading it, by a monitor's notice, or by ending (D244). Till then
-anyone may join it, as often as they like, or race it, which doesn't
-take it; after, it's `:ended`. So a task forked and joined at once, the
-usual way, keeps nothing once joined; and a parent that forks many and
-never joins them holds their values till it ends. A pid is never
+anyone may join a task, as often as they like, or race it, which
+doesn't take it, and anyone may read an actor; after, it's `:ended`. An
+actor's is kept so only if its parent is a task, which can read it
+(D245); an actor's parent can't, and hears of its end only by
+monitoring it, so the end of an actor an actor started isn't kept, and
+is `:ended` to whoever asks after (D243). So a task forked and joined
+at once, the usual way, keeps nothing once joined; a task can read an
+actor it started whenever it likes; and a parent that starts many and
+never takes them holds their values till it ends. A pid is never
 reused, and the runtime forgets one once nothing more can come of it,
 so a program that runs for good, starting processes as it goes, holds
 only those running, open or keeping a value (`:system`'s `(:records
@@ -785,13 +789,12 @@ A task can't be sent to, so it makes a place that can be (D243):
 - `(read src)` waits, keeping the stack as `join` does, for the next
   message sent to `src`, an address of the caller's, and gives it; or,
   if `src` is a pid, for it to end, and gives its result, as `join`.
-  An actor's end is the reader's only if it was watching when the actor
-  ended: from a `read` or `read/any` of the actor's pid begun before
-  then, even one that has since returned with something else, which
-  keeps watching till the task reads it again, or reads without it.
-  After that, an actor's end is `:ended`. So a task reads an actor it
-  has just spawned, or sent its last message to, without calling
-  anything in between; or has it send what it's to give to an address.
+  An actor's end is kept for its parent if that's a task (above);
+  another task gets it only if it was watching when the actor ended:
+  from a `read` or `read/any` of the actor's pid begun before then,
+  even one that has since returned with something else, which keeps
+  watching till the task reads it again, or reads without it. After
+  that, the end of an actor not kept is `:ended`.
   Messages to one address come in the order they were sent, and no
   other message can be taken for one: there's nothing to steal, and no
   dead letters.

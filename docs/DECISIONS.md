@@ -5718,3 +5718,45 @@ million customers, all entries.
   pointer, 488 bytes rounded to 496 by macOS's malloc. A process's
   devices moved into the side record too, most processes owning none,
   so the struct is 480 bytes again, as before D243.
+
+**D245. An actor's end is kept for its parent, if that's a task.**
+*(Stevan, Oct 2026: "Yes", to Claude's look back at whether D243 had
+made things less awkward.)* After D243 a task had an actor's end only
+if it was reading the actor when it ended: from a `read` begun before,
+with no call between the spawn, or the last send, and the read that
+could let the actor run. That was the one new trap D243 made, and it
+caught three programs (t/143 had to `read/any` over both keyboards,
+boids explained why its `read` was in time, and t/222 had a task kill
+an actor while the root read it).
+
+- **Now:** D244's rule for a task's value holds for an actor's too when
+  its parent is a task: kept, after those waiting as it ended are told,
+  till the parent reads it, is told by a monitor, or ends. A task can
+  read an actor it started whenever it likes. An actor's parent can't
+  read, and hears of a child's end only by monitoring it, so an actor
+  an actor started keeps nothing, as before: a server's connections, a
+  hub's workers, a cell's watcher, so D243's saving for programs that
+  run for good stands.
+- **`join` still faults on an actor** (`:not-a-task`), its end kept or
+  not: an actor is read. One whose entry has gone is `:ended`, as any
+  such pid is (D244).
+- **The cost:** a task that starts actors and never reads them holds
+  their ends till it ends, as one that forks tasks and never joins them
+  does (D244); the benchmarks start theirs from an actor, and none of
+  them changed.
+- **Rejected:** keeping the rule and documenting "read from before it
+  ends"; and keeping every actor's end, which brings back what D243
+  saved for servers.
+- **Programs:** t/143 reads its two keyboards' ends one after the
+  other again, and boids drops its comment. Expected output changed by
+  the rule alone, each an actor the root started, read or asked after
+  it ended, which now says how it ended where it said `:ended` (125,
+  137, 169, 200, 229, 238, as they printed before step 4). t/301 shows
+  both: the root's own actor read after its end, and the ends of an
+  actor's children, read late (`:ended`), and watched between two
+  reads (kept), and dropped by a read without them.
+- **With it, the examples whose top level waited lose their wrapper:**
+  even-odd-actors, game-of-life-actors and ring-benchmark gathered
+  replies in an actor the root spawned and read; the root does it now,
+  at an address it makes, reading in an ordinary loop, and each prints
+  what it did before D243, but for even-odd's address where its pid was.

@@ -262,7 +262,9 @@ step 5, exit records (D244): a task's value kept till its parent has it
 `:ended`, and the process table in pages, each freed once nothing more
 can come of its entries, so a program that runs for good holds only
 what's running, open or kept (`:system`'s `(:records n)`; golden test
-302, t/live.py's memory). **Next:** to settle with Stevan
+302, t/live.py's memory); and an actor's end kept so too, for a parent
+that's a task, so a task reads one whenever it likes (D245, golden test
+301). **Next:** to settle with Stevan
 (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan

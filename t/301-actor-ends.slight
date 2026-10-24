@@ -1,6 +1,9 @@
-; An actor's end isn't kept (D243): it's told to those watching when it
-; ends, its monitors and the tasks reading it, and is :ended to anyone
-; who asks after. A read's watch on a pid lasts till the task reads
+; An actor's end is told to those watching when it ends: its monitors
+; and the tasks reading it. If its parent is a task, which can read it,
+; it's kept for the parent too, till the parent has it (D245), as a
+; task's is (D244). An actor's parent can't read, so the end of an
+; actor an actor started is kept by nothing, and is :ended to anyone who
+; asks after (D243). A read's watch on a pid lasts till the task reads
 ; without it, so an end that comes between two reads waits for the next.
 
 (defun waits () (recv (_ :woke)))
@@ -11,27 +14,47 @@
 ; read from before it ends
 (pprint (read (spawn 5)))
 
-; read, and monitored, after
+; the root's own, read after it ends: kept for the root till it reads
+; it; then monitored, after
 (let a (spawn 7))
 (pause)
 (pprint (read a))
+(pprint (read a))
 (pprint (cadr (read (spawn (do (monitor a) (recv (m m)))))))
 
+; an actor that starts four, each waiting for a word, tells the root
+; their pids, and stays, so their ends are kept by nothing
+(defun four (to)
+    (send to (list (spawn (recv (_ :b))) (spawn (recv (_ (yield ()) :c))) (spawn (waits)) (spawn (recv (_ 9)))))
+    (recv (_ :done)))
+
+(let to (address))
+(let h (spawn (four to)))
+(let kids (read to))
+(let b (car kids))
+(let c (cadr kids))
+(let d (nth 2 kids))
+(let e (nth 3 kids))
+
+; e, read after it ends
+(send e :go)
+(pause)
+(pprint (read e))
+
 ; c ends after read/any has given b's end, and before c is read
-(let b (spawn :b))
-(let c (spawn (do (yield ()) :c)))
+(send b :go)
+(send c :go)
 (pprint (read/any (list b c)))
 (pause)
 (pprint (read c))
 
 ; d is watched while read/any waits, then not, once the root reads
 ; without it: so when it's killed, nobody's told
-(let d (spawn (waits)))
-(let to (address))
 (after 1 to :here)
 (pprint (read/any (list d to)))
 (send to :again)
 (pprint (read to))
 (kill d)
 (pprint (read d))
+(send h :done)
 :done

@@ -242,12 +242,13 @@ reply refs.
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns the timer's number (D232). |
 | `(timer/cancel t)` | Takes back `after`'s timer `t` if it hasn't fired: `#true`, or `#false` (D232). |
 
-**Tasks and actors (D243; steps 1 to 4 built, the rest of exit records
-to come).** Two kinds of process.
+**Tasks and actors (D243, with D244 and D245; built).** Two kinds of
+process.
 An actor, started with `(spawn expr)`, has a mailbox and the `recv`
-rule; it can be sent to, monitored and killed, not joined, and its value
-isn't kept when it ends: monitors are told, and one that asks later
-hears `:ended`. A task, started with `(fork expr)`, computes a value: it
+rule; it can be sent to, monitored and killed, not joined, and read by
+a task. When it ends, monitors and readers are told; its value is kept
+for its parent if that's a task, till the parent reads it (D245), and
+otherwise one that asks later hears `:ended`. A task, started with `(fork expr)`, computes a value: it
 can't `recv` or be sent to, and can be joined. The root is a task. A
 task waits for something other than a process's end through addresses
 it makes, `(address)`, which `send` and `after` take where they take a
@@ -879,11 +880,12 @@ processes that allocate and then wait turn out to hold too much).
   waiting then: each joiner, and a race it wins, is given a copy to
   take when it runs; each task with a read's watch on it is sent it,
   marked with the pid, so it waits for that task's next `read`; and
-  monitors get `(:exit pid result)` (D243, D244). Then an actor's isn't
-  kept, nor a task's whose parent was among them, or has ended: the
-  record says only that it ended, and later asks get `:ended`. Else a
-  task's Result is copied into its small per-pid **exit record**, kept
-  for the parent, which lists it; the parent's `join`, `read` or
+  monitors get `(:exit pid result)` (D243, D244). Then a Result isn't
+  kept if the parent was among them, or has ended, nor an actor's whose
+  parent is an actor, which can't read it: the record says only that it
+  ended, and later asks get `:ended`. Else the Result is copied into its
+  small per-pid **exit record**, kept for the parent, which lists it
+  (D244, D245); the parent's `join`, `read` or
   `monitor` of it, or its end, lets it go. The monitors a process set
   on others are taken off their lists (D183). A `join/race` is a watch
   on each of its pids, as a monitor is, that wakes its process rather

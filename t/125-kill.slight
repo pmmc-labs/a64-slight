@@ -1,8 +1,10 @@
 ; kill ends a process with (:error :killed), whatever it's doing: waiting
 ; for a message, ready to run (started or not), or blocked in join or
 ; read; or the caller itself. Killing a process that has ended does
-; nothing. An actor's result isn't kept (D243), so one killed and read
-; after is :ended; nor is a task's, once its parent has joined it (D244).
+; nothing. A process's result is kept for its parent, the root here,
+; till it has it, an actor's too since the root is a task (D244, D245):
+; so one killed and read after still says how it ended; and a second
+; join is :ended.
 
 (defun server ()
     (recv

@@ -1397,10 +1397,12 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     }
     // A task's value is kept for its parent till it has it: the root's
     // for the program to print, and one that ended before its parent
-    // joined, read or was told of it (D244). Else it's :ended now, as an
-    // actor's is (D243).
+    // joined, read or was told of it (D244). So is an actor's whose
+    // parent is a task, which can read it, so that it needn't be reading
+    // as the actor ends (D245); an actor's parent can't read, and is told
+    // only if it monitors. Else it's :ended now (D243).
     rt_proc_t *parent = p->parent == RT_NIL ? NULL : slot(p->parent)->proc;
-    if (!p->actor && (p->parent == RT_NIL || (!had && parent))) {
+    if (p->parent == RT_NIL || (!had && parent && (!p->actor || !parent->actor))) {
         e->chunk = copy_values(&value, &e->value, 1);
         if (parent) keep_for(parent, id);
     } else {
@@ -1450,7 +1452,7 @@ rt_value_t rt_join(rt_value_t pid, const char *site) {
     rt_proc_t *p = rt_current;
     entry_t   *e = entry(pid, site);
     rt_proc_t *t = e->proc;
-    if (t && t->actor) rt_fault(RT_FAULT_NOT_TASK, pid, site);  // it keeps no value to give (D243)
+    if (e->actor && (t || !e->ended)) rt_fault(RT_FAULT_NOT_TASK, pid, site);   // read, not joined, even once kept (D243, D245)
     if (pid == p->pid) rt_fault(RT_FAULT_JOIN_SELF, pid, site);
     if (t) {
         rt_proc_t **link = &t->joiners;
@@ -1502,7 +1504,7 @@ rt_value_t rt_join_race(rt_value_t pids, const char *site) {
         rt_value_t pid = rt_car(xs);
         entry_t   *e   = entry(pid, site);
         if (pid == p->pid) rt_fault(RT_FAULT_JOIN_SELF, pid, site);
-        if (e->proc && e->proc->actor) rt_fault(RT_FAULT_NOT_TASK, pid, site);
+        if (e->actor && (e->proc || !e->ended)) rt_fault(RT_FAULT_NOT_TASK, pid, site);
         if (!won && !e->proc) won = pid;
     }
     if (!won) {

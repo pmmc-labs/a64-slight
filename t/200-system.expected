@@ -6,7 +6,7 @@
 (joiner (state joining) (joining #<pid 4>) (in "joiner") (stack #true))
 (spinner (state recv) (in "spinner (recv at t/200-system.slight:12:32)"))
 (ended #<pid 11> #<pid 8> (ok 42))
-(ended #<pid 11> #<pid 9> ended)
+(ended #<pid 11> #<pid 9> (error killed))
 (ended #<pid 11> #<pid 11> ended)
 (spinner-busiest #true #true #true)
 (hoarder-biggest #true #true)
