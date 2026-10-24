@@ -31,9 +31,9 @@
 
 ; 1025 pieces of 64 KB
 (let path "build/t/249-read-endless.txt")
-(join (connect :fs/write path (writer (double-up "a" 16) 1025)))
-(pprint (join (connect :fs/read path (reading :json))))
-(pprint (join (connect :fs/read path (reading :sexp))))
+(read (connect :fs/write path (writer (double-up "a" 16) 1025)))
+(pprint (read (connect :fs/read path (reading :json))))
+(pprint (read (connect :fs/read path (reading :sexp))))
 
 ; the file emptied, so it doesn't keep its 64 MB
-(pprint (join (connect :fs/write path (emptied))))
+(pprint (read (connect :fs/write path (emptied))))

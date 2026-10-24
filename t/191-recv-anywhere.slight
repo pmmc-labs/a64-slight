@@ -71,4 +71,4 @@
     (send $$ (list :second 2))
     (yes-or-no :asked))
 
-(join (spawn (top-level @ARGV)))
+(read (spawn (top-level @ARGV)))

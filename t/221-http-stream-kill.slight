@@ -11,10 +11,10 @@
 (@include :http)
 (@include "data/http-raw.slight")
 
-(defun leave (url)
+(defun leave (to url)
     (http/stream :get url () "" :chunks)
     (let status (recv ((:head _ status _) status)))
-    (recv ((:chunk _ bytes) (list status bytes))))
+    (recv ((:chunk _ bytes) (send to (list :left status bytes)))))
 
 (defun main ()
     (let me   $$)
@@ -30,7 +30,9 @@
     (after 10 $$ :quiet)
     (let next (recv (m m)))
     (pprint (list head line seen next))
-    (pprint (join (spawn (leave (str base "/chunks")))))
+    (let me $$)
+    (spawn (leave me (str base "/chunks")))
+    (pprint (recv ((:left status bytes) (list status bytes))))
     (let seen-too (recv ((:raw what) (list :server what))))
     (kill raw)
     seen-too)
@@ -39,4 +41,4 @@
 (defun top-level ()
     (main))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

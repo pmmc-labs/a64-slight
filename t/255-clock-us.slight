@@ -21,4 +21,4 @@
     ; A builtin like any other, as a value.
     (pprint (apply clock/us ())))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

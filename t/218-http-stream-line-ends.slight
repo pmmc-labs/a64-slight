@@ -19,31 +19,24 @@
         ((:error _ reason)  (reverse (cons (list :error reason) acc)))))
 
 (defun streamed (url f)
-    (cadr (join (spawn (heard (http/stream :get url () "" :lines) f ())))))
+    (cadr (read (spawn (heard (http/stream :get url () "" :lines) f ())))))
 
 (defun same (x) x)
 
-(defun main ()
-    (let me $$)
-    (let raw (raw-listen :raw (list
-        (list "/length" (list "HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\none\r" "\n\r\nthr" "ee\nlast"))
-        (list "/close"  (list "HTTP/1.1 200 OK\r\n\r\nfirst\r\nsec" "ond\r"))
-        (list "/none"   "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
-        (list "/long"   (str "HTTP/1.1 200 OK\r\n\r\nok\n" (str/repeat "x" 65536) "\n" (str/repeat "y" 65537) "\nnever\n"))) me))
-    (recv
-        ((:raw port)
-            (let base (str "http://127.0.0.1:" port))
-            (let r (list
-                (streamed (str base "/length") same)
-                (streamed (str base "/close") same)
-                (streamed (str base "/none") same)
-                (streamed (str base "/long") bytes/len)))
-            (kill raw)
-            (map pprint r)
-            :done)))
-
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    (main))
-
-(join (spawn (top-level)))
+; The top level is a task (D243), so the raw server says its port with raw-up.
+(let up (raw-up (list
+    (list "/length" (list "HTTP/1.1 200 OK\r\nContent-Length: 17\r\n\r\none\r" "\n\r\nthr" "ee\nlast"))
+    (list "/close"  (list "HTTP/1.1 200 OK\r\n\r\nfirst\r\nsec" "ond\r"))
+    (list "/none"   "HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+    (list "/long"   (str "HTTP/1.1 200 OK\r\n\r\nok\n" (str/repeat "x" 65536) "\n" (str/repeat "y" 65537) "\nnever\n")))))
+(let raw (car up))
+(let port (cadr up))
+(let base (str "http://127.0.0.1:" port))
+(let r (list
+    (streamed (str base "/length") same)
+    (streamed (str base "/close") same)
+    (streamed (str base "/none") same)
+    (streamed (str base "/long") bytes/len)))
+(kill raw)
+(map pprint r)
+:done

@@ -135,7 +135,7 @@
 (let rows (- (tty/screen/rows) 2))
 (tty/write \e "[2J" \e "[" (+ rows 2) ";1H" \e "[2m"
            "arrows: move (shift: 4)  space: pen  c: colour  u/r: undo/redo  x: clear  p: replay  q: quit" \e "[0m")
-(match (join (connect :keypress (sketch (tuple (map/new) () () cols (* 2 rows) #true 0) (tuple cols rows))))
+(match (read (connect :keypress (sketch (tuple (map/new) () () cols (* 2 rows) #true 0) (tuple cols rows))))
     ((:ok (steps lit))
         (tty/write \e "[0m" \e "[" (+ rows 2) ";1H" \e "[K"
                    steps " steps kept, each a whole drawing sharing all but one key's change with the one before" \n)

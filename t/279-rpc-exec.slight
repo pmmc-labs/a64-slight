@@ -23,6 +23,6 @@
 (match (rpc/exec (list "cat") (list add count))
     ((:ok conn)
         (pprint (rpc/call conn "add" (list 2 3)))
-        (pprint (join (spawn (do (rpc/stream conn "count" (list 3)) (values-of ())))))
+        (pprint (read (spawn (do (rpc/stream conn "count" (list 3)) (values-of ())))))
         (rpc/close conn)))
 (pprint (rpc/exec (list "no-such-command-for-t279") ()))

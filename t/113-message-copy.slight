@@ -21,4 +21,4 @@
     (let k 10)
     (ask e (list 42 "a string" 2.5 :sym '(quoted (list)) (list 1 (list 2 "three")) (lambda (x) (+ x k)) (range 0 5))))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

@@ -16,4 +16,4 @@
                 (_         (show-keys))))))
 
 (pprint (list (tty/screen/rows) (tty/screen/cols)))
-(pprint (join (connect :keypress (show-keys))))
+(pprint (read (connect :keypress (show-keys))))

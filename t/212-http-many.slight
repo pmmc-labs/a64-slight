@@ -11,18 +11,11 @@
         ((:ok (:ok (_ _ body))) body)
         (_                      :failed)))
 
-(defun main ()
-    (let server (http/serve 0 handler))
-    (recv
-        ((:listening port)
-            (let base (str "http://127.0.0.1:" port "/"))
-            (let pids (map (lambda (i) (fork (http/get (str base i)))) (range 1 11)))
-            (let r (map (lambda (p) (body-of (join p))) pids))
-            (kill server)
-            r)))
-
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    (main))
-
-(join (spawn (top-level)))
+; The top level is a task (D243): http/listen starts the server from it.
+(match (http/listen 0 handler)
+    ((:ok (server port))
+        (let base (str "http://127.0.0.1:" port "/"))
+        (let pids (map (lambda (i) (fork (http/get (str base i)))) (range 1 11)))
+        (let r (map (lambda (p) (body-of (join p))) pids))
+        (kill server)
+        r))

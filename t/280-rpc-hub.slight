@@ -36,34 +36,29 @@
             (rpc/call conn :register (list name))
             conn)))
 
-; The registry's devices, asked from a process of its own, since a
-; function that waits in recv can't give a value back.
+; The registry's devices, asked by an actor of its own, whose end is read,
+; since a task can't be told (D243).
 (defun devices-of (reg)
-    (match (join (spawn (listing reg)))
+    (match (read (spawn (listing reg)))
         ((:ok ds) ds)))
 
 (defun listing (reg)
     (send reg (list :list $$))
     (recv ((:devices ds) ds)))
 
-(defun main (l reg)
-    (recv
-        ((:listening port)
-            (let conns (map (lambda (d) (device port (car d) (cadr d))) (list (list "b" 19) (list "a" 21) (list "c" 23))))
-            (let ds (devices-of reg))
-            (pprint (map (lambda (d) (list (car d) (rpc/call (cadr d) :read ()))) ds))
-            (rpc/close (car conns))
-            (recv ((:gone name) (pprint (list :gone name))))
-            (pprint (map car (devices-of reg)))
-            (pprint (rpc/call (cadr (find (lambda (d) (eq? (car d) "b")) ds)) :read ()))
-            (map rpc/close (cdr conns))
-            (kill l)
-            :done)))
-
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    (let me $$)
-    (let reg (spawn (registry () me)))
-    (main (rpc/serve "127.0.0.1:0" (hub-handlers reg)) reg))
-
-(join (spawn (top-level)))
+; The top level is a task (D243): rpc/listen starts the hub from it, and
+; the registry tells it at an address when a device hangs up.
+(let to (address))
+(let reg (spawn (registry () to)))
+(match (rpc/listen "127.0.0.1:0" (hub-handlers reg))
+    ((:ok (l port))
+        (let conns (map (lambda (d) (device port (car d) (cadr d))) (list (list "b" 19) (list "a" 21) (list "c" 23))))
+        (let ds (devices-of reg))
+        (pprint (map (lambda (d) (list (car d) (rpc/call (cadr d) :read ()))) ds))
+        (rpc/close (car conns))
+        (pprint (read to))
+        (pprint (map car (devices-of reg)))
+        (pprint (rpc/call (cadr (find (lambda (d) (eq? (car d) "b")) ds)) :read ()))
+        (map rpc/close (cdr conns))
+        (kill l)
+        :done))

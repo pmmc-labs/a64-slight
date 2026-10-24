@@ -7,16 +7,9 @@
 (defun handler (req)
     (list 200 (list (list "Content-Type" "text/plain")) (str (lookup :path req) "?" (lookup :query req))))
 
-(defun main ()
-    (let server (http/serve 0 handler))
-    (recv
-        ((:listening port)
-            (let r (http/get (str "http://127.0.0.1:" port "/hello?x=1")))
-            (kill server)
-            r)))
-
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    (main))
-
-(join (spawn (top-level)))
+; The top level is a task (D243): http/listen starts the server from it.
+(match (http/listen 0 handler)
+    ((:ok (server port))
+        (let r (http/get (str "http://127.0.0.1:" port "/hello?x=1")))
+        (kill server)
+        r))

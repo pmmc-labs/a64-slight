@@ -2,4 +2,4 @@
 ((head 200) (line "first") (line "second") (eof))
 ((head 200) (eof))
 ((head 200) (line 2) (line 65536) (error line-too-big))
-(ok done)
+done

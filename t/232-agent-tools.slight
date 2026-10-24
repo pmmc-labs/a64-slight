@@ -84,6 +84,7 @@
 
 (defun forever () (recv (:never :never)))
 
+; me, whom the stuck tool tells its pid
 (defun tools (me)
     (list
         (tool/new "get_weather" "The weather in a city, now." (list (list "city" :string "The city"))
@@ -92,7 +93,7 @@
             (lambda (args) (+ (lookup "a" args) (lookup "b" args))))
         (tool/new "broken" "Fails." () (lambda (args) (raise "the tool broke")))
         (tool/new "big" "Says a lot." () (lambda (args) (str/repeat "x" 20000)))
-        (tool/new "stuck" "Never answers." () (lambda (args) (send me (list :stuck $$)) (join (spawn (forever)))))))
+        (tool/new "stuck" "Never answers." () (lambda (args) (send me (list :stuck $$)) (read (spawn (forever)))))))
 
 ; --- asking ------------------------------------------------------------
 
@@ -107,7 +108,7 @@
         ((:error _ reason)      (reverse (cons (list :error reason) acc)))))
 
 (defun ask (a text)
-    (cadr (join (spawn (asking a text)))))
+    (cadr (read (spawn (asking a text)))))
 
 (defun asking (a text)
     (agent/say a text)
@@ -115,36 +116,36 @@
 
 ; --- the run -----------------------------------------------------------
 
-(defun main ()
-    (let me   $$)
-    (let srv  (http/serve 0 handler))
-    (let base (recv ((:listening port) (str "http://127.0.0.1:" port))))
-    (let ts   (tools me))
-    (let a    (agent/new base "fake" "be brief" ts))
-    (pprint (ask a "schema"))
-    (pprint (ask a "weather"))
-    (pprint (ask a "again"))
-    (pprint (ask (agent/new base "fake" "" ts) "both"))
-    (pprint (ask (agent/new base "fake" "" ts) "broken"))
-    (pprint (ask (agent/new base "fake" "" ts) "unknown"))
-    (pprint (ask (agent/new base "fake" "" ts) "big"))
-    (let b    (agent/new base "fake" "" ts))
-    (pprint (ask b "loop"))
-    (pprint (ask b "after"))
-    (pprint (ask (agent/new base "fake" "" ()) "no tools"))
-    (let c    (agent/new base "fake" "" ts))
+; A tool that never answers: the agent is killed while it runs, and the
+; tool's process ends with it. An actor asks, since the tool tells it its
+; pid, and it monitors that.
+(defun stuck (base)
+    (let c    (agent/new base "fake" "" (tools $$)))
     (agent/say c "stuck")
     (let calling (recv ((:calling _ name args) (list :calling name args))))
     (let p    (recv ((:stuck p) p)))
     (monitor p)
     (kill c)
     (let ended (recv ((:exit q r) (list (eq? q p) r))))
-    (pprint (list calling ended))
-    (kill srv)
-    :done)
+    (list calling ended))
 
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    (main))
-
-(join (spawn (top-level)))
+; The top level is a task (D243): http/listen starts the server from it.
+(match (http/listen 0 handler)
+    ((:ok (srv port))
+        (let base (str "http://127.0.0.1:" port))
+        (let ts   (tools ()))
+        (let a    (agent/new base "fake" "be brief" ts))
+        (pprint (ask a "schema"))
+        (pprint (ask a "weather"))
+        (pprint (ask a "again"))
+        (pprint (ask (agent/new base "fake" "" ts) "both"))
+        (pprint (ask (agent/new base "fake" "" ts) "broken"))
+        (pprint (ask (agent/new base "fake" "" ts) "unknown"))
+        (pprint (ask (agent/new base "fake" "" ts) "big"))
+        (let b    (agent/new base "fake" "" ts))
+        (pprint (ask b "loop"))
+        (pprint (ask b "after"))
+        (pprint (ask (agent/new base "fake" "" ()) "no tools"))
+        (pprint (cadr (read (spawn (stuck base)))))
+        (kill srv)
+        :done))

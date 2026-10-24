@@ -14,4 +14,8 @@
 (fork (do (sleep 1) (pprint :slept)))
 (let one (connect :keypress (listener :one)))
 (let two (connect :keypress (listener :two)))
-(pprint (map join (list one two)))
+; Both end on the same key, so both are read at once: a read of the
+; second alone would come after its end, which an actor doesn't keep
+; (D243); read/any watches both, and tells the root each one's end.
+(let first (read/any (list one two)))
+(pprint (list (cadr first) (read (if (eq? (car first) one) two one))))

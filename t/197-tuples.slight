@@ -46,4 +46,4 @@
     (pprint (join (fork (tuple/len (list 1)))))
     (pprint (join (fork (tuple/get (tuple 1 2) 1.0)))))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

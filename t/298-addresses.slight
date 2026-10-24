@@ -3,8 +3,9 @@
 ; its sources, in their order, that has something, a pid's being its end;
 ; a timer can be set for an address, and taken back; and disconnect closes
 ; one, dropping what waits there and what comes after. ask is the
-; prelude's, on them. Only a task makes and reads addresses, and only its
-; own, open ones.
+; prelude's, on them; asking an actor that has ended raises with :ended,
+; since its result isn't kept. Only a task makes and reads addresses, and
+; only its own, open ones.
 
 (defun echo ()
     (recv
@@ -54,7 +55,7 @@
 (let s (spawn (deaf)))
 (pprint (join (fork (ask-within 50 s (list :get)))))
 
-(pprint (join (spawn (address))))
+(pprint (read (spawn (address))))
 (pprint (join (fork (read/any ()))))
 (pprint (join (fork (read $$))))
 :done

@@ -27,4 +27,4 @@
     (kill b)
     (watcher 4))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

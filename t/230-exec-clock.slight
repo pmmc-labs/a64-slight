@@ -13,7 +13,7 @@
         ((:exited p n) (list n (reverse out)))
         (:timeout      :timed-out)))
 
-(pprint (join (connect :exec (list "sh" "-c" "echo working; echo still working; exit 4") (timed ()))))
+(pprint (read (connect :exec (list "sh" "-c" "echo working; echo still working; exit 4") (timed ()))))
 
 ; One around a command that waits for its input, and never says anything.
 (defun waits ()
@@ -22,7 +22,7 @@
         (:timeout  :timed-out)
         (m         (list :unexpected m))))
 
-(pprint (join (connect :exec (list "cat") (waits))))
+(pprint (read (connect :exec (list "cat") (waits))))
 
 ; A command that answers, then waits for more: a timer set once it has
 ; said all it will closes its input, and it ends.
@@ -34,4 +34,4 @@
         ((:eof p)      (prompts out))
         ((:exited p n) (list n (reverse out)))))
 
-(pprint (join (connect :exec (list "cat") (prompts ()))))
+(pprint (read (connect :exec (list "cat") (prompts ()))))

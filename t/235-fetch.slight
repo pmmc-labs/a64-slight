@@ -66,4 +66,4 @@
     (kill srv)
     :done)
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

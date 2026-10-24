@@ -44,7 +44,7 @@
 (send p (list :point (tuple 5 6 7)))
 (send p (list :point (tuple 10 20)))
 (send p :done)
-(pprint (join p))
+(pprint (read p))
 
 ; a whole message that's a tuple; and names from tuple patterns after a
 ; recv in the middle of the function, in a lambda, and in a fork
@@ -57,7 +57,7 @@
             (join (fork (f n))))))
 (let tw (spawn (twice 1)))
 (send tw (tuple :add 2))
-(pprint (join tw))
+(pprint (read tw))
 
 ; a tuple pattern compiles to one compare of the box's header (D178), so
 ; no other box passes for a tuple of two: not a string of two bytes, a

@@ -33,4 +33,4 @@
         ((and (>= digit 1) (<= digit 7)) (+ 40 digit))
         (#true                            color)))
 
-(join (connect :keypress (keyboard 47)))
+(read (connect :keypress (keyboard 47)))

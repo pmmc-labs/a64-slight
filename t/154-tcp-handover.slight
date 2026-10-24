@@ -29,7 +29,7 @@
         ((:open l port)
             (let me $$)
             (let where (str "localhost:" port))
-            (fork (send me (list :client (join (connect :tcp where (first-client where))))))
+            (fork (send me (list :client (read (connect :tcp where (first-client where))))))
             (holding l))))
 
 (defun holding (l)
@@ -47,4 +47,4 @@
     (recv
         ((:client r) (disconnect l) r)))
 
-(pprint (join (connect :tcp/listen 0 (listener))))
+(pprint (read (connect :tcp/listen 0 (listener))))

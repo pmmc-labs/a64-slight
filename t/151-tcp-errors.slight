@@ -1,7 +1,9 @@
 ; A port must be from 0 to 65535 (or "host:port", t/276), an address a
 ; string; connect can only hand over an open device. A port that's taken,
 ; a connection refused and an address that can't be found end the connected
-; process before it runs, with (:error (name where)). A listener takes nothing.
+; process as it starts, with (:error (name where)), which the root reads (an
+; actor's result isn't kept, D243, so it reads it from the start). A
+; listener takes nothing.
 
 (defun never ()
     (recv
@@ -17,15 +19,19 @@
 (defun failed (r where)
     (list (car r) (car (cadr r)) (eq? (cadr (cadr r)) where)))
 
-(defun first ()
-    (recv
-        ((:open l port)
-            (pprint (failed (join (connect :tcp/listen port (never))) port))
-            (send l (list :write "nope"))
-            (disconnect l)
-            (let where (str "localhost:" port))
-            (failed (join (connect :tcp where (never))) where))))
+; A listener's owner, which tells the root the listener and its port.
+(defun telling (to)
+    (recv ((:open l port) (send to (list l port)) (never))))
 
-(pprint (join (connect :tcp/listen 0 (first))))
-(pprint (join (connect :tcp "localhost" (never))))
-(pprint (join (connect :tcp "localhost:notaport" (never))))
+(let to (address))
+(connect :tcp/listen 0 (telling to))
+(let lp (read to))
+(let l (car lp))
+(let port (cadr lp))
+(pprint (failed (read (connect :tcp/listen port (never))) port))
+(send l (list :write "nope"))
+(disconnect l)
+(let where (str "localhost:" port))
+(pprint (failed (read (connect :tcp where (never))) where))
+(pprint (read (connect :tcp "localhost" (never))))
+(pprint (read (connect :tcp "localhost:notaport" (never))))

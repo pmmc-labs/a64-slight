@@ -18,4 +18,4 @@
 (defun top-level (argv)
     (ping (spawn (pong)) 0 (str->int (car argv))))
 
-(cadr (join (spawn (top-level @ARGV))))
+(cadr (read (spawn (top-level @ARGV))))

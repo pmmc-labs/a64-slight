@@ -38,7 +38,7 @@
         ((_ & rest) (cons (list x y) rest))))
 
 (tty/write \e "[?25l")
-(join (connect :keypress (tail-chaser
+(read (connect :keypress (tail-chaser
     40 40
     10 20
     0

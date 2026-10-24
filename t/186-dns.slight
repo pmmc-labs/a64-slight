@@ -116,28 +116,25 @@
 
 ; --- the test --------------------------------------------------------------
 
-; A process that ends with the first message it gets, so the root, which
-; can't wait in recv but where it ends, can join it for an answer.
-(defun box () (recv (msg msg)))
-(defun answer (box) (match (join box) ((:ok (_ v)) v)))
+; Each server tells the root its port at an address of the root's (D243).
+(defun answer (to) (match (read to) ((_ v) v)))
 
-(let dns-box (spawn (box)))
-(let dns (connect :tcp/listen 0 (dns-server dns-box)))
-(let dns-port (answer dns-box))
-(let echo-box (spawn (box)))
-(let echo (connect :tcp/listen 0 (echo-server echo-box)))
-(let echo-port (answer echo-box))
+(let to (address))
+(let dns (connect :tcp/listen 0 (dns-server to)))
+(let dns-port (answer to))
+(let echo (connect :tcp/listen 0 (echo-server to)))
+(let echo-port (answer to))
 
 (defun writer (text)
     (recv
         ((:open f) (send f (list :write text)) (disconnect f))))
 
-(defun resolv-conf (text) (join (connect :fs/write "build/t/186-dns.resolv.conf" (writer text))))
+(defun resolv-conf (text) (read (connect :fs/write "build/t/186-dns.resolv.conf" (writer text))))
 
 (resolv-conf (str "nameserver 127.0.0.1:1\nnameserver 127.0.0.1:" dns-port "\nsearch test\noptions use-vc timeout:1 attempts:3\n"))
 
 ; What connecting to name gets: the echo, or why not.
-(defun try (port name) (pprint (list name (outcome (join (connect :tcp (str name ":" port) (client)))))))
+(defun try (port name) (pprint (list name (outcome (read (connect :tcp (str name ":" port) (client)))))))
 
 (defun outcome (r)
     (match r
@@ -154,4 +151,4 @@
 ; and what the name server was asked, in order
 (send echo :stop)
 (send dns :stop)
-(pprint (cadr (join dns)))
+(pprint (cadr (read dns)))

@@ -42,7 +42,7 @@
     (recv
         ((:open l port)
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (str "localhost:" port) (reader ()))))))
+            (fork (send me (list :client (read (connect :tcp (str "localhost:" port) (reader ()))))))
             (serving l text))))
 
 (defun serving (l text)
@@ -50,6 +50,6 @@
         ((:accept _ conn) (connect conn (dripper text)) (serving l text))
         ((:client r)      (disconnect l) (cadr r))))
 
-(let got (cadr (join (connect :tcp/listen 0 (listener wire)))))
+(let got (cadr (read (connect :tcp/listen 0 (listener wire)))))
 (tty/write (sexp/print got) "\n")
 (pprint (eq? got (append data (map (lambda (t) (cadr (sexp/parse t))) (list "(alpha :beta 'gamma)" "\"s\\u{e9}\"" "#false" "12" "-0.5")))))

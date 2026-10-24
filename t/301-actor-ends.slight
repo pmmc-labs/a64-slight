@@ -1,0 +1,37 @@
+; An actor's end isn't kept (D243): it's told to those watching when it
+; ends, its monitors and the tasks reading it, and is :ended to anyone
+; who asks after. A read's watch on a pid lasts till the task reads
+; without it, so an end that comes between two reads waits for the next.
+
+(defun waits () (recv (_ :woke)))
+
+; Lets everything that can run, run, while the root waits.
+(defun pause () (join (fork (yield ()))))
+
+; read from before it ends
+(pprint (read (spawn 5)))
+
+; read, and monitored, after
+(let a (spawn 7))
+(pause)
+(pprint (read a))
+(pprint (cadr (read (spawn (do (monitor a) (recv (m m)))))))
+
+; c ends after read/any has given b's end, and before c is read
+(let b (spawn :b))
+(let c (spawn (do (yield ()) :c)))
+(pprint (read/any (list b c)))
+(pause)
+(pprint (read c))
+
+; d is watched while read/any waits, then not, once the root reads
+; without it: so when it's killed, nobody's told
+(let d (spawn (waits)))
+(let to (address))
+(after 1 to :here)
+(pprint (read/any (list d to)))
+(send to :again)
+(pprint (read to))
+(kill d)
+(pprint (read d))
+:done

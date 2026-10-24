@@ -52,16 +52,20 @@
 ; The result, and how long it took on the clock, in ms.
 (defun timed (n)
     (let t0 (clock/us))
-    (let r  (cadr (join (spawn (simulate n)))))
+    (let r  (cadr (read (spawn (simulate n)))))
     (list r (div (- (clock/us) t0) 1000)))
 
-(defun with-listener (n)
-    (recv
-        ((:open l port)
-            (let r (timed n))
-            (disconnect l)
-            r)))
+; A listener's owner, which tells the root the listener at an address
+; (D243), and lets what comes sit.
+(defun telling (to)
+    (recv ((:open l port) (send to l) (sitting))))
+
+(defun sitting () (recv (_ (sitting))))
 
 (pprint (timed 2000))
-(pprint (join (connect :tcp/listen 0 (with-listener 2000))))
+(let to (address))
+(connect :tcp/listen 0 (telling to))
+(let l (read to))
+(pprint (timed 2000))
+(disconnect l)
 :done

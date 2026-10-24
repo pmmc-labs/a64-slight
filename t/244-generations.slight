@@ -44,7 +44,7 @@
 
 (let k (spawn (keeper ())))
 (dotimes 0 100 (lambda (i) (send k (list :add (range 0 1000)))))
-(pprint (join (spawn (ask-sum k))))
+(pprint (read (spawn (ask-sum k))))
 (match (join (fork (range 0 10000)))
     ((:ok xs) (pprint (sum xs))))
 

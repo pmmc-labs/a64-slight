@@ -1,10 +1,12 @@
 ; ping-pong: a pinger and a ponger play 30 rounds. The pinger sends, and
-; waits for the reply in the middle of its loop (D167). The root joins
-; both.
+; waits for the reply in the middle of its loop (D167). The ponger answers
+; the pinger's stop too, and the root reads how the pinger ended (D243).
 
 (defun ponger ()
     (recv
-        ((:stop from) :pong-done)
+        ((:stop from)
+            (send from :pong-done)
+            :pong-done)
         ((:ping from)
             (send from (list :pong $$))
             (ponger))))
@@ -13,7 +15,8 @@
     (cond
         ((== n 0)
             (send target (list :stop $$))
-            :ping-done)
+            (let last (recv))
+            (list :ping-done last))
         (#true
             (send target (list :ping $$))
             (let reply (recv))
@@ -21,4 +24,4 @@
             (pinger target (- n 1)))))
 
 (let pong (spawn (ponger)))
-(list (join (spawn (pinger pong 30))) (join pong))
+(read (spawn (pinger pong 30)))

@@ -55,4 +55,4 @@
     (fork (source me n 1))
     (bank 3 (list () ()) 0 0 0 n))
 
-(cadr (join (spawn (top-level @ARGV))))
+(cadr (read (spawn (top-level @ARGV))))

@@ -5365,8 +5365,8 @@ look at.** *(Stevan, Oct 2026: "lets do #1", from Claude's list after
 compute a value.** *(Stevan, Oct 2026: "there are two forms of
 concurrency here ... perhaps we should spawn actors instead of fork
 them", then "go with your recommendations on the points to settle", on
-Claude's proposal in PLAN.md, "Tasks and actors".)* Agreed, not yet
-built. A census of every `fork` and `connect` in `lib/` and the
+Claude's proposal in PLAN.md, "Tasks and actors".)* Agreed; built in
+four steps (below), the rest of exit records still to come. A census of every `fork` and `connect` in `lib/` and the
 examples (`docs/processes-2026-10-23.md`) found 49 actors, 14 tasks and
 33 that were both: 9 waiting for one reply, 18 reading a device to its
 end for a value, and 6 gathering several messages. Where the two meet,
@@ -5592,3 +5592,59 @@ addresses, `read`, `read/any`, and `ask` without a box.
   `:system`, a device closed while its reader waits, a refused
   connection, and the faults: an actor opening, a listener, a path
   that isn't a string), worked out by hand.
+
+**Step 4, built** *(Claude, Oct 2026, on Stevan's "go with option 1":
+strict D243, every program restructured, and starters for servers that
+a task can call)*: an actor can't be joined, and keeps no value.
+
+- **The rule:** `join` and `join/race` of an actor fault `:not-a-task`.
+  A task reads an actor's end instead. Its value isn't copied into its
+  exit record: it goes from the actor's own heap to those watching as
+  it ends (its monitors, and each task reading it, as a message marked
+  with its pid, as a device's is), and the record keeps only that it
+  ended, so a later `read`, `monitor` or `:system` gets `:ended`.
+- **A read's watch lasts:** `read` and `read/any` watch each live pid
+  among their sources as they start to wait, and the watch stays after
+  they return, till the task next reads without that pid. So an end
+  that comes between two reads (two actors that end together, one read
+  after the other: 143) waits in the mailbox for the next, and isn't
+  lost; and a task that has stopped reading a pid isn't sent its end.
+  So a task reads an actor from before it ends: the one it has just
+  spawned, or just sent its last message to, with no call between that
+  could let it run; otherwise the actor sends what it has to an address.
+- **A `connect` that fails as it starts** (a file or command that isn't
+  there, a port that's taken, an address that isn't one) used to end
+  its actor at once,
+  before `connect` returned, so a `read` of it would be `:ended`; now
+  the actor starts, and ends with the reason when it first runs, so
+  `(read (connect ...))` gets `(:error reason)`, as `join` did.
+- **Libraries:** `http/listen` and `rpc/listen`, `http/serve` and
+  `rpc/serve` for a task: they wait till the server listens, at an
+  address, and give `(:ok (l port))`, or the listener's error.
+  `http/request`, `http/request-within` and `rpc/call` wait in `join`
+  for a task that reads the connection's, or the call's, end, so an
+  actor (a handler, a hub's registry) can still call them, as
+  `rpc/connect` and `agent/ask` already did (step 2): an actor may block
+  in `join` (point 4). `rpc/stream` was already an actor that sends.
+- **Programs:** a `(join (spawn ...))` or `(join (connect ...))` that
+  a task reads at once became `read` (83 files, by a script). The rest were restructured, each in the way that
+  kept its point: work moved from a top-level actor back to the root
+  where it only needed to be an actor to hear `(:listening port)`
+  (the HTTP and `rpc` tests, on `http/listen`, `rpc/listen`, and a
+  test helper, `raw-up`); an actor that ends with a result sends it to
+  an address (the tournaments' games, 199's collector, 151's and 250's
+  listeners, 186's servers); an actor that answers a stop answers who
+  stopped it (ping-pong's ponger, pub-sub's subscribers, so the broker
+  ends with what they said); an actor that read another's end joins a
+  task that reads it (277, 283); and tests that joined an actor to see
+  it killed race a task (266) or read it while a task kills it (222).
+- **Expected output:** changed only as these explain, each line
+  checked: a value the root used to get through a wrapper actor's
+  `(ok ...)` is the root's own; an actor read or monitored after its
+  end is `ended` (125, 200, 229, 238's `agent/ask` of a killed agent);
+  sites and pids that moved with their code; and the restructured
+  programs' new lines (222's stops, ping-pong's and pub-sub's ends).
+- **Tests:** 301 (an actor read from before its end, read and
+  monitored after it, an end between two reads waiting for the second,
+  and a watch dropped by a read without its pid), worked out by hand;
+  and 296 and 268 gain joining an actor, and racing one.

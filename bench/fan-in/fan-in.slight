@@ -17,4 +17,4 @@
     (dotimes 1 101 (lambda (s) (fork (sender me s (div n 100)))))
     (gather n 0))
 
-(cadr (join (spawn (top-level @ARGV))))
+(cadr (read (spawn (top-level @ARGV))))

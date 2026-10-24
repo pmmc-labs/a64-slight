@@ -16,7 +16,7 @@
         ((:json p v) :a-value)
         ((:eof p)    :eof)))
 
-(defun command (script) (join (connect :exec (list "sh" "-c" script) (reading))))
+(defun command (script) (read (connect :exec (list "sh" "-c" script) (reading))))
 
 (defun run-case (name)
     (match name

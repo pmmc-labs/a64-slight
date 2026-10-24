@@ -55,7 +55,7 @@
 
 ; Each text asked at once, by a caller of its own, and what it heard.
 (defun ask-all (a texts)
-    (cadr (join (spawn (asking a texts)))))
+    (cadr (read (spawn (asking a texts)))))
 
 (defun asking (a texts)
     (map (lambda (text) (agent/say a text)) texts)
@@ -63,23 +63,16 @@
 
 ; --- the run -----------------------------------------------------------
 
-(defun main ()
+; A story, from a raw server that sends its first piece and then holds
+; the connection open: the agent is killed, and the server sees its
+; connection close.
+(defun story ()
     (let me   $$)
-    (let srv  (http/serve 0 handler))
-    (let base (recv ((:listening port) (str "http://127.0.0.1:" port))))
     (let raw  (raw-listen :raw (list (list "/api/chat" (list
                   "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
                   "3f\r\n{\"message\":{\"role\":\"assistant\",\"content\":\"Once\"},\"done\":false}\n\r\n"
                   #false))) me))
     (let held (recv ((:raw port) (str "http://127.0.0.1:" port))))
-    (let a    (agent/new base "fake" "be brief" ()))
-    (pprint (ask-all a (list "hello")))
-    (pprint (ask-all a (list "again")))
-    (pprint (ask-all a (list "one" "two")))
-    (pprint (ask-all a (list "fail")))
-    (pprint (ask-all a (list "after")))
-    (pprint (ask-all (agent/new base "missing" "" ()) (list "hi")))
-    (pprint (ask-all (agent/new "http://127.0.0.1:1" "fake" "" ()) (list "hi")))
     (let d    (agent/new held "fake" "" ()))
     (agent/say d "a story")
     (let first (recv ((:piece _ text) (list :piece text))))
@@ -87,13 +80,22 @@
     (let seen (recv ((:raw what) (list :server what))))
     (after 10 me :quiet)
     (let next (recv (m m)))
-    (pprint (list first seen next))
-    (kill srv)
     (kill raw)
-    :done)
+    (list first seen next))
 
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    (main))
-
-(join (spawn (top-level)))
+; The top level is a task (D243): http/listen starts the server from it,
+; and an actor hears the story.
+(match (http/listen 0 handler)
+    ((:ok (srv port))
+        (let base (str "http://127.0.0.1:" port))
+        (let a    (agent/new base "fake" "be brief" ()))
+        (pprint (ask-all a (list "hello")))
+        (pprint (ask-all a (list "again")))
+        (pprint (ask-all a (list "one" "two")))
+        (pprint (ask-all a (list "fail")))
+        (pprint (ask-all a (list "after")))
+        (pprint (ask-all (agent/new base "missing" "" ()) (list "hi")))
+        (pprint (ask-all (agent/new "http://127.0.0.1:1" "fake" "" ()) (list "hi")))
+        (pprint (cadr (read (spawn (story)))))
+        (kill srv)
+        :done))

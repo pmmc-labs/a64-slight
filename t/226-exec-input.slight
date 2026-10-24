@@ -22,7 +22,7 @@
             (send p (list :write "after (:eof): nowhere"))
             (run ()))))
 
-(pprint (join (connect :exec (list "cat") (feed))))
+(pprint (read (connect :exec (list "cat") (feed))))
 
 ; A line at a time, each back before the next is written.
 (defun echo (n out)
@@ -35,7 +35,7 @@
         ((:eof p)      (echo n out))
         ((:exited p s) (list s (reverse out)))))
 
-(pprint (join (connect :exec (list "cat") (echo 1 ()))))
+(pprint (read (connect :exec (list "cat") (echo 1 ()))))
 
 ; From another process, and closed by a timer.
 (defun relay ()
@@ -45,7 +45,7 @@
             (after 10 p (list :eof))
             (run ()))))
 
-(pprint (join (connect :exec (list "cat") (relay))))
+(pprint (read (connect :exec (list "cat") (relay))))
 
 ; Written to, but it doesn't read: before its end and after.
 (defun deaf (out)
@@ -55,7 +55,7 @@
         ((:eof p)      (send p (list :write "after its end" \n)) (deaf out))
         ((:exited p n) (list n (reverse out)))))
 
-(pprint (join (connect :exec (list "sh" "-c" "echo deaf") (deaf ()))))
+(pprint (read (connect :exec (list "sh" "-c" "echo deaf") (deaf ()))))
 
 ; More than a pipe holds, through cat and back, a chunk at a time.
 (defun pour (p i n)
@@ -70,4 +70,4 @@
         ((:eof p)      (tally lines bytes))
         ((:exited p n) (list n lines bytes))))
 
-(pprint (join (connect :exec (list "cat") (tally 0 0))))
+(pprint (read (connect :exec (list "cat") (tally 0 0))))

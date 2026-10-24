@@ -23,4 +23,4 @@
                     (lambda (acc t) (tuple (+ (tuple/get acc 0) (tuple/get t 0)) (+ (tuple/get acc 1) (tuple/get t 1))))
                     squares)))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

@@ -24,17 +24,15 @@
                 (do (disconnect c) (reverse (cons s got)))
                 (client lines (cons s got))))))
 
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level (argv)
-    (let me $$)
-    (let l (connect :tcp/listen 0 (server me)))
-    (let port (recv ((:port p) p)))
-    (pprint (join (connect :tcp (str "echo.test:" port) (client (list "one" "two" "three") ()))))
-    (kill l)
-    (let u (connect :unix/listen (car argv) (server me)))
-    (let path (recv ((:port p) p)))
-    (pprint (join (connect :unix path (client (list "four" "five") ()))))
-    (pprint (join (connect :unix path (recv ((:open c) (let who (socket/peer c)) (disconnect c) who)))))
-    (kill u))
-
-(join (spawn (top-level @ARGV)))
+; The top level is a task (D243): each listener tells it its port, or its
+; path, at an address.
+(let to (address))
+(let l (connect :tcp/listen 0 (server to)))
+(let port (cadr (read to)))
+(pprint (read (connect :tcp (str "echo.test:" port) (client (list "one" "two" "three") ()))))
+(kill l)
+(let u (connect :unix/listen (car @ARGV) (server to)))
+(let path (cadr (read to)))
+(pprint (read (connect :unix path (client (list "four" "five") ()))))
+(pprint (read (connect :unix path (recv ((:open c) (let who (socket/peer c)) (disconnect c) who)))))
+(kill u)

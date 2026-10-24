@@ -118,4 +118,4 @@
             (send (at cells x y) (list :neighbors (neighbors-of cells x y)))))))
     (generation cells (grid 6 8 glider-cell) 4 0))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

@@ -38,7 +38,7 @@
     (recv
         ((:open l port)
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (str "localhost:" port) (reader how ()))))))
+            (fork (send me (list :client (read (connect :tcp (str "localhost:" port) (reader how ()))))))
             (serving l text))))
 
 (defun serving (l text)
@@ -46,7 +46,7 @@
         ((:accept _ conn) (connect conn (dripper text)) (serving l text))
         ((:client r)      (disconnect l) (cadr r))))
 
-(defun read-dripped (text how) (cadr (join (connect :tcp/listen 0 (listener text how)))))
+(defun read-dripped (text how) (cadr (read (connect :tcp/listen 0 (listener text how)))))
 
 ; the whole text as one array of its values, for json/parse
 (let whole (cadr (json/parse (str "["

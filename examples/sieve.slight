@@ -8,7 +8,7 @@
 ; each prime found so far, each taking out the multiples of its own. The
 ; one that takes a number out tells the painter, which lights the number
 ; in its colour: by its smallest factor. A number that gets past them
-; all is prime: the end of the chain becomes the filter for it, and forks
+; all is prime: the end of the chain becomes the filter for it, and spawns
 ; a new end. So the chain grows a process for each prime, a few hundred
 ; long on an 80 by 24 screen, and every number goes down it as far as its
 ; smallest factor.
@@ -129,7 +129,7 @@
 (let painter (spawn (paint (map/new) (tuple cols (div cols 2) (div (* 2 rows) 2) (inc rows)) 0)))
 (send painter (list :caught 1 1))
 (count-up (spawn (end-of-chain painter)) 2 last (math/max 1 (div last 2000)))
-(match (join painter)
+(match (read painter)
     ((:ok (primes total))
         (tty/write \e "[" (inc rows) ";1H" \e "[0m" \e "[K" \e "[?25h"
                    "1 to " last ": " primes " primes, a process each in a chain that took in " total " numbers" \n)

@@ -22,4 +22,4 @@
         ((:line f s)  (second-owner first (cons (list :line s) seen)))
         ((:chunk f s) (second-owner first (cons (list :chunk s) seen)))))
 
-(pprint (join (connect :fs/read "t/data/lines.txt" (first-owner))))
+(pprint (read (connect :fs/read "t/data/lines.txt" (first-owner))))

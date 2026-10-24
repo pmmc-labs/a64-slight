@@ -882,12 +882,12 @@ with Stevan first.
     as it is, which without selective receive would make every caller
     of `(join (fork ...))` a state function.
 
-### Tasks and actors (agreed, D243; to build)
+### Tasks and actors (agreed, D243; steps 1 to 4 built)
 
 Claude's proposal, after Stevan's "there are two forms of concurrency
 here ... perhaps we should spawn actors instead of fork them"; agreed
-with every point below settled as Claude recommended (D243). Not built
-yet: the order is at the end.
+with every point below settled as Claude recommended (D243). Built but
+for the rest of exit records: the order is at the end.
 
 **Why.** slight has two models of concurrency behind one `fork`:
 
@@ -1073,7 +1073,7 @@ and `lib/ds`, `rpc/peer`, `rpc/connect` and `agent/ask` moved to them
 `lib/exec` and `lib/tools` moved (done, D243's "Step 3"); (4) an actor can't be
 joined and keeps no value, told late as `:ended`, with HTTP's client,
 `rpc/call`, `rpc/stream` and the coordinators (the games, the airline's desk, an
-agent's turn) moved off joined actors first; (5) the rest of exit
+agent's turn) moved off joined actors first (done, D243's "Step 4"); (5) the rest of exit
 records. (4) was part of (1) as agreed, and moved: until (2) and (3)
 give a task other ways to have an answer, the hybrids (`ask`'s box,
 `slurp`, an HTTP request) are actors that are joined.

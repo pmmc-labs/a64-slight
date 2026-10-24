@@ -1,1 +1,1 @@
-(ok ((ok (200 (("transfer-encoding" "chunked")) "hello world")) "abcde"))
+((ok (200 (("transfer-encoding" "chunked")) "hello world")) "abcde")

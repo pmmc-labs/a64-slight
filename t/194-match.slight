@@ -74,4 +74,4 @@
 (let s (spawn (serve 2)))
 (send s (list :tick))
 (send s (list :tick))
-(pprint (join s))
+(pprint (read s))

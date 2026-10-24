@@ -13,15 +13,19 @@
     (recv
         (:wake (pprint :woke) :root-done)))
 
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    (let sleeper (spawn (late 20)))   ; an actor, which a timer can be aimed at
-    (after 30 sleeper :hello)
-    (sleep 5)
-    (kill sleeper)
-    (pprint (join sleeper))
+; A killed sleeper, an actor so that a timer can be aimed at it, whose
+; result isn't kept (D243): read after it's killed, it has :ended.
+(let sleeper (spawn (late 20)))
+(after 30 sleeper :hello)
+(sleep 5)
+(kill sleeper)
+(pprint (read sleeper))
+
+; The root is a task, which can't take messages, so an actor waits for
+; the wake-up.
+(defun waker ()
     (fork (late 50))
     (after 10 $$ :wake)
     (wait-for-wake))
 
-(join (spawn (top-level)))
+(read (spawn (waker)))

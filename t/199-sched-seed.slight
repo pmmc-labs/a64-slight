@@ -14,21 +14,23 @@
 ; they arrive there in order
 (defun sender (to tag n) (dotimes 0 n (lambda (i) (send to (list tag i)))))
 (defun lookup* (tag seen) (match (lookup tag seen) (:not-found ()) (xs xs)))
-(defun collect (seen n)
+; which then tells the root at its address what it saw (D243)
+(defun collect (to seen n)
     (if (== n 0)
-        seen
+        (send to seen)
         (recv
-            ((tag i) (collect (assoc tag (cons i (lookup* tag seen)) seen) (- n 1))))))
+            ((tag i) (collect to (assoc tag (cons i (lookup* tag seen)) seen) (- n 1))))))
 
 ; ten processes, each adding 1 to a cell a hundred times, atomically
 (let c (cell/new 0))
 (let adders (map (lambda (i) (fork (adder c 100))) (range 0 10)))
 (map join adders)
 (pprint (cell/get c))
-(let col (spawn (collect () 250)))
+(let to (address))
+(let col (spawn (collect to () 250)))
 (map (lambda (tag) (fork (sender col tag 50))) (list :a :b :c :d :e))
-(match (join col)
-    ((:ok seen) (pprint (map (lambda (tag) (eq? (reverse (lookup* tag seen)) (range 0 50))) (list :a :b :c :d :e)))))
+(let seen (read to))
+(pprint (map (lambda (tag) (eq? (reverse (lookup* tag seen)) (range 0 50))) (list :a :b :c :d :e)))
 
 ; timers due at the same time fire in the order they were set; an actor
 ; takes them, since the root is a task (D243)
@@ -39,4 +41,4 @@
     (after 5 me :sooner)
     (list (recv) (recv) (recv)))
 
-(pprint (cadr (join (spawn (timers)))))
+(pprint (cadr (read (spawn (timers)))))

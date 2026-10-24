@@ -12,4 +12,4 @@
     (send $$ :one)
     (ask-twice))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

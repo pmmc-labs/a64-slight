@@ -233,18 +233,17 @@ reply refs.
 | `(disconnect f)` | Closes the device `f`. Anything that isn't an open device it ignores. Returns `()`. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
-| `(join pid)` | **Blocking** wait for `pid` to end. Returns `(:ok value)` or `(:error reason)`. Works on any pid (not just children), anywhere (including inside lambdas), any number of times, and after the process has already ended. Joiners wake in the order they joined. `(join $$)` faults (`:join-self`). |
-| `(join/race pids)` | **Blocking** wait for the first of `pids` to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
-| `(address)`, `(read src)`, `(read/any srcs)` | A task's (D243): `address` makes a place it can be sent to, an immediate under the pid tag (the task's index and a number), which `send`, `after` and `disconnect` take; `read` waits, keeping the stack, for the next message to one of its open addresses, or for a pid to end; `read/any` for the first of several, in their order, giving `(src what)`. The messages wait in the task's mailbox, marked with their address. `ask`, `ask-within` and `reply` are prelude functions on them. |
+| `(join pid)` | **Blocking** wait for `pid`, a task, to end. Returns `(:ok value)` or `(:error reason)`. Works on any task (not just children), anywhere (including inside lambdas, and in an actor), any number of times, and after the task has already ended. Joiners wake in the order they joined. `(join $$)` faults (`:join-self`), and so does an actor's pid (`:not-a-task`, D243): a task reads its end. |
+| `(join/race pids)` | **Blocking** wait for the first of `pids`, tasks, to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
+| `(address)`, `(read src)`, `(read/any srcs)` | A task's (D243): `address` makes a place it can be sent to, an immediate under the pid tag (the task's index and a number), which `send`, `after` and `disconnect` take; `read` waits, keeping the stack, for the next message to one of its open addresses, or for a pid to end (an actor's end is told to those reading it then, a read's watch lasting till the task next reads without it, and is `:ended` after); `read/any` for the first of several, in their order, giving `(src what)`. The messages wait in the task's mailbox, marked with their address. `ask`, `ask-within` and `reply` are prelude functions on them. |
 | `(open source arg)` | A task's (D243): opens a device it owns, with no process started, from `connect`'s sources but the listeners and `:keypress`, and waits till it's open: `(:ok d)`, or `(:error reason)`. `read` gives its messages, its next cut at the `read` after (D158); a failure is `(:error d reason)` there, and the device closes, rather than ending the task (D128's rule is an actor's). |
-| `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has. Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
+| `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has, `result` being `:ended` for an actor (D243). Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
 | `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns the timer's number (D232). |
 | `(timer/cancel t)` | Takes back `after`'s timer `t` if it hasn't fired: `#true`, or `#false` (D232). |
 
-**Tasks and actors (D243; step 1 built: `spawn`, the kinds, and what a
-task can't do; an actor is still joined, and its value kept, till step
-4).** Two kinds of process.
+**Tasks and actors (D243; steps 1 to 4 built, the rest of exit records
+to come).** Two kinds of process.
 An actor, started with `(spawn expr)`, has a mailbox and the `recv`
 rule; it can be sent to, monitored and killed, not joined, and its value
 isn't kept when it ends: monitors are told, and one that asks later
@@ -876,10 +875,14 @@ processes that allocate and then wait turn out to hold too much).
 
 - `fork`: allocate the process, deep-copy the free variables into its heap,
   queue it to run the entry function.
-- Ending: the Result is copied into a small per-pid **exit record**.
+- Ending: a task's Result is copied into a small per-pid **exit record**.
   Processes blocked in `join` on it wake with a copy; later `join`s read
-  the record; monitors get `(:exit pid result)`, and the monitors it set
-  on others are taken off their lists (D183). A `join/race` is a watch
+  the record, as do tasks reading it, which it wakes; monitors get
+  `(:exit pid result)`. An actor's Result isn't kept (D243): its
+  monitors get it, and each task with a read's watch on it is sent it,
+  marked with the pid, so it waits for that task's next `read`; the
+  record says only that it ended, and later asks get `:ended`. The
+  monitors a process set on others are taken off their lists (D183). A `join/race` is a watch
   on each of its pids, as a monitor is, that wakes its process rather
   than sending it a message; the first to end wakes it, and it takes the
   rest off when it runs, so a killed racer, or one whose other pids end

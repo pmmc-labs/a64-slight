@@ -15,7 +15,7 @@
     (recv
         ((:open f) (map (lambda (t) (send f (list :write t))) texts) (disconnect f))))
 
-(defun write-file (path texts) (join (connect :fs/write path (writer texts))))
+(defun write-file (path texts) (read (connect :fs/write path (writer texts))))
 
 (defun reading (how)
     (recv
@@ -32,9 +32,9 @@
 (write-file "build/t/252-deep.json" (list (nested "[" "]" 20)))
 (write-file "build/t/252-deep.sexp" (list (nested "(" ")" 20)))
 (write-file "build/t/252-some.json" (list (nested "[[" "]]" 9) "\n"))
-(pprint (join (connect :fs/read "build/t/252-deep.json" (reading :json))))
-(pprint (join (connect :fs/read "build/t/252-deep.sexp" (reading :sexp))))
-(pprint (join (connect :fs/read "build/t/252-some.json" (reading :json))))
+(pprint (read (connect :fs/read "build/t/252-deep.json" (reading :json))))
+(pprint (read (connect :fs/read "build/t/252-deep.sexp" (reading :sexp))))
+(pprint (read (connect :fs/read "build/t/252-some.json" (reading :json))))
 
 ; and in the heap: a fault (its kind, here), not memory from outside it
 (defun parsed (r)

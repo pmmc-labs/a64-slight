@@ -5,21 +5,24 @@
 
 (@include :fs)
 
-(defun keys (n)
+; The keys, till q, and then how many came before it, told to to.
+(defun keys (to n)
     (recv
-        (("q") n)
-        ((k & _) (pprint (list :key k)) (keys (+ n 1)))))
+        (("q") (send to n))
+        ((k & _) (pprint (list :key k)) (keys to (+ n 1)))))
 
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level (argv env)
-    (let k (connect :keypress (keys 0)))
+(defun ticking ()
     (after 5 $$ :tick)
-    (pprint (recv (:tick :ticked)))
-    (pprint (list :clock (> (clock/us) 4999) (clock/us)))
-    (pprint (slurp (car argv)))
-    (pprint (spew (cadr argv) (list "written")))
-    (pprint (join k))
-    (pprint (list :screen (tty/screen/rows) (tty/screen/cols)))
-    (pprint (list :env (lookup "SLIGHT_REPLAY_TEST" env))))
+    (recv (:tick :ticked)))
 
-(join (spawn (top-level @ARGV %ENV)))
+; The top level is a task (D243): an actor takes the keys, and tells it
+; at an address how many came; another takes the timer.
+(let to (address))
+(connect :keypress (keys to 0))
+(pprint (cadr (read (spawn (ticking)))))
+(pprint (list :clock (> (clock/us) 4999) (clock/us)))
+(pprint (slurp (car @ARGV)))
+(pprint (spew (cadr @ARGV) (list "written")))
+(pprint (read to))
+(pprint (list :screen (tty/screen/rows) (tty/screen/cols)))
+(pprint (list :env (lookup "SLIGHT_REPLAY_TEST" %ENV)))

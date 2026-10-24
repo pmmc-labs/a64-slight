@@ -29,4 +29,4 @@
                   (match (tuple) (#() :empty))))
     :done)
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

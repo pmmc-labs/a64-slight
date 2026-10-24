@@ -47,7 +47,7 @@
     (recv
         ((:open l port)
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (str "localhost:" port) (reader :source ()))))))
+            (fork (send me (list :client (read (connect :tcp (str "localhost:" port) (reader :source ()))))))
             (serving l text))))
 
 (defun serving (l text)
@@ -55,17 +55,17 @@
         ((:accept _ conn) (connect conn (dripper text)) (serving l text))
         ((:client r)      (disconnect l) (cadr r))))
 
-(let dripped (cadr (join (connect :tcp/listen 0 (listener text)))))
+(let dripped (cadr (read (connect :tcp/listen 0 (listener text)))))
 (map (lambda (m) (tty/write (sexp/print m) "\n")) dripped)
 
 (defun writer (text)
     (recv
         ((:open f) (send f (list :write text)) (disconnect f))))
 
-(join (connect :fs/write "build/t/185-source.txt" (writer text)))
-(pprint (eq? (cadr (join (connect :fs/read "build/t/185-source.txt" (reader :source ())))) dripped))
+(read (connect :fs/write "build/t/185-source.txt" (writer text)))
+(pprint (eq? (cadr (read (connect :fs/read "build/t/185-source.txt" (reader :source ())))) dripped))
 
-(let after-a-line (cadr (join (connect :fs/read "build/t/185-source.txt" (reader :lines ())))))
+(let after-a-line (cadr (read (connect :fs/read "build/t/185-source.txt" (reader :lines ())))))
 (pprint (car after-a-line))
 (pprint (eq? (cdr after-a-line) dripped))
 
@@ -78,6 +78,6 @@
         ((:doc c text line) (back-and-forth (cons (list :doc text line) seen)))
         ((:eof c)           (reverse seen))))
 
-(join (connect :fs/write "build/t/185-switch.txt" (writer "(alpha) \n=doc\ntext\n=cut\n(beta)\n")))
-(let switched (cadr (join (connect :fs/read "build/t/185-switch.txt" (back-and-forth ())))))
+(read (connect :fs/write "build/t/185-switch.txt" (writer "(alpha) \n=doc\ntext\n=cut\n(beta)\n")))
+(let switched (cadr (read (connect :fs/read "build/t/185-switch.txt" (back-and-forth ())))))
 (tty/write (str/join "\n" (map sexp/print switched)) "\n")

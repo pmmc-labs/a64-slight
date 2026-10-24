@@ -30,25 +30,18 @@
         ((:error _ reason)        (reverse (cons (list :error reason) acc)))))
 
 (defun streamed (url)
-    (cadr (join (spawn (heard (http/stream :post url () "{\"prompt\":\"hi\"}" :lines) ())))))
+    (cadr (read (spawn (heard (http/stream :post url () "{\"prompt\":\"hi\"}" :lines) ())))))
 
 ; The "response" of each line, joined.
 (defun answer (said)
     (str/join "" (map (lambda (m) (lookup "response" (cdr (cadr (cadr m)))))
                       (filter (lambda (m) (eq? (car m) :line)) said))))
 
-(defun main ()
-    (let me $$)
-    (let raw (raw-listen :raw (list (list "/api/generate" (pieces))) me))
-    (recv
-        ((:raw port)
-            (let said (streamed (str "http://127.0.0.1:" port "/api/generate")))
-            (kill raw)
-            (map pprint said)
-            (answer said))))
-
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    (main))
-
-(join (spawn (top-level)))
+; The top level is a task (D243), so the raw server says its port with raw-up.
+(let up (raw-up (list (list "/api/generate" (pieces)))))
+(let raw (car up))
+(let port (cadr up))
+(let said (streamed (str "http://127.0.0.1:" port "/api/generate")))
+(kill raw)
+(map pprint said)
+(answer said)

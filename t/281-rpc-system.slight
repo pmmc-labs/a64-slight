@@ -30,4 +30,4 @@
 (defun top-level ()
     (main (rpc/serve "127.0.0.1:0" (list (rpc/system)))))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

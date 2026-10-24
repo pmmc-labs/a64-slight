@@ -22,4 +22,4 @@
 (let h (spawn (holder (double :leaf 30) 0)))
 (dotimes 0 200 (lambda (i) (send h :churn)))
 (send h :stop)
-(join h)
+(read h)

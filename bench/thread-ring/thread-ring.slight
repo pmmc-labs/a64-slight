@@ -18,4 +18,4 @@
     (send (car ring) (str->int (car argv)))
     (recv (id id)))
 
-(cadr (join (spawn (top-level @ARGV))))
+(cadr (read (spawn (top-level @ARGV))))

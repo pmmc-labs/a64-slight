@@ -9,7 +9,7 @@
 ; killed while it waits ends as any other does.
 
 ; Monitors each of targets, tells start it has, and then tells told what
-; it hears, till it's told to stop.
+; it hears, till it's told to stop, which it tells told too.
 (defun watcher (name targets told start)
     (map monitor targets)
     (send start :ready)
@@ -18,11 +18,11 @@
 (defun listening (name told)
     (recv
         ((:exit _ result) (send told (list :heard name result)) (listening name told))
-        (:stop            :stopped)))
+        (:stop            (send told (list :stopped name)))))
 
 ; A watcher, once it has set its monitors.
 (defun started (name targets told)
-    (cadr (join (spawn (start name targets told)))))
+    (cadr (read (spawn (start name targets told)))))
 
 (defun start (name targets told)
     (let me $$)
@@ -54,14 +54,15 @@
     (send e :stop)
     (kill c)
     (kill g)
-    (let ended (list (list :a (join a)) (list :c (join c)) (list :e (join e)) (list :g (join g))))
     (let f  (started :f (list t) me))
     (let s  (spawn (self-watch)))
-    (yield (kill s))
+    ; a task kills s once it waits, while the root reads it (D243)
+    (fork (yield (kill s)))
+    (let s-end (read s))
     (kill t)
     (kill u)
     (after 10 me :quiet)
-    (list ended (join s) (cadr (join me))))
+    (list s-end (cadr (read me))))
 
 (map pprint (main))
 :done

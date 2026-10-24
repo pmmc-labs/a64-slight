@@ -16,4 +16,4 @@
     (start 0 n $$)
     (gather n 0))
 
-(cadr (join (spawn (top-level @ARGV))))
+(cadr (read (spawn (top-level @ARGV))))

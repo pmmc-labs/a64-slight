@@ -146,6 +146,6 @@
 (let workers (list (fork (cruncher)) (spawn (pinger pong 50)) pong (fork (producer sink 0)) sink (fork (hoarder ()))))
 (let watcher (connect :system (top frames)))
 (let keyboard (connect :keypress (keys watcher)))
-(join watcher)
+(read watcher)
 (map kill (cons keyboard workers))
 :bye

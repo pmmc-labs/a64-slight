@@ -9,6 +9,6 @@
             (recv ((:process _ info) (list (lookup :state info) (lookup :joining info)))))))
 
 (let reader (fork (read (address))))
-(pprint (join (connect :system (state-of reader))))
+(pprint (read (connect :system (state-of reader))))
 (let w (spawn (recv)))
 (read/any (list (address) w))

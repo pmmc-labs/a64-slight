@@ -139,7 +139,7 @@
         (tty/write \e "[?25l" \e "[2J")
         (let painter (spawn (paint (map/new) (tuple cols rows))))
         (draw walks painter fit longest 1)
-        (match (join painter)
+        (match (read painter)
             ((:ok lit)
                 (tty/write \e "[0m" \e "[" (inc rows) ";1H" \e "[?25h"
                            "1 to " last ", each walked out from 1; the longest walk " (dec longest) " steps" \n)

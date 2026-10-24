@@ -12,7 +12,7 @@
 ; to send the file after a message: ((message how) ...), how being one
 ; (:read how), or a list of them, sent in order.
 (defun read-all (path table)
-    (cadr (join (connect :fs/read path (reading table ())))))
+    (cadr (read (connect :fs/read path (reading table ())))))
 
 (defun reading (table seen)
     (recv
@@ -62,5 +62,5 @@
     (recv
         ((:open f) (map (lambda (m) (send f m)) msgs) (disconnect f) :poked)))
 
-(pprint (join (connect :fs/read lines (poke (list (list :read) (list :read 1 2) :read)))))
-(pprint (join (connect :fs/write "build/t/170-read-chunks.txt" (poke (list (list :read :lines))))))
+(pprint (read (connect :fs/read lines (poke (list (list :read) (list :read 1 2) :read)))))
+(pprint (read (connect :fs/write "build/t/170-read-chunks.txt" (poke (list (list :read :lines))))))

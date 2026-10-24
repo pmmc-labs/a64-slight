@@ -24,4 +24,4 @@
     (pprint (tool/call (tools/run no) (list (list "command" "echo shown\e[8m; echo hidden\e[28m"))))
     (recv ((:asked what) (pprint what))))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

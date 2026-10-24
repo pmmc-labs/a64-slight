@@ -23,13 +23,13 @@
 ; Listens at where, has a client connect to it at to-host and say hi,
 ; and gives what came back.
 (defun listen-at (where to-host)
-    (join (connect :tcp/listen where (listening to-host))))
+    (read (connect :tcp/listen where (listening to-host))))
 
 (defun listening (to-host)
     (recv
         ((:open l port)
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (str to-host ":" port) (talker))))))
+            (fork (send me (list :client (read (connect :tcp (str to-host ":" port) (talker))))))
             (serving l))))
 
 (defun serving (l)
@@ -45,18 +45,21 @@
 ; an address that isn't this machine's; names that aren't in the hosts
 ; file, which aren't looked up; one that's there for IPv6 alone; no port;
 ; and a port too big
-(pprint (join (connect :tcp/listen "8.8.8.8:0" (never))))
-(pprint (join (connect :tcp/listen "nowhere.invalid:0" (never))))
-(pprint (join (connect :tcp/listen "ip6only.test:0" (never))))
-(pprint (join (connect :tcp/listen "127.0.0.1" (never))))
-(pprint (join (connect :tcp/listen "127.0.0.1:65536" (never))))
+(pprint (read (connect :tcp/listen "8.8.8.8:0" (never))))
+(pprint (read (connect :tcp/listen "nowhere.invalid:0" (never))))
+(pprint (read (connect :tcp/listen "ip6only.test:0" (never))))
+(pprint (read (connect :tcp/listen "127.0.0.1" (never))))
+(pprint (read (connect :tcp/listen "127.0.0.1:65536" (never))))
 
-; an address that's taken: the error names it as it was given
-(defun taken ()
-    (recv
-        ((:open l port)
-            (let where (str "127.0.0.1:" port))
-            (match (join (connect :tcp/listen where (never)))
-                ((:error (name w)) (disconnect l) (list name (eq? w where)))))))
+; an address that's taken: the error names it as it was given. The first
+; listener's owner tells the root the listener and its port, at an
+; address (D243).
+(defun telling (to)
+    (recv ((:open l port) (send to (list l port)) (never))))
 
-(pprint (join (connect :tcp/listen "127.0.0.1:0" (taken))))
+(let to (address))
+(connect :tcp/listen "127.0.0.1:0" (telling to))
+(let lp (read to))
+(let where (str "127.0.0.1:" (cadr lp)))
+(match (read (connect :tcp/listen where (never)))
+    ((:error (name w)) (disconnect (car lp)) (pprint (list name (eq? w where)))))

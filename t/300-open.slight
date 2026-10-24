@@ -35,7 +35,7 @@
 (match (open :system)
     ((:ok s) (fork (disconnect s)) (pprint (read s))))
 
-(pprint (join (spawn (open :fs/read path))))
+(pprint (read (spawn (open :fs/read path))))
 (pprint (join (fork (open :tcp/listen 0))))
 (pprint (join (fork (open :fs/read 42))))
 (pprint (open :tcp "127.0.0.1:1"))

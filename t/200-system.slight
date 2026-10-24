@@ -105,7 +105,7 @@
 (let w (spawn (worker)))
 (let sv (spawn (server 0)))
 (let nap (fork (napper)))
-(let j (fork (joiner w)))
+(let j (fork (joiner nap)))
 (let sp (spawn (spinner)))
 (let h (spawn (hoarder (range 0 1000))))
 (let done (fork 42))
@@ -113,4 +113,4 @@
 (kill killed)
 (let gone (list done killed))
 (sleep 1)                                   ; till all but the napper wait
-(join (connect :system (check me w sv nap j sp h gone)))
+(read (connect :system (check me w sv nap j sp h gone)))

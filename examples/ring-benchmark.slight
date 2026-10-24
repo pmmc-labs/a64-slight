@@ -45,4 +45,4 @@
     (tty/write "START" \n)
     (send-ping last ping-count))
 
-(join (spawn (top-level @ARGV)))
+(read (spawn (top-level @ARGV)))

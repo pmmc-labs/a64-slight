@@ -6,4 +6,4 @@
 ((head 204 (("content-length" "5"))) (eof))
 ((head 304 ()) (eof))
 ((head 200 (("content-length" "10"))) (chunk "hello") (error (bad-http "short body")))
-(ok done)
+done

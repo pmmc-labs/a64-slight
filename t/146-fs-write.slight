@@ -31,7 +31,7 @@
         ((:eof f)    (reverse lines))))
 
 (defun read-back (path)
-    (pprint (join (connect :fs/read path (collect ())))))
+    (pprint (read (connect :fs/read path (collect ())))))
 
 (defun bad-commands ()
     (recv
@@ -41,11 +41,11 @@
             :sent)))
 
 (let path "build/t/146-fs-write.txt")
-(pprint (join (connect :fs/write path (writer (list "one" "two")))))
+(pprint (read (connect :fs/write path (writer (list "one" "two")))))
 (read-back path)
-(pprint (join (connect :fs/append path (appender (list "three")))))
+(pprint (read (connect :fs/append path (appender (list "three")))))
 (read-back path)
-(pprint (join (connect :fs/write path (appender (list "only this")))))
+(pprint (read (connect :fs/write path (appender (list "only this")))))
 (read-back path)
-(pprint (join (connect :fs/append path (bad-commands))))
+(pprint (read (connect :fs/append path (bad-commands))))
 (read-back path)

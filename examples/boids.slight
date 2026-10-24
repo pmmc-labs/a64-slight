@@ -292,7 +292,10 @@
 (map (lambda (b) (send b (list :flock birds))) birds)
 (let keyboard (connect :keypress (keys shown)))
 
-(let drawn (join shown))
+; The display ends only after the birds have flown a tick, or on a key
+; the keyboard, connected just now, hears: the root reads it in time
+; (D243).
+(let drawn (read shown))
 (map kill (cons keyboard birds))
 (when (< frames 1) (tty/write \e "[?25h\n"))
 (match drawn

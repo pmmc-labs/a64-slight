@@ -112,13 +112,14 @@
 ; Calls name, a string or a symbol, on the other end of conn with args,
 ; and waits for the answer: (:ok v), or (:error reason), the other end's
 ; reason, or :disconnected, or the connection's own error. A stream's
-; values are dropped. It waits in join, so it works anywhere, a lambda
-; or a handler included: a handler calls its caller back with (rpc/call
-; ^$$ name args). args that aren't data fault here (:not-sexp).
+; values are dropped. It waits in join, for a task that reads how the
+; call ends (D243), so it works anywhere, an actor, a lambda or a handler
+; included: a handler calls its caller back with (rpc/call ^$$ name
+; args). args that aren't data fault here (:not-sexp).
 (defun rpc/call (conn name args)
     (let text (rpc/printed name args))
     (let caller $$)
-    (rpc/result (join (spawn (rpc/calling conn caller text)))))
+    (rpc/result (join (fork (rpc/result (read (spawn (rpc/calling conn caller text))))))))
 
 (defun rpc/calling (conn caller text)
     (monitor conn)
@@ -235,6 +236,17 @@
 (defun rpc/serve (where handlers)
     (let told $$)
     (rpc/listen-at where handlers told))
+
+; As rpc/serve, for a task (D243): waits till it listens, and gives (:ok
+; (l at)), or (:error reason).
+(defun rpc/listen (where handlers)
+    (let to (address))
+    (let l (rpc/listen-at where handlers to))
+    (let got (read/any (list to l)))
+    (disconnect to)
+    (match got
+        ((_ (:listening at)) (list :ok (list l at)))
+        ((_ (:error reason)) (list :error reason))))
 
 (defun rpc/accepting (handlers told)
     (recv

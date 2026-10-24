@@ -41,4 +41,4 @@
     (let path "build/t/285-rpc-unix.sock")
     (main path (rpc/serve path (handlers))))
 
-(join (spawn (top-level)))
+(read (spawn (top-level)))

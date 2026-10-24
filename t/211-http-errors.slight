@@ -5,23 +5,16 @@
 (@include :http)
 (@include "data/http-raw.slight")
 
-(defun main ()
-    (let me $$)
-    (let raw (raw-listen :silent (list (list "/silent" #false)) me))
-    (recv
-        ((:silent port)
-            (let r (list
-                (http/get "https://127.0.0.1/")
-                (http/get "ftp://127.0.0.1/")
-                (http/get "http://127.0.0.1:1/")
-                (http/request-within 100 :get (str "http://127.0.0.1:" port "/silent") () "")
-                (http/parse-url "http://example.com:8080/a/b?c=d")
-                (http/parse-url "http://example.com")))
-            (kill raw)
-            r)))
-
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    (main))
-
-(join (spawn (top-level)))
+; The top level is a task (D243), so the raw server says its port with raw-up.
+(let up (raw-up (list (list "/silent" #false))))
+(let raw (car up))
+(let port (cadr up))
+(let r (list
+    (http/get "https://127.0.0.1/")
+    (http/get "ftp://127.0.0.1/")
+    (http/get "http://127.0.0.1:1/")
+    (http/request-within 100 :get (str "http://127.0.0.1:" port "/silent") () "")
+    (http/parse-url "http://example.com:8080/a/b?c=d")
+    (http/parse-url "http://example.com")))
+(kill raw)
+r

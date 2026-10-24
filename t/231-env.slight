@@ -28,4 +28,4 @@
     (recv
         (:go (pprint (list :after-recv (lookup "SLIGHT_TEST_HOST" env) argv)))))
 
-(join (spawn (top-level @ARGV %ENV)))
+(read (spawn (top-level @ARGV %ENV)))

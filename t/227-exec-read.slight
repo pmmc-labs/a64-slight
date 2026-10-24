@@ -10,7 +10,7 @@
         ((:eof p)      (size n))
         ((:exited p s) (list s n))))
 
-(pprint (join (connect :exec (list "sh" "-c" "i=0; while [ $i -lt 2000 ]; do echo 0123456789012345678901234567890123456789012345678; i=$((i+1)); done") (size 0))))
+(pprint (read (connect :exec (list "sh" "-c" "i=0; while [ $i -lt 2000 ]; do echo 0123456789012345678901234567890123456789012345678; i=$((i+1)); done") (size 0))))
 
 (defun head (out)
     (recv
@@ -20,7 +20,7 @@
         ((:eof p)      (head out))
         ((:exited p n) (list n (reverse out)))))
 
-(pprint (join (connect :exec (list "printf" "abcdefg\\nhij\\n") (head ()))))
+(pprint (read (connect :exec (list "printf" "abcdefg\\nhij\\n") (head ()))))
 
 (defun json-values (out)
     (recv
@@ -29,11 +29,11 @@
         ((:eof p)      (json-values out))
         ((:exited p n) (list n (reverse out)))))
 
-(pprint (join (connect :exec (list "printf" "{\"a\": 1}\\n[true, null]\\n\"x\"") (json-values ()))))
+(pprint (read (connect :exec (list "printf" "{\"a\": 1}\\n[true, null]\\n\"x\"") (json-values ()))))
 
 (defun big ()
     (recv
         ((:open p)    (send p (list :read 67108864)) (big))
         ((:chunk p s) :never)))
 
-(pprint (join (connect :exec (list "cat") (big))))
+(pprint (read (connect :exec (list "cat") (big))))

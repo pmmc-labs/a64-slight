@@ -7,15 +7,6 @@
 
 (defun handler (req) (list 200 () (lookup :body req)))
 
-; Waits for both listeners to say which port they got: hp is the http
-; server's, rp the raw server's.
-(defun both (hp rp srv raw)
-    (cond
-        ((and (int? hp) (int? rp)) (run hp rp srv raw))
-        (#true (recv
-            ((:listening p) (both p rp srv raw))
-            ((:raw p)       (both hp p srv raw))))))
-
 (defun run (hp rp srv raw)
     (let got (http/get (str "http://127.0.0.1:" rp "/chunked")))
     (let echoed (talk hp (list "POST / HTTP/1.1\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabc\r\n2\r\nde\r\n0\r\n\r\n")))
@@ -23,14 +14,9 @@
     (kill raw)
     (list got (cadr (str/split echoed "\r\n\r\n"))))
 
-(defun main ()
-    (let me $$)
-    (let srv (http/serve 0 handler))
-    (let raw (raw-listen :raw (list (list "/chunked" "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6;ext=1\r\n world\r\n0\r\nX-Trailer: yes\r\n\r\n")) me))
-    (both #false #false srv raw))
-
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    (main))
-
-(join (spawn (top-level)))
+; The top level is a task (D243): hp is the http server's port, rp the
+; raw server's.
+(match (http/listen 0 handler)
+    ((:ok (srv hp))
+        (let up (raw-up (list (list "/chunked" "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n5\r\nhello\r\n6;ext=1\r\n world\r\n0\r\nX-Trailer: yes\r\n\r\n"))))
+        (run hp (cadr up) srv (car up))))

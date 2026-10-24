@@ -9,5 +9,5 @@
 (ok (took "hello"))
 "later"
 2
-(error ended #true (error killed))
+(error ended #true ended)
 (error timeout #true)

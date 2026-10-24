@@ -389,7 +389,7 @@ typedef struct rt_watch {
     struct rt_watch *next, *prev;           // on the watched one's list
     struct rt_watch *next_held, *prev_held; // on the watcher's
     struct rt_proc  *watched, *watcher;
-    int              wakes;                 // join/race's: wakes the watcher, rather than telling it
+    int              wakes;                 // join/race's or read's (process.c): wakes the watcher, rather than telling it
 } rt_watch_t;
 
 // A process. Compiled code finds the current one in x28 (r15 on x86-64),

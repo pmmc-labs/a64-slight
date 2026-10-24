@@ -728,7 +728,7 @@
     (let restore (if (nil? cp) () (restore-of runs parent cp)))
     (let begun (if (nil? cp) (start) (car cp)))
     (let t0 (clock/us))
-    (match (join (spawn (simulate day changes targets restore (if keeps every 0))))
+    (match (read (spawn (simulate day changes targets restore (if keeps every 0))))
         ((:ok (stop rejoined digests totals flown checkpoints))
             (let took (- (clock/us) t0))
             (let minutes (+ (- stop begun) 1))
@@ -832,7 +832,7 @@
             (go-on day opts h (runs/of kept) 0 0))
         (#true
             (let every (opt/every opts))
-            (match (join (spawn (simulate day () () () every)))
+            (match (read (spawn (simulate day () () () every)))
                 ((:ok (_ _ digests totals flown checkpoints))
                     (let t2 (clock/us))
                     (if (opt/record opts)
@@ -1236,7 +1236,7 @@
 
 ; A stand-in, listening where the system says: its URL and its pid.
 (defun stand-in (handler)
-    (match (join (spawn (serve-for handler)))
+    (match (read (spawn (serve-for handler)))
         ((:ok (port pid)) (list (str "http://127.0.0.1:" port "/") pid))))
 
 (defun serve-for (handler)

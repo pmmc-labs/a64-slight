@@ -46,7 +46,7 @@
 (send c :ignored)
 (send c :inc)
 (send c :stop)
-(pprint (join c))
+(pprint (read c))
 
 ; an operand before the last that isn't a boolean faults, as any cond
 ; test does

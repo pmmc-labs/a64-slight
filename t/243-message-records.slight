@@ -36,5 +36,5 @@
     (kill b)
     (disconnect s))
 
-(join (connect :system (check)))
+(read (connect :system (check)))
 :done

@@ -26,4 +26,4 @@
 (send w (list :churn 300))
 (send w (list :churn 1000))
 (send w :stop)
-(join w)
+(read w)

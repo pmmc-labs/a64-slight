@@ -2,4 +2,4 @@
 (gone "b")
 ("a" "c")
 (error disconnected)
-(ok done)
+done
