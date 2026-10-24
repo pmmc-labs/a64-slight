@@ -233,7 +233,7 @@ reply refs.
 | `(disconnect f)` | Closes the device `f`. Anything that isn't an open device it ignores. Returns `()`. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
-| `(join pid)` | **Blocking** wait for `pid`, a task, to end. Returns `(:ok value)` or `(:error reason)`. Works on any task (not just children), anywhere (including inside lambdas, and in an actor), any number of times, and after the task has already ended. Joiners wake in the order they joined. `(join $$)` faults (`:join-self`), and so does an actor's pid (`:not-a-task`, D243): a task reads its end. |
+| `(join pid)` | **Blocking** wait for `pid`, a task, to end. Returns `(:ok value)` or `(:error reason)`. Works on any task (not just children), anywhere (including inside lambdas, and in an actor), and after the task has already ended, till its parent has had the result: joined or read it, been told by a monitor, or ended; then `:ended` (D244). Joiners wake in the order they joined, each with a copy. `(join $$)` faults (`:join-self`), and so does a running actor's pid (`:not-a-task`, D243): a task reads its end. |
 | `(join/race pids)` | **Blocking** wait for the first of `pids`, tasks, to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
 | `(address)`, `(read src)`, `(read/any srcs)` | A task's (D243): `address` makes a place it can be sent to, an immediate under the pid tag (the task's index and a number), which `send`, `after` and `disconnect` take; `read` waits, keeping the stack, for the next message to one of its open addresses, or for a pid to end (an actor's end is told to those reading it then, a read's watch lasting till the task next reads without it, and is `:ended` after); `read/any` for the first of several, in their order, giving `(src what)`. The messages wait in the task's mailbox, marked with their address. `ask`, `ask-within` and `reply` are prelude functions on them. |
 | `(open source arg)` | A task's (D243): opens a device it owns, with no process started, from `connect`'s sources but the listeners and `:keypress`, and waits till it's open: `(:ok d)`, or `(:error reason)`. `read` gives its messages, its next cut at the `read` after (D158); a failure is `(:error d reason)` there, and the device closes, rather than ending the task (D128's rule is an actor's). |
@@ -875,14 +875,17 @@ processes that allocate and then wait turn out to hold too much).
 
 - `fork`: allocate the process, deep-copy the free variables into its heap,
   queue it to run the entry function.
-- Ending: a task's Result is copied into a small per-pid **exit record**.
-  Processes blocked in `join` on it wake with a copy; later `join`s read
-  the record, as do tasks reading it, which it wakes; monitors get
-  `(:exit pid result)`. An actor's Result isn't kept (D243): its
-  monitors get it, and each task with a read's watch on it is sent it,
-  marked with the pid, so it waits for that task's next `read`; the
-  record says only that it ended, and later asks get `:ended`. The
-  monitors a process set on others are taken off their lists (D183). A `join/race` is a watch
+- Ending: the Result goes, from the process's own heap, to those
+  waiting then: each joiner, and a race it wins, is given a copy to
+  take when it runs; each task with a read's watch on it is sent it,
+  marked with the pid, so it waits for that task's next `read`; and
+  monitors get `(:exit pid result)` (D243, D244). Then an actor's isn't
+  kept, nor a task's whose parent was among them, or has ended: the
+  record says only that it ended, and later asks get `:ended`. Else a
+  task's Result is copied into its small per-pid **exit record**, kept
+  for the parent, which lists it; the parent's `join`, `read` or
+  `monitor` of it, or its end, lets it go. The monitors a process set
+  on others are taken off their lists (D183). A `join/race` is a watch
   on each of its pids, as a monitor is, that wakes its process rather
   than sending it a message; the first to end wakes it, and it takes the
   rest off when it runs, so a killed racer, or one whose other pids end
@@ -893,15 +896,17 @@ processes that allocate and then wait turn out to hold too much).
 - The record is the pid's 40-byte entry in the process table (32 till
   devices added a pointer to it): the value (or the error's reason), and
   a chunk holding a copy of it if it needs memory. `(:ok v)` and `(:exit pid result)` are built when asked for.
-- Exit records are kept forever (D88). That doesn't matter at hundreds or
-  thousands of processes, and a million cost 40 MB. A system that churns
-  through many millions will need a retention policy, such as dropping
-  the record once the parent has seen it. So will one whose processes
-  end with big values, since a record keeps a copy of its value: the
-  airline's runs each leave theirs (D216). **(open)** A rule for when a
-  record goes, after Unix's zombies or Erlang's `noproc`, with
-  `detach` for children nobody joins, is in `docs/PLAN.md` ("Exit
-  records"), with what it was weighed on.
+- An entry is **dead** once nothing more can come of it: no process, no
+  open device, and no value kept. The table is in pages of 1,024
+  entries, and a page is freed once all its entries are dead and its
+  last pid has been made; a pid whose page has gone reads as ended,
+  keeping nothing, since pids are never reused (D244). So a program
+  that runs for good holds the entries of what's running, open or
+  keeping a value, not of every process it started: `bank`'s million
+  customers peak at 2 MB where they took 42, an HTTP server's 4,000
+  requests at 2.6 where they took 95. A long-lived process holds its
+  page's 40 KB; there's no `detach`, since the children nobody takes
+  are few and small, and go when their parent ends.
 
 ### Scheduler
 

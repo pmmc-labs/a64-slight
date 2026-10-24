@@ -205,27 +205,36 @@
 
 ; join/race, in the runtime, gives the first of pids to end, as (pid
 ; result). These are JavaScript's Promise.any and Promise.all on top of
-; it; both leave the processes they don't wait for running (D220).
+; it; both leave the processes they don't wait for running (D220). Each
+; joins a task as soon as the race says it has ended, so that its value,
+; kept for its parent till it has it, goes at once (D244); the results
+; are kept here, by pid, so a pid listed twice is joined once.
 
 ; The first of pids to succeed, as (:ok value); or, once all have failed,
 ; (:error reasons), the reasons in the order of pids.
-(defun join/any (pids) (join/any-loop pids pids))
-(defun join/any-loop (pids waiting)
+(defun join/any (pids) (join/any-loop pids pids ()))
+(defun join/any-loop (pids waiting reasons)
     (if (nil? waiting)
-        (list :error (map (lambda (p) (cadr (join p))) pids))
-        (match (join/race waiting)
-            ((_ (:ok v))    (list :ok v))
-            ((p (:error _)) (join/any-loop pids (remove (lambda (q) (eq? q p)) waiting))))))
+        (list :error (map (lambda (p) (lookup p reasons)) pids))
+        (join/any-next pids waiting reasons (car (join/race waiting)))))
+(defun join/any-next (pids waiting reasons p)
+    (match (join p)
+        ((:ok v)    (list :ok v))
+        ((:error r) (join/any-loop pids (remove (lambda (q) (eq? q p)) waiting) (assoc p r reasons)))
+        (:ended     (join/any-loop pids (remove (lambda (q) (eq? q p)) waiting) (assoc p :ended reasons)))))
 
 ; (:ok values), the values in the order of pids, once all have succeeded;
 ; or the first (:error reason) as soon as one fails.
-(defun join/all (pids) (join/all-loop pids pids))
-(defun join/all-loop (pids waiting)
+(defun join/all (pids) (join/all-loop pids pids ()))
+(defun join/all-loop (pids waiting values)
     (if (nil? waiting)
-        (list :ok (map (lambda (p) (cadr (join p))) pids))
-        (match (join/race waiting)
-            ((_ (:error reason)) (list :error reason))
-            ((p (:ok _))         (join/all-loop pids (remove (lambda (q) (eq? q p)) waiting))))))
+        (list :ok (map (lambda (p) (lookup p values)) pids))
+        (join/all-next pids waiting values (car (join/race waiting)))))
+(defun join/all-next (pids waiting values p)
+    (match (join p)
+        ((:error reason) (list :error reason))
+        (:ended          (list :error :ended))
+        ((:ok v)         (join/all-loop pids (remove (lambda (q) (eq? q p)) waiting) (assoc p v values)))))
 
 ; --- asking actors ------------------------------------------------------------
 

@@ -5648,3 +5648,56 @@ a task can call)*: an actor can't be joined, and keeps no value.
   monitored after it, an end between two reads waiting for the second,
   and a watch dropped by a read without its pid), worked out by hand;
   and 296 and 268 gain joining an actor, and racing one.
+
+**D244. A task's value is kept till its parent has it, and the process
+table is in pages.** *(Stevan, Oct 2026: "'until the parent has it' is
+good ... pages is good ... no detach for now", on Claude's proposal for
+D243's step 5, the rest of exit records.)* Settles the open item D88
+put off and D216 kept (PLAN.md, "Exit records"). After step 4 an
+actor kept no value, but every task still kept its own for good, and
+every pid its 40-byte entry: measured on the cloud machine, an HTTP
+server and its client in one program held 95 MB after 4,000 requests
+of 10 KB (two copies of each response, the client's task and the
+handler's), `rpc` 44 MB after 4,000 such calls, and `bank` 42 MB for a
+million customers, all entries.
+
+- **The rule:** a process's result goes, as it ends, to those waiting
+  for it then: its joiners and a race it wins, each given a copy to
+  take when it runs, the tasks reading it, and its monitors. A task's
+  is then kept for its parent if the parent wasn't among them and is
+  still running; the parent's `join`, `read` or `monitor` of it, or the
+  parent's end, lets it go. Till then anyone may join it, any number
+  of times; after, it's `:ended`, as an ended actor is (D243). The
+  root's is kept, to be printed.
+- **A race doesn't take a value,** so `join/race` can be asked again,
+  and `join/all` and `join/any` join each task as the race says it has
+  ended (so its value goes then; a pid listed twice is joined once, and
+  one joined before gives `:ended`, a failure to both).
+- **Pages:** the table is pages of 1,024 entries, each freed once all
+  its entries are dead (no process, no open device, no value kept) and
+  its last pid has been made. A pid whose page has gone reads as ended
+  and keeping nothing, since pids are never reused and can't be made
+  from data. `:system`'s `(:runtime ...)` says `(:records n)`, the
+  entries not dead.
+- **What it changed:** an actor that has ended, its entry perhaps gone,
+  is `:ended` to `join` too, where it faulted `:not-a-task`; a running
+  one still faults. A device keeps no value: a closed one is `:ended`
+  to `join`, `read` and `monitor`, where it was `(:ok ())`. A second
+  `join` of a task by its parent is `:ended`.
+- **Measured** after: the HTTP pair 2.6 MB at 4,000 requests and at
+  16,000; `rpc` 4.5 MB at both; `bank` 2.1 MB for a million customers.
+- **Rejected:** Erlang's `:noproc`, a second name for what `:ended`
+  says; only the parent able to join (simpler to state, and no program
+  needed more, but it gives up joining a sibling's task); entries
+  shrunk to a word each, still never freed; and `detach`, for children
+  nobody takes, since those found are few and small (a timeout's killed
+  sleeper, `rpc/keep`'s `on-open`), and go when their parent ends.
+- **Tested:** golden test 302 (a sibling's join before the parent's,
+  the parent's, and after it; a race and then a join; a parent's end
+  letting its child's value go; a parent's monitor; and `:records`
+  over 6,000 tasks and actors, and over five kept and then joined),
+  worked out by hand; t/live.py's memory, a million tasks and actors,
+  each taken as it ends, peaking under 16 MB (10 MB). Expected output
+  changed by the rule alone: a parent's second join (122, 125), a read
+  after the parent's read (298), a monitor after the parent was told
+  (283), and closed devices (200, 300); and 281's `:runtime` keys.

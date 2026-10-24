@@ -44,7 +44,9 @@
             (send c (list :write text \n))
             (client-wait c rest n))))
 
-; How each of n calls' processes ended, as hold tells of them.
+; How each of n calls' processes ended, as hold tells of them: :ended,
+; since they were stopped once their parent, the connection, had ended,
+; so nothing kept their values (D244).
 (defun stopped (n)
     (cond
         ((== n 0) (to-raw))

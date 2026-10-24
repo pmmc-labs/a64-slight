@@ -278,6 +278,12 @@
 #define RT_SOURCE_SYSTEM     6    // :system
 #define RT_SOURCE_COUNT      7
 
+// What :system's (:runtime s info) says of the process table (D244):
+// RT_TABLE_x is symbol RT_SYM_TABLE + x.
+#define RT_SYM_TABLE       158    // RT_SYM_SOURCE + RT_SOURCE_COUNT
+#define RT_TABLE_RECORDS     0    // :records       entries in use: running, open, or keeping a value
+#define RT_TABLE_COUNT       1
+
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it
@@ -431,6 +437,8 @@ typedef struct rt_proc {
     uint64_t        rand_seed;  // its random numbers: SplitMix64's state...
     uint64_t        rand_gamma; // ...and the step it takes, its own (numbers.c, D222)
     struct rt_addresses *addresses; // a task's open addresses (process.c, D243), or NULL
+    rt_msg_t       *given;      // the result a join or race was woken with, till it runs (D244)
+    struct rt_kept *kept;       // its children whose values are kept for it (process.c, D244), or NULL
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,

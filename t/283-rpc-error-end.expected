@@ -6,8 +6,8 @@
 < (next 2 held)
 > )
 eof
-(stopped (error killed))
-(stopped (error killed))
+(stopped ended)
+(stopped ended)
 server > (helo rpc 1)
 server > (call 1 hold)
 server < (helo rpc 1)

@@ -2,7 +2,7 @@
 ; for a message, ready to run (started or not), or blocked in join or
 ; read; or the caller itself. Killing a process that has ended does
 ; nothing. An actor's result isn't kept (D243), so one killed and read
-; after is :ended.
+; after is :ended; nor is a task's, once its parent has joined it (D244).
 
 (defun server ()
     (recv
@@ -48,7 +48,8 @@
 (pprint (join (fork (suicide))))
 
 (let done (fork :finished))
-(pprint (join done))
+(yield ())
 (kill done)
+(pprint (join done))
 (pprint (join done))
 :end

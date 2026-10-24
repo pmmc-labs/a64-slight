@@ -1,8 +1,8 @@
 (ok 5000)
-(ok 5000)
+ended
 (ok (hello #<pid 3>))
 (first (ok 5000))
 (second (ok 5000))
 ((ok first) (ok second))
 (ok spawned)
-(ok second)
+ended

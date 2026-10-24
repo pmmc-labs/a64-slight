@@ -704,10 +704,13 @@ The fault kinds:
 ### Waiting for a process
 
 - `(join pid)` waits until `pid`, a task, ends, and gives its result,
-  `(:ok value)` or `(:error reason)`. It works any number of times, from
-  anywhere (a lambda, or an actor, included), and after the task has
-  ended. Several joiners wake in the order they joined. An actor can't
-  be joined (`:not-a-task`): a task reads its end instead.
+  `(:ok value)` or `(:error reason)`. It works from anywhere (a lambda,
+  or an actor, included), and after the task has ended, till its parent
+  has had the result (below); after that it gives `:ended`. Several
+  joiners wake in the order they joined, each with the result. An actor
+  can't be joined while it runs (`:not-a-task`): a task reads its end
+  instead; once it has ended, `join` gives `:ended`, as for any pid
+  whose result isn't kept.
 - `(join/race pids)` waits until the first of the list `pids`, tasks,
   ends, and
   gives `(pid result)`, `result` being what `join` would give (D220). If
@@ -739,7 +742,10 @@ The fault kinds:
   one that waits for every result, ended well or not.
 
   Both are in the prelude, on `join/race`, and both leave running the
-  processes they no longer wait for.
+  processes they no longer wait for. Each joins a task as soon as the
+  race says it has ended, so its value goes then, and a pid listed twice
+  is joined once; one that was joined before gives `:ended`, a failure
+  to both.
 - `(monitor pid)` asks to be told when `pid` ends: the caller is sent
   `(:exit pid result)` then, or at once if it already has, `result`
   being `:ended` for an actor that has (D243). Monitoring
@@ -751,10 +757,19 @@ The fault kinds:
   `join`, or asleep. `(kill $$)` ends the caller. Killing a process that
   has ended does nothing. Returns `()`.
 
-A task's result is kept after it ends, for good, so a late `join` or
-`monitor` still gets it. An actor's isn't: it goes to those watching
-when it ends, its monitors and the tasks reading it, and later ones get
-`:ended`.
+When a process ends, its result goes to those waiting for it then: its
+joiners, the tasks reading it, a race it wins, and its monitors. An
+actor's isn't kept after that, and later ones get `:ended` (D243). A
+task's is kept for its parent, till the parent has had it: by joining
+or reading it, by a monitor's notice, or by ending (D244). Till then
+anyone may join it, as often as they like, or race it, which doesn't
+take it; after, it's `:ended`. So a task forked and joined at once, the
+usual way, keeps nothing once joined; and a parent that forks many and
+never joins them holds their values till it ends. A pid is never
+reused, and the runtime forgets one once nothing more can come of it,
+so a program that runs for good, starting processes as it goes, holds
+only those running, open or keeping a value (`:system`'s `(:records
+n)`).
 
 ### Addresses
 
@@ -920,8 +935,9 @@ A task opens a device of its own instead, and reads it (D243):
   takes a device among its sources too. A device that fails (a read or
   a write, bad JSON, `:too-big`) doesn't end the task: it closes, and
   its next message is `(:error d reason)`. Once a device has closed and
-  its messages are read, `read` gives `(:ok ())`, as for a process that
-  has ended; so does a device closed while its reader waits.
+  its messages are read, `read` gives `:ended`, as for a process that
+  has ended and kept nothing; so does a device closed while its reader
+  waits.
 
       (match (open :fs/read "notes.txt")
           ((:ok f)         (read f))           ; (:line f "first line")
@@ -1143,7 +1159,7 @@ which the reader asks for while it handles that blank line, so none of
 the body is cut as lines (D159).
 
 To `join`, `monitor` and `kill`, a device is a process that has ended
-with `(:ok ())`.
+and kept nothing: `:ended`.
 
 ### Commands
 
@@ -1235,7 +1251,8 @@ answers its owner, whose first message is `(:open s)`. It's asked:
   is answered after it.
 - `(:process pid)`: it answers at once, with `(:process s info)`, or
   `(:ended s pid result)` if `pid` has ended, `result` being what `join`
-  would give. A device is a process that ended with `(:ok ())`.
+  would give, or `:ended`. A device is a process that has ended and
+  kept nothing.
 - `(:runtime)`: it answers at once, with `(:runtime s info)`.
 
 Anything else is a dead letter. An `info` is a list of `(key value)`,
@@ -1267,7 +1284,9 @@ which `lookup` reads; more keys may come. A process's:
 - `(:devices pids)`: the devices it owns.
 
 The runtime's: `(:processes n)` that haven't ended; `(:pids n)` made,
-processes and devices, ended or not; `(:ready n)` in the run queue;
+processes and devices, ended or not; `(:records n)` of those the runtime
+still holds an entry for: running, open, or keeping a task's value for
+its parent (D244); `(:ready n)` in the run queue;
 `(:timers n)` pending; `(:devices n)` open; `(:heap bytes)` in use by
 all the processes; `(:heap-max bytes)`, the most one process's heap
 holds (D233); `(:stacks n)` held; `(:clock ms)` since the program

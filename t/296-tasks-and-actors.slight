@@ -27,7 +27,7 @@
 (send c :inc)
 (send c :stop)
 (pprint (read c))
-(pprint (join (fork (join c))))
+(pprint (join (fork (join (spawn (recv (_ :never)))))))
 
 (pprint (join (fork (send (fork (sleep 10)) :hi))))
 (pprint (join (fork (after 10 (fork (sleep 10)) :hi))))

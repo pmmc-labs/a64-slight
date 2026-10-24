@@ -4,7 +4,7 @@ to-myself
 late
 (#<address 1.0> tick)
 (#<pid 4> (ok ()))
-(#<pid 4> (ok ()))
+(#<pid 4> ended)
 queued
 #true
 fault in #<pid 5>: not a pid: #<address 1.0> (read at t/298-addresses.slight:48:21)

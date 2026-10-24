@@ -829,7 +829,9 @@ with Stevan first.
   within a function. Either is a proposal of its own; boids is the
   benchmark. Not this way (D179): fixed point in the example, or a type
   of numerical vectors.
-- **Exit records (open, talked over Oct 2026, for Stevan to decide).**
+- **Exit records (settled, D244: a task's value kept till its parent has
+  it, the table in pages, no `detach`; built as D243's step 5).** As
+  talked over in Oct 2026:
   Every process's record is kept for good (D88), its 40-byte entry and
   a copy of the value it ended with, outside every heap, so outside
   every cap (D202, D233). D88 was decided for batch programs of small
@@ -882,12 +884,12 @@ with Stevan first.
     as it is, which without selective receive would make every caller
     of `(join (fork ...))` a state function.
 
-### Tasks and actors (agreed, D243; steps 1 to 4 built)
+### Tasks and actors (agreed, D243; built, with D244)
 
 Claude's proposal, after Stevan's "there are two forms of concurrency
 here ... perhaps we should spawn actors instead of fork them"; agreed
-with every point below settled as Claude recommended (D243). Built but
-for the rest of exit records: the order is at the end.
+with every point below settled as Claude recommended (D243), and the
+rest of exit records with D244. Built: the order is at the end.
 
 **Why.** slight has two models of concurrency behind one `fork`:
 
@@ -1074,7 +1076,7 @@ and `lib/ds`, `rpc/peer`, `rpc/connect` and `agent/ask` moved to them
 joined and keeps no value, told late as `:ended`, with HTTP's client,
 `rpc/call`, `rpc/stream` and the coordinators (the games, the airline's desk, an
 agent's turn) moved off joined actors first (done, D243's "Step 4"); (5) the rest of exit
-records. (4) was part of (1) as agreed, and moved: until (2) and (3)
+records (done, D244). (4) was part of (1) as agreed, and moved: until (2) and (3)
 give a task other ways to have an answer, the hybrids (`ask`'s box,
 `slurp`, an HTTP request) are actors that are joined.
 

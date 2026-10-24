@@ -2,13 +2,13 @@
 (line #<pid 3> "one")
 (chunk #<pid 3> "two\nthree")
 (eof #<pid 3>)
-(ok ())
+ended
 (error (enoent "build/t/no-such-file"))
 (error #<pid 4> (eisdir "t"))
 ((line #<pid 5> "got hi") (eof #<pid 5>) (exited #<pid 5> 0))
 (error (enoent "no-such-command-300"))
 task
-(ok ())
+ended
 fault in #<pid 9>: not a task: #<pid 9> (open at t/300-open.slight:38:22)
 (error (not-a-task #<pid 9> "open at t/300-open.slight:38:22"))
 fault in #<pid 10>: not a device: tcp/listen (open at t/300-open.slight:39:21)

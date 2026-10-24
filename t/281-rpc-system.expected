@@ -1,4 +1,4 @@
-(processes pids ready timers devices heap heap-max stacks clock reductions)
+(processes pids records ready timers devices heap heap-max stacks clock reductions)
 (pid parent kind state joining in mail heap reductions stack devices)
 #true
 "#<pid 1>"

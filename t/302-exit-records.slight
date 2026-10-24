@@ -1,0 +1,61 @@
+; A task's value is kept till its parent has it (D244): by joining or
+; reading it, by a monitor's notice, or by ending. Anyone may join it
+; till then; after, it's :ended, as an actor's end is (D243). A race
+; doesn't take it. And the table holds only what's running, open or
+; keeping a value: :system's (:records n), against (:pids n), every pid
+; made.
+
+; kept for the root, which hasn't joined it, so a sibling's join gets it
+(let t (fork 42))
+(yield ())
+(pprint (join (fork (join t))))
+(pprint (join t))
+(pprint (join (fork (join t))))
+(pprint (join t))
+
+; a race doesn't take it; the join after does
+(let r (fork :r))
+(yield ())
+(pprint (join/race (list r)))
+(pprint (join r))
+(pprint (join r))
+
+; what a parent didn't take goes when it ends
+(defun leaves ()
+    (let c (fork :child))
+    (yield ())
+    c)
+(let b (cadr (join (fork (leaves)))))
+(pprint (list b (join b)))
+
+; a parent that monitors has it when it's told
+(defun watches ()
+    (let c (fork :c))
+    (monitor c)
+    (recv ((:exit q r) (list (eq? q c) r c))))
+(let w (cadr (read (spawn (watches)))))
+(pprint (list (car w) (cadr w) (join (nth 2 w))))
+
+; (records pids), asked of :system
+(defun table ()
+    (match (open :system)
+        ((:ok s)
+            (send s (list :runtime))
+            (let info (match (read s) ((:runtime _ i) i)))
+            (disconnect s)
+            (list (lookup :records info) (lookup :pids info)))))
+
+(pprint (table))
+(defun churn (n)
+    (if (== n 0)
+        :done
+        (do (join (fork n))
+            (read (spawn n))
+            (churn (- n 1)))))
+(churn 3000)
+(pprint (table))
+(let kept (map (lambda (i) (fork i)) (range 0 5)))
+(yield ())
+(pprint (table))
+(pprint (map join kept))
+(pprint (table))

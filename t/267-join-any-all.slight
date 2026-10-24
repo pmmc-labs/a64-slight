@@ -36,4 +36,5 @@
 (pprint (join slow))
 (pprint (took t3))
 (pprint (join/all ()))
-(pprint (join/all (list done done)))
+(let twice (fork :twice))
+(pprint (join/all (list twice twice)))
