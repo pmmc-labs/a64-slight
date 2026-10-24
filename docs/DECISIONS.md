@@ -5485,3 +5485,59 @@ generalizes.
   to, a task sent to, timed and monitoring, a message to an ended task,
   and `:kind`) and 297 (a cycle of joins, and so on), worked out by
   hand.
+
+**Step 2, built** *(Claude, Oct 2026, on Stevan's "start step 2")*:
+addresses, `read`, `read/any`, and `ask` without a box.
+
+- **An address** is an immediate under the pid tag with its top bit
+  set: the task's index in 32 bits, and its number among the task's
+  addresses in 28 above them, printed `#<address 1.0>`. It's copied,
+  compared and hashed as a word, can't be made from data, and `pid?`
+  says `#true` of it; every other process operation faults
+  `:not-a-pid` on it, through `entry()`. A task keeps the numbers of
+  its open addresses in a small table, a pointer in `rt_proc_t`.
+- **Delivery:** a message to an address goes into its task's mailbox,
+  its record's device field holding the address (a task has no device
+  to read on yet), and wakes the task if it's reading that address; to
+  an address that's closed, or whose task has ended, it disappears, as
+  to an ended process (D92). A timer can be set for one, and is dropped
+  as soon as nothing can come of it (D232).
+- **`read` and `read/any`** take the first of their sources, in their
+  order, with something: a message waiting for an address, or a pid
+  that has ended, its result as `join` gives it. Else the task waits in
+  a new state, `:reading` to `:system`, keeping its stack, woken by a
+  message to one of its sources or by a watch on each pid among them,
+  as `join/race`'s (D220), and looks again. Reading a closed address,
+  another task's, or `()`, faults; reading one's own pid is
+  `:join-self`. `join/race` stays in the runtime: actors still race
+  (they may block in `join`, D243's point 4), and read only in a task.
+- **`ask`, `ask-within` and `reply` moved to the prelude** from
+  `lib/ds.slight`, `ask` making an address, sending, and reading the
+  address and the actor together, so it gives the answer or raises
+  `(:ended pid result)`; `ask-within` sets a timer for the address, and
+  takes it back. No process and no exit record per question.
+- **Actors that asked:** two did. `active-objects`'s object actor works
+  out an answer that asks other objects' actors, so it forks a task for
+  each answer, which replies; and 199's top-level actor only needed to
+  be an actor for its timers, so the root does the rest again and its
+  expected output is back to what it was before step 1.
+- **Libraries:** `rpc/peer` asks the connection at an address, from the
+  handler's own task. `rpc/connect`, `rpc/exec` and `agent/ask` fork a
+  task that reads an address, and join it, rather than reading in the
+  caller: their callers include actors (a test's actor that has just
+  heard `(:listening port)`, a hub), which may join a task but can't
+  read. They start a process each, as their box did, so no test's
+  output changed.
+- **Left for step 4,** which forces them: `rpc/call` and `rpc/stream`,
+  whose waiting process the connection monitors and a keeper tells
+  which connection it used (D228, D230), and the coordinators (the
+  tournaments' games, ping-pong's pinger, the airline's desk and
+  stand-ins, an agent's turn), still actors that are joined.
+- **Tests:** 298 (an address printed, a message to oneself, an actor's
+  answer, a task's, a timer's, `read/any` in its sources' order with a
+  pid's end, a timer taken back, `disconnect` dropping what waits and
+  what comes, reading a closed address and another's, `ask`, an actor
+  that has ended, `ask-within` timing out, and the faults: an actor
+  making an address, `read/any` of `()`, `read` of oneself) and 299
+  (`:system` showing a reader and its source, and the deadlock message
+  for `read/any`), worked out by hand.

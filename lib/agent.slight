@@ -74,22 +74,24 @@
 (defun agent/say (a text) (send a (list :say text $$)))
 
 ; Asks a, and waits for the whole answer: (:ok answer), or (:error reason),
-; (:ended a result) if a ends first. A process of its own asks, so the
-; pieces and calls it's told of go nowhere else, and this can be called
-; anywhere, a lambda or a tool included (D192).
-(defun agent/ask (a text) (join (spawn (agent/asking a text))))
+; (:ended a result) if a ends first. A task of its own asks, with an
+; address the pieces and calls it's told of go to as well, passed over
+; (D243); so this can be called anywhere, a lambda, a tool or an actor
+; included (D192).
+(defun agent/ask (a text) (join (fork (agent/asking a text))))
 
 (defun agent/asking (a text)
-    (monitor a)
-    (agent/say a text)
-    (agent/answer a))
+    (let to (address))
+    (send a (list :say text to))
+    (let answer (agent/answer a to))
+    (disconnect to)
+    answer)
 
-(defun agent/answer (a)
-    (recv
-        ((:answer _ text)  text)
-        ((:error _ reason) (raise reason))
-        ((:exit _ result)  (raise (list :ended a result)))
-        (_                 (agent/answer a))))
+(defun agent/answer (a to)
+    (match (read/any (list to a))
+        ((_ (:answer _ text))  text)
+        ((_ (:error _ reason)) (raise reason))
+        ((p result)            (if (eq? p a) (raise (list :ended a result)) (agent/answer a to)))))
 
 ; A message of the conversation, as /api/chat takes it.
 (defun agent/message (role content)

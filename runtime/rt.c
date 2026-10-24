@@ -173,7 +173,7 @@ static void render_float(rt_buf_t *b, double d) {
 
 // Anything but a cons.
 static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
-    char num[32];
+    char num[48];
     if ((v & RT_TAG_INT_MASK) == 0) {
         snprintf(num, sizeof num, "%" PRId64, rt_int_value(v));
         buf_str(b, num);
@@ -185,6 +185,11 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
     }
     if (rt_is_float(v)) {
         render_float(b, rt_float_value(v));
+        return;
+    }
+    if (rt_is_address(v)) {
+        snprintf(num, sizeof num, "#<address %" PRIu64 ".%" PRIu64 ">", rt_address_task(v), rt_address_number(v));
+        buf_str(b, num);
         return;
     }
     if ((v & RT_TAG_MASK) == RT_TAG_PID) {

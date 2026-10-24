@@ -944,7 +944,7 @@ rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
 // pid's entry. Every pid came from fork, so it has one. Don't hold on to
 // it across a switch: a fork can move the table.
 static entry_t *entry(rt_value_t pid, const char *site) {
-    if ((pid & RT_TAG_MASK) != RT_TAG_PID) rt_fault(RT_FAULT_NOT_PID, pid, site);
+    if ((pid & RT_TAG_MASK) != RT_TAG_PID || rt_is_address(pid)) rt_fault(RT_FAULT_NOT_PID, pid, site);
     return &procs[pid >> RT_PID_SHIFT];
 }
 
@@ -975,6 +975,95 @@ static void need_actor(const entry_t *e, rt_value_t pid, const char *site) {
     if (e->proc && !e->proc->actor) rt_fault(RT_FAULT_NOT_ACTOR, pid, site);
 }
 
+// --- addresses (D243) ---------------------------------------------------------
+//
+// A task makes addresses to be sent to, and reads what comes to each. A
+// message to one goes into the task's mailbox, marked with the address
+// (the record's device field, which a task has no other use for till it
+// owns devices), so read takes it by that, and nothing else can.
+
+typedef struct rt_addresses {
+    uint64_t  next;                     // the number the next address gets
+    uint64_t  n, cap;
+    uint64_t *open;                     // the numbers of those not closed
+} rt_addresses_t;
+
+#define ADDRESS_NUMBERS (1ULL << (63 - RT_ADDRESS_SHIFT))
+
+static int address_open(const rt_proc_t *p, rt_value_t a) {
+    const rt_addresses_t *s = p->addresses;
+    for (uint64_t i = 0; s && i < s->n; i++) if (s->open[i] == rt_address_number(a)) return 1;
+    return 0;
+}
+
+// The task a is for, while it runs and has a open; or NULL.
+static rt_proc_t *address_owner(rt_value_t a) {
+    uint64_t   i = rt_address_task(a);
+    rt_proc_t *p = i >= 1 && i <= nprocs ? procs[i].proc : NULL;
+    return p && address_open(p, a) ? p : NULL;
+}
+
+static void deliver(rt_proc_t *p, rt_msg_t *m);
+
+// To an address, as send to a process: a message to one that's closed, or
+// whose task has ended, disappears (D92).
+static void to_address(rt_value_t a, rt_msg_t *m) {
+    rt_proc_t *p = address_owner(a);
+    if (!p) {
+        free_msg(m);
+        return;
+    }
+    m->device = a;
+    deliver(p, m);
+}
+
+// A new address of the calling task's. Its number wraps past 2^28, and
+// could then name an address still open since; reading one that long
+// isn't expected.
+rt_value_t rt_address(const char *site) {
+    rt_proc_t *p = rt_current;
+    if (p->actor) rt_fault(RT_FAULT_NOT_TASK, p->pid, site);   // an actor takes its answers as messages
+    rt_addresses_t *s = p->addresses;
+    if (!s) s = p->addresses = rt_must(calloc(1, sizeof *s));
+    if (s->n == s->cap) {
+        s->cap  = s->cap ? s->cap * 2 : 4;
+        s->open = rt_must(realloc(s->open, s->cap * sizeof *s->open));
+    }
+    uint64_t num = s->next++ % ADDRESS_NUMBERS;
+    s->open[s->n++] = num;
+    return RT_ADDRESS_BIT | num << RT_ADDRESS_SHIFT | p->pid;
+}
+
+// Closes a, of p's: what's sent to it after goes nowhere, and what's
+// waiting for it is freed.
+static void close_address(rt_proc_t *p, rt_value_t a) {
+    rt_addresses_t *s = p->addresses;
+    for (uint64_t i = 0; i < s->n; i++) {
+        if (s->open[i] != rt_address_number(a)) continue;
+        s->open[i] = s->open[--s->n];
+        break;
+    }
+    rt_msg_t *last = NULL;
+    for (rt_msg_t **link = &p->mail; *link; ) {
+        rt_msg_t *m = *link;
+        if (m->device == a) {
+            *link = m->next;
+            free_msg(m);
+        } else {
+            last = m;
+            link = &m->next;
+        }
+    }
+    p->mail_last = last;
+}
+
+static void free_addresses(rt_proc_t *p) {
+    if (!p->addresses) return;
+    free(p->addresses->open);
+    free(p->addresses);
+    p->addresses = NULL;
+}
+
 // A message holding a copy of msg: the message's record and the copy in
 // one chunk, the record first, so a send is one malloc, and taking the
 // message adopts the chunk and frees nothing. The record is then dead
@@ -992,11 +1081,16 @@ static rt_msg_t *new_msg(rt_value_t msg) {
 }
 
 // Into p's mailbox; p wakes if it's waiting for a message.
+static int among(rt_value_t xs, rt_value_t v) {
+    for (; xs != RT_NIL; xs = rt_cdr(xs)) if (rt_car(xs) == v) return 1;
+    return 0;
+}
+
 static void deliver(rt_proc_t *p, rt_msg_t *m) {
     if (p->mail_last) p->mail_last->next = m;
     else              p->mail = m;
     p->mail_last = m;
-    if (p->state == RT_WAITING) enqueue(p);
+    if (p->state == RT_WAITING || (p->state == RT_READING && among(p->joining, m->device))) enqueue(p);
 }
 
 static void command(struct rt_device *d, rt_value_t msg);
@@ -1005,6 +1099,10 @@ static void read_on(rt_proc_t *p, rt_value_t pid);
 // To a process that has ended, a message just disappears, as in Erlang. A
 // device takes it at once.
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
+    if (rt_is_address(pid)) {
+        to_address(pid, new_msg(msg));
+        return RT_NIL;
+    }
     entry_t *e = entry(pid, site);
     need_actor(e, pid, site);
     if (e->proc) {
@@ -1111,6 +1209,8 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
             if (w->watcher->state == RT_RACING) {
                 w->watcher->joining = p->pid;
                 enqueue(w->watcher);
+            } else if (w->watcher->state == RT_READING) {
+                enqueue(w->watcher);            // it looks at its sources again
             }
         } else if (w->watcher != p) {
             // Not p itself: its notice would be dropped with its mail, and
@@ -1125,6 +1225,7 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     // on the structure it asked, and each monitor walked them all (D183).
     while (p->watching) unwatch(p->watching);
     free_heap(p);
+    free_addresses(p);
     if (p->keypress) disconnect(p);
     close_all(p);
     p->state = RT_DONE;
@@ -1223,6 +1324,75 @@ rt_value_t rt_join_race(rt_value_t pids, const char *site) {
     _Alignas(16) rt_value_t cells[8];
     rt_value_t result = result_at(cells, &procs[won >> RT_PID_SHIFT]);
     return copy_here(rt_cons_at(cells + 4, won, rt_cons_at(cells + 6, result, RT_NIL)));
+}
+
+// The first of srcs with something for the calling task: a message to one
+// of its addresses, or a process's end, taken in the order of srcs, as
+// join/race takes the first of its pids to have ended (D220); as (src
+// what) if pair is set, or just what. Waits, keeping the stack, till one
+// has something: a watch on each pid among them, as a race's, and a
+// message to one of them, wake it (D243).
+static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char *site) {
+    rt_proc_t *p = rt_current;
+    if (p->actor) rt_fault(RT_FAULT_NOT_TASK, p->pid, site);   // an actor takes its messages with recv
+    if (srcs == RT_NIL) rt_fault(RT_FAULT_NOT_PID, srcs, site);  // nothing to wait for, ever
+    for (rt_value_t xs = srcs; xs != RT_NIL; xs = rt_cdr(xs)) {
+        if (!rt_is_cons(xs)) rt_fault(RT_FAULT_NOT_LIST, srcs, site);
+        rt_value_t src = rt_car(xs);
+        if (rt_is_address(src)) {
+            if (rt_address_task(src) != p->pid >> RT_PID_SHIFT || !address_open(p, src)) rt_fault(RT_FAULT_NOT_PID, src, site);
+        } else {
+            entry(src, site);
+            if (src == p->pid) rt_fault(RT_FAULT_JOIN_SELF, src, site);
+        }
+    }
+    for (;;) {
+        for (rt_value_t xs = srcs; xs != RT_NIL; xs = rt_cdr(xs)) {
+            rt_value_t src = rt_car(xs);
+            if (rt_is_address(src)) {
+                rt_msg_t *last = NULL;
+                for (rt_msg_t **link = &p->mail; *link; link = &(*link)->next) {
+                    rt_msg_t *m = *link;
+                    if (m->device != src) {
+                        last = m;
+                        continue;
+                    }
+                    *link = m->next;
+                    if (p->mail_last == m) p->mail_last = last;
+                    rt_value_t v = m->value;
+                    if (m->chunk->size == sizeof *m) free_msg(m);
+                    else                             adopt(p, m->chunk);
+                    if (!pair) return v;
+                    rt_value_t *cells = rt_alloc(4 * sizeof *cells, site);
+                    return rt_cons_at(cells, src, rt_cons_at(cells + 2, v, RT_NIL));
+                }
+            } else if (!procs[src >> RT_PID_SHIFT].proc) {
+                _Alignas(16) rt_value_t cells[8];
+                rt_value_t result = result_at(cells, &procs[src >> RT_PID_SHIFT]);
+                return copy_here(pair ? rt_cons_at(cells + 4, src, rt_cons_at(cells + 6, result, RT_NIL)) : result);
+            }
+        }
+        for (rt_value_t xs = srcs; xs != RT_NIL; xs = rt_cdr(xs)) {
+            if (!rt_is_address(rt_car(xs))) watch(procs[rt_car(xs) >> RT_PID_SHIFT].proc, p, 1);
+        }
+        p->joining = srcs;
+        p->state   = RT_READING;
+        p->at      = at;
+        to_scheduler(p);                        // till a message or an end wakes it
+        for (rt_watch_t *w = p->watching, *next; w; w = next) {
+            next = w->next_held;
+            if (w->wakes) unwatch(w);
+        }
+    }
+}
+
+rt_value_t rt_read(rt_value_t src, const char *site) {
+    _Alignas(16) rt_value_t cell[2];
+    return read_from(rt_cons_at(cell, src, RT_NIL), 0, (uintptr_t)__builtin_return_address(0), site);
+}
+
+rt_value_t rt_read_any(rt_value_t srcs, const char *site) {
+    return read_from(srcs, 1, (uintptr_t)__builtin_return_address(0), site);
 }
 
 rt_value_t rt_monitor(rt_value_t pid, const char *site) {
@@ -1436,6 +1606,10 @@ static void lookup_timed_out(struct rt_device *d, uint64_t seq);
 static void ring(void) {
     for (uint64_t t = nalarms ? now() : 0; nalarms && alarms[0].due <= t; ) {
         alarm_t    a = next_alarm();
+        if (rt_is_address(a.pid)) {
+            to_address(a.pid, a.msg);
+            continue;
+        }
         rt_proc_t *p = procs[a.pid >> RT_PID_SHIFT].proc;
         if (!p) {
             struct rt_device *d = procs[a.pid >> RT_PID_SHIFT].device;
@@ -1452,7 +1626,7 @@ static void ring(void) {
 
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) {
     uint64_t due = due_in(ms, site);
-    need_actor(entry(pid, site), pid, site);
+    if (!rt_is_address(pid)) need_actor(entry(pid, site), pid, site);
     set_alarm(due, pid, new_msg(msg), ++afters);
     return rt_int((int64_t)afters);
 }
@@ -1470,6 +1644,7 @@ rt_value_t rt_timer_cancel(rt_value_t t, const char *site) {
 // Whether nothing can come of a: its process has ended, or its device
 // closed (D232).
 static int orphaned(const alarm_t *a) {
+    if (rt_is_address(a->pid)) return !address_owner(a->pid);
     uint64_t at = a->pid >> RT_PID_SHIFT;
     return !procs[at].proc && !procs[at].device;
 }
@@ -2572,6 +2747,11 @@ rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *value
 }
 
 rt_value_t rt_disconnect(rt_value_t pid, const char *site) {
+    if (rt_is_address(pid)) {
+        rt_proc_t *p = address_owner(pid);
+        if (p) close_address(p, pid);
+        return RT_NIL;
+    }
     rt_device_t *d = entry(pid, site)->device;
     if (d) close_device(d);
     return RT_NIL;
@@ -3066,6 +3246,7 @@ static snapshot_t take(rt_device_t *d, const rt_proc_t *p) {
     static const int states[] = {
         [RT_READY] = RT_SYS_READY, [RT_RUNNING] = RT_SYS_RUNNING, [RT_WAITING] = RT_SYS_RECV,
         [RT_JOINING] = RT_SYS_JOINING, [RT_RACING] = RT_SYS_JOINING, [RT_SLEEPING] = RT_SYS_SLEEPING,
+        [RT_READING] = RT_SYS_READING,
     };
     snapshot_t r = {
         .pid   = p->pid, .parent = p->parent, .joining = p->state == RT_JOINING ? p->joining : RT_NIL,
@@ -3078,6 +3259,8 @@ static snapshot_t take(rt_device_t *d, const rt_proc_t *p) {
     r.racing   = d->snap_npids;
     if (p->state == RT_RACING) {
         for (const rt_watch_t *w = race_last(p); w; w = w->prev_held) if (w->wakes) snap_pid(d, w->watched->pid);
+    } else if (p->state == RT_READING) {
+        for (rt_value_t xs = p->joining; xs != RT_NIL; xs = rt_cdr(xs)) snap_pid(d, rt_car(xs));
     }
     r.nracing = d->snap_npids - r.racing;
     return r;
@@ -3184,7 +3367,7 @@ static void system_command(rt_device_t *d, rt_value_t msg) {
         }
         push_snapshot(d, (snapshot_t){ 0 });
         if (!d->sent) system_next(d);               // else when the owner waits for the next
-    } else if (word == rt_symbol(SYS(PROCESS)) && (pid & RT_TAG_MASK) == RT_TAG_PID) {
+    } else if (word == rt_symbol(SYS(PROCESS)) && (pid & RT_TAG_MASK) == RT_TAG_PID && !rt_is_address(pid)) {
         const entry_t *e = &procs[pid >> RT_PID_SHIFT];
         if (alive(e->proc)) {
             uint64_t   mark = d->snap_npids;     // its devices go after the ones still to be sent
@@ -3364,6 +3547,22 @@ static void tell_waiting(const rt_proc_t *p) {
             }
             fprintf(stderr, " to end");
             return;
+        }
+        if (p->state == RT_READING) {
+            rt_value_t xs = p->joining;
+            if (rt_cdr(xs) != RT_NIL || rt_is_address(rt_car(xs))) {
+                fprintf(stderr, rt_cdr(xs) == RT_NIL ? "a message to" : "the first of");
+                for (const char *sep = " "; xs != RT_NIL; xs = rt_cdr(xs), sep = ", ") {
+                    rt_value_t v = rt_car(xs);
+                    if (rt_is_address(v)) fprintf(stderr, "%s#<address %" PRIu64 ".%" PRIu64 ">", sep, rt_address_task(v), rt_address_number(v));
+                    else                  fprintf(stderr, "%s#<pid %" PRIu64 ">", sep, v >> RT_PID_SHIFT);
+                }
+                return;
+            }
+            fprintf(stderr, "#<pid %" PRIu64 "> to end", rt_car(xs) >> RT_PID_SHIFT);   // read of one pid: as join
+            p = procs[rt_car(xs) >> RT_PID_SHIFT].proc;
+            if (!p) return;
+            continue;
         }
         if (p->state != RT_JOINING) {
             fprintf(stderr, "a message");

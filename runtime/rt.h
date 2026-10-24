@@ -222,14 +222,15 @@
 #define RT_SYS_STACKS       19    // :stacks        stacks held
 #define RT_SYS_CLOCK        20    // :clock         milliseconds since the program started
 #define RT_SYS_HEAP_MAX     21    // :heap-max      the most a process's heap holds (D202, D233)
-#define RT_SYS_COUNT        22
+#define RT_SYS_READING      22    // :reading       a state: a task in read or read/any (D243)
+#define RT_SYS_COUNT        23
 
 // A command's last message (connect :exec, process.c, D185) is (:exited p
 // status): status is the exit code, or (:signal name) if a signal ended
 // it, name being one of these (the same on macOS and Linux, where some of
 // their numbers aren't), or the number of any other. RT_EXEC_x is symbol
 // RT_SYM_EXEC + x.
-#define RT_SYM_EXEC        128    // RT_SYM_SYSTEM + RT_SYS_COUNT
+#define RT_SYM_EXEC        129    // RT_SYM_SYSTEM + RT_SYS_COUNT
 #define RT_EXEC_EXITED       0    // :exited
 #define RT_EXEC_SIGNAL       1    // :signal
 #define RT_EXEC_HUP          2    // :hup           the signals' names, without SIG
@@ -252,14 +253,14 @@
 // Who's at the other end of a Unix connection (socket/peer, process.c,
 // D235): ((:uid u) (:gid g) (:pid p)), :pid being RT_SYS_PID's. RT_PEER_x
 // is symbol RT_SYM_PEER + x.
-#define RT_SYM_PEER        145    // RT_SYM_EXEC + RT_EXEC_COUNT
+#define RT_SYM_PEER        146    // RT_SYM_EXEC + RT_EXEC_COUNT
 #define RT_PEER_UID          0    // :uid
 #define RT_PEER_GID          1    // :gid
 #define RT_PEER_COUNT        2
 
 // What kind a process is (D243), in :system's info as (:kind k): RT_KIND_x
 // is symbol RT_SYM_KIND + x.
-#define RT_SYM_KIND        147    // RT_SYM_PEER + RT_PEER_COUNT
+#define RT_SYM_KIND        148    // RT_SYM_PEER + RT_PEER_COUNT
 #define RT_KIND_KIND         0    // :kind
 #define RT_KIND_TASK         1    // :task          started with fork, or the root
 #define RT_KIND_ACTOR        2    // :actor         started with spawn or connect
@@ -355,15 +356,18 @@ typedef struct rt_msg {
     struct rt_msg *next;
     rt_value_t     value;
     rt_chunk_t    *chunk;       // what this record and value live in (new_msg in process.c)
-    rt_value_t     device;      // a reader's pid, if it's to read on at the taker's next recv; or 0
+    rt_value_t     device;      // a reader's pid, if it's to read on at the taker's next recv;
+                                // the address it was sent to, in a task's mailbox; or 0
 } rt_msg_t;
 
 // READY: in the run queue. WAITING: in recv, with no stack. JOINING:
 // blocked in join, keeping its stack. RACING: blocked in join/race,
 // keeping its stack, with a watch that wakes it on each of its pids.
-// SLEEPING: in sleep, keeping its stack, until its timer wakes it. DONE:
-// ended, about to be freed.
-typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_RACING, RT_SLEEPING, RT_DONE } rt_state_t;
+// SLEEPING: in sleep, keeping its stack, until its timer wakes it.
+// READING: a task in read or read/any, keeping its stack, woken by a
+// message to one of its sources or by a watch on a pid among them (D243).
+// DONE: ended, about to be freed.
+typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_RACING, RT_SLEEPING, RT_READING, RT_DONE } rt_state_t;
 
 // One monitor: someone to tell when a process ends. It's on the watched
 // process's list, in the order they asked, and on the watcher's, so that
@@ -402,7 +406,8 @@ typedef struct rt_proc {
     struct rt_proc *next_ready;
     struct rt_proc *joiners;    // blocked in join on this one, in the order they joined
     struct rt_proc *next_joiner;
-    rt_value_t      joining;    // while JOINING: whom; once a race is woken, the pid that woke it
+    rt_value_t      joining;    // while JOINING: whom; once a race is woken, the pid that woke it;
+                                // while READING: the list of its sources
     rt_watch_t     *watchers, *last_watcher; // monitoring this one, in order
     rt_watch_t     *watching;   // the monitors it has set on processes still running
     struct rt_device *devices;  // the files it has open (process.c)
@@ -413,6 +418,7 @@ typedef struct rt_proc {
     uintptr_t       at;         // where in compiled code it last stopped while holding a stack, or 0
     uint64_t        rand_seed;  // its random numbers: SplitMix64's state...
     uint64_t        rand_gamma; // ...and the step it takes, its own (numbers.c, D222)
+    struct rt_addresses *addresses; // a task's open addresses (process.c, D243), or NULL
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -420,6 +426,16 @@ typedef struct rt_proc {
 static inline rt_value_t rt_car(rt_value_t v) { return ((const rt_value_t *)(v - RT_TAG_LIST))[0]; }
 static inline rt_value_t rt_cdr(rt_value_t v) { return ((const rt_value_t *)(v - RT_TAG_LIST))[1]; }
 static inline int        rt_is_cons(rt_value_t v) { return (v & RT_TAG_MASK) == RT_TAG_LIST && v != RT_NIL; }
+
+// An address (D243): a place a task makes to be sent to. An immediate under
+// the pid tag, with the top bit set: the task's index in its low 32 bits
+// (as a pid's, from RT_PID_SHIFT), and its number among the task's
+// addresses above them, so it can't be taken for a pid.
+#define RT_ADDRESS_BIT    (1ULL << 63)
+#define RT_ADDRESS_SHIFT  35
+static inline int      rt_is_address(rt_value_t v)   { return (v & RT_TAG_MASK) == RT_TAG_PID && (v & RT_ADDRESS_BIT); }
+static inline uint64_t rt_address_task(rt_value_t v) { return (v >> RT_PID_SHIFT) & 0xffffffffu; }
+static inline uint64_t rt_address_number(rt_value_t v) { return (v & ~RT_ADDRESS_BIT) >> RT_ADDRESS_SHIFT; }
 
 static inline const uint64_t *rt_box(rt_value_t v) { return (const uint64_t *)(v - RT_TAG_BOXED); }
 static inline int rt_is_box(rt_value_t v, uint64_t type) {
@@ -535,6 +551,13 @@ void       rt_yield(void) RT_ASM(rt_yield);
 rt_value_t rt_join(rt_value_t pid, const char *site) RT_ASM(rt_join);
 rt_value_t rt_join_race(rt_value_t pids, const char *site) RT_ASM(rt_join_race);
 rt_value_t rt_monitor(rt_value_t pid, const char *site) RT_ASM(rt_monitor);
+// A task's addresses (D243): rt_address makes one; rt_read waits, keeping
+// the stack, for the next message to an address of the task's, or for a
+// process to end, and gives it; rt_read_any does that for the first of a
+// list of them, and gives (src what).
+rt_value_t rt_address(const char *site) RT_ASM(rt_address);
+rt_value_t rt_read(rt_value_t src, const char *site) RT_ASM(rt_read);
+rt_value_t rt_read_any(rt_value_t srcs, const char *site) RT_ASM(rt_read_any);
 rt_value_t rt_kill(rt_value_t pid, const char *site) RT_ASM(rt_kill);
 __attribute__((noreturn))
 rt_value_t rt_raise(rt_value_t reason, const char *site) RT_ASM(rt_raise);

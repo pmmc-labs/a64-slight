@@ -46,11 +46,13 @@
             (_       (super m o)))))
 
 ; The process holding an object: (m o to) is a message for it, whose
-; answer goes back to the box at the end (ask's).
+; answer goes back to the address at the end (ask's). The answer is worked
+; out in a task of its own, since o may be an actor's object too, and
+; working it out asks that actor, which an actor can't (D243).
 (defun ActorRef (obj)
     (recv
         (:EXIT    ())
-        ((m o to) (reply to (obj m o)) (ActorRef obj))))
+        ((m o to) (fork (reply to (obj m o))) (ActorRef obj))))
 
 (defun PointActor (oid x y)
     (let ref (spawn (ActorRef (Point oid x y))))

@@ -744,6 +744,57 @@ The fault kinds:
 A process's result is kept after it ends, for good, so a late `join`
 or `monitor` still gets it.
 
+### Addresses
+
+A task can't be sent to, so it makes a place that can be (D243):
+
+- `(address)` makes one, a value of its own, printed `#<address 1.0>`
+  (the task's pid and its number among the task's addresses). `send` and
+  `after` take it where they take a pid, so it goes in a message for an
+  actor to answer at. `pid?` is `#true` of it; `join`, `monitor`, `kill`
+  and the rest fault on it (`:not-a-pid`). Only a task makes one: in an
+  actor, `address` faults `:not-a-task`, since an actor takes what comes
+  to it with `recv`.
+- `(read src)` waits, keeping the stack as `join` does, for the next
+  message sent to `src`, an address of the caller's, and gives it; or,
+  if `src` is a pid, for it to end, and gives its result, as `join`.
+  Messages to one address come in the order they were sent, and no
+  other message can be taken for one: there's nothing to steal, and no
+  dead letters.
+- `(read/any srcs)` waits for the first of a list of them to have
+  something, and gives `(src what)`. They're looked at in their order,
+  as `join/race`'s pids are: an address with a message waiting, or a pid
+  that has ended. So with an address and the actor it asked, the answer,
+  or the actor's end, whichever comes; and with a timer set for the
+  address too, a timeout.
+- `(disconnect a)` closes an address: what's waiting there is dropped,
+  and anything sent to it after disappears, as to an ended process. So
+  does what's sent to an address of a task that has ended. Reading a
+  closed address, or another task's, faults (`:not-a-pid`).
+
+`read` and `read/any` are a task's alone (`:not-a-task` in an actor). A
+task reading what will never come is waiting for ever: `deadlock: the
+root process is waiting in the top level for a message to #<address
+1.0>, ...`.
+
+    (defun counter (n)
+        (recv
+            ((:get to) (reply to n) (counter n))))
+
+    (let c (spawn (counter 5)))
+    (let to (address))
+    (send c (list :get to))
+    (read to)                            (reply 5)
+
+That's what `ask` does, in the prelude: `(ask pid msg)` adds an address
+to the end of `msg`, sends it, and reads the answer, which the actor
+gives with `(reply to v)` (it sends `(:reply v)`). It gives `v`; or, if
+`pid` ends first, raises `(:ended pid result)`. `(ask-within ms pid
+msg)` raises `(:timeout pid)` too, if no answer comes in `ms`
+milliseconds, and takes its timer back if one does. Since `ask` makes
+an address, only a task asks (D243): an actor sends, and takes the
+answer as a message, or forks a task to ask.
+
 ### Time
 
 - `(after ms pid msg)` sends `msg` to `pid` once `ms` milliseconds have
@@ -1801,9 +1852,10 @@ until it's killed.
 - A channel: `(channel/new)`, `(channel/put ch x)`, and `(channel/take
   ch)`, which waits until there's an item.
 
-For structures of one's own: `(ask pid msg)` sends `msg` with a box for
-the answer added at the end, and waits for the answer; the structure
-answers with `(reply to v)`, `to` being that box.
+For structures of one's own: `(ask pid msg)`, in the prelude (under
+Addresses), sends `msg` with an address for the answer added at the end,
+and reads the answer; the structure answers with `(reply to v)`, `to`
+being that address. A task asks; an actor can't.
 
     (defun counter (n)
         (recv
@@ -1816,8 +1868,7 @@ answers with `(reply to v)`, `to` being that box.
 
 If the structure ends before it answers, `ask` raises `(:ended pid
 result)`. `(ask-within ms pid msg)` raises `(:timeout pid)` too, if no
-answer comes in time; its timer stays pending till then, and a pending
-timer keeps the program running.
+answer comes in time.
 
 ### (@include :http)
 
@@ -1938,9 +1989,10 @@ plain HTTP; the agent includes `:http` itself.
   for it, and its answer comes after.
 - `(agent/ask a text)` asks `a` and waits for the whole answer: `(:ok
   answer)`, or `(:error reason)` as `(:error a reason)` would have said,
-  or `(:error (:ended a result))` if `a` has ended or ends first. A
-  process of its own asks, so none of the pieces or calls reach the
-  caller, and it works anywhere, a lambda or a tool included (D192).
+  or `(:error (:ended a result))` if `a` has ended or ends first. A task
+  of its own asks, at an address of its own (D243), so none of the
+  pieces or calls reach the caller, and it works anywhere, a lambda, a
+  tool or an actor included (D192).
 - `(kill a)` ends the agent, and stops an answer on its way, and any
   tool it was running.
 

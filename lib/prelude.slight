@@ -226,3 +226,32 @@
         (match (join/race waiting)
             ((_ (:error reason)) (list :error reason))
             ((p (:ok _))         (join/all-loop pids (remove (lambda (q) (eq? q p)) waiting))))))
+
+; --- asking actors ------------------------------------------------------------
+
+; Sends msg to pid with an address of the caller's added at the end, and
+; reads the answer from it: a task's way to have an actor's answer (D243).
+; The actor answers with (reply to v), to being the address. If pid ends
+; first, ask raises (:ended pid result) rather than waiting for ever.
+(defun ask (pid msg) (ask/via pid msg ()))
+
+; As ask, but raises (:timeout pid) if no answer comes within ms
+; milliseconds; the timer is taken back once one does (D232).
+(defun ask-within (ms pid msg)
+    (let to (address))
+    (ask/via pid msg (list to (after ms to :timeout))))
+
+; How an actor answers an ask: to is the address at the end of the message.
+(defun reply (to v) (send to (list :reply v)))
+
+; timer is () or (to t): the address it was set for, and its number.
+(defun ask/via (pid msg timer)
+    (let to (if (nil? timer) (address) (car timer)))
+    (send pid (append msg (list to)))
+    (let got (read/any (list to pid)))
+    (if (nil? timer) () (timer/cancel (cadr timer)))
+    (disconnect to)
+    (match got
+        ((_ (:reply v)) v)
+        ((_ :timeout)   (raise (list :timeout pid)))
+        ((_ result)     (raise (list :ended pid result)))))

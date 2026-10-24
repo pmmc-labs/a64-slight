@@ -246,8 +246,11 @@ Stevan (`docs/PLAN.md`, 15), and when an exit record goes, open
 starts an actor, `fork` a task, which can't wait, nor be sent to, timed
 or monitor, and the root is a task, so a top level that waits spawns an
 actor and joins it; the deadlock message follows the root's join to
-where the program waits (golden tests 296, 297). Next, step 2:
-addresses, `read` and `read/any`, and `ask` without a box. 12c (C libraries vendored as source, D151, D152, then
+where the program waits (golden tests 296, 297); and step 2: a task's
+addresses, `(address)`, which `send` and `after` take, `read` and
+`read/any`, which wait for a message to one or a process's end, and
+`ask` in the prelude on them, without a box (golden tests 298, 299).
+Next, step 3: `open`, a device a task owns and reads. 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
 first (`docs/PLAN.md`). Self-hosting waits

@@ -1,0 +1,3 @@
+(ok (reading (#<address 2.0>)))
+deadlock: the root process is waiting in the top level for the first of #<address 1.0>, #<pid 5>, and nothing else can run
+exit: 1

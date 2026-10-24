@@ -68,19 +68,17 @@
 ; Who called (D235): ((uid u) (gid g) (pid p)) for a caller at the other
 ; end of a Unix socket, as socket/peer gives it, the kernel's word for
 ; it; or () over TCP or a command. Only from the call's own process, as
-; rpc/next. It asks the connection, which holds the socket.
+; rpc/next. It asks the connection, which holds the socket, with an
+; address for the answer (D243).
 (defun rpc/peer ()
     (let conn ^$$)
-    (match (join (spawn (rpc/asking-peer conn)))
-        ((:ok who) who)
-        (_         ())))
-
-(defun rpc/asking-peer (conn)
-    (monitor conn)
-    (send conn (list :rpc/peer $$))
-    (recv
-        ((:rpc/peer who) who)
-        ((:exit _ _)     ())))
+    (let to (address))
+    (send conn (list :rpc/peer to))
+    (let got (read/any (list to conn)))
+    (disconnect to)
+    (match got
+        ((_ (:rpc/peer who)) who)
+        (_                   ())))
 
 ; A handler, system, that tells what the :system device does (D171, D228):
 ; ((runtime info) (processes (info ...))), each info the device's, a pid
@@ -190,12 +188,10 @@
 ; once the connection is open gives (:ok conn), conn being its pid, for
 ; rpc/call, rpc/stream and rpc/close; or (:error reason), the socket's,
 ; such as (:econnrefused "localhost:1"). The other end can call handlers.
+; A task waits for the connection to open, reading an address it gave it
+; (D243), so an actor can connect too, joining the task.
 (defun rpc/connect (where handlers)
-    (rpc/result (join (spawn (rpc/connecting where handlers)))))
-
-(defun rpc/connecting (where handlers)
-    (let me $$)
-    (rpc/opened (rpc/dial-to where handlers me)))
+    (rpc/result (join (fork (rpc/opened (address) (lambda (to) (rpc/dial-to where handlers to)))))))
 
 ; A path, a string with a / in it, is a Unix socket's (D231): "./ctl.sock"
 ; for one here. Anything else is a port or "host:port".
@@ -219,20 +215,17 @@
 ; The command's stderr comes with its stdout, so it mustn't write
 ; anything but messages there.
 (defun rpc/exec (cmd handlers)
-    (rpc/result (join (spawn (rpc/exec-connecting cmd handlers)))))
+    (rpc/result (join (fork (rpc/opened (address) (lambda (to) (connect :exec cmd (rpc/opening handlers to))))))))
 
-(defun rpc/exec-connecting (cmd handlers)
-    (let me $$)
-    (rpc/opened (connect :exec cmd (rpc/opening handlers me))))
-
-(defun rpc/opened (conn)
-    (monitor conn)
-    (rpc/opening-wait conn))
-
-(defun rpc/opening-wait (conn)
-    (recv
-        ((:rpc/open _) (list :ok conn))
-        ((:exit _ r)   (list :error (rpc/gone r)))))
+; (:ok conn) once the connection (dial to) makes tells to it's open, or
+; (:error why) if it ends first.
+(defun rpc/opened (to dial)
+    (let conn (dial to))
+    (let got (read/any (list to conn)))
+    (disconnect to)
+    (match got
+        ((_ (:rpc/open _)) (list :ok conn))
+        ((_ r)             (list :error (rpc/gone r)))))
 
 ; Listens at where, a port or "host:port" (D226), or a path (D231), and
 ; gives the listener's pid, which kill stops; the caller is sent

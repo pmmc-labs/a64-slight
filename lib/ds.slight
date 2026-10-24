@@ -20,39 +20,8 @@
 
 ; --- asking ------------------------------------------------------------
 
-; Sends msg to pid with a box for the answer added at the end, and waits
-; for the answer. The box also watches pid, so if pid ends first, ask
-; raises (:ended pid result) instead of waiting for ever. A box is a
-; process of its own, so an answer can't be mistaken for anything else
-; the caller is sent.
-(defun ask (pid msg) (ask/via (spawn (ask/box pid)) pid msg))
-
-; As ask, but raises (:timeout pid) if no answer comes within ms
-; milliseconds. The timer is the box's, which ends with the answer, so
-; it doesn't hold up the program's end after that (D232).
-(defun ask-within (ms pid msg)
-    (let box (spawn (ask/box pid)))
-    (after ms box :timeout)
-    (ask/via box pid msg))
-
-; How a structure answers an ask: to is the box at the end of the
-; message.
-(defun reply (to v) (send to (list :reply v)))
-
-(defun ask/via (box pid msg)
-    (send pid (append msg (list box)))
-    (match (join box)
-        ((:ok (:reply v))      v)
-        ((:ok (:ended result)) (raise (list :ended pid result)))
-        ((:ok (:timeout))      (raise (list :timeout pid)))))
-
-; The box: watches pid, and ends with the first thing it hears.
-(defun ask/box (pid)
-    (monitor pid)
-    (recv
-        ((:reply v)       (list :reply v))
-        ((:exit p result) (list :ended result))
-        (:timeout         (list :timeout))))
+; ask, ask-within and reply are the prelude's (D243): a task asks, with
+; an address of its own, and a structure answers with (reply to v).
 
 ; --- cell: one value ---------------------------------------------------
 

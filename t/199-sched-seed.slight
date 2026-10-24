@@ -20,22 +20,23 @@
         (recv
             ((tag i) (collect (assoc tag (cons i (lookup* tag seen)) seen) (- n 1))))))
 
-; The top level is a task, which can't wait (D243), so an actor does its work.
-(defun top-level ()
-    ; ten processes, each adding 1 to a cell a hundred times, atomically
-    (let c (cell/new 0))
-    (let adders (map (lambda (i) (fork (adder c 100))) (range 0 10)))
-    (map join adders)
-    (pprint (cell/get c))
-    (let col (spawn (collect () 250)))
-    (map (lambda (tag) (fork (sender col tag 50))) (list :a :b :c :d :e))
-    (match (join col)
-        ((:ok seen) (pprint (map (lambda (tag) (eq? (reverse (lookup* tag seen)) (range 0 50))) (list :a :b :c :d :e)))))
+; ten processes, each adding 1 to a cell a hundred times, atomically
+(let c (cell/new 0))
+(let adders (map (lambda (i) (fork (adder c 100))) (range 0 10)))
+(map join adders)
+(pprint (cell/get c))
+(let col (spawn (collect () 250)))
+(map (lambda (tag) (fork (sender col tag 50))) (list :a :b :c :d :e))
+(match (join col)
+    ((:ok seen) (pprint (map (lambda (tag) (eq? (reverse (lookup* tag seen)) (range 0 50))) (list :a :b :c :d :e)))))
+
+; timers due at the same time fire in the order they were set; an actor
+; takes them, since the root is a task (D243)
+(defun timers ()
     (let me $$)
-    ; timers due at the same time fire in the order they were set
     (after 10 me :first)
     (after 10 me :second)
     (after 5 me :sooner)
-    (pprint (list (recv) (recv) (recv))))
+    (list (recv) (recv) (recv)))
 
-(join (spawn (top-level)))
+(pprint (cadr (join (spawn (timers)))))
