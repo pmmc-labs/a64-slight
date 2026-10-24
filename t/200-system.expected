@@ -3,11 +3,11 @@
 (me (parent #<pid 1>) (state running) (in "check (recv at t/200-system.slight:26:13)") (mail 0) (stack #true) (devices (#<pid 11>)))
 (server (state recv) (in "server (recv at t/200-system.slight:7:12)") (stack #false))
 (napper (state sleeping) (in "napper") (stack #true))
-(joiner (state joining) (joining #<pid 2>) (in "joiner") (stack #true))
+(joiner (state joining) (joining #<pid 4>) (in "joiner") (stack #true))
 (spinner (state recv) (in "spinner (recv at t/200-system.slight:12:32)"))
 (ended #<pid 11> #<pid 8> (ok 42))
 (ended #<pid 11> #<pid 9> (error killed))
-(ended #<pid 11> #<pid 11> (ok ()))
+(ended #<pid 11> #<pid 11> ended)
 (spinner-busiest #true #true #true)
 (hoarder-biggest #true #true)
 #true

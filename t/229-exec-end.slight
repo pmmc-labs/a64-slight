@@ -4,17 +4,20 @@
 ; nothing more comes from it. A command is handed to another process as
 ; any device is.
 
-(defun run (out)
+; What a command says, and how it ends; told to to, unless that's ().
+(defun run (to out)
     (recv
-        ((:open p)     (run out))
-        ((:line p s)   (run (cons s out)))
-        ((:eof p)      (run out))
-        ((:exited p n) (list n (reverse out)))))
+        ((:open p)     (run to out))
+        ((:line p s)   (run to (cons s out)))
+        ((:eof p)      (run to out))
+        ((:exited p n)
+            (let r (list n (reverse out)))
+            (if (eq? to ()) r (send to r)))))
 
 ; Whether the process pid is gone (kill -0 fails), asked of another
 ; command.
 (defun gone (pid)
-    (join (connect :exec (list "sh" "-c" (str "kill -0 " pid " 2>/dev/null || echo gone")) (run ()))))
+    (read (connect :exec (list "sh" "-c" (str "kill -0 " pid " 2>/dev/null || echo gone")) (run () ()))))
 
 ; A command that says its pid, then waits for input that never comes.
 (defun waits ()
@@ -26,11 +29,8 @@
         ((:open p)   (raises))
         ((:line p s) (raise (list :pid s)))))
 
-(match (join (connect :exec (waits) (raises)))
-    ((:error (:pid pid)) (pprint (gone pid))))
-
 ; Its owner disconnects, and goes on: nothing more comes, and what's
-; written to it goes nowhere.
+; written to it goes nowhere. It ends with the command's pid.
 (defun disconnects ()
     (recv
         ((:open p)   (disconnects))
@@ -39,10 +39,8 @@
             (send p (list :write "nowhere" \n))
             (send $$ :next)
             (recv
-                (:next (gone s))
+                (:next (list :pid s))
                 (m     (list :unexpected m))))))
-
-(pprint (join (connect :exec (waits) (disconnects))))
 
 ; Its owner is killed, by the process it told the pid to.
 (defun tells (whom)
@@ -50,17 +48,24 @@
         ((:open p)   (tells whom))
         ((:line p s) (send whom (list :pid s)) (tells whom))))
 
-(let me $$)
-(let owner (connect :exec (waits) (tells me)))
-(recv
-    ((:pid pid)
-        (kill owner)
-        (pprint (join owner))
-        (pprint (gone pid))))
-
-; Handed over, from the process connect made to another.
-(defun hands ()
+; Handed over, from the process connect made to another, which tells to
+; what it gets.
+(defun hands (to)
     (recv
-        ((:open p) (join (connect p (run ()))))))
+        ((:open p) (connect p (run to ())))))
 
-(pprint (join (connect :exec (list "sh" "-c" "echo handed") (hands))))
+; The top level is a task (D243): it reads how each owner ends, and is
+; told at an address what an owner says.
+(match (read (connect :exec (waits) (raises)))
+    ((:error (:pid pid)) (pprint (gone pid))))
+(match (read (connect :exec (waits) (disconnects)))
+    ((:ok (:pid pid)) (pprint (gone pid)))
+    (r                (pprint r)))
+(let to (address))
+(let owner (connect :exec (waits) (tells to)))
+(let pid (cadr (read to)))
+(kill owner)
+(pprint (read owner))
+(pprint (gone pid))
+(read (connect :exec (list "sh" "-c" "echo handed") (hands to)))
+(pprint (read to))

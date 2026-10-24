@@ -8,7 +8,7 @@
 ; each prime found so far, each taking out the multiples of its own. The
 ; one that takes a number out tells the painter, which lights the number
 ; in its colour: by its smallest factor. A number that gets past them
-; all is prime: the end of the chain becomes the filter for it, and forks
+; all is prime: the end of the chain becomes the filter for it, and spawns
 ; a new end. So the chain grows a process for each prime, a few hundred
 ; long on an 80 by 24 screen, and every number goes down it as far as its
 ; smallest factor.
@@ -46,7 +46,7 @@
         ((:end total) (send painter (list :end total)))
         (p
             (send painter (list :prime p))
-            (sieve p (fork (end-of-chain painter)) painter 1))))
+            (sieve p (spawn (end-of-chain painter)) painter 1))))
 
 ; 2 up to last, into the chain, a pause every batch, so it can be watched.
 (defun count-up (first n last batch)
@@ -126,10 +126,10 @@
 (let side (if (== (% fits 2) 0) (dec fits) fits))
 (let last (* side side))
 (tty/write \e "[?25l" \e "[2J")
-(let painter (fork (paint (map/new) (tuple cols (div cols 2) (div (* 2 rows) 2) (inc rows)) 0)))
+(let painter (spawn (paint (map/new) (tuple cols (div cols 2) (div (* 2 rows) 2) (inc rows)) 0)))
 (send painter (list :caught 1 1))
-(count-up (fork (end-of-chain painter)) 2 last (math/max 1 (div last 2000)))
-(match (join painter)
+(count-up (spawn (end-of-chain painter)) 2 last (math/max 1 (div last 2000)))
+(match (read painter)
     ((:ok (primes total))
         (tty/write \e "[" (inc rows) ";1H" \e "[0m" \e "[K" \e "[?25h"
                    "1 to " last ": " primes " primes, a process each in a chain that took in " total " numbers" \n)

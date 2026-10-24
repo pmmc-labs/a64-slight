@@ -46,5 +46,6 @@
             (kill l)
             :done)))
 
-(match (join (connect :tcp/listen "127.0.0.1:0" (free-port)))
-    ((:ok port) (main port)))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(match (read (connect :tcp/listen "127.0.0.1:0" (free-port)))
+    ((:ok port) (read (spawn (main port)))))

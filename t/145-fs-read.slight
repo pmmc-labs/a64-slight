@@ -14,7 +14,7 @@
 
 (let r (connect :fs/read "t/data/lines.txt" (reader 0)))
 (send r :hello)
-(pprint (join r))
+(pprint (read r))
 
 (defun first-line ()
     (recv
@@ -30,4 +30,4 @@
         (:check :checked)
         (msg    (pprint (list :then msg)) (drain))))
 
-(pprint (join (connect :fs/read "t/data/lines.txt" (first-line))))
+(pprint (read (connect :fs/read "t/data/lines.txt" (first-line))))

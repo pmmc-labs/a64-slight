@@ -7,12 +7,9 @@
 
 (defun handler (req) (list 200 () (lookup :body req)))
 
-(defun main ()
-    (let server (http/serve 0 handler))
-    (recv
-        ((:listening port)
-            (let reply (talk port (list "POST / HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\n" "hello")))
-            (kill server)
-            (map (lambda (p) (car (str/split p "\r\n"))) (str/split reply "\r\n\r\n")))))
-
-(main)
+; The top level is a task (D243): http/listen starts the server from it.
+(match (http/listen 0 handler)
+    ((:ok (server port))
+        (let reply (talk port (list "POST / HTTP/1.1\r\nExpect: 100-continue\r\nContent-Length: 5\r\n\r\n" "hello")))
+        (kill server)
+        (map (lambda (p) (car (str/split p "\r\n"))) (str/split reply "\r\n\r\n"))))

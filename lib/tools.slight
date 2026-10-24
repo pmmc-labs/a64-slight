@@ -117,24 +117,37 @@
 
 ; The file at path, its bytes as they are; or it raises why not.
 (defun tools/read (path)
-    (match (join (connect :fs/read path (tools/chunks ())))
+    (match (join (fork (tools/reading path)))
         ((:ok text)      text)
         ((:error reason) (raise reason))))
 
-(defun tools/chunks (acc)
-    (recv
-        ((:open f)    (send f (list :read :chunks)) (tools/chunks acc))
-        ((:chunk f s) (tools/chunks (cons s acc)))
-        ((:eof f)     (str/join "" (reverse acc)))))
+(defun tools/reading (path)
+    (match (open :fs/read path)
+        ((:ok f)         (send f (list :read :chunks)) (tools/chunks f ()))
+        ((:error reason) (raise reason))))
+
+(defun tools/chunks (f acc)
+    (match (read f)
+        ((:chunk _ s)      (tools/chunks f (cons s acc)))
+        ((:eof _)          (str/join "" (reverse acc)))
+        ((:error _ reason) (raise reason))))
 
 ; Makes the file at path hold text, and nothing else.
 (defun tools/save (path text)
-    (match (join (connect :fs/write path (tools/writing text)))
+    (match (join (fork (tools/writing path text)))
         ((:ok _)         ())
         ((:error reason) (raise reason))))
 
-(defun tools/writing (text)
-    (recv ((:open f) (send f (list :write text)) (disconnect f))))
+; A write that fails leaves (:error f reason) to be read, closed or not.
+(defun tools/writing (path text)
+    (match (open :fs/write path)
+        ((:ok f)
+            (send f (list :write text))
+            (disconnect f)
+            (match (read f)
+                ((:error _ reason) (raise reason))
+                (_                 ())))
+        ((:error reason) (raise reason))))
 
 ; What a command printed, and its status if that wasn't 0.
 (defun tools/output (ran)
@@ -545,7 +558,7 @@
 ; starts (a file that isn't there, or is empty, is no notes; one that
 ; isn't notes ends the store, rather than be written over), and writes
 ; them all back after each change, so they outlast the program.
-(defun notes/open (path) (fork (notes/loop path (notes/read path))))
+(defun notes/open (path) (spawn (notes/loop path (notes/read path))))
 
 (defun notes/get (store key) (ask store (list :get key)))
 (defun notes/keys (store) (ask store (list :keys)))

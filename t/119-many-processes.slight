@@ -4,10 +4,10 @@
     (recv
         ((:double n) (send reply-to (list :doubled (* 2 n))))))
 
-(defun spawn (n me acc)
+(defun start-all (n me acc)
     (cond
         ((== n 0) acc)
-        (#true    (spawn (- n 1) me (cons (fork (waiter me)) acc)))))
+        (#true    (start-all (- n 1) me (cons (spawn (waiter me)) acc)))))
 
 (defun ask-all (pids n)
     (cond
@@ -23,4 +23,8 @@
     (recv
         ((:doubled d) (collect (- n 1) (+ total d)))))
 
-(ask-all (spawn 10000 $$ ()) 0)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (ask-all (start-all 10000 $$ ()) 0))
+
+(read (spawn (top-level)))

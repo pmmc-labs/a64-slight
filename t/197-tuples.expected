@@ -12,10 +12,10 @@
 "[1,[\"a\",null],[2],[]]"
 #("s" 1.5 #((1 2)) #(1 "a" b (2 3) #() 2.5))
 #true
-fault in #<pid 3>: out of range: 2 (tuple/get at t/197-tuples.slight:48:21)
-(error (out-of-range 2 "tuple/get at t/197-tuples.slight:48:21"))
-fault in #<pid 4>: not a tuple: (1) (tuple/len at t/197-tuples.slight:49:21)
-(error (not-a-tuple (1) "tuple/len at t/197-tuples.slight:49:21"))
-fault in #<pid 5>: not an integer: 1.0 (tuple/get at t/197-tuples.slight:50:21)
-(error (not-an-int 1.0 "tuple/get at t/197-tuples.slight:50:21"))
-()
+fault in #<pid 4>: out of range: 2 (tuple/get at t/197-tuples.slight:45:25)
+(error (out-of-range 2 "tuple/get at t/197-tuples.slight:45:25"))
+fault in #<pid 5>: not a tuple: (1) (tuple/len at t/197-tuples.slight:46:25)
+(error (not-a-tuple (1) "tuple/len at t/197-tuples.slight:46:25"))
+fault in #<pid 6>: not an integer: 1.0 (tuple/get at t/197-tuples.slight:47:25)
+(error (not-an-int 1.0 "tuple/get at t/197-tuples.slight:47:25"))
+(ok ())

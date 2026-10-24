@@ -33,4 +33,4 @@ run: echo hi; exit 3
 (ok "hi\n[exit status: 3]")
 (error "the argument path is missing")
 (error "the argument path must be a string")
-()
+(ok ())

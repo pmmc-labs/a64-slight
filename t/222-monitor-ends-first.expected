@@ -1,4 +1,3 @@
-((a (ok stopped)) (c (error killed)) (e (ok stopped)) (g (error killed)))
 (error killed)
-((heard b (error killed)) (heard d (error killed)) (heard f (error killed)) quiet)
+((stopped a) (stopped e) (heard b (error killed)) (heard d (error killed)) (heard f (error killed)) quiet)
 done

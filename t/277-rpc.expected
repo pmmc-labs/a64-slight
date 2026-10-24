@@ -18,4 +18,4 @@
 (handler-ended (error killed))
 (error disconnected)
 (error econnrefused)
-done
+(ok done)

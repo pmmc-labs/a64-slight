@@ -4,4 +4,4 @@
 (ok 42)
 (error (enoent "build/t/285-rpc-unix.sock"))
 (error (enotfound "285.sock"))
-done
+(ok done)

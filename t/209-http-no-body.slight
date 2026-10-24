@@ -6,20 +6,17 @@
 (@include :http)
 (@include "data/http-raw.slight")
 
-(defun main ()
-    (let me $$)
-    (let raw (raw-listen :raw (list
-        (list "/head"      "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n")
-        (list "/nocontent" "HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\n")
-        (list "/eof"       "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nabc")) me))
-    (recv
-        ((:raw port)
-            (let base (str "http://127.0.0.1:" port))
-            (let r (list
-                (http/request :head (str base "/head") () "")
-                (http/get (str base "/nocontent"))
-                (http/get (str base "/eof"))))
-            (kill raw)
-            r)))
-
-(main)
+; The top level is a task (D243), so the raw server says its port with raw-up.
+(let up (raw-up (list
+    (list "/head"      "HTTP/1.1 200 OK\r\nContent-Length: 5\r\n\r\n")
+    (list "/nocontent" "HTTP/1.1 204 No Content\r\nContent-Length: 5\r\n\r\n")
+    (list "/eof"       "HTTP/1.1 200 OK\r\nConnection: close\r\n\r\nabc"))))
+(let raw (car up))
+(let port (cadr up))
+(let base (str "http://127.0.0.1:" port))
+(let r (list
+    (http/request :head (str base "/head") () "")
+    (http/get (str base "/nocontent"))
+    (http/get (str base "/eof"))))
+(kill raw)
+r

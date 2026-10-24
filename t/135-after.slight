@@ -13,14 +13,18 @@
                 ((== n 1) :done)
                 (#true    (show (- n 1)))))))
 
-(let me $$)
-(pprint (after 30 $$ :thirty))
-(after 10 $$ :ten-a)
-(after 20 $$ :twenty)
-(after 10 $$ :ten-b)
-(after -5 $$ :now)
-(send $$ :sent)
-(fork (do
-    (let squares (map (lambda (n) (* n n)) (range 1 6)))
-    (after 15 me (list :from-child squares))))
-(show 7)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (let me $$)
+    (pprint (after 30 $$ :thirty))
+    (after 10 $$ :ten-a)
+    (after 20 $$ :twenty)
+    (after 10 $$ :ten-b)
+    (after -5 $$ :now)
+    (send $$ :sent)
+    (fork (do
+        (let squares (map (lambda (n) (* n n)) (range 1 6)))
+        (after 15 me (list :from-child squares))))
+    (show 7))
+
+(read (spawn (top-level)))

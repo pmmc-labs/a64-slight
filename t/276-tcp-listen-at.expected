@@ -7,5 +7,5 @@
 (error (enotfound "ip6only.test:0"))
 (error (enotfound "127.0.0.1"))
 (error (enotfound "127.0.0.1:65536"))
-(ok (eaddrinuse #true))
+(eaddrinuse #true)
 ()

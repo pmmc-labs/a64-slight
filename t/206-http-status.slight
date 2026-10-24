@@ -11,15 +11,12 @@
         ((eq? path "/boom") (raise :boom))
         (#true              (list 200 () "ok"))))
 
-(defun main ()
-    (let server (http/serve 0 handler))
-    (recv
-        ((:listening port)
-            (let base (str "http://127.0.0.1:" port))
-            (let r1 (http/get (str base "/nope")))
-            (let r2 (http/get (str base "/boom")))
-            (let r3 (http/get (str base "/ok")))
-            (kill server)
-            (list r1 r2 r3))))
-
-(main)
+; The top level is a task (D243): http/listen starts the server from it.
+(match (http/listen 0 handler)
+    ((:ok (server port))
+        (let base (str "http://127.0.0.1:" port))
+        (let r1 (http/get (str base "/nope")))
+        (let r2 (http/get (str base "/boom")))
+        (let r3 (http/get (str base "/ok")))
+        (kill server)
+        (list r1 r2 r3)))

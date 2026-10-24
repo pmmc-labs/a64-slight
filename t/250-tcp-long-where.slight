@@ -27,25 +27,31 @@
 (let long (double-up "a" 23))
 (let h255 (bytes/slice long 0 255))
 (let h256 (bytes/slice long 0 256))
-(join (connect :fs/write "build/t/250-hosts" (writer (str "127.0.0.1 " h255 " " h256 \n))))
+(read (connect :fs/write "build/t/250-hosts" (writer (str "127.0.0.1 " h255 " " h256 \n))))
 
 (let where (str long ":80"))
-(pprint (failed (join (connect :tcp where (never))) where))
+(pprint (failed (read (connect :tcp where (never))) where))
 
 (defun answer ()
     (recv
         ((:open c) :connected)))
 
+; A listener's owner, which tells the root the listener and its port, at
+; an address (D243), and then lets what comes sit.
+(defun telling (to)
+    (recv ((:open l port) (send to (list l port)) (sitting))))
+
+(defun sitting () (recv (_ (sitting))))
+
 ; 255 bytes of host is looked up, and connects, and 256 isn't; then a
 ; port that was listened on and isn't now, after 8 MB of zeros
-(defun listening (h255 h256)
-    (recv
-        ((:open l port)
-            (pprint (join (connect :tcp (str h255 ":" port) (answer))))
-            (let where (str h256 ":" port))
-            (pprint (failed (join (connect :tcp where (never))) where))
-            (disconnect l)
-            (let refused (str "127.0.0.1:" (double-up "0" 23) port))
-            (failed (join (connect :tcp refused (never))) refused))))
-
-(pprint (join (connect :tcp/listen 0 (listening h255 h256))))
+(let to (address))
+(connect :tcp/listen 0 (telling to))
+(let lp (read to))
+(let port (cadr lp))
+(pprint (read (connect :tcp (str h255 ":" port) (answer))))
+(let where (str h256 ":" port))
+(pprint (failed (read (connect :tcp where (never))) where))
+(disconnect (car lp))
+(let refused (str "127.0.0.1:" (double-up "0" 23) port))
+(pprint (failed (read (connect :tcp refused (never))) refused))

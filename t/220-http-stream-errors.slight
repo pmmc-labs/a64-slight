@@ -18,30 +18,27 @@
         ((:error p reason)  (reverse (cons (list :error reason (eq? p s)) acc)))))
 
 (defun streamed (url)
-    (cadr (join (fork (heard (http/stream :get url () "" :lines) ())))))
+    (cadr (read (spawn (heard (http/stream :get url () "" :lines) ())))))
 
-(defun main ()
-    (let me $$)
-    (let raw (raw-listen :raw (list
-        (list "/nothing" "")
-        (list "/ssh"     "SSH-2.0-OpenSSH_9.6\r\n\r\n")
-        (list "/cut"     "HTTP/1.1 200 OK\r\nContent-Ty")
-        (list "/size"    "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nok\n\r\n0\r\n\r\n")
-        (list "/short"   (list "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" "3\r\nok\n\r\n" "9\r\nnot all"))) me))
-    (recv
-        ((:raw port)
-            (let base (str "http://127.0.0.1:" port))
-            (let r (list
-                (streamed "https://127.0.0.1/")
-                (streamed "ftp://127.0.0.1/")
-                (streamed "http://127.0.0.1:1/")
-                (streamed (str base "/nothing"))
-                (streamed (str base "/ssh"))
-                (streamed (str base "/cut"))
-                (streamed (str base "/size"))
-                (streamed (str base "/short"))))
-            (kill raw)
-            (map pprint r)
-            :done)))
-
-(main)
+; The top level is a task (D243), so the raw server says its port with raw-up.
+(let up (raw-up (list
+    (list "/nothing" "")
+    (list "/ssh"     "SSH-2.0-OpenSSH_9.6\r\n\r\n")
+    (list "/cut"     "HTTP/1.1 200 OK\r\nContent-Ty")
+    (list "/size"    "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\nzz\r\nok\n\r\n0\r\n\r\n")
+    (list "/short"   (list "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n" "3\r\nok\n\r\n" "9\r\nnot all")))))
+(let raw (car up))
+(let port (cadr up))
+(let base (str "http://127.0.0.1:" port))
+(let r (list
+    (streamed "https://127.0.0.1/")
+    (streamed "ftp://127.0.0.1/")
+    (streamed "http://127.0.0.1:1/")
+    (streamed (str base "/nothing"))
+    (streamed (str base "/ssh"))
+    (streamed (str base "/cut"))
+    (streamed (str base "/size"))
+    (streamed (str base "/short"))))
+(kill raw)
+(map pprint r)
+:done

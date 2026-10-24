@@ -7,7 +7,9 @@ program, or the system to measure the run.
   process's stack all but full; until D205 that ran off the stack.
 - memory: each case of t/live/memory.slight ends as its golden test
   does, and its peak resident set is under PEAK; the code before D204
-  and D205 held from half a gigabyte to 4 GB on the way.
+  and D205 held from half a gigabyte to 4 GB on the way. And a million
+  tasks and actors, each joined or read as it ends, peak under CHURN:
+  before D244 every pid's entry was kept, 40 MB of them.
 - chat: examples/chat.slight in a terminal, with t/live/model.slight as
   its model: what the model sends with terminal escapes in it is shown
   escaped, approvals included; a refused command isn't run; and a fetch
@@ -68,6 +70,7 @@ import termios
 TARGET   = os.environ.get('TARGET', 'aarch64')
 DEADLINE = 120
 PEAK     = 400 << 20
+CHURN    = 16 << 20
 DIR      = os.path.join('build', 't', TARGET, 'live')
 PROMPT   = '❯ '.encode()
 
@@ -143,15 +146,16 @@ def peak_run(prog, args):
 def memory():
     prog = build('memory', 't/live/memory.slight')
     cases = [
-        ('endless', '(error (too-big "sh"))\n()\n', 'a JSON value with no end, from a command'),
-        ('deep', '(error (too-big "sh"))\n()\n', '30 million arrays deep, from a command'),
-        ('wide', None, 'str/pad-start to a width of 4 GB'),
+        ('endless', '(error (too-big "sh"))\n()\n', 'a JSON value with no end, from a command', PEAK),
+        ('deep', '(error (too-big "sh"))\n()\n', '30 million arrays deep, from a command', PEAK),
+        ('wide', None, 'str/pad-start to a width of 4 GB', PEAK),
+        ('churn', 'done\n()\n', 'a million tasks and actors, each taken as it ends', CHURN),
     ]
-    for name, expected, what in cases:
+    for name, expected, what, most in cases:
         out, status, peak = peak_run(prog, [name])
         ok_out = out == expected if expected else out.startswith('(error (heap () "str/pad-start at ')
         check(f'{what}: {out.splitlines()[0] if out else "nothing"}, at most {peak >> 20} MB',
-              status == 0 and ok_out and peak < PEAK, f'exit {status}, printed {out!r}')
+              status == 0 and ok_out and peak < most, f'exit {status}, printed {out!r}')
 
 
 # A terminal, read as it's written to: see waits for text after what's

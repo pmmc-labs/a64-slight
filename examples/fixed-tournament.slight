@@ -1,14 +1,14 @@
 ; fixed-tournament: N games, each playing exactly R rallies, so every
 ; game must finish with counters (R R-1). Any other result prints a FAIL.
 ;
-; Every game is a process that forks its two players, waits for the
+; Every game is a process that spawns its two players, waits for the
 ; :START gate, serves, and collects the two finals, waiting in the middle
 ; of its function for each (D167); each player is a receive function, and
-; rally is the step between its states. The root
-; joins every game. N and R come from @ARGV, as strings, through
-; str->int, and default to 100 and 1000. A game is forked by name,
-; since a function that waits in recv can't be passed around as a
-; value.
+; rally is the step between its states. Every game tells the root its
+; finals, at an address of the root's (D243). N and R come from @ARGV, as
+; strings, through str->int, and default to 100 and 1000. A game is
+; spawned by name, since a function that waits in recv can't be passed
+; around as a value.
 
 (defun player (game limit counter)
     (recv
@@ -34,26 +34,27 @@
             (player game limit counter))))
 
 ; wait for the :START gate, serve, then collect the two finals: p2 always
-; reaches the limit first, so they arrive (R) then (R-1)
-(defun game (limit)
-    (let me $$)     ; $$ inside the fork would be the child
-    (let p1 (fork (player me limit 0)))
-    (let p2 (fork (player me limit 0)))
+; reaches the limit first, so they arrive (R) then (R-1); and tell to
+(defun game (to limit)
+    (let me $$)     ; $$ inside the spawn would be the child
+    (let p1 (spawn (player me limit 0)))
+    (let p2 (spawn (player me limit 0)))
     (recv)
     (send p1 (list :Serve p2))
     (let first (recv ((:Final counter) counter)))
-    (list first (recv ((:Final counter) counter))))
+    (send to (list first (recv ((:Final counter) counter)))))
 
-(defun setup-tournament (n limit)
+(defun setup-tournament (to n limit)
     (cond
         ((== n 0) ())
-        (#true    (cons (fork (game limit)) (setup-tournament (- n 1) limit)))))
+        (#true    (cons (spawn (game to limit)) (setup-tournament to (- n 1) limit)))))
 
 (defun start-tournament (pids)
     (map (lambda (pid) (send pid :START) pid) pids))
 
-(defun await-results (pids)
-    (map (lambda (pid) (cadr (join pid))) pids))
+; the n games' finals, in the order they come
+(defun await-results (to n)
+    (if (== n 0) () (cons (read to) (await-results to (- n 1)))))
 
 (defun verify-results (expected results)
     (fold/l 0 (lambda (failures r)
@@ -69,11 +70,13 @@
 
 (tty/write "tournament: " num-games " games x " rallies " rallies" \n)
 
-(let pids (setup-tournament num-games rallies))
+(let to (address))
+(let pids (setup-tournament to num-games rallies))
 
 (yield ())  ; let every game fork its players and park at recv
 
-(let results (await-results (start-tournament pids)))
+(start-tournament pids)
+(let results (await-results to num-games))
 
 (let failures (verify-results (list rallies (- rallies 1)) results))
 (cond

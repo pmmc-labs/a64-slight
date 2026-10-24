@@ -7,54 +7,52 @@
 
 (defun call (tool args) (join (fork (tool/call tool args))))
 
-(let dir  "build/t/234-tools")
-(let file (str dir "/a.txt"))
-(exec/run (list "rm" "-rf" dir))
-(exec/run (list "mkdir" "-p" (str dir "/sub")))
-(let me  $$)
-(let yes (lambda (what) (send me (list :asked what)) #true))
-(let no  (lambda (what) (send me (list :asked what)) #false))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (let dir  "build/t/234-tools")
+    (let file (str dir "/a.txt"))
+    (exec/run (list "rm" "-rf" dir))
+    (exec/run (list "mkdir" "-p" (str dir "/sub")))
+    (let me  $$)
+    (let yes (lambda (what) (send me (list :asked what)) #true))
+    (let no  (lambda (what) (send me (list :asked what)) #false))
+    (pprint (map tool/name (list (tools/read-file) (tools/list-files) (tools/search) (tools/write-file yes) (tools/edit-file yes) (tools/run yes))))
+    ; Writing, reading, listing, finding.
+    (let wrote (call (tools/write-file yes) (list (list "path" file) (list "content" "one\ntwo\nthree\n"))))
+    (recv ((:asked what) (tty/write what)))
+    (pprint wrote)
+    (pprint (call (tools/read-file) (list (list "path" file))))
+    (pprint (call (tools/list-files) (list (list "path" dir))))
+    (pprint (call (tools/list-files) (list (list "path" (str dir "/sub")))))
+    (pprint (call (tools/search) (list (list "text" "two") (list "path" dir))))
+    (pprint (call (tools/search) (list (list "text" "t(w") (list "path" dir))))
+    ; Editing: the text to replace must be there once.
+    (let edited (call (tools/edit-file yes) (list (list "path" file) (list "old" "two\n") (list "new" "2\n2.5\n"))))
+    (recv ((:asked what) (tty/write what)))
+    (pprint edited)
+    (pprint (call (tools/read-file) (list (list "path" file))))
+    (pprint (call (tools/edit-file yes) (list (list "path" file) (list "old" "four") (list "new" "4"))))
+    (pprint (call (tools/edit-file yes) (list (list "path" file) (list "old" "e") (list "new" "E"))))
+    (pprint (call (tools/edit-file yes) (list (list "path" file) (list "old" "") (list "new" "E"))))
+    (pprint (call (tools/edit-file yes) (list (list "path" (str dir "/nope.txt")) (list "old" "a") (list "new" "b"))))
+    ; Refused: nothing is written, changed or run.
+    (let unwritten (call (tools/write-file no) (list (list "path" (str dir "/c.txt")) (list "content" ""))))
+    (recv ((:asked what) (tty/write what)))
+    (pprint unwritten)
+    (let unedited (call (tools/edit-file no) (list (list "path" file) (list "old" "one") (list "new" "1"))))
+    (recv ((:asked what) (tty/write what)))
+    (pprint unedited)
+    (let unrun (call (tools/run no) (list (list "command" (str "touch " dir "/ran")))))
+    (recv ((:asked what) (tty/write what \n)))
+    (pprint unrun)
+    (pprint (call (tools/list-files) (list (list "path" dir))))
+    (pprint (call (tools/read-file) (list (list "path" file))))
+    ; Running.
+    (let ran (call (tools/run yes) (list (list "command" "echo hi; exit 3"))))
+    (recv ((:asked what) (tty/write what \n)))
+    (pprint ran)
+    ; Arguments that aren't there, or aren't strings.
+    (pprint (call (tools/read-file) ()))
+    (pprint (call (tools/read-file) (list (list "path" 5)))))
 
-(pprint (map tool/name (list (tools/read-file) (tools/list-files) (tools/search) (tools/write-file yes) (tools/edit-file yes) (tools/run yes))))
-
-; Writing, reading, listing, finding.
-(let wrote (call (tools/write-file yes) (list (list "path" file) (list "content" "one\ntwo\nthree\n"))))
-(recv ((:asked what) (tty/write what)))
-(pprint wrote)
-(pprint (call (tools/read-file) (list (list "path" file))))
-(pprint (call (tools/list-files) (list (list "path" dir))))
-(pprint (call (tools/list-files) (list (list "path" (str dir "/sub")))))
-(pprint (call (tools/search) (list (list "text" "two") (list "path" dir))))
-(pprint (call (tools/search) (list (list "text" "t(w") (list "path" dir))))
-
-; Editing: the text to replace must be there once.
-(let edited (call (tools/edit-file yes) (list (list "path" file) (list "old" "two\n") (list "new" "2\n2.5\n"))))
-(recv ((:asked what) (tty/write what)))
-(pprint edited)
-(pprint (call (tools/read-file) (list (list "path" file))))
-(pprint (call (tools/edit-file yes) (list (list "path" file) (list "old" "four") (list "new" "4"))))
-(pprint (call (tools/edit-file yes) (list (list "path" file) (list "old" "e") (list "new" "E"))))
-(pprint (call (tools/edit-file yes) (list (list "path" file) (list "old" "") (list "new" "E"))))
-(pprint (call (tools/edit-file yes) (list (list "path" (str dir "/nope.txt")) (list "old" "a") (list "new" "b"))))
-
-; Refused: nothing is written, changed or run.
-(let unwritten (call (tools/write-file no) (list (list "path" (str dir "/c.txt")) (list "content" ""))))
-(recv ((:asked what) (tty/write what)))
-(pprint unwritten)
-(let unedited (call (tools/edit-file no) (list (list "path" file) (list "old" "one") (list "new" "1"))))
-(recv ((:asked what) (tty/write what)))
-(pprint unedited)
-(let unrun (call (tools/run no) (list (list "command" (str "touch " dir "/ran")))))
-(recv ((:asked what) (tty/write what \n)))
-(pprint unrun)
-(pprint (call (tools/list-files) (list (list "path" dir))))
-(pprint (call (tools/read-file) (list (list "path" file))))
-
-; Running.
-(let ran (call (tools/run yes) (list (list "command" "echo hi; exit 3"))))
-(recv ((:asked what) (tty/write what \n)))
-(pprint ran)
-
-; Arguments that aren't there, or aren't strings.
-(pprint (call (tools/read-file) ()))
-(pprint (call (tools/read-file) (list (list "path" 5))))
+(read (spawn (top-level)))

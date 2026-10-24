@@ -5,7 +5,7 @@
 ;     ./forest 42       the forest of 42
 ;
 ; Every branch is a process. It works out where it ends, turns its
-; segment into dots, sends them to the painter, and forks its children
+; segment into dots, sends them to the painter, and spawns its children
 ; as buds: processes waiting in recv, which hold no stack, till a timer
 ; (after) tells each to grow. So a tree grows as its processes do, a few
 ; hundred of them alive at once, and the trees all grow together.
@@ -16,7 +16,7 @@
 ; together, and it keeps the colour of the highest thing drawn in it,
 ; and both orders are the same, so the picture doesn't depend on the
 ; order the dots come in. Nor do the dots: each process draws its random
-; numbers from a generator split from its parent's when it was forked
+; numbers from a generator split from its parent's when it was spawned
 ; (D222), so what it draws depends on the seed and on where it is in its
 ; tree, never on when it ran. Try
 ;
@@ -24,7 +24,7 @@
 ;
 ; The painter counts the branches still to come: each says how many
 ; children it has, and when there are none left the painter ends with the
-; picture's hash, which the top level joins and prints.
+; picture's hash, which the top level reads and prints.
 
 (@include :map)
 
@@ -138,10 +138,10 @@
         (:grow (grow painter x y angle len depth lean))))
 
 ; A branch from (x y): its segment, its blossom if it's a twig, and its
-; children, forked as buds, each told to grow a little later. The draws
+; children, spawned as buds, each told to grow a little later. The draws
 ; for each child (its angle, its length, when it grows) are the parent's,
-; made before the child is forked; the child's own come from the
-; generator split off for it at the fork.
+; made before the child is spawned; the child's own come from the
+; generator split off for it at the spawn.
 (defun grow (painter x y angle len depth lean)
     (let x1 (+ x (* len (math/cos angle))))
     (let y1 (- y (* len (math/sin angle))))
@@ -152,7 +152,7 @@
              (lambda (i)
                  (let a (+ angle (+ (* 0.42 (- i (/ (- children 1) 2.0))) (+ (* 0.5 (- (rand/float) 0.5)) lean))))
                  (let l (* len (+ 0.66 (* 0.16 (rand/float)))))
-                 (let b (fork (bud painter x1 y1 a l (inc depth) lean)))
+                 (let b (spawn (bud painter x1 y1 a l (inc depth) lean)))
                  (after (+ 150 (rand/int 250)) b :grow))))
 
 ; --- the night ------------------------------------------------------------------
@@ -164,7 +164,7 @@
 (let w (* 2 cols))
 (let h (* 4 rows))
 (let trees (+ 3 (rand/int 3)))
-(let painter (fork (paint (map/new) (tuple cols rows) trees 0)))
+(let painter (spawn (paint (map/new) (tuple cols rows) trees 0)))
 (tty/write \e "[?25l" \e "[2J")
 
 (send painter (list :dots (map (lambda (i) (list (rand/int w) (rand/int (div h 2)))) (range 0 (div (* w h) 120))) (rank/star)))
@@ -179,10 +179,10 @@
          (lambda (i)
              (let x (math/round (+ (/ (* w (+ i 0.5)) trees) (* (/ w (* 3.0 trees)) (- (rand/float) 0.5)))))
              (let len (* h (+ 0.13 (* 0.06 (rand/float)))))
-             (let b (fork (bud painter x (ground h x) (+ (/ math/PI 2) (* 0.2 (- (rand/float) 0.5))) len 0 lean)))
+             (let b (spawn (bud painter x (ground h x) (+ (/ math/PI 2) (* 0.2 (- (rand/float) 0.5))) len 0 lean)))
              (after (* 700 i) b :grow)))
 
-(match (join painter)
+(match (read painter)
     ((:ok (drawn lit picture))
         (tty/write \e "[0m" \e "[" (inc rows) ";1H" \e "[?25h"
                    drawn " branches, " (if (int? seed) (str "from seed " seed) "from the system's seed")

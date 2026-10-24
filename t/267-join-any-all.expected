@@ -11,5 +11,5 @@
 (ok slow)
 100
 (ok ())
-(ok (done done))
+(ok (twice twice))
 ()

@@ -9,13 +9,14 @@
 ;     node bin/slightc.ts -o build/ping-pong-tournament examples/ping-pong-tournament.slight
 ;     build/ping-pong-tournament 10 100    # games, ms; qemu-aarch64 build/... on x86
 ;
-; Each game is a process that forks its two players, waits for the
+; Each game is a process that spawns its two players, waits for the
 ; :START gate, serves, sleeps for D ms, stops them, and collects their
 ; counts, waiting in the middle of its function each time (D167). The root
-; starts the games, joins them all, says where a game's counts differ from
-; the one before by more than one, and adds them up.
-; N and D come from @ARGV, through str->int, and default to 10 and
-; 100. A game is forked by name: a function that waits isn't a value.
+; starts the games, is told each one's counts at an address (D243), says
+; where a game's counts differ from the one before by more than one, and
+; adds them up. N and D come from @ARGV, through str->int, and default to
+; 10 and 100. A game is spawned by name: a function that waits isn't a
+; value.
 
 (defun player (counter)
     (recv
@@ -32,28 +33,30 @@
             (send reply-to (list :Final counter)))))
 
 ; wait for the :START gate, serve, let them play for duration ms, stop
-; them, then collect the two finals, labelled in the order they arrive
-(defun ping-pong (duration)
-    (let p1 (fork (player 0)))
-    (let p2 (fork (player 0)))
+; them, then collect the two finals, labelled in the order they arrive,
+; and tell to
+(defun ping-pong (to duration)
+    (let p1 (spawn (player 0)))
+    (let p2 (spawn (player 0)))
     (recv)
     (send p1 (list :Serve p2))
     (sleep duration)
     (send p1 (list :EXIT $$))
     (send p2 (list :EXIT $$))
     (let got (recv))
-    (list (list p1 got) (list p2 (recv))))
+    (send to (list (list p1 got) (list p2 (recv)))))
 
-(defun setup-tournament (n duration)
+(defun setup-tournament (to n duration)
     (cond
         ((== n 0) ())
-        (#true    (cons (fork (ping-pong duration)) (setup-tournament (- n 1) duration)))))
+        (#true    (cons (spawn (ping-pong to duration)) (setup-tournament to (- n 1) duration)))))
 
 (defun start-tournament (pids)
     (map (lambda (pid) (send pid :START) pid) pids))
 
-(defun await-results (pids)
-    (map (lambda (pid) (cadr (join pid))) pids))
+; the n games' counts, in the order they come
+(defun await-results (to n)
+    (if (== n 0) () (cons (read to) (await-results to (- n 1)))))
 
 ; a game's two counts, from its result: ((p1 (:Final a)) (p2 (:Final b)))
 (defun counts (r)
@@ -80,7 +83,8 @@
 (tty/write "Running " num-games " for " game-duration \n)
 
 (tty/write "Setting up Tournament ..." \n)
-(let setup-pids (setup-tournament num-games game-duration))
+(let to (address))
+(let setup-pids (setup-tournament to num-games game-duration))
 (tty/write "..." \n)
 
 (tty/write "Starting Tournament ..." \n)
@@ -88,7 +92,7 @@
 (tty/write "..." \n)
 
 (tty/write "Awaiting Tournament Results ..." \n)
-(let results (await-results running-pids))
+(let results (await-results to num-games))
 (tty/write "..." \n)
 
 (tty/write "Analyzing Tournament Results ..." \n)

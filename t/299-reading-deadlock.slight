@@ -1,0 +1,14 @@
+; A task waiting in read (D243): :system shows it :reading, its sources
+; under :joining; and a root reading what nothing will send is
+; deadlocked, the message naming its sources.
+
+(defun state-of (pid)
+    (recv
+        ((:open s)
+            (send s (list :process pid))
+            (recv ((:process _ info) (list (lookup :state info) (lookup :joining info)))))))
+
+(let reader (fork (read (address))))
+(pprint (read (connect :system (state-of reader))))
+(let w (spawn (recv)))
+(read/any (list (address) w))

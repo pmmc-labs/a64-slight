@@ -34,11 +34,14 @@
 
 ; Any method, headers (a list of (name value)) and a body (a string, "" for
 ; none). Gives (:ok response), or (:error reason).
+; The connection's actor ends with the reply, which a task reads as it
+; does, from the start (D243); the caller joins the task, so it can be
+; an actor, a handler say, too.
 (defun http/request (method url headers body)
     (let ctx (list :client (http/method-name method)))
     (match (http/parse-url url)
         ((:ok host port target)
-            (http/unwrap (join (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx)))))
+            (http/unwrap (join (fork (http/unwrap (read (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx))))))))
         ((:error reason) (list :error reason))))
 
 ; As http/request, but gives (:error :timeout) if no answer comes within ms
@@ -48,14 +51,14 @@
     (let ctx (list :client (http/method-name method)))
     (match (http/parse-url url)
         ((:ok host port target)
-            (http/await (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx)) ms))
+            (http/unwrap (join (fork (http/await (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx)) ms)))))
         ((:error reason) (list :error reason))))
 
 ; The pid's result, or (:error :timeout) after ms milliseconds, killing it:
-; it races a process that sleeps that long (D220).
+; it reads the first of it and a process that sleeps that long to end.
 (defun http/await (pid ms)
     (let timer (fork (sleep ms)))
-    (match (join/race (list pid timer))
+    (match (read/any (list pid timer))
         ((p exit) (if (eq? p pid)
                       (do (kill timer) (http/unwrap exit))
                       (do (kill pid) (list :error :timeout))))))
@@ -79,7 +82,7 @@
     (let s      (match (http/parse-url url)
         ((:ok host port target) (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx)))
         ((:error reason)        (fork (raise reason)))))
-    (fork (http/watch s caller))
+    (spawn (http/watch s caller))
     s)
 
 ; A stream cuts its body into :lines or :chunks; anything else faults, in the
@@ -121,6 +124,20 @@
 (defun http/serve (port handler)
     (let told $$)
     (connect :tcp/listen port (http/accept handler told)))
+
+; As http/serve, for a task (D243), which can't be told: it waits till
+; the listener listens, and gives (:ok (l port)), or (:error reason) if it
+; can't, (:eaddrinuse 8080) say.
+(defun http/listen (port handler)
+    (let to (address))
+    (http/listening to (connect :tcp/listen port (http/accept handler to))))
+
+(defun http/listening (to l)
+    (let got (read/any (list to l)))
+    (disconnect to)
+    (match got
+        ((_ (:listening port)) (list :ok (list l port)))
+        ((_ (:error reason))   (list :error reason))))
 
 (defun http/accept (handler told)
     (recv

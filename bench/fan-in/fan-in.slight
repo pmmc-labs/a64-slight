@@ -9,7 +9,12 @@
 (defun gather (n sum)
     (if (== n 0) sum (recv (s (gather (- n 1) (+ sum s))))))
 
-(let n  (str->int (car @ARGV)))
-(let me $$)
-(dotimes 1 101 (lambda (s) (fork (sender me s (div n 100)))))
-(gather n 0)
+; The top level is a task, which can't wait (D243), so an actor does its
+; work, and the root gives its value.
+(defun top-level (argv)
+    (let n  (str->int (car argv)))
+    (let me $$)
+    (dotimes 1 101 (lambda (s) (fork (sender me s (div n 100)))))
+    (gather n 0))
+
+(cadr (read (spawn (top-level @ARGV))))

@@ -64,7 +64,7 @@
         (("q" & _) ())
         (_ (keyboard rows cols))))
 
-(join (connect :keypress (keyboard screen-rows screen-cols)))
+(read (connect :keypress (keyboard screen-rows screen-cols)))
 
 (tty/write "rows:" screen-rows)
 (tty/write "cols:" screen-cols)

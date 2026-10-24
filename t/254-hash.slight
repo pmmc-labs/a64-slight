@@ -38,11 +38,15 @@
 (defun hasher ()
     (recv ((from v) (send from (hash v)) (hasher))))
 
+; A task can't be sent to, nor recv (D243), so an actor asks.
+(defun ask-hash (h v before)
+    (send h (list $$ v))
+    (recv (n (== n before))))
+
 (let v (list (tuple "a" 1.5 twice) :ok (list 2 3)))
 (let before (hash v))
-(let h (fork (hasher)))
-(send h (list $$ v))
-(pprint (recv (n (== n before))))
+(let h (spawn (hasher)))
+(pprint (cadr (read (spawn (ask-hash h v before)))))
 (dotimes 0 20 (lambda (i) (length (range 0 100000))))
 (pprint (== (hash v) before))
 (kill h)

@@ -35,7 +35,7 @@
         ((:open l port)
             (let me $$)
             (map (lambda (name)
-                     (fork (send me (list :done (join (connect :tcp (str "localhost:" port) (client name 300)))))))
+                     (fork (send me (list :done (read (connect :tcp (str "localhost:" port) (client name 300)))))))
                  names)
             (serving l names (length names) ()))))
 
@@ -51,4 +51,4 @@
         ((:accept _ conn) (connect conn (echo)) (serving-wait l names n results))
         ((:done r)        (serving l names (- n 1) (cons r results)))))
 
-(pprint (join (connect :tcp/listen 0 (listener (list "a" "b" "c" "d" "e")))))
+(pprint (read (connect :tcp/listen 0 (listener (list "a" "b" "c" "d" "e")))))

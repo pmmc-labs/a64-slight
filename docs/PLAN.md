@@ -829,7 +829,9 @@ with Stevan first.
   within a function. Either is a proposal of its own; boids is the
   benchmark. Not this way (D179): fixed point in the example, or a type
   of numerical vectors.
-- **Exit records (open, talked over Oct 2026, for Stevan to decide).**
+- **Exit records (settled, D244: a task's value kept till its parent has
+  it, the table in pages, no `detach`; built as D243's step 5).** As
+  talked over in Oct 2026:
   Every process's record is kept for good (D88), its 40-byte entry and
   a copy of the value it ended with, outside every heap, so outside
   every cap (D202, D233). D88 was decided for batch programs of small
@@ -881,6 +883,208 @@ with Stevan first.
     timer, and fails silently if one is missed; and Erlang's model
     as it is, which without selective receive would make every caller
     of `(join (fork ...))` a state function.
+
+### Tasks and actors (agreed, D243; built, with D244)
+
+Claude's proposal, after Stevan's "there are two forms of concurrency
+here ... perhaps we should spawn actors instead of fork them"; agreed
+with every point below settled as Claude recommended (D243), and the
+rest of exit records with D244. Built: the order is at the end.
+
+**Why.** slight has two models of concurrency behind one `fork`:
+
+- **Tasks:** `fork`, `join` and `yield`. A computation with a value,
+  plain code that can block anywhere, `join` keeping its stack (D19).
+  `author/meta-circular.slight` is the pure form.
+- **Actors:** `send` and `recv`. A loop with state and a mailbox, that
+  runs till it's stopped and has no value anyone joins. The `recv` rule
+  (D8) suits it, since an actor is a loop anyway.
+
+Where the two meet, a process is both, and that's where the costs found
+in the review of Oct 2026 come from:
+
+- `ask`'s box (D157), `rpc/call`, `agent/ask`: a process whose `recv`
+  takes one reply and ends with it, so a task can have an actor's
+  answer. A fork, an exit record kept for good (D88), and a stack held
+  in `join`, per question.
+- `(join (connect ...))` (`slurp`, `exec/run`, `http/request`): a
+  process that receives a device's messages and ends with a value.
+- Exit records keep every process's value, since any process may be
+  joined, though most actors never are (D216, "Exit records" above).
+- A helper's `recv` takes its caller's messages, since every process has
+  one mailbox; that's why the boxes are processes.
+- A wait spreads up the call chain: a function that waits can be only
+  tail-called, so can its callers (D167). That's actor code's shape,
+  and a burden on code that only wants an answer.
+- D8's "no call-cycle deadlocks between handlers" no longer holds once
+  a handler can `ask` (D192's agent asking itself).
+- 40,000 processes blocked in `join` stop the runtime (`rt: can't
+  allocate a stack`, exit 2), where D167 turned down stacks kept in
+  `recv` for the same limit, about 32,000.
+
+**The census** (`docs/processes-2026-10-23.md`): of the 96 `fork`s and
+`connect`s in `lib/` and the examples, 49 are actors (39 loops, 7 that
+give the root a summary at the end, 3 watchers), 14 are tasks, and 33
+are both. Of those 33, 9 wait for one reply, 18 read a device to its
+end for a value (11 in the libraries, 7 terminal programs whose last
+state the root joins), and 6 coordinate: they start actors and gather
+several messages (the tournaments' games, ping-pong's pinger, the
+airline's desk, an agent's turn). Of the 14 tasks, only 2 are parallel
+work joined for its value; the rest stand in for `try` (3), a timeout
+or a failure to race (2), a call whose value is told by message or
+monitor (2), and work never joined (5).
+
+**The proposal.** Two kinds of process, and a task's ways to wait for
+something other than a process's end.
+
+- **`(spawn expr)` starts an actor.** The `recv` rule is an actor's
+  alone, as it is now (D8, D167). It can be sent to, monitored and
+  killed, not joined: `join` of an actor faults (`:not-a-task`). When it
+  ends, its monitors are told `(:exit pid result)` as now, and its value
+  isn't kept: its exit record is only that it has ended. `connect`
+  starts an actor too, owning the device, as now.
+- **`(fork expr)` starts a task**, as it does now, but a task can't
+  `recv`: the compiler refuses a `fork`'s expression, or the top level,
+  that waits (a state function, D167), and the runtime faults a `recv`
+  in a task as a backstop. It can't be sent to (`:not-an-actor`). It can
+  be joined, monitored and killed. The root is a task: the program's
+  value is its value, as now (D93).
+- **`(address)` makes a place for a task to be sent to.** An address is
+  a value naming the task and a number of its own, so many can be in
+  use at once. `send` and `after` take an address where they take a pid,
+  so an actor answers without knowing it's an address: `lib/ds`'s
+  `(reply to v)` is unchanged. `disconnect` closes an address: what's
+  sent to it after goes nowhere, as to an ended process (D92), and
+  what's waiting is freed. One sent to an ended task goes nowhere.
+- **`(read src)` waits for the next message from `src`,** keeping the
+  stack, as `join` does: an address of the task's, or a device it owns.
+  Messages from anywhere else can't be taken by it, so a helper can't
+  take its caller's, and there are no dead letters in a task.
+- **`(read/any srcs)` waits for the first of several,** giving `(src
+  msg)`: addresses, devices, and pids, a pid's "message" being its end
+  (`join`'s result for a task). `join/race` (D220) is `read/any` over
+  pids, and can become a prelude function over it.
+- **`ask` is slight,** in the prelude, where `lib/ds` has it now:
+
+        (defun ask (pid msg)
+            (let r (address))
+            (send pid (append msg (list r)))
+            (let got (read/any (list r pid)))
+            (disconnect r)
+            (match got
+                ((_ (:reply v)) v)
+                ((_ result)     (raise (list :ended pid result)))))
+
+  `ask-within` adds `(after ms r :timeout)`. No process, no exit
+  record, and nothing held but the stack while it waits.
+- **Gathering** is one address given to many: the airline's desk sends
+  each aircraft its tick with one `r`, and takes as many answers with
+  `read`. A stream (`http/stream`, `rpc/stream`, an agent's pieces) is
+  an address the stream sends to till it ends.
+- **`(open how ...)` opens a device the calling task owns,** with the
+  same sources as `connect` (`:fs/read path`, `:tcp "host:port"`,
+  `:exec cmd`, ...), and no process forked. It gives `(:ok d)` once the
+  device is open (a connection connected), or `(:error reason)`.
+  `(read d)` gives the device's messages as an owner gets them now,
+  `(:line d s)`, `(:chunk d s)`, `(:eof d)` and the rest, its next one
+  cut at the `read` (D158's cut, at a `read` in place of a `recv`), and
+  `(:read how)` and `(:write ...)` are sent as now. A device that fails
+  gives `(:error d reason)` from `read`, where it ends an actor that owns
+  it (D128): a task asked for the device, and can be told. So `slurp`:
+
+        (defun slurp (path)
+            (match (open :fs/read path)
+                ((:ok f)         (slurp-lines f ()))
+                ((:error reason) (list :error reason))))
+
+        (defun slurp-lines (f lines)
+            (match (read f)
+                ((:line _ s)  (slurp-lines f (cons s lines)))
+                ((:eof _)     (list :ok (reverse lines)))
+                ((:error _ r) (list :error r))))
+
+**What it settles.** An actor's end keeps no value, which is most of
+what exit records hold (`bank`'s customers and a server's connections
+would be actors). The library's box and reader processes go: an `ask`
+costs an address and a wait, and `slurp` a device. A task's code never
+meets the `recv` rule; an actor's meets it where it's a loop already.
+Nothing is taken from a mailbox by a helper, since tasks have none. And
+an actor that can't `ask` (below) can't wait on another, so D8's
+"no call-cycle deadlocks between handlers" holds again for actors.
+
+**What doesn't change.** The collector, message copying, the scheduler,
+timers, the assembly, recording and replaying (no new system calls),
+`split.ts` (which matters only where a `recv` is), monitors and `kill`.
+A message's record already says what device it came from
+(`rt_msg_t.device`), which serves for an address too.
+
+**Size.** In the runtime, about 350 to 450 lines of `process.c`'s 3,400:
+the kind of a process (a flag in the padding of `rt_proc_t`) and its
+rules, actors keeping no value, addresses (`send`, `after` and
+`disconnect` taking them), `read` and `read/any` (a wait that keeps the
+stack, like `join`'s, woken by a message from its source; `join/race`'s
+watches for pids), `open`, a device's failure told to a task (`fail()`'s
+15 callers), `kill` of a task while it reads, and `:system` and the
+deadlock message (`:kind`, `:reading`). In the compiler about 150:
+`spawn`, the builtins, and `classify.ts` refusing a wait in task code.
+Most of the work is elsewhere: the 33 hybrids in `lib/` and the
+examples; the golden tests, 142 of 265 using `fork` or `connect` (most
+only `fork` to `spawn`; those that join an actor, monitor it; 9 with a
+`recv` at the top level give it an actor); and the docs.
+
+**Settled (D243), each as Claude recommended:**
+
+1. **Names:** `spawn` and `fork`; `address`, `read`, `read/any` and
+   `open`.
+2. **What an address is:** an immediate under the pid tag (the task's
+   number and the address's), printed `#<address 3.2>`, nothing to copy
+   or collect, and not to be made from data, as a pid can't be; or a
+   tuple `#(pid n)`, plain data, which can be printed, read back and
+   faked. Claude recommends the immediate.
+3. **Can an actor ask?** Claude recommends no: an actor makes no
+   address, so it can't `read`; it sends and handles the answer as a
+   message, or forks a task to wait. That's what keeps handlers from
+   waiting on each other. A rule users will meet, but one with a reason
+   in the model, not in how it's compiled.
+4. **Can an actor block in `join` or `sleep`?** Today's examples do
+   (`top`'s consumer sleeps). Claude recommends yes, as now.
+5. **An actor's end, told late:** with no value kept, `monitor` of an
+   actor that has ended, or `read/any` of its pid after its end, can't
+   say how it ended: `(:exit pid :ended)`. A change to D101 for
+   actors.
+6. **`:keypress`** isn't a device (D131), so a task can't `read` keys.
+   The 7 terminal programs whose last state the root joins stay actors
+   that tell their monitors; or `:keypress` becomes a device. Settled:
+   they stay actors, and D131 stands.
+7. **Tasks as `try`:** 3 of the 14 tasks fork only to turn a fault or
+   a `raise` into a Result. They can stay so (`join` still gives `(:error
+   reason)`), or this is when D17's "no `catch`" is looked at again.
+   Settled: they stay so.
+8. **`ask` and failure:** it raises, as D157's does; or gives a Result,
+   as `agent/ask` (D192) and `http/request` do. Settled: it raises.
+9. **The rest of exit records:** a task's value is kept till it's joined;
+   when it goes after that, and when a pid's entry goes for either kind,
+   is the item above.
+
+**The order, each step with passing tests:** (1) `spawn`, the two
+kinds, and the rules that hold without the rest: a task can't wait, nor
+be sent to, timed or monitor, and the root is a task (done, D243's
+"Step 1"); (2) addresses, `read` and `read/any`, `ask` in the prelude,
+and `lib/ds`, `rpc/peer`, `rpc/connect` and `agent/ask` moved to them
+(done, D243's "Step 2"); (3) `open`, a device's failure told to a task, and `lib/fs`,
+`lib/exec` and `lib/tools` moved (done, D243's "Step 3"); (4) an actor can't be
+joined and keeps no value, told late as `:ended`, with HTTP's client,
+`rpc/call`, `rpc/stream` and the coordinators (the games, the airline's desk, an
+agent's turn) moved off joined actors first (done, D243's "Step 4"); (5) the rest of exit
+records (done, D244). (4) was part of (1) as agreed, and moved: until (2) and (3)
+give a task other ways to have an answer, the hybrids (`ask`'s box,
+`slurp`, an HTTP request) are actors that are joined.
+
+Replaces, if taken, parts of: D8 and D167 (the `recv` rule is an
+actor's), D19 (`join` is a task's), D88 and D216 (an actor's value isn't
+kept), D124 and D128 (a task opens a device, and is told its failure),
+D157 (`ask` without a box), and D220 (`join/race` is `read/any` over
+pids).
 
 ### 17. Self-host
 

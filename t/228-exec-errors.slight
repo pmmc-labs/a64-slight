@@ -12,11 +12,11 @@
         ((:eof p)      (run))
         ((:exited p n) n)))
 
-(pprint (join (connect :exec (list "no-such-command" "-l") (run))))
-(pprint (join (connect :exec (list "t/data/no-such-file") (run))))
-(pprint (join (connect :exec (list "t/data") (run))))
-(pprint (join (connect :exec (list "t/data/lines.txt") (run))))
-(pprint (join (connect :exec (list "echo" (str "a" (codes->str (list 0)) "b")) (run))))
+(pprint (read (connect :exec (list "no-such-command" "-l") (run))))
+(pprint (read (connect :exec (list "t/data/no-such-file") (run))))
+(pprint (read (connect :exec (list "t/data") (run))))
+(pprint (read (connect :exec (list "t/data/lines.txt") (run))))
+(pprint (read (connect :exec (list "echo" (str "a" (codes->str (list 0)) "b")) (run))))
 
 (defun poke ()
     (recv
@@ -26,7 +26,7 @@
             (send p (list :read :nope))
             (run))))
 
-(pprint (join (connect :exec (list "true") (poke))))
+(pprint (read (connect :exec (list "true") (poke))))
 (pprint (join (fork (connect :exec "ls" (run)))))
 (pprint (join (fork (connect :exec () (run)))))
 (connect :exec (list "ls" 1) (run))

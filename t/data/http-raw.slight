@@ -69,10 +69,19 @@
         ((:line c _) (raw-wait c))
         ((:eof c)    (disconnect c))))
 
+; From a task, which can't be told (D243): the raw server's owner and its
+; port, which its listener says at an address of the task's.
+(defun raw-up (replies)
+    (let to (address))
+    (let raw (raw-listen :raw replies to))
+    (let port (cadr (read to)))
+    (disconnect to)
+    (list raw port))
+
 ; A raw client: pieces are sent one after another, a millisecond apart, and
 ; what the server sends comes back as one string, once it closes.
 (defun talk (port pieces)
-    (reply-of (join (connect :tcp (str "127.0.0.1:" port) (talk-conn pieces)))))
+    (reply-of (read (connect :tcp (str "127.0.0.1:" port) (talk-conn pieces)))))
 
 (defun talk-conn (pieces)
     (recv
@@ -98,7 +107,7 @@
 
 ; A client that connects and says nothing, closing at once.
 (defun quit-at-once (port)
-    (reply-of (join (connect :tcp (str "127.0.0.1:" port) (quit-now)))))
+    (reply-of (read (connect :tcp (str "127.0.0.1:" port) (quit-now)))))
 
 (defun quit-now ()
     (recv ((:open c) (disconnect c) :quit)))

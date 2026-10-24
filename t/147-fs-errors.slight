@@ -15,10 +15,10 @@
     (recv
         ((:open f) (send f (list :write "no")) :poked)))
 
-(pprint (join (connect :fs/read "t/data/no-such-file" (reader))))
-(pprint (join (connect :fs/read "t/data" (reader))))
-(pprint (join (connect :fs/write "build/t/no-such-dir/x" (reader))))
-(pprint (join (connect :fs/read "t/data/lines.txt" (poke))))
+(pprint (read (connect :fs/read "t/data/no-such-file" (reader))))
+(pprint (read (connect :fs/read "t/data" (reader))))
+(pprint (read (connect :fs/write "build/t/no-such-dir/x" (reader))))
+(pprint (read (connect :fs/read "t/data/lines.txt" (poke))))
 (pprint (join (fork (disconnect 5))))
 (pprint (disconnect $$))
 (connect :fs/read 42 (reader))

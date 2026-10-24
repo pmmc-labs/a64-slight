@@ -9,6 +9,9 @@
 ;            too big to build, the open ones counted (D205)
 ;   wide     str/pad-start to a width of 4 GB: the heap's fault, at once,
 ;            with nothing built outside the heap first (D205)
+;   churn    half a million tasks, each joined, and as many actors, each
+;            read: a pid's entry goes once nothing can come of it, and its
+;            page once all of the page's have (D244)
 
 (defun reading ()
     (recv
@@ -16,12 +19,20 @@
         ((:json p v) :a-value)
         ((:eof p)    :eof)))
 
-(defun command (script) (join (connect :exec (list "sh" "-c" script) (reading))))
+(defun command (script) (read (connect :exec (list "sh" "-c" script) (reading))))
+
+(defun churn (n)
+    (if (== n 0)
+        :done
+        (do (join (fork n))
+            (read (spawn n))
+            (churn (- n 1)))))
 
 (defun run-case (name)
     (match name
         ("endless" (command "printf '\"'; head -c 536870912 /dev/zero | tr '\\000' a"))
         ("deep"    (command "head -c 31457280 /dev/zero | tr '\\000' '['; head -c 31457280 /dev/zero | tr '\\000' ']'"))
-        ("wide"    (join (fork (str/pad-start (str 1) 4000000000 "x"))))))
+        ("wide"    (join (fork (str/pad-start (str 1) 4000000000 "x"))))
+        ("churn"   (churn 500000))))
 
 (pprint (run-case (car @ARGV)))

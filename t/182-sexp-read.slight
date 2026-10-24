@@ -8,7 +8,7 @@
 (let known '(config name version alpha beta gamma nested deeper deepest defun))
 
 ; The data a reader of path gets, each printed as it comes; then how many.
-(defun read-all (path) (join (connect :fs/read path (reading 0))))
+(defun read-all (path) (read (connect :fs/read path (reading 0))))
 
 (defun reading (n)
     (recv
@@ -26,7 +26,7 @@
         ((:sexp f v) (forms (cons v seen)))
         ((:eof f)    (reverse seen))))
 
-(let fs (cadr (join (connect :fs/read "lib/fs.slight" (forms ())))))
+(let fs (cadr (read (connect :fs/read "lib/fs.slight" (forms ())))))
 (pprint (map car fs))
 (pprint (map cadr fs))
 
@@ -35,7 +35,7 @@
     (recv
         ((:open f) (map (lambda (t) (send f (list :write t))) texts) (disconnect f))))
 
-(defun write-file (path texts) (join (connect :fs/write path (writer texts))))
+(defun write-file (path texts) (read (connect :fs/write path (writer texts))))
 
 ; a list not closed, after a good datum; a ) with none open; a datum that
 ; runs into the next; a quote with nothing after it

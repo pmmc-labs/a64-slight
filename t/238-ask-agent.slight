@@ -1,7 +1,8 @@
 ; Agents asking agents (D192), against a fake ollama. agent/ask waits for
 ; the whole answer, in a process of its own, so none of the pieces reach
 ; the caller: (:ok answer), (:error reason), or (:ended a result) for an
-; agent that has ended. The helper answers with the question and the roles
+; agent that has ended, result kept for the task that started it (D245),
+; or :ended. The helper answers with the question and the roles
 ; of its own conversation, which goes on from one question to the next.
 ; Then a helper as another agent's tool, tools/ask-agent: the main agent
 ; calls it, and its answer is the call's result; and one whose model
@@ -61,24 +62,28 @@
     (agent/say a text)
     (heard ()))
 
-(defun main ()
-    (let srv    (http/serve 0 handler))
-    (let base   (recv ((:listening port) (str "http://127.0.0.1:" port))))
-    (let helper (agent/new base "helper" "" ()))
-    (pprint (agent/ask helper "hello"))
+; An actor asks, and then finds nothing else in its mailbox: no piece
+; reached it.
+(defun asks-alone (a text)
+    (let r (agent/ask a text))
     (send $$ :nothing-else)
-    (pprint (recv (m m)))
-    (pprint (agent/ask (agent/new base "missing" "" ()) "hi"))
-    (let gone   (agent/new base "helper" "" ()))
-    (kill gone)
-    (pprint (match (agent/ask gone "hi") ((:error (:ended _ result)) (list :ended result))))
-    (let boss   (agent/new base "main" ""
-                    (list (tools/ask-agent "ask_expert" "Asks an expert, who knows arithmetic." helper)
-                          (tools/ask-agent "ask_broken" "Asks one who isn't there." (agent/new base "missing" "" ())))))
-    (pprint (cadr (join (fork (asking boss "consult")))))
-    (pprint (cadr (join (fork (asking boss "consult the broken one")))))
-    (pprint (agent/ask helper "and again"))
-    (kill srv)
-    :done)
+    (list r (recv (m m))))
 
-(main)
+; The top level is a task (D243): http/listen starts the server from it.
+(match (http/listen 0 handler)
+    ((:ok (srv port))
+        (let base   (str "http://127.0.0.1:" port))
+        (let helper (agent/new base "helper" "" ()))
+        (pprint (cadr (read (spawn (asks-alone helper "hello")))))
+        (pprint (agent/ask (agent/new base "missing" "" ()) "hi"))
+        (let gone   (agent/new base "helper" "" ()))
+        (kill gone)
+        (pprint (match (agent/ask gone "hi") ((:error (:ended _ result)) (list :ended result))))
+        (let boss   (agent/new base "main" ""
+                        (list (tools/ask-agent "ask_expert" "Asks an expert, who knows arithmetic." helper)
+                              (tools/ask-agent "ask_broken" "Asks one who isn't there." (agent/new base "missing" "" ())))))
+        (pprint (cadr (read (spawn (asking boss "consult")))))
+        (pprint (cadr (read (spawn (asking boss "consult the broken one")))))
+        (pprint (agent/ask helper "and again"))
+        (kill srv)
+        :done))

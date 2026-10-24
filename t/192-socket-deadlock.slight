@@ -1,10 +1,10 @@
 ; A connection whose owner has its last message and isn't waiting in recv
 ; is nothing select() can wait on, so it mustn't keep the program alive:
 ; with nothing else pending, this is a deadlock, not a hang. The root
-; joins the server, the server joins the holder, and the holder, which
-; took (:open c), joins a process that waits for a message that never
-; comes. The listener and the accepted side are closed first.
-(defun blocker () (recv (x x)))
+; reads the server's end, the server joins a task reading the holder's
+; (an actor can't read, nor be joined, D243), and the holder, which took
+; (:open c), joins a task that reads an address nothing sends to. The
+; listener and the accepted side are closed first.
 (defun holder (q) (recv ((:open c) (join q))))
 (defun server (q)
     (let lp (recv ((:open l port) (list l port))))
@@ -12,6 +12,6 @@
     (let conn (recv ((:accept l2 conn) conn)))
     (disconnect conn)
     (disconnect (car lp))
-    (join h))
-(let q (fork (blocker)))
-(join (connect :tcp/listen 0 (server q)))
+    (join (fork (read h))))
+(let q (fork (read (address))))
+(read (connect :tcp/listen 0 (server q)))

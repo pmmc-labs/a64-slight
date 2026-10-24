@@ -15,6 +15,10 @@
             (pprint (cond ((lambda? v) (v 1)) (#true v)))
             (ask e values))))
 
-(let e (fork (echo)))
-(let k 10)
-(ask e (list 42 "a string" 2.5 :sym '(quoted (list)) (list 1 (list 2 "three")) (lambda (x) (+ x k)) (range 0 5)))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (let e (spawn (echo)))
+    (let k 10)
+    (ask e (list 42 "a string" 2.5 :sym '(quoted (list)) (list 1 (list 2 "three")) (lambda (x) (+ x k)) (range 0 5))))
+
+(read (spawn (top-level)))

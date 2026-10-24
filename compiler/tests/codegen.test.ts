@@ -608,13 +608,12 @@ test("the prelude's not is inline, as a value and as a test; a program's own not
 const W = '(defun w () (recv (m m))) ';
 
 test('recv goes anywhere a tail call could (D167), but not in a lambda', () => {
-    assert.doesNotThrow(() => compile('(recv (m m))'));
-    assert.doesNotThrow(() => compile('(defun f () (pprint 1) (recv (m m))) (f)'));
-    assert.doesNotThrow(() => compile('(defun f () (cond (#true (recv (m m))))) (f)'));
-    assert.doesNotThrow(() => compile('(fork (recv (m m)))'));
-    assert.doesNotThrow(() => compile('(defun f () (recv (m (recv (n n))))) (f)'));
-    assert.doesNotThrow(() => compile('(defun f () (recv)) (f)'));
-    assert.doesNotThrow(() => compile('(pprint (list (recv) (recv)))'));
+    assert.doesNotThrow(() => compile('(spawn (recv (m m)))'));
+    assert.doesNotThrow(() => compile('(defun f () (pprint 1) (recv (m m))) (spawn (f))'));
+    assert.doesNotThrow(() => compile('(defun f () (cond (#true (recv (m m))))) (spawn (f))'));
+    assert.doesNotThrow(() => compile('(defun f () (recv (m (recv (n n))))) (spawn (f))'));
+    assert.doesNotThrow(() => compile('(defun f () (recv)) (spawn (f))'));
+    assert.doesNotThrow(() => compile('(spawn (pprint (list (recv) (recv))))'));
     fails('(lambda () (recv (m m)))', "test.slight:1:12: recv can't be in a lambda: a lambda can't wait for messages");
     fails('(lambda () (fork 1) (pprint (recv)))', "test.slight:1:29: recv can't be in a lambda: a lambda can't wait for messages");
     fails('(defun f () (cond ((recv) 1)) 2) (f)',
@@ -637,13 +636,13 @@ test('recv goes anywhere a tail call could (D167), but not in a lambda', () => {
 });
 
 test('a function with a recv in it waits, so it can only be called in tail position', () => {
-    fails('(defun f () (let m (recv)) m) (pprint (f))', 'test.slight:1:39: f waits for messages (it reaches a recv), so it can only be called in tail position');
+    fails('(defun f () (let m (recv)) m) (defun g () (pprint (f)))', 'test.slight:1:51: f waits for messages (it reaches a recv), so it can only be called in tail position');
 });
 
 test('a function that waits can only be called in tail position', () => {
     fails(W + '(defun f () (+ 1 (w)))', 'test.slight:1:44: w waits for messages (it reaches a recv), so it can only be called in tail position');
-    fails(W + '(defun g () (w)) (pprint (g))', 'test.slight:1:52: g waits for messages (it reaches a recv), so it can only be called in tail position');
-    fails(W + '(cond ((w) 1))', 'test.slight:1:34: w waits for messages (it reaches a recv), so it can only be called in tail position');
+    fails(W + '(defun g () (w)) (defun h () (pprint (g)))', 'test.slight:1:64: g waits for messages (it reaches a recv), so it can only be called in tail position');
+    fails(W + '(defun h () (cond ((w) 1)))', 'test.slight:1:46: w waits for messages (it reaches a recv), so it can only be called in tail position');
 });
 
 test('a lambda never waits, and a function that waits is never a value', () => {
@@ -651,11 +650,21 @@ test('a lambda never waits, and a function that waits is never a value', () => {
     fails(W + '(let f w)', "test.slight:1:34: w waits for messages, so it can't be used as a value");
 });
 
-test('a function that waits can be the body of a fork, the end of the top level, or after a yield', () => {
-    assert.doesNotThrow(() => compile(W + '(fork (w))'));
-    assert.doesNotThrow(() => compile(W + '(pprint 1) (w)'));
-    assert.doesNotThrow(() => compile(W + '(defun y () (yield (w))) (y)'));
-    assert.doesNotThrow(() => compile(W + '(lambda () (fork (w)))'));
+test('a function that waits can be the body of a spawn, the end of a connect, or after a yield', () => {
+    assert.doesNotThrow(() => compile(W + '(spawn (w))'));
+    assert.doesNotThrow(() => compile(W + '(spawn (do (pprint 1) (w)))'));
+    assert.doesNotThrow(() => compile(W + '(connect :keypress (w))'));
+    assert.doesNotThrow(() => compile(W + '(defun y () (yield (w))) (spawn (y))'));
+    assert.doesNotThrow(() => compile(W + '(lambda () (spawn (w)))'));
+});
+
+test("a task, a fork's body or the top level, can't wait (D243)", () => {
+    const task = "a task (a fork's body, or the top level) can't wait for messages";
+    fails(W + '(fork (w))', `test.slight:1:33: ${task}, and w, which waits for messages (it reaches a recv), would: spawn an actor for it`);
+    fails(W + '(pprint 1) (w)', `test.slight:1:38: ${task}, and w, which waits for messages (it reaches a recv), would: spawn an actor for it`);
+    fails('(recv (m m))', `test.slight:1:1: ${task}, and this recv would: spawn an actor for it`);
+    fails('(fork (do (pprint 1) (recv)))', `test.slight:1:22: ${task}, and this recv would: spawn an actor for it`);
+    fails('(spawn (fork (recv)))', `test.slight:1:14: ${task}, and this recv would: spawn an actor for it`);
 });
 
 test('recv clauses and patterns', () => {

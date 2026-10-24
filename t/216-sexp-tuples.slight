@@ -18,7 +18,7 @@
 (defun writer (texts)
     (recv
         ((:open f) (map (lambda (t) (send f (list :write t))) texts) (disconnect f))))
-(defun write-file (path texts) (join (connect :fs/write path (writer texts))))
+(defun write-file (path texts) (read (connect :fs/write path (writer texts))))
 
 (defun reading (how acc)
     (recv
@@ -26,7 +26,7 @@
         ((:sexp f v)      (pprint v) (reading how (cons v acc)))
         ((:form f v line) (reading how (cons (list line v) acc)))
         ((:eof f)         (reverse acc))))
-(defun read-all (path how) (join (connect :fs/read path (reading how ()))))
+(defun read-all (path how) (read (connect :fs/read path (reading how ()))))
 
 (write-file "build/t/216-data.sexp" (list "#(alpha 1) (#(beta)) #()\n#(2"))
 (pprint (read-all "build/t/216-data.sexp" :sexp))

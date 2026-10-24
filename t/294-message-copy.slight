@@ -37,6 +37,8 @@
 (defun sum3 (a b xs) (+ a (+ b (sum xs))))
 (defun capture (a b c d f g xs) (lambda (x) (sum (list x a b c d f g (sum xs)))))
 
+; The top level is a task (D243): the echo gives all of them back at an
+; address of the root's.
 (let k  7)
 (let ys (range 0 10))
 (let s  (range 0 1000))
@@ -56,12 +58,11 @@
     (capture 1 2 3 4 5 k ys)
     (map int->float (range 0 100))
     42 :sym #true () 2.5 "short"))
-
-(let e   (fork (echo)))
-(let got (cadr (join (fork (trip e things ())))))
-(send e (list $$ things))
-(let whole (recv (v v)))
-
+(let e   (spawn (echo)))
+(let got (cadr (read (spawn (trip e things ())))))
+(let to (address))
+(send e (list to things))
+(let whole (read to))
 (pprint (map (lambda (p) (same? (car p) (cadr p))) (zip things got)))
 (pprint (same? things whole))
 (let m (nth 0 got))

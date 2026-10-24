@@ -5,5 +5,9 @@
     (recv
         (:right :done)))
 
-(after 10 $$ :wrong)
-(wait-for-right)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (after 10 $$ :wrong)
+    (wait-for-right))
+
+(read (spawn (top-level)))

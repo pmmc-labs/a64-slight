@@ -1,5 +1,6 @@
 ; ring-benchmark: a chain of processes passes a count along it, and the
-; last one reports back to the root, once for each ping; then an :EXIT
+; last one reports back to the root, at an address the root made, since
+; it's a task (D243), once for each ping; then an :EXIT
 ; goes down the chain, and each process ends as it passes it on. The
 ; chain's length and the number of pings after the first come from
 ; @ARGV, through str->int, and default to 1000 and 3. Each round is
@@ -23,23 +24,22 @@
             (tty/write "READY" \n)
             next)
         (#true
-            (setup (- n 1) reply-to (fork (test-actor reply-to next))))))
+            (setup (- n 1) reply-to (spawn (test-actor reply-to next))))))
 
-(defun send-ping (pid count)
+(defun send-ping (self pid count)
     (cond
         ((>= count 0)
             (send pid (list :PING 0))
-            (recv ((:COMPLETED n from) (tty/write "COMPLETED " n " at " from \n)))
-            (send-ping pid (- count 1)))
+            (match (read self) ((:COMPLETED n from) (tty/write "COMPLETED " n " at " from \n)))
+            (send-ping self pid (- count 1)))
         (#true
             (send pid (list :EXIT 0))
             :done)))
 
-(let self $$)
+(let self (address))
 (let actor-count (if (nil? @ARGV) 1000 (str->int (car     @ARGV))))
 (let ping-count  (if (nil? @ARGV) 3    (str->int (cadr @ARGV))))
-
 (tty/write "INIT with " actor-count " actors, sending " (+ ping-count 1) " pings" \n)
-(let last (setup actor-count self (fork (test-actor self ()))))
+(let last (setup actor-count self (spawn (test-actor self ()))))
 (tty/write "START" \n)
-(send-ping last ping-count)
+(send-ping self last ping-count)

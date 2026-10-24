@@ -22,4 +22,4 @@ end [never closed](https://example.com/docs/open)
 (error "the URL must start with http:// or https://")
 #true
 (ok "the user didn't let it be fetched")
-done
+(ok done)

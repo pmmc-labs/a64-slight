@@ -13,11 +13,20 @@
     (recv
         (:wake (pprint :woke) :root-done)))
 
-(let sleeper (fork (late 20)))
+; A killed sleeper, an actor so that a timer can be aimed at it, whose
+; result is kept for the root, its parent (D245): read after it's
+; killed, it says so.
+(let sleeper (spawn (late 20)))
 (after 30 sleeper :hello)
 (sleep 5)
 (kill sleeper)
-(pprint (join sleeper))
-(fork (late 50))
-(after 10 $$ :wake)
-(wait-for-wake)
+(pprint (read sleeper))
+
+; The root is a task, which can't take messages, so an actor waits for
+; the wake-up.
+(defun waker ()
+    (fork (late 50))
+    (after 10 $$ :wake)
+    (wait-for-wake))
+
+(read (spawn (waker)))

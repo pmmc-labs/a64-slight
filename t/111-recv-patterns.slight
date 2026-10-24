@@ -21,6 +21,6 @@
             (send s :stop)
             :client-done)))
 
-(let s (fork (server 0)))
-(fork (client s))
+(let s (spawn (server 0)))
+(spawn (client s))
 :started

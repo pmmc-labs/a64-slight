@@ -1,2 +1,2 @@
-deadlock: the root process is waiting in the top level for #<pid 3> to end, and nothing else can run
+deadlock: the root process is waiting in the top level for #<pid 3> to end, which is waiting in server (recv at t/192-socket-deadlock.slight:12:15) for #<pid 8> to end, which is waiting in fork at t/192-socket-deadlock.slight:15:11 for #<pid 5> to end, which is waiting in holder for #<pid 2> to end, which is waiting in fork at t/192-socket-deadlock.slight:16:8 for a message to #<address 2.0>, and nothing else can run
 exit: 1

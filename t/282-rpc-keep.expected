@@ -5,4 +5,4 @@
 (opened (ok "hello, keeper"))
 (ok 5)
 (error disconnected)
-done
+(ok done)

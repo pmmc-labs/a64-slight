@@ -17,11 +17,11 @@
             (tty/write "READY" \n)
             next)
         (#true
-            (setup (- n 1) (fork (test-actor next))))))
+            (setup (- n 1) (spawn (test-actor next))))))
 
 (let actor-count 1000000)
 
 (tty/write "INIT with " actor-count " actors" \n)
-(let last (setup actor-count (fork (test-actor ()))))
+(let last (setup actor-count (spawn (test-actor ()))))
 (tty/write "START" \n)
 (send last (list :PING 0))

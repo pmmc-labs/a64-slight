@@ -2,7 +2,7 @@
     (recv
         ((:ping n) (pprint (list :ping n)) (only-pings))))
 
-(let p (fork (only-pings)))
+(let p (spawn (only-pings)))
 (send p (list :ping 1))
 (send p :unexpected)
 (send p (list :ping 2 3))

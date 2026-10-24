@@ -8,7 +8,7 @@
 
 ; The whole of the file at path, as one string: a count bigger than any
 ; of them gives it all in one chunk, even when it's empty.
-(defun bytes-of (path) (cadr (join (connect :fs/read path (whole)))))
+(defun bytes-of (path) (cadr (read (connect :fs/read path (whole)))))
 
 (defun whole ()
     (recv
@@ -20,7 +20,7 @@
         ((:eof f) s)))
 
 ; The values a device gives for the file at path, read as JSON.
-(defun values-of (path) (cadr (join (connect :fs/read path (values ())))))
+(defun values-of (path) (cadr (read (connect :fs/read path (values ())))))
 
 (defun values (seen)
     (recv

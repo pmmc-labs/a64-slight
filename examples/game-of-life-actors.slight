@@ -14,7 +14,8 @@
 ;     is, and where.
 ;
 ; The root keeps the cells' pids, and the states it shows, as tuples of
-; rows (D169).
+; rows (D169). It's a task, so the cells tell it at an address it made,
+; root, which it reads (D243).
 
 (defun wrap-around (n size) (% (+ n size) size))
 
@@ -38,7 +39,7 @@
         ((:status from)  (send from (list :status state)) (cell x y state next neighbors root))
         (:count
             (let me $$)
-            (fork (watch me neighbors 0))
+            (spawn (watch me neighbors 0))
             (cell x y state next neighbors root))
         ((:counted n)
             (send root :ready)
@@ -85,34 +86,36 @@
 
 ; Shows the states; then, for the last of n generations, stops the cells,
 ; or else has them count.
-(defun generation (cells states n gen)
+(defun generation (root cells states n gen)
     (display-grid states gen)
     (cond
         ((== n 1) (each-cell cells :stop) (+ gen 1))
         (#true
             (each-cell cells :count)
-            (ready cells states n gen (* (rows cells) (cols cells))))))
+            (ready root cells states n gen (* (rows cells) (cols cells))))))
 
 ; Waits till every cell is ready, then has them all change.
-(defun ready (cells states n gen left)
+(defun ready (root cells states n gen left)
     (cond
         ((== left 0)
             (each-cell cells :commit)
-            (gather cells states n gen (* (rows cells) (cols cells))))
+            (gather root cells states n gen (* (rows cells) (cols cells))))
         (#true
-            (recv (:ready (ready cells states n gen (- left 1)))))))
+            (match (read root)
+                (:ready (ready root cells states n gen (- left 1)))))))
 
 ; What every cell is now.
-(defun gather (cells states n gen left)
+(defun gather (root cells states n gen left)
     (cond
-        ((== left 0) (generation cells states (- n 1) (+ gen 1)))
+        ((== left 0) (generation root cells states (- n 1) (+ gen 1)))
         (#true
-            (recv ((:cell x y state) (gather cells (put states x y state) n gen (- left 1)))))))
+            (match (read root)
+                ((:cell x y state) (gather root cells (put states x y state) n gen (- left 1)))))))
 
-(let root $$)
-(let cells (grid 6 8 (lambda (x y) (fork (cell x y (glider-cell x y) () () root)))))
+(let root (address))
+(let cells (grid 6 8 (lambda (x y) (spawn (cell x y (glider-cell x y) () () root)))))
 (dotimes 0 6 (lambda (x)
     (dotimes 0 8 (lambda (y)
         (send (at cells x y) (list :neighbors (neighbors-of cells x y)))))))
 
-(generation cells (grid 6 8 glider-cell) 4 0)
+(generation root cells (grid 6 8 glider-cell) 4 0)

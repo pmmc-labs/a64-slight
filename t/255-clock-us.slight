@@ -5,16 +5,20 @@
 
 (defun spin (n) (if (== n 0) (clock/us) (spin (dec n))))
 
-(pprint (clock/us))
-(pprint (spin 100000))                  ; work takes no time on this clock
-(sleep 50)
-(pprint (clock/us))
+                  ; work takes no time on this clock
 
-; A process sees the same clock; its timer moves it for everyone.
-(let p (fork (do (sleep 20) (clock/us))))
-(pprint (join p))
-(after 5 $$ :tick)
-(recv (:tick (pprint (clock/us))))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (pprint (clock/us))
+    (pprint (spin 100000))
+    (sleep 50)
+    (pprint (clock/us))
+    ; A process sees the same clock; its timer moves it for everyone.
+    (let p (fork (do (sleep 20) (clock/us))))
+    (pprint (join p))
+    (after 5 $$ :tick)
+    (recv (:tick (pprint (clock/us))))
+    ; A builtin like any other, as a value.
+    (pprint (apply clock/us ())))
 
-; A builtin like any other, as a value.
-(pprint (apply clock/us ()))
+(read (spawn (top-level)))

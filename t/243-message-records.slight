@@ -20,8 +20,8 @@
 (defun check ()
     (let s  (recv ((:open s) s)))
     (let me $$)
-    (let a  (fork (ints me 0)))
-    (let b  (fork (lists me 0 ())))
+    (let a  (spawn (ints me 0)))
+    (let b  (spawn (lists me 0 ())))
     (map (lambda (i) (send a i) (send b (list i))) (range 1 1001))
     (send a :done)
     (send b :done)
@@ -36,5 +36,5 @@
     (kill b)
     (disconnect s))
 
-(join (connect :system (check)))
+(read (connect :system (check)))
 :done

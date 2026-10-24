@@ -11,10 +11,10 @@
 (@include :http)
 (@include "data/http-raw.slight")
 
-(defun leave (url)
+(defun leave (to url)
     (http/stream :get url () "" :chunks)
     (let status (recv ((:head _ status _) status)))
-    (recv ((:chunk _ bytes) (list status bytes))))
+    (recv ((:chunk _ bytes) (send to (list :left status bytes)))))
 
 (defun main ()
     (let me   $$)
@@ -30,9 +30,15 @@
     (after 10 $$ :quiet)
     (let next (recv (m m)))
     (pprint (list head line seen next))
-    (pprint (join (fork (leave (str base "/chunks")))))
+    (let me $$)
+    (spawn (leave me (str base "/chunks")))
+    (pprint (recv ((:left status bytes) (list status bytes))))
     (let seen-too (recv ((:raw what) (list :server what))))
     (kill raw)
     seen-too)
 
-(main)
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main))
+
+(read (spawn (top-level)))

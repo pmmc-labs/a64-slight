@@ -6,17 +6,19 @@
 ; models the index: in a table that left a gap where one was taken back,
 ; six of them would be lost.
 
-(defun set-timers (n) (map (lambda (i) (after 600000 $$ i)) (range 0 n)))
+; Aimed at an actor that never takes them, since a task can't be sent to (D243).
+(defun set-timers (to n) (map (lambda (i) (after 600000 to i)) (range 0 n)))
 
 (defun trues (bs) (length (filter (lambda (b) b) bs)))
 
-(defun one-round (ok)
-    (let block (set-timers 80))
+(defun one-round (to ok)
+    (let block (set-timers to 80))
     (+ ok (trues (map (lambda (i) (timer/cancel (nth (math/mod (* i 37) 80) block))) (range 0 80)))))
 
-(defun rounds (r ok)
-    (if (== r 0) ok (rounds (- r 1) (one-round ok))))
+(defun rounds (to r ok)
+    (if (== r 0) ok (rounds to (- r 1) (one-round to ok))))
 
-(let long (set-timers 40))
-(let ok (rounds 50 0))
+(let to (spawn (recv)))
+(let long (set-timers to 40))
+(let ok (rounds to 50 0))
 (+ ok (trues (map timer/cancel (reverse long))))

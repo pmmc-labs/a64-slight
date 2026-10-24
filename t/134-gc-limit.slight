@@ -20,10 +20,10 @@
         ((:churn n) (churn n) (pprint (list :round rounds :done)) (worker (+ rounds 1)))
         (:stop      rounds)))
 
-(let w (fork (worker 1)))
+(let w (spawn (worker 1)))
 (send w (list :churn 300))
 (send w (list :churn 300))
 (send w (list :churn 300))
 (send w (list :churn 1000))
 (send w :stop)
-(join w)
+(read w)

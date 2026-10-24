@@ -63,7 +63,7 @@ function tailCalls(body: Sexp, params: readonly string[], globals: readonly stri
         const head = x.car;
         if (head.t === 'sym' && !bound.includes(head.name)) {
             switch (head.name) {
-                case 'quote': case 'lambda': case 'fork': case 'connect': case 'defun':
+                case 'quote': case 'lambda': case 'fork': case 'spawn': case 'connect': case 'defun':
                     return;
                 case 'cond':
                     return scanClauses(x.cdr, bound, tail, false);

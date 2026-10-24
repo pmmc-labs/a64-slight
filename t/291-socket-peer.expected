@@ -1,5 +1,5 @@
-fault in #<pid 2>: not a pid: 42 (socket/peer at t/291-socket-peer.slight:87:21)
-(error (not-a-pid 42 "socket/peer at t/291-socket-peer.slight:87:21"))
+fault in #<pid 2>: not a pid: 42 (socket/peer at t/291-socket-peer.slight:54:21)
+(error (not-a-pid 42 "socket/peer at t/291-socket-peer.slight:54:21"))
 (accepted #true)
 (connected #true)
 (uid gid pid)

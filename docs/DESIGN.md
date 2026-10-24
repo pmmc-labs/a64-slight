@@ -220,24 +220,44 @@ reply refs.
 
 | | |
 |---|---|
-| `(fork expr)` | The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. `expr` runs at the base of the child's stack, so it may tail-call a state function. Inside `expr`, `$$` is the child. |
-| `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
-| `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
-| `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
+| `(fork expr)` | Starts a **task** (D243). The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. A task can't wait in `recv` (the compiler refuses a state function in `expr`, or in the top level, which is the root's task), nor be sent to, timed (`after`) or monitor (`:not-an-actor`). Inside `expr`, `$$` is the child. |
+| `(spawn expr)` | As `fork`, but starts an **actor** (D243): `expr` runs at the base of the child's stack, so it may tail-call a state function, and the actor can be sent to. |
+| `(connect :keypress expr)` | `spawn`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
+| `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `spawn`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
+| `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `spawn`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
 | `(connect :unix path expr)`, `(connect :unix/listen path expr)` | The same, at a Unix socket's path (D231). |
 | `(socket/peer c)` | The uid, gid and pid at the other end of the Unix connection `c`, or `()` (D235). |
-| `(connect :exec cmd expr)` | `fork`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
-| `(connect :system expr)` | `fork`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
-| `(connect dev expr)` | `fork`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
+| `(connect :exec cmd expr)` | `spawn`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
+| `(connect :system expr)` | `spawn`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
+| `(connect dev expr)` | `spawn`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
 | `(disconnect f)` | Closes the device `f`. Anything that isn't an open device it ignores. Returns `()`. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
-| `(join pid)` | **Blocking** wait for `pid` to end. Returns `(:ok value)` or `(:error reason)`. Works on any pid (not just children), anywhere (including inside lambdas), any number of times, and after the process has already ended. Joiners wake in the order they joined. `(join $$)` faults (`:join-self`). |
-| `(join/race pids)` | **Blocking** wait for the first of `pids` to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
-| `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has. Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
+| `(join pid)` | **Blocking** wait for `pid`, a task, to end. Returns `(:ok value)` or `(:error reason)`. Works on any task (not just children), anywhere (including inside lambdas, and in an actor), and after the task has already ended, till its parent has had the result: joined or read it, been told by a monitor, or ended; then `:ended` (D244). Joiners wake in the order they joined, each with a copy. `(join $$)` faults (`:join-self`), and so does a running actor's pid (`:not-a-task`, D243): a task reads its end. |
+| `(join/race pids)` | **Blocking** wait for the first of `pids`, tasks, to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
+| `(address)`, `(read src)`, `(read/any srcs)` | A task's (D243): `address` makes a place it can be sent to, an immediate under the pid tag (the task's index and a number), which `send`, `after` and `disconnect` take; `read` waits, keeping the stack, for the next message to one of its open addresses, or for a pid to end (an actor's end is told to those reading it then, a read's watch lasting till the task next reads without it, and is `:ended` after); `read/any` for the first of several, in their order, giving `(src what)`. The messages wait in the task's mailbox, marked with their address. `ask`, `ask-within` and `reply` are prelude functions on them. |
+| `(open source arg)` | A task's (D243): opens a device it owns, with no process started, from `connect`'s sources but the listeners and `:keypress`, and waits till it's open: `(:ok d)`, or `(:error reason)`. `read` gives its messages, its next cut at the `read` after (D158); a failure is `(:error d reason)` there, and the device closes, rather than ending the task (D128's rule is an actor's). |
+| `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has, `result` being `:ended` for an actor (D243). Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
 | `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns the timer's number (D232). |
 | `(timer/cancel t)` | Takes back `after`'s timer `t` if it hasn't fired: `#true`, or `#false` (D232). |
+
+**Tasks and actors (D243, with D244 and D245; built).** Two kinds of
+process.
+An actor, started with `(spawn expr)`, has a mailbox and the `recv`
+rule; it can be sent to, monitored and killed, not joined, and read by
+a task. When it ends, monitors and readers are told; its value is kept
+for its parent if that's a task, till the parent reads it (D245), and
+otherwise one that asks later hears `:ended`. A task, started with `(fork expr)`, computes a value: it
+can't `recv` or be sent to, and can be joined. The root is a task. A
+task waits for something other than a process's end through addresses
+it makes, `(address)`, which `send` and `after` take where they take a
+pid, and devices it opens, `(open how ...)`, with `(read src)` for the
+next message from one, or `(read/any srcs)` for the first of several, a
+pid's being its end; each keeps the stack, as `join` does. An address is
+an immediate under the pid tag. `ask` is a prelude function on them. An
+actor makes no address, so it can't `ask`; it may block in `join` and
+`sleep`. `connect` starts an actor that owns a device, as before.
 | `(sleep ms)` | **Blocking** wait for `ms` milliseconds, keeping the stack. Works anywhere. Returns `()`. |
 | `(clock/us)` | The microseconds since the program started, on the timers' clock (D208). |
 | `(raise reason)` | Ends the current process with `(:error reason)`. |
@@ -856,9 +876,17 @@ processes that allocate and then wait turn out to hold too much).
 
 - `fork`: allocate the process, deep-copy the free variables into its heap,
   queue it to run the entry function.
-- Ending: the Result is copied into a small per-pid **exit record**.
-  Processes blocked in `join` on it wake with a copy; later `join`s read
-  the record; monitors get `(:exit pid result)`, and the monitors it set
+- Ending: the Result goes, from the process's own heap, to those
+  waiting then: each joiner, and a race it wins, is given a copy to
+  take when it runs; each task with a read's watch on it is sent it,
+  marked with the pid, so it waits for that task's next `read`; and
+  monitors get `(:exit pid result)` (D243, D244). Then a Result isn't
+  kept if the parent was among them, or has ended, nor an actor's whose
+  parent is an actor, which can't read it: the record says only that it
+  ended, and later asks get `:ended`. Else the Result is copied into its
+  small per-pid **exit record**, kept for the parent, which lists it
+  (D244, D245); the parent's `join`, `read` or
+  `monitor` of it, or its end, lets it go. The monitors a process set
   on others are taken off their lists (D183). A `join/race` is a watch
   on each of its pids, as a monitor is, that wakes its process rather
   than sending it a message; the first to end wakes it, and it takes the
@@ -870,15 +898,17 @@ processes that allocate and then wait turn out to hold too much).
 - The record is the pid's 40-byte entry in the process table (32 till
   devices added a pointer to it): the value (or the error's reason), and
   a chunk holding a copy of it if it needs memory. `(:ok v)` and `(:exit pid result)` are built when asked for.
-- Exit records are kept forever (D88). That doesn't matter at hundreds or
-  thousands of processes, and a million cost 40 MB. A system that churns
-  through many millions will need a retention policy, such as dropping
-  the record once the parent has seen it. So will one whose processes
-  end with big values, since a record keeps a copy of its value: the
-  airline's runs each leave theirs (D216). **(open)** A rule for when a
-  record goes, after Unix's zombies or Erlang's `noproc`, with
-  `detach` for children nobody joins, is in `docs/PLAN.md` ("Exit
-  records"), with what it was weighed on.
+- An entry is **dead** once nothing more can come of it: no process, no
+  open device, and no value kept. The table is in pages of 1,024
+  entries, and a page is freed once all its entries are dead and its
+  last pid has been made; a pid whose page has gone reads as ended,
+  keeping nothing, since pids are never reused (D244). So a program
+  that runs for good holds the entries of what's running, open or
+  keeping a value, not of every process it started: `bank`'s million
+  customers peak at 2 MB where they took 42, an HTTP server's 4,000
+  requests at 2.6 where they took 95. A long-lived process holds its
+  page's 40 KB; there's no `detach`, since the children nobody takes
+  are few and small, and go when their parent ends.
 
 ### Scheduler
 
@@ -1283,4 +1313,5 @@ step 9: collecting only at `recv` (D105). In step 10a: the virtual clock
 ended (D112), and waiting in `select()` (D113). In step 10b: feeding tests
 keys (D116), Ctrl-C (D117), the end of stdin (D118), and several
 connected processes (D119). In step 12b: collecting at a function's
-entry, with the frames as roots (D166).
+entry, with the frames as roots (D166). In Oct 2026: tasks and actors (D243, below
+Processes).

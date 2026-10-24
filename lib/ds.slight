@@ -20,43 +20,12 @@
 
 ; --- asking ------------------------------------------------------------
 
-; Sends msg to pid with a box for the answer added at the end, and waits
-; for the answer. The box also watches pid, so if pid ends first, ask
-; raises (:ended pid result) instead of waiting for ever. A box is a
-; process of its own, so an answer can't be mistaken for anything else
-; the caller is sent.
-(defun ask (pid msg) (ask/via (fork (ask/box pid)) pid msg))
-
-; As ask, but raises (:timeout pid) if no answer comes within ms
-; milliseconds. The timer is the box's, which ends with the answer, so
-; it doesn't hold up the program's end after that (D232).
-(defun ask-within (ms pid msg)
-    (let box (fork (ask/box pid)))
-    (after ms box :timeout)
-    (ask/via box pid msg))
-
-; How a structure answers an ask: to is the box at the end of the
-; message.
-(defun reply (to v) (send to (list :reply v)))
-
-(defun ask/via (box pid msg)
-    (send pid (append msg (list box)))
-    (match (join box)
-        ((:ok (:reply v))      v)
-        ((:ok (:ended result)) (raise (list :ended pid result)))
-        ((:ok (:timeout))      (raise (list :timeout pid)))))
-
-; The box: watches pid, and ends with the first thing it hears.
-(defun ask/box (pid)
-    (monitor pid)
-    (recv
-        ((:reply v)       (list :reply v))
-        ((:exit p result) (list :ended result))
-        (:timeout         (list :timeout))))
+; ask, ask-within and reply are the prelude's (D243): a task asks, with
+; an address of its own, and a structure answers with (reply to v).
 
 ; --- cell: one value ---------------------------------------------------
 
-(defun cell/new (v) (fork (cell/loop v)))
+(defun cell/new (v) (spawn (cell/loop v)))
 (defun cell/get (c) (ask c (list :get)))
 (defun cell/set (c v) (send c (list :set v)))
 
@@ -82,7 +51,7 @@
 ; Keys are compared with eq?, so any value can be one. The table is an
 ; association list, most recently put first, so a lookup costs the
 ; number of keys.
-(defun dict/new () (fork (dict/loop ())))
+(defun dict/new () (spawn (dict/loop ())))
 (defun dict/put (d k v) (send d (list :put k v)))
 (defun dict/delete (d k) (send d (list :delete k)))
 
@@ -115,7 +84,7 @@
 
 ; --- queue: first in, first out ----------------------------------------
 
-(defun queue/new () (fork (queue/loop () ())))
+(defun queue/new () (spawn (queue/loop () ())))
 (defun queue/push (q x) (send q (list :push x)))
 
 ; The oldest item, taken off, or :empty.
@@ -139,7 +108,7 @@
 
 ; --- channel: take waits for an item -----------------------------------
 
-(defun channel/new () (fork (channel/loop () ())))
+(defun channel/new () (spawn (channel/loop () ())))
 (defun channel/put (ch x) (send ch (list :put x)))
 
 ; The oldest item, taken off; waits until there is one. Don't take with

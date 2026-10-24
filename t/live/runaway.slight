@@ -11,7 +11,7 @@
 
 (defun grow (acc) (grow (cons (str/repeat "x" 1000) acc)))
 
-(pprint (join (connect :system (ask))))
+(pprint (read (connect :system (ask))))
 (pprint (match (join (fork (grow ())))
     ((:error (kind _ _)) (list :error kind))
     (r                   r)))

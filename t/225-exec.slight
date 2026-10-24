@@ -14,7 +14,7 @@
         ((:exited p n) (list n (reverse out)))))
 
 (defun exec (cmd)
-    (join (connect :exec cmd (run ()))))
+    (read (connect :exec cmd (run ()))))
 
 (pprint (exec (list "printf" "one\\ntwo\\n")))
 (pprint (exec (list "printf" "%s|" "no shell" "$HOME" "*")))
@@ -36,4 +36,4 @@
                 ((:exit q x)   (both x n))
                 ((:exited p s) (both r s))))))
 
-(pprint (join (connect :exec (list "sh" "-c" "exit 7") (both () ()))))
+(pprint (read (connect :exec (list "sh" "-c" "exit 7") (both () ()))))

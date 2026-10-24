@@ -7,19 +7,21 @@
 
 (defun shown (s) (pprint (tools/printable s)))
 
-; newlines and tabs stay, and so does UTF-8
-(shown "plain text, a tab\tand\na newline, é, 日本, 😀")
-(shown "colour \e[31mred\e[0m, and \e[8mhidden\e[28m")
-(shown "back\rover, bell\u{7}, delete\u{7f}, nul\u{0}")
-(shown "C1: \u{9b}31m and \u{85}")
-(shown (bytes->str (list 97 155 98 255 32 226 130 65)))
-(shown "bidi: \u{202a}abc\u{202e}fed\u{2069} \u{2066}x\u{2069}")
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    ; newlines and tabs stay, and so does UTF-8
+    (shown "plain text, a tab\tand\na newline, é, 日本, 😀")
+    (shown "colour \e[31mred\e[0m, and \e[8mhidden\e[28m")
+    (shown "back\rover, bell\u{7}, delete\u{7f}, nul\u{0}")
+    (shown "C1: \u{9b}31m and \u{85}")
+    (shown (bytes->str (list 97 155 98 255 32 226 130 65)))
+    (shown "bidi: \u{202a}abc\u{202e}fed\u{2069} \u{2066}x\u{2069}")
+    ; what it gives is printable already
+    (shown (tools/printable "\e[1m"))
+    ; a command to run, asked about as it will run
+    (let me $$)
+    (let no (lambda (what) (send me (list :asked what)) #false))
+    (pprint (tool/call (tools/run no) (list (list "command" "echo shown\e[8m; echo hidden\e[28m"))))
+    (recv ((:asked what) (pprint what))))
 
-; what it gives is printable already
-(shown (tools/printable "\e[1m"))
-
-; a command to run, asked about as it will run
-(let me $$)
-(let no (lambda (what) (send me (list :asked what)) #false))
-(pprint (tool/call (tools/run no) (list (list "command" "echo shown\e[8m; echo hidden\e[28m"))))
-(recv ((:asked what) (pprint what)))
+(read (spawn (top-level)))

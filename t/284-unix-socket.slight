@@ -35,21 +35,18 @@
     (match joined
         ((:error (k _)) k)))
 
-(defun main (path l)
-    (recv
-        ((:listening at)
-            (pprint (list :listening at))
-            (pprint (join (connect :unix path (client (list "one" "two")))))
-            (pprint (join (connect :unix/listen path (server ()))))
-            (join (connect :fs/write "build/t/284-unix.txt" (wrote)))
-            (pprint (join (connect :unix/listen "build/t/284-unix.txt" (server ()))))
-            (pprint (join (connect :unix "build/t/284-unix-nothing.sock" (client ()))))
-            (pprint (join (connect :unix "" (client ()))))
-            (pprint (kind (join (connect :unix/listen (str "build/t/" (str/repeat "x" 120)) (server ())))))
-            (kill l)
-            (pprint (join (connect :unix path (client ()))))
-            :done)))
-
+; The top level is a task (D243): the listener tells it at an address.
 (let path "build/t/284-unix.sock")
-(let me $$)
-(main path (connect :unix/listen path (server me)))
+(let to (address))
+(let l (connect :unix/listen path (server to)))
+(pprint (read to))
+(pprint (read (connect :unix path (client (list "one" "two")))))
+(pprint (read (connect :unix/listen path (server ()))))
+(read (connect :fs/write "build/t/284-unix.txt" (wrote)))
+(pprint (read (connect :unix/listen "build/t/284-unix.txt" (server ()))))
+(pprint (read (connect :unix "build/t/284-unix-nothing.sock" (client ()))))
+(pprint (read (connect :unix "" (client ()))))
+(pprint (kind (read (connect :unix/listen (str "build/t/" (str/repeat "x" 120)) (server ())))))
+(kill l)
+(pprint (read (connect :unix path (client ()))))
+:done

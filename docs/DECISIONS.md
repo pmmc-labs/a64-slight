@@ -5358,3 +5358,405 @@ look at.** *(Stevan, Oct 2026: "lets do #1", from Claude's list after
   `select()` at each step (3,998 calls, where both runs made 7,996
   before), the waits and the time the last teller came free from
   `t/models/bank.py`, by the recursion.
+
+## Tasks and actors
+
+**D243. Two kinds of process: actors, which `recv`, and tasks, which
+compute a value.** *(Stevan, Oct 2026: "there are two forms of
+concurrency here ... perhaps we should spawn actors instead of fork
+them", then "go with your recommendations on the points to settle", on
+Claude's proposal in PLAN.md, "Tasks and actors".)* Agreed; built in
+four steps (below), the rest of exit records still to come. A census of every `fork` and `connect` in `lib/` and the
+examples (`docs/processes-2026-10-23.md`) found 49 actors, 14 tasks and
+33 that were both: 9 waiting for one reply, 18 reading a device to its
+end for a value, and 6 gathering several messages. Where the two meet,
+the costs found in Oct 2026's review come from: a process, an exit
+record and a held stack per `ask`; every value kept in case of a
+`join`; a helper's `recv` taking its caller's messages.
+
+- **`(spawn expr)` starts an actor.** The `recv` rule is an actor's
+  (D8, D167). An actor can be sent to, monitored and killed, not joined
+  (`:not-a-task`). When it ends its monitors are told `(:exit pid
+  result)`, and its value isn't kept. `connect` starts an actor, as it
+  started a process.
+- **`(fork expr)` starts a task.** A task can't `recv`: the compiler
+  refuses a wait in a `fork`'s expression or the top level, and the
+  runtime faults one as a backstop. It can't be sent to
+  (`:not-an-actor`). It can be joined, monitored and killed. The root is
+  a task.
+- **`(address)`, `(read src)`, `(read/any srcs)`:** a task makes
+  addresses to be sent to, and waits, keeping its stack, for the next
+  message from one, from a device it owns, or, with `read/any`, the first
+  of several, a pid's being its end. `send` and `after` take an address
+  where they take a pid; `disconnect` closes one. `join/race` becomes
+  `read/any` over pids. `ask` is a prelude function on them, with no box.
+- **`(open how ...)`** opens a device the calling task owns, with no
+  process, giving `(:ok d)` or `(:error reason)`; `(read d)` gives its
+  messages, cut at the `read` (D158), and its failure as `(:error d
+  reason)`, where an actor that owns a device still ends (D128).
+
+The points the proposal left open, each as Claude recommended:
+
+1. **Names:** `spawn`, `fork`, `address`, `read`, `read/any`, `open`.
+2. **An address is an immediate** under the pid tag: the task's number
+   and the address's, printed `#<address 3.2>`. Nothing to copy or
+   collect, `eq?` and `hash` a word's, and no way to make one from data,
+   as with a pid. Rejected: a tuple `#(pid n)`, which can be printed,
+   read back and faked.
+3. **An actor can't `ask`:** it makes no address, so it can't `read`. It
+   sends, and takes the answer as a message, or forks a task to wait. So
+   no handler waits on another, and D8's "no call-cycle deadlocks
+   between handlers" holds again for actors.
+4. **An actor may block in `join` and `sleep`,** as now, keeping its
+   stack while it does (`top`'s consumer sleeps).
+5. **An actor's end, told late:** `monitor` of an actor that has ended,
+   or `read/any` of its pid after its end, gives `:ended` as the result,
+   `(:exit pid :ended)`, since its value isn't kept. A change to D101 for
+   actors; a task's is as before.
+6. **`:keypress` stays as it is** (D131): the terminal programs whose
+   last state the root joins stay actors, and tell it through a monitor.
+7. **Tasks used as `try`** (3 of the 14) stay so: `join` still gives
+   `(:error reason)`. D17's "no `catch`" isn't reopened here.
+8. **`ask` raises** `(:ended pid result)` if the actor ends first, as
+   D157's does; `ask-within` raises `(:timeout pid)`. `http/request`,
+   `agent/ask` and the rest keep their Results.
+9. **The rest of exit records** (how long a task's value is kept, and
+   when a pid's entry goes) is still the open item in PLAN.md, "Exit
+   records".
+
+To be built in four steps, each with passing tests: the kinds and their
+rules; addresses, `read` and `read/any`, and `ask`; `open`; then exit
+records. It replaces, as each lands, parts of D8 and D167 (the `recv`
+rule is an actor's), D19 (`join` is a task's), D88 and D216 (an actor's
+value isn't kept), D101 (point 5), D124 and D128 (a task opens a
+device, and is told its failure), D157 (`ask` without a box) and D220
+(`join/race` over `read/any`). Rejected on the way: extending
+`split.ts` to split at every call that can wait (continuations on the
+heap), which hides where a wait can go but not what it takes from the
+mailbox; receivers as values, `recv/with`, which makes actors' loops
+pleasanter and leaves the boxes; and a reply slot alone, which `address`
+generalizes.
+
+**Step 1, built** *(Claude, Oct 2026, on Stevan's "yes, start step 1")*:
+`spawn`, the two kinds, and the rules that hold without the rest.
+
+- **The order changed:** an actor can't be joined, and keeps no value,
+  moved from step 1 to after addresses and `open` (PLAN.md's step 4),
+  since till then the hybrids (`ask`'s box, `slurp`, `http/request`,
+  `rpc/call`) can only be actors that are joined. So for now an actor's
+  value is kept, and `join` takes one; `:not-a-task` is in `rt.h`, for
+  then.
+- **What a task can't do:** wait (the compiler refuses a state function
+  called in a `fork`'s body or the top level, `classify.ts`'s
+  classification as it was, and `rt_recv` faults as a backstop); be sent
+  to, or timed with `after` (`:not-an-actor`, in the sender: a message
+  that can't be taken is a bug in whoever sent it); and monitor, since
+  the notice would be a message it can't take, which D243 didn't say and
+  follows from it. A message to a task that has ended disappears, as
+  before (D92).
+- **In the runtime:** a flag in `rt_proc_t` (`keypress` and it share the
+  word `keypress` had), `rt_spawn`, `connect`'s processes actors, and
+  `:system`'s `(:kind k)`. Two fault kinds and the three words of
+  `:kind` move every runtime symbol after the faults up by two, which
+  only the tables see.
+- **The deadlock message follows the root's join:** the root, a task,
+  now waits in `join` where it waited in `recv`, so `... waiting in the
+  top level for #<pid 2> to end` alone would hide where the program is
+  stuck. It goes on, `, which is waiting in wait-forever for a message`,
+  through each join, and stops after eight with `, and so on`, since
+  tasks that join each other make a cycle.
+- **Programs:** `fork` became `spawn` for every process whose body waits
+  (a script asked the compiler, about 150 places, the hybrids among
+  them). 66 programs whose top level waited (53 golden tests, three
+  examples, the replay and live checks' three programs, seven
+  benchmarks) have it moved into `(defun top-level ...)`, which the root
+  spawns and joins; a benchmark takes its value back out with `cadr`, so
+  the harness's check is unchanged. Two tests, and the live check of
+  timers, set timers on a sleeper or the root, now an actor that never
+  takes them; one keeps its
+  root and moves only its round trip into an actor, so the hash of the
+  root's pid it checks stays the model's.
+- **Expected output:** a golden test's was changed only as the move
+  explains, and checked so: its old expected output, with every pid one
+  more (the top level's actor is pid 2) and the root's value as `(ok
+  v)`, against what it prints, which left only deadlock messages (the
+  longer one above) and sites in moved code, each checked to be the same
+  expression. New: 296 (tasks and actors: a task joined, an actor sent
+  to, a task sent to, timed and monitoring, a message to an ended task,
+  and `:kind`) and 297 (a cycle of joins, and so on), worked out by
+  hand.
+
+**Step 2, built** *(Claude, Oct 2026, on Stevan's "start step 2")*:
+addresses, `read`, `read/any`, and `ask` without a box.
+
+- **An address** is an immediate under the pid tag with its top bit
+  set: the task's index in 32 bits, and its number among the task's
+  addresses in 28 above them, printed `#<address 1.0>`. It's copied,
+  compared and hashed as a word, can't be made from data, and `pid?`
+  says `#true` of it; every other process operation faults
+  `:not-a-pid` on it, through `entry()`. A task keeps the numbers of
+  its open addresses in a small table, a pointer in `rt_proc_t`.
+- **Delivery:** a message to an address goes into its task's mailbox,
+  its record's device field holding the address (a task has no device
+  to read on yet), and wakes the task if it's reading that address; to
+  an address that's closed, or whose task has ended, it disappears, as
+  to an ended process (D92). A timer can be set for one, and is dropped
+  as soon as nothing can come of it (D232).
+- **`read` and `read/any`** take the first of their sources, in their
+  order, with something: a message waiting for an address, or a pid
+  that has ended, its result as `join` gives it. Else the task waits in
+  a new state, `:reading` to `:system`, keeping its stack, woken by a
+  message to one of its sources or by a watch on each pid among them,
+  as `join/race`'s (D220), and looks again. Reading a closed address,
+  another task's, or `()`, faults; reading one's own pid is
+  `:join-self`. `join/race` stays in the runtime: actors still race
+  (they may block in `join`, D243's point 4), and read only in a task.
+- **`ask`, `ask-within` and `reply` moved to the prelude** from
+  `lib/ds.slight`, `ask` making an address, sending, and reading the
+  address and the actor together, so it gives the answer or raises
+  `(:ended pid result)`; `ask-within` sets a timer for the address, and
+  takes it back. No process and no exit record per question.
+- **Actors that asked:** two did. `active-objects`'s object actor works
+  out an answer that asks other objects' actors, so it forks a task for
+  each answer, which replies; and 199's top-level actor only needed to
+  be an actor for its timers, so the root does the rest again and its
+  expected output is back to what it was before step 1.
+- **Libraries:** `rpc/peer` asks the connection at an address, from the
+  handler's own task. `rpc/connect`, `rpc/exec` and `agent/ask` fork a
+  task that reads an address, and join it, rather than reading in the
+  caller: their callers include actors (a test's actor that has just
+  heard `(:listening port)`, a hub), which may join a task but can't
+  read. They start a process each, as their box did, so no test's
+  output changed.
+- **Left for step 4,** which forces them: `rpc/call` and `rpc/stream`,
+  whose waiting process the connection monitors and a keeper tells
+  which connection it used (D228, D230), and the coordinators (the
+  tournaments' games, ping-pong's pinger, the airline's desk and
+  stand-ins, an agent's turn), still actors that are joined.
+- **Tests:** 298 (an address printed, a message to oneself, an actor's
+  answer, a task's, a timer's, `read/any` in its sources' order with a
+  pid's end, a timer taken back, `disconnect` dropping what waits and
+  what comes, reading a closed address and another's, `ask`, an actor
+  that has ended, `ask-within` timing out, and the faults: an actor
+  making an address, `read/any` of `()`, `read` of oneself) and 299
+  (`:system` showing a reader and its source, and the deadlock message
+  for `read/any`), worked out by hand.
+
+**Step 3, built** *(Claude, Oct 2026, on Stevan's "start step 3")*:
+`open`, a device a task owns.
+
+- **`(open source arg)` is a builtin,** not a special form as
+  `connect` is: its sources are runtime symbols (`:fs/read`,
+  `:fs/write`, `:fs/append`, `:tcp`, `:unix`, `:exec`, `:system`, a
+  group of their own), which the runtime tells apart, so `open` can be
+  a local's name (`lib/tools.slight` has one) and a value. Listeners
+  and `:keypress` aren't among them: what waits for whatever comes is
+  an actor, and connects.
+- **Opening** is `connect`'s, factored out of each `rt_connect_*`
+  (`fs_open`, `exec_start`, and the socket openers as they were), with
+  the task as the owner. `open` then reads the device's first message:
+  `(:open d)` gives `(:ok d)`; a failure, `(:error reason)`. One that
+  can't start at all (no such file or command) gives its reason with no
+  device made.
+- **Reading:** a device's message to a task is marked with the device,
+  as an address's is with the address, so `read` takes it by its
+  source; the mark is always there for a task, where for an actor it's
+  set only when the next message is to be cut (reading on after a
+  message that doesn't need it does nothing). The device whose message
+  a task took last is read on at its next `read`, as at an actor's next
+  `recv` (D158). A device's messages are read before it's taken as
+  ended, so `(:eof f)` comes though the file has closed.
+- **Failure:** D128 ends a device's owner; a task asked for its device,
+  so it's told instead: `(:error d reason)` where the device's next
+  message would be, and the device closes. `spew` and `tools/save`
+  read their file after closing it, so a write that failed raises, as
+  it ended the writer before.
+- **A device closed or handed on** while its task reads it wakes the
+  task, which finds it ended.
+- **Libraries:** `slurp`, `spew`, `exec/run`, `exec/run-within`,
+  `tools/read`, `tools/save`, the airline's `read-sexps` and
+  `rpc/system` open and read in a task of their own, which raises what
+  went wrong, so `join` gives what the actor did. `exec/run`'s task reads
+  its command, an address for its timer, and its caller's end, which
+  ends it and so the command (D193). Each starts a process and a
+  device, as `connect` did, so no output changed but one test's that
+  prints `lib/fs.slight`'s definitions (182).
+- **Left for step 4: HTTP's client.** Its connection's process shares
+  the head, framing and body readers with the server's (D182), all
+  `recv`; reading them with `read` would be a second copy of each. In
+  step 4 the connection sends its result to an address the caller
+  reads, as `http/stream` sends its pieces, which needs neither.
+- **Tests:** 300 (a file written and read, `(:read :chunks)` between
+  reads, the end, a file that isn't there, a directory failing at its
+  first read, a command written to and read, one that can't start,
+  `:system`, a device closed while its reader waits, a refused
+  connection, and the faults: an actor opening, a listener, a path
+  that isn't a string), worked out by hand.
+
+**Step 4, built** *(Claude, Oct 2026, on Stevan's "go with option 1":
+strict D243, every program restructured, and starters for servers that
+a task can call)*: an actor can't be joined, and keeps no value.
+
+- **The rule:** `join` and `join/race` of an actor fault `:not-a-task`.
+  A task reads an actor's end instead. Its value isn't copied into its
+  exit record: it goes from the actor's own heap to those watching as
+  it ends (its monitors, and each task reading it, as a message marked
+  with its pid, as a device's is), and the record keeps only that it
+  ended, so a later `read`, `monitor` or `:system` gets `:ended`.
+- **A read's watch lasts:** `read` and `read/any` watch each live pid
+  among their sources as they start to wait, and the watch stays after
+  they return, till the task next reads without that pid. So an end
+  that comes between two reads (two actors that end together, one read
+  after the other: 143) waits in the mailbox for the next, and isn't
+  lost; and a task that has stopped reading a pid isn't sent its end.
+  So a task reads an actor from before it ends: the one it has just
+  spawned, or just sent its last message to, with no call between that
+  could let it run; otherwise the actor sends what it has to an address.
+- **A `connect` that fails as it starts** (a file or command that isn't
+  there, a port that's taken, an address that isn't one) used to end
+  its actor at once,
+  before `connect` returned, so a `read` of it would be `:ended`; now
+  the actor starts, and ends with the reason when it first runs, so
+  `(read (connect ...))` gets `(:error reason)`, as `join` did.
+- **Libraries:** `http/listen` and `rpc/listen`, `http/serve` and
+  `rpc/serve` for a task: they wait till the server listens, at an
+  address, and give `(:ok (l port))`, or the listener's error.
+  `http/request`, `http/request-within` and `rpc/call` wait in `join`
+  for a task that reads the connection's, or the call's, end, so an
+  actor (a handler, a hub's registry) can still call them, as
+  `rpc/connect` and `agent/ask` already did (step 2): an actor may block
+  in `join` (point 4). `rpc/stream` was already an actor that sends.
+- **Programs:** a `(join (spawn ...))` or `(join (connect ...))` that
+  a task reads at once became `read` (83 files, by a script). The rest were restructured, each in the way that
+  kept its point: work moved from a top-level actor back to the root
+  where it only needed to be an actor to hear `(:listening port)`
+  (the HTTP and `rpc` tests, on `http/listen`, `rpc/listen`, and a
+  test helper, `raw-up`); an actor that ends with a result sends it to
+  an address (the tournaments' games, 199's collector, 151's and 250's
+  listeners, 186's servers); an actor that answers a stop answers who
+  stopped it (ping-pong's ponger, pub-sub's subscribers, so the broker
+  ends with what they said); an actor that read another's end joins a
+  task that reads it (277, 283); and tests that joined an actor to see
+  it killed race a task (266) or read it while a task kills it (222).
+- **Expected output:** changed only as these explain, each line
+  checked: a value the root used to get through a wrapper actor's
+  `(ok ...)` is the root's own; an actor read or monitored after its
+  end is `ended` (125, 200, 229, 238's `agent/ask` of a killed agent);
+  sites and pids that moved with their code; and the restructured
+  programs' new lines (222's stops, ping-pong's and pub-sub's ends).
+- **Tests:** 301 (an actor read from before its end, read and
+  monitored after it, an end between two reads waiting for the second,
+  and a watch dropped by a read without its pid), worked out by hand;
+  and 296 and 268 gain joining an actor, and racing one.
+
+**D244. A task's value is kept till its parent has it, and the process
+table is in pages.** *(Stevan, Oct 2026: "'until the parent has it' is
+good ... pages is good ... no detach for now", on Claude's proposal for
+D243's step 5, the rest of exit records.)* Settles the open item D88
+put off and D216 kept (PLAN.md, "Exit records"). After step 4 an
+actor kept no value, but every task still kept its own for good, and
+every pid its 40-byte entry: measured on the cloud machine, an HTTP
+server and its client in one program held 95 MB after 4,000 requests
+of 10 KB (two copies of each response, the client's task and the
+handler's), `rpc` 44 MB after 4,000 such calls, and `bank` 42 MB for a
+million customers, all entries.
+
+- **The rule:** a process's result goes, as it ends, to those waiting
+  for it then: its joiners and a race it wins, each given a copy to
+  take when it runs, the tasks reading it, and its monitors. A task's
+  is then kept for its parent if the parent wasn't among them and is
+  still running; the parent's `join`, `read` or `monitor` of it, or the
+  parent's end, lets it go. Till then anyone may join it, any number
+  of times; after, it's `:ended`, as an ended actor is (D243). The
+  root's is kept, to be printed.
+- **A race doesn't take a value,** so `join/race` can be asked again,
+  and `join/all` and `join/any` join each task as the race says it has
+  ended (so its value goes then; a pid listed twice is joined once, and
+  one joined before gives `:ended`, a failure to both).
+- **Pages:** the table is pages of 1,024 entries, each freed once all
+  its entries are dead (no process, no open device, no value kept) and
+  its last pid has been made. A pid whose page has gone reads as ended
+  and keeping nothing, since pids are never reused and can't be made
+  from data. `:system`'s `(:runtime ...)` says `(:records n)`, the
+  entries not dead.
+- **What it changed:** an actor that has ended, its entry perhaps gone,
+  is `:ended` to `join` too, where it faulted `:not-a-task`; a running
+  one still faults. A device keeps no value: a closed one is `:ended`
+  to `join`, `read` and `monitor`, where it was `(:ok ())`. A second
+  `join` of a task by its parent is `:ended`.
+- **Measured** after: the HTTP pair 2.6 MB at 4,000 requests and at
+  16,000; `rpc` 4.5 MB at both; `bank` 2.1 MB for a million customers.
+- **Rejected:** Erlang's `:noproc`, a second name for what `:ended`
+  says; only the parent able to join (simpler to state, and no program
+  needed more, but it gives up joining a sibling's task); entries
+  shrunk to a word each, still never freed; and `detach`, for children
+  nobody takes, since those found are few and small (a timeout's killed
+  sleeper, `rpc/keep`'s `on-open`), and go when their parent ends.
+- **Tested:** golden test 302 (a sibling's join before the parent's,
+  the parent's, and after it; a race and then a join; a parent's end
+  letting its child's value go; a parent's monitor; and `:records`
+  over 6,000 tasks and actors, and over five kept and then joined),
+  worked out by hand; t/live.py's memory, a million tasks and actors,
+  each taken as it ends, peaking under 16 MB (10 MB). Expected output
+  changed by the rule alone: a parent's second join (122, 125), a read
+  after the parent's read (298), a monitor after the parent was told
+  (283), and closed devices (200, 300); and 281's `:runtime` keys.
+- **After the benchmarks** *(Stevan, Oct 2026: "yes, make the two
+  fixes", on his M2 Max's run against the last before D243)*: no time
+  moved, but two peaks rose. `spawn` (86 MB to 121) forked a million
+  senders nobody joined, each kept for its parent, the case `detach`
+  was for; they're `spawn`ed now, actors, which keep nothing, as Go's
+  and Erlang's do. And idle-memory (546 to 602 bytes a waiting process)
+  paid for D243's and D244's pointers in every process: a task's
+  addresses, a joiner's result and a parent's kept children are now
+  one side record, made when first wanted, so the struct is 488 bytes
+  on AArch64 (504 before, 480 before D243). On the cloud machine,
+  against the commit before D243: idle-memory 452 MB to 442, `spawn`
+  105 to 66, times the same. The Mac then showed idle-memory at 587
+  MB, against 573 for the commit before D243 run the same day (the 546
+  of Oct 23's run didn't come back): 14 bytes a process, the side
+  pointer, 488 bytes rounded to 496 by macOS's malloc. A process's
+  devices moved into the side record too, most processes owning none,
+  so the struct is 480 bytes again, as before D243.
+
+**D245. An actor's end is kept for its parent, if that's a task.**
+*(Stevan, Oct 2026: "Yes", to Claude's look back at whether D243 had
+made things less awkward.)* After D243 a task had an actor's end only
+if it was reading the actor when it ended: from a `read` begun before,
+with no call between the spawn, or the last send, and the read that
+could let the actor run. That was the one new trap D243 made, and it
+caught three programs (t/143 had to `read/any` over both keyboards,
+boids explained why its `read` was in time, and t/222 had a task kill
+an actor while the root read it).
+
+- **Now:** D244's rule for a task's value holds for an actor's too when
+  its parent is a task: kept, after those waiting as it ended are told,
+  till the parent reads it, is told by a monitor, or ends. A task can
+  read an actor it started whenever it likes. An actor's parent can't
+  read, and hears of a child's end only by monitoring it, so an actor
+  an actor started keeps nothing, as before: a server's connections, a
+  hub's workers, a cell's watcher, so D243's saving for programs that
+  run for good stands.
+- **`join` still faults on an actor** (`:not-a-task`), its end kept or
+  not: an actor is read. One whose entry has gone is `:ended`, as any
+  such pid is (D244).
+- **The cost:** a task that starts actors and never reads them holds
+  their ends till it ends, as one that forks tasks and never joins them
+  does (D244); the benchmarks start theirs from an actor, and none of
+  them changed.
+- **Rejected:** keeping the rule and documenting "read from before it
+  ends"; and keeping every actor's end, which brings back what D243
+  saved for servers.
+- **Programs:** t/143 reads its two keyboards' ends one after the
+  other again, and boids drops its comment. Expected output changed by
+  the rule alone, each an actor the root started, read or asked after
+  it ended, which now says how it ended where it said `:ended` (125,
+  137, 169, 200, 229, 238, as they printed before step 4). t/301 shows
+  both: the root's own actor read after its end, and the ends of an
+  actor's children, read late (`:ended`), and watched between two
+  reads (kept), and dropped by a read without them.
+- **With it, the examples whose top level waited lose their wrapper:**
+  even-odd-actors, game-of-life-actors and ring-benchmark gathered
+  replies in an actor the root spawned and read; the root does it now,
+  at an address it makes, reading in an ordinary loop, and each prints
+  what it did before D243, but for even-odd's address where its pid was.

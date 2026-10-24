@@ -34,7 +34,7 @@
 
 (defun db (pid cmd key value) (ask pid (list cmd key value)))
 
-(let server (fork (db-server ())))
+(let server (spawn (db-server ())))
 
 (pprint (db server :update :x 10))
 (pprint (db server :update :y 20))

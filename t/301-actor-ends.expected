@@ -1,0 +1,11 @@
+(ok 5)
+(ok 7)
+ended
+(exit #<pid 3> ended)
+ended
+(#<pid 7> (ok b))
+(ok c)
+(#<address 1.0> here)
+again
+ended
+done

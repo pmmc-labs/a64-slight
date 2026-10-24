@@ -12,10 +12,14 @@
         (eq? (reverse acc) expected)
         (recv (i (gather (- n 1) (cons i acc) expected)))))
 
-(let ids (map (lambda (i) (after (due i) $$ i)) (range 1 2001)))
-(pprint (eq? ids (range 1 2001)))
-(let gone (reverse (filter (lambda (t) (== (math/mod t 3) 0)) ids)))
-(pprint (list (length gone) (eq? (map timer/cancel gone) (map (lambda (t) #true) gone))))
-(pprint (eq? (map timer/cancel gone) (map (lambda (t) #false) gone)))
-(let kept (filter (lambda (t) (not (== (math/mod t 3) 0))) ids))
-(gather (length kept) () (sort-by due kept))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (let ids (map (lambda (i) (after (due i) $$ i)) (range 1 2001)))
+    (pprint (eq? ids (range 1 2001)))
+    (let gone (reverse (filter (lambda (t) (== (math/mod t 3) 0)) ids)))
+    (pprint (list (length gone) (eq? (map timer/cancel gone) (map (lambda (t) #true) gone))))
+    (pprint (eq? (map timer/cancel gone) (map (lambda (t) #false) gone)))
+    (let kept (filter (lambda (t) (not (== (math/mod t 3) 0))) ids))
+    (gather (length kept) () (sort-by due kept)))
+
+(read (spawn (top-level)))

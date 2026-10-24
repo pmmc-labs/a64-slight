@@ -239,9 +239,33 @@ the virtual clock moved to it while a reply crossed macOS's loopback);
 and who's at the other end of a Unix socket, `(socket/peer c)`, its
 uid, gid and pid as the kernel has them, and `(rpc/peer)` in a handler
 (D235, golden test 291).
-**Next:** to settle with
-Stevan (`docs/PLAN.md`, 15), and when an exit record goes, open
-(`docs/PLAN.md`, "Exit records"). 12c (C libraries vendored as source, D151, D152, then
+And tasks and actors (D243,
+`docs/PLAN.md`, "Tasks and actors"), built in five steps; step 1: `spawn`
+starts an actor, `fork` a task, which can't wait, nor be sent to, timed
+or monitor, and the root is a task, so a top level that waits spawns an
+actor and reads its end; the deadlock message follows the root's join to
+where the program waits (golden tests 296, 297); and step 2: a task's
+addresses, `(address)`, which `send` and `after` take, `read` and
+`read/any`, which wait for a message to one or a process's end, and
+`ask` in the prelude on them, without a box (golden tests 298, 299);
+and step 3: `(open source arg)`, a device a task owns, no process
+started, read with `read`, its failure a message rather than the
+task's end, under `slurp`, `spew`, `exec/run` and `tools/read` (golden
+test 300); and step 4: an actor can't be joined (`:not-a-task`), and
+keeps no value: its end goes to its monitors and the tasks reading it,
+a read's watch lasting till the task reads without it, and is `:ended`
+after; `http/listen` and `rpc/listen` start servers from a task, and
+`http/request` and `rpc/call` join a task that reads, so actors call
+them too; every program restructured to match (golden test 301); and
+step 5, exit records (D244): a task's value kept till its parent has it
+(a join, a read, a monitor's notice, or the parent's end), then
+`:ended`, and the process table in pages, each freed once nothing more
+can come of its entries, so a program that runs for good holds only
+what's running, open or kept (`:system`'s `(:records n)`; golden test
+302, t/live.py's memory); and an actor's end kept so too, for a parent
+that's a task, so a task reads one whenever it likes (D245, golden test
+301). **Next:** to settle with Stevan
+(`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
 first (`docs/PLAN.md`). Self-hosting waits

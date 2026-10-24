@@ -29,7 +29,7 @@
             (list (list "n" :number "n"))
             (lambda (n) (rpc/call ^$$ :mul (list n n))))
         (rpc/handler "hold" "Says held, then never ends." ()
-            (lambda () (send w (list :running $$)) (rpc/next :held) (join (fork (stuck)))))))
+            (lambda () (send w (list :running $$)) (rpc/next :held) (read (spawn (stuck)))))))
 
 ; What the client offers, for square to call back.
 (defun mul ()
@@ -60,7 +60,8 @@
     (pprint (rpc/call conn "boom" ()))
     (pprint (rpc/call conn "square" (list 12)))
     (pprint (map car (cadr (rpc/call conn "help" ()))))
-    (pprint (join (fork (do (rpc/stream conn "count" (list 3)) (values-of ())))))
+    ; an actor can't read, so a task it joins reads the stream's (D243)
+    (pprint (cadr (join (fork (read (spawn (do (rpc/stream conn "count" (list 3)) (values-of ()))))))))
     (stopping l port conn))
 
 ; A stream killed once it has said held: the other end is told to stop,
@@ -104,4 +105,8 @@
                         ((:error (name _)) (pprint (list :error name))))
                     :done)))))
 
-(main (rpc/serve "127.0.0.1:0" (handlers $$)))
+; The top level is a task, which can't wait (D243), so an actor does its work.
+(defun top-level ()
+    (main (rpc/serve "127.0.0.1:0" (handlers $$))))
+
+(read (spawn (top-level)))

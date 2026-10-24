@@ -40,18 +40,19 @@
     (recv
         (:inc      (counter (+ n 1)))
         ((:get to) (reply to n) (counter n))))
-(let k (fork (counter 0)))
+(let k (spawn (counter 0)))
 (send k :inc)
 (send k :inc)
 (pprint (ask k (list :get)))
 
-; asking a structure that has ended raises (:ended pid result)
+; asking a structure that has ended raises (:ended pid result), its
+; result kept for the root, which started it (D245)
 (kill c)
 (let r (join (fork (cell/get c))))
 (pprint (list (car r) (car (cadr r)) (eq? (cadr (cadr r)) c) (caddr (cadr r))))
 
 ; and one that never answers, (:timeout pid)
 (defun sink () (recv (_ (sink))))
-(let s (fork (sink)))
+(let s (spawn (sink)))
 (let t (join (fork (ask-within 100 s (list :anything)))))
 (list (car t) (car (cadr t)) (eq? (cadr (cadr t)) s))

@@ -32,8 +32,8 @@ line and its head.
         ((:sexp f v) (forms (cons (car v) heads)))
         ((:eof f)    (reverse heads))))
 
-(map pprint (cadr (join (connect :fs/read "t/184-doc-blocks.slight" (outline ())))))
-(pprint (join (connect :fs/read "t/184-doc-blocks.slight" (forms ()))))
+(map pprint (cadr (read (connect :fs/read "t/184-doc-blocks.slight" (outline ())))))
+(pprint (read (connect :fs/read "t/184-doc-blocks.slight" (forms ()))))
 
 ; inside a form, a line =doc is a name like any other
 (pprint '(before

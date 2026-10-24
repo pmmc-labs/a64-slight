@@ -1,5 +1,4 @@
-(ok "helper: hello [user]")
-nothing-else
+((ok "helper: hello [user]") nothing-else)
 (error (http 404 "model 'missing' not found"))
 (ended (error killed))
 ((calling "ask_expert" (("question" "what is 2+2?"))) (called "ask_expert" "helper: what is 2+2? [user assistant user]") (piece "results: helper: what is 2+2? [user assistant user]") (piece " [user calls tool]") (answer "results: helper: what is 2+2? [user assistant user] [user calls tool]"))

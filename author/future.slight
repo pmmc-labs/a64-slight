@@ -12,13 +12,13 @@
 (defun Future () (recv (msg (yield msg))))
 
 (defun ask? ($to @msg)
-    (let $f (fork (Future)))
+    (let $f (spawn (Future)))
     (send $to (append @msg (list $f)))
     (match (join $f)
         ((:ok    value)  value)
         ((:error reason) (raise reason))))
 
-(let calc (fork (Calculator)))
+(let calc (spawn (Calculator)))
 
 (pprint (ask? calc (list :add 10 (ask? calc (list :mul 2 10)))))
 

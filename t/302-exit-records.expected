@@ -1,0 +1,15 @@
+(ok (ok 42))
+(ok 42)
+(ok ended)
+ended
+(#<pid 5> (ok r))
+(ok r)
+ended
+(#<pid 7> ended)
+(#true (ok c) ended)
+(2 10)
+(2 6011)
+(7 6017)
+((ok 0) (ok 1) (ok 2) (ok 3) (ok 4))
+(2 6018)
+()
