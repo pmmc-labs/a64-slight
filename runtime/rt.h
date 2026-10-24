@@ -428,7 +428,6 @@ typedef struct rt_proc {
                                 // while READING: the list of its sources
     rt_watch_t     *watchers, *last_watcher; // monitoring this one, in order
     rt_watch_t     *watching;   // the monitors it has set on processes still running
-    struct rt_device *devices;  // the files it has open (process.c)
     rt_value_t      reading;    // the reader whose message it took last, to read on at its next recv; or 0
     int64_t         slice_rest; // calls left in its slice after reductions run out (process.c)
     int64_t         slice;      // the calls its last slice had, reductions and slice_rest together
@@ -436,8 +435,9 @@ typedef struct rt_proc {
     uintptr_t       at;         // where in compiled code it last stopped while holding a stack, or 0
     uint64_t        rand_seed;  // its random numbers: SplitMix64's state...
     uint64_t        rand_gamma; // ...and the step it takes, its own (numbers.c, D222)
-    struct rt_side *side;       // what few processes need, made when first wanted: a task's
-                                // addresses, a joiner's result, a parent's kept children (process.c)
+    struct rt_side *side;       // what few processes need, made when first wanted: the devices
+                                // it owns, a task's addresses, a joiner's result, a parent's
+                                // kept children (process.c)
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,

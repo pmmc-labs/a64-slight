@@ -5712,4 +5712,9 @@ million customers, all entries.
   one side record, made when first wanted, so the struct is 488 bytes
   on AArch64 (504 before, 480 before D243). On the cloud machine,
   against the commit before D243: idle-memory 452 MB to 442, `spawn`
-  105 to 66, times the same.
+  105 to 66, times the same. The Mac then showed idle-memory at 587
+  MB, against 573 for the commit before D243 run the same day (the 546
+  of Oct 23's run didn't come back): 14 bytes a process, the side
+  pointer, 488 bytes rounded to 496 by macOS's malloc. A process's
+  devices moved into the side record too, most processes owning none,
+  so the struct is 480 bytes again, as before D243.

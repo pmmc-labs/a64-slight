@@ -1069,6 +1069,7 @@ typedef struct rt_kept {
 // What only some processes need, apart, so that one waiting in recv, of
 // which there may be a million, costs a pointer for them all.
 typedef struct rt_side {
+    struct rt_device *devices;          // the devices it owns, newest first
     rt_addresses_t addresses;           // a task's (D243)
     rt_kept_t      kept;                // a parent's (D244)
     rt_msg_t      *given;               // the result a join or race was woken with, till it runs (D244)
@@ -1077,6 +1078,10 @@ typedef struct rt_side {
 static rt_side_t *side_of(rt_proc_t *p) {
     if (!p->side) p->side = rt_must(calloc(1, sizeof *p->side));
     return p->side;
+}
+
+static struct rt_device *devices_of(const rt_proc_t *p) {
+    return p->side ? p->side->devices : NULL;
 }
 
 #define ADDRESS_NUMBERS (1ULL << (63 - RT_ADDRESS_SHIFT))
@@ -1408,9 +1413,9 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     // on the structure it asked, and each monitor walked them all (D183).
     while (p->watching) unwatch(p->watching);
     free_heap(p);
-    free_side(p);
     if (p->keypress) disconnect(p);
     close_all(p);
+    free_side(p);
     p->state = RT_DONE;
 }
 
@@ -2249,8 +2254,8 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
         d->path_space = rt_must(malloc((len / 8 + 6) * sizeof *d->path_space));
         d->path       = string_in(d->path_space, path, len);
     }
-    d->next    = p->devices;
-    p->devices = d;
+    d->next             = devices_of(p);
+    side_of(p)->devices = d;
     ndevices++;
     if (is_socket(d)) {
         d->next_socket = sockets;
@@ -2319,11 +2324,11 @@ static void shut(rt_device_t *d) {
 }
 
 static void close_all(rt_proc_t *p) {
-    for (rt_device_t *d = p->devices, *next; d; d = next) {
+    for (rt_device_t *d = devices_of(p), *next; d; d = next) {
         next = d->next;
         shut(d);
     }
-    p->devices = NULL;
+    if (p->side) p->side->devices = NULL;
 }
 
 // A task reading d, which closes or is handed on, looks at its sources
@@ -2334,7 +2339,7 @@ static void wake_reader(rt_proc_t *owner, const rt_device_t *d) {
 
 static void unown(rt_device_t *d) {
     rt_proc_t    *owner = slot(d->owner)->proc;
-    rt_device_t **link  = &owner->devices;
+    rt_device_t **link  = &owner->side->devices;   // it owns d, so it has one
     while (*link != d) link = &(*link)->next;
     *link = d->next;
     wake_reader(owner, d);
@@ -2984,8 +2989,8 @@ rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *value
     rt_proc_t *p   = slot(pid)->proc;
     unown(d);
     d->owner   = pid;
-    d->next    = p->devices;
-    p->devices = d;
+    d->next             = devices_of(p);
+    side_of(p)->devices = d;
     d->waiting = 0;
     if (!d->connecting) tell_open(d);           // a connection that's still connecting says so when it has
     return pid;
@@ -3510,7 +3515,7 @@ static snapshot_t take(rt_device_t *d, const rt_proc_t *p) {
         .state = states[p->state], .stack = p->stack != NULL, .devices = d->snap_npids, .actor = p->actor,
     };
     for (rt_msg_t *m = p->mail; m; m = m->next) r.mail++;
-    for (rt_device_t *x = p->devices; x; x = x->next) snap_pid(d, x->pid);
+    for (rt_device_t *x = devices_of(p); x; x = x->next) snap_pid(d, x->pid);
     r.ndevices = d->snap_npids - r.devices;
     r.racing   = d->snap_npids;
     if (p->state == RT_RACING) {
@@ -3664,7 +3669,7 @@ rt_value_t rt_open(rt_value_t source, rt_value_t arg, const char *site) {
     } else if (which != RT_SOURCE_SYSTEM && !rt_is_string(arg)) {
         rt_fault(RT_FAULT_NOT_STRING, arg, site);
     }
-    rt_device_t *had = p->devices;
+    rt_device_t *had = devices_of(p);
     int          err = 0;
     rt_value_t   where = arg;
     switch (which) {
@@ -3678,7 +3683,7 @@ rt_value_t rt_open(rt_value_t source, rt_value_t arg, const char *site) {
     }
     _Alignas(16) rt_value_t cells[8];
     if (err) return copy_here(rt_cons_at(cells, rt_symbol(RT_SYM_ERROR), rt_cons_at(cells + 2, io_reason(cells + 4, err, where), RT_NIL)));
-    rt_value_t d = p->devices != had ? p->devices->pid : RT_NIL;   // new_device puts it first
+    rt_value_t d = devices_of(p) != had ? devices_of(p)->pid : RT_NIL;   // new_device puts it first
     rt_value_t m = read_from(rt_cons_at(cells, d, RT_NIL), 0, (uintptr_t)__builtin_return_address(0), site);
     if (rt_car(m) == rt_symbol(RT_SYM_ERROR)) {                        // (:error d reason)
         return copy_here(rt_cons_at(cells, rt_symbol(RT_SYM_ERROR), rt_cons_at(cells + 2, rt_car(rt_cdr(rt_cdr(m))), RT_NIL)));
