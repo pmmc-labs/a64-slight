@@ -1058,10 +1058,31 @@ typedef struct rt_addresses {
     uint64_t *open;                     // the numbers of those not closed
 } rt_addresses_t;
 
+// The children whose values a process's records keep for it, since they
+// ended before it had them (D244). Few at a time: a parent joins what it
+// forks, mostly before it ends.
+typedef struct rt_kept {
+    uint64_t  n, cap;
+    uint64_t *ids;
+} rt_kept_t;
+
+// What only some processes need, apart, so that one waiting in recv, of
+// which there may be a million, costs a pointer for them all.
+typedef struct rt_side {
+    rt_addresses_t addresses;           // a task's (D243)
+    rt_kept_t      kept;                // a parent's (D244)
+    rt_msg_t      *given;               // the result a join or race was woken with, till it runs (D244)
+} rt_side_t;
+
+static rt_side_t *side_of(rt_proc_t *p) {
+    if (!p->side) p->side = rt_must(calloc(1, sizeof *p->side));
+    return p->side;
+}
+
 #define ADDRESS_NUMBERS (1ULL << (63 - RT_ADDRESS_SHIFT))
 
 static int address_open(const rt_proc_t *p, rt_value_t a) {
-    const rt_addresses_t *s = p->addresses;
+    const rt_addresses_t *s = p->side ? &p->side->addresses : NULL;
     for (uint64_t i = 0; s && i < s->n; i++) if (s->open[i] == rt_address_number(a)) return 1;
     return 0;
 }
@@ -1093,8 +1114,7 @@ static void to_address(rt_value_t a, rt_msg_t *m) {
 rt_value_t rt_address(const char *site) {
     rt_proc_t *p = rt_current;
     if (p->actor) rt_fault(RT_FAULT_NOT_TASK, p->pid, site);   // an actor takes its answers as messages
-    rt_addresses_t *s = p->addresses;
-    if (!s) s = p->addresses = rt_must(calloc(1, sizeof *s));
+    rt_addresses_t *s = &side_of(p)->addresses;
     if (s->n == s->cap) {
         s->cap  = s->cap ? s->cap * 2 : 4;
         s->open = rt_must(realloc(s->open, s->cap * sizeof *s->open));
@@ -1107,7 +1127,7 @@ rt_value_t rt_address(const char *site) {
 // Closes a, of p's: what's sent to it after goes nowhere, and what's
 // waiting for it is freed.
 static void close_address(rt_proc_t *p, rt_value_t a) {
-    rt_addresses_t *s = p->addresses;
+    rt_addresses_t *s = &p->side->addresses;    // open, so it has one
     for (uint64_t i = 0; i < s->n; i++) {
         if (s->open[i] != rt_address_number(a)) continue;
         s->open[i] = s->open[--s->n];
@@ -1127,12 +1147,6 @@ static void close_address(rt_proc_t *p, rt_value_t a) {
     p->mail_last = last;
 }
 
-static void free_addresses(rt_proc_t *p) {
-    if (!p->addresses) return;
-    free(p->addresses->open);
-    free(p->addresses);
-    p->addresses = NULL;
-}
 
 // A message holding a copy of msg: the message's record and the copy in
 // one chunk, the record first, so a send is one malloc, and taking the
@@ -1276,17 +1290,8 @@ static void tell_reader(rt_proc_t *reader, rt_value_t pid, const entry_t *e) {
     deliver(reader, m);
 }
 
-// The children whose values a process's records keep for it, since they
-// ended before it had them (D244). Few at a time: a parent joins what it
-// forks, mostly before it ends.
-typedef struct rt_kept {
-    uint64_t  n, cap;
-    uint64_t *ids;
-} rt_kept_t;
-
 static void keep_for(rt_proc_t *parent, uint64_t id) {
-    rt_kept_t *k = parent->kept;
-    if (!k) k = parent->kept = rt_must(calloc(1, sizeof *k));
+    rt_kept_t *k = &side_of(parent)->kept;
     if (k->n == k->cap) {
         k->cap = k->cap ? k->cap * 2 : 4;
         k->ids = rt_must(realloc(k->ids, k->cap * sizeof *k->ids));
@@ -1307,7 +1312,7 @@ static void release(uint64_t id) {
 // p, the caller, has had pid's result from its record: if pid is a child
 // of p's, its value was kept for p, and now goes.
 static void taken(rt_proc_t *p, rt_value_t pid) {
-    rt_kept_t *k  = p->kept;
+    rt_kept_t *k  = p->side ? &p->side->kept : NULL;
     uint64_t   id = pid >> RT_PID_SHIFT;
     for (uint64_t i = k ? k->n : 0; i-- > 0; ) {
         if (k->ids[i] != id) continue;
@@ -1317,10 +1322,24 @@ static void taken(rt_proc_t *p, rt_value_t pid) {
     }
 }
 
+// What was kept for p goes, since no one else is waiting for it; and a
+// result it was given, if it was killed before it ran again; and its
+// addresses.
+static void free_side(rt_proc_t *p) {
+    rt_side_t *s = p->side;
+    if (!s) return;
+    for (uint64_t i = 0; i < s->kept.n; i++) release(s->kept.ids[i]);
+    if (s->given) free_msg(s->given);
+    free(s->kept.ids);
+    free(s->addresses.open);
+    free(s);
+    p->side = NULL;
+}
+
 // The result a join or race was woken with, now in the caller's heap.
 static rt_value_t take_given(rt_proc_t *p) {
-    rt_msg_t *m = p->given;
-    p->given = NULL;
+    rt_msg_t *m = p->side->given;
+    p->side->given = NULL;
     rt_value_t v = m->value;
     if (m->chunk->size == sizeof *m) free_msg(m);
     else                             adopt(p, m->chunk);
@@ -1342,7 +1361,7 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     }
     for (rt_proc_t *j = p->joiners, *next; j; j = next) {
         next     = j->next_joiner;
-        j->given = result_msg(e);
+        side_of(j)->given = result_msg(e);
         had     |= j->pid == p->parent;
         enqueue(j);
     }
@@ -1353,7 +1372,7 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
             // before the racer has run again only goes.
             if (w->watcher->state == RT_RACING) {
                 w->watcher->joining = p->pid;
-                w->watcher->given   = result_msg(e);
+                side_of(w->watcher)->given = result_msg(e);
                 enqueue(w->watcher);
             }
         } else if (w->wakes == WATCH_READ) {
@@ -1383,23 +1402,13 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
         e->value = RT_NIL;
         e->ended = 1;
     }
-    // What was kept for p goes, since no one else is waiting for it.
-    if (p->kept) {
-        for (uint64_t i = 0; i < p->kept->n; i++) release(p->kept->ids[i]);
-        free(p->kept->ids);
-        free(p->kept);
-        p->kept = NULL;
-    }
-    if (p->given) {                             // a join or race killed before it ran again
-        free_msg(p->given);
-        p->given = NULL;
-    }
+
     // The monitors p set go too. Their notices would be dropped, and kept,
     // they'd pile up on a process that lives long: each ask's box left one
     // on the structure it asked, and each monitor walked them all (D183).
     while (p->watching) unwatch(p->watching);
     free_heap(p);
-    free_addresses(p);
+    free_side(p);
     if (p->keypress) disconnect(p);
     close_all(p);
     p->state = RT_DONE;

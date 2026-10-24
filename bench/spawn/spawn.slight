@@ -1,9 +1,10 @@
 ; spawn: n processes started one after another, each sending its number
-; back and ending; their numbers summed.
+; back and ending; their numbers summed. Each is an actor: nothing takes
+; its value, which a task's record would keep for its parent (D244).
 
 (defun start (i n me)
     (when (< i n)
-        (fork (send me i))
+        (spawn (send me i))
         (start (+ i 1) n me)))
 
 (defun gather (n acc)

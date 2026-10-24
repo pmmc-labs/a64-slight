@@ -5701,3 +5701,15 @@ million customers, all entries.
   changed by the rule alone: a parent's second join (122, 125), a read
   after the parent's read (298), a monitor after the parent was told
   (283), and closed devices (200, 300); and 281's `:runtime` keys.
+- **After the benchmarks** *(Stevan, Oct 2026: "yes, make the two
+  fixes", on his M2 Max's run against the last before D243)*: no time
+  moved, but two peaks rose. `spawn` (86 MB to 121) forked a million
+  senders nobody joined, each kept for its parent, the case `detach`
+  was for; they're `spawn`ed now, actors, which keep nothing, as Go's
+  and Erlang's do. And idle-memory (546 to 602 bytes a waiting process)
+  paid for D243's and D244's pointers in every process: a task's
+  addresses, a joiner's result and a parent's kept children are now
+  one side record, made when first wanted, so the struct is 488 bytes
+  on AArch64 (504 before, 480 before D243). On the cloud machine,
+  against the commit before D243: idle-memory 452 MB to 442, `spawn`
+  105 to 66, times the same.

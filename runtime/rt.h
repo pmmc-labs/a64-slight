@@ -436,9 +436,8 @@ typedef struct rt_proc {
     uintptr_t       at;         // where in compiled code it last stopped while holding a stack, or 0
     uint64_t        rand_seed;  // its random numbers: SplitMix64's state...
     uint64_t        rand_gamma; // ...and the step it takes, its own (numbers.c, D222)
-    struct rt_addresses *addresses; // a task's open addresses (process.c, D243), or NULL
-    rt_msg_t       *given;      // the result a join or race was woken with, till it runs (D244)
-    struct rt_kept *kept;       // its children whose values are kept for it (process.c, D244), or NULL
+    struct rt_side *side;       // what few processes need, made when first wanted: a task's
+                                // addresses, a joiner's result, a parent's kept children (process.c)
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
