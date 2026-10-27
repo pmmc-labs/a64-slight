@@ -1,0 +1,3 @@
+fault in #<pid 2>: not a number: "red" (+ at docs/guide/code/tut-store.slight:23:40)
+(error (ended #<pid 2> (error (not-a-number "red" "+ at docs/guide/code/tut-store.slight:23:40"))))
+(error (not-a-number "red" "+ at docs/guide/code/tut-store.slight:23:40"))

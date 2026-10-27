@@ -1,0 +1,13 @@
+42
+3
+3.5
+3
+"a string"
+apple
+#true
+(1 "two" three (4.5))
+()
+#true
+#false
+#true
+"apples: 3"

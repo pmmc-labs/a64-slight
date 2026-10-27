@@ -1,0 +1,36 @@
+(@include "tut-table.slight")
+
+; Runs one command on a table, and gives the next table and the reply.
+(defun run-command (table cmd)
+    (match cmd
+        ((:put key value) (list (table/put key value table) (list :ok value)))
+        ((:get key)       (list table (found (table/get key table))))
+        ((:del key)       (list (table/del key table) (list :ok ())))
+        ((:keys)          (list table (list :ok (table/keys table))))
+        (_                (list table (list :error (list :unknown cmd))))))
+
+(defun found (value)
+    (if (eq? value :not-found)
+        (list :error :not-found)
+        (list :ok value)))
+
+; Runs commands in order: the last table, and the replies in order.
+(defun run-all (table cmds replies)
+    (match cmds
+        (()           (list table (reverse replies)))
+        ((cmd & rest) (match (run-command table cmd)
+                          ((next reply) (run-all next rest (cons reply replies)))))))
+
+(let cmds (list
+    (list :put "apple" 3)
+    (list :put "pear" 5)
+    (list :get "apple")
+    (list :del "apple")
+    (list :get "apple")
+    (list :keys)
+    (list :frobnicate)))
+
+(match (run-all () cmds ())
+    ((table replies)
+        (map pprint replies)
+        table))

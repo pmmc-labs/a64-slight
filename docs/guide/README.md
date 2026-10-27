@@ -5,7 +5,8 @@ program, and assumes no Lisp and no Erlang. For the reference, where
 every form and builtin is, see [`docs/LANGUAGE.md`](../LANGUAGE.md).
 
 Start with the **[tour](tour.md)**: fifteen minutes from hello world to
-actors.
+actors. Then the **[tutorial](tutorial/01-values.md)** goes over the same
+ground slowly, building one program.
 
 ## What's here, and what's coming
 
@@ -13,16 +14,19 @@ The guide has four parts, each for a different need:
 
 - **The tour** ([`tour.md`](tour.md)). A quick look at the whole
   language.
-- **The tutorial** (to come). One program, a key-value store, grown
+- **The tutorial** (`tutorial/`). One program, a key-value store, grown
   chapter by chapter:
-  1. Values, functions, and loops as tail calls
-  2. Lists, `match`, and data as tagged lists
-  3. State in a process: an actor for the store
-  4. Asking and answering, and the `recv` rule in practice
-  5. Tasks and actors: `fork`, `spawn`, `join`, `monitor`, and errors
+  1. [Values, functions, and loops](tutorial/01-values.md)
+  2. [Lists, `match`, and data as tagged lists](tutorial/02-match.md)
+  3. [State in a process](tutorial/03-actors.md): an actor for the store
+  4. [Asking and answering](tutorial/04-asking.md), and the `recv` rule
+     in practice
+  5. [When things go wrong](tutorial/05-errors.md): faults, errors,
+     `raise`, a supervisor, and tasks and actors
   6. Timers, and testing with the virtual clock and `(@include :test)`
-  7. Devices: keeping the store in a file
-  8. Serving it over a socket with `(@include :rpc)`
+     (to come)
+  7. Devices: keeping the store in a file (to come)
+  8. Serving it over a socket with `(@include :rpc)` (to come)
 - **Concepts** (to come). The ideas you have to adopt to write slight
   well, and why they're there:
   - Nothing changes: where state goes instead
@@ -40,7 +44,9 @@ The guide has four parts, each for a different need:
 ## The code is tested
 
 Every program in the guide is in [`code/`](code), with the output it
-should print beside it, and runs with the golden tests. A `lisp` block
+should print beside it, and runs with the golden tests; a file of
+functions that programs share, such as the tutorial's
+`tut-store.slight`, is run by the programs that include it. A `lisp` block
 in a page is preceded by `<!-- code: path -->` naming its program, and
 an output block by `<!-- output: path -->`; `t/guide.py` (`make guide`)
 checks that each block is in its file as it stands. So when the

@@ -1,0 +1,24 @@
+(@include "tut-store.slight")
+
+; Starts the store and watches it, and passes it every message. When it
+; ends, it starts another, with an empty table.
+(defun supervise ()
+    (let s (spawn (store ())))
+    (monitor s)
+    (supervisor s))
+
+(defun supervisor (s)
+    (recv
+        ((:exit _ result)
+            (pprint (list :restarting result))
+            (supervise))
+        (msg
+            (send s msg)
+            (supervisor s))))
+
+(let sup (spawn (supervise)))
+(call sup (list :put "apple" 3))
+(call sup (list :put "color" "red"))
+(pprint (join (fork (ask-within 1000 sup (list :do (list :incr "color"))))))
+(pprint (call sup (list :get "apple")))
+(call sup (list :put "apple" 4))

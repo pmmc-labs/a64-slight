@@ -1,0 +1,34 @@
+; A table is a list of (key value) pairs, newest first.
+
+(defun table/get (key table)
+    (cond
+        ((nil? table)           :not-found)
+        ((eq? (caar table) key) (cadar table))
+        (#true                  (table/get key (cdr table)))))
+
+(defun table/del (key table)
+    (table/del-loop key table ()))
+
+; seen holds the pairs passed over, in reverse.
+(defun table/del-loop (key table seen)
+    (cond
+        ((nil? table)           (reverse seen))
+        ((eq? (caar table) key) (append (reverse seen) (cdr table)))
+        (#true                  (table/del-loop key (cdr table) (cons (car table) seen)))))
+
+(defun table/put (key value table)
+    (cons (list key value) (table/del key table)))
+
+(defun table/keys (table)
+    (map car table))
+
+(let t1 (table/put "apple" 3 ()))
+(let t2 (table/put "pear" 5 t1))
+(let t3 (table/put "apple" 4 t2))
+(let t4 (table/del "pear" t3))
+
+(pprint t3)
+(pprint (table/get "apple" t3))
+(pprint (table/get "plum" t3))
+(pprint (table/get "apple" t1))
+(table/keys t4)

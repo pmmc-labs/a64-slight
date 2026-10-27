@@ -1,0 +1,23 @@
+; The table: a list of (key value) pairs, newest first, taken apart
+; with match.
+
+(defun table/get (key table)
+    (match table
+        (()             :not-found)
+        (((k v) & rest) (if (eq? k key) v (table/get key rest)))))
+
+(defun table/del (key table)
+    (table/del-loop key table ()))
+
+(defun table/del-loop (key table seen)
+    (match table
+        (()             (reverse seen))
+        ((pair & rest)  (if (eq? (car pair) key)
+                            (append (reverse seen) rest)
+                            (table/del-loop key rest (cons pair seen))))))
+
+(defun table/put (key value table)
+    (cons (list key value) (table/del key table)))
+
+(defun table/keys (table)
+    (map car table))

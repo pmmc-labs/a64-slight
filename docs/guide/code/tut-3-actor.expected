@@ -1,0 +1,5 @@
+(ok 3)
+(ok 5)
+dead letter: (put "plum" 7) (recv at docs/guide/code/tut-3-actor.slight:19:5)
+(ok ("pear" "apple"))
+(ok (("pear" 5) ("apple" 3)))

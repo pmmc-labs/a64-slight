@@ -1,0 +1,7 @@
+(@include "tut-store.slight")
+
+(let s (spawn (store ())))
+(call s (list :put "apple" 3))
+(call s (list :put "color" "red"))
+(pprint (join (fork (call s (list :incr "color")))))
+(read s)

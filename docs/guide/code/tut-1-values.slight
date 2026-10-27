@@ -1,0 +1,15 @@
+(pprint 42)
+(pprint (+ 1 2))
+(pprint (/ 7 2))
+(pprint (div 7 2))
+(pprint "a string")
+(pprint :apple)
+(pprint #true)
+(pprint (list 1 "two" :three (list 4.5)))
+(pprint ())
+
+(pprint (== 1 1.0))
+(pprint (eq? 1 1.0))
+(pprint (eq? (list 1 "two") (list 1 "two")))
+
+(str "apples: " 3)

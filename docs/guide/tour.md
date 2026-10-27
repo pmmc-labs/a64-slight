@@ -251,6 +251,8 @@ Two consequences show up early:
 
 ## Where next
 
+- The [tutorial](tutorial/01-values.md) goes over the same ground more
+  slowly, building a key-value store from a list to a supervised actor.
 - The [guide](README.md) lists what else there is to read, and what's
   coming.
 - [`docs/LANGUAGE.md`](../LANGUAGE.md) is the reference: every form and

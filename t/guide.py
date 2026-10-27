@@ -3,7 +3,8 @@
 # README.md) follows a line <!-- code: path -->, naming a program, and
 # must appear in that program word for word. The programs are in
 # docs/guide/code/, each with a .expected beside it, so t/run.sh runs
-# them as golden tests. A block after <!-- output: path --> must be that
+# them as golden tests (or, for a file of functions alone, with a program
+# that includes it). A block after <!-- output: path --> must be that
 # .expected, whole. A block that's only a sketch, never run, is fenced
 # without the "lisp".
 import os
@@ -40,6 +41,19 @@ def blocks(text):
             marker = None
         i += 1
 
+# A file of functions alone, shared by the guide's programs, is run by
+# the programs that include it.
+def included(src):
+    dir = os.path.dirname(src)
+    form = f'(@include "{os.path.basename(src)}")'
+    for name in os.listdir(dir):
+        path = os.path.join(dir, name)
+        if name.endswith(".slight") and os.path.isfile(path[:-len(".slight")] + ".expected"):
+            with open(path) as f:
+                if form in f.read():
+                    return True
+    return False
+
 failed = 0
 def fail(msg):
     global failed
@@ -69,8 +83,8 @@ for page in pages():
                 if code != f.read():
                     fail(f"{where}: the block isn't {src} as it stands")
         else:
-            if not os.path.isfile(src[:-len(".slight")] + ".expected"):
-                fail(f"{where}: {src} has no .expected, so it's never run")
+            if not os.path.isfile(src[:-len(".slight")] + ".expected") and not included(src):
+                fail(f"{where}: {src} has no .expected, nor does a program that includes it, so it's never run")
             with open(src) as f:
                 if code not in f.read():
                     fail(f"{where}: the block isn't in {src} as it stands")
