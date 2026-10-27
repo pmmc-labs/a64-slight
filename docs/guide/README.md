@@ -23,10 +23,12 @@ The guide has four parts, each for a different need:
      in practice
   5. [When things go wrong](tutorial/05-errors.md): faults, errors,
      `raise`, a supervisor, and tasks and actors
-  6. Timers, and testing with the virtual clock and `(@include :test)`
-     (to come)
-  7. Devices: keeping the store in a file (to come)
-  8. Serving it over a socket with `(@include :rpc)` (to come)
+  6. [Time, and testing](tutorial/06-time.md): keys that expire,
+     the virtual clock, and `(@include :test)`
+  7. [Keeping the store in a file](tutorial/07-files.md): devices, and
+     a log the store starts again from
+  8. [Serving the store](tutorial/08-serving.md) over a socket with
+     `(@include :rpc)`, to programs and people
 - **Concepts** (to come). The ideas you have to adopt to write slight
   well, and why they're there:
   - Nothing changes: where state goes instead

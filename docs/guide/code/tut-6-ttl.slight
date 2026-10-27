@@ -1,0 +1,17 @@
+(@include "tut-ttl.slight")
+
+(let s (spawn (ttl-store () () 1)))
+(call s (list :put-for "session" "abc" 1000))
+(call s (list :put-for "token" "xyz" 500))
+(pprint (call s (list :keys)))
+
+(sleep 600)
+(pprint (call s (list :keys)))
+
+(call s (list :put-for "session" "def" 1000))
+(sleep 600)
+(pprint (call s (list :get "session")))
+
+(sleep 600)
+(pprint (call s (list :get "session")))
+(clock/us)

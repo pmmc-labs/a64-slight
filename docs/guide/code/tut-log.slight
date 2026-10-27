@@ -1,0 +1,40 @@
+; The store kept in a log, as chapter 7 leaves it: every command that
+; changes the table is written to a file as it's run, and a store
+; started on the file runs them again.
+
+(@include "tut-store.slight")
+(@include :fs)
+
+(defun write? (cmd)
+    (member? (car cmd) (list :put :del :incr)))
+
+; The table the log at path says, or an empty one if there's no log.
+(defun load (path)
+    (match (slurp path)
+        ((:ok lines)          (replay () lines))
+        ((:error (:enoent _)) ())))
+
+(defun replay (table lines)
+    (match lines
+        (()            table)
+        ((line & rest) (match (sexp/parse line)
+                           ((:ok cmd) (replay (car (run-command table cmd)) rest))))))
+
+; Starts a store on the log at path, and gives its pid.
+(defun start (path)
+    (let table (load path))
+    (connect :fs/append path (logged-open table)))
+
+(defun logged-open (table)
+    (recv
+        ((:open f) (logged table f))))
+
+(defun logged (table f)
+    (recv
+        ((:do cmd to)
+            (match (run-command table cmd)
+                ((next answer)
+                    (when (and (write? cmd) (eq? (car answer) :ok))
+                        (send f (list :write (sexp/print cmd) \n)))
+                    (reply to answer)
+                    (logged next f))))))

@@ -1,0 +1,4 @@
+fault in #<pid 7>: not a number: "red" (+ at docs/guide/code/tut-store.slight:23:40)
+(restarting not-a-number)
+(error (timeout #<pid 4>))
+(ok 3)

@@ -197,8 +197,5 @@ it. If so, it's an actor.
 
 ---
 
-Previous: [4. Asking and answering](04-asking.md)
-
-The next chapters, on timers and testing, files, and sockets, are still
-to come. Meanwhile, [`docs/LANGUAGE.md`](../../LANGUAGE.md) has them
-all, under Processes and Devices.
+Previous: [4. Asking and answering](04-asking.md) ·
+Next: [6. Time, and testing](06-time.md)
