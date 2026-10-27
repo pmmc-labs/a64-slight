@@ -1,0 +1,12 @@
+; An error you expect is a value.
+(defun safe-div (a b)
+    (if (== b 0)
+        (list :error :div-by-zero)
+        (list :ok (div a b))))
+
+(pprint (safe-div 10 2))
+(pprint (safe-div 1 0))
+
+; A bug is a fault, which ends only the process it happens in.
+(let t (fork (car ())))
+(join t)

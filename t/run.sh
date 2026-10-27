@@ -1,6 +1,7 @@
 #!/bin/sh
-# Golden tests: compile each t/NNN-name.slight and examples/name.slight
-# that has a .expected next to it (or the files given), run it, and diff
+# Golden tests: compile each t/NNN-name.slight, examples/name.slight and
+# docs/guide/code/name.slight that has a .expected next to it (or the
+# files given), run it, and diff
 # what it prints against the .expected: stdout and stderr together, then
 # "exit: N" if it exits with N other than 0. A line "; stdin: bytes" is
 # what the test reads from stdin (keys, say), written
@@ -75,7 +76,7 @@ fi
 
 if [ $# -eq 0 ]; then
     set --
-    for src in t/*.slight examples/*.slight; do
+    for src in t/*.slight examples/*.slight docs/guide/code/*.slight; do
         [ -f "${src%.slight}.expected" ] && set -- "$@" "$src"
     done
 fi

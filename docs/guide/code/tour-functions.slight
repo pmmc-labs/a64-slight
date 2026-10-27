@@ -1,0 +1,20 @@
+; A loop is a tail call: the state is in the arguments.
+(defun sum-to (n acc)
+    (if (== n 0)
+        acc
+        (sum-to (- n 1) (+ acc n))))
+
+(defun square (x) (* x x))
+
+(pprint (sum-to 100 0))
+(pprint (map square (range 1 6)))
+(pprint (filter (lambda (x) (== (% x 2) 0)) (range 1 11)))
+(pprint (fold/l 0 + (list 1 2 3 4)))
+
+; Nothing changes once it's made: cons makes a new list.
+(let xs (list 1 2 3))
+(let ys (cons 0 xs))
+(pprint (list xs ys))
+
+(let greet (lambda (name) (str "hello, " name)))
+(greet "slight")

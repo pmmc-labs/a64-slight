@@ -1,0 +1,11 @@
+; A counter is an actor: its state is the argument of a function that
+; waits for messages.
+(defun counter (n)
+    (recv
+        ((:inc)    (counter (+ n 1)))
+        ((:get to) (reply to n) (counter n))))
+
+; ask sends a request with an address to answer at, and waits there.
+(let c (spawn (counter 0)))
+(dotimes 0 3 (lambda (i) (send c (list :inc))))
+(ask c (list :get))
