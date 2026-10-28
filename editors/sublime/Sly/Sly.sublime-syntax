@@ -1,0 +1,186 @@
+%YAML 1.2
+---
+# slight's C-style syntax, .sly (D246, docs/SYNTAX.md), for Sublime Text.
+# Scopes follow Sublime's naming guidelines, so any colour scheme works.
+name: Sly
+scope: source.sly
+version: 2
+file_extensions:
+  - sly
+
+variables:
+  ident: '[A-Za-z_][A-Za-z0-9_]*\??'
+  name: '{{ident}}(?:::{{ident}})*'
+  # what a keyword is made of: anything but white space and what ends one
+  kwchar: '[^\s()\[\]{},;"''`]'
+  reserved: '\b(?:fn|let|if|else|cond|case|match|recv|spawn|fork|connect|yield|true|false|self|parent)\b'
+  # the process builtins and the prelude's asking, which every program uses
+  builtin: '\b(?:send|join|join::race|join::any|join::all|monitor|kill|raise|after|sleep|read|read::any|address|open|disconnect|ask|ask_within|reply|apply|pprint|timer::cancel|clock::us)\b'
+
+contexts:
+  main:
+    - include: doc-block
+    - include: items
+
+  items:
+    - include: comments
+    - include: fn-definition
+    - include: expressions
+
+  # =doc ... =cut, as in Perl's POD, holding Markdown
+  doc-block:
+    - match: '^(=doc)\s*$'
+      captures:
+        1: meta.directive.sly keyword.other.doc.begin.sly
+      embed: scope:text.html.markdown
+      embed_scope: comment.block.documentation.sly
+      escape: '^(=cut)\s*$'
+      escape_captures:
+        1: meta.directive.sly keyword.other.doc.end.sly
+    - match: '^=[A-Za-z]\S*'
+      scope: invalid.illegal.doc-block.sly
+
+  comments:
+    - match: '//'
+      scope: punctuation.definition.comment.sly
+      push:
+        - meta_scope: comment.line.double-slash.sly
+        - match: '$\n?'
+          pop: true
+
+  # fn name(params) { ... }
+  fn-definition:
+    - match: '\b(fn)\s+({{name}}|`[^`\n]+`)'
+      captures:
+        1: keyword.declaration.function.sly
+        2: entity.name.function.sly
+      push: parameters
+
+  parameters:
+    - match: '\('
+      scope: punctuation.section.parameters.begin.sly
+      set:
+        - meta_scope: meta.function.parameters.sly
+        - match: '\)'
+          scope: punctuation.section.parameters.end.sly
+          pop: true
+        - match: ','
+          scope: punctuation.separator.parameters.sly
+        - match: '{{reserved}}'
+          scope: invalid.illegal.reserved.sly
+        - match: '{{ident}}|`[^`\n]+`'
+          scope: variable.parameter.sly
+        - include: comments
+    - match: '(?=\S)'
+      pop: true
+
+  expressions:
+    - include: comments
+    - include: strings
+    - include: numbers
+    - include: keywords
+    - include: lambda
+    - include: words
+    - include: operators
+    - include: punctuation
+    - include: calls
+    - include: names
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.sly
+      push:
+        - meta_scope: string.quoted.double.sly
+        - match: '"'
+          scope: punctuation.definition.string.end.sly
+          pop: true
+        - match: '\\(?:["\\ntre]|u\{[0-9A-Fa-f]{1,6}\})'
+          scope: constant.character.escape.sly
+        - match: '\\.'
+          scope: invalid.illegal.escape.sly
+
+  numbers:
+    - match: '\b\d+\.\d+(?:[eE][+-]?\d+)?\b'
+      scope: constant.numeric.float.sly
+    - match: '\b\d+\b'
+      scope: constant.numeric.integer.sly
+
+  # :tag, a symbol that stands for itself; :tag( is a tagged list
+  keywords:
+    - match: '(:)({{kwchar}}+)'
+      scope: constant.other.symbol.sly
+      captures:
+        1: punctuation.definition.symbol.sly
+
+  # fn(params) => e, or fn(params) { ... }
+  lambda:
+    - match: '\bfn\b(?=\s*\()'
+      scope: keyword.declaration.function.anonymous.sly
+      push: parameters
+
+  words:
+    - match: '\b(?:if|else|cond|case|match)\b'
+      scope: keyword.control.conditional.sly
+    - match: '\brecv\b'
+      scope: keyword.control.receive.sly
+    - match: '\b(?:spawn|fork|connect|yield)\b'
+      scope: keyword.control.process.sly
+    - match: '\blet\b'
+      scope: keyword.declaration.variable.sly
+    - match: '\b(?:true|false)\b'
+      scope: constant.language.boolean.sly
+    - match: '\b(?:self|parent)\b'
+      scope: variable.language.sly
+    - match: '@include\b'
+      scope: keyword.control.import.sly
+    - match: '@ARGV\b|%ENV\b'
+      scope: variable.language.sly
+
+  operators:
+    - match: '\|>'
+      scope: keyword.operator.pipe.sly
+    - match: '=>'
+      scope: punctuation.separator.arm.sly
+    - match: '\.\.\.'
+      scope: keyword.operator.spread.sly
+    - match: '==|!=|<=|>=|<|>'
+      scope: keyword.operator.comparison.sly
+    - match: '&&|\|\||!'
+      scope: keyword.operator.logical.sly
+    - match: '\+\+|[-+*/%]'
+      scope: keyword.operator.arithmetic.sly
+    - match: '='
+      scope: keyword.operator.assignment.sly
+
+  punctuation:
+    - match: '#\('
+      scope: punctuation.section.tuple.begin.sly
+    - match: '\('
+      scope: punctuation.section.parens.begin.sly
+    - match: '\)'
+      scope: punctuation.section.parens.end.sly
+    - match: '\['
+      scope: punctuation.section.brackets.begin.sly
+    - match: '\]'
+      scope: punctuation.section.brackets.end.sly
+    - match: '\{'
+      scope: punctuation.section.block.begin.sly
+    - match: '\}'
+      scope: punctuation.section.block.end.sly
+    - match: ','
+      scope: punctuation.separator.sly
+    - match: ';'
+      scope: punctuation.terminator.sly
+
+  # a name followed by (, so a call
+  calls:
+    - match: '{{builtin}}(?=\s*\()'
+      scope: support.function.builtin.sly
+    - match: '(?:{{name}}|`[^`\n]+`)(?=\s*\()'
+      scope: variable.function.sly
+
+  names:
+    - match: '`[^`\n]+`'
+      scope: variable.other.raw.sly
+    - match: '{{name}}'
+      scope: variable.other.sly

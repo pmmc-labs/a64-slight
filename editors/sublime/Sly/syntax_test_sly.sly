@@ -1,0 +1,77 @@
+// SYNTAX TEST "Packages/Sly/Sly.sublime-syntax"
+
+// A comment.
+// <- comment.line.double-slash punctuation.definition.comment
+
+fn table::get(key, table) {
+// <- keyword.declaration.function
+// ^^^^^^^^^^ entity.name.function
+//           ^ punctuation.section.parameters.begin
+//            ^^^ variable.parameter
+//               ^ punctuation.separator.parameters
+//                 ^^^^^ variable.parameter
+//                      ^ punctuation.section.parameters.end
+//                        ^ punctuation.section.block.begin
+    match table {
+//  ^^^^^ keyword.control.conditional
+//        ^^^^^ variable.other
+        []                => :not-found,
+//                        ^^ punctuation.separator.arm
+//                           ^^^^^^^^^^ constant.other.symbol
+//                           ^ punctuation.definition.symbol
+        [[k, v], ...rest] => if k == key { v } else { table::get(key, rest) },
+//               ^^^ keyword.operator.spread
+//                           ^^ keyword.control.conditional
+//                                ^^ keyword.operator.comparison
+//                                             ^^^^ keyword.control.conditional
+//                                                    ^^^^^^^^^^ variable.function
+    }
+}
+
+let s = spawn store([]);
+// <- keyword.declaration.variable
+//    ^ keyword.operator.assignment
+//      ^^^^^ keyword.control.process
+//            ^^^^^ variable.function
+send(s, :on-next(v));
+// <- support.function.builtin
+//      ^^^^^^^^ constant.other.symbol
+let n = -(3 * 4) + 10 % 4 ++ "x\n\q";
+//      ^ keyword.operator.arithmetic
+//          ^ keyword.operator.arithmetic
+//               ^ keyword.operator.arithmetic
+//                 ^^ constant.numeric.integer
+//                    ^ keyword.operator.arithmetic
+//                        ^^ keyword.operator.arithmetic
+//                           ^^^^^^^ string.quoted.double
+//                             ^^ constant.character.escape
+//                               ^^ invalid.illegal.escape
+let f = fn(x) => x * 1.5e3;
+//      ^^ keyword.declaration.function.anonymous
+//         ^ variable.parameter
+//            ^^ punctuation.separator.arm
+//                   ^^^^^ constant.numeric.float
+xs |> filter(even?) |> map(square) |> `str/<`(a);
+// ^^ keyword.operator.pipe
+//    ^^^^^^ variable.function
+//           ^^^^^ variable.other
+//                                    ^^^^^^^ variable.function
+recv { :at(at, said) => cond { at == tick => [said, ...heard] } }
+// <- keyword.control.receive
+//                      ^^^^ keyword.control.conditional
+pprint([self, parent, true, false, @ARGV, %ENV, #(1, 2)]);
+//      ^^^^ variable.language
+//            ^^^^^^ variable.language
+//                    ^^^^ constant.language.boolean
+//                                 ^^^^^ variable.language
+//                                        ^^^^ variable.language
+//                                              ^^ punctuation.section.tuple.begin
+@include("tut-table.sly");
+// <- keyword.control.import
+//       ^^^^^^^^^^^^^^^ string.quoted.double
+
+=doc
+# A heading in a doc block
+// <- comment.block.documentation
+=cut
+// <- keyword.other.doc.end
