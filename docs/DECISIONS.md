@@ -5927,3 +5927,58 @@ everything else, your suggestions look good. Let's build it.")*
   socket's messages), parameters' types from their use, contracts, and
   the warning for one tag in both shapes beyond what a send to a known
   actor shows (D246).
+
+**D248. A file with a header is a module.** *(Stevan, Oct 2026: the
+types looked strange among the defuns in s-expressions, and he'd rather
+have them together; "something like .h files, where the header has the
+types and defines what names are exposed": "the simplest route", and
+one that "would also remove all the library helpers from being callable
+outside of the libraries", worth having "even if types end up being
+removed"; and whether that's enough or a proper module system is better
+is left till he's used the types and `.sly` more. Then "go ahead and
+build it", on Claude's proposal.)* A file `X.slight` (or `X.sly`) with a
+file `X.sli` (or `X.slyi`) beside it is a module: the header holds
+`deftype`s, `sig`s and `@include`s of other modules; whoever includes
+the module sees the functions its header has a `sig` for, and its
+types, and the rest is its own; what a header includes, its includers
+see too, as with C's. A file without a header is spliced in, as before
+(D141), so programs split into files are as they were.
+
+- **Linking by renaming.** `compiler/src/modules.ts` makes the units (the
+  prelude, the program, each module) one program again: a module's
+  functions, and its types outside its header, get names with the file
+  in them (`map/bit (in lib/map.slight)`), which no program can write,
+  as `split.ts`'s generated functions do; and each name a unit's code
+  mentions becomes what it means there. So the checker, `split.ts`,
+  `classify.ts` and code generation see one program, as before, and
+  barely changed. People see names without the file: faults, `:system`,
+  printed functions, warnings.
+- **A module's code calls the prelude's functions as the prelude's**
+  (`inc (prelude)`), so a program's own `inc` (D80) doesn't take their
+  place, as it could when libraries were spliced in.
+- **A name another unit keeps, or one in a module not included, is a
+  compile error that says whose it is**: `map/bit is private to
+  lib/map.slight: its header doesn't declare it`, `http/get is
+  lib/http.slight's: include it to use it`.
+- **The prelude and every library have headers,** of what LANGUAGE.md
+  documents: their helpers (`map-loop`, `map/walk`, `http/...`'s
+  parsers) are their own now. Three functions tests used, undocumented,
+  were kept and documented (`http/parse-url`, `tools/read`,
+  `tools/save`). `tools.sli` includes the five libraries `tools` says
+  it includes itself; three tests that used `:http` through `:agent` or
+  `:tools` include it. The prelude's types and sigs moved into
+  `lib/prelude.sli`; the libraries' sigs are typed where their docs make
+  it certain (`fs`, `exec`, `calc`, `map`, `test`) and `any` elsewhere.
+- **In `.sly`, a prototype** (`fun f(x : int) : str;`) is a `sig` alone,
+  as a `.slyi` header declares a function.
+- **`--strict` leaves a module's insides to its own check:** checking a
+  program reports what might go wrong in its own files, and a module is
+  checked strictly as a program of its own, which reads its header.
+- **Rejected:** an `(export ...)` form in the module's own file, as
+  Erlang's `-export` (one file, but the interface can't be shared
+  without the implementation); for now, a richer module system, with
+  imports under other names or of some names only, which prefixes
+  (`http/`, `map::`) already stand in for, and which headers don't rule
+  out: any module system needs interfaces. **Not built:** compiling a
+  module apart from its program (whole-program compiling, D141, still
+  holds), and private names for headerless files.

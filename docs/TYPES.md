@@ -146,8 +146,12 @@ All optional. Three forms, each erased once the checker has read it:
   makes a `sig` from them, just before the `defun`, so the
   s-expressions for an annotated function are its `defun` and a `sig`.
 - In s-expressions, a `sig` goes anywhere at the top level, one for
-  each function at most, as Typed Racket's `:` does. `defun` itself
-  doesn't change.
+  each function at most, as Typed Racket's `:` does: before its `defun`,
+  all together at the top of the file, or in a module's header (`X.sli`
+  or `X.slyi`, D248), which says what the module exports. `defun` itself
+  doesn't change. In `.sly`, a prototype, a function without its body
+  (`fun f(x : int) : str;`), is its `sig` alone, as a header declares a
+  function.
 - A generic function lists its type variables: `fun map<A, B>(f : fun(A)
   -> B, xs : list<A>) : list<B>` and `(sig (map A B) ((fun (A) B) (list
   A)) (list B))`. Only a `sig` is generic; the checker never infers one.
@@ -186,7 +190,9 @@ The checker runs over each function's body, knowing what it was given:
   held to be a float where an integer goes; `/` is a `float`. A
   builtin as a value is a function of any arity, since one with
   optional arguments takes the ones it's called with (D219).
-- **The prelude's functions** have `sig`s, in `lib/prelude.slight`:
+- **The prelude's functions** have `sig`s, in its header,
+  `lib/prelude.sli` (D248), and so do the libraries', in theirs (typed
+  where their docs make it certain, `any` elsewhere for now):
   `lookup<K, V>(k : K, table : list<[K, V]>) : V | :not-found`,
   `nth<T>(i : int, xs : list<T>) : T | nil`, and so on.
 - **A parameter without a type is `any`,** in the function's body.
@@ -352,7 +358,10 @@ counter.sly:9:9: warning: this actor takes :inc() | :get(any) | :stop, and this 
 A warning in a `.sly` file speaks its syntax: its types as `.sly`
 writes them, and names too (`str::len`, `++`). `slightc` still compiles
 and links, and exits 0. With `--strict`, it also reports what might go
-wrong, and exits 1 if it reported anything. `slightc --check file`
+wrong, and exits 1 if it reported anything; but not within the modules
+a program includes (D248), which are checked strictly as programs of
+their own (`slightc --check --strict lib/map.slight`, which reads its
+header too). `slightc --check file`
 checks and reports without compiling, for editors and for tests.
 
 A program in the repository is to check clean: `make types`

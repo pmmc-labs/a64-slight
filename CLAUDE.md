@@ -281,7 +281,15 @@ warnings errors; `--check` only checks. Annotations, erased before code
 generation: `deftype`, `sig` and `the`, and in `.sly` `x : int` (a space
 each side), `fun f<A>(...) : R recv M`, `type Name = T;`. `make types`
 checks every program clean but for what it lists (`; warns: L:C`), and
-`t/types/` is the checker's golden tests. **Next:** to settle with Stevan
+`t/types/` is the checker's golden tests. Modules (D248): a file with a
+header beside it (`X.sli`, or `X.slyi` in `.sly`, of `deftype`s, `sig`s
+and `@include`s) is a module, whose includers see what the header
+declares and nothing else, what a header includes being seen too;
+`compiler/src/modules.ts` links the units by renaming a module's names
+with its file in them (`map/bit (in lib/map.slight)`, shown without);
+the prelude (`lib/prelude.sli`, its types and sigs) and every library
+have headers, so their helpers are their own; a file without a header is
+spliced in as before; golden test 308. **Next:** to settle with Stevan
 (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
@@ -398,10 +406,10 @@ to get them back from git (`3fd71e0`).
 | Path | |
 |---|---|
 | `bin/slightc.ts` | The driver: read and expand (with the files it includes), compile, write `out.S`, link with clang |
-| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `sly.ts` (the C-style syntax, `.sly`, read into the same forms, D246, `docs/SYNTAX.md`), `expand.ts` (`@include`, and the forms that become `cond`; with `keepMatch`, all but `match`, for the checker), `types.ts` (types: union, meet, fits, reading and showing them, D247), `check.ts` (the type checker, its warnings, and `eraseTypes`), `builtins.ts` (the builtins' types), `pattern.ts` (`match`'s and `recv`'s patterns, as tests and bindings), `split.ts` (a `recv` anywhere a tail call could go, made the whole body of a generated receive function), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
+| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `sly.ts` (the C-style syntax, `.sly`, read into the same forms, D246, `docs/SYNTAX.md`), `expand.ts` (`@include`, and the forms that become `cond`; with `keepMatch`, all but `match`, for the checker), `modules.ts` (a file with a header is a module: linking the units by renaming, D248), `types.ts` (types: union, meet, fits, reading and showing them, D247), `check.ts` (the type checker, its warnings, and `eraseTypes`), `builtins.ts` (the builtins' types), `pattern.ts` (`match`'s and `recv`'s patterns, as tests and bindings), `split.ts` (a `recv` anywhere a tail call could go, made the whole body of a generated receive function), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c` (the string builtins, D219), `unicode.c` (Unicode's case mappings and the properties they need, made by `gen-unicode.py`; don't edit it), `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
-| `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `map.slight` (a persistent map, a hash trie, D223), `rpc.slight` (calls between programs, and people, over a connection, D225), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
+| `lib/` | The built-ins `(@include :name)` asks for, each with its header, `NAME.sli`, which says what a program sees of it (D248): `prelude.slight` (in every program; `prelude.sli` has its types and sigs), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `map.slight` (a persistent map, a hash trie, D223), `rpc.slight` (calls between programs, and people, over a connection, D225), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `docs/guide/` | The guide, for learning slight: `README.md` (what's in it and what's to come), `tour.md`, `tutorial/` (a key-value store, a chapter a page), `concepts/` (the ideas, and why), `howto/` (recipes); `code/`, its programs (`tut-` the tutorial's, `con-` the concepts', `howto-` the recipes', and `data/`, files they read), each with a `.expected`, golden tests too, and the files of functions they include (`tut-table.slight`, `tut-store.slight`, `tut-ttl.slight`, `tut-log.slight`, `tut-serve.slight`); a program that writes a file takes its path from `; args:`, under `build/t/`. A `lisp` block in a page follows `<!-- code: path -->`, and an output block `<!-- output: path -->`, and `t/guide.py` checks each is in its file as it stands (README.md's too) |
 | `editors/sublime/` | `Slight/`, a Sublime Text package: `Slight.sublime-syntax` for `.slight` and `Sly.sublime-syntax` for `.sly` (D246), each with its `Comments (...).tmPreferences` and `syntax_test_...`, Sublime's own test of it; `README.md` says how to install it |
@@ -454,7 +462,9 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
   kept in `build/runtime/` until a runtime file changes (D150);
   `--runtime` only builds it. The types are checked first, warnings to
   stderr (D247); `--check` only checks, and `--strict` warns of what
-  might go wrong too, and makes a warning an error.
+  might go wrong too (in the program's own files: a module it includes
+  is checked strictly on its own, `--check --strict lib/map.slight`,
+  D248), and makes a warning an error.
 - Exit codes from `slightc`: 0 ok, 1 compile error (or a warning, with
   `--strict`), 2 usage or toolchain error. `SLIGHT_CC` overrides the C compiler command.
 - `SLIGHT_POISON=1` when running a compiled program makes the collector

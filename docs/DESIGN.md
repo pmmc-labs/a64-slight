@@ -127,8 +127,15 @@ file's forms where it stands, the path relative to the file it's in;
 Only at the top level. A file is included once however often it's asked
 for, and a file that includes itself, directly or not, is an error. Every
 program starts with an unwritten `(@include :prelude)`, whose definitions
-the compiler keeps apart (D80). It's not a module system: everything is
-still one program, compiled whole.
+the compiler keeps apart (D80). A file with a header beside it, `X.sli`
+or `X.slyi`, is a module (D248): its includers see what the header
+declares (`sig`s and `deftype`s), the rest is its own, and what a header
+includes its includers see too. `compiler/src/modules.ts` makes the
+units one program again by renaming: a module's names get its file in
+them, which no program can write, and each name a unit's code mentions
+becomes the one it means there. Everything is still one program,
+compiled whole; a header could let a module be compiled apart one day,
+but nothing needs that yet.
 
 A function takes at most 8 parameters, one register each (see the
 register convention below). More could go on the stack later.

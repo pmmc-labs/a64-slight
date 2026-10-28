@@ -193,8 +193,38 @@ often it's asked for, and a file that includes itself, directly or not,
 is a compile error. Every program starts with an unwritten
 `(@include :prelude)`.
 
-It's not a module system: there's one namespace, and the whole program
-is compiled at once (D141).
+**A file with a header is a module** (D248). The header is a file beside
+it with the same name: `X.sli` (in s-expressions) or `X.slyi` (in the
+C-style syntax) for `X.slight` or `X.sly`. It holds `deftype` and `sig`
+forms, and `@include`s of other modules, and nothing else:
+
+    ; lib/map.sli
+    (deftype (Map K V) tuple)
+    (sig (map/get K V) ((Map K V) K) (or V :not-found))
+    (sig (map/put K V) ((Map K V) K V) (Map K V))
+
+A file that includes a module sees the functions its header has a `sig`
+for, and its header's types; the rest of the module's functions and
+types are its own, and naming one is a compile error that says whose it
+is (`map/bit is private to lib/map.slight: its header doesn't declare
+it`). A `sig` of `any`s exports a function without saying more. What a
+header includes, whoever includes the header sees too, as with C's
+headers. A module's own names don't clash with anyone else's, and its
+code calls the prelude's functions, whatever the program that includes
+it defines. A module defines functions and types, and nothing else runs
+at its top level. Every library has a header, and so does the prelude,
+whose helpers (`map-loop`, `sort-merge`, ...) are its own.
+
+A file without a header is spliced in where it's included, as it always
+was: its names are its includer's, and its top-level forms run there.
+The program is still compiled whole (D141), the modules with it.
+
+In the C-style syntax, a header declares a function by its prototype,
+the function without its body, which is its `sig`:
+
+    // shape.slyi
+    type Shape = :rect(num, num) | :square(num);
+    fun shape::area(s : Shape) : num;
 
 
 ## Syntax
@@ -1961,11 +1991,10 @@ A map is a tuple, so `tuple?` says `#true` of one, and `pprint` shows the
 trie; `map->list` is the way to show it. A `nan` key is never found again,
 since `nan` isn't `eq?` to itself.
 
-Its helpers (`map/get-hashed`, `map/put-hashed`, `map/delete-hashed`,
-which take the key's hash, for tests; `map/bit`, `map/slot`,
-`map/bucket-index`, `map/leaf`, `map/put-at`, `map/pair`,
-`map/delete-at`, `map/collapse`, `map/walk` and `map/walk-slots`) are
-visible too, but not meant to be called.
+Its header (`lib/map.sli`, D248) also gives `map/get-hashed`,
+`map/put-hashed` and `map/delete-hashed`, which take the key's hash, for
+tests; the rest of its functions (`map/bit`, `map/slot`, `map/walk`, ...)
+are its own.
 
 ### (@include :ds)
 
@@ -2068,6 +2097,11 @@ waits for TLS (step 12c).
   length is read to the end of the connection, except for HEAD, 1xx, 204
   and 304, which have no body. `Expect: 100-continue` gets its 100 at
   once.
+- `(http/parse-url url)`: `(:ok host port target)` for
+  `http://host[:port][/path[?query]]`, the port 80 and the target `"/"`
+  when none is given; `(:error :no-tls)` for `https://`, and `(:error
+  (:bad-url url))` for anything else. It's what `http/request` reads its
+  URL with.
 - `(http/stream method url headers body how)` makes the same request, and
   gives the reply to the caller as it comes, in messages, as a device
   gives a file (D181, D182). It gives the stream's pid, `s`, at once. The
@@ -2291,6 +2325,10 @@ argument it needs, or with one that isn't a string.
   `[Next](https://example.com/docs/next)`. A link to a place on the same
   page (`#top`), by a scheme a fetch can't follow (`mailto:`,
   `javascript:`), or with no text (an image's) is just its text.
+- `(tools/read path)`: the file's bytes, as a string, or it raises why
+  not; `(tools/save path text)` makes the file hold `text` and nothing
+  else, or raises why not. What the tools to read and write files are
+  made of, in a task of their own (D243).
 
 The commands these run are given their arguments directly, with no
 shell (but `run`'s), so a path or a text can't be taken for anything

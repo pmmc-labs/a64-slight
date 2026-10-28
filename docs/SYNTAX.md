@@ -34,7 +34,9 @@ this says how `.sly` writes them.
 A file in this syntax ends in `.sly`; one in s-expressions keeps
 `.slight`. `slightc` picks the reader by the
 extension, and `@include` of either kind works from either kind. The
-prelude and `lib/` stay s-expressions.
+prelude and `lib/` stay s-expressions. A module's header (D248) is
+`X.slyi` in this syntax, `X.sli` in s-expressions, and either can go with
+either kind of module.
 
 ## Lexical structure
 
@@ -127,7 +129,7 @@ separated by `s`, a trailing one allowed.
 ```
 file      = { item }
 item      = fndef | doc | include ";" | typedef ";" | "let" ident [ ":" type ] "=" expr end | expr end
-fndef     = "fun" name [ tvars ] "(" sep(param, ",") ")" [ ":" type ] [ "recv" type ] block
+fndef     = "fun" name [ tvars ] "(" sep(param, ",") ")" [ ":" type ] [ "recv" type ] ( block | ";" )
 param     = ident [ ":" type ]
 tvars     = "<" sep(ident, ",") ">"
 typedef   = "type" name [ tvars ] "=" type      (type is a name, but here)
@@ -270,6 +272,7 @@ first, so the pipe doesn't help with them.
 | `let x : T = e;` | `(let x (the T e))` |
 | `fun(x : T) => e` | `(the (fun (T) any) (lambda (x) e))` |
 | `type Name<A> = T;` | `(deftype (Name A) T)` |
+| `fun f(x : int) : str;` | `(sig f (int) str)`: a prototype, as a header (`X.slyi`, D248) declares a function |
 
 A block's value is its last expression, whether or not a `;` follows it.
 An empty block, `{}`, is `()`.

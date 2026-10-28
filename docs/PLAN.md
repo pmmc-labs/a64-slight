@@ -1126,6 +1126,16 @@ the steps that document gives, each with passing tests:
 Also waiting: typed devices beyond the keyboard, parameters' types from
 their use (success typings), and contracts checked at run time.
 
+### Modules (built, D248, Oct 2026)
+
+A file with a header (`X.sli`, `X.slyi`) is a module: its includers see
+what the header declares, and the rest is its own; `modules.ts` links by
+renaming. The prelude and every library have headers. Waiting, till
+Stevan has used types and `.sly` more: whether a richer module system
+(imports under other names, or of some names) is wanted; real types in
+the libraries' headers beyond `fs`, `exec`, `calc`, `map` and `test`;
+and the libraries checking clean under `--strict` on their own.
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written
