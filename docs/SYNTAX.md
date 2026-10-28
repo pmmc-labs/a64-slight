@@ -25,8 +25,9 @@ and says how it was settled, under Questions.
   files and `:source` read and write is unchanged. Code and data look
   different, as they do in Elixir.
 
-Not goals: types, macros, new semantics, or replacing the s-expression
-syntax.
+Not goals: macros, new semantics, or replacing the s-expression
+syntax. Types came later, for both syntaxes (D247, `docs/TYPES.md`);
+this says how `.sly` writes them.
 
 ## Files
 
@@ -89,7 +90,12 @@ kchar   = any character but white space and ( ) [ ] { } , ; " ' `
 ```
 
 So `:on-next`, `:fs/read`, `:tcp/listen`, `:RECV`. A keyword followed
-by `(` is a tagged list (below).
+by `(` is a tagged list (below). A keyword doesn't end in `>`, so that
+a type's `actor<:ok>` closes (D247); `:>` alone is a keyword.
+
+**A type's `:`** has white space on each side (D247): `x : int`. One
+touching a name on its right begins a keyword, and one touching what's
+before it, `x: int`, is an error that says to write `x : int`.
 
 **Literals:**
 
@@ -109,7 +115,8 @@ by `(` is a tagged list (below).
 `%ENV` and `@include` are written as they are. `%ENV` is one token
 wherever `%` is directly followed by `ENV`.
 
-**Punctuation:** `( ) [ ] { } , ; => ... :: |> '` and the operators below.
+**Punctuation:** `( ) [ ] { } , ; => ... :: |> '` and the operators
+below; and in types, `:`, `|` and `->`.
 
 ## Grammar
 
@@ -119,13 +126,16 @@ separated by `s`, a trailing one allowed.
 
 ```
 file      = { item }
-item      = fndef | doc | include ";" | "let" ident "=" expr end | expr end
-fndef     = "fun" name "(" sep(ident, ",") ")" block
+item      = fndef | doc | include ";" | typedef ";" | "let" ident [ ":" type ] "=" expr end | expr end
+fndef     = "fun" name [ tvars ] "(" sep(param, ",") ")" [ ":" type ] [ "recv" type ] block
+param     = ident [ ":" type ]
+tvars     = "<" sep(ident, ",") ">"
+typedef   = "type" name [ tvars ] "=" type      (type is a name, but here)
 include   = "@include" "(" (string | keyword) ")"
 rawname   = "`" any characters but "`" "`"
 
 block     = "{" { stmt } [ expr ] "}"
-stmt      = "let" pattern "=" expr end | expr end
+stmt      = "let" pattern [ ":" type ] "=" expr end | expr end
 end       = ";"            (optional after an expr that ends with "}")
 
 expr      = "spawn" expr | "fork" expr | "yield" expr
@@ -149,7 +159,7 @@ tagged    = keyword "(" sep(expr | spread, ",") ")"
 list      = "[" sep(expr, ",") [ "," spread ] "]" | "[" spread "]"
 spread    = "..." expr
 tuple     = "#(" sep(expr, ",") ")"
-lambda    = "fun" "(" sep(ident, ",") ")" ( "=>" expr | block )
+lambda    = "fun" "(" sep(param, ",") ")" [ ":" type ] ( "=>" expr | block )
 
 if        = "if" expr block [ "else" ( if | block ) ]
 cond      = "cond" "{" sep(expr "=>" body, ",") "}"
@@ -183,6 +193,22 @@ The expression after `if`, `match` or `case`, before its `{`, can't
 itself be a bare block, so `if x {` always opens the `if`'s block. Nor
 can it be a bare `recv`: in `match recv {`, the `{` opens the `recv`'s
 arms. Write `recv { ... }` itself, or `match (recv) { ... }`.
+
+### Types
+
+```
+type      = one { "|" one }
+one       = name [ "<" sep(type, ",") ">" ]          int, list<T>, task<T>, Tree<int>
+          | "true" | "false" | keyword
+          | keyword "(" sep(type | "..." type, ",") ")"
+          | "[" sep(type, ",") [ "," "..." type ] "]" | "[" "..." type "]"
+          | "#(" sep(type, ",") ")"
+          | "fun" [ "(" sep(type, ",") ")" "->" type ]
+          | "(" type ")"
+```
+
+A type's `->` takes all the type after it: `fun(A) -> B | C` gives
+`B | C`.
 
 ### Patterns
 
@@ -239,6 +265,11 @@ first, so the pipe doesn't help with them.
 | `let p = e; rest` (`p` not a name) | `(match e (p rest...))` |
 | `{ s1; s2; e }` as a body | `s1 s2 e`, the forms of the body |
 | `{ s1; s2; e }` as an expression | `(do s1 s2 e)` |
+| `fun f(x : int, y) : str recv M { body }` | `(sig f (int any) str (recv M))` then the `defun` (D247) |
+| `fun f<A>(x : A) : A { body }` | `(sig (f A) (A) A)` then the `defun` |
+| `let x : T = e;` | `(let x (the T e))` |
+| `fun(x : T) => e` | `(the (fun (T) any) (lambda (x) e))` |
+| `type Name<A> = T;` | `(deftype (Name A) T)` |
 
 A block's value is its last expression, whether or not a `;` follows it.
 An empty block, `{}`, is `()`.

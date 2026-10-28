@@ -70,3 +70,22 @@
 ; <- comment.block.documentation
 =cut
 ; <- keyword.other.doc.end
+
+; types (D247)
+(deftype (Tree T) (or :leaf (:node (Tree T) T (Tree T))))
+;^^^^^^^ keyword.declaration.type
+;         ^^^^ entity.name.type
+;              ^ variable.parameter.type
+;                  ^^ support.type
+;                     ^^^^^ constant.other.symbol
+;                                   ^^^^ storage.type
+(sig size ((Tree int)) int (recv Msg))
+;^^^ keyword.declaration.type
+;    ^^^^ entity.name.function
+;                ^^^ storage.type
+;                           ^^^^ support.type
+;                                ^^^ storage.type
+(let n (the int (size t)))
+;       ^^^ keyword.operator.type
+;           ^^^ storage.type
+;                ^^^^ variable.function

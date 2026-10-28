@@ -1,10 +1,11 @@
 # Types for slight
 
-Proposed, **(open)**: nothing here is agreed or built. It's a thought
-experiment written down, as `SYNTAX.md` was before D246, so it can be
-argued with. Each choice that changes the language (a new form, new
-syntax in `.sly`) needs Stevan's word before it's built, and goes into
-`DECISIONS.md` when it has it.
+Agreed (D247) and built: `compiler/src/types.ts`, `check.ts` and
+`builtins.ts`, the annotations in both syntaxes, the prelude's types,
+`slightc --check` and `--strict`, and `make types`. It began as a
+thought experiment, as `SYNTAX.md` did; Stevan took its recommendations
+and settled the `:` (Questions). Where building it changed something,
+this says what was built.
 
 ## Goals
 
@@ -67,7 +68,7 @@ when the code runs.
 | `:ok` | `:ok` | that symbol alone |
 | `true`, `false` | `#true`, `#false` | that boolean alone |
 | `bool` | `bool` | `true \| false` |
-| `[]`, `nil` | `nil` | `()` |
+| `[]`, `nil` | `()`, `nil` | `()` |
 | `list<T>` | `(list T)` | a list, `()` included, of `T`s |
 | `[A, B]` | `(shape A B)` | a list of exactly two, an `A` then a `B` |
 | `[A, ...T]` | `(shape A & T)` | an `A`, then a list of type `T` |
@@ -78,6 +79,7 @@ when the code runs.
 | `actor<M>` | `(actor M)` | an actor's pid; it takes messages of type `M` |
 | `address<M>` | `(address M)` | an address; what's sent to it is an `M` |
 | `pid` | `pid` | any process or device |
+| `tuple`, `fun` | `tuple`, `fun` | any tuple; any function |
 | `A \| B` | `(or A B)` | either |
 | `any` | `any` | anything: not checked |
 | `never` | `never` | nothing: what `raise` gives, or a loop that never returns |
@@ -87,6 +89,11 @@ A tagged list is just a fixed list headed by a keyword, but it gets its
 own notation, since it's how slight writes variants and messages. In
 s-expressions, a list type headed by a keyword is a tagged list, and
 `&` takes the rest, as in patterns: `(:write & (list str))`.
+
+In `.sly`, `fun(A) -> B | C` gives `B | C`, as TypeScript reads it;
+`(fun(A) -> B) | C` is the union of a function and a `C`. And a keyword
+there doesn't take a `>` after it, so `actor<:ok>` closes: in `.sly` no
+keyword ends in `>`.
 
 Types are structural: two types with the same shape are the same type,
 whatever they're called. An alias is only a name for its type, and may
@@ -133,7 +140,9 @@ All optional. Three forms, each erased once the checker has read it:
 
 - In `.sly`, any parameter, a function's result, or a `let`'s name may
   have a type after a `:`, with a space on each side of it (Questions,
-  2), and what's left out is `any`. The reader
+  2), and what's left out is `any`. `type` is a name like any other,
+  but where a top-level item starts with `type Name =` or `type
+  Name<`, which is a type's declaration. The reader
   makes a `sig` from them, just before the `defun`, so the
   s-expressions for an annotated function are its `defun` and a `sig`.
 - In s-expressions, a `sig` goes anywhere at the top level, one for
@@ -155,22 +164,28 @@ All optional. Three forms, each erased once the checker has read it:
 
 Types have names of their own, apart from values', so a `type` named
 `Msg` doesn't clash with a function named `Msg`. Aliases are capitalized
-by convention, not by rule.
+by convention, not by rule. A program can't name a type the prelude
+does (`Result`, `Json`), as it can a function: the builtins' types
+mention them.
 
 ## Inference
 
 The checker runs over each function's body, knowing what it was given:
 
 - **Literals** are their types: `1` is an `int`, `"a"` a `str`, `:ok`
-  the keyword `:ok`, `[1, :a]` a `[int, :a]`. A `let` widens a number or
-  a string to `int`, `float` or `str`, as TypeScript's `let` does;
-  keywords stay as they are, since they're tags.
-- **Builtins** have their types in a table, beside the one in
-  `codegen.ts` that gives their arities: `str::len` is `fun(str) ->
-  int`, `str_to_int` is `fun(str) -> int | false` (and takes a radix too), `json::parse`
-  is `fun(str) -> Result<Json, :bad-json(int)>`. Arithmetic follows the
-  numbers: `int + int` is an `int`, a `float` with either is a `float`,
-  and `num + num` is a `num`; `/` is a `float`.
+  the keyword `:ok`, `[1, :a]` a `[int, :a]`. A number or a string has
+  no type of its own value, so nothing needs widening; a keyword is its
+  own, since it's a tag.
+- **Builtins** have their types in a table, `compiler/src/builtins.ts`
+  (their arities are code generation's): `str::len` is `fun(str) ->
+  int`, `str_to_int` `fun(str) -> int | false` (with a radix too), and
+  `json::parse` `fun(str) -> :ok(Json) | :error(:bad-json(int))`.
+  Arithmetic follows the numbers: `int + int` is an `int`, a `float`
+  with either is a `float`, `num + num` a `num`, and with an `any`
+  either side, `any`, so a value worked out from what isn't known isn't
+  held to be a float where an integer goes; `/` is a `float`. A
+  builtin as a value is a function of any arity, since one with
+  optional arguments takes the ones it's called with (D219).
 - **The prelude's functions** have `sig`s, in `lib/prelude.slight`:
   `lookup<K, V>(k : K, table : list<[K, V]>) : V | :not-found`,
   `nth<T>(i : int, xs : list<T>) : T | nil`, and so on.
@@ -178,10 +193,20 @@ The checker runs over each function's body, knowing what it was given:
   Inferring parameters' types from how they're used (Dialyzer's success
   typings) is a question below.
 - **A function's result,** when it has no `sig`, is worked out from its
-  body: the types of all the values it can end with, together. A
-  function that calls itself starts as `never` and is worked out again
-  till it stops changing. After three rounds it's `any`, so the checker
-  always finishes.
+  body: the types of all the values it can end with, together. Every
+  function's starts as `never`, and they're all worked out again, each
+  put to use as soon as it is, till none changes. From the third round a
+  list a loop builds is a `list<T>`, however long it was (a short tagged
+  list keeps its shape), and one still changing after six is `any`, so
+  the checker always finishes.
+- **A generic call** works its type variables out from the arguments
+  that aren't lambdas, then gives each lambda its parameters' types
+  from them; a lambda's result can change a variable (`fold/l`'s
+  accumulator), so that's worked out quietly till they settle, and the
+  lambda is checked once, with what they came to.
+- **A form that never gives a value** (a fault the checker is sure of,
+  `raise`, a loop that never returns) ends what's checked of its body:
+  what comes after it can't run.
 - **`cond`, `match` and `recv`** give the union of their arms.
 
 ### Narrowing
@@ -195,10 +220,12 @@ out of the type the arms after it see.
 
 A test in `cond` (and so in `if`, `when` and `case`) narrows too, when
 it's one the checker knows: a type predicate (`int?(x)`, `str?(x)`,
-`nil?(x)`, `cons?(x)` and the rest), `x == lit` or `eq?(x, lit)`, `!`
-of one of those, and `&&` of them. In the clause it's true, and its
-complement in the clauses after. Nothing else narrows: there are no
-user-written guards, and nothing follows a value into a function.
+`nil?(x)`, `cons?(x)` and the rest), `x == lit` or `eq?(x, lit)`, a
+local itself (`if x`, which is `true` there), `!` of one of those, and
+`&&` and `||` of them. In the clause it's true, and its complement in
+the clauses after. A `case`'s topic, a local bound to another local, is
+narrowed with it. Nothing else narrows: there are no user-written
+guards, and nothing follows a value into a function.
 
 ```
 fun arg(i : int, args : list<int | false>, default : int) : int {
@@ -224,16 +251,23 @@ goes).
 | `cons` onto something that isn't a list | `:not-a-list` |
 | A test that isn't a boolean: `if lookup(k, t) { ... }` | `:not-a-bool` |
 | A call of something that isn't a function, or with the wrong number of arguments through a function value | `:not-a-function`, `:arity` |
-| A `match` whose arms don't cover the topic's type, when it has no `any` in it | `:no-match` |
+| A `match` none of whose arms can match the topic's type | `:no-match` |
 | An arm no value can reach: its pattern can't fit what's left | (dead code) |
 | A message no `recv` of the actor can take | a dead letter |
-| `join` of an actor; `send`, `after` or `monitor` with a task | `:not-a-task`, `:not-an-actor` |
-| `address`, `read` or `open` in a function that waits | `:not-a-task` |
-| A device's messages that the actor connected to it can never take | every one a dead letter |
+| `join` of an actor; `join`, `monitor` or `kill` of an address; `monitor` in a task | `:not-a-task`, `:not-a-pid`, `:not-an-actor` |
+| `address`, `read`, `read/any` or `open` in a function that waits | `:not-a-task` |
+| An actor connected to the keyboard that can take no key | every key a dead letter |
+| A call against its `sig`, a body against its result, `the` against its value | (what the program said) |
 
-The fifth row closes a question `SYNTAX.md` left open (3, D246): a
-message sent as `:stop()` to an actor that takes `:stop` is a dead
-letter, and it's found when the program is compiled.
+And with `--strict`: a `match` whose arms leave out part of the topic's
+type, when it has no `any` in it; a `send` or `after` to a task, which
+faults only if the task hasn't ended (one that has takes it, as any
+ended process does); and every argument, test and result whose type is
+wider than the one wanted.
+
+The row for messages closes a question `SYNTAX.md` left open (3, D246),
+for sends: a message sent as `:stop()` to an actor that takes `:stop` is
+a dead letter, and it's found when the program is compiled.
 
 ## Processes
 
@@ -294,12 +328,13 @@ fun counter(n : int) recv CounterMsg {
 ### Messages from the runtime
 
 A device sends what `LANGUAGE.md` says it does, and those have types
-too: the keyboard sends `[str | sym, ...list<sym>]`, a timer sends what
-`after` was given, `monitor` brings `:exit(pid, any)`, and a file read by lines
-`:open(pid) | :line(pid, str) | :eof(pid)`. These are checked
-against the connected actor's mailbox as `send`s are. `open` gives a
-`Result<pid, any>` and `read` of a device an `any`, at first; a typed
-device is a question below.
+too. Built: the keyboard's, `[str | sym, ...list<sym>]`, checked
+against the mailbox of the actor connected to it. A timer's message is
+`after`'s, checked as a `send`'s is. The other devices' messages (a
+file's `:open(pid) | :line(pid, str) | :eof(pid)`, `monitor`'s
+`:exit(pid, any)`) aren't checked yet: `open` gives `:ok(pid) |
+:error(any)`, and `read` of a device `any`; a typed device is a
+question below.
 
 `ask(pid, msg)` gives `any`, since its answer's type is the protocol's,
 not `ask`'s. `let n : int = ask(c, :get())` says what's expected, and is
@@ -311,39 +346,53 @@ Warnings go to stderr as compile errors do, with the place and what a
 run would do:
 
 ```
-counter.sly:9:1: warning: counter takes :inc() | :get(any) | :stop; :inc is none of those, a dead letter
+counter.sly:9:9: warning: this actor takes :inc() | :get(any) | :stop, and this is :inc: it would be a dead letter
 ```
 
-`slightc` still compiles and links, and exits 0. With `--strict`, it
-also reports what might go wrong, and exits 1 if it reported anything.
-`slightc --check file` checks and reports without compiling, for
-editors and for tests.
+A warning in a `.sly` file speaks its syntax: its types as `.sly`
+writes them, and names too (`str::len`, `++`). `slightc` still compiles
+and links, and exits 0. With `--strict`, it also reports what might go
+wrong, and exits 1 if it reported anything. `slightc --check file`
+checks and reports without compiling, for editors and for tests.
 
-A program in the repository is to check clean: `make types` runs
-`slightc --check` over every test, example and the guide's code, and
-fails on a warning unless the program's header lists it (`; warns:
-9:1`), as some tests mean to fault. The checker's own tests are unit
-tests, `compiler/tests/check.test.ts`, as the reader's are, and golden
-tests of whole programs' warnings.
+A program in the repository is to check clean: `make types`
+(`t/types.ts`, every program in one process, in a few seconds) checks
+every test, example and the guide's code, and fails on a warning unless
+the program lists it in a line `; warns: 9:1 12:5` (`// warns:` in
+`.sly`), which the tests that mean to fault have, at their end, where
+it moves no line; and on a listed one that doesn't come. The checker's
+own tests are unit tests, `compiler/tests/check.test.ts`, and golden
+tests of whole programs' warnings, `t/types/NAME.slight` (or `.sly`),
+each with its `.expected`, `--strict` if a line says `; check: strict`.
+
+Its first run found a real bug: `author/boids.slight` joined its
+display actor, which D243 had made a fault (`:not-a-task`).
 
 ## In the compiler
 
-- `compiler/src/types.ts`: types as s-expressions, as everything else
-  is: what fits what, union, narrowing by a pattern, and reading a type
-  from its s-expression.
+- `compiler/src/types.ts`: the types, records of a few shapes (a
+  slight port would make them tagged lists): union, what two have in
+  common (meet), what fits what, a type's members, reading one from its
+  s-expression, and showing one in either syntax. 560 lines.
 - `compiler/src/check.ts`: the pass. It runs on the forms `expand.ts`
-  gives (all `cond` and `match`, includes spliced in), before
-  `split.ts`, so its places are the source's, and it uses
-  `classify.ts`'s graph of functions that wait. It drops `deftype`,
-  `sig` and `the` from what goes on, so code generation doesn't change.
-- `compiler/src/sly.ts`: the `:` annotations, `type`, and `fun f<A>`.
-- Builtins' types next to their arities; the prelude's in `sig`s.
+  gives with `match` kept (`expandProgram`'s `keepMatch`), includes
+  spliced in, before `split.ts`, so its places are the source's; the
+  driver then lowers the matches as `expand.ts` always did. It uses
+  `classify.ts`'s fixpoint over tail calls, with a recv anywhere in a
+  body, to know which functions wait. `eraseTypes`, which code
+  generation calls first, drops `deftype` and `sig` and makes `(the T
+  e)` `e`, so the code is the same with types or without. 1,140 lines.
+- `compiler/src/builtins.ts`: the builtins' types. 240 lines.
+- `compiler/src/sly.ts`: the `:` annotations, `type`, and `fun f<A>`,
+  about 170 lines.
 
-A guess at its size: 1,500 to 2,500 lines of TypeScript, most of it
-narrowing and what fits what, against the compiler's 4,800 now. It
-would be ported with the rest when the compiler self-hosts.
+About 2,100 lines in all, against the 1,500 to 2,500 guessed, and the
+compiler's 4,800 before. It would be ported with the rest when the
+compiler self-hosts.
 
 ## Building it
+
+Steps 1 to 4 are done (D247); 5 waits.
 
 1. **The lint.** `types.ts` and `check.ts`, builtins' types, inference
    in a body, narrowing, and the warnings that need no annotations:
@@ -362,6 +411,9 @@ Each step leaves every program compiling and running as before, and
 the tests passing.
 
 ## Questions
+
+All settled (D247): Stevan took the recommendations, and settled 2
+himself.
 
 1. **Warnings, or errors?** Proposed: warnings, since a slight program
    with a bug in one process still runs the rest, and `--strict` for

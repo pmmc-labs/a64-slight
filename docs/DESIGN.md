@@ -75,6 +75,14 @@ program was in.
 
 Booleans are the reserved symbols `#true` and `#false`.
 
+Those are what values are, when the program runs. Before it does, the
+compiler checks what it can of them (D247, `docs/TYPES.md`): a type is
+one of those, or a keyword alone, a list's shape, a union, `any`; it's
+inferred from literals, the builtins, the prelude's sigs, patterns and
+tests, and said, if a program wants, with `deftype`, `sig` and `the`.
+It warns only about what's certain to go wrong, unless `--strict`, and
+never changes the code.
+
 ### Special forms (10)
 
 | Form | Meaning |
@@ -88,6 +96,7 @@ Booleans are the reserved symbols `#true` and `#false`.
 | `(fork expr)` | Runs `expr` in a new process and returns its pid. |
 | `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`, or a Unix socket, `(connect :unix path expr)` or `(connect :unix/listen path expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
 | `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
+| `(deftype ...)`, `(sig ...)`, `(the type expr)` | Types (D247): a type's name and a function's types, at the top level, and an expression's. The checker reads them; code generation leaves them out (`(the T e)` is `e`). Not counted among the 10, since none does anything when the program runs. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
 Function bodies and clause bodies can hold several forms, as if wrapped in
@@ -1231,7 +1240,10 @@ that's just a walk over every function.
 
 1. **Read** text into s-expressions with source positions.
 2. **Expand** (`expand.ts`): splice in what `@include` asks for, and make
-   `if`, `when`, `case`, `and` and `or` into `cond`.
+   `if`, `when`, `case`, `and` and `or` into `cond`, keeping `match`.
+   **Check the types** (`check.ts`, D247): warnings, on the source's
+   forms and places. Then make `match` into `cond` too, and erase the
+   types (`deftype`, `sig`, `the`).
 3. **Check and expand** the 10 special forms. `let` becomes nested scopes,
    `quote` becomes constants.
 4. **Resolve names** as locals, globals or builtins. Check arity on calls

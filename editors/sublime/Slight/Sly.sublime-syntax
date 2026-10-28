@@ -25,8 +25,42 @@ contexts:
 
   items:
     - include: comments
+    - include: type-definition
     - include: fun-definition
     - include: expressions
+
+  # type Name<A> = T; (D247)
+  type-definition:
+    - match: '^\s*(type)\s+({{name}})(?=\s*[=<])'
+      captures:
+        1: keyword.declaration.type.sly
+        2: entity.name.type.sly
+      push: type-declared
+
+  type-declared:
+    - match: '<'
+      scope: punctuation.definition.generic.begin.sly
+      push: type-vars
+    - match: '='
+      scope: keyword.operator.assignment.sly
+      set: type-to-semicolon
+    - match: '(?=\S)'
+      pop: true
+
+  type-to-semicolon:
+    - meta_scope: meta.type.sly
+    - match: '(?=;)'
+      pop: true
+    - include: type-atoms
+
+  type-vars:
+    - match: '>'
+      scope: punctuation.definition.generic.end.sly
+      pop: true
+    - match: ','
+      scope: punctuation.separator.sly
+    - match: '{{ident}}'
+      scope: variable.parameter.type.sly
 
   # =doc ... =cut, as in Perl's POD, holding Markdown
   doc-block:
@@ -58,6 +92,9 @@ contexts:
       push: parameters
 
   parameters:
+    - match: '<'
+      scope: punctuation.definition.generic.begin.sly
+      push: type-vars
     - match: '\('
       scope: punctuation.section.parameters.begin.sly
       set:
@@ -65,6 +102,7 @@ contexts:
         - match: '\)'
           scope: punctuation.section.parameters.end.sly
           pop: true
+        - include: annotation
         - match: ','
           scope: punctuation.separator.parameters.sly
         - match: '{{reserved}}'
@@ -75,8 +113,78 @@ contexts:
     - match: '(?=\S)'
       pop: true
 
+  # a type's :, with space each side (D247), and the type after it, to
+  # what ends it: , ) = { => ; or recv
+  annotation:
+    - match: '(?<=\s)(:)(?=\s)'
+      scope: punctuation.separator.type.sly
+      push: type-after-colon
+    - match: '\b(recv)\s+(?={{name}}\s*(?:\{|<|\|))'
+      captures:
+        1: keyword.control.receive.sly
+      push: type-after-colon
+
+  type-after-colon:
+    - meta_scope: meta.type.sly
+    - match: '(?=[,)={;]|=>|\brecv\b)'
+      pop: true
+    - include: type-atoms
+
+  # what's in a type
+  type-atoms:
+    - include: comments
+    - match: '<'
+      scope: punctuation.definition.generic.begin.sly
+      push: type-nested-angle
+    - match: '\('
+      scope: punctuation.section.parens.begin.sly
+      push: type-nested-paren
+    - match: '#\('
+      scope: punctuation.section.tuple.begin.sly
+      push: type-nested-paren
+    - match: '\['
+      scope: punctuation.section.brackets.begin.sly
+      push: type-nested-bracket
+    - match: '->'
+      scope: keyword.operator.type.arrow.sly
+    - match: '\|'
+      scope: keyword.operator.type.union.sly
+    - match: '\.\.\.'
+      scope: keyword.operator.spread.sly
+    - match: ','
+      scope: punctuation.separator.sly
+    - match: '(:)([^\s()\[\]{},;"''`<>]+)'
+      scope: constant.other.symbol.sly
+      captures:
+        1: punctuation.definition.symbol.sly
+    - match: '\b(?:true|false)\b'
+      scope: constant.language.boolean.sly
+    - match: '\b(?:list|task|actor|address|fun)\b'
+      scope: support.type.sly
+    - match: '{{name}}'
+      scope: storage.type.sly
+
+  type-nested-angle:
+    - match: '>'
+      scope: punctuation.definition.generic.end.sly
+      pop: true
+    - include: type-atoms
+
+  type-nested-paren:
+    - match: '\)'
+      scope: punctuation.section.parens.end.sly
+      pop: true
+    - include: type-atoms
+
+  type-nested-bracket:
+    - match: '\]'
+      scope: punctuation.section.brackets.end.sly
+      pop: true
+    - include: type-atoms
+
   expressions:
     - include: comments
+    - include: annotation
     - include: strings
     - include: quoted
     - include: numbers

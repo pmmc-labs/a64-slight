@@ -21,6 +21,15 @@ files can be given, and together they're one program, read in order. On
 Linux the program is a static binary, which runs on any Linux of its
 machine's kind, in an empty container (`FROM scratch`) too (D227).
 
+Every program's types are checked first (Types, below), and what's sure
+to go wrong when it runs is a warning, on stderr; the program is
+compiled anyway:
+
+    hello.slight:3:10: warning: str/len's argument is int, not str: it faults :not-a-string
+
+`--check` checks and compiles nothing. `--strict` also warns where a
+value may not be what's wanted, and makes any warning an error.
+
 A program is a sequence of top-level forms:
 
 - A `defun` defines a function. Every function is global, and they can
@@ -513,6 +522,67 @@ one, and so can a `recv`. If no pattern fits, the process faults
 A name can be in a pattern only once, and it can't be a name that can't
 be bound (`$$`, `cond`, ...). There are no guards: match the shape, and
 test the rest in the body, with `cond`.
+
+
+## Types
+
+The compiler knows what it can of each value's type, and says, before
+the program runs, what will go wrong if it gets there: a builtin given
+what it never takes, a test that's never a boolean, a match none of
+whose arms can match, an arm nothing can reach, a message an actor can
+never take, a task sent to or an actor joined (D247, `docs/TYPES.md`).
+It knows the builtins' types, the prelude's, literals', what patterns
+and tests say of a value, and what each function gives; where it knows
+nothing, it says nothing. Types say nothing to the code: a program runs
+the same with them or without.
+
+A type is a name, `int`, `float`, `num` (either), `str`, `sym`, `bool`,
+`nil`, `pid`, `tuple`, `fun`, `any` or `never`; a keyword, `#true` or
+`#false`, that value alone; or a form: `(list T)`, a list of `T`s;
+`(shape A B)`, a list of an `A` and a `B`, and `(shape A & T)`, an `A`
+then a list of type `T`; `(:tag A B)`, a list headed by `:tag`, with `&`
+for the rest as in patterns; `(tuple A B)`; `(fun (A B) C)`; `(or A B)`;
+`(task T)`, a task whose value is a `T`; `(actor M)`, an actor that takes
+messages of type `M`; `(address M)`; or a name `deftype` gave, with its
+parameters: `(Result int str)`.
+
+### deftype
+
+    (deftype Name type)
+    (deftype (Name A B) type)
+
+Top level only. Names a type; `A` and `B` stand for the types it's
+given. A type may mention itself, and one declared after it:
+
+    (deftype (Tree T) (or :leaf (:node (Tree T) T (Tree T))))
+
+The prelude names `(Result T E)`, `(or (:ok T) (:error E))`, and `Json`,
+what `json/parse` gives.
+
+### sig
+
+    (sig name (param-type ...) result-type)
+    (sig name (param-type ...) result-type (recv message-type))
+    (sig (name A B) (param-type ...) result-type)
+
+Top level only, one for a function, which must be defined. Says what its
+parameters and its result are, and, for a function that waits, what the
+actor it's in takes; a call, and the function's body, are checked
+against it. A `sig` with type variables is generic: each call works out
+what they are from its arguments.
+
+    (sig (map A B) ((fun (A) B) (list A)) (list B))
+    (sig counter (int) int (recv (or (:inc) (:get (address int)) :stop)))
+
+### the
+
+    (the type expr)
+
+`expr`, checked to be a `type`, and taken to be one after; not a
+conversion. `(let n (the int (ask c (list :get))))`.
+
+In `.sly`, a type's `:` has a space on each side: `fun f(x : int, y) :
+str { ... }` (`docs/SYNTAX.md`).
 
 
 ## Functions and calls

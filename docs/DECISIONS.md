@@ -5862,3 +5862,68 @@ newline rule, which makes a `;` of a newline after `}` and so needs
 exceptions for `else`, `,`, `)` and every arm; and Rust's, ending a
 statement that begins with a block-like form at its `}`, which would
 stop `if ... { } else { } |> f` there.)*
+
+**D247. Types: a checker that warns, by inference, with annotations
+that say more.** *(Stevan, Oct 2026: a thought experiment, "Could we add
+types to the language? And if so, how deep do we go?", then Claude's
+write-up, `docs/TYPES.md`; "enforce a space around the `:` so that
+`x: int` is a syntax error, and `x : int` is what we expect"; and "for
+everything else, your suggestions look good. Let's build it.")*
+`docs/TYPES.md` has it all; in short:
+
+- **Two depths, one checker.** By default it warns only about what will
+  go wrong if that code runs, as Dialyzer does: a value that can't be
+  what's asked of it, a message no recv of the actor can take, a match
+  none of whose arms can match, an arm nothing reaches. It never rejects
+  a program that might work, so a warning on a program that works is the
+  checker's bug. `--strict` also warns where a type is wider than the
+  one wanted, as TypeScript's checker does, and makes warnings errors.
+  Types are erased: code generation is the same with them or without,
+  so a wrong checker costs a warning, never a run. Rejected: sound
+  inference, Hindley-Milner as Gleam's (slight's tagged lists,
+  association lists and mailboxes would need declared variants and a
+  `Dynamic` type, every example would change, and a large engine would
+  have to be ported); contracts checked at run time, for now; types in
+  code generation, till the checker has been used a while.
+- **Types as slight's values are:** structural, with unions, a keyword
+  as a type of its own, a list as `()` or a cons (`[A, B]`, `:tag(A)`,
+  `list<T>`), tuples, functions, `task<T>`, `actor<M>`, `address<M>`,
+  `pid`, and `any`, which fits everything both ways, so where nothing is
+  known nothing is said. Aliases may refer to themselves (`Json`).
+- **Inferred:** literals, the builtins' types (`builtins.ts`), the
+  prelude's sigs, each function's result (worked out from `never` up,
+  all at once, till nothing changes), narrowing by patterns and by the
+  tests it knows, and an actor's mailbox: the union of the patterns of
+  every recv it can be in, its own function's and those it can go on to,
+  since there's no selective receive. A parameter without a type is
+  `any`; inferring it from its use is left for later.
+- **Annotations, three new forms that compile to nothing:** `(deftype
+  Name T)`, `(sig f (T ...) R)` beside a `defun` (Typed Racket's way,
+  so `defun` is as it was), with `(recv M)` for what its actor takes and
+  `(sig (f A B) ...)` for a generic one, and `(the T e)`. In `.sly`:
+  `type Name<A> = T;`, `fun f<A>(x : T, y) : R recv M { }`, `let x :
+  T = e;`, and `fun(x : T) => e`. The `:` has a space on each side,
+  Stevan's rule: one touching a name on its right begins a keyword, and
+  `x: int` is an error that says what to write. Rejected: `x: int`
+  (TypeScript's), `x :: int` (`::` is in names) and C's `int x`; types
+  in comments, which leave `.sly` nowhere to put them.
+- **Built:** `compiler/src/types.ts`, `check.ts` and `builtins.ts`,
+  about 2,100 lines with the reader's part. It runs on the expanded
+  forms with `match` kept, before `split.ts`; `slightc` checks every
+  program, warnings to stderr, `--check` only checks, `--strict` as
+  above. The prelude has sigs, and `Result` and `Json`. `make types`
+  (`t/types.ts`) checks every test, example and the guide's code clean,
+  but for the warnings a program lists (`; warns: L:C`, which the tests
+  of faults have); `t/types/` is the checker's own golden tests, and
+  `compiler/tests/check.test.ts` its unit tests, the prelude checked
+  against its own sigs among them.
+- **Found while building it:** `author/boids.slight` joined its display
+  actor, which D243 had made a fault; it reads it now. In `.sly`, a
+  keyword no longer ends in `>`, so that `actor<:ok>` closes, and `type`
+  is a declaration only where a top-level item is `type Name =` or
+  `type Name<`; `->` and `|` are tokens. `send` to a task is a warning
+  only with `--strict`, since a task that has ended takes it.
+- **Not built yet:** typed devices beyond the keyboard (a file's or a
+  socket's messages), parameters' types from their use, contracts, and
+  the warning for one tag in both shapes beyond what a send to a known
+  actor shows (D246).

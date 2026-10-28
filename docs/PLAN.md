@@ -1096,7 +1096,8 @@ A second way to write slight, `.sly`, read into the same s-expressions
    tests 303 to 307 (306 and 307: game-of-life-actors and boids,
    converted, to the examples' own output).
 2. **The warning** for a tag used both bare and as a tagged list in one
-   program (D246), which helps the s-expressions too.
+   program (D246), which helps the s-expressions too: done for a send
+   to an actor whose recvs are known, by the type checker (D247).
 3. **The converters,** `slightc --to-sly` and `--to-slight`, which keep
    comments and doc blocks, and lay a program out by rules of their own.
 4. **The guide in both syntaxes:** every program in `docs/guide/code/`
@@ -1105,6 +1106,25 @@ A second way to write slight, `.sly`, read into the same s-expressions
 
 Each of 2 to 4 waits for Stevan to have written some `.sly` and to say
 it's worth keeping.
+
+### Types (agreed and built, D247, Oct 2026)
+
+A checker that warns before a program is compiled (`docs/TYPES.md`), in
+the steps that document gives, each with passing tests:
+
+1. **The lint** (done): `types.ts`, `check.ts`, `builtins.ts`; what's
+   certain from literals, builtins, patterns and tests; `slightc
+   --check`; `make types` over every program.
+2. **Processes** (done): task, actor and address types, mailboxes from
+   `recv`, dead letters, an actor joined, the keyboard.
+3. **Annotations** (done): `deftype`, `sig`, `the`, their `.sly`
+   syntax, generics, and the prelude's sigs.
+4. **`--strict`** (done).
+5. **Types in code generation:** waits, till the checker has been used
+   a while, and then only with benchmarks to show it's worth it.
+
+Also waiting: typed devices beyond the keyboard, parameters' types from
+their use (success typings), and contracts checked at run time.
 
 ### 17. Self-host
 

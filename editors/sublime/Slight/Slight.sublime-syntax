@@ -69,6 +69,32 @@ contexts:
   # A form's head says what it is: a definition, a special form, a
   # builtin, or a call.
   forms:
+    # types (D247): (deftype Name T), (deftype (Name A) T), (sig f (T) R),
+    # (sig (f A) (T) R), and (the T e)
+    - match: '(\()\s*(deftype|sig)\s+(\()\s*({{sym}})'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.declaration.type.slight
+        3: punctuation.section.parens.begin.slight
+        4: entity.name.type.slight
+      push: [type-body, type-params]
+    - match: '(\()\s*(deftype)\s+({{sym}})'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.declaration.type.slight
+        3: entity.name.type.slight
+      push: type-body
+    - match: '(\()\s*(sig)\s+({{sym}})'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.declaration.type.slight
+        3: entity.name.function.slight
+      push: type-body
+    - match: '(\()\s*(the){{ends}}'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.operator.type.slight
+      push: type-one
     - match: '(\()\s*(defun)\s+({{sym}})'
       captures:
         1: punctuation.section.parens.begin.slight
@@ -133,6 +159,60 @@ contexts:
         - include: comments
     - match: '(?=\S)'
       pop: true
+
+  # A type's parameters, A B), after (deftype ( or (sig (
+  type-params:
+    - match: '\)'
+      scope: punctuation.section.parens.end.slight
+      pop: true
+    - match: '{{sym}}'
+      scope: variable.parameter.type.slight
+    - include: comments
+
+  # types, to the ) that closes the form they're in
+  type-body:
+    - meta_scope: meta.type.slight
+    - match: '\)'
+      scope: punctuation.section.parens.end.slight
+      pop: true
+    - include: type-atoms
+
+  type-atoms:
+    - include: comments
+    - match: '\('
+      scope: punctuation.section.parens.begin.slight
+      push: type-body
+    - match: '(:)({{sym}})'
+      scope: constant.other.symbol.slight
+      captures:
+        1: punctuation.definition.symbol.slight
+    - match: '#(?:true|false){{ends}}'
+      scope: constant.language.boolean.slight
+    - match: '&{{ends}}'
+      scope: keyword.operator.rest.slight
+    - match: '(?:list|shape|tuple|fun|or|task|actor|address|recv){{ends}}'
+      scope: support.type.slight
+    - match: '{{sym}}'
+      scope: storage.type.slight
+
+  # the one type after (the
+  type-one:
+    - match: '\('
+      scope: punctuation.section.parens.begin.slight
+      set: type-body
+    - match: '(?=\S)'
+      set:
+        - include: comments
+        - match: '(:)({{sym}})'
+          scope: constant.other.symbol.slight
+          captures:
+            1: punctuation.definition.symbol.slight
+          pop: true
+        - match: '{{sym}}'
+          scope: storage.type.slight
+          pop: true
+        - match: '(?=\S)'
+          pop: true
 
   atoms:
     - match: '(?<!{{notdelim}}){{number}}'

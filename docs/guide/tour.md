@@ -161,6 +161,18 @@ as the top level does here with `join`. Since processes are cheap, the
 way to contain something that might go wrong is to run it in a process
 of its own.
 
+A bug as plain as that one is found before the program runs, too. The
+compiler knows what it can of each value's type, and warns of what's
+sure to go wrong if that code runs:
+
+```
+docs/guide/code/tour-errors.slight:11:14: warning: car takes a non-empty list, and this is (): it faults :not-a-cons
+```
+
+It compiles the program anyway: the fault would end only its own
+process. Where it can't tell what a value is, it says nothing, and a
+program can tell it more, with types of its own (LANGUAGE.md, "Types").
+
 ## Tasks
 
 A **task** is a process that computes a value. `fork` starts one and

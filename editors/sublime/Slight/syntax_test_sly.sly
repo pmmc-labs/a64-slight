@@ -93,3 +93,42 @@ let q = ['a, 'b, '42];
 //            ^ constant.other.symbol
 //                ^^ constant.numeric
 //                  ^ punctuation.section.brackets.end
+
+// types (D247)
+type Tree<T> = :leaf | :node(Tree<T>, T, Tree<T>);
+// <- keyword.declaration.type
+//   ^^^^ entity.name.type
+//        ^ variable.parameter.type
+//             ^^^^^ constant.other.symbol
+//                   ^ keyword.operator.type.union
+//                           ^^^^ storage.type
+//                                               ^ punctuation.terminator
+fun size<T>(t : Tree<T>, n) : int recv Msg {
+//      ^ punctuation.definition.generic.begin
+//       ^ variable.parameter.type
+//          ^ variable.parameter
+//            ^ punctuation.separator.type
+//              ^^^^ storage.type
+//                       ^ variable.parameter
+//                          ^ punctuation.separator.type
+//                            ^^^ storage.type
+//                                ^^^^ keyword.control.receive
+//                                     ^^^ storage.type
+    0
+}
+let f : fun(int) -> list<str> | :none = g;
+//    ^ punctuation.separator.type
+//      ^^^ support.type
+//          ^^^ storage.type
+//               ^^ keyword.operator.type.arrow
+//                  ^^^^ support.type
+//                       ^^^ storage.type
+//                            ^ keyword.operator.type.union
+//                              ^^^^^ constant.other.symbol
+//                                    ^ keyword.operator.assignment
+//                                      ^ variable.other
+let h = fun(x : int) => x;
+//          ^ variable.parameter
+//            ^ punctuation.separator.type
+//              ^^^ storage.type
+//                   ^^ punctuation.separator.arm
