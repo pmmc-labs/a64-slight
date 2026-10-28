@@ -1,0 +1,157 @@
+%YAML 1.2
+---
+# slight's s-expressions, .slight (docs/LANGUAGE.md, "Syntax"), for
+# Sublime Text. Scopes follow Sublime's naming guidelines, and match the
+# .sly syntax's, so the two look alike in any colour scheme.
+name: Slight
+scope: source.slight
+version: 2
+file_extensions:
+  - slight
+
+variables:
+  # a name is a run of anything but these (LANGUAGE.md, "Syntax")
+  delim: '[\s()''";`,]'
+  sym: '[^\s()''";`,]+'
+  notdelim: '[^\s()''";`,]'
+  ends: '(?={{delim}}|$)'
+  number: '-?\d+(?:\.\d+(?:[eE][+-]?\d+)?)?{{ends}}'
+  # what can be at the head of a form and be a function: not a number,
+  # a keyword, or a # word
+  head: '(?!{{number}})[^\s()''";`,:#][^\s()''";`,]*'
+  builtin: '(?:send|join|join/race|join/any|join/all|monitor|kill|raise|after|sleep|read|read/any|address|open|disconnect|ask|ask-within|reply|apply|pprint|timer/cancel|clock/us){{ends}}'
+
+contexts:
+  main:
+    - include: doc-block
+    - include: expressions
+
+  # =doc ... =cut, as in Perl's POD, holding Markdown
+  doc-block:
+    - match: '^(=doc)\s*$'
+      captures:
+        1: meta.directive.slight keyword.other.doc.begin.slight
+      embed: scope:text.html.markdown
+      embed_scope: comment.block.documentation.slight
+      escape: '^(=cut)\s*$'
+      escape_captures:
+        1: meta.directive.slight keyword.other.doc.end.slight
+    - match: '^=[A-Za-z]\S*'
+      scope: invalid.illegal.doc-block.slight
+
+  expressions:
+    - include: comments
+    - include: strings
+    - include: forms
+    - include: atoms
+
+  comments:
+    - match: ';'
+      scope: punctuation.definition.comment.slight
+      push:
+        - meta_scope: comment.line.semicolon.slight
+        - match: '$\n?'
+          pop: true
+
+  strings:
+    - match: '"'
+      scope: punctuation.definition.string.begin.slight
+      push:
+        - meta_scope: string.quoted.double.slight
+        - match: '"'
+          scope: punctuation.definition.string.end.slight
+          pop: true
+        - match: '\\(?:["\\ntre]|u\{[0-9A-Fa-f]{1,6}\})'
+          scope: constant.character.escape.slight
+        - match: '\\.'
+          scope: invalid.illegal.escape.slight
+
+  # A form's head says what it is: a definition, a special form, a
+  # builtin, or a call.
+  forms:
+    - match: '(\()\s*(defun)\s+({{sym}})'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.declaration.function.slight
+        3: entity.name.function.slight
+      push: parameters
+    - match: '(\()\s*(lambda){{ends}}'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.declaration.function.anonymous.slight
+      push: parameters
+    - match: '(\()\s*(if|when|cond|case|match|and|or|do){{ends}}'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.control.conditional.slight
+    - match: '(\()\s*(recv){{ends}}'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.control.receive.slight
+    - match: '(\()\s*(spawn|fork|connect|yield){{ends}}'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.control.process.slight
+    - match: '(\()\s*(let){{ends}}'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.declaration.variable.slight
+    - match: '(\()\s*(quote){{ends}}'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.operator.quote.slight
+    - match: '(\()\s*(@include){{ends}}'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: keyword.control.import.slight
+    - match: '(\()\s*({{builtin}})'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: support.function.builtin.slight
+    - match: '(\()\s*({{head}})'
+      captures:
+        1: punctuation.section.parens.begin.slight
+        2: variable.function.slight
+    - match: '#\('
+      scope: punctuation.section.tuple.begin.slight
+    - match: '\('
+      scope: punctuation.section.parens.begin.slight
+    - match: '\)'
+      scope: punctuation.section.parens.end.slight
+
+  # (params...) after defun or lambda
+  parameters:
+    - match: '\('
+      scope: punctuation.section.parameters.begin.slight
+      set:
+        - meta_scope: meta.function.parameters.slight
+        - match: '\)'
+          scope: punctuation.section.parameters.end.slight
+          pop: true
+        - match: '{{sym}}'
+          scope: variable.parameter.slight
+        - include: comments
+    - match: '(?=\S)'
+      pop: true
+
+  atoms:
+    - match: '(?<!{{notdelim}}){{number}}'
+      scope: constant.numeric.slight
+    - match: '(:)({{sym}})'
+      scope: constant.other.symbol.slight
+      captures:
+        1: punctuation.definition.symbol.slight
+    - match: '('')({{sym}})'
+      captures:
+        1: keyword.operator.quote.slight
+        2: constant.other.symbol.slight
+    - match: ''''
+      scope: keyword.operator.quote.slight
+    - match: '#(?:true|false){{ends}}'
+      scope: constant.language.boolean.slight
+    - match: '(?:\$\$|\^\$\$|@ARGV|%ENV){{ends}}'
+      scope: variable.language.slight
+    - match: '[`,]'
+      scope: invalid.illegal.unquote.slight
+    - match: '{{sym}}'
+      scope: variable.other.slight

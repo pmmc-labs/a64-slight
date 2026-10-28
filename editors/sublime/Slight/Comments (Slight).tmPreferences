@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Ctrl+/ (Cmd+/ on a Mac) comments out lines with ; -->
+<plist version="1.0">
+<dict>
+    <key>scope</key>
+    <string>source.slight</string>
+    <key>settings</key>
+    <dict>
+        <key>shellVariables</key>
+        <array>
+            <dict>
+                <key>name</key>
+                <string>TM_COMMENT_START</string>
+                <key>value</key>
+                <string>; </string>
+            </dict>
+        </array>
+    </dict>
+</dict>
+</plist>

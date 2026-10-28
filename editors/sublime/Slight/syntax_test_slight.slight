@@ -1,0 +1,72 @@
+; SYNTAX TEST "Packages/Slight/Slight.sublime-syntax"
+
+; A comment.
+; <- comment.line.semicolon punctuation.definition.comment
+
+(defun table/get (key table)
+; <- punctuation.section.parens.begin
+;^^^^^ keyword.declaration.function
+;      ^^^^^^^^^ entity.name.function
+;                ^ punctuation.section.parameters.begin
+;                 ^^^ variable.parameter
+;                     ^^^^^ variable.parameter
+;                          ^ punctuation.section.parameters.end
+    (match table
+;   ^ punctuation.section.parens.begin
+;    ^^^^^ keyword.control.conditional
+;          ^^^^^ variable.other
+        (()             :not-found)
+;                       ^^^^^^^^^^ constant.other.symbol
+;                       ^ punctuation.definition.symbol
+        (((k v) & rest) (if (eq? k key) v (table/get key rest)))))
+;                        ^^ keyword.control.conditional
+;                            ^^^ variable.function
+;                                          ^^^^^^^^^ variable.function
+
+(let s (spawn (store ())))
+;^^^ keyword.declaration.variable
+;    ^ variable.other
+;       ^^^^^ keyword.control.process
+;              ^^^^^ variable.function
+(send s (list :on-next v))
+;^^^^ support.function.builtin
+;             ^^^^^^^^ constant.other.symbol
+(let n (+ (- 0 (* 3 4)) (% 10 4) -7 1.5e3 1e3 "x\n\q"))
+;       ^ variable.function
+;          ^ variable.function
+;               ^ variable.function
+;                 ^ constant.numeric
+;                                ^^ constant.numeric
+;                                   ^^^^^ constant.numeric
+;                                         ^^^ variable.other
+;                                             ^^^^^^^ string.quoted.double
+;                                               ^^ constant.character.escape
+;                                                 ^^ invalid.illegal.escape
+(lambda (x) (str->int x))
+;^^^^^^ keyword.declaration.function.anonymous
+;        ^ variable.parameter
+;            ^^^^^^^^ variable.function
+(pprint (list $$ ^$$ #true #false @ARGV %ENV 'zebra '(1 2)))
+;^^^^^^ support.function.builtin
+;             ^^ variable.language
+;                ^^^ variable.language
+;                    ^^^^^ constant.language.boolean
+;                          ^^^^^^ constant.language.boolean
+;                                 ^^^^^ variable.language
+;                                       ^^^^ variable.language
+;                                            ^ keyword.operator.quote
+;                                             ^^^^^ constant.other.symbol
+;                                                   ^ keyword.operator.quote
+(recv ((:put k v) v) (#(a b) a))
+;^^^^ keyword.control.receive
+;       ^^^^ constant.other.symbol
+;                     ^^ punctuation.section.tuple.begin
+(@include :fs)
+;^^^^^^^^ keyword.control.import
+;         ^^^ constant.other.symbol
+
+=doc
+# A heading in a doc block
+; <- comment.block.documentation
+=cut
+; <- keyword.other.doc.end
