@@ -1,0 +1,25 @@
+(@include "tut-ttl.slight")
+(@include :test)
+
+; The reply alone, from running cmd on table.
+(defun reply-of (table cmd)
+    (cadr (run-command table cmd)))
+
+(let t1 (car (run-command () (list :put "a" 1))))
+(let s (spawn (ttl-store () () 1)))
+
+(run-tests (list
+    (is (reply-of () (list :get "a")) (list :error :not-found) "get of a key that isn't there")
+    (is (reply-of t1 (list :get "a")) (list :ok 1) "get of a key that is")
+    (is (reply-of t1 (list :incr "a")) (list :ok 2) "incr adds one")
+    (is (reply-of () (list :incr "a")) (list :ok 1) "incr counts from 0")
+    (is (reply-of () (list :bogus)) (list :error (list :unknown (list :bogus))) "an unknown command")
+    (is (call s (list :put-for "k" "v" 100)) (list :ok "v") "put-for")
+    (is (do (sleep 150) (call s (list :get "k"))) (list :error :not-found) "a key expires")
+    (is (do (call s (list :put-for "k" "v" 100))
+            (call s (list :put "k" "w"))
+            (sleep 150)
+            (call s (list :get "k")))
+        (list :ok "w")
+        "a put without a time stops the expiry")
+    (ok (== (clock/us) 300000) "the clock moved by the sleeps alone")))

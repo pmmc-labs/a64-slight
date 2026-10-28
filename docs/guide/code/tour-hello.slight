@@ -1,0 +1,2 @@
+; The program prints the value of its last form.
+"hello, world"

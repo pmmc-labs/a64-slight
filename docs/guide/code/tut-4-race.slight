@@ -1,0 +1,19 @@
+(@include "tut-store.slight")
+
+; Adds one to a key's value, in two steps: get it, then put it back.
+(defun bump (s key)
+    (match (call s (list :get key))
+        ((:ok n) (call s (list :put key (+ n 1))))))
+
+(let s (spawn (store ())))
+(call s (list :put "hits" 0))
+
+(let a (fork (bump s "hits")))
+(let b (fork (bump s "hits")))
+(pprint (list (join a) (join b)))
+(pprint (call s (list :get "hits")))
+
+(let c (fork (call s (list :incr "views"))))
+(let d (fork (call s (list :incr "views"))))
+(pprint (list (join c) (join d)))
+(call s (list :get "views"))

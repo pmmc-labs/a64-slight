@@ -1,0 +1,24 @@
+(defun fib (n)
+    (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+
+; On the virtual clock, work takes no time.
+(let t0 (clock/us))
+(fib 20)
+(pprint (- (clock/us) t0))
+
+; Timers fire in the order they're due, and those due together in the
+; order they were set.
+(defun collect (got n)
+    (if (== n 0)
+        (reverse got)
+        (recv (m (collect (cons m got) (- n 1))))))
+
+(defun timed ()
+    (after 20 $$ :b)
+    (after 10 $$ :a)
+    (after 20 $$ :c)
+    (send $$ :now)
+    (collect () 4))
+
+(pprint (read (spawn (timed))))
+(clock/us)

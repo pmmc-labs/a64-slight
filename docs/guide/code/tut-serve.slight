@@ -1,0 +1,25 @@
+; The store served over a connection, as chapter 8 leaves it.
+
+(@include "tut-log.slight")
+(@include :rpc)
+
+; A handler's answer is its value, and a raise is a failure, which is
+; what the caller gets as (:ok v) and (:error reason).
+(defun answer (reply)
+    (match reply
+        ((:ok value)     value)
+        ((:error reason) (raise reason))))
+
+(defun handlers (s)
+    (list
+        (rpc/handler "get" "A key's value." (list (list "key" :string "The key"))
+            (lambda (key) (answer (call s (list :get key)))))
+        (rpc/handler "put" "Gives a key a value."
+            (list (list "key" :string "The key") (list "value" :any "Its value"))
+            (lambda (key value) (answer (call s (list :put key value)))))
+        (rpc/handler "del" "Takes a key out." (list (list "key" :string "The key"))
+            (lambda (key) (answer (call s (list :del key)))))
+        (rpc/handler "incr" "Adds one to a key's value." (list (list "key" :string "The key"))
+            (lambda (key) (answer (call s (list :incr key)))))
+        (rpc/handler "keys" "Every key." ()
+            (lambda () (answer (call s (list :keys)))))))

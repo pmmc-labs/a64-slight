@@ -1,0 +1,36 @@
+; The store, as chapter 4 leaves it: an actor that runs commands on a
+; table, and answers each at the address that came with it.
+
+(@include "tut-table.slight")
+
+(defun run-command (table cmd)
+    (match cmd
+        ((:put key value) (list (table/put key value table) (list :ok value)))
+        ((:get key)       (list table (found (table/get key table))))
+        ((:del key)       (list (table/del key table) (list :ok ())))
+        ((:keys)          (list table (list :ok (table/keys table))))
+        ((:incr key)      (incr key table))
+        (_                (list table (list :error (list :unknown cmd))))))
+
+(defun found (value)
+    (if (eq? value :not-found)
+        (list :error :not-found)
+        (list :ok value)))
+
+; A key that isn't there counts from 0.
+(defun incr (key table)
+    (let n (table/get key table))
+    (let next (if (eq? n :not-found) 1 (+ n 1)))
+    (list (table/put key next table) (list :ok next)))
+
+(defun store (table)
+    (recv
+        ((:do cmd to)
+            (match (run-command table cmd)
+                ((next answer)
+                    (reply to answer)
+                    (store next))))))
+
+; A task's way to run a command: send it, and wait for the reply.
+(defun call (s cmd)
+    (ask s (list :do cmd)))

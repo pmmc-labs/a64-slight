@@ -1,0 +1,5 @@
+(put "apple" 3)
+(put "pear" 5)
+(incr "apple")
+(del "pear")
+((ok 4) (ok ("apple")))

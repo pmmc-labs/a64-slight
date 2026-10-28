@@ -1,0 +1,24 @@
+; args: docs/guide/code/data/events.ndjson
+(pprint (json/parse "{\"a\": [1, 2.5], \"b\": null}"))
+(pprint (json/parse "[1,]"))
+
+; A field of an object, or :not-found.
+(defun field (obj key)
+    (match obj
+        ((:object & fields) (lookup key fields))))
+
+; Reads a file of JSON values, one after another, adding up "ms".
+(defun total-ms (path)
+    (match (open :fs/read path)
+        ((:ok f)
+            (send f (list :read :json))
+            (total-loop f 0 ()))))
+
+(defun total-loop (f ms users)
+    (match (read f)
+        ((:json _ event) (total-loop f (+ ms (field event "ms")) (cons (field event "user") users)))
+        ((:eof _)        (list :object (list "total_ms" ms) (list "users" (reverse users))))))
+
+(let summary (total-ms (car @ARGV)))
+(tty/write (json/print summary) \n)
+(field summary "total_ms")

@@ -1,0 +1,38 @@
+; The store with keys that expire, as chapter 6 leaves it.
+
+(@include "tut-store.slight")
+
+; table is the store's, timers holds (key (serial timer)) for each key
+; that expires, and serial is the next expiry's.
+(defun ttl-store (table timers serial)
+    (recv
+        ((:do (:put-for key value ms) to)
+            (let t (after ms $$ (list :expire key serial)))
+            (reply to (list :ok value))
+            (ttl-store
+                (table/put key value table)
+                (table/put key (list serial t) (drop-timer key timers))
+                (+ serial 1)))
+        ((:expire key n)
+            (match (table/get key timers)
+                ((m _) (if (== m n)
+                           (ttl-store (table/del key table) (table/del key timers) serial)
+                           (ttl-store table timers serial)))
+                (_     (ttl-store table timers serial))))
+        ((:do cmd to)
+            (match (run-command table cmd)
+                ((next answer)
+                    (reply to answer)
+                    (ttl-store next (forget cmd timers) serial))))))
+
+; A key put or deleted without a time no longer expires.
+(defun forget (cmd timers)
+    (match cmd
+        ((:put key _) (drop-timer key timers))
+        ((:del key)   (drop-timer key timers))
+        (_            timers)))
+
+(defun drop-timer (key timers)
+    (match (table/get key timers)
+        ((_ t) (timer/cancel t) (table/del key timers))
+        (_     timers)))

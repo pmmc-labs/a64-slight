@@ -1,0 +1,19 @@
+; args: build/t/tut-7-log.log
+(@include "tut-log.slight")
+
+(let path (if (nil? @ARGV) "store.log" (car @ARGV)))
+(spew path ())
+
+(let s (start path))
+(call s (list :put "apple" 3))
+(call s (list :put "pear" 5))
+(call s (list :incr "apple"))
+(call s (list :del "pear"))
+(call s (list :get "apple"))
+(kill s)
+
+(match (slurp path)
+    ((:ok lines) (map (lambda (line) (tty/write line \n)) lines)))
+
+(let s2 (start path))
+(list (call s2 (list :get "apple")) (call s2 (list :keys)))

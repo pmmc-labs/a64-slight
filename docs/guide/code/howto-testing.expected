@@ -1,0 +1,9 @@
+ok 1 - lower-cases, and joins with -
+ok 2 - trims
+not ok 3 - squeezes spaces
+#          got: "a--b"
+#     expected: "a-b"
+# slugify is here to keep the example short
+1..3
+# Looks like you failed 1 test of 3.
+#false

@@ -1,0 +1,23 @@
+(defun worker (job)
+    (match job
+        ((:div a b) (div a b))
+        ((:check n) (if (< n 0) (raise (list :negative n)) n))))
+
+(pprint (join (fork (worker (list :div 6 3)))))
+(pprint (join (fork (worker (list :div 1 0)))))
+(pprint (join (fork (worker (list :check -5)))))
+
+(let sleeper (fork (sleep 1000)))
+(kill sleeper)
+(pprint (join sleeper))
+
+; An actor hears of another process's end by monitoring it.
+(defun watcher (job)
+    (let p (fork (worker job)))
+    (monitor p)
+    (recv
+        ((:exit _ result) (list :watched result))))
+
+(pprint (read (spawn (watcher (list :check -1)))))
+
+(raise :gave-up)

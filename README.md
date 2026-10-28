@@ -5,35 +5,28 @@ mutated. This is its compiler, which turns a whole program into native
 code for AArch64 (macOS on Apple Silicon, and Linux) or x86-64, linked
 with a small actor runtime in C and assembly.
 
-A slight program is processes sending each other messages. `fork`
-starts a process, `send` copies a value into its mailbox, and `recv`
-takes the next message. What would be mutable state elsewhere lives in a
-process, in the arguments of the function it loops through, one call per
+A slight program is processes sending each other messages. `spawn`
+starts an actor, `send` copies a value into its mailbox, and `recv`
+takes the next message; `fork` starts a task, which computes a value
+that `join` waits for. What would be mutable state elsewhere lives in an
+actor, in the arguments of the function it loops through, one call per
 message. Errors are values: a process ends with `(:ok value)` or
 `(:error reason)`, and a fault such as an integer overflow ends only the
 process it happens in.
 
+<!-- code: docs/guide/code/readme-counter.slight -->
 ```lisp
-; A counter is a process: its state is the argument of a function that
+; A counter is an actor: its state is the argument of a function that
 ; waits for messages.
 (defun counter (n)
     (recv
-        ((:inc)      (counter (+ n 1)))
-        ((:get from) (send from (list :count n)) (counter n))))
+        ((:inc)    (counter (+ n 1)))
+        ((:get to) (reply to n) (counter n))))
 
-; Asking means sending, then waiting for the answer in a function of its
-; own, since only a whole function body can wait.
-(defun ask (c)
-    (send c (list :get $$))
-    (answer))
-
-(defun answer ()
-    (recv
-        ((:count n) n)))
-
-(let c (fork (counter 0)))
+; ask sends a request with an address to answer at, and waits there.
+(let c (spawn (counter 0)))
 (dotimes 0 3 (lambda (i) (send c (list :inc))))
-(ask c)
+(ask c (list :get))
 ```
 
 This prints `3`: the value of the program's last form.
@@ -96,6 +89,9 @@ settles.
 
 ## Documents
 
+- [`docs/guide/`](docs/guide/README.md): the guide, for learning slight:
+  a tour, a tutorial that builds a key-value store, the ideas behind
+  slight, and recipes.
 - [`docs/LANGUAGE.md`](docs/LANGUAGE.md): the language: every form and
   builtin, and how a program runs.
 - [`docs/DESIGN.md`](docs/DESIGN.md): the design of the language, the

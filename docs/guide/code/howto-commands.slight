@@ -1,0 +1,22 @@
+(@include :exec)
+
+; A command run to its end: its status, and all it printed.
+(pprint (exec/run (list "echo" "hello")))
+(pprint (exec/run (list "sh" "-c" "echo out; echo err >&2; exit 3")))
+(pprint (exec/run (list "no-such-command")))
+
+; A command given input, and read a line at a time.
+(defun sorted (lines)
+    (match (open :exec (list "sort"))
+        ((:ok p)
+            (map (lambda (line) (send p (list :write line \n))) lines)
+            (send p (list :eof))
+            (collect p ()))))
+
+(defun collect (p out)
+    (match (read p)
+        ((:line _ s)        (collect p (cons s out)))
+        ((:eof _)           (collect p out))
+        ((:exited _ status) (list status (reverse out)))))
+
+(sorted (list "pear" "apple" "fig"))

@@ -299,7 +299,9 @@ to get them back from git (`3fd71e0`).
   `docs/DECISIONS.md` (who decided, why, what was rejected) and update
   `docs/DESIGN.md`.
 - When a special form or builtin is added or changes, update
-  [`docs/LANGUAGE.md`](docs/LANGUAGE.md) (no tables there).
+  [`docs/LANGUAGE.md`](docs/LANGUAGE.md) (no tables there), and the
+  guide (`docs/guide/`) where it shows it: its code is golden tests, so
+  `make test` says which pages a change broke.
 - Keep a working compiler with passing tests at the end of every step
   (Ghuloum). Each step adds golden tests.
 - **Examples bend to the language, not the other way round.** When an
@@ -382,6 +384,7 @@ to get them back from git (`3fd71e0`).
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c` (the string builtins, D219), `unicode.c` (Unicode's case mappings and the properties they need, made by `gen-unicode.py`; don't edit it), `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
 | `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `map.slight` (a persistent map, a hash trie, D223), `rpc.slight` (calls between programs, and people, over a connection, D225), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
+| `docs/guide/` | The guide, for learning slight: `README.md` (what's in it and what's to come), `tour.md`, `tutorial/` (a key-value store, a chapter a page), `concepts/` (the ideas, and why), `howto/` (recipes); `code/`, its programs (`tut-` the tutorial's, `con-` the concepts', `howto-` the recipes', and `data/`, files they read), each with a `.expected`, golden tests too, and the files of functions they include (`tut-table.slight`, `tut-store.slight`, `tut-ttl.slight`, `tut-log.slight`, `tut-serve.slight`); a program that writes a file takes its path from `; args:`, under `build/t/`. A `lisp` block in a page follows `<!-- code: path -->`, and an output block `<!-- output: path -->`, and `t/guide.py` checks each is in its file as it stands (README.md's too) |
 | `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, `.ss` for Chez Scheme, and `.rs` for Rust, the actor programs alone, on tokio, D224); `Cargo.toml` and `Cargo.lock`, the Rust programs as one package, and `rt.rs`, the runtime they start; `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
 | `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's; SIGTERM, as PID 1 too, and a command's orphan, as PID 1; a runaway
 process in a cgroup of 256 MB, faulting at its cap; a command killed at
@@ -393,12 +396,13 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
 ## Commands
 
 - `npm install` once, for `typescript` (used only by `make check`).
-- `make test`: unit tests, the runtime header check, then the golden tests,
+- `make test`: unit tests, the runtime header check, the guide's check
+  (`t/guide.py`), then the golden tests,
   the replay checks and the live checks (`t/live.py`, Python 3) for each
   of `TARGETS` (aarch64 and x86_64 on an x86-64 machine, aarch64 on
   arm64). About two minutes on a cloud session.
-- `make unit`, `make golden`, `make replay`, `make live`, `make headers`:
-  one at a time.
+- `make unit`, `make guide`, `make golden`, `make replay`, `make live`,
+  `make headers`: one at a time.
   `t/run.sh t/003-int-max.slight` runs one golden test, for `TARGET`
   (`aarch64` unless set: `TARGET=x86_64 t/run.sh ...`). The golden tests
   run `JOBS` at a time (one per CPU unless set; `JOBS=1` for one at a

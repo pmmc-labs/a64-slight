@@ -1,0 +1,33 @@
+(@include "tut-table.slight")
+
+(defun run-command (table cmd)
+    (match cmd
+        ((:put key value) (list (table/put key value table) (list :ok value)))
+        ((:get key)       (list table (found (table/get key table))))
+        ((:del key)       (list (table/del key table) (list :ok ())))
+        ((:keys)          (list table (list :ok (table/keys table))))
+        (_                (list table (list :error (list :unknown cmd))))))
+
+(defun found (value)
+    (if (eq? value :not-found)
+        (list :error :not-found)
+        (list :ok value)))
+
+; The store: its table is its argument, and it runs a command for each
+; message.
+(defun store (table)
+    (recv
+        ((:do cmd)
+            (match (run-command table cmd)
+                ((next answer)
+                    (pprint answer)
+                    (store next))))
+        (:stop table)))
+
+(let s (spawn (store ())))
+(send s (list :do (list :put "apple" 3)))
+(send s (list :do (list :put "pear" 5)))
+(send s (list :put "plum" 7))
+(send s (list :do (list :keys)))
+(send s :stop)
+(read s)

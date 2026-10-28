@@ -1,0 +1,17 @@
+(defun slow-square (n ms)
+    (sleep ms)
+    (* n n))
+
+; The result of pid, a task, or (:error :timeout) if it takes longer
+; than ms.
+(defun within (ms pid)
+    (let timer (fork (sleep ms)))
+    (match (join/race (list pid timer))
+        ((p result) (if (eq? p pid)
+                        (do (kill timer) result)
+                        (do (kill pid) (list :error :timeout))))))
+
+(pprint (join/all (map (lambda (n) (fork (slow-square n (* n 100)))) (list 1 2 3))))
+(pprint (within 250 (fork (slow-square 5 100))))
+(pprint (within 250 (fork (slow-square 6 400))))
+(clock/us)

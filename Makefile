@@ -1,7 +1,8 @@
 # make test     the compiler's unit tests, the runtime header check, then
 #               the golden tests (t/run.sh), the record and replay checks
 #               (t/replay.sh) and the live checks (t/live.py) for each of
-#               $(TARGETS)
+#               $(TARGETS), and that the guide's code is the code tested
+#               (t/guide.py)
 # make check    type-check the compiler (needs `npm install` first)
 # make bench    the benchmarks, against other languages (bench/run.py,
 #               docs/BENCHMARKS.md); BENCH passes it options: BENCH=--quick
@@ -35,7 +36,7 @@ endif
 sketch:
 	node bin/slightc.ts -o "./sketch" "author/sketch.slight"
 
-test: unit headers golden replay live
+test: unit headers guide golden replay live
 
 unit:
 	node --test "compiler/tests/**/*.test.ts"
@@ -49,6 +50,10 @@ replay:
 	@fail=0; for target in $(TARGETS); do \
 		echo "# $$target replay"; TARGET=$$target ./t/replay.sh || fail=1; \
 	done; exit $$fail
+
+# Every lisp block in docs/guide/ and README.md is in a golden test
+guide:
+	python3 t/guide.py
 
 live:
 	@fail=0; for target in $(TARGETS); do \
@@ -76,4 +81,4 @@ clean:
 		rm -rf "./sketch.dSYM"; \
     fi
 
-.PHONY: test unit golden replay live headers check bench clean
+.PHONY: test unit guide golden replay live headers check bench clean

@@ -1,0 +1,11 @@
+(defun fib (n)
+    (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+
+; Two mirrors of the same file: whichever answers first is used.
+(defun fetch (mirror)
+    (list mirror (fib 15)))
+
+(let a (fork (fetch "mirror-a")))
+(let b (fork (fetch "mirror-b")))
+(match (join/race (list a b))
+    ((_ (:ok (mirror _))) mirror))

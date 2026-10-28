@@ -1,0 +1,8 @@
+(defun area (shape)
+    (match shape
+        ((:square side) (* side side))
+        ((:rect w h)    (* w h))
+        ((:circle r)    (* math/PI (* r r)))))
+
+(let shapes (list (list :square 3) (list :rect 2 5) (list :circle 1)))
+(map area shapes)

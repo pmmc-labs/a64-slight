@@ -1,0 +1,8 @@
+(ok 3)
+(ok 5)
+(ok 3)
+(ok ())
+(error not-found)
+(ok ("pear"))
+(error (unknown (frobnicate)))
+(("pear" 5))

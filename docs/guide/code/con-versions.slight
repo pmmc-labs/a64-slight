@@ -1,0 +1,14 @@
+(@include :map)
+
+; Every version of a map is a value of its own: a change makes a new
+; map, which shares all but what changed with the old one.
+(let v1 (map/put (map/new) "apple" 3))
+(let v2 (map/put v1 "pear" 5))
+(let v3 (map/delete v2 "apple"))
+(let history (list v1 v2 v3))
+
+(pprint (map (lambda (m) (map/get m "apple")) history))
+(pprint (map map/size history))
+
+; So undo is going back to an older value.
+(map/get (car history) "apple")

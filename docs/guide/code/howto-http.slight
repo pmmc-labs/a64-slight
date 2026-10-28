@@ -1,0 +1,29 @@
+(@include :http)
+
+(defun handler (req)
+    (match (list (lookup :method req) (lookup :path req))
+        ((:get "/hello")
+            (list 200 (list (list "Content-Type" "text/plain"))
+                (str "hello, " (lookup :query req))))
+        ((:post "/sum")
+            (match (json/parse (lookup :body req))
+                ((:ok numbers) (list 200 (list (list "Content-Type" "application/json")) (json/print (sum numbers))))
+                ((:error _)    (list 400 () "not JSON"))))
+        (_
+            (list 404 () "not found"))))
+
+; A response's status and body.
+(defun show (response)
+    (match response
+        ((:ok (status _ body)) (list status body))
+        ((:error reason)       (list :error reason))))
+
+(match (http/listen 0 handler)
+    ((:ok (l port))
+        (let base (str "http://127.0.0.1:" port))
+        (pprint (show (http/get (str base "/hello?name=ann"))))
+        (pprint (show (http/get (str base "/nope"))))
+        (pprint (show (http/request :post (str base "/sum") () "[1, 2, 3.5]")))
+        (pprint (show (http/request :post (str base "/sum") () "[1, 2,")))
+        (kill l)))
+:done

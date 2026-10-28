@@ -1,0 +1,12 @@
+; An actor holds state in the arguments of a function that waits for
+; messages, and calls itself with the next state.
+(defun counter (n)
+    (recv
+        ((:inc)    (counter (+ n 1)))
+        ((:get to) (reply to n) (counter n))))
+
+(let c (spawn (counter 0)))
+(send c (list :inc))
+(send c (list :inc))
+(send c (list :inc))
+(ask c (list :get))

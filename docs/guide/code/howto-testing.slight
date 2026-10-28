@@ -1,0 +1,10 @@
+(@include :test)
+
+(defun slugify (s)
+    (str/join "-" (str/split (str/lower (str/trim s)) " ")))
+
+(run-tests (list
+    (is (slugify "Hello World") "hello-world" "lower-cases, and joins with -")
+    (is (slugify "  Tea  ") "tea" "trims")
+    (is (slugify "a  b") "a-b" "squeezes spaces")
+    (diag "slugify is here to keep the example short")))

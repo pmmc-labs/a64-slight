@@ -1,0 +1,4 @@
+(ok 5)
+(error div-by-zero)
+fault in #<pid 2>: not a cons: () (car at docs/guide/code/tour-errors.slight:11:14)
+(error (not-a-cons () "car at docs/guide/code/tour-errors.slight:11:14"))

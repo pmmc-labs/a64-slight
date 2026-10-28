@@ -1,0 +1,4 @@
+(error (not-an-int "color"))
+(ok 1)
+(ok 1)
+(error (not-found "plum"))

@@ -1,0 +1,26 @@
+; args: build/t/tut-7-supervised.log
+(@include "tut-log.slight")
+
+; Chapter 5's supervisor, starting the store on its log each time.
+(defun supervise (path)
+    (let s (start path))
+    (monitor s)
+    (supervisor path s))
+
+(defun supervisor (path s)
+    (recv
+        ((:exit _ (:error (kind _ _)))
+            (pprint (list :restarting kind))
+            (supervise path))
+        (msg
+            (send s msg)
+            (supervisor path s))))
+
+(let path (if (nil? @ARGV) "store.log" (car @ARGV)))
+(spew path ())
+
+(let sup (spawn (supervise path)))
+(call sup (list :put "apple" 3))
+(call sup (list :put "color" "red"))
+(pprint (join (fork (ask-within 1000 sup (list :do (list :incr "color"))))))
+(call sup (list :get "apple"))

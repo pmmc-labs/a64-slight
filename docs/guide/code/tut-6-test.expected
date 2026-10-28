@@ -1,0 +1,11 @@
+ok 1 - get of a key that isn't there
+ok 2 - get of a key that is
+ok 3 - incr adds one
+ok 4 - incr counts from 0
+ok 5 - an unknown command
+ok 6 - put-for
+ok 7 - a key expires
+ok 8 - a put without a time stops the expiry
+ok 9 - the clock moved by the sleeps alone
+1..9
+#true

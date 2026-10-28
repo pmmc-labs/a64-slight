@@ -1,0 +1,60 @@
+; args: build/t/tut-8-calls.log
+(@include "tut-serve.slight")
+
+(defun show (x)
+    (tty/write (str x) \n))
+
+; A program calling the store.
+(defun program (where)
+    (match (rpc/connect where ())
+        ((:ok conn)
+            (show (rpc/call conn "put" (list "apple" 3)))
+            (show (rpc/call conn "incr" (list "apple")))
+            (show (rpc/call conn "get" (list "plum")))
+            (show (rpc/call conn "get" (list "apple" "pear")))
+            (rpc/close conn))))
+
+; A person at nc, played by a client that sends each line of a script,
+; and shows what it sends (>) and what comes back (<).
+(defun script ()
+    (list
+        (list "(helo rpc 1)" 0)
+        (list "(call 1 keys)" 1)
+        (list "(call 2 put pear 5)" 1)
+        (list "(call 3 incr pear)" 1)
+        (list "(call 4 get plum)" 1)
+        (list "(call 5 get)" 1)
+        (list "(call 6 help)" 1)))
+
+(defun person (script)
+    (recv
+        ((:open c) (person-wait c script 1))))
+
+; Waits for n lines, then sends the next line of the script.
+(defun person-wait (c script n)
+    (if (> n 0)
+        (recv
+            ((:line _ s) (tty/write "< " s \n) (person-wait c script (- n 1))))
+        (match script
+            (()
+                (disconnect c))
+            (((text n) & rest)
+                (tty/write "> " text \n)
+                (send c (list :write text \n))
+                (person-wait c rest n)))))
+
+(let path (if (nil? @ARGV) "store.log" (car @ARGV)))
+(spew path ())
+(let s (start path))
+
+(match (rpc/listen "127.0.0.1:0" (handlers s))
+    ((:ok (l port))
+        (let where (str "127.0.0.1:" port))
+        (program where)
+        (read (connect :tcp where (person (script))))
+        (kill l)))
+
+(tty/write "the log:" \n)
+(match (slurp path)
+    ((:ok lines) (map show lines)))
+:done

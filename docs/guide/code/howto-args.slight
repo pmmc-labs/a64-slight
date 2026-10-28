@@ -1,0 +1,18 @@
+; args: --name Ann 3
+; env: GREETING=Hello
+
+; The word after name in args, or default.
+(defun option (name args default)
+    (match args
+        ((flag value & rest) (if (eq? flag name) value (option name (cdr args) default)))
+        (_                   default)))
+
+(pprint @ARGV)
+(let name (option "--name" @ARGV "world"))
+(let times (str->int (car (reverse @ARGV))))
+(let greeting (match (lookup "GREETING" %ENV)
+    (:not-found "Hi")
+    (g          g)))
+
+(dotimes 0 times (lambda (i) (tty/write greeting ", " name "!" \n)))
+(lookup "NO_SUCH_VARIABLE" %ENV)

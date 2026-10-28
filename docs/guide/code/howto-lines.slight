@@ -1,0 +1,36 @@
+; args: docs/guide/code/data/fog.txt
+(@include :fs)
+
+(let path (car @ARGV))
+
+; A small file, whole.
+(match (slurp path)
+    ((:ok lines) (pprint (length lines))))
+
+; A file of any size, a line at a time, from a task.
+(defun words (line)
+    (remove (lambda (w) (eq? w "")) (str/split line " ")))
+
+(defun count-words (path)
+    (match (open :fs/read path)
+        ((:ok f)         (count-loop f 0))
+        ((:error reason) (list :error reason))))
+
+(defun count-loop (f n)
+    (match (read f)
+        ((:line _ s)       (count-loop f (+ n (length (words s)))))
+        ((:eof _)          (list :ok n))
+        ((:error _ reason) (list :error reason))))
+
+(pprint (count-words path))
+(pprint (count-words "no-such-file.txt"))
+
+; The same from an actor, which connects to the file and takes its lines
+; as messages.
+(defun longest (best)
+    (recv
+        ((:open f)   (longest best))
+        ((:line f s) (longest (if (> (str/len s) (str/len best)) s best)))
+        ((:eof f)    best)))
+
+(read (connect :fs/read path (longest "")))
