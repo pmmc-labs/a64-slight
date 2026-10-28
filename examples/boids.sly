@@ -1,0 +1,319 @@
+// args: 30 4 8
+// boids: Craig Reynolds's flocking birds, in the terminal, with a process
+// for each bird. A bird steers by three rules, from the birds it can see:
+// toward the middle of them (cohesion), the way they're going
+// (alignment), and away from any too close (separation). The sky wraps
+// around at its edges. q quits. Its arguments, each optional: how many
+// birds (30); a number of frames, to draw them one under another and stop
+// rather than redraw the screen till q; and a seed for the random numbers:
+//
+//     node bin/slightc.ts -o boids examples/boids.sly
+//     ./boids                                      (q quits)
+//     ./boids 60                                   (60 birds)
+//     SLIGHT_CLOCK=virtual ./boids 12 4 </dev/null (four frames, at once)
+//
+// There's no one place where the flock is. Each tick, every bird tells
+// the display and every other bird where it is and how it's going; works
+// out its next move from what it heard; sleeps a tick; and tells them
+// again. A bird that has heard all of a tick can be on the next while
+// another is still waiting for part of it, from a bird that hasn't
+// finished telling everyone. The sleep makes that rare, but not
+// impossible (with no sleep, and SLIGHT_SCHED, it happens all the time).
+// So a bird keeps what comes early for the next tick. Nothing comes from
+// two ticks on, which would need this bird's next tick. Once it has the
+// whole tick, it sorts the birds it can see by id, and sums over them in
+// that order, so where they go doesn't depend on the order the messages
+// came in: any SLIGHT_SCHED gives the same flight.
+//
+// The display draws a tick once it has heard from every bird. It never
+// hears of the next tick before it has all of this one: every bird tells
+// the display first, so the last of a tick's messages to it is sent before
+// any bird can have heard all of that tick. Below the sky it says how long
+// a tick takes, from the :system device's clock (slight has no other way
+// to read one): on the virtual clock, the 100 ms the birds sleep; on a
+// real one, that and the flock's work.
+//
+// Space is in columns: a column is 1 wide and a row 2 high, about as a
+// terminal's cells are, so the flock isn't stretched. The expected output
+// comes from t/models/boids.py.
+//
+// slight's vector functions, v+ and the rest, are vec::add and so on
+// here, since v+ is no identifier.
+
+// --- how birds fly -----------------------------------------------------------
+
+fun sight() { 10.0 }             // how far a bird sees
+fun room() { 2.0 }               // how close it lets another come
+fun cohesion_rate() { 0.01 }
+fun alignment_rate() { 0.125 }
+fun separation_rate() { 0.1 }
+fun max_speed() { 1.0 }
+fun min_speed() { 0.5 }
+fun tick_ms() { 100 }
+
+// --- vectors, as [x, y] -------------------------------------------------------
+
+fun vec::add(a, b) { let [ax, ay] = a; let [bx, by] = b; [ax + bx, ay + by] }
+fun vec::sub(a, b) { let [ax, ay] = a; let [bx, by] = b; [ax - bx, ay - by] }
+fun vec::scale(a, k) { let [x, y] = a; [x * k, y * k] }
+fun vec::div(a, k) { let [x, y] = a; [x / k, y / k] }
+fun vec::dot(a, b) { let [ax, ay] = a; let [bx, by] = b; ax * bx + ay * by }
+fun vec::sum(vs) { fold::l([0, 0], vec::add, vs) }
+
+// The shortest way from a to b, on a circle size round (half is half of
+// it, worked out once a tick rather than at every call).
+fun across(a, b, size, half) {
+    let d = b - a;
+    cond {
+        d > half  => d - size,
+        d < -half => d + size,
+        true      => d,
+    }
+}
+
+fun around(x, size) {
+    cond {
+        x < 0     => x + size,
+        x >= size => x - size,
+        true      => x,
+    }
+}
+
+// --- steering ----------------------------------------------------------------
+
+// A bird is #(id, x, y, vx, vy). The others a bird at state sees, from
+// what the rest of the flock said: each as [id, offset, velocity,
+// distance²], in sight, and sorted by id, the order the rules sum in.
+fun in_sight(state, heard, sky) {
+    let #(_, x, y, _, _) = state;
+    let [w, h] = sky;
+    let hw = w / 2;
+    let hh = h / 2;
+    let seen = fold::l([], fun(seen, said) {
+        let #(id, px, py, vx, vy) = said;
+        let dx = across(x, px, w, hw);
+        let dy = across(y, py, h, hh);
+        let d2 = dx * dx + dy * dy;
+        if d2 < sight() * sight() { [[id, [dx, dy], [vx, vy], d2], ...seen] } else { seen }
+    }, heard);
+    sort_by(car, seen)
+}
+
+fun cohesion(others) {
+    vec::scale(vec::div(vec::sum(map(cadr, others)), length(others)), cohesion_rate())
+}
+
+fun alignment(others, v) {
+    vec::scale(vec::sub(vec::div(vec::sum(map(caddr, others)), length(others)), v), alignment_rate())
+}
+
+fun separation(others) {
+    let close = others |> filter(fun(o) => cadddr(o) < room() * room());
+    vec::scale(vec::sum(map(cadr, close)), -separation_rate())
+}
+
+// Not faster than max_speed, nor slower than min_speed unless still.
+fun limit(v) {
+    let speed = math::sqrt(vec::dot(v, v));
+    cond {
+        speed > max_speed()               => vec::scale(v, max_speed() / speed),
+        speed < min_speed() && speed > 0  => vec::scale(v, min_speed() / speed),
+        true                              => v,
+    }
+}
+
+// Where a bird at state goes next, from what the rest of the flock said.
+fun steer(state, heard, sky) {
+    let others = in_sight(state, heard, sky);
+    let #(id, x, y, vx, vy) = state;
+    let [w, h] = sky;
+    let v = [vx, vy];
+    let steered = if nil?(others) {
+        v
+    } else {
+        vec::add(v, vec::add(cohesion(others), vec::add(alignment(others, v), separation(others))))
+    };
+    let [nvx, nvy] = limit(steered);
+    #(id, around(x + nvx, w), around(y + nvy, h), nvx, nvy)
+}
+
+// --- a bird ------------------------------------------------------------------
+
+// It waits to hear who's in the flock (every bird's pid, its own
+// included), then flies, knowing #(me, others, shown, sky, n). What comes
+// from another bird's tick 0 before then is kept for it.
+fun bird(me, state, sky, shown, early) {
+    recv {
+        :flock(flock) => {
+            let others = flock |> remove(fun(b) => b == self);
+            fly(#(me, others, shown, sky, length(flock)), 0, state, early)
+        }
+        :at(0, said) => bird(me, state, sky, shown, [said, ...early]),
+    }
+}
+
+// Tells the display and the rest of the flock where it is on this tick,
+// and listens for the n - 1 others, of whom those in early have spoken.
+fun fly(ctx, tick, state, early) {
+    let #(me, others, shown, sky, n) = ctx;
+    let msg = :at(tick, state);
+    send(shown, msg);
+    tell(others, msg);
+    listen(ctx, tick, state, early, n - (1 + length(early)), [])
+}
+
+fun tell(pids, msg) {
+    match pids {
+        []             => [],
+        [p, ...rest]   => { send(p, msg); tell(rest, msg) }
+    }
+}
+
+// Listens till it has heard from every other bird on this tick, keeping
+// what comes from the next; then steers, sleeps a tick, and flies on.
+fun listen(ctx, tick, state, heard, left, early) {
+    if left == 0 {
+        let #(me, others, shown, sky, n) = ctx;
+        let next = steer(state, heard, sky);
+        sleep(tick_ms());
+        fly(ctx, inc(tick), next, early)
+    } else {
+        recv {
+            :at(at, said) => cond {
+                at == tick      => listen(ctx, tick, state, [said, ...heard], dec(left), early),
+                at == inc(tick) => listen(ctx, tick, state, heard, left, [said, ...early]),
+            }
+        }
+    }
+}
+
+// --- the display -------------------------------------------------------------
+
+// It's connected to the :system device, s, and knows #(n, sky, frames, s).
+fun display_on(n, sky, frames) {
+    recv {
+        :open(s) => display(#(n, sky, frames, s), 0, [], 0, [], []),
+    }
+}
+
+// Draws each tick once it has heard from all n birds, till it has drawn
+// frames of them, or forever if frames isn't above 0, or till q. Gives
+// how many it drew. After each it asks the clock: last is the time it
+// said after the tick before, and took how long that tick took.
+fun display(ctx, tick, heard, count, last, took) {
+    let #(n, sky, frames, s) = ctx;
+    if count == n {
+        draw(sky, frames, tick, took, heard |> sort_by(fun(b) { let #(id, _, _, _, _) = b; id }));
+        send(s, :runtime());
+        if inc(tick) == frames { frames } else { display(ctx, inc(tick), [], 0, last, took) }
+    } else {
+        recv {
+            :at(at, said) => cond {
+                at == tick => display(ctx, tick, [said, ...heard], inc(count), last, took),
+            }
+            :runtime(_, info) => {
+                let now = lookup(:clock, info);
+                display(ctx, tick, heard, count, now, if nil?(last) { [] } else { now - last })
+            }
+            :quit => tick,
+        }
+    }
+}
+
+// Which way it's going: one of eight arrows. 0.41421356 is tan 22.5°,
+// halfway between an axis and a diagonal.
+fun arrow(vx, vy) {
+    cond {
+        math::abs(vy) <= math::abs(vx) * 0.41421356 => if vx < 0 { "←" } else { "→" },
+        math::abs(vx) <= math::abs(vy) * 0.41421356 => if vy < 0 { "↑" } else { "↓" },
+        vx < 0                                      => if vy < 0 { "↖" } else { "↙" },
+        true                                        => if vy < 0 { "↗" } else { "↘" },
+    }
+}
+
+// The sky as a tuple of rows, each a tuple of one-character strings, with
+// a bird put in it. A bird on the far edge, which rounding can leave
+// exactly there, is put back on the near one.
+fun put(grid, bird) {
+    let #(_, x, y, vx, vy) = bird;
+    let row = math::floor(y / 2) % tuple::len(grid);
+    let col = math::floor(x) % tuple::len(tuple::get(grid, 0));
+    tuple::set(grid, row, tuple::set(tuple::get(grid, row), col, arrow(vx, vy)))
+}
+
+// Each frame redraws the whole screen from the top left, or, when there's
+// a number of frames, goes under the one before.
+fun draw(sky, frames, tick, took, birds) {
+    let [w, h] = sky;
+    let live = frames < 1;
+    let grid = fold::l(tuple::make(div(h, 2), tuple::make(w, " ")), put, birds);
+    let edge = "+" ++ str::repeat("-", w) ++ "+\n";
+    let lines = tuple_to_list(grid) |> map(fun(row) => "|" ++ str::join("", tuple_to_list(row)) ++ "|\n");
+    tty::write(
+        if live { "\e[H" } else { "" },
+        edge,
+        str::join("", lines),
+        edge,
+        "tick ", tick, ", ", length(birds), " birds",
+        if nil?(took) { "" } else { str(", ", took, " ms a tick") },
+        if live { ", q quits" } else { "\n" })
+}
+
+fun keys(shown) {
+    recv {
+        ["q", ..._] => send(shown, :quit),
+        _           => keys(shown),
+    }
+}
+
+// --- the flock ---------------------------------------------------------------
+
+// n birds anywhere in the sky, going any way, from the root's random
+// numbers, four a bird, in this order.
+fun hatch(n, sky, birds) {
+    if n == 0 {
+        reverse(birds)
+    } else {
+        let a = rand::float();
+        let b = rand::float();
+        let c = rand::float();
+        let d = rand::float();
+        let [w, h] = sky;
+        let bird = #(a * w, b * h, (c * 2 - 1) * max_speed(), (d * 2 - 1) * max_speed());
+        hatch(dec(n), sky, [bird, ...birds])
+    }
+}
+
+// The i'th argument as a number, or default if there isn't one.
+fun arg(i, args, default) {
+    match nth(i, args) {
+        []    => default,
+        false => default,
+        k     => k,
+    }
+}
+
+// --- the program -------------------------------------------------------------
+
+let args = @ARGV |> map(str_to_int);
+let n = arg(0, args, 30);
+let frames = arg(1, args, 0);
+let sky = [tty::screen::cols() - 2, 2 * (tty::screen::rows() - 3)];
+rand::seed(arg(2, args, 2026));
+let states = hatch(n, sky, []);
+
+if frames < 1 { tty::write("\e[?25l\e[2J") };
+let shown = connect(:system) { display_on(n, sky, frames) };
+let birds = zip(range(0, n), states) |> map(fun(b) {
+    let [i, #(x, y, vx, vy)] = b;
+    spawn bird(i, #(i, x, y, vx, vy), sky, shown, [])
+});
+birds |> map(fun(b) => send(b, :flock(birds)));
+let keyboard = connect(:keypress) { keys(shown) };
+
+let drawn = read(shown);
+map(kill, [keyboard, ...birds]);
+if frames < 1 { tty::write("\e[?25h\n") };
+match drawn {
+    :ok(k) => str(k, " frames"),
+}

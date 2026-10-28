@@ -1,0 +1,29 @@
+// simple-crappy-adts: a binary tree as tagged lists, :Branch(left, right)
+// and :Leaf(value), with predicates for each, and a printer, which take
+// a tree apart by matching its shape.
+
+fun Branch?(t) { match t { :Branch(_, _) => true, _ => false } }
+fun Leaf?(t)   { match t { :Leaf(_) => true, _ => false } }
+fun Tree?(t)   { Branch?(t) || Leaf?(t) }
+
+fun Branch(left, right) { :Branch(left, right) }
+fun Leaf(value) { :Leaf(value) }
+
+fun pprint_tree(t, depth) {
+    match t {
+        :Leaf(value) =>
+            tty::write(str::repeat("  ", depth), ":..[", value, "]\n"),
+        :Branch(left, right) => {
+            pprint_tree(left, inc(depth));
+            pprint_tree(right, inc(depth))
+        }
+    }
+}
+
+let tree = Branch(
+    Leaf(:+),
+    Branch(
+        Leaf(10),
+        Leaf(20)));
+
+pprint_tree(tree, 0)

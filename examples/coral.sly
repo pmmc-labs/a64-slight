@@ -1,0 +1,174 @@
+// Collatz's coral, after Edmund Harriss's picture, in Braille.
+//
+//     node bin/slightc.ts --target x86_64 -o coral examples/coral.sly
+//     ./coral           1 to 1500
+//     ./coral 4000      1 to 4000
+//
+// Take a number; halve it if it's even, else triple it and add 1; again,
+// till it comes to 1. Everyone who's tried it has come to 1, and no one
+// has shown that everything does. Here each number's way to 1 is walked
+// backwards, out from 1: a step for each number on the way, turning a
+// little one way at an even one and further the other way at an odd
+// one. Ways that meet go on together to 1, so the walks share their
+// beginnings, and grow into one branching thing.
+//
+// Eight processes walk the numbers, each a share; the top level finds
+// how far they all reach, to fit them to the screen, and hands them, a
+// few at a time, to a painter that keeps the picture as a persistent map
+// (lib/map.slight) and draws the cells that change, the deeper into a
+// walk the brighter.
+
+@include(:map);
+
+fun even_turn() { 0.135 }
+fun odd_turn() { -0.27 }
+
+// n's way to 1, as [1, ..., n].
+fun collatz(n, acc) {
+    cond {
+        n == 1     => [1, ...acc],
+        n % 2 == 0 => collatz(div(n, 2), [n, ...acc]),
+        true       => collatz(3 * n + 1, [n, ...acc]),
+    }
+}
+
+// The walk out from 1 along xs, from [x, y] heading a: its points.
+fun walk(xs, x, y, a, acc) {
+    match xs {
+        [] => reverse(acc),
+        [m, ...rest] => {
+            let a2 = a + if m % 2 == 0 { even_turn() } else { odd_turn() };
+            let x2 = x + math::cos(a2);
+            let y2 = y + math::sin(a2);
+            walk(rest, x2, y2, a2, [[x2, y2], ...acc])
+        }
+    }
+}
+
+// Heading up and to the right, since it curls to the left.
+fun path(n) { walk(cdr(collatz(n, [])), 0.0, 0.0, 0.75, [[0.0, 0.0]]) }
+
+// A share of 1 to last: those that leave k over 8.
+fun share(k, last) {
+    range(1, inc(last)) |> filter(fun(n) => n % 8 == k) |> map(fun(n) => [n, path(n)])
+}
+
+// --- the picture --------------------------------------------------------------
+
+fun colour(rank) { tuple::get(#(0, 23, 24, 30, 36, 37, 43, 79, 115, 216, 210, 203), rank) }
+
+fun dot(x, y) {
+    let dx = x % 2;
+    let dy = y % 4;
+    if dy < 3 { bit::shl(1, dy + 3 * dx) } else { bit::shl(64, dx) }
+}
+
+fun glyph(cx, cy, cell) {
+    str("\e[", inc(cy), ";", inc(cx), "H\e[38;5;", colour(tuple::get(cell, 1)), "m",
+        codes_to_str([10240 + tuple::get(cell, 0)]))
+}
+
+// The painter: the canvas and #(cols, rows); it ends with how many cells
+// it lit when told it's done.
+fun paint(canvas, size) {
+    recv {
+        :dots(pts) => {
+            let [canvas2, out] = plot(canvas, size, pts, []);
+            tty::write(str::join("", reverse(out)));
+            paint(canvas2, size)
+        }
+        :done => map::size(canvas),
+    }
+}
+
+// Each of pts is [x, y, rank]; a cell keeps the highest rank it's had.
+fun plot(canvas, size, pts, out) {
+    match pts {
+        [] => [canvas, out],
+        [[x, y, rank], ...rest] => {
+            let cols = tuple::get(size, 0);
+            if x < 0 || y < 0 || x >= 2 * cols || y >= 4 * tuple::get(size, 1) {
+                plot(canvas, size, rest, out)
+            } else {
+                let key = div(y, 4) * cols + div(x, 2);
+                let was = match map::get(canvas, key) { :not-found => #(0, 0), c => c };
+                let cell = #(bit::or(tuple::get(was, 0), dot(x, y)), math::max(tuple::get(was, 1), rank));
+                if cell == was {
+                    plot(canvas, size, rest, out)
+                } else {
+                    plot(map::put(canvas, key, cell), size, rest, [glyph(div(x, 2), div(y, 4), cell), ...out])
+                }
+            }
+        }
+    }
+}
+
+fun line(x0, y0, x1, y1, rank) {
+    let steps = math::max(1, math::ceil(math::max(math::abs(x1 - x0), math::abs(y1 - y0))));
+    range(0, inc(steps)) |> map(fun(i) => [math::round(x0 + (x1 - x0) * i / steps),
+                                           math::round(y0 + (y1 - y0) * i / steps),
+                                           rank])
+}
+
+// A walk's dots, its points put on the screen by fit, each step ranked by
+// how deep into the longest walk it is.
+fun walk_dots(pts, fit, longest, i, acc) {
+    match pts {
+        [p, q, ...rest] => {
+            let [x0, y0] = fit(p);
+            let [x1, y1] = fit(q);
+            walk_dots([q, ...rest], fit, longest, inc(i),
+                      append(line(x0, y0, x1, y1, 1 + div(10 * i, longest)), acc))
+        }
+        _ => acc,
+    }
+}
+
+// Every 25th walk, a pause, so the coral can be watched growing.
+fun draw(walks, painter, fit, longest, k) {
+    match walks {
+        [] => send(painter, :done),
+        [[n, pts], ...rest] => {
+            send(painter, :dots(walk_dots(pts, fit, longest, 0, [])));
+            if k % 25 == 0 { sleep(15) };
+            draw(rest, painter, fit, longest, inc(k))
+        }
+    }
+}
+
+// --- the run ------------------------------------------------------------------
+
+let last = match @ARGV {
+    [s, ..._] => match str_to_int(s) { false => 1500, n => math::max(1, n) },
+    _         => 1500,
+};
+let cols = tty::screen::cols();
+let rows = tty::screen::rows() - 1;
+let w = 2 * cols;
+let h = 4 * rows;
+match join::all(range(0, 8) |> map(fun(k) => fork share(k, last))) {
+    :ok(shares) => {
+        let walks = sort_by(car, fold::l([], append, shares));
+        let points = fold::l([], fun(acc, wk) => append(cadr(wk), acc), walks);
+        let xs = map(car, points);
+        let ys = map(cadr, points);
+        let x0 = fold::l(0.0, math::min, xs);
+        let y0 = fold::l(0.0, math::min, ys);
+        let scale = math::min((w - 4) / math::max(1.0, fold::l(0.0, math::max, xs) - x0),
+                              (h - 4) / math::max(1.0, fold::l(0.0, math::max, ys) - y0));
+        let left = 2 + (w - 4 - scale * (fold::l(0.0, math::max, xs) - x0)) / 2;
+        let fit = fun(p) => [math::round(left + scale * (car(p) - x0)),
+                             math::round(h - 2 - scale * (cadr(p) - y0))];
+        let longest = fold::l(1, fun(m, wk) => math::max(m, length(cadr(wk))), walks);
+        tty::write("\e[?25l\e[2J");
+        let painter = spawn paint(map::new(), #(cols, rows));
+        draw(walks, painter, fit, longest, 1);
+        match read(painter) {
+            :ok(lit) => {
+                tty::write("\e[0m\e[", inc(rows), ";1H\e[?25h",
+                           "1 to ", last, ", each walked out from 1; the longest walk ", dec(longest), " steps\n");
+                [:walks, last, :longest, dec(longest), :cells, lit]
+            }
+        }
+    }
+}

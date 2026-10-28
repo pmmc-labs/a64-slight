@@ -1,0 +1,96 @@
+// Strings on waves, as the demoscene did them.
+//
+//     node bin/slightc.ts --target x86_64 -o waves examples/waves.sly
+//     ./waves
+//
+// Three: a rainbow scroller riding a sine wave; a pangram whose letters'
+// case rolls along a wave, through Unicode's case mapping, so ö becomes
+// Ö and ж Ж as the crest passes (D219); and "slight" chasing its own
+// tail round a Lissajous figure. Each frame is a persistent map from a
+// cell of the screen to its character and colour (lib/map.slight),
+// written out whole, a row at a time. The strings are characters to the
+// str:: builtins, whatever their bytes: the scroller counts its message's
+// characters, not its bytes, and says so at the end.
+
+@include(:map);
+
+fun scroller_text() { "slight says héllo wörld ♥ λx.x ≈ ∞ ☺ Привет, мир! ¡Olé! γειά σου ~ " }
+fun pangram() { "the quick brown fox jumps over the lazy dög · съешь же ещё этих мягких булок" }
+
+fun rainbow(i) { tuple::get(#(196, 208, 226, 46, 51, 33, 129, 201), i % 8) }
+
+// cells with ch at [x, y] in colour c, if it's on the screen.
+fun put(cells, cols, rows, x, y, ch, c) {
+    if x >= 0 && x < cols && y >= 0 && y < rows {
+        map::put(cells, y * cols + x, [ch, c])
+    } else {
+        cells
+    }
+}
+
+// The scroller: a character for every column, the message going left a
+// column a frame, each riding the wave at its column, the wave going
+// right.
+fun scroller(cells, cols, rows, t, msg) {
+    fold::l(cells, fun(cells, x) {
+        let ch = tuple::get(msg, (x + t) % tuple::len(msg));
+        let y = 6 + math::round(4.0 * math::sin(0.17 * x - 0.21 * t));
+        if ch == " " { cells } else { put(cells, cols, rows, x, y, ch, rainbow(div(x + 2 * t, 3))) }
+    }, range(0, cols))
+}
+
+// The pangram, still, its case rolling: upper on the crest, lower in the
+// trough, bright and dim.
+fun case_wave(cells, cols, rows, t, text) {
+    let left = math::max(0, div(cols - tuple::len(text), 2));
+    fold::l(cells, fun(cells, i) {
+        let up = math::sin(0.45 * i - 0.25 * t) > 0.3;
+        let ch = tuple::get(text, i);
+        put(cells, cols, rows, left + i, 12, if up { str::upper(ch) } else { ch }, if up { 231 } else { 242 })
+    }, range(0, tuple::len(text)))
+}
+
+// "slight" three times, 18 letters each a little behind the one
+// before on the curve x = sin 3u, y = sin 2u.
+fun lissajous(cells, cols, rows, t) {
+    let word = list_to_tuple(str::chars("slight"));
+    fold::l(cells, fun(cells, i) {
+        let u = 0.05 * t - 0.022 * i;
+        let x = div(cols, 2) + math::round(cols / 2.6 * math::sin(3 * u));
+        let y = 17 + math::round(4.0 * math::sin(2 * u));
+        put(cells, cols, rows, x, y, tuple::get(word, i % 6), tuple::get(#(201, 165, 129, 93, 57, 51), div(i, 3)))
+    }, reverse(range(0, 18)))
+}
+
+fun frame(cols, rows, t, msg, text) {
+    let title = "~ s l i g h t ,   w a v i n g ~";
+    let cells = fold::l(map::new(),
+                        fun(cells, i) => put(cells, cols, rows, div(cols - 33, 2) + i, 0, str::at(title, i), 244),
+                        range(0, str::len(title)));
+    lissajous(case_wave(scroller(cells, cols, rows, t, msg), cols, rows, t, text), cols, rows, t)
+}
+
+fun render(cells, cols, rows) {
+    let row = fun(y) => range(0, cols) |> map(fun(x) => match map::get(cells, y * cols + x) {
+        :not-found => " ",
+        [ch, c]    => str("\e[38;5;", c, "m", ch),
+    }) |> str::join("");
+    str::join("\n", range(0, rows) |> map(row))
+}
+
+fun play(t, frames, cols, rows, msg, text) {
+    if t < frames {
+        tty::write("\e[H", render(frame(cols, rows, t, msg, text), cols, rows));
+        sleep(33);
+        play(inc(t), frames, cols, rows, msg, text)
+    }
+}
+
+let cols = tty::screen::cols();
+let rows = tty::screen::rows() - 1;
+let msg = list_to_tuple(str::chars(scroller_text()));
+tty::write("\e[?25l\e[2J");
+play(0, 300, cols, rows, msg, list_to_tuple(str::chars(pangram())));
+tty::write("\e[0m\e[", inc(rows), ";1H\e[?25h",
+           "the scroller: ", str::len(scroller_text()), " characters in ", bytes::len(scroller_text()), " bytes\n");
+[:frames, 300, :characters, str::len(scroller_text()), :bytes, bytes::len(scroller_text())]

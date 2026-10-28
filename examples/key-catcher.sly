@@ -1,0 +1,43 @@
+// stdin: \033[1;2C3\033[1;2C\033[1;2B\033[D\033[1;3D\033x\003
+// key-catcher: the arrows move the cursor; with shift, an arrow paints
+// the cell it leaves (an upper-case letter paints too); with alt, it
+// clears it. The digits 1 to 7 pick the paint's colour. There's no quit
+// key: Ctrl-C ends it.
+//
+// The keyboard is one receive function, connected to :keypress, with the
+// colour as its state. A key is [key, ...mods], taken apart by recv's
+// pattern and then matched: the arrows are names such as :ArrowUp, and the
+// digits are one-character strings ("1" rather than 1), so pick_color
+// reads them with str_to_int.
+
+fun keyboard(color) {
+    recv {
+        [key, ...mods] => {
+            match mods {
+                [:shift, ..._] => tty::write("\e[", color, "m \e[D"),
+                [:alt, ..._]   => tty::write("\e[49m \e[D"),
+                _              => [],
+            };
+            match key {
+                :ArrowUp    => tty::write("\e[A"),
+                :ArrowDown  => tty::write("\e[B"),
+                :ArrowRight => tty::write("\e[C"),
+                :ArrowLeft  => tty::write("\e[D"),
+                _           => [],
+            };
+            keyboard(pick_color(key, color))
+        }
+    }
+}
+
+// a digit from 1 to 7 picks a colour (41 to 47); any other key keeps it
+fun pick_color(key, color) {
+    let digit = if str?(key) { str_to_int(key) } else { false };
+    cond {
+        !int?(digit)              => color,
+        digit >= 1 && digit <= 7 => 40 + digit,
+        true                      => color,
+    }
+}
+
+read(connect(:keypress) { keyboard(47) })

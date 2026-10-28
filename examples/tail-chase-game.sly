@@ -1,0 +1,52 @@
+// stdin: \033[C\033[C\033[Bq
+// tail-chase-game: the arrows move an @ around, and each square it leaves
+// fades: to * after a second, to . two seconds later, and to blank three
+// seconds after that. q (or any key but an arrow) ends it.
+//
+// tail_chaser draws, forks a process for the fading, which sleeps
+// between its steps, and then waits for the next key, which it matches
+// by name (D167, D168).
+
+fun tail_chaser(h, w, x, y, count, to_clear) {
+    tty::write("\e[", x, ";", y, "H", "@");
+    tty::write("\e[", inc(h), ";", 0, "H", "steps: ", count, "\r");
+    tty::write("\e[", h + 2, ";", 0, "H", "tails: ", count * 3, "\r");
+    match to_clear {
+        [] => [],
+        [[cx, cy], ..._] => fork {
+            sleep(1000);
+            tty::write("\e[", cx, ";", cy, "H", "*");
+            tty::write("\e[", h + 3, ";", 0, "H", "fade1: ", count, "\r");
+            sleep(2000);
+            tty::write("\e[", cx, ";", cy, "H", ".");
+            tty::write("\e[", h + 4, ";", 0, "H", "fade2: ", count, "\r");
+            sleep(3000);
+            tty::write("\e[", cx, ";", cy, "H", " ");
+            tty::write("\e[", h + 5, ";", 0, "H", "fade3: ", count, "\r")
+        }
+    };
+    let tail = trail(x, y, to_clear);
+    recv {
+        [:ArrowUp, ..._]    => tail_chaser(h, w, if x == 0 { x } else { dec(x) }, y, inc(count), tail),
+        [:ArrowDown, ..._]  => tail_chaser(h, w, if x == h { x } else { inc(x) }, y, inc(count), tail),
+        [:ArrowLeft, ..._]  => tail_chaser(h, w, x, if y == 0 { y } else { dec(y) }, inc(count), tail),
+        [:ArrowRight, ..._] => tail_chaser(h, w, x, if y == w { y } else { inc(y) }, inc(count), tail),
+        _                   => [],
+    }
+}
+
+fun trail(x, y, to_clear) {
+    match to_clear {
+        []           => [[x, y]],
+        [_, ...rest] => [[x, y], ...rest],
+    }
+}
+
+tty::write("\e[?25l");
+read(connect(:keypress) {
+    tail_chaser(
+        40, 40,
+        10, 20,
+        0,
+        [])
+})

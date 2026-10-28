@@ -1,0 +1,58 @@
+// simple-db-server: a key-value store as a process. The server takes a
+// command, says what it got, and answers; the client asks with ask, which
+// sends the command with an address for the answer and waits for it.
+// (In ts-slight the client waited in a lambda, which slight doesn't
+// allow.) The server waits in the middle of its function, and matches
+// each command (D167, D168).
+
+@include(:ds);
+
+fun db_server(data) {
+    let [cmd, key, value, to] = recv;
+    tty::write("... ", cmd, " -> ", [key, value], "\n");
+    match cmd {
+        :update => {
+            reply(to, :ok([]));
+            db_server([[key, value], ...data])
+        }
+        :delete => {
+            reply(to, :ok([]));
+            db_server(data |> remove(fun(row) => car(row) == key))
+        }
+        :lookup => {
+            reply(to, match find(fun(row) => car(row) == key, data) {
+                []          => :not-found(),
+                [_, found]  => :found(found),
+            });
+            db_server(data)
+        }
+        :exit => {
+            reply(to, :shutdown([]));
+            tty::write("... shutting down server\n")
+        }
+        _ => {
+            tty::write("... logging unknown command ", cmd, "\n");
+            reply(to, :unknown-command(cmd));
+            db_server(data)
+        }
+    }
+}
+
+fun db(pid, cmd, key, value) { ask(pid, [cmd, key, value]) }
+
+let server = spawn db_server([]);
+
+pprint(db(server, :update, :x, 10));
+pprint(db(server, :update, :y, 20));
+pprint(db(server, :update, :z, 30));
+
+pprint(db(server, :lookup, :x, []));
+pprint(db(server, :lookup, :z, []));
+pprint(db(server, :lookup, :y, []));
+
+pprint(db(server, :delete, :z, []));
+pprint(db(server, :lookup, :z, []));
+pprint(db(server, :lookup, :x, []));
+
+pprint(db(server, :wassup, [], []));
+pprint(db(server, :exit, [], []))

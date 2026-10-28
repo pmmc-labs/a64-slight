@@ -1,0 +1,63 @@
+// even-odd-actors: two processes decide whether a number is even by
+// passing it back and forth, counting down, until one of them reaches 0
+// and tells the root, at an address it made, since the root is a task
+// (D243). Each is a receive function that prints what it got and matches
+// it: a count of 0 is the answer, and any other is passed on; anything
+// else (:STOP) ends it. The root reads the four answers as they come,
+// then stops both.
+
+fun is_it_even?(reply_to) {
+    let msg = recv;
+    pprint([:is-it-even?, :got, msg]);
+    match msg {
+        :IS-EVEN?(0, _) => {
+            send(reply_to, :IT-IS-EVEN!());
+            is_it_even?(reply_to)
+        }
+        :IS-EVEN?(n, peer) => {
+            send(peer, :IS-ODD?(n - 1, self));
+            is_it_even?(reply_to)
+        }
+        _ => [],
+    }
+}
+
+fun is_it_odd?(reply_to) {
+    let msg = recv;
+    pprint([:is-it-odd?, :got, msg]);
+    match msg {
+        :IS-ODD?(0, _) => {
+            send(reply_to, :IT-IS-ODD!());
+            is_it_odd?(reply_to)
+        }
+        :IS-ODD?(n, peer) => {
+            send(peer, :IS-EVEN?(n - 1, self));
+            is_it_odd?(reply_to)
+        }
+        _ => [],
+    }
+}
+
+// the asker: read n answers at to, print them, and stop both actors
+fun collect(to, n, answers, is_even?, is_odd?) {
+    if n == 0 {
+        pprint(reverse(answers));
+        send(is_even?, :STOP());
+        send(is_odd?, :STOP())
+    } else {
+        collect(to, n - 1, [read(to), ...answers], is_even?, is_odd?)
+    }
+}
+
+let $reply_to = address();
+
+let is_even? = spawn is_it_even?($reply_to);
+let is_odd?  = spawn is_it_odd?($reply_to);
+
+pprint($reply_to);
+send(is_even?, :IS-EVEN?(21, is_odd?));
+send(is_even?, :IS-EVEN?(36, is_odd?));
+send(is_even?, :IS-EVEN?(57, is_odd?));
+send(is_even?, :IS-EVEN?(92, is_odd?));
+
+collect($reply_to, 4, [], is_even?, is_odd?)

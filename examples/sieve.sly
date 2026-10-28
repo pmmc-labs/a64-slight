@@ -1,0 +1,152 @@
+// The prime sieve as a chain of processes (McIlroy's, which Go made
+// famous), drawn as Ulam's spiral.
+//
+//     node bin/slightc.ts --target x86_64 -o sieve examples/sieve.sly
+//     ./sieve
+//
+// The numbers go, one at a time, down a chain of processes, one for
+// each prime found so far, each taking out the multiples of its own. The
+// one that takes a number out tells the painter, which lights the number
+// in its colour: by its smallest factor. A number that gets past them
+// all is prime: the end of the chain becomes the filter for it, and spawns
+// a new end. So the chain grows a process for each prime, a few hundred
+// long on an 80 by 24 screen, and every number goes down it as far as its
+// smallest factor.
+//
+// The numbers wind out from the middle, as Ulam doodled them in 1963,
+// and the primes fall on diagonals no one has fully explained. Primes
+// that are 1 more than a multiple of 4 are yellow: Fermat's, each the sum
+// of two squares (5 = 1 + 4, 13 = 4 + 9). Those 3 more are orange, which
+// never are. 2 is cyan, and 1, neither, is white. Of the rest, multiples
+// of 2 are grey, of 3 blue, of 5 green, of 7 red, of 11 purple, and so
+// on, so the small primes' patterns show too.
+//
+// A pixel is half a character, which is about square: "▀" in one colour
+// on another.
+
+@include(:map);
+
+// --- the chain ----------------------------------------------------------------
+
+// A filter for the prime p: its multiples go to the painter, the rest
+// on down the chain. At the end it passes on how many numbers came
+// through it, added to how many came through those before.
+fun sieve(p, next, painter, seen) {
+    recv {
+        :end(total) => send(next, :end(total + seen)),
+        n => {
+            if n % p == 0 { send(painter, :caught(n, p)) } else { send(next, n) };
+            sieve(p, next, painter, inc(seen))
+        }
+    }
+}
+
+// The end of the chain: whatever gets here is prime.
+fun end_of_chain(painter) {
+    recv {
+        :end(total) => send(painter, :end(total)),
+        p => {
+            send(painter, :prime(p));
+            sieve(p, spawn end_of_chain(painter), painter, 1)
+        }
+    }
+}
+
+// 2 up to last, into the chain, a pause every batch, so it can be watched.
+fun count_up(first, n, last, batch) {
+    if n > last {
+        send(first, :end(0))
+    } else {
+        send(first, n);
+        if n % batch == 0 { sleep(2) };
+        count_up(first, inc(n), last, batch)
+    }
+}
+
+// --- the picture --------------------------------------------------------------
+
+// Where n is on Ulam's spiral, from 1 in the middle: [x, y], y up.
+fun spiral(n) {
+    let k = math::ceil((math::sqrt(n) - 1) / 2);
+    let side = 2 * k + 1;
+    let m = side * side;
+    let s = side - 1;
+    cond {
+        n >= m - s     => [k - (m - n), -k],
+        n >= m - 2 * s => [-k, -k + (m - s - n)],
+        n >= m - 3 * s => [-k + (m - 2 * s - n), k],
+        true           => [k, k - (m - 3 * s - n)],
+    }
+}
+
+fun prime_colour(p) {
+    cond {
+        p == 2     => 51,
+        p % 4 == 1 => 226,
+        true       => 208,
+    }
+}
+
+fun factor_colour(q) {
+    match q {
+        1  => 231,
+        2  => 238,
+        3  => 25,
+        5  => 28,
+        7  => 88,
+        11 => 91,
+        13 => 30,
+        17 => 136,
+        19 => 125,
+        23 => 61,
+        _  => 235,
+    }
+}
+
+// The painter: the canvas, a map from a character cell to the colours of
+// its top and bottom pixels; geo, #(cols, cx, cy, rows), the screen's
+// width, the middle in pixels and the status line; and how many primes so
+// far. It ends with how many primes, and how many numbers the chain's
+// processes took in.
+fun paint(canvas, geo, primes) {
+    recv {
+        :prime(p) => {
+            tty::write("\e[", tuple::get(geo, 3), ";1H\e[0m", inc(primes),
+                       " processes in the chain, the newest taking out multiples of ", p, "\e[K");
+            paint(put_pixel(canvas, geo, p, prime_colour(p)), geo, inc(primes))
+        }
+        :caught(n, q) => paint(put_pixel(canvas, geo, n, factor_colour(q)), geo, primes),
+        :end(total)   => [primes, total],
+    }
+}
+
+fun put_pixel(canvas, geo, n, colour) {
+    let [x, y] = spiral(n);
+    let px = tuple::get(geo, 1) + x;
+    let py = tuple::get(geo, 2) - y;
+    let row = div(py, 2);
+    let key = row * tuple::get(geo, 0) + px;
+    let was = match map::get(canvas, key) { :not-found => #(16, 16), c => c };
+    let cell = tuple::set(was, py % 2, colour);
+    tty::write("\e[", inc(row), ";", inc(px), "H\e[38;5;", tuple::get(cell, 0), "m\e[48;5;", tuple::get(cell, 1), "m▀");
+    map::put(canvas, key, cell)
+}
+
+// --- the run ------------------------------------------------------------------
+
+let cols = tty::screen::cols();
+let rows = tty::screen::rows() - 1;
+let fits = math::min(cols, 2 * rows);
+let side = if fits % 2 == 0 { dec(fits) } else { fits };
+let last = side * side;
+tty::write("\e[?25l\e[2J");
+let painter = spawn paint(map::new(), #(cols, div(cols, 2), div(2 * rows, 2), inc(rows)), 0);
+send(painter, :caught(1, 1));
+count_up(spawn end_of_chain(painter), 2, last, math::max(1, div(last, 2000)));
+match read(painter) {
+    :ok([primes, total]) => {
+        tty::write("\e[", inc(rows), ";1H\e[0m\e[K\e[?25h",
+                   "1 to ", last, ": ", primes, " primes, a process each in a chain that took in ", total, " numbers\n");
+        [:numbers, last, :primes, primes, :taken-in, total]
+    }
+}

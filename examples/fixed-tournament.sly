@@ -1,0 +1,91 @@
+// fixed-tournament: N games, each playing exactly R rallies, so every
+// game must finish with counters [R, R-1]. Any other result prints a FAIL.
+//
+// Every game is a process that spawns its two players, waits for the
+// :START gate, serves, and collects the two finals, waiting in the middle
+// of its function for each (D167); each player is a receive function, and
+// rally is the step between its states. Every game tells the root its
+// finals, at an address of the root's (D243). N and R come from @ARGV, as
+// strings, through str_to_int, and default to 100 and 1000. A game is
+// spawned by name, since a function that waits in recv can't be passed
+// around as a value.
+
+fun player(game, limit, counter) {
+    recv {
+        :Serve(reply_to) => {
+            send(reply_to, :Ping(self));
+            player(game, limit, counter)
+        }
+        :Ping(reply_to) => rally(game, limit, counter + 1, reply_to, :Pong),
+        :Pong(reply_to) => rally(game, limit, counter + 1, reply_to, :Ping),
+        :Stop(reply_to) => send(game, :Final(counter)),
+    }
+}
+
+// one rally step: bump the counter, either keep the volley going or, once
+// this player reaches the limit, stop the peer and report to the game
+fun rally(game, limit, counter, reply_to, reply_tag) {
+    if counter >= limit {
+        send(reply_to, :Stop(self));
+        send(game, :Final(counter))
+    } else {
+        send(reply_to, [reply_tag, self]);
+        player(game, limit, counter)
+    }
+}
+
+// wait for the :START gate, serve, then collect the two finals: p2 always
+// reaches the limit first, so they arrive (R) then (R-1); and tell to
+fun game(to, limit) {
+    let me = self;      // self inside the spawn would be the child
+    let p1 = spawn player(me, limit, 0);
+    let p2 = spawn player(me, limit, 0);
+    recv;
+    send(p1, :Serve(p2));
+    let first = recv { :Final(counter) => counter };
+    send(to, [first, recv { :Final(counter) => counter }])
+}
+
+fun setup_tournament(to, n, limit) {
+    if n == 0 { [] } else { [spawn game(to, limit), ...setup_tournament(to, n - 1, limit)] }
+}
+
+fun start_tournament(pids) {
+    pids |> map(fun(pid) { send(pid, :START); pid })
+}
+
+// the n games' finals, in the order they come
+fun await_results(to, n) {
+    if n == 0 { [] } else { [read(to), ...await_results(to, n - 1)] }
+}
+
+fun verify_results(expected, results) {
+    fold::l(0, fun(failures, r) {
+        if r == expected {
+            failures
+        } else {
+            tty::write("FAIL: expected ", expected, " got ", r, "\n");
+            failures + 1
+        }
+    }, results)
+}
+
+let num_games = if nil?(@ARGV) { 100 } else { str_to_int(car(@ARGV)) };
+let rallies   = if nil?(@ARGV) { 1000 } else { str_to_int(cadr(@ARGV)) };
+
+tty::write("tournament: ", num_games, " games x ", rallies, " rallies\n");
+
+let to = address();
+let pids = setup_tournament(to, num_games, rallies);
+
+yield [];   // let every game fork its players and park at recv
+
+start_tournament(pids);
+let results = await_results(to, num_games);
+
+let failures = verify_results([rallies, rallies - 1], results);
+if failures == 0 {
+    tty::write("PASS: ", num_games, " games, every game exactly (", rallies, " ", rallies - 1, ")\n")
+} else {
+    tty::write("FAIL: ", failures, " of ", num_games, " games wrong\n")
+}
