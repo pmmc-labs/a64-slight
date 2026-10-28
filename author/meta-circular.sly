@@ -1,0 +1,61 @@
+fn Lambda(params, body, env) { :Lambda(params, body, env) }
+fn Builtin(body) { :Builtin(body) }
+
+fn bind_params(params, args, env) {
+    match [params, args] {
+        [[], _]                   => env,
+        [[p, ...ps], [a, ...as]]  => bind_params(ps, as, assoc(p, a, env)),
+    }
+}
+
+fn eval(expr, env) {
+    pprint([self, :EVAL, expr]);
+    cond {
+        sym?(expr) => {
+            pprint([self, :IS-SYM, expr]);
+            let found = lookup(expr, env);
+            pprint([self, :FOUND?, found]);
+            yield found
+        }
+        cons?(expr) => {
+            pprint([self, :CALLING, expr]);
+            match expr {
+                [:lambda, params, body] => Lambda(params, body, env),
+                [call, ...args] =>
+                    yield application(eval(call, env), args |> map(fn(a) => eval(a, env)), env),
+            }
+        }
+        true => {
+            pprint([self, :IS-ATOM, expr]);
+            yield expr
+        }
+    }
+}
+
+fn application(call, args, env) {
+    pprint([self, :APPLY, car(call), args]);
+    match call {
+        :Lambda(params, body, closure_env) => {
+            pprint([self, :CALL-LAMBDA, body, args]);
+            yield eval(body, bind_params(params, args, closure_env))
+        }
+        :Builtin(body) => {
+            pprint([self, :CALL-BIF, body, args]);
+            yield body(args)
+        }
+    }
+}
+
+let env =
+    assoc(:+, Builtin(fn(args) => apply(`+`, args)),
+    assoc(:-, Builtin(fn(args) => apply(`-`, args)),
+    assoc(:*, Builtin(fn(args) => apply(`*`, args)),
+    assoc(:/, Builtin(fn(args) => apply(`/`, args)),
+    []))));
+
+let program = [[:lambda, [:x, :y], [:+, :x, :y]], 10, 20];
+let p1 = fork eval(program, env);
+let p2 = fork eval(program, env);
+
+pprint(join(p1));
+pprint(join(p2));

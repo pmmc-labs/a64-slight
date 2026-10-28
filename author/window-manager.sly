@@ -1,0 +1,103 @@
+fn Coords(x, y) { fn(m) => match m { :x => x, :y => y } }
+fn Dimensions(h, w) { fn(m) => match m { :h => h, :w => w } }
+
+fn Logger(dims, coords, logs) {
+    recv {
+        :init => {
+            tty::write(
+                "\e[s", "\e[", inc(coords(:x)), ";", inc(coords(:y)), "H",
+                "\e[37;42m LOG ", str::repeat(" ", math::max(0, dims(:w) - 13)), self, " ",
+                "\e[0m",
+                "\e[u");
+            Logger(dims, coords, logs)
+        }
+        :log(from, level, line) => {
+            tty::write("\e[s", "\e[", coords(:x) + length(logs) + 2, ";", inc(coords(:y)), "H");
+            let colour = match level {
+                :INFO  => 6,
+                :ALERT => 5,
+                :DEBUG => 3,
+                :ERROR => 1,
+            };
+            tty::write(
+                "\e[4", colour, "m▕",
+                "\e[32;47;4m", str::pad_end(line, dims(:w), " "),
+                "\e[0m",
+                "\e[u");
+            Logger(dims, coords, [line, ...logs])
+        }
+        :EXIT   => [],
+        unknown => raise([:WTF, unknown]),
+    }
+}
+
+fn Window(name, dims, coords, contents, logger) {
+    recv {
+        :refresh => {
+            tty::write("\e[s", "\e[", coords(:x) + 1, ";", coords(:y) + 1, "H");
+            tty::write("\e[37;46m ", name, str::repeat(" ", math::max(0, dims(:w) - (bytes::len(name) + 6))), self, " ", "\e[0m");
+            tty::write("\e[", coords(:x) + 2, ";", coords(:y) + 1, "H");
+            dotimes(0, dims(:h), fn(i) {
+                tty::write("\e[36;47m", "▏", str::pad_start(str(i), 2, "0"), "▕", "\e[4m", str::repeat(" ", dims(:w)), "\e[0m");
+                tty::write("\e[", coords(:x) + i + 2, ";", coords(:y) + 1, "H")
+            });
+            tty::write("\e[0m", "\e[u");
+            send(logger, :log(self, :INFO, str("-> window[", self, "](", name, ") got refresh")));
+            yield Window(name, dims, coords, contents, logger)
+        }
+        :EXIT => send(logger, :log(self, :ALERT, str("... exiting window[", self, "]"))),
+    }
+}
+
+fn WindowManager(rows, cols, windows, logger) {
+    recv {
+        :newWindow(name, dims, coords) => {
+            send(logger, :log(self, :ALERT, str("+ new Window(", name, ")")));
+            let win = spawn Window(name, dims, coords, [], logger);
+            send(win, :refresh);
+            yield WindowManager(rows, cols, [win, ...windows], logger)
+        }
+        :EXIT => {
+            send(logger, :log(self, :ALERT, "... exiting window-manager"));
+            if cons?(windows) { windows |> map(fn(w) => send(w, :EXIT)) }
+        }
+    }
+}
+
+// An actor can't wait for the others to end, so it tells them to, and
+// the top level, a task, reads its end.
+fn Keyboard(window_manager, logger) {
+    recv {
+        ["q", ..._] => {
+            send(window_manager, :EXIT);
+            send(logger, :EXIT)
+        }
+        _ => Keyboard(window_manager, logger),
+    }
+}
+
+tty::write("\e[1J");
+
+let screen_rows = tty::screen::rows() - 10;
+let screen_cols = tty::screen::cols() - 1;
+
+let logger = spawn Logger(Dimensions(screen_rows, 50), Coords(1, screen_cols - 52), []);
+send(logger, :init);
+send(logger, :log(self, :DEBUG, "... Logger Initialized"));
+
+let wm = spawn WindowManager(screen_rows, screen_cols, [], logger);
+let kb = connect(:keypress) { Keyboard(wm, logger) };
+
+send(wm, :newWindow(
+    "Window One",
+    Dimensions(20, screen_cols - 59),
+    Coords(1, 1)));
+
+send(wm, :newWindow(
+    "Window Two",
+    Dimensions(20, screen_cols - 59),
+    Coords(22, 1)));
+
+read(kb);
+
+tty::write("\e[", screen_rows + 5, ";0H");

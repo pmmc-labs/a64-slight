@@ -1,0 +1,27 @@
+fn Calculator() {
+    recv {
+        :add(x, y, f) => { send(f, x + y); Calculator() }
+        :sub(x, y, f) => { send(f, x - y); Calculator() }
+        :mul(x, y, f) => { send(f, x * y); Calculator() }
+        :div(x, y, f) => { send(f, x / y); Calculator() }
+        other         => raise([:WTF, other]),
+    }
+}
+
+fn Future() {
+    let msg = recv;
+    yield msg
+}
+
+fn ask?(to, msg) {
+    let f = spawn Future();
+    send(to, append(msg, [f]));
+    match read(f) {
+        :ok(value)     => value,
+        :error(reason) => raise(reason),
+    }
+}
+
+let calc = spawn Calculator();
+
+pprint(ask?(calc, [:add, 10, ask?(calc, [:mul, 2, 10])]));
