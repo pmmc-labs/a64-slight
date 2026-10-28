@@ -35,3 +35,4 @@
 (pprint (kind (fork (rand/int -5))))
 (pprint (kind (fork (rand/int 2.5))))
 (kind (fork (rand/seed "x")))
+; warns: 36:31 37:24

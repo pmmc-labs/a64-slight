@@ -1,0 +1,23 @@
+; match: an arm that can't match, and a match no arm of which can.
+(sig sign (int) sym)
+(defun sign (n)
+    (match n
+        (1.0 :float)
+        (0   :zero)
+        (_   :other)))
+
+(sig flag (bool) int)
+(defun flag (b)
+    (match b
+        (#true  1)
+        (#false 0)
+        (_      2)))
+
+(sig pair-sum ((shape int int)) int)
+(defun pair-sum (p)
+    (match p
+        ((a b) (+ a b))
+        ((a)   a)))
+
+(fork (match (tuple 1 2) (#(a) a)))
+(list (sign 0) (flag #true) (pair-sum (list 1 2)))

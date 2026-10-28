@@ -1,0 +1,26 @@
+; Annotations: types named, functions' types said, and calls, results and
+; values checked against them.
+(deftype Shape (or (:circle num) (:rect num num)))
+(deftype (Tree T) (or :leaf (:node (Tree T) T (Tree T))))
+
+(sig area (Shape) num)
+(defun area (s)
+    (match s
+        ((:circle r) (* 3.14 (* r r)))
+        ((:rect w h) (* w h))))
+
+(sig insert ((Tree int) int) (Tree int))
+(defun insert (t x)
+    (match t
+        (:leaf (list :node :leaf x :leaf))
+        ((:node l v r)
+            (if (< x v) (list :node (insert l x) v r) (list :node l v (insert r x))))))
+
+(sig name-of (int) str)
+(defun name-of (n) n)
+
+(area (list :square 2))
+(insert :leaf "x")
+(let label (the str (name-of 1)))
+(let n (the int "one"))
+(str/len (lookup :b (list (list :a 1) (list :b 2))))

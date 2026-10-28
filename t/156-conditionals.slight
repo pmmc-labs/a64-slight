@@ -51,3 +51,4 @@
 ; an operand before the last that isn't a boolean faults, as any cond
 ; test does
 (pprint (join (fork (and 5 #true))))
+; warns: 53:26

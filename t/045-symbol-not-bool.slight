@@ -1,2 +1,3 @@
 (cond
     (:yes 1))
+; warns: 2:6

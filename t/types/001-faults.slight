@@ -1,0 +1,17 @@
+; The builtins' faults that types make certain: each, if it ran, would end
+; its process, so each is in a process of its own. last-word's s isn't
+; known, so nothing is said of it.
+(defun last-word (s) (car (str/split s " ")))
+(fork (str/len 42))
+(fork (+ 1 :two))
+(fork (cons 1 2))
+(fork (join/race (list 1 2)))
+(fork (car ()))
+(fork (cadr (list :only)))
+(fork (if (str/index-of "abc" "b") :found :not))
+(let f 5)
+(fork (f 1))
+(let g (lambda (a b) a))
+(fork (g 1))
+(fork (last-word 7))
+(last-word "a b")

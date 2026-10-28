@@ -39,7 +39,7 @@ test('names map to slight names', () => {
 test('keywords keep their spelling', () => {
     same(':on-next; :fs/read; :RECV;', ':on-next :fs/read :RECV');
     fails(':12;', /invalid keyword/);
-    fails(': x;', /invalid keyword/);
+    fails(': x;', /expected an expression, not ':'/);    // a type's : (D247), out of place
 });
 
 test('special names', () => {
@@ -232,4 +232,44 @@ test("' quotes an s-expression, read as slight reads one", () => {
     same("match e { '(1 2) => a, _ => b };", "(match e ('(1 2) a) (_ b))");
     fails("'(a b", /expected a datum to quote/);
     fails("';", /expected something to quote/);
+});
+
+// --- types (D247) -----------------------------------------------------------
+
+test("a parameter's, a result's and an actor's types make a sig before the defun", () => {
+    same('fun f(x : int, y) : str { y }', '(sig f (int any) str) (defun f (x y) y)');
+    same('fun f(n : int) recv Msg { n }', '(sig f (int) any (recv Msg)) (defun f (n) n)');
+    same('fun g<A, B>(f : fun(A) -> B, xs : list<A>) : list<B> { xs }',
+         '(sig (g A B) ((fun (A) B) (list A)) (list B)) (defun g (f xs) xs)');
+    same('fun h(x) { x }', '(defun h (x) x)');
+});
+
+test('types as .sly writes them', () => {
+    same('let x : int | str | :ok | true | [] = 1;', "(let x (the (or int str 'ok #true ()) 1))");
+    same('let x : [int, str] = 1;', '(let x (the (shape int str) 1))');
+    same('let x : [int, ...list<str>] = 1;', '(let x (the (shape int & (list str)) 1))');
+    same('let x : [...list<str>] = 1;', '(let x (the (list str) 1))');
+    same("let x : :ok(int) | :error(str, ...list<any>) = 1;", "(let x (the (or ('ok int) ('error str & (list any))) 1))");
+    same('let x : #(int, str) = 1;', '(let x (the (tuple int str) 1))');
+    same('let x : fun(int) -> int | str = 1;', '(let x (the (fun (int) (or int str)) 1))');    // as TypeScript has it
+    same('let x : (fun(int) -> int) | fun = 1;', '(let x (the (or (fun (int) int) fun) 1))');
+    same('let x : list<list<int>> = 1;', '(let x (the (list (list int)) 1))');
+    same('let x : Result<int, (str | :none)> = 1;', '(let x (the (Result int (or str :none)) 1))');
+    same('let x : task<int> = 1; let y : actor<:ok> = 2;', "(let x (the (task int) 1)) (let y (the (actor 'ok) 2))");
+});
+
+test('type declarations, and typed lets and lambdas', () => {
+    same('type Tree = :leaf | :node(Tree, int, Tree);', "(deftype Tree (or 'leaf ('node Tree int Tree)))");
+    same('type Pair<A, B> = [A, B];', '(deftype (Pair A B) (shape A B))');
+    same('fun f() { let [a, b] : Pair<int, str> = g(); a }', '(defun f () (match (the (Pair int str) (g)) ((a b) a)))');
+    same('fun(x : int) => x + 1;', '(the (fun (int) any) (lambda (x) (+ x 1)))');
+    same('fun(x, y) : int { x };', '(the (fun (any any) int) (lambda (x y) x))');
+    same('type(x);', '(type x)');        // type is a name but where a declaration starts
+});
+
+test("a type's ':' has a space on each side", () => {
+    fails('fun f(x: int) { x }', /a type's ':' has a space on each side: write x : int/);
+    fails('fun f(x :int) { x }', /a type's ':' has a space on each side: write x : int/);
+    fails('let x: int = 1;', /a type's ':' has a space on each side/);
+    same(':ok;', "'ok");
 });

@@ -49,3 +49,4 @@
 (pprint (kind (fork (str/slice u "1"))))
 (pprint (kind (fork (str/index-of u 'a))))
 (kind (fork (str/last-index-of u "a" "0")))
+; warns: 49:34 50:37 51:38

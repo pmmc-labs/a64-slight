@@ -69,3 +69,4 @@
 (pprint (map two (list "ab" 2.5 two (lambda () (+ p q)) $$ :ab 12 () (tuple :a :b))))
 (pprint (match (list->tuple (range 0 40))
     (#(a _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ z) (list a z))))
+; warns: 34:21 43:9 44:9

@@ -44,6 +44,7 @@ import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord, TOP_P
 import { isReceiveBody, stateFunctions } from './classify.ts';
 import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
+import { eraseTypes } from './check.ts';
 import { AARCH64 } from './aarch64.ts';
 import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, word, type BitOp, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
 
@@ -101,12 +102,15 @@ type St = {
 // which it leaves none of: neither kind can be a name.
 const SPECIAL_FORMS: readonly string[] = [
     'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'spawn', 'connect', 'recv', 'yield',
-    'if', 'when', 'case', 'and', 'or', 'match', '@include',
+    'if', 'when', 'case', 'and', 'or', 'match', '@include', 'deftype', 'sig', 'the',
 ];
 
 // --- the program ------------------------------------------------------------
 
-export function compileProgram(forms: Sexp, prelude: Sexp = NIL, t: Target = AARCH64): string {
+export function compileProgram(typed: Sexp, typedPrelude: Sexp = NIL, t: Target = AARCH64): string {
+    // types say nothing to the code (D247): deftype and sig go, (the T e) is e
+    const forms   = eraseTypes(typed);
+    const prelude = eraseTypes(typedPrelude);
     const preludeForms = toArray(prelude)!;
     preludeForms.forEach((f) => {
         if (!isForm(f, 'defun')) throw new CompileError(`the prelude can only define functions, not ${show(f)}`, posOf(f));

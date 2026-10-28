@@ -1,0 +1,6 @@
+t/types/004-processes.slight:20:9: warning: this actor takes (or (:work any) :stop (:done any)), and this is (:stop): it would be a dead letter
+t/types/004-processes.slight:21:9: warning: this actor takes (or (:work any) :stop (:done any)), and this is :finish: it would be a dead letter
+t/types/004-processes.slight:22:13: warning: join of an actor, which can't be joined: it faults :not-a-task (read it, from a task)
+t/types/004-processes.slight:23:20: warning: the keyboard sends (shape (or str sym) & (list sym)), and keys takes :quit: every key would be a dead letter
+t/types/004-processes.slight:27:20: warning: address in an actor, which is a task's: it faults :not-a-task
+t/types/004-processes.slight:29:1: warning: monitor in a task, which can't be sent the notice: it faults :not-an-actor

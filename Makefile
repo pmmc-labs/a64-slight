@@ -36,7 +36,7 @@ endif
 sketch:
 	node bin/slightc.ts -o "./sketch" "author/sketch.slight"
 
-test: unit headers guide golden replay live
+test: unit headers guide types golden replay live
 
 unit:
 	node --test "compiler/tests/**/*.test.ts"
@@ -54,6 +54,11 @@ replay:
 # Every lisp block in docs/guide/ and README.md is in a golden test
 guide:
 	python3 t/guide.py
+
+# Every program checks clean but for the warnings it lists, and the
+# checker's own tests (t/types/) say what they should (D247)
+types:
+	node t/types.ts
 
 live:
 	@fail=0; for target in $(TARGETS); do \
@@ -81,4 +86,4 @@ clean:
 		rm -rf "./sketch.dSYM"; \
     fi
 
-.PHONY: test unit guide golden replay live headers check bench clean
+.PHONY: test unit guide types golden replay live headers check bench clean

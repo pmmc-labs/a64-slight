@@ -54,3 +54,4 @@
 (pprint (kind (fork (bit/xor 1 1.0))))
 (pprint (kind (fork (bit/count "1"))))
 (kind (fork (bit/not ())))
+; warns: 54:32 55:32 56:13

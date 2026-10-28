@@ -40,3 +40,4 @@
 (pprint (join (fork (open :fs/read 42))))
 (pprint (open :tcp "127.0.0.1:1"))
 :done
+; warns: 38:22

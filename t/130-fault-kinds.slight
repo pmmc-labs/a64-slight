@@ -16,3 +16,4 @@
 (pprint (join (fork (sum-down 10000))))
 (pprint (join (fork (length (range 0 100000)))))
 :done
+; warns: 15:32

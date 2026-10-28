@@ -2,3 +2,4 @@
 (let g add)
 (pprint (g 1 2))
 (g 1)
+; warns: 4:2

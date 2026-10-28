@@ -67,12 +67,14 @@ type Source = { readonly path: string; readonly name: string };
 // A file being included, for spotting cycles.
 type Open = { readonly name: string; readonly key: string };
 
-type Cx = { readonly lib: string; readonly load: Loader };
+type Cx = { readonly lib: string; readonly load: Loader; readonly keepMatch: boolean };
 
 // The prelude, then the files in order, each with what it includes. lib is
 // the directory with the built-in files (lib/name.slight).
-export function expandProgram(files: readonly string[], lib: string, load: Loader): Expanded {
-    const cx: Cx = { lib, load };
+// keepMatch: leave match as it is, for the checker (check.ts), which
+// expand() then lowers.
+export function expandProgram(files: readonly string[], lib: string, load: Loader, keepMatch = false): Expanded {
+    const cx: Cx = { lib, load, keepMatch };
     const [prelude, done] = includeFile(builtin('prelude', lib), null, cx, [], []);
     const [program] = files.reduce<[readonly Sexp[], readonly string[]]>(([acc, d], file) => {
         const [forms, d1] = includeFile({ path: file, name: file }, null, cx, [], d);
@@ -105,7 +107,7 @@ function includeFile(src: Source, from: Pos | null, cx: Cx, stack: readonly Open
             out.push(...forms);
             d = d1;
         } else {
-            out.push(expand(x));
+            out.push(expand(x, cx.keepMatch));
         }
     }
     return [out, [...d, key]];
@@ -154,30 +156,44 @@ function mapList(xs: Sexp, f: (x: Sexp) => Sexp): Sexp {
 }
 
 // The first n elements as they are, and the rest expanded.
-function after(xs: Sexp, n: number): Sexp {
+function after(xs: Sexp, n: number, keep: boolean): Sexp {
     if (xs.t !== 'pair') return xs;
-    return n > 0 ? cons(xs.car, after(xs.cdr, n - 1), xs.pos) : mapList(xs, expand);
+    return n > 0 ? cons(xs.car, after(xs.cdr, n - 1, keep), xs.pos) : mapList(xs, (y) => expand(y, keep));
 }
 
-export function expand(x: Sexp): Sexp {
+// keepMatch: everything but match, which the checker wants as it is
+// (D247); expanding the result again lowers it.
+export function expand(x: Sexp, keepMatch = false): Sexp {
     if (x.t !== 'pair') return x;
-    if (x.car.t !== 'sym') return mapList(x, expand);
+    const ex = (y: Sexp): Sexp => expand(y, keepMatch);
+    if (x.car.t !== 'sym') return mapList(x, ex);
     switch (x.car.name) {
         case 'quote':    return x;
+        case 'deftype':  return x;    // types, which check.ts reads
+        case 'sig':      return x;
+        case 'the':      return after(x, 2, keepMatch);
         case '@include': throw new CompileError('@include is only allowed at the top level', x.pos);
         case TUPLE:      throw new CompileError(`#(...) is a pattern, for match and recv; (tuple ...) makes a tuple, not ${show(x)}`, x.pos);
-        case 'if':       return expand(expandIf(x));
-        case 'when':     return expand(expandWhen(x));
-        case 'case':     return expand(expandCase(x));
-        case 'and':      return expand(expandAnd(x));
-        case 'or':       return expand(expandOr(x));
-        case 'match':    return expand(expandMatch(x));
-        case 'defun':    return after(x, 3);    // (defun name params body...)
-        case 'lambda':   return after(x, 2);    // (lambda params body...)
-        case 'cond':     return cons(x.car, mapList(x.cdr, (c) => mapList(c, expand)), x.pos);
-        case 'recv':     return cons(x.car, mapList(x.cdr, (c) => after(c, 1)), x.pos);
-        default:         return mapList(x, expand);
+        case 'if':       return ex(expandIf(x));
+        case 'when':     return ex(expandWhen(x));
+        case 'case':     return ex(expandCase(x));
+        case 'and':      return ex(expandAnd(x));
+        case 'or':       return ex(expandOr(x));
+        case 'match':    return keepMatch ? matchKept(x) : ex(expandMatch(x));
+        case 'defun':    return after(x, 3, keepMatch);    // (defun name params body...)
+        case 'lambda':   return after(x, 2, keepMatch);    // (lambda params body...)
+        case 'cond':     return cons(x.car, mapList(x.cdr, (c) => mapList(c, ex)), x.pos);
+        case 'recv':     return cons(x.car, mapList(x.cdr, (c) => after(c, 1, keepMatch)), x.pos);
+        default:         return mapList(x, ex);
     }
+}
+
+// (match topic (pattern body...) ...) with its topic and bodies expanded,
+// and its patterns as they are.
+function matchKept(x: Pair): Sexp {
+    if (x.cdr.t !== 'pair') return x;
+    const clauses = mapList(x.cdr.cdr, (c) => after(c, 1, true));
+    return cons(x.car, cons(expand(x.cdr.car, true), clauses, x.cdr.pos), x.pos);
 }
 
 const TRUE  = sym('#true');

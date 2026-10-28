@@ -1,4 +1,6 @@
-; The prelude: compiled with every program. It can only define functions.
+; The prelude: compiled with every program. It can only define functions,
+; and say their types and the types it names (D247): what the checker
+; knows them by, which the compiler leaves out.
 ;
 ; A program can define a function with a prelude name: its own code then
 ; uses its own, and the prelude keeps using these (D80). D78 says why
@@ -8,13 +10,24 @@
 ; in ?, member? among them. Every loop is a tail call, so long lists are
 ; fine. The string functions are builtins, in C (D219).
 
+; --- types --------------------------------------------------------------------
+
+; What can fail: what the runtime's (:ok value) and (:error reason) are.
+(deftype (Result T E) (or (:ok T) (:error E)))
+
+; JSON as json/parse gives it (docs/LANGUAGE.md, JSON).
+(deftype Json (or :null bool int float str (list Json) (:object & (list (shape str Json)))))
+
 ; --- numbers and booleans ---------------------------------------------------
 
+(sig (inc N) (N) N)
 (defun inc (n) (+ n 1))
+(sig (dec N) (N) N)
 (defun dec (n) (- n 1))
 
 ; On booleans only. (and and or aren't functions: the expander makes them
 ; into cond, which stops at the first operand that decides.)
+(sig not (bool) bool)
 (defun not (a)
     (cond
         (a      #false)
@@ -23,12 +36,14 @@
 ; --- folds --------------------------------------------------------------------
 
 ; (f acc x) for each x, from the left.
+(sig (fold/l A B) (A (fun (A B) A) (list B)) A)
 (defun fold/l (acc f xs)
     (match xs
         (()         acc)
         ((x & rest) (fold/l (f acc x) f rest))))
 
 ; (f x acc) for each x, from the right.
+(sig (fold/r A B) (A (fun (B A) A) (list B)) A)
 (defun fold/r (acc f xs) (fold/r-loop f (reverse xs) acc))
 (defun fold/r-loop (f xs acc)
     (match xs
@@ -40,34 +55,41 @@
 ; Each its own loop, not fold/l with a lambda: a closure called for each
 ; element was most of the time a program spent in these (D203).
 
+(sig (reverse A) ((list A)) (list A))
 (defun reverse (xs) (reverse-onto xs ()))
 
 ; xs reversed, in front of ys.
+(sig (reverse-onto A) ((list A) (list A)) (list A))
 (defun reverse-onto (xs ys)
     (match xs
         (()         ys)
         ((x & rest) (reverse-onto rest (cons x ys)))))
 
+(sig length ((list any)) int)
 (defun length (xs) (length-loop xs 0))
 (defun length-loop (xs n)
     (match xs
         (()         n)
         ((_ & rest) (length-loop rest (+ n 1)))))
 
+(sig (append A) ((list A) (list A)) (list A))
 (defun append (xs ys) (reverse-onto (reverse xs) ys))
 
+(sig (sum N) ((list N)) (or N int))
 (defun sum (xs) (sum-loop xs 0))
 (defun sum-loop (xs acc)
     (match xs
         (()         acc)
         ((x & rest) (sum-loop rest (+ acc x)))))
 
+(sig (product N) ((list N)) (or N int))
 (defun product (xs) (product-loop xs 1))
 (defun product-loop (xs acc)
     (match xs
         (()         acc)
         ((x & rest) (product-loop rest (* acc x)))))
 
+(sig (map A B) ((fun (A) B) (list A)) (list B))
 (defun map (f xs) (map-loop f xs ()))
 (defun map-loop (f xs acc)
     (match xs
@@ -75,6 +97,7 @@
         ((x & rest) (map-loop f rest (cons (f x) acc)))))
 
 ; The elements for which (f x) is #true.
+(sig (filter A) ((fun (A) bool) (list A)) (list A))
 (defun filter (f xs) (filter-loop f xs ()))
 (defun filter-loop (f xs acc)
     (match xs
@@ -82,6 +105,7 @@
         ((x & rest) (filter-loop f rest (if (f x) (cons x acc) acc)))))
 
 ; The elements for which (f x) is #false.
+(sig (remove A) ((fun (A) bool) (list A)) (list A))
 (defun remove (f xs) (remove-loop f xs ()))
 (defun remove-loop (f xs acc)
     (match xs
@@ -89,6 +113,7 @@
         ((x & rest) (remove-loop f rest (if (f x) acc (cons x acc))))))
 
 ; The first n elements, or all of them if there are fewer.
+(sig (take A) (int (list A)) (list A))
 (defun take (n xs) (take-loop n xs ()))
 (defun take-loop (n xs acc)
     (cond
@@ -97,6 +122,7 @@
         (#true     (take-loop (- n 1) (cdr xs) (cons (car xs) acc)))))
 
 ; All but the first n elements, or () if there are fewer.
+(sig (skip A) (int (list A)) (list A))
 (defun skip (n xs)
     (cond
         ((== n 0)  xs)
@@ -104,23 +130,27 @@
         (#true     (skip (- n 1) (cdr xs)))))
 
 ; The element at index i, or () if there isn't one.
+(sig (nth A) (int (list A)) (or A nil))
 (defun nth (i xs)
     (match xs
         (()         ())
         ((x & rest) (if (== i 0) x (nth (- i 1) rest)))))
 
 ; The first element for which (f x) is #true, or ().
+(sig (find A) ((fun (A) bool) (list A)) (or A nil))
 (defun find (f xs)
     (match xs
         (()         ())
         ((x & rest) (if (f x) x (find f rest)))))
 
+(sig member? (any (list any)) bool)
 (defun member? (x xs)
     (match xs
         (()         #false)
         ((y & rest) (or (eq? x y) (member? x rest)))))
 
 ; start, start + 1, ... up to but not including end.
+(sig (range N) (N N) (list N))
 (defun range (start end) (range-loop (- end 1) start ()))
 (defun range-loop (n start acc)
     (cond
@@ -128,6 +158,7 @@
         (#true       (range-loop (- n 1) start (cons n acc)))))
 
 ; (f i) for i from start up to but not including end, for its effects.
+(sig (dotimes N) (N N (fun (N) any)) nil)
 (defun dotimes (start end f)
     (cond
         ((>= start end) ())
@@ -135,6 +166,7 @@
 
 ; (x y) for each x and the y in the same place, as long as the shorter
 ; list: an association list, if the xs are keys.
+(sig (zip A B) ((list A) (list B)) (list (shape A B)))
 (defun zip (xs ys) (zip-loop xs ys ()))
 (defun zip-loop (xs ys acc)
     (match (list xs ys)
@@ -147,10 +179,12 @@
 ; ascending. Stable: elements that neither is less than the other keep
 ; their order. A merge sort from the bottom up: runs of one, merged in
 ; pairs, again and again, till there's one run.
+(sig (sort A) ((fun (A A) bool) (list A)) (list A))
 (defun sort (less? xs) (sort-runs less? (map (lambda (x) (list x)) xs)))
 
 ; xs in the order of (key x), a number, ascending; stable too. key is
 ; called once for each element.
+(sig (sort-by A) ((fun (A) num) (list A)) (list A))
 (defun sort-by (key xs)
     (map cadr (sort (lambda (a b) (< (car a) (car b))) (map (lambda (x) (list (key x) x)) xs))))
 
@@ -178,10 +212,12 @@
 
 ; --- association lists: ((key value) ...) -------------------------------------
 
+(sig (assoc K V) (K V (list (shape K V))) (list (shape K V)))
 (defun assoc (k v table)
     (cons (list k v) table))
 
 ; The value for k, or :not-found.
+(sig (lookup K V) (K (list (shape K V))) (or V :not-found))
 (defun lookup (k table)
     (match table
         (()                   :not-found)
@@ -193,12 +229,14 @@
 ; generator of its own (D222).
 
 ; An element of xs, each as likely, or () if there are none, as nth gives.
+(sig (rand/pick A) ((list A)) (or A nil))
 (defun rand/pick (xs)
     (if (nil? xs) () (nth (rand/int (length xs)) xs)))
 
 ; xs in an order each of whose arrangements is as likely: each element
 ; sorted by a draw of its own, where swapping as the elements come is easy
 ; to get subtly wrong.
+(sig (rand/shuffle A) ((list A)) (list A))
 (defun rand/shuffle (xs) (sort-by (lambda (x) (rand/float)) xs))
 
 ; --- waiting for processes ----------------------------------------------------
@@ -212,6 +250,7 @@
 
 ; The first of pids to succeed, as (:ok value); or, once all have failed,
 ; (:error reasons), the reasons in the order of pids.
+(sig join/any ((list pid)) (or (:ok any) (:error (list any))))
 (defun join/any (pids) (join/any-loop pids pids ()))
 (defun join/any-loop (pids waiting reasons)
     (if (nil? waiting)
@@ -225,6 +264,7 @@
 
 ; (:ok values), the values in the order of pids, once all have succeeded;
 ; or the first (:error reason) as soon as one fails.
+(sig join/all ((list pid)) (or (:ok (list any)) (:error any)))
 (defun join/all (pids) (join/all-loop pids pids ()))
 (defun join/all-loop (pids waiting values)
     (if (nil? waiting)
@@ -242,15 +282,18 @@
 ; reads the answer from it: a task's way to have an actor's answer (D243).
 ; The actor answers with (reply to v), to being the address. If pid ends
 ; first, ask raises (:ended pid result) rather than waiting for ever.
+(sig ask (pid (list any)) any)
 (defun ask (pid msg) (ask/via pid msg ()))
 
 ; As ask, but raises (:timeout pid) if no answer comes within ms
 ; milliseconds; the timer is taken back once one does (D232).
+(sig ask-within (int pid (list any)) any)
 (defun ask-within (ms pid msg)
     (let to (address))
     (ask/via pid msg (list to (after ms to :timeout))))
 
 ; How an actor answers an ask: to is the address at the end of the message.
+(sig reply (pid any) nil)
 (defun reply (to v) (send to (list :reply v)))
 
 ; timer is () or (to t): the address it was set for, and its number.

@@ -1,0 +1,4 @@
+t/types/003-match.slight:5:10: warning: this arm can't match int
+t/types/003-match.slight:14:10: warning: this arm can't match: the ones before it take everything
+t/types/003-match.slight:20:10: warning: this arm can't match (shape int int)
+t/types/003-match.slight:22:7: warning: no arm of this match can match (tuple int int): it faults :no-match

@@ -18,10 +18,12 @@ export type FnSource = { readonly name: string; readonly params: readonly string
 export const isReceiveBody = (body: Sexp): boolean =>
     body.t === 'pair' && body.cdr.t === 'nil' && isForm(body.car, 'recv');
 
-export function stateFunctions(defuns: readonly FnSource[]): readonly string[] {
+// waits: whether a body waits itself; the checker (check.ts), which
+// runs before split.ts, asks whether it has a recv anywhere.
+export function stateFunctions(defuns: readonly FnSource[], waits: (body: Sexp) => boolean = isReceiveBody): readonly string[] {
     const names = defuns.map((d) => d.name);
     const calls = defuns.map((d) => tailCalls(d.body, d.params, names));
-    let state   = defuns.filter((d) => isReceiveBody(d.body)).map((d) => d.name);
+    let state   = defuns.filter((d) => waits(d.body)).map((d) => d.name);
     for (;;) {
         const more = defuns.filter((d, i) => !state.includes(d.name) && calls[i]!.some((c) => state.includes(c)));
         if (more.length === 0) return state;

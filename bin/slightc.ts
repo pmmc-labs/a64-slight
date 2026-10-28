@@ -3,7 +3,8 @@
 // slightc: compile .slight files to a native binary, for AArch64 (the
 // default) or x86-64.
 //
-//   node bin/slightc.ts [-o out] [-S] [--target aarch64|x86_64] file.slight ...
+//   node bin/slightc.ts [-o out] [-S] [--target aarch64|x86_64] [--strict] file.slight ...
+//   node bin/slightc.ts --check [--strict] file.slight ...
 //   node bin/slightc.ts --runtime [--target aarch64|x86_64]
 //
 //   -o out     the binary to write (default: a.out). The assembly goes next
@@ -12,6 +13,14 @@
 //   --target   the architecture to compile for (default: aarch64)
 //   --runtime  only build the runtime, if it isn't built already: for
 //              before several compiles start at once (t/run.sh)
+//   --check    only check the program's types (D247): say what's wrong,
+//              and compile nothing
+//   --strict   warn where a type may be wrong as well as where it is, and
+//              make any warning an error
+//
+// The types are checked every time (docs/TYPES.md, compiler/src/check.ts):
+// warnings go to stderr, and the program is compiled anyway, unless
+// --strict.
 //
 // The runtime is compiled once, and kept under build/runtime/ (D150).
 //
@@ -21,8 +30,8 @@
 // with qemu-aarch64 or qemu-x86_64). SLIGHT_CC overrides the compiler
 // command.
 //
-// Exit codes: 0 on success, 1 on a compile error, 2 on bad usage or a
-// failed toolchain step.
+// Exit codes: 0 on success, 1 on a compile error (or a warning, with
+// --strict), 2 on bad usage or a failed toolchain step.
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -33,8 +42,10 @@ import { basename, join } from 'node:path';
 
 import { AARCH64 } from '../compiler/src/aarch64.ts';
 import { compileProgram } from '../compiler/src/codegen.ts';
+import { checkProgram, formatWarning } from '../compiler/src/check.ts';
 import { CompileError } from '../compiler/src/errors.ts';
-import { expandProgram, type Loader } from '../compiler/src/expand.ts';
+import { expand, expandProgram, type Loader } from '../compiler/src/expand.ts';
+import { list, toArray, type Sexp } from '../compiler/src/sexp.ts';
 import type { Target } from '../compiler/src/target.ts';
 import { X86_64 } from '../compiler/src/x86_64.ts';
 
@@ -55,7 +66,8 @@ const runtimeSources = (arch: Arch): readonly string[] =>
     ['rt.c', 'process.c', 'strings.c', 'numbers.c', 'tuples.c', 'tty.c', 'json.c', 'sexp.c', 'dns.c', 'replay.c', 'unicode.c', arch.asm].map((f) => join(RUNTIME_DIR, f));
 
 function usage(message: string): never {
-    process.stderr.write(`slightc: ${message}\nusage: node bin/slightc.ts [-o out] [-S] [--target aarch64|x86_64] file.slight ...\n`
+    process.stderr.write(`slightc: ${message}\nusage: node bin/slightc.ts [-o out] [-S] [--target aarch64|x86_64] [--strict] file.slight ...\n`
+                         + '       node bin/slightc.ts --check [--strict] file.slight ...\n'
                          + '       node bin/slightc.ts --runtime [--target aarch64|x86_64]\n');
     process.exit(2);
 }
@@ -75,6 +87,7 @@ const loader: Loader = {
 type Options = {
     readonly out: string | null; readonly asmOnly: boolean; readonly runtimeOnly: boolean;
     readonly arch: string; readonly files: readonly string[];
+    readonly check: boolean; readonly strict: boolean;
 };
 
 function parseArgs(args: readonly string[], opts: Options): Options {
@@ -82,6 +95,8 @@ function parseArgs(args: readonly string[], opts: Options): Options {
     if (arg === undefined) return opts;
     if (arg === '-S') return parseArgs(rest, { ...opts, asmOnly: true });
     if (arg === '--runtime') return parseArgs(rest, { ...opts, runtimeOnly: true });
+    if (arg === '--check') return parseArgs(rest, { ...opts, check: true });
+    if (arg === '--strict') return parseArgs(rest, { ...opts, strict: true });
     if (arg === '--target') {
         const [arch, ...more] = rest;
         if (arch === undefined || !Object.hasOwn(ARCHES, arch)) usage(`--target takes ${Object.keys(ARCHES).join(' or ')}`);
@@ -151,11 +166,15 @@ function runtimeObjects(arch: Arch, compiler: Compiler): readonly string[] {
     return objects;
 }
 
+// The forms with their matches made into cond, as expand() does them
+// when it isn't keeping them for the checker.
+const lowered = (forms: Sexp): Sexp => list(...(toArray(forms) ?? []).map((f) => expand(f)));
+
 function main(): void {
-    const opts = parseArgs(process.argv.slice(2), { out: null, asmOnly: false, runtimeOnly: false, arch: 'aarch64', files: [] });
+    const opts = parseArgs(process.argv.slice(2), { out: null, asmOnly: false, runtimeOnly: false, arch: 'aarch64', files: [], check: false, strict: false });
     const arch = ARCHES[opts.arch]!;
     if (opts.runtimeOnly) {
-        if (opts.files.length > 0 || opts.asmOnly || opts.out !== null) usage('--runtime takes only --target');
+        if (opts.files.length > 0 || opts.asmOnly || opts.out !== null || opts.check) usage('--runtime takes only --target');
         runtimeObjects(arch, compilerCommand(arch));
         return;
     }
@@ -170,8 +189,12 @@ function main(): void {
 
     let asm: string;
     try {
-        const { prelude, program } = expandProgram(opts.files, LIB_DIR, loader);
-        asm = compileProgram(program, prelude, arch.target);
+        const { prelude, program } = expandProgram(opts.files, LIB_DIR, loader, true);
+        const warnings = checkProgram(prelude, program, { strict: opts.strict });
+        for (const w of warnings) process.stderr.write(`${formatWarning(w)}\n`);
+        if (opts.strict && warnings.length > 0) process.exit(1);
+        if (opts.check) return;
+        asm = compileProgram(lowered(program), lowered(prelude), arch.target);
     } catch (e) {
         if (!(e instanceof CompileError)) throw e;
         process.stderr.write(`${e.message}\n`);

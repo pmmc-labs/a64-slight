@@ -11,3 +11,4 @@
 (pprint (kind (fork (join/race (list $$)))))
 (pprint (kind (fork (join/race (list (spawn (recv (_ :a))))))))
 (join/race (list (fork (read (address))) (fork (read (address)))))
+; warns: 9:32 10:32

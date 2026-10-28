@@ -29,3 +29,4 @@
 (pprint (join (fork (tuple/remove (tuple) 0))))
 (pprint (join (fork (tuple/remove (list 1) 0))))
 (pprint (join (fork (tuple/insert t :b :x))))
+; warns: 30:35 31:37

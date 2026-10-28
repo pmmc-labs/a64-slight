@@ -26,6 +26,18 @@
 //   spawn e, fork e, yield e   (spawn e), (fork e), (yield e)
 //   self, parent               $$, ^$$
 //
+// And types (D247, docs/TYPES.md), which the checker reads and the
+// compiler leaves out:
+//
+//   fun f(x : int, y) : str    (sig f (int any) str) (defun f (x y) ...)
+//   fun g<A>(xs : list<A>) : A (sig (g A) ((list A)) A) ...
+//   fun h(n : int) recv Msg    (sig h (int) any (recv Msg)) ...
+//   let x : T = e;             (let x (the T e))
+//   fun(x : int) => e          (the (fun (int) any) (lambda (x) e))
+//   type Name<A> = T;          (deftype (Name A) T)
+//
+// A type's `:` has a space on each side, and `x: int` is an error that
+// says so.
 // Names: an identifier's `::` is slight's `/`, then `_to_` its `->`, then
 // `_` its `-`, so str_to_int is str->int, and it may start with `$`; a
 // name between backticks is taken as it is. Keywords keep slight's
@@ -56,8 +68,8 @@ const RESERVED = ['fun', 'let', 'if', 'else', 'cond', 'case', 'match', 'recv', '
                   'true', 'false', 'self', 'parent'];
 
 // Longest first, so that `...` isn't read as something shorter.
-const PUNCTS = ['...', '=>', '==', '!=', '<=', '>=', '&&', '||', '|>', '++', '#(',
-                '(', ')', '[', ']', '{', '}', ',', ';', '<', '>', '+', '-', '*', '/', '%', '!', '='];
+const PUNCTS = ['...', '=>', '==', '!=', '<=', '>=', '&&', '||', '|>', '++', '#(', '->',
+                '(', ')', '[', ']', '{', '}', ',', ';', '<', '>', '+', '-', '*', '/', '%', '!', '=', '|'];
 
 const isIdentStart = (ch: string): boolean => isLetter(ch) || ch === '_';
 const isIdentChar  = (ch: string): boolean => isIdentStart(ch) || isDigit(ch);
@@ -127,8 +139,21 @@ function nextToken(c: Cursor): [Token | null, Cursor] {
     }
     if (ch === "'") return readQuoted(c, pos);
     if (ch === ':') {
-        const end  = skipWhile(step(c), isKwChar);
-        const text = s.slice(c.i + 1, end.i);
+        // a type's : (D247) has space on each side; a keyword's has none after it
+        const next = s[c.i + 1] ?? '';
+        if (next === '' || isSpace(next)) {
+            if (c.i > 0 && !isSpace(s[c.i - 1]!)) throw new CompileError("a type's ':' has a space on each side: write x : int", pos);
+            return [{ kind: 'punct', text: ':', pos }, step(c)];
+        }
+        let end    = skipWhile(step(c), isKwChar);
+        let text   = s.slice(c.i + 1, end.i);
+        // a keyword doesn't end in >, so that a type's actor<:ok> closes
+        let trim = 0;
+        while (trim < text.length && text[text.length - 1 - trim] === '>') trim++;
+        if (trim > 0 && trim < text.length) {
+            text = text.slice(0, -trim);
+            end  = advance(c, 1 + text.length);
+        }
         if (text === '' || text.startsWith(':') || text.startsWith('#') || numberKind(text) !== null) {
             throw new CompileError(`invalid keyword ':${text}'`, pos);
         }
@@ -229,20 +254,22 @@ export function readSly(src: string, file: string): Sexp {
             continue;
         }
         if (isW(t, 'fun') && ts[i + 1]?.kind === 'name') {
-            const [d, next] = parseDefun(ts, i);
-            out.push(d);
+            const [ds, next] = parseDefun(ts, i);
+            out.push(...ds);
             i = next;
             continue;
         }
         let x: Sexp;
         if (isW(t, '@include')) {
             [x, i] = parseInclude(ts, i);
+        } else if (isTypeDecl(ts, i)) {
+            [x, i] = parseTypeDecl(ts, i);
         } else if (isW(t, 'let')) {
             const [pattern, j] = parsePattern(ts, i + 1);
             if (pattern.t !== 'sym' || isSym(pattern, '_')) {
                 throw new CompileError("a top-level let binds a name: there's no rest of a block for a pattern's match", t.pos);
             }
-            const [e, k] = parseExpr(ts, expect(ts, j, '=', 'after the name a let binds'));
+            const [e, k] = parseLetValue(ts, j, 'after the name a let binds');
             [x, i] = [form(t.pos, sym('let', t.pos), pattern, e), k];
         } else {
             [x, i] = parseExpr(ts, i);
@@ -253,27 +280,160 @@ export function readSly(src: string, file: string): Sexp {
     return list(...out);
 }
 
-// fun name(params) { body }
-function parseDefun(ts: Ts, i: number): [Sexp, number] {
+// fun name<A, B>(params) : result recv messages { body }, the types
+// optional: the defun, and before it a sig if anything has a type.
+function parseDefun(ts: Ts, i: number): [readonly Sexp[], number] {
     const at   = ts[i]!.pos;
     const name = ts[i + 1]!;
-    const [params, j] = parseParams(ts, i + 2);
-    const [body, k]   = parseBlock(ts, j);
-    return [form(at, sym('defun', at), sym(name.text, name.pos), params, ...nonEmpty(body)), k];
+    const [vars, j0] = isP(ts[i + 2], '<') ? parseTypeVars(ts, i + 2) : [[], i + 2];
+    const [params, j] = parseParams(ts, j0);
+    let k = j;
+    let result: Sexp | null = null;
+    let takes: Sexp | null = null;
+    if (isP(ts[k], ':')) [result, k] = parseType(ts, k + 1);
+    if (isW(ts[k], 'recv')) [takes, k] = parseType(ts, k + 1);
+    const [body, m] = parseBlock(ts, k);
+    const defun = form(at, sym('defun', at), sym(name.text, name.pos), params.names, ...nonEmpty(body));
+    if (vars.length === 0 && result === null && takes === null && params.types.every((t) => t === null)) return [[defun], m];
+    const head = vars.length === 0 ? sym(name.text, name.pos) : form(name.pos, sym(name.text, name.pos), ...vars);
+    const sig  = form(at, sym('sig', at), head, list(...params.types.map((t) => t ?? sym('any', at))), result ?? sym('any', at),
+                      ...(takes === null ? [] : [list(sym('recv', at), takes)]));
+    return [[sig, defun], m];
 }
 
-// (a, b, ...), as a list of names.
-function parseParams(ts: Ts, i: number): [Sexp, number] {
+// (a : T, b, ...): the names, and each one's type, or null.
+type Params = { readonly names: Sexp; readonly types: readonly (Sexp | null)[] };
+
+function parseParams(ts: Ts, i: number): [Params, number] {
     i = expect(ts, i, '(', 'before the parameters');
     const names: Sexp[] = [];
+    const types: (Sexp | null)[] = [];
     while (!isP(ts[i], ')')) {
         const t = ts[i];
         if (t?.kind !== 'name' || !t.plain) throw new CompileError(`a parameter is a name, not ${describe(t)}`, t?.pos ?? null);
         names.push(sym(t.text, t.pos));
         i++;
+        if (ts[i]?.kind === 'kw') throw new CompileError(`a type's ':' has a space on each side: write ${t.text} : ${ts[i]!.text}`, ts[i]!.pos);
+        let type: Sexp | null = null;
+        if (isP(ts[i], ':')) [type, i] = parseType(ts, i + 1);
+        types.push(type);
         if (!isP(ts[i], ')')) i = expect(ts, i, ',', 'between parameters');
     }
-    return [list(...names), i + 1];
+    return [{ names: list(...names), types }, i + 1];
+}
+
+// A let's value, after its pattern: `: T = e` is (the T e).
+function parseLetValue(ts: Ts, i: number, what: string): [Sexp, number] {
+    if (!isP(ts[i], ':')) return parseExpr(ts, expect(ts, i, '=', what));
+    const at = ts[i]!.pos;
+    const [type, j] = parseType(ts, i + 1);
+    const [e, k] = parseExpr(ts, expect(ts, j, '=', "after a let's type"));
+    return [form(at, sym('the', at), type, e), k];
+}
+
+// ---- types (D247) ----------------------------------------------------------
+
+// type Name = T; type Name<A, B> = T;
+const isTypeDecl = (ts: Ts, i: number): boolean => {
+    const t = ts[i];
+    return t?.kind === 'name' && t.text === 'type' && ts[i + 1]?.kind === 'name' && (isP(ts[i + 2], '=') || isP(ts[i + 2], '<'));
+};
+
+function parseTypeDecl(ts: Ts, i: number): [Sexp, number] {
+    const at = ts[i]!.pos;
+    const name = ts[i + 1]!;
+    const [vars, j] = isP(ts[i + 2], '<') ? parseTypeVars(ts, i + 2) : [[], i + 2];
+    const [type, k] = parseType(ts, expect(ts, j, '=', "after a type's name"));
+    const head = vars.length === 0 ? sym(name.text, name.pos) : form(name.pos, sym(name.text, name.pos), ...vars);
+    return [form(at, sym('deftype', at), head, type), k];
+}
+
+// <A, B>: type variables.
+function parseTypeVars(ts: Ts, i: number): [readonly Sexp[], number] {
+    i = expect(ts, i, '<', 'before type variables');
+    const vars: Sexp[] = [];
+    while (!isP(ts[i], '>')) {
+        const t = ts[i];
+        if (t?.kind !== 'name' || !t.plain) throw new CompileError(`a type variable is a name, not ${describe(t)}`, t?.pos ?? null);
+        vars.push(sym(t.text, t.pos));
+        i = isP(ts[i + 1], '>') ? i + 1 : expect(ts, i + 1, ',', 'between type variables');
+    }
+    return [vars, i + 1];
+}
+
+// A type, as docs/TYPES.md writes them in this syntax, into the
+// s-expression check.ts reads: A | B is (or A B).
+function parseType(ts: Ts, i: number): [Sexp, number] {
+    const at = ts[i]?.pos ?? null;
+    const parts: Sexp[] = [];
+    let [t, j] = parseTypeOne(ts, i);
+    parts.push(t);
+    while (isP(ts[j], '|')) {
+        [t, j] = parseTypeOne(ts, j + 1);
+        parts.push(t);
+    }
+    return [parts.length === 1 ? parts[0]! : form(at, sym('or', at), ...parts), j];
+}
+
+// Types up to close, each maybe after `...` (the last only), and past it.
+function parseTypeItems(ts: Ts, i: number, close: string): [readonly Sexp[], Sexp | null, number] {
+    const items: Sexp[] = [];
+    while (!isP(ts[i], close)) {
+        if (isP(ts[i], '...')) {
+            const [rest, j] = parseType(ts, i + 1);
+            return [items, rest, expect(ts, j, close, "after a type's '...'")];
+        }
+        const [t, j] = parseType(ts, i);
+        items.push(t);
+        i = isP(ts[j], close) ? j : expect(ts, j, ',', 'between types');
+    }
+    return [items, null, i + 1];
+}
+
+function parseTypeOne(ts: Ts, i: number): [Sexp, number] {
+    const t = ts[i];
+    if (t === undefined) throw new CompileError('expected a type, not the end of the file', ts.at(-1)?.pos ?? null);
+    const at = t.pos;
+    switch (t.kind) {
+        case 'name': {
+            if (!isP(ts[i + 1], '<')) return [sym(t.text, at), i + 1];
+            const [args, , j] = parseTypeItems(ts, i + 2, '>');
+            return [form(at, sym(t.text, at), ...args), j];
+        }
+        case 'word':
+            if (t.text === 'true') return [sym('#true', at), i + 1];
+            if (t.text === 'false') return [sym('#false', at), i + 1];
+            if (t.text === 'fun') {
+                if (!isP(ts[i + 1], '(')) return [sym('fun', at), i + 1];
+                const [params, , j] = parseTypeItems(ts, i + 2, ')');
+                const [result, k] = parseType(ts, expect(ts, j, '->', "after a function type's parameters"));
+                return [form(at, sym('fun', at), list(...params), result), k];
+            }
+            break;
+        case 'kw': {
+            const tag = quote(sym(t.text, at), at);
+            if (!isP(ts[i + 1], '(')) return [tag, i + 1];
+            const [items, rest, j] = parseTypeItems(ts, i + 2, ')');
+            return [form(at, tag, ...items, ...(rest === null ? [] : [sym('&', at), rest])), j];
+        }
+        case 'punct':
+            if (t.text === '(') {
+                const [x, j] = parseType(ts, i + 1);
+                return [x, expect(ts, j, ')', 'to close the parenthesis')];
+            }
+            if (t.text === '[') {
+                const [items, rest, j] = parseTypeItems(ts, i + 1, ']');
+                if (items.length === 0) return [rest ?? NIL, j];
+                return [form(at, sym('shape', at), ...items, ...(rest === null ? [] : [sym('&', at), rest])), j];
+            }
+            if (t.text === '#(') {
+                const [items, rest, j] = parseTypeItems(ts, i + 1, ')');
+                if (rest !== null) throw new CompileError("a tuple type has no '...'", at);
+                return [form(at, sym('tuple', at), ...items), j];
+            }
+            break;
+    }
+    throw new CompileError(`expected a type, not ${describe(t)}`, at);
 }
 
 // @include("path") or @include(:name)
@@ -315,7 +475,7 @@ function parseStatements(ts: Ts, i: number): [readonly Sexp[], number] {
         if (isW(t, '@include')) throw new CompileError('@include is only allowed at the top level', t.pos);
         if (isW(t, 'let')) {
             const [pattern, j] = parsePattern(ts, i + 1);
-            const [e, k] = parseExpr(ts, expect(ts, j, '=', 'after what a let binds'));
+            const [e, k] = parseLetValue(ts, j, 'after what a let binds');
             if (pattern.t === 'sym' && !isSym(pattern, '_')) {
                 out.push(form(t.pos, sym('let', t.pos), pattern, e));
                 i = isP(ts[k], '}') ? k : endItem(ts, k, 'after a let');
@@ -499,13 +659,23 @@ function parseWord(ts: Ts, i: number, w: string, at: Pos): [Sexp, number] {
         }
         case 'fun': {
             if (ts[i + 1]?.kind === 'name') throw new CompileError('a function is defined at the top level only', at);
-            const [params, j] = parseParams(ts, i + 1);
+            const [params, j0] = parseParams(ts, i + 1);
+            let j = j0;
+            let result: Sexp | null = null;
+            if (isP(ts[j], ':')) [result, j] = parseType(ts, j + 1);
+            let lambda: Sexp;
+            let k: number;
             if (isP(ts[j], '=>')) {
-                const [x, k] = parseExpr(ts, j + 1);
-                return [form(at, sym('lambda', at), params, x), k];
+                const [x, k1] = parseExpr(ts, j + 1);
+                [lambda, k] = [form(at, sym('lambda', at), params.names, x), k1];
+            } else {
+                const [body, k1] = parseBlock(ts, j);
+                [lambda, k] = [form(at, sym('lambda', at), params.names, ...nonEmpty(body)), k1];
             }
-            const [body, k] = parseBlock(ts, j);
-            return [form(at, sym('lambda', at), params, ...nonEmpty(body)), k];
+            if (result === null && params.types.every((t) => t === null)) return [lambda, k];
+            // a lambda with types is one, (the (fun (T ...) R) (lambda ...))
+            const type = form(at, sym('fun', at), list(...params.types.map((t) => t ?? sym('any', at))), result ?? sym('any', at));
+            return [form(at, sym('the', at), type, lambda), k];
         }
         case 'connect': {
             const [args, j] = parseItems(ts, expect(ts, i + 1, '(', 'after connect'), ')', 'what connect connects to');

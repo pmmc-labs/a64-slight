@@ -47,3 +47,4 @@
     (pprint (join (fork (tuple/get (tuple 1 2) 1.0)))))
 
 (read (spawn (top-level)))
+; warns: 46:36 47:48

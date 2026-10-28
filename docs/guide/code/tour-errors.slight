@@ -10,3 +10,4 @@
 ; A bug is a fault, which ends only the process it happens in.
 (let t (fork (car ())))
 (join t)
+; warns: 11:14

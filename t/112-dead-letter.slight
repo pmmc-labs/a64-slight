@@ -8,3 +8,4 @@
 (send p (list :ping 2 3))
 (send p (list :ping 3))
 :sent
+; warns: 7:9 8:9

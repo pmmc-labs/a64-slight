@@ -31,3 +31,4 @@
 (send s (list :do (list :keys)))
 (send s :stop)
 (read s)
+; warns: 30:9
