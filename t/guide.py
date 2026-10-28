@@ -31,11 +31,14 @@ def blocks(text):
             kind, path = line[len("<!-- "):-len(" -->")].split(":", 1)
             marker = (kind.strip(), path.strip())
         elif line.startswith("```"):
+            # A block in a list item is indented as its fence is.
+            indent = len(lines[i]) - len(lines[i].lstrip())
             start = i
             i += 1
             while i < len(lines) and lines[i].strip() != "```":
                 i += 1
-            yield start + 1, line[3:], marker, "\n".join(lines[start + 1:i]) + "\n"
+            body = [l[indent:] if l[:indent].strip() == "" else l for l in lines[start + 1:i]]
+            yield start + 1, line[3:], marker, "\n".join(body) + "\n"
             marker = None
         elif line:
             marker = None

@@ -8,7 +8,7 @@ Start with the **[tour](tour.md)**: fifteen minutes from hello world to
 actors. Then the **[tutorial](tutorial/01-values.md)** goes over the same
 ground slowly, building one program.
 
-## What's here, and what's coming
+## What's here
 
 The guide has four parts, each for a different need:
 
@@ -29,19 +29,28 @@ The guide has four parts, each for a different need:
      a log the store starts again from
   8. [Serving the store](tutorial/08-serving.md) over a socket with
      `(@include :rpc)`, to programs and people
-- **Concepts** (to come). The ideas you have to adopt to write slight
-  well, and why they're there:
-  - Nothing changes: where state goes instead
-  - The `recv` rule
-  - Tasks and actors
-  - Faults, errors, and how processes end
-  - Time: the real clock, the virtual one, and replaying a run
-  - Memory: a heap per process, and what a message costs
-- **How-to** (to come). Short recipes: reading a file by lines, JSON
-  from a socket, running a command, an HTTP server and client, TAP
-  tests, finding a deadlock with `:system`, catching a race with
-  `SLIGHT_SCHED` and a replay, shipping a program in an empty
-  container.
+- **[Concepts](concepts/README.md)**. The ideas you have to adopt to
+  write slight well, and why they're there:
+  - [Nothing changes](concepts/immutability.md): where state goes
+    instead
+  - [The `recv` rule](concepts/recv-rule.md)
+  - [Tasks and actors](concepts/tasks-and-actors.md)
+  - [Failure](concepts/failure.md): faults, errors, and how processes
+    end
+  - [Time](concepts/time.md): the real clock, the virtual one, and
+    replaying a run
+  - [Memory](concepts/memory.md): a heap per process, and what a
+    message costs
+- **[How-to](howto/README.md)**. Short recipes:
+  [reading a file](howto/read-a-file.md),
+  [JSON](howto/json.md),
+  [arguments and the environment](howto/arguments.md),
+  [running a command](howto/run-a-command.md),
+  [an HTTP server and client](howto/http.md),
+  [shipping a program in a container](howto/containers.md),
+  [tests](howto/testing.md),
+  [finding a deadlock](howto/deadlocks.md) with `:system`, and
+  [finding a race](howto/races.md) with `SLIGHT_SCHED` and a replay.
 
 ## The code is tested
 

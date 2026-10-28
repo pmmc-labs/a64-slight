@@ -1,0 +1,4 @@
+(#<pid 1> task running "the top level" 0)
+(#<pid 2> actor recv "store" 0)
+(#<pid 3> task reading "ask/via" 0)
+done

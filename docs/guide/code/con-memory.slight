@@ -1,0 +1,18 @@
+; A process that grows without end faults on its own, at its heap's cap,
+; and the rest go on.
+(defun grow (xs)
+    (grow (cons 0 xs)))
+
+(pprint (join (fork (grow ()))))
+
+; A process waiting for a message holds no stack.
+(defun idle ()
+    (recv (_ :done)))
+
+(let a (spawn (idle)))
+(sleep 1)
+(match (open :system)
+    ((:ok s)
+        (send s (list :process a))
+        (match (read s)
+            ((:process _ info) (list (lookup :state info) (lookup :stack info))))))

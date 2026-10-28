@@ -90,8 +90,8 @@ settles.
 ## Documents
 
 - [`docs/guide/`](docs/guide/README.md): the guide, for learning slight:
-  a tour, a tutorial that builds a key-value store, and (to come) the
-  ideas behind it, and recipes.
+  a tour, a tutorial that builds a key-value store, the ideas behind
+  slight, and recipes.
 - [`docs/LANGUAGE.md`](docs/LANGUAGE.md): the language: every form and
   builtin, and how a program runs.
 - [`docs/DESIGN.md`](docs/DESIGN.md): the design of the language, the

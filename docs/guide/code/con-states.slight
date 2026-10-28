@@ -1,0 +1,31 @@
+; A door with a code, as an actor whose states are functions: each waits
+; for what makes sense in that state, and goes to the next by calling it.
+
+(defun locked (code tries)
+    (recv
+        ((:open guess to)
+            (cond
+                ((eq? guess code) (reply to :opened) (opened code))
+                ((>= tries 2)     (reply to :alarm) (alarm))
+                (#true            (reply to :wrong) (locked code (+ tries 1)))))))
+
+(defun opened (code)
+    (recv
+        ((:open _ to) (reply to :already-open) (opened code))
+        ((:close to)  (reply to :closed) (locked code 0))))
+
+; Nothing opens it now.
+(defun alarm ()
+    (recv
+        ((:open _ to) (reply to :alarm) (alarm))))
+
+(let door (spawn (locked "1234" 0)))
+(list
+    (ask door (list :open "0000"))
+    (ask door (list :open "1234"))
+    (ask door (list :open "1234"))
+    (ask door (list :close))
+    (ask door (list :open "1111"))
+    (ask door (list :open "2222"))
+    (ask door (list :open "3333"))
+    (ask door (list :open "1234")))

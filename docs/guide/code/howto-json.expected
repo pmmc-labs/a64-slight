@@ -1,0 +1,4 @@
+(ok (object ("a" (1 2.5)) ("b" null)))
+(error (bad-json 3))
+{"total_ms":555,"users":["ann","bob","ann"]}
+555

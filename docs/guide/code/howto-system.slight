@@ -1,0 +1,21 @@
+(defun store (n)
+    (recv
+        ((:get to) (store n))))
+
+(let s (spawn (store 0)))
+(let asker (fork (ask s (list :get))))
+(sleep 1)
+
+; Every process's info, from the :system device.
+(defun processes (sys infos)
+    (match (read sys)
+        ((:process _ info) (processes sys (cons info infos)))
+        ((:end _)          (reverse infos))))
+
+(match (open :system)
+    ((:ok sys)
+        (send sys (list :processes))
+        (map (lambda (info) (pprint (map (lambda (k) (lookup k info)) (list :pid :kind :state :in :mail))))
+            (processes sys ()))))
+(kill asker)
+:done

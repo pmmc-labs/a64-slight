@@ -1,0 +1,3 @@
+fault in #<pid 2>: heap exhausted (cons at docs/guide/code/con-memory.slight:4:11)
+(error (heap () "cons at docs/guide/code/con-memory.slight:4:11"))
+(recv #false)

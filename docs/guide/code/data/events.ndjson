@@ -1,0 +1,3 @@
+{"user": "ann", "action": "login", "ms": 120}
+{"user": "bob", "action": "login", "ms": 340}
+{"user": "ann", "action": "buy", "ms": 95, "item": "tea"}
