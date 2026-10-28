@@ -1,0 +1,44 @@
+
+(defun Consumer (f)
+    (recv (msg
+        (pprint (list $$ :RECV msg))
+    (match msg
+        ((:on-next v)    (f v) (Consumer f))
+        ((:on-completed) ())
+        ((:on-error e)   (raise e))))))
+
+(defun Operation (op next)
+    (recv (msg
+        (pprint (list $$ :OPER msg))
+    (match msg
+        ((:on-next v)
+            (send next (list :on-next (op v)))
+            (Operation op next))
+        ((:on-completed)
+            (send next (list :on-completed)))
+        ((:on-error e)
+            (send next (list :on-error e)))))))
+
+(defun Producer (sub items)
+    (match items
+        (()
+            (pprint (list $$ :DONE))
+            (send sub (list :on-completed)))
+        ((item & rest)
+            (send sub (list :on-next item))
+            (pprint (list $$ :SENT item))
+            (yield (Producer sub rest)))))
+
+(let o1 (spawn (Consumer pprint)))
+(let o2 (spawn (Consumer pprint)))
+
+(let op1 (spawn (Operation (lambda (x) (+ x 100)) o1)))
+(let op2 (spawn (Operation (lambda (x) (+ x 200)) o2)))
+
+(let p1 (fork (Producer op1 (list 10 20 30 40 50 60))))
+(let p2 (fork (Producer op2 (list 1 2 3 4 5 6 7 8 9))))
+
+(pprint (list (join p1) (join p2)))
+(pprint (list (read o1) (read o2)))
+(pprint (list (read op1) (read op2)))
+(pprint :done)
