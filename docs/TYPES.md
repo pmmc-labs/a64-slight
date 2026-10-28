@@ -128,26 +128,27 @@ All optional. Three forms, each erased once the checker has read it:
 | `.sly` | s-expression | |
 |---|---|---|
 | `type Name = T;` | `(deftype Name T)` | an alias; `type Name<A, B> = T;` and `(deftype (Name A B) T)` take parameters |
-| `fun f(x: int, y): str { ... }` | `(sig f (int any) str)` | a function's parameters and result |
-| `let x: T = e;` | `(let x (the T e))` | an expression's type, checked |
+| `fun f(x : int, y) : str { ... }` | `(sig f (int any) str)` | a function's parameters and result |
+| `let x : T = e;` | `(let x (the T e))` | an expression's type, checked |
 
 - In `.sly`, any parameter, a function's result, or a `let`'s name may
-  have a type after a `:`, and what's left out is `any`. The reader
+  have a type after a `:`, with a space on each side of it (Questions,
+  2), and what's left out is `any`. The reader
   makes a `sig` from them, just before the `defun`, so the
   s-expressions for an annotated function are its `defun` and a `sig`.
 - In s-expressions, a `sig` goes anywhere at the top level, one for
   each function at most, as Typed Racket's `:` does. `defun` itself
   doesn't change.
-- A generic function lists its type variables: `fun map<A, B>(f: fun(A)
-  -> B, xs: list<A>): list<B>` and `(sig (map A B) ((fun (A) B) (list
+- A generic function lists its type variables: `fun map<A, B>(f : fun(A)
+  -> B, xs : list<A>) : list<B>` and `(sig (map A B) ((fun (A) B) (list
   A)) (list B))`. Only a `sig` is generic; the checker never infers one.
   At each call, it works out what `A` and `B` are from the arguments.
 - A function that waits says what its actor takes, after its result:
-  `fun counter(n: int) recv CounterMsg { ... }`, and `(sig counter (int)
+  `fun counter(n : int) recv CounterMsg { ... }`, and `(sig counter (int)
   any (recv CounterMsg))`. `recv` is reserved already, so no new word.
 - `(the T e)` is `e`, checked to be a `T`, and taken to be one after:
   not a cast. It's how `.sly` writes a typed `let`, and how a lambda is
-  given a type: `fun(x: int) => x + 1` is `(the (fun (int) any) (lambda
+  given a type: `fun(x : int) => x + 1` is `(the (fun (int) any) (lambda
   (x) (+ x 1)))`. Most lambdas need none, since a lambda's parameters
   take their types from where it goes: in `map(fun(x) => x + 1, xs)`,
   `x` is whatever `xs` holds.
@@ -171,8 +172,8 @@ The checker runs over each function's body, knowing what it was given:
   numbers: `int + int` is an `int`, a `float` with either is a `float`,
   and `num + num` is a `num`; `/` is a `float`.
 - **The prelude's functions** have `sig`s, in `lib/prelude.slight`:
-  `lookup<K, V>(k: K, table: list<[K, V]>): V | :not-found`, `nth<T>(i:
-  int, xs: list<T>): T | nil`, and so on.
+  `lookup<K, V>(k : K, table : list<[K, V]>) : V | :not-found`,
+  `nth<T>(i : int, xs : list<T>) : T | nil`, and so on.
 - **A parameter without a type is `any`,** in the function's body.
   Inferring parameters' types from how they're used (Dialyzer's success
   typings) is a question below.
@@ -200,7 +201,7 @@ complement in the clauses after. Nothing else narrows: there are no
 user-written guards, and nothing follows a value into a function.
 
 ```
-fun arg(i: int, args: list<int | false>, default: int): int {
+fun arg(i : int, args : list<int | false>, default : int) : int {
     match nth(i, args) {     // int | false | nil
         []    => default,
         false => default,
@@ -281,7 +282,7 @@ An arm for a message that isn't in `M` is unreachable, and a message in
 ```
 type CounterMsg = :inc() | :get(address<:count(int)>) | :stop
 
-fun counter(n: int) recv CounterMsg {
+fun counter(n : int) recv CounterMsg {
     recv {
         :inc()   => counter(n + 1),
         :get(to) => { send(to, :count(n)); counter(n) }   // to: address<:count(int)>
@@ -301,7 +302,7 @@ against the connected actor's mailbox as `send`s are. `open` gives a
 device is a question below.
 
 `ask(pid, msg)` gives `any`, since its answer's type is the protocol's,
-not `ask`'s. `let n: int = ask(c, :get())` says what's expected, and is
+not `ask`'s. `let n : int = ask(c, :get())` says what's expected, and is
 checked from there on.
 
 ## Reporting
@@ -366,15 +367,27 @@ the tests passing.
    with a bug in one process still runs the rest, and `--strict` for
    errors. Rejected: errors by default, which makes every gap in the
    checker a program that won't build.
-2. **The `:` in `.sly`.** `x: int` needs a `:` that isn't a keyword's.
-   Proposed: a `:` followed by white space is an annotation's, and
-   `x:int` an error that says to add the space. Rejected: `x :: int`,
-   since `::` is in names already, and `int x`, C's, which reads badly
-   with `fun`.
+2. **The `:` in `.sly`,** settled by Stevan: "enforce a space around
+   the `:` so that `x: int` is a syntax error, and `x : int` is what we
+   expect". A type needs a `:` that isn't a keyword's, and with white
+   space on both sides it can't be one: a `:` touching a name on its
+   right begins a keyword, and one with space on each side is the
+   annotation's, in a parameter, after a function's parameters, or
+   after a `let`'s name, and an error anywhere else. So `x : int` and
+   `x : :ok`, a keyword's type. The rest are errors that say what to
+   write: `x: int` (a `:` touching the name before it), and `x :int`,
+   which reads as `x` and the keyword `:int`, an error after a
+   parameter's name already. It leaves `x:` free, for named arguments
+   or a record's fields if either is ever wanted, and keeps the
+   tokenizer's rule to the one character after the `:`, plus the one
+   before. It isn't TypeScript's way, `x: int`, which Stevan's fingers
+   will reach for; the error says how to fix it. Rejected: a `:`
+   with space after it alone (`x: int`), `x :: int`, since `::` is in
+   names already, and `int x`, C's, which reads badly with `fun`.
 3. **New forms.** `deftype`, `sig` and `the` are special forms, though
    ones that compile to nothing. Rejected: types in comments, as JSDoc
    and Flow's comments do, which keeps the language as it is but gives
-   the `.sly` reader nowhere to put `x: int`.
+   the `.sly` reader nowhere to put `x : int`.
 4. **Parameters' types from their use.** A parameter used as `x + 1`
    is a `num`, so `wrap_around("a", 1)` could be found with no
    annotation (Dialyzer's success typings). Proposed: not at first:
