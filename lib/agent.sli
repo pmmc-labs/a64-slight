@@ -1,0 +1,9 @@
+; lib/agent.slight's header (D248): what (@include :agent) gives a program,
+; docs/LANGUAGE.md, "(@include :agent)". The rest of agent.slight is its own.
+
+(sig tool/new (any any any any) any)
+(sig tool/name (any) any)
+(sig tool/call (any any) any)
+(sig agent/new (any any any any) any)
+(sig agent/say (any any) any)
+(sig agent/ask (any any) any)

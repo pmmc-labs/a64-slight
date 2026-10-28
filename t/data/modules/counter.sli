@@ -1,0 +1,3 @@
+; counter.slight's header: what a program that includes it sees.
+(sig counter/run (int) int)
+(sig counter/get-step () (fun (int) int))

@@ -1,0 +1,10 @@
+; lib/http.slight's header (D248): what (@include :http) gives a program,
+; docs/LANGUAGE.md, "(@include :http)". The rest of http.slight is its own.
+
+(sig http/get (any) any)
+(sig http/request (any any any any) any)
+(sig http/request-within (any any any any any) any)
+(sig http/stream (any any any any any) any)
+(sig http/serve (any any) any)
+(sig http/listen (any any) any)
+(sig http/parse-url (any) any)

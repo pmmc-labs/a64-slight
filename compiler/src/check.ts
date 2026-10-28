@@ -30,6 +30,7 @@
 import { stateFunctions } from './classify.ts';
 import { CompileError } from './errors.ts';
 import { expand } from './expand.ts';
+import { displayName, PRELUDE_SUFFIX } from './modules.ts';
 import { REST } from './pattern.ts';
 import { NIL, cons, isForm, isSym, list, posOf, show, toArray, TUPLE, type Pair, type Pos, type Sexp } from './sexp.ts';
 import { BUILTINS, CONSTANTS, PREDICATES, RESULT_ANY, cxr, cxrSteps, faultOf, resultOf } from './builtins.ts';
@@ -44,7 +45,9 @@ export type Warning = { readonly pos: Pos | null; readonly message: string; read
 
 // prelude: check the prelude's functions too, against their sigs (its
 // tests do; a program's check needn't, as nothing changes them).
-export type CheckOptions = { readonly strict?: boolean; readonly prelude?: boolean };
+// modules: files whose --strict warnings are their own checks' (D248):
+// a module is checked strictly as a program of its own.
+export type CheckOptions = { readonly strict?: boolean; readonly prelude?: boolean; readonly modules?: readonly string[] };
 
 // --- the program's functions ---------------------------------------------------------
 
@@ -80,6 +83,7 @@ type G = {
     readonly mailboxes: Readonly<Record<string, Ty>>;   // a state function: what its actor takes from there on
     readonly strict: boolean;
     readonly report: ((w: Warning) => void) | null;     // null: a round that only works out results
+    readonly prelude: Fns;                              // the prelude's, for `f (prelude)`
 };
 
 // The locals: an association list from name to type. id says which
@@ -151,7 +155,7 @@ export function checkProgram(prelude: Sexp, program: Sexp, opts: CheckOptions = 
         for (const f of unsigned) {
             const k = key(f);
             if (capped.includes(k)) continue;
-            const g: G = { defs, results, mailboxes, strict, report: null };
+            const g: G = { defs, results, mailboxes, strict, report: null, prelude: fnsP };
             const raw = checkFn(f, g, f.module === 'user' ? fnsU : fnsP);
             const t = round >= 2 ? widen(raw, defs) : raw;
             if (same(t, results[k]!)) continue;
@@ -168,11 +172,11 @@ export function checkProgram(prelude: Sexp, program: Sexp, opts: CheckOptions = 
 
     const found: Warning[] = [];
     const report = (w: Warning): void => {
-        if (!w.certain && !strict) return;
+        if (!w.certain && (!strict || (w.pos !== null && (opts.modules ?? []).includes(w.pos.file)))) return;
         if (found.some((x) => x.message === w.message && samePos(x.pos, w.pos))) return;
         found.push(w);
     };
-    const g: G = { defs, results, mailboxes, strict, report };
+    const g: G = { defs, results, mailboxes, strict, report, prelude: fnsP };
     if (opts.prelude === true) pfns.forEach((f) => checkFn(f, g, fnsP));
     ufns.forEach((f) => checkFn(f, g, fnsU));
     const top = uforms.filter((f) => !isForm(f, 'defun') && !isForm(f, 'deftype') && !isForm(f, 'sig'));
@@ -386,7 +390,12 @@ function checkFn(f: Fn, g: G, fns: Fns): Ty {
 }
 
 const isSly = (pos: Pos | null): boolean => pos !== null && pos.file.endsWith('.sly');
-const name = (n: string, sly: boolean): string => (sly ? slyName(n) : n);
+const name = (n: string, sly: boolean): string => (sly ? slyName(displayName(n)) : displayName(n));
+
+// A function by the name code calls it: `f (prelude)` is the prelude's
+// f, as a library's code names it (modules.ts, D248).
+const fnNamed = (cx: Cx, n: string): Fn | undefined =>
+    n.endsWith(PRELUDE_SUFFIX) ? cx.g.prelude[n.slice(0, -PRELUDE_SUFFIX.length)] : cx.fns[n];
 
 function warn(cx: Cx, pos: Pos | null, message: string, certain: boolean): void {
     cx.g.report?.({ pos, message, certain });
@@ -446,7 +455,7 @@ function nameType(n: string, cx: Cx): Ty {
     if (local !== null) return local.ty;
     const c = CONSTANTS[n];
     if (c !== undefined) return c;
-    const f = cx.fns[n];
+    const f = fnNamed(cx, n);
     if (f !== undefined) return funOfFn(f, cx.g);
     // a builtin as a value takes the arguments it's called with, its
     // optional ones among them (D219): no arity is fixed
@@ -484,7 +493,7 @@ function formType(x: Pair, cx: Cx, expected: Ty | null): Ty {
             case 'the':     return theType(x, args, cx);
             case 'defun': case 'deftype': case 'sig': return NIL_T;
         }
-        const f = cx.fns[head.name];
+        const f = fnNamed(cx, head.name);
         if (f !== undefined) return callFn(x, f, args, cx);
         const b = BUILTINS[head.name];
         if (b !== undefined) return callBuiltin(x, head.name, args, cx);
@@ -760,7 +769,7 @@ function refine(test: Sexp, cx: Cx, truth: boolean): Facts | null {
     const args = toArray(test.cdr) ?? [];
     const head = test.car.name;
     const defs = cx.g.defs;
-    if (head === 'not' && args.length === 1 && cx.fns['not']?.module === 'prelude') return refine(args[0]!, cx, !truth);
+    if ((head === 'not' || head === `not${PRELUDE_SUFFIX}`) && args.length === 1 && fnNamed(cx, head)?.module === 'prelude') return refine(args[0]!, cx, !truth);
     const pred = PREDICATES[head];
     if (pred !== undefined && args.length === 1) return narrow(args[0]!, cx, (t) => (truth ? meet(t, pred, defs) : minus(t, pred, defs)));
     if ((head === 'eq?' || head === 'ne?') && args.length === 2) {
@@ -1041,7 +1050,7 @@ function spawnType(x: Pair, devices: readonly Sexp[], body: Sexp | undefined, cx
     const ds = devices.map((d) => typeOf(d, cx));
     if (ds.some((t) => t.k === 'never')) return NEVER;
     const starts = body !== undefined && body.t === 'pair' && body.car.t === 'sym' && lookup(cx.env, body.car.name) === null
-        ? cx.fns[body.car.name] : undefined;
+        ? fnNamed(cx, body.car.name) : undefined;
     const m = starts !== undefined && starts.module === 'user' ? (cx.g.mailboxes[starts.name] ?? ANY) : ANY;
     if (body !== undefined) typeOf(body, { ...cx, kind: 'actor', self: actorOf(m), mailbox: ANY });
     if (isForm(x, 'connect') && devices.length >= 1 && isKeyword(devices[0]!, 'keypress') && m.k !== 'any' && starts !== undefined) {

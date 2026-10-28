@@ -20,6 +20,7 @@
 // what's safe: that they overlap, or that it doesn't fit), so none loops.
 
 import { CompileError } from './errors.ts';
+import { displayName } from './modules.ts';
 import { isForm, isSym, posOf, show as showSexp, toArray, TUPLE, type Sexp } from './sexp.ts';
 
 export type Ty =
@@ -540,9 +541,11 @@ export function showType(t: Ty, sly: boolean): string {
             if (t.of.length === 2 && t.of.some((x) => x.k === 'int') && t.of.some((x) => x.k === 'float')) return 'num';
             return sly ? t.of.map(s).join(' | ') : `(or ${t.of.map(s).join(' ')})`;
         }
-        case 'alias':
-            if (t.args.length === 0) return t.name;
-            return sly ? `${t.name}<${t.args.map(s).join(', ')}>` : `(${t.name} ${t.args.map(s).join(' ')})`;
+        case 'alias': {
+            const n = displayName(t.name);
+            if (t.args.length === 0) return n;
+            return sly ? `${n}<${t.args.map(s).join(', ')}>` : `(${n} ${t.args.map(s).join(' ')})`;
+        }
         case 'cons': {
             const items: Ty[] = [];
             let rest: Ty = t;

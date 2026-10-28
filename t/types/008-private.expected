@@ -1,0 +1,1 @@
+t/types/008-private.slight:5:2: step is private to t/data/modules/counter.slight: its header doesn't declare it

@@ -1,0 +1,4 @@
+; lib/calc.slight's header (D248): what (@include :calc) gives a program,
+; docs/LANGUAGE.md, "(@include :calc)". The rest of calc.slight is its own.
+
+(sig calc/eval (str) num)

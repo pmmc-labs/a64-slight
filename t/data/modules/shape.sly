@@ -1,0 +1,9 @@
+// A module in the C-style syntax, with its header, shape.slyi (D248).
+fun shape::area(s) {
+    match s {
+        :rect(w, h) => w * h,
+        :square(a)  => sq(a),
+    }
+}
+
+fun sq(x) { x * x }

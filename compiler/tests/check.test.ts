@@ -17,7 +17,9 @@ import {
 } from '../src/types.ts';
 
 const kept = (forms: Sexp): Sexp => list(...(toArray(forms) ?? []).map((f) => expand(f, true)));
-const PRELUDE = kept(read(readFileSync(new URL('../../lib/prelude.slight', import.meta.url), 'utf8'), 'lib/prelude.slight'));
+const libFile = (name: string): Sexp => read(readFileSync(new URL(`../../lib/${name}`, import.meta.url), 'utf8'), `lib/${name}`);
+// the prelude, and its header, which has its types (D248)
+const PRELUDE = kept(list(...toArray(libFile('prelude.slight'))!, ...toArray(libFile('prelude.sli'))!));
 
 // The warnings for a program, as messages with their line and column.
 function warnings(src: string, opts: { strict?: boolean; file?: string } = {}): string[] {

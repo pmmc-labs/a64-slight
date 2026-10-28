@@ -1,0 +1,5 @@
+; A module's own functions aren't the program's to call (D248): counter's
+; header doesn't declare step, so the program can't see it.
+(@include "../data/modules/counter.slight")
+(counter/run 2)
+(step 1)

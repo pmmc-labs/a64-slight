@@ -35,6 +35,8 @@
 //   let x : T = e;             (let x (the T e))
 //   fun(x : int) => e          (the (fun (int) any) (lambda (x) e))
 //   type Name<A> = T;          (deftype (Name A) T)
+//   fun f(x : int) : str;      (sig f (int) str): a prototype, as a
+//                              header (X.slyi, D248) declares f
 //
 // A type's `:` has a space on each side, and `x: int` is an error that
 // says so.
@@ -292,12 +294,14 @@ function parseDefun(ts: Ts, i: number): [readonly Sexp[], number] {
     let takes: Sexp | null = null;
     if (isP(ts[k], ':')) [result, k] = parseType(ts, k + 1);
     if (isW(ts[k], 'recv')) [takes, k] = parseType(ts, k + 1);
-    const [body, m] = parseBlock(ts, k);
-    const defun = form(at, sym('defun', at), sym(name.text, name.pos), params.names, ...nonEmpty(body));
-    if (vars.length === 0 && result === null && takes === null && params.types.every((t) => t === null)) return [[defun], m];
     const head = vars.length === 0 ? sym(name.text, name.pos) : form(name.pos, sym(name.text, name.pos), ...vars);
     const sig  = form(at, sym('sig', at), head, list(...params.types.map((t) => t ?? sym('any', at))), result ?? sym('any', at),
                       ...(takes === null ? [] : [list(sym('recv', at), takes)]));
+    // a prototype, no body: the sig alone, as a header declares a function (D248)
+    if (isP(ts[k], ';')) return [[sig], k + 1];
+    const [body, m] = parseBlock(ts, k);
+    const defun = form(at, sym('defun', at), sym(name.text, name.pos), params.names, ...nonEmpty(body));
+    if (vars.length === 0 && result === null && takes === null && params.types.every((t) => t === null)) return [[defun], m];
     return [[sig, defun], m];
 }
 

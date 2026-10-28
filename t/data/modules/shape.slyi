@@ -1,0 +1,4 @@
+// shape.sly's header, as prototypes.
+type Shape = :rect(num, num) | :square(num);
+
+fun shape::area(s : Shape) : num;

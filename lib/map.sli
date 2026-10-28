@@ -1,0 +1,19 @@
+; lib/map.slight's header (D248): what (@include :map) gives a program,
+; docs/LANGUAGE.md, "(@include :map)". The rest of map.slight is its own.
+
+; a map is a tuple, a trie's root (D223): K and V say what's in it
+(deftype (Map K V) tuple)
+
+(sig (map/new K V) () (Map K V))
+(sig map/size ((Map any any)) int)
+(sig (map/get K V) ((Map K V) K) (or V :not-found))
+(sig (map/has? K V) ((Map K V) K) bool)
+(sig (map/put K V) ((Map K V) K V) (Map K V))
+(sig (map/delete K V) ((Map K V) K) (Map K V))
+(sig (map/update K V) ((Map K V) K (fun (V) V) V) (Map K V))
+(sig (map/fold A K V) (A (fun (A K V) A) (Map K V)) A)
+(sig (map->list K V) ((Map K V)) (list (shape K V)))
+(sig (list->map K V) ((list (shape K V))) (Map K V))
+(sig map/get-hashed (any any any) any)
+(sig map/put-hashed (any any any any) any)
+(sig map/delete-hashed (any any any) any)

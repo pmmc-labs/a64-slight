@@ -8,6 +8,7 @@ scope: source.slight
 version: 2
 file_extensions:
   - slight
+  - sli
 
 variables:
   # a name is a run of anything but these (LANGUAGE.md, "Syntax")

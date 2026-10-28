@@ -7,6 +7,7 @@ scope: source.sly
 version: 2
 file_extensions:
   - sly
+  - slyi
 
 variables:
   # a name may start with the sigil $ (D246)

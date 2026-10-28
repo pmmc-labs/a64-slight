@@ -273,3 +273,9 @@ test("a type's ':' has a space on each side", () => {
     fails('let x: int = 1;', /a type's ':' has a space on each side/);
     same(':ok;', "'ok");
 });
+
+test('a prototype is a sig alone, as a header declares a function (D248)', () => {
+    same('fun f(x : int, y) : str;', '(sig f (int any) str)');
+    same('fun g(x);', '(sig g (any) any)');
+    same('fun h<A>(xs : list<A>) : A recv Msg;', '(sig (h A) ((list A)) A (recv Msg))');
+});

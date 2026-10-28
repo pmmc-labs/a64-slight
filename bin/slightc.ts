@@ -189,8 +189,8 @@ function main(): void {
 
     let asm: string;
     try {
-        const { prelude, program } = expandProgram(opts.files, LIB_DIR, loader, true);
-        const warnings = checkProgram(prelude, program, { strict: opts.strict });
+        const { prelude, program, modules } = expandProgram(opts.files, LIB_DIR, loader, true);
+        const warnings = checkProgram(prelude, program, { strict: opts.strict, modules });
         for (const w of warnings) process.stderr.write(`${formatWarning(w)}\n`);
         if (opts.strict && warnings.length > 0) process.exit(1);
         if (opts.check) return;

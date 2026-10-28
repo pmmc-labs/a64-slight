@@ -1,0 +1,31 @@
+; lib/tools.slight's header (D248): what (@include :tools) gives a program,
+; docs/LANGUAGE.md, "(@include :tools)". The rest of tools.slight is its own.
+
+; what tools.slight includes, and whoever includes it gets too, as its
+; comment says: the agents the tools are for, and the libraries they use
+(@include :agent)
+(@include :calc)
+(@include :ds)
+(@include :exec)
+(@include :fs)
+
+(sig tools/read-file () any)
+(sig tools/list-files () any)
+(sig tools/search () any)
+(sig tools/write-file (any) any)
+(sig tools/edit-file (any) any)
+(sig tools/run (any) any)
+(sig tools/run-within (any any) any)
+(sig tools/calc () any)
+(sig tools/remember (any) any)
+(sig tools/recall (any) any)
+(sig tools/ask-agent (any any any) any)
+(sig tools/fetch (any) any)
+(sig tools/printable (any) any)
+(sig tools/html->text (any any) any)
+(sig notes/open (any) any)
+(sig notes/get (any any) any)
+(sig notes/keys (any) any)
+(sig notes/put (any any any) any)
+(sig tools/read (any) any)
+(sig tools/save (any any) any)

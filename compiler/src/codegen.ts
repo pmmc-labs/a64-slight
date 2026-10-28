@@ -45,6 +45,7 @@ import { isReceiveBody, stateFunctions } from './classify.ts';
 import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
 import { eraseTypes } from './check.ts';
+import { displayName, PRELUDE_SUFFIX } from './modules.ts';
 import { AARCH64 } from './aarch64.ts';
 import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, word, type BitOp, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
 
@@ -263,9 +264,9 @@ function compileFunction(entry: string, d: Defun, free: readonly string[], fns: 
     const [body, st1] = compileBody(d.body, cx, { ...st, slots: locals.length, calls: false });
     const size = 16 * Math.ceil(st1.slots / 2);
     if (size > 4095) throw new CompileError(`${d.name.name} needs too many frame slots (${st1.slots})`, d.pos);
-    const [overflow, st2] = faultLabel(st1, 'RT_FAULT_STACK', d.name.name, at);
+    const [overflow, st2] = faultLabel(st1, 'RT_FAULT_STACK', displayName(d.name.name), at);
     const [preempt, st3]  = label(st2, 'preempt');
-    const [name, st4]     = cString(d.name.name, st3);
+    const [name, st4]     = cString(displayName(d.name.name), st3);
     const t    = st.t;
     const stub = [`${preempt}:`, t.call('rt_preempt', [PROC, FRAME, imm(locals.length), FP, addr(entry)], false), t.jump(`${preempt}_done`)];
     return [[
@@ -430,7 +431,7 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     if (constant !== undefined) return compileExpr(constant, cx, st);
     const fn = lookupFn(cx.fns, x.name);
     if (fn !== null && fn.state) throw new CompileError(`${fn.name} waits for messages, so it can't be used as a value`, x.pos);
-    if (fn !== null) return loadClosure(staticClosure(fn.label, fn.arity, fn.name, st));
+    if (fn !== null) return loadClosure(staticClosure(fn.label, fn.arity, displayName(fn.name), st));
     if (isBuiltin(x.name)) return loadClosure(builtinWrapper(x, st));
     throw new CompileError(`unknown name '${x.name}'`, x.pos);
 }
@@ -1517,8 +1518,9 @@ function compileCompareTest(name: string, args: readonly Sexp[], ifFalse: string
 // argument's, with the branches the other way round. Not a program's own
 // not (D80), nor a local called not.
 function isPreludeNot(x: Sexp, cx: Cx): boolean {
-    if (!isForm(x, 'not') || lookup(cx.env, 'not') !== null || toArray(x)?.length !== 2) return false;
-    const fn = lookupFn(cx.fns, 'not');
+    const head = isForm(x, `not${PRELUDE_SUFFIX}`) ? `not${PRELUDE_SUFFIX}` : 'not';
+    if (!isForm(x, head) || lookup(cx.env, head) !== null || toArray(x)?.length !== 2) return false;
+    const fn = lookupFn(cx.fns, head);
     return fn !== null && fn.module === 'prelude';
 }
 
@@ -1553,7 +1555,10 @@ function lookup(env: Env, name: string): number | null {
     return null;
 }
 
+// A library's code names the prelude's f as `f (prelude)` (modules.ts,
+// D248), so the program's own f doesn't take its place.
 function lookupFn(fns: Fns, name: string): Fn | null {
+    if (name.endsWith(PRELUDE_SUFFIX)) return findFn(fns, name.slice(0, -PRELUDE_SUFFIX.length), 'prelude');
     for (; fns !== null; fns = fns.next) if (fns.fn.name === name) return fns.fn;
     return null;
 }

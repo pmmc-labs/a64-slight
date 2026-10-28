@@ -11,7 +11,7 @@
 ; of an answer, from a raw server that sends one piece and holds the
 ; connection open: the server sees it close, and nothing more comes.
 
-(@include :agent)
+(@include :agent) (@include :http)
 (@include "data/http-raw.slight")
 
 ; --- the fake ollama ---------------------------------------------------

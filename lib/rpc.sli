@@ -1,0 +1,15 @@
+; lib/rpc.slight's header (D248): what (@include :rpc) gives a program,
+; docs/LANGUAGE.md, "(@include :rpc)". The rest of rpc.slight is its own.
+
+(sig rpc/handler (any any any any) any)
+(sig rpc/next (any) any)
+(sig rpc/peer () any)
+(sig rpc/system () any)
+(sig rpc/call (any any any) any)
+(sig rpc/stream (any any any) any)
+(sig rpc/connect (any any) any)
+(sig rpc/exec (any any) any)
+(sig rpc/serve (any any) any)
+(sig rpc/listen (any any) any)
+(sig rpc/close (any) any)
+(sig rpc/keep (any any any) any)

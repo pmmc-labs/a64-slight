@@ -1,0 +1,6 @@
+; What a module exports is seen by the files that include it, and by
+; those that include a header that includes it, but no one else: the
+; prelude's helpers are its own too (D248).
+(@include :tools)
+(slurp "t/data/lines.txt")
+(http/get "http://localhost:1/")

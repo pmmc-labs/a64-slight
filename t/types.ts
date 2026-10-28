@@ -37,8 +37,8 @@ const loader: Loader = {
 // What slightc --check prints for a file.
 function check(file: string, strict: boolean): string[] {
     try {
-        const { prelude, program } = expandProgram([file], LIB, loader, true);
-        return checkProgram(prelude, program, { strict }).map(formatWarning);
+        const { prelude, program, modules } = expandProgram([file], LIB, loader, true);
+        return checkProgram(prelude, program, { strict, modules }).map(formatWarning);
     } catch (e) {
         if (e instanceof CompileError) return [e.message];
         throw e;

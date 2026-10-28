@@ -45,6 +45,7 @@
 // expression, where it means nothing yet (D176): an error.
 
 import { CompileError } from './errors.ts';
+import { link, type Unit, type UnitKind } from './modules.ts';
 import { lowerPattern, NO_MATCH } from './pattern.ts';
 import { read } from './reader.ts';
 import { readSly } from './sly.ts';
@@ -59,7 +60,10 @@ export type Loader = {
     readonly text: (key: string) => string;
 };
 
-export type Expanded = { readonly prelude: Sexp; readonly program: Sexp };
+// modules: the files of the modules a program includes, headers and
+// what they splice in (D248), whose insides --strict leaves to their own
+// checks.
+export type Expanded = { readonly prelude: Sexp; readonly program: Sexp; readonly modules: readonly string[] };
 
 // Where a file is read from, and the name its positions and messages use.
 type Source = { readonly path: string; readonly name: string };
@@ -69,48 +73,126 @@ type Open = { readonly name: string; readonly key: string };
 
 type Cx = { readonly lib: string; readonly load: Loader; readonly keepMatch: boolean };
 
-// The prelude, then the files in order, each with what it includes. lib is
-// the directory with the built-in files (lib/name.slight).
-// keepMatch: leave match as it is, for the checker (check.ts), which
-// expand() then lowers.
+// The prelude, then the files in order, each with what it includes, as
+// units (D248): the prelude, the program, and each file with a header,
+// linked into the prelude's forms and the program's (modules.ts). lib is
+// the directory with the built-in files (lib/name.slight). keepMatch:
+// leave match as it is, for the checker (check.ts), which expand() then
+// lowers.
 export function expandProgram(files: readonly string[], lib: string, load: Loader, keepMatch = false): Expanded {
     const cx: Cx = { lib, load, keepMatch };
-    const [prelude, done] = includeFile(builtin('prelude', lib), null, cx, [], []);
-    const [program] = files.reduce<[readonly Sexp[], readonly string[]]>(([acc, d], file) => {
-        const [forms, d1] = includeFile({ path: file, name: file }, null, cx, [], d);
-        return [[...acc, ...forms], d1];
-    }, [[], done]);
-    return { prelude: list(...prelude), program: list(...program) };
+    const units: Unit[] = [];
+    readUnit([builtin('prelude', lib)], 'prelude', null, cx, [], units);
+    readUnit(files.map((file) => ({ path: file, name: file })), 'program', null, cx, [], units);
+    return link(units);
 }
 
 const builtin = (name: string, lib: string): Source => ({ path: `${lib}/${name}.slight`, name: `lib/${name}.slight` });
 
-// The forms of src, with its includes spliced in, unless it's in done
-// already. stack holds the files being included, outermost first.
-function includeFile(src: Source, from: Pos | null, cx: Cx, stack: readonly Open[],
-                     done: readonly string[]): [readonly Sexp[], readonly string[]] {
+const keyOf = (src: Source, from: Pos | null, cx: Cx): string => {
     const key = cx.load.key(src.path);
     if (key === null) throw new CompileError(`can't read ${src.name}`, from);
-    if (done.includes(key)) return [[], done];
+    return key;
+};
+
+// A unit's files, with what they splice in, and its header, if it has
+// one; added to units once it's read, after the modules it includes.
+function readUnit(srcs: readonly Source[], kind: UnitKind, from: Pos | null, cx: Cx, stack: readonly Open[], units: Unit[]): string {
+    const keys = srcs.map((src) => keyOf(src, from, cx));
+    const key = kind === 'program' ? `the program: ${keys.join(' ')}` : keys[0]!;
+    const done: string[] = [];
+    const imports: string[] = [];
+    const forms = srcs.flatMap((src) => spliceFile(src, from, cx, stack, done, imports, units));
+    // a program's first file's header too, so a module checked on its own
+    // is checked against what it says
+    const h = headerOf(srcs[0]!, cx);
+    const [header, reexports] = h === null ? [null, []] : readHeader(h, cx, [...stack, { name: srcs[0]!.name, key }], units);
+    if (kind === 'module') {
+        const loose = forms.find((f) => !isForm(f, 'defun') && !isForm(f, 'sig') && !isForm(f, 'deftype'));
+        if (loose !== undefined) {
+            throw new CompileError(`${srcs[0]!.name} has a header, so it's a module: it can only define functions and types`, posOf(loose));
+        }
+    }
+    units.push({
+        key, kind, forms, header, reexports,
+        name: kind === 'program' ? 'the program' : srcs[0]!.name,
+        imports: [...imports, ...reexports.filter((r) => !imports.includes(r))],
+    });
+    return key;
+}
+
+// A file's forms, with its includes spliced in, unless it's in done (this
+// unit's) already; a module it includes, a file with a header, is read as
+// a unit of its own, once, and goes in imports. stack holds the files
+// being included, outermost first.
+function spliceFile(src: Source, from: Pos | null, cx: Cx, stack: readonly Open[],
+                    done: string[], imports: string[], units: Unit[]): readonly Sexp[] {
+    const key = keyOf(src, from, cx);
     const path = [...stack, { name: src.name, key }];
     if (stack.some((o) => o.key === key)) {
         throw new CompileError(`including ${src.name} makes a cycle: ${path.map((o) => o.name).join(' -> ')}`, from);
     }
+    if (done.includes(key)) return [];
+    done.push(key);
     const out: Sexp[] = [];
-    let d = done;
     // a .sly file is in the C-style syntax (D246), read into the same forms
     const reader = src.path.endsWith('.sly') ? readSly : read;
     for (let xs = reader(cx.load.text(key), src.name); xs.t === 'pair'; xs = xs.cdr) {
         const x = xs.car;
-        if (isForm(x, '@include')) {
-            const [forms, d1] = includeFile(target(x as Pair, src, cx.lib), (x as Pair).pos, cx, path, d);
-            out.push(...forms);
-            d = d1;
-        } else {
+        if (!isForm(x, '@include')) {
             out.push(expand(x, cx.keepMatch));
+            continue;
+        }
+        const t = target(x as Pair, src, cx.lib);
+        const module = moduleKey(t, (x as Pair).pos, cx, path, units);
+        if (module === null) out.push(...spliceFile(t, (x as Pair).pos, cx, path, done, imports, units));
+        else if (!imports.includes(module)) imports.push(module);
+    }
+    return out;
+}
+
+// The key of the unit t is, read now if it hasn't been: or null, if t
+// has no header, so it's spliced in where it's included.
+function moduleKey(t: Source, from: Pos | null, cx: Cx, stack: readonly Open[], units: Unit[]): string | null {
+    const key = keyOf(t, from, cx);
+    if (units.some((u) => u.key === key)) return key;
+    if (headerOf(t, cx) === null) return null;
+    if (stack.some((o) => o.key === key)) {
+        throw new CompileError(`including ${t.name} makes a cycle: ${[...stack.map((o) => o.name), t.name].join(' -> ')}`, from);
+    }
+    return readUnit([t], 'module', from, cx, stack, units);
+}
+
+// X.sli, or X.slyi, beside X.slight or X.sly: its header, if it has one.
+function headerOf(src: Source, cx: Cx): Source | null {
+    const strip = (p: string): string => (p.lastIndexOf('.') < 0 ? p : p.slice(0, p.lastIndexOf('.')));
+    for (const ext of ['.sli', '.slyi']) {
+        const path = strip(src.path) + ext;
+        if (cx.load.key(path) !== null) return { path, name: strip(src.name) + ext };
+    }
+    return null;
+}
+
+// A header's deftypes and sigs, and the modules its includes name, whose
+// headers whoever includes this one sees too.
+function readHeader(h: Source, cx: Cx, stack: readonly Open[], units: Unit[]): [readonly Sexp[], readonly string[]] {
+    const reader = h.path.endsWith('.slyi') ? readSly : read;
+    const forms: Sexp[] = [];
+    const includes: string[] = [];
+    for (let xs = reader(cx.load.text(keyOf(h, null, cx)), h.name); xs.t === 'pair'; xs = xs.cdr) {
+        const x = xs.car;
+        if (isForm(x, 'deftype') || isForm(x, 'sig')) {
+            forms.push(x);
+        } else if (isForm(x, '@include')) {
+            const t = target(x as Pair, h, cx.lib);
+            const module = moduleKey(t, (x as Pair).pos, cx, stack, units);
+            if (module === null) throw new CompileError(`a header includes only modules, files with headers: ${t.name} has none`, (x as Pair).pos);
+            if (!includes.includes(module)) includes.push(module);
+        } else {
+            throw new CompileError(`${h.name} is a header: it has deftype and sig forms, and @include, not ${show(x)}`, posOf(x));
         }
     }
-    return [out, [...d, key]];
+    return [forms, includes];
 }
 
 // What (@include x) in src asks for.
