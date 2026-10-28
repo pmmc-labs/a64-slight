@@ -22,14 +22,14 @@
 // it took. A ghost doesn't sleep or show itself, only adds up.
 fun crawl(lane, x, steps, ghost, total) {
     if x == steps {
-        if !ghost { sleep(lane) };
+        if !ghost { sleep(lane) }
         [lane, total + lane]
     } else {
         let pause = 10 * (3 + rand::int(10));
         if !ghost {
             sleep(pause);
             tty::write("\e[", 2 * lane, ";", x + 3, "H", "\e[38;5;", colour(lane), "m_@")
-        };
+        }
         crawl(lane, inc(x), steps, ghost, total + pause)
     }
 }
@@ -43,7 +43,7 @@ fun field(seed, steps, ghost) {
 
 fun line(row, text) { tty::write("\e[", row, ";1H", "\e[0m", "\e[K", text) }
 
-let seed = match @ARGV { [s, ..._] => str_to_int(s), _ => rand::int(1000000) };
+let seed = match @ARGV { [s, ..._] => str_to_int(s), _ => rand::int(1000000) }
 let steps = math::min(60, tty::screen::cols() - 8);
 tty::write("\e[?25l\e[2J");
 line(1, str("race ", seed));

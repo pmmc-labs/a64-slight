@@ -6,6 +6,6 @@ fun fib(n) {
     if n < 2 { n } else { fib(n - 1) + fib(n - 2) }
 }
 
-let n = if nil?(@ARGV) { 25 } else { str_to_int(car(@ARGV)) };
+let n = if nil?(@ARGV) { 25 } else { str_to_int(car(@ARGV)) }
 tty::write("fib(", n, ") = ");
 fib(n)

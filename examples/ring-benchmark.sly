@@ -18,7 +18,7 @@ fun test_actor(reply_to, next) {
                 send(reply_to, :COMPLETED(count, self))
             } else {
                 send(next, :PING(count + 1))
-            };
+            }
             test_actor(reply_to, next)
         }
     }
@@ -46,8 +46,8 @@ fun send_ping($self, pid, count) {
 }
 
 let $self = address();
-let actor_count = if nil?(@ARGV) { 1000 } else { str_to_int(car(@ARGV)) };
-let ping_count  = if nil?(@ARGV) { 3 } else { str_to_int(cadr(@ARGV)) };
+let actor_count = if nil?(@ARGV) { 1000 } else { str_to_int(car(@ARGV)) }
+let ping_count  = if nil?(@ARGV) { 3 } else { str_to_int(cadr(@ARGV)) }
 tty::write("INIT with ", actor_count, " actors, sending ", ping_count + 1, " pings\n");
 let last = setup(actor_count, $self, spawn test_actor($self, []));
 tty::write("START\n");

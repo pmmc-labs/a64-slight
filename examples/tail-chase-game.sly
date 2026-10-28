@@ -24,7 +24,7 @@ fun tail_chaser(h, w, x, y, count, to_clear) {
             tty::write("\e[", cx, ";", cy, "H", " ");
             tty::write("\e[", h + 5, ";", 0, "H", "fade3: ", count, "\r")
         }
-    };
+    }
     let tail = trail(x, y, to_clear);
     recv {
         [:ArrowUp, ..._]    => tail_chaser(h, w, if x == 0 { x } else { dec(x) }, y, inc(count), tail),

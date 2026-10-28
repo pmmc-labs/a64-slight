@@ -98,7 +98,7 @@ fun steer(state, heard, sky) {
         v
     } else {
         vec::add(v, vec::add(cohesion(others), vec::add(alignment(others, v), separation(others))))
-    };
+    }
     let [nvx, nvy] = limit(steered);
     #(id, around(x + nvx, w), around(y + nvy, h), nvx, nvy)
 }
@@ -268,18 +268,18 @@ let sky = [tty::screen::cols() - 2, 2 * (tty::screen::rows() - 3)];
 rand::seed(arg(2, args, 2026));
 let states = hatch(n, sky, []);
 
-if frames < 1 { tty::write("\e[?25l\e[2J") };
-let shown = connect(:system) { display_on(n, sky, frames) };
+if frames < 1 { tty::write("\e[?25l\e[2J") }
+let shown = connect(:system) { display_on(n, sky, frames) }
 let birds = zip(range(0, n), states) |> map(fun(b) {
     let [i, #(x, y, vx, vy)] = b;
     spawn bird(i, #(i, x, y, vx, vy), sky, shown, [])
 });
 birds |> map(fun(b) => send(b, :flock(birds)));
-let keyboard = connect(:keypress) { keys(shown) };
+let keyboard = connect(:keypress) { keys(shown) }
 
 let drawn = read(shown);
 map(kill, [keyboard, ...birds]);
-if frames < 1 { tty::write("\e[?25h\n") };
+if frames < 1 { tty::write("\e[?25h\n") }
 match drawn {
     :ok(k) => str(k, " frames"),
 }

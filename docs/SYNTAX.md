@@ -37,8 +37,10 @@ prelude and `lib/` stay s-expressions.
 
 ## Lexical structure
 
-**White space** separates tokens and is otherwise ignored. Newlines
-mean nothing: items are separated by `;`.
+**White space** separates tokens and is otherwise ignored. Items are
+separated by `;`, which can be left out after a `}` (see Grammar).
+Newlines mean nothing but in one place: a `}` that ends a line ends the
+expression before a `(` or `-` that starts the next.
 
 **Comments:** `//` to the end of the line. There is no block comment.
 
@@ -117,13 +119,14 @@ separated by `s`, a trailing one allowed.
 
 ```
 file      = { item }
-item      = fndef | doc | include ";" | "let" ident "=" expr ";" | expr ";"
+item      = fndef | doc | include ";" | "let" ident "=" expr end | expr end
 fndef     = "fun" name "(" sep(ident, ",") ")" block
 include   = "@include" "(" (string | keyword) ")"
 rawname   = "`" any characters but "`" "`"
 
 block     = "{" { stmt } [ expr ] "}"
-stmt      = "let" pattern "=" expr ";" | expr ";"
+stmt      = "let" pattern "=" expr end | expr end
+end       = ";"            (optional after an expr that ends with "}")
 
 expr      = "spawn" expr | "fork" expr | "yield" expr
           | "connect" "(" sep(expr, ",") ")" block
@@ -159,7 +162,22 @@ body      = expr
 
 An arm's body is one expression; a block is one, for several. After an
 arm whose body ends with `}` (a block, an `if`, a `match`), the `,` may
-be left out, as in Rust.
+be left out, as in Rust; and so may the `;` after an item or a statement
+that ends with `}`:
+
+```
+fun count(table) {
+    let n = match table { [] => 0, [_, ...rest] => 1 + count(rest) }
+    if n > 9 { tty::write("big\n") }
+    n
+}
+```
+
+Since that rule looks at tokens, a `}` followed by `(` or `-` would go
+on as a call or a subtraction, so a `}` that ends a line ends the
+expression when the next line starts with either, as a statement could.
+Any other operator there, `|>` say, goes on, since no statement starts
+with one.
 
 The expression after `if`, `match` or `case`, before its `{`, can't
 itself be a bare block, so `if x {` always opens the `if`'s block. Nor

@@ -13,7 +13,7 @@ fun char_buffer($s) {
 }
 
 fun flush_buffer($s, buffer) {
-    if bytes::len(buffer) > 0 { send($s, :ATOM(buffer)) };
+    if bytes::len(buffer) > 0 { send($s, :ATOM(buffer)) }
     ""
 }
 
@@ -42,6 +42,6 @@ fun DEBUG() {
 
 let debugger = spawn DEBUG();
 let tokens   = spawn tokenize(debugger, "");
-let chars    = connect(:fs/read, "tsconfig.json") { char_buffer(tokens) };
+let chars    = connect(:fs/read, "tsconfig.json") { char_buffer(tokens) }
 
 pprint(read(debugger));

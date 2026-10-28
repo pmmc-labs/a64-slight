@@ -35,7 +35,7 @@ fun sieve(p, next, painter, seen) {
     recv {
         :end(total) => send(next, :end(total + seen)),
         n => {
-            if n % p == 0 { send(painter, :caught(n, p)) } else { send(next, n) };
+            if n % p == 0 { send(painter, :caught(n, p)) } else { send(next, n) }
             sieve(p, next, painter, inc(seen))
         }
     }
@@ -58,7 +58,7 @@ fun count_up(first, n, last, batch) {
         send(first, :end(0))
     } else {
         send(first, n);
-        if n % batch == 0 { sleep(2) };
+        if n % batch == 0 { sleep(2) }
         count_up(first, inc(n), last, batch)
     }
 }
@@ -126,7 +126,7 @@ fun put_pixel(canvas, geo, n, colour) {
     let py = tuple::get(geo, 2) - y;
     let row = div(py, 2);
     let key = row * tuple::get(geo, 0) + px;
-    let was = match map::get(canvas, key) { :not-found => #(16, 16), c => c };
+    let was = match map::get(canvas, key) { :not-found => #(16, 16), c => c }
     let cell = tuple::set(was, py % 2, colour);
     tty::write("\e[", inc(row), ";", inc(px), "H\e[38;5;", tuple::get(cell, 0), "m\e[48;5;", tuple::get(cell, 1), "m▀");
     map::put(canvas, key, cell)
@@ -137,7 +137,7 @@ fun put_pixel(canvas, geo, n, colour) {
 let cols = tty::screen::cols();
 let rows = tty::screen::rows() - 1;
 let fits = math::min(cols, 2 * rows);
-let side = if fits % 2 == 0 { dec(fits) } else { fits };
+let side = if fits % 2 == 0 { dec(fits) } else { fits }
 let last = side * side;
 tty::write("\e[?25l\e[2J");
 let painter = spawn paint(map::new(), #(cols, div(cols, 2), div(2 * rows, 2), inc(rows)), 0);

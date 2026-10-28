@@ -37,7 +37,7 @@ fun walk(xs, x, y, a, acc) {
     match xs {
         [] => reverse(acc),
         [m, ...rest] => {
-            let a2 = a + if m % 2 == 0 { even_turn() } else { odd_turn() };
+            let a2 = a + if m % 2 == 0 { even_turn() } else { odd_turn() }
             let x2 = x + math::cos(a2);
             let y2 = y + math::sin(a2);
             walk(rest, x2, y2, a2, [[x2, y2], ...acc])
@@ -91,7 +91,7 @@ fun plot(canvas, size, pts, out) {
                 plot(canvas, size, rest, out)
             } else {
                 let key = div(y, 4) * cols + div(x, 2);
-                let was = match map::get(canvas, key) { :not-found => #(0, 0), c => c };
+                let was = match map::get(canvas, key) { :not-found => #(0, 0), c => c }
                 let cell = #(bit::or(tuple::get(was, 0), dot(x, y)), math::max(tuple::get(was, 1), rank));
                 if cell == was {
                     plot(canvas, size, rest, out)
@@ -130,7 +130,7 @@ fun draw(walks, painter, fit, longest, k) {
         [] => send(painter, :done),
         [[n, pts], ...rest] => {
             send(painter, :dots(walk_dots(pts, fit, longest, 0, [])));
-            if k % 25 == 0 { sleep(15) };
+            if k % 25 == 0 { sleep(15) }
             draw(rest, painter, fit, longest, inc(k))
         }
     }
@@ -141,7 +141,7 @@ fun draw(walks, painter, fit, longest, k) {
 let last = match @ARGV {
     [s, ..._] => match str_to_int(s) { false => 1500, n => math::max(1, n) },
     _         => 1500,
-};
+}
 let cols = tty::screen::cols();
 let rows = tty::screen::rows() - 1;
 let w = 2 * cols;

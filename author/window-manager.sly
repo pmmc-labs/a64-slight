@@ -18,7 +18,7 @@ fun Logger(dims, coords, logs) {
                 :ALERT => 5,
                 :DEBUG => 3,
                 :ERROR => 1,
-            };
+            }
             tty::write(
                 "\e[4", colour, "m▕",
                 "\e[32;47;4m", str::pad_end(line, dims(:w), " "),
@@ -86,7 +86,7 @@ send(logger, :init);
 send(logger, :log(self, :DEBUG, "... Logger Initialized"));
 
 let wm = spawn WindowManager(screen_rows, screen_cols, [], logger);
-let kb = connect(:keypress) { Keyboard(wm, logger) };
+let kb = connect(:keypress) { Keyboard(wm, logger) }
 
 send(wm, :newWindow(
     "Window One",

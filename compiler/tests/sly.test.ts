@@ -175,6 +175,24 @@ test('includes', () => {
 
 // --- mistakes, and where they are --------------------------------------------
 
+test("the ';' after a '}' can be left out", () => {
+    same('fun f() { if a { b } else { c }\n d }', '(defun f () (if a b c) d)');
+    same('fun f() { let x = match y { _ => 1 }\n x }', '(defun f () (let x (match y (_ 1))) x)');
+    same('fun f() { let [a] = if b { c } else { d }\n a }', '(defun f () (match (if b c d) ((a) a)))');
+    fails('fun f() { let [a] = g(fun() { 1 })\n a }', /expected ';' after a let/);
+    same('if a { b }\nlet s = connect(:system) { c }\nf(s);', '(if a b) (let s (connect :system c)) (f s)');
+    same('fun f() { if a { b } else { c }; d }', '(defun f () (if a b c) d)');
+    fails('fun f() { g() h() }', /expected ';' between statements/);
+});
+
+test("a '}' at the end of a line ends the expression before a '(' or '-'", () => {
+    same('fun f() { if a { b }\n(g)(1) }', '(defun f () (if a b) (g 1))');
+    same('fun f() { if a { b }\n-1 }', '(defun f () (if a b) -1)');
+    same('fun f() { if a { b } - 1 }', '(defun f () (- (if a b) 1))');
+    same('fun f() { if a { b } else { c }\n    |> g }', '(defun f () (g (if a b c)))');
+    same('match x { 1 => if a { b }\n-1 => c };', '(match x (1 (if a b)) (-1 c))');
+});
+
 test('a missing semicolon', () => {
     fails('f(1)\ng(2);', /expected ';' after a top-level item/, 2, 1);
     fails('fun f() { a b }', /expected ';' between statements/, 1, 13);

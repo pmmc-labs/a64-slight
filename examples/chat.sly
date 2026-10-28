@@ -34,8 +34,8 @@ fun divider() {
 }
 
 fun main(args, env) {
-    let model  = if cons?(args) { car(args) } else { "llama3.2" };
-    let url    = if cons?(args) && cons?(cdr(args)) { cadr(args) } else { ollama_url(env) };
+    let model  = if cons?(args) { car(args) } else { "llama3.2" }
+    let url    = if cons?(args) && cons?(cdr(args)) { cadr(args) } else { ollama_url(env) }
     let path   = notes_path(env);
     let store  = notes::open(path);
     let keys   = notes::keys(store);
@@ -51,7 +51,7 @@ fun main(args, env) {
                "\e[0m",
                "\n",
                divider(), prompt());
-    let extra = if str?(expert) { [expert_tool(url, expert)] } else { [] };
+    let extra = if str?(expert) { [expert_tool(url, expert)] } else { [] }
     // inside the connect, self is the keyboard's process, the agent's caller
     read(connect(:keypress) {
         typing(agent::new(url, model, system(keys), append(chat_tools(self, store), extra)), "", [])
@@ -205,7 +205,7 @@ fun show_args(args) {
 }
 
 fun short(s) {
-    let line = if bytes::len(s) == 0 { "" } else { car(str::split(s, "\n")) };
+    let line = if bytes::len(s) == 0 { "" } else { car(str::split(s, "\n")) }
     if str::len(line) > 60 || bytes::len(line) < bytes::len(s) { str(str::slice(line, 0, 60), "…") } else { line }
 }
 

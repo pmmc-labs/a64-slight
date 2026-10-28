@@ -206,6 +206,17 @@ function expect(ts: Ts, i: number, text: string, what: string): number {
     throw new CompileError(`expected '${text}' ${what}, not ${describe(ts[i])}`, ts[i]?.pos ?? ts.at(-1)?.pos ?? null);
 }
 
+// The ';' after an item or a statement, which can be left out when it
+// ends with a '}', as an arm's ',' can.
+const endItem = (ts: Ts, i: number, what: string): number =>
+    isP(ts[i - 1], '}') && !isP(ts[i], ';') ? i : expect(ts, i, ';', what);
+
+// A '}' that ends a line ends the expression, when the next line starts
+// with '(' or '-': either could begin a statement whose ';' before it was
+// left out, and is taken to.
+const freshLine = (ts: Ts, j: number): boolean =>
+    isP(ts[j - 1], '}') && ts[j]!.pos.line > ts[j - 1]!.pos.line;
+
 // Every top-level form in a .sly file, as a list, as read() gives them.
 export function readSly(src: string, file: string): Sexp {
     const ts = tokenize(src, file);
@@ -237,7 +248,7 @@ export function readSly(src: string, file: string): Sexp {
             [x, i] = parseExpr(ts, i);
         }
         out.push(x);
-        if (i < ts.length) i = expect(ts, i, ';', 'after a top-level item');
+        if (i < ts.length) i = endItem(ts, i, 'after a top-level item');
     }
     return list(...out);
 }
@@ -307,19 +318,19 @@ function parseStatements(ts: Ts, i: number): [readonly Sexp[], number] {
             const [e, k] = parseExpr(ts, expect(ts, j, '=', 'after what a let binds'));
             if (pattern.t === 'sym' && !isSym(pattern, '_')) {
                 out.push(form(t.pos, sym('let', t.pos), pattern, e));
-                i = isP(ts[k], '}') ? k : expect(ts, k, ';', 'after a let');
+                i = isP(ts[k], '}') ? k : endItem(ts, k, 'after a let');
                 continue;
             }
             // A let that takes a value apart is a match over the rest of
             // the block, which is the match's one clause.
-            const [rest, end] = parseStatements(ts, expect(ts, k, ';', 'after a let'));
+            const [rest, end] = parseStatements(ts, endItem(ts, k, 'after a let'));
             if (rest.length === 0) throw new CompileError('a let that takes a value apart needs something after it to bind for', t.pos);
             out.push(form(t.pos, sym('match', t.pos), e, list(pattern, ...rest)));
             return [out, end];
         }
         const [x, j] = parseExpr(ts, i);
         out.push(x);
-        i = isP(ts[j], '}') ? j : expect(ts, j, ';', 'between statements');
+        i = isP(ts[j], '}') ? j : endItem(ts, j, 'between statements');
     }
 }
 
@@ -376,7 +387,7 @@ function parseBinary(ts: Ts, i: number, min: number): [Sexp, number] {
     for (;;) {
         const t  = ts[j];
         const op = opAt(t);
-        if (op === null || op.prec < min) return [left, j];
+        if (op === null || op.prec < min || (t!.text === '-' && freshLine(ts, j))) return [left, j];
         const [right, k] = parseBinary(ts, j + 1, op.prec + 1);
         left = binary(op, left, right, t!.pos);
         j = k;
@@ -415,7 +426,7 @@ function parseUnary(ts: Ts, i: number): [Sexp, number] {
 // f(a)(b): calls of whatever the primary is.
 function parsePostfix(ts: Ts, i: number): [Sexp, number] {
     let [x, j] = parsePrimary(ts, i);
-    while (isP(ts[j], '(')) {
+    while (isP(ts[j], '(') && !freshLine(ts, j)) {
         const [args, k] = parseItems(ts, j + 1, ')', 'arguments');
         if (args.some((a) => a.spread)) throw new CompileError("'...' is for lists, not calls: use apply", ts[j]!.pos);
         x = cons(x, list(...args.map((a) => a.x)), posOf(x));

@@ -42,7 +42,7 @@ fun game(to, limit) {
     let p2 = spawn player(me, limit, 0);
     recv;
     send(p1, :Serve(p2));
-    let first = recv { :Final(counter) => counter };
+    let first = recv { :Final(counter) => counter }
     send(to, [first, recv { :Final(counter) => counter }])
 }
 
@@ -70,8 +70,8 @@ fun verify_results(expected, results) {
     }, results)
 }
 
-let num_games = if nil?(@ARGV) { 100 } else { str_to_int(car(@ARGV)) };
-let rallies   = if nil?(@ARGV) { 1000 } else { str_to_int(cadr(@ARGV)) };
+let num_games = if nil?(@ARGV) { 100 } else { str_to_int(car(@ARGV)) }
+let rallies   = if nil?(@ARGV) { 1000 } else { str_to_int(cadr(@ARGV)) }
 
 tty::write("tournament: ", num_games, " games x ", rallies, " rallies\n");
 

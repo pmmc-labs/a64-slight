@@ -51,7 +51,7 @@ fun diff(old, new, cols) {
 
 fun plot(canvas, cols, x, y, colour) {
     let key = div(y, 4) * cols + div(x, 2);
-    let was = match map::get(canvas, key) { :not-found => #(0, colour), c => c };
+    let was = match map::get(canvas, key) { :not-found => #(0, colour), c => c }
     map::put(canvas, key, #(bit::or(tuple::get(was, 0), dot(x, y)), colour))
 }
 
@@ -96,7 +96,7 @@ fun status(st, geo) {
 
 fun move(st, geo, dx, dy, mods) {
     let #(canvas, undo, redo, x, y, pen, colour) = st;
-    let n = if member?(:shift, mods) { 4 } else { 1 };
+    let n = if member?(:shift, mods) { 4 } else { 1 }
     let x2 = clamp(x + n * dx, 0, dec(2 * tuple::get(geo, 0)));
     let y2 = clamp(y + n * dy, 0, dec(4 * tuple::get(geo, 1)));
     let moved = #(canvas, undo, redo, x2, y2, pen, colour);

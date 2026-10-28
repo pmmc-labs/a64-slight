@@ -4,6 +4,6 @@ node_modules/
 /build/
 /bench/target/
 .DS_Store
-sketch
-sketch.*
+/sketch
+/sketch.*
 __pycache__/

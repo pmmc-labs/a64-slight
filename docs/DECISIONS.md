@@ -5849,3 +5849,16 @@ defines a function, and makes a lambda, is `fun` (ML's, Erlang's and
 Kotlin's word), `fn` an ordinary name again. The D246 entry above keeps
 `fn` as it was decided. With it, the three sketches in `author/` that
 joined an actor read it instead, as their `.sly` versions do.)*
+
+*(And: Stevan, "make ; after } optional", once the examples were
+converted. An item or a statement that ends with `}` needs no `;` after
+it, as an arm that does needs no `,`, and as Rust's `if` and `match`
+need none. Since the rule looks at tokens, not lines, one hazard is
+left, JavaScript's: a `}` followed by `(` or `-` would go on as a call
+or a subtraction. So a `}` that ends a line ends the expression when the
+next line starts with either of those, which could begin a statement;
+any other operator there, `|>` say, can't, and goes on. Rejected: Go's
+newline rule, which makes a `;` of a newline after `}` and so needs
+exceptions for `else`, `,`, `)` and every arm; and Rust's, ending a
+statement that begins with a block-like form at its `}`, which would
+stop `if ... { } else { } |> f` there.)*

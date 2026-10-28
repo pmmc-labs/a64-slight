@@ -55,7 +55,7 @@ fun swap(pair) {
 }
 
 let add = fun(x, y) => x + y;
-let twice = fun(f, x) { let y = f(x); f(y) };
+let twice = fun(f, x) { let y = f(x); f(y) }
 pprint([swap([1, 2]), add(2, 3), twice(fun(n) => n * 10, 1)]);
 pprint({ let z = 5; z * z });
 pprint([[0, ...[1, 2]], :t(1, ...[2]), #(1, :a)]);

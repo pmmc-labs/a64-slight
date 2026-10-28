@@ -78,8 +78,8 @@ fun calculate_totals(results) {
     fold::l(0, fun(acc, r) => acc + sum(counts(r)), results)
 }
 
-let num_games     = if nil?(@ARGV) { 10 } else { str_to_int(car(@ARGV)) };
-let game_duration = if nil?(@ARGV) { 100 } else { str_to_int(cadr(@ARGV)) };
+let num_games     = if nil?(@ARGV) { 10 } else { str_to_int(car(@ARGV)) }
+let game_duration = if nil?(@ARGV) { 100 } else { str_to_int(cadr(@ARGV)) }
 
 tty::write("Running ", num_games, " for ", game_duration, "\n");
 

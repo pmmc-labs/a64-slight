@@ -17,14 +17,14 @@ fun keyboard(color) {
                 [:shift, ..._] => tty::write("\e[", color, "m \e[D"),
                 [:alt, ..._]   => tty::write("\e[49m \e[D"),
                 _              => [],
-            };
+            }
             match key {
                 :ArrowUp    => tty::write("\e[A"),
                 :ArrowDown  => tty::write("\e[B"),
                 :ArrowRight => tty::write("\e[C"),
                 :ArrowLeft  => tty::write("\e[D"),
                 _           => [],
-            };
+            }
             keyboard(pick_color(key, color))
         }
     }
@@ -32,7 +32,7 @@ fun keyboard(color) {
 
 // a digit from 1 to 7 picks a colour (41 to 47); any other key keeps it
 fun pick_color(key, color) {
-    let digit = if str?(key) { str_to_int(key) } else { false };
+    let digit = if str?(key) { str_to_int(key) } else { false }
     cond {
         !int?(digit)              => color,
         digit >= 1 && digit <= 7 => 40 + digit,

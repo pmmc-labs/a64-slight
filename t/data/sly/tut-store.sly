@@ -21,7 +21,7 @@ fun found(value) {
 // A key that isn't there counts from 0.
 fun incr(key, table) {
     let n = table::get(key, table);
-    let next = if n == :not-found { 1 } else { n + 1 };
+    let next = if n == :not-found { 1 } else { n + 1 }
     [table::put(key, next, table), :ok(next)]
 }
 

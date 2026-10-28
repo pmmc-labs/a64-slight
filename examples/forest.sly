@@ -91,7 +91,7 @@ fun plot_dots(canvas, size, pts, rank, out) {
                 plot_dots(canvas, size, rest, rank, out)
             } else {
                 let key = div(y, 4) * cols + div(x, 2);
-                let was = match map::get(canvas, key) { :not-found => #(0, 0), c => c };
+                let was = match map::get(canvas, key) { :not-found => #(0, 0), c => c }
                 let cell = #(bit::or(tuple::get(was, 0), dot(x, y)), math::max(tuple::get(was, 1), rank));
                 if cell == was {
                     plot_dots(canvas, size, rest, rank, out)
@@ -160,8 +160,8 @@ fun bud(painter, x, y, angle, len, depth, lean) {
 fun grow(painter, x, y, angle, len, depth, lean) {
     let x1 = x + len * math::cos(angle);
     let y1 = y - len * math::sin(angle);
-    let children = cond { depth == twigs() => 0, rand::int(3) == 0 => 3, true => 2 };
-    if children == 0 { send(painter, :dots(blossom(x1, y1), rank::blossom())) };
+    let children = cond { depth == twigs() => 0, rand::int(3) == 0 => 3, true => 2 }
+    if children == 0 { send(painter, :dots(blossom(x1, y1), rank::blossom())) }
     send(painter, :branch(thick(math::max(0, 2 - depth), x, y, x1, y1), rank::branch(depth), children));
     dotimes(0, children, fun(i) {
         let a = angle + (0.42 * (i - (children - 1) / 2.0) + (0.5 * (rand::float() - 0.5) + lean));
@@ -173,8 +173,8 @@ fun grow(painter, x, y, angle, len, depth, lean) {
 
 // --- the night ----------------------------------------------------------------
 
-let seed = match @ARGV { [s, ..._] => str_to_int(s), _ => false };
-if int?(seed) { rand::seed(seed) };
+let seed = match @ARGV { [s, ..._] => str_to_int(s), _ => false }
+if int?(seed) { rand::seed(seed) }
 let cols = tty::screen::cols();
 let rows = tty::screen::rows() - 1;
 let w = 2 * cols;
