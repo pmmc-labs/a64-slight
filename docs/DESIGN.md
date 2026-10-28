@@ -55,6 +55,11 @@ The reader (`compiler/src/reader.ts`, D37) reads:
 - the names `\n`, `\r`, `\t` and `\e`, constants for those one-character
   strings, and `math/PI`
 
+A second syntax, C-style, is read into the same s-expressions: a file
+ending in `.sly` goes to `compiler/src/sly.ts` instead (D246,
+`docs/SYNTAX.md`), and nothing after the reader knows which syntax a
+program was in.
+
 ### Types
 
 | Type     | Notes |

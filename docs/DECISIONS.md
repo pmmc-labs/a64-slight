@@ -5760,3 +5760,62 @@ an actor while the root read it).
   replies in an actor the root spawned and read; the root does it now,
   at an address it makes, reading in an ordinary loop, and each prints
   what it did before D243, but for even-odd's address where its pid was.
+
+**D246. A second syntax, C-style with ML's habits, read into the same
+s-expressions.** *(Stevan, Oct 2026: a thought experiment, "a C style
+syntax for slight, perhaps borrowing from ML a bit too", then, after two
+programs converted by hand and Claude's written grammar,
+`docs/SYNTAX.md`, "proceed with the next steps", choosing among Claude's
+options on the questions it left.)* `fn f(a, b) { ... }`, `let x = e;`,
+infix operators, `[a, ...xs]`, `:tag(a)` for a tagged list, `match`
+and `recv` with `pattern => body` arms, `spawn e` and `fork e` as
+prefix words, `self` and `parent`, `x |> f(a)`. A file ending in `.sly`
+is read by `compiler/src/sly.ts` into the forms `reader.ts` makes, with
+their positions, so the expander, the compiler and the runtime don't
+know which syntax a program was in, and the two include each other.
+slight has no macros, which is what an infix syntax usually costs a
+Lisp (Dylan's); its semantics are already ML's (expressions, immutable
+bindings, patterns, tail calls), and its tagged lists are OCaml's
+polymorphic variants. Gleam (ML's semantics, C's look, on Erlang's
+machine) and Elixir (a new syntax on Erlang's) are the nearest
+neighbours.
+
+- **Names:** an identifier's `::` is `/`, then `_to_` is `->`, then
+  `_` is `-` (`table::del_loop` is `table/del-loop`, `str_to_int` is
+  `str->int`), and a raw name in backticks is any slight name as it is
+  (`` `str/<` ``). Keywords keep slight's spelling (`:on-next`,
+  `:fs/read`), since nothing after `:` can be an operator.
+- **`==` is structural:** `eq?`, with `!=` as `ne?`, because that's what
+  a C or JavaScript programmer writes, and every comparison in the two
+  programs converted was structural; slight's numeric `==` is
+  `` `==`(a, b) ``. Rejected: `==` as slight's `==` (which makes
+  `name == "ann"` a fault), and `===` for structure beside it.
+- **The extension is `.sly`.** Rejected: `.sl`, which other tools use,
+  and `.slc`.
+- **`:tag` and `:tag()` stay different values,** as `'tag` and
+  `(list :tag)` are, and the compiler is to warn when a program uses one
+  tag in both shapes (a message sent one way and matched the other is a
+  dead letter only a run finds). Not built yet. Rejected: a bare `:tag`
+  meaning the one-element list in some positions, a change to what
+  values are; and no warning.
+- **A list of literals is a quoted constant:** `[1, :a]` is `'(1 a)`, so
+  `quote` needs no syntax, and the s-expressions' trap, `'(:inc)` being
+  `((quote inc))`, has no counterpart.
+- **A `let` that takes a value apart,** `let [a, b] = e;`, is a
+  one-clause `match` over the rest of its block.
+- **Data stays s-expressions:** what programs print, log and send, and
+  what `rpc` puts on the wire, whichever syntax wrote them.
+- **Built first, by Stevan's choice of the smallest step: the reader
+  alone,** a precedence climber over a token list, slight-shaped, so it
+  ports as `reader.ts` will (about 600 lines). Its unit tests read each
+  construct and compare it with what `reader.ts` makes of the
+  s-expressions it stands for; golden tests 303 (every form, run), 304
+  and 305 (the tutorial's store, race and supervisor, converted, to the
+  tutorial's own output, and a fault's site in the `.sly` file);
+  `t/run.sh` takes `.sly` files, and `// args:` as `; args:`. Rejected
+  for now: the converters both ways (`--to-sly`, `--to-slight`) and
+  running the guide in both syntaxes, which come next if it's kept.
+- **Left open:** `c ? a : b` (`?` ends names and `:` starts keywords),
+  Rust's `become` for a checked tail call, printing values in this
+  syntax, and what a parser in slight would cost the self-hosted
+  compiler.

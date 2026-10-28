@@ -47,6 +47,7 @@
 import { CompileError } from './errors.ts';
 import { lowerPattern, NO_MATCH } from './pattern.ts';
 import { read } from './reader.ts';
+import { readSly } from './sly.ts';
 import { NIL, cons, form, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 
 // The outside world: a key for the file at path that's the same however
@@ -95,7 +96,9 @@ function includeFile(src: Source, from: Pos | null, cx: Cx, stack: readonly Open
     }
     const out: Sexp[] = [];
     let d = done;
-    for (let xs = read(cx.load.text(key), src.name); xs.t === 'pair'; xs = xs.cdr) {
+    // a .sly file is in the C-style syntax (D246), read into the same forms
+    const reader = src.path.endsWith('.sly') ? readSly : read;
+    for (let xs = reader(cx.load.text(key), src.name); xs.t === 'pair'; xs = xs.cdr) {
         const x = xs.car;
         if (isForm(x, '@include')) {
             const [forms, d1] = includeFile(target(x as Pair, src, cx.lib), (x as Pair).pos, cx, path, d);

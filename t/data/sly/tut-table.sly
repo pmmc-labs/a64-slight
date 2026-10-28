@@ -1,0 +1,30 @@
+// The tutorial's table (docs/guide/code/tut-table.slight) in the C-style
+// syntax (D246): a list of [key, value] pairs, newest first.
+
+fn table::get(key, table) {
+    match table {
+        []                => :not-found,
+        [[k, v], ...rest] => if k == key { v } else { table::get(key, rest) },
+    }
+}
+
+fn table::del(key, table) {
+    table::del_loop(key, table, [])
+}
+
+fn table::del_loop(key, table, seen) {
+    match table {
+        []              => reverse(seen),
+        [pair, ...rest] =>
+            if car(pair) == key { append(reverse(seen), rest) }
+            else { table::del_loop(key, rest, [pair, ...seen]) }
+    }
+}
+
+fn table::put(key, value, table) {
+    [[key, value], ...table::del(key, table)]
+}
+
+fn table::keys(table) {
+    table |> map(car)
+}

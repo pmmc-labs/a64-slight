@@ -1,0 +1,19 @@
+(empty (one 7) (tagged 9) (many 3 (3 4)) (pair k 5) string minus-one other)
+(positive negative zero)
+("A" "B" "C" "two" "many")
+"concat"
+43
+#true
+#true
+#false
+#true
+-10
+3.5
+((2 1) 5 100)
+25
+((0 1 2) (t 1 2) #(1 a))
+2
+(ok lift-off)
+#true
+()
+done

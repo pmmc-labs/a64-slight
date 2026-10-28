@@ -1086,6 +1086,25 @@ kept), D124 and D128 (a task opens a device, and is told its failure),
 D157 (`ask` without a box), and D220 (`join/race` is `read/any` over
 pids).
 
+### A C-style syntax (agreed, D246; the reader built, Oct 2026)
+
+A second way to write slight, `.sly`, read into the same s-expressions
+(`docs/SYNTAX.md`). In steps, each with passing tests:
+
+1. **The reader** (done): `compiler/src/sly.ts`, chosen by the file's
+   extension in `expand.ts`; unit tests against `reader.ts`, and golden
+   tests 303 to 305.
+2. **The warning** for a tag used both bare and as a tagged list in one
+   program (D246), which helps the s-expressions too.
+3. **The converters,** `slightc --to-sly` and `--to-slight`, which keep
+   comments and doc blocks, and lay a program out by rules of their own.
+4. **The guide in both syntaxes:** every program in `docs/guide/code/`
+   converted, and run to the same `.expected`; the pages could then show
+   either.
+
+Each of 2 to 4 waits for Stevan to have written some `.sly` and to say
+it's worth keeping.
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written

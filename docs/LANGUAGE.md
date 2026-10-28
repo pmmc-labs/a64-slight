@@ -222,6 +222,11 @@ list too. `'(:inc)` is the list `((quote inc))`, not the message
 
 `$$` is the current process, and `^$$` its parent (Processes).
 
+A file ending in `.sly` is in a second syntax, C-style, with the same
+meaning: `fn f(a, b) { ... }`, `let x = e;`, infix operators, `[a,
+...xs]`, `:tag(a)`, `match x { p => e, ... }`. `docs/SYNTAX.md` has it
+all (D246). Either kind of file can include the other.
+
 `\n`, `\r`, `\t` and `\e` are also names, for the one-character strings,
 and `math/PI` is the float 3.141592653589793. They're constants rather than
 reserved words: a local of the same name hides them.

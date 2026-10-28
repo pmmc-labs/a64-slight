@@ -1,10 +1,11 @@
 # A C-style syntax for slight
 
-**(open)** A proposal, not built. Nothing here changes what a program
+Agreed (D246); the reader is built (`compiler/src/sly.ts`), the warning
+and the converters below aren't yet. Nothing here changes what a program
 means: this is a second way to write the same programs, read into the
 same s-expressions the compiler already takes. Where it touches a choice
 that is really about the language (what `==` means, say), it says so,
-and lists it under Open questions.
+and says how it was settled, under Questions.
 
 ## Goals
 
@@ -29,8 +30,8 @@ syntax.
 
 ## Files
 
-A file in this syntax ends in `.sl` (open: the name); one in
-s-expressions keeps `.slight`. `slightc` picks the reader by the
+A file in this syntax ends in `.sly`; one in s-expressions keeps
+`.slight`. `slightc` picks the reader by the
 extension, and `@include` of either kind works from either kind. The
 prelude and `lib/` stay s-expressions.
 
@@ -52,7 +53,7 @@ ident  = (letter | "_") (letter | digit | "_")* "?"?
 name   = ident ("::" ident)*
 ```
 
-So `table::get`, `nil?`, `str::to_int`, `Consumer`, `tty::screen::rows`.
+So `table::get`, `nil?`, `str_to_int`, `Consumer`, `tty::screen::rows`.
 Case is significant and carries no meaning: capitals are free for
 anything (`Consumer` for a function an actor runs, say).
 
@@ -291,42 +292,46 @@ rest of the file as its body); write a `match`.
 
 ## Errors
 
-A syntax error is reported as now, `prog.sl:line:col: message`, and
+A syntax error is reported as now, `prog.sly:line:col: message`, and
 `slightc` exits 1. Every form the reader makes carries the position of
 the token it came from, so the compiler's own errors and the runtime's
-fault sites (`car at prog.sl:3:5`) point into the `.sl` file.
+fault sites (`car at prog.sly:3:5`) point into the `.sly` file.
 
-## Converting
+## Converting (not built yet)
 
-- `slightc --to-sl file.slight` writes the program in this syntax, and
-  `slightc --to-slight file.sl` in s-expressions. Comments and doc
+- `slightc --to-sly file.slight` writes the program in this syntax, and
+  `slightc --to-slight file.sly` in s-expressions. Comments and doc
   blocks are kept, attached to the item they precede.
-- Converting `.sl` to `.slight` and back gives the same text, laid out by
+- Converting `.sly` to `.slight` and back gives the same text, laid out by
   the converter's rules.
-- Converting `.slight` to `.sl` and back gives the same program, but
+- Converting `.slight` to `.sly` and back gives the same program, but
   maybe not the same text: `(list 1 2)` comes back `'(1 2)`, `when` as
   `if`, and layout as the converter lays it out.
 - The guide's code could be checked in both syntaxes: each program
   converted, and run to the same `.expected`.
 
-## Open questions
+## Questions
 
-1. **What `==` means.** slight's `==` compares numbers (`(== 1 1.0)` is
-   true) and faults on anything else; `eq?` compares structure.
-   Recommended: `==` and `!=` are `eq?` and `ne?`, because that's what
-   a C or JavaScript programmer will reach for, and in both examples
-   converted so far every comparison was structural (keys, keywords).
-   Numeric equality is then `` `==`(a, b) ``, or a named function
-   (`num::eq`). The cost: `1 == 1.0` is false, as `(eq? 1 1.0)` is. The
-   alternative, `==` as slight's numeric `==`, keeps the meaning of the
-   name, and makes `name == "ann"` a fault.
-2. **The file extension.** `.sl`, or something less likely to collide.
-3. **`:tag` and `:tag()`.** They're different values, and the
-   difference is easy to miss: a message sent as `:tag()` and matched
-   as `:tag` is a dead letter. Recommended: keep both, as slight does,
-   and have the converter and the compiler warn when one tag is used in
-   both shapes in one program. Rejected: making a bare `:tag` mean the
-   one-element list in some positions, which changes what values are.
+Settled by Stevan (D246):
+
+1. **`==` is structural.** `==` and `!=` are slight's `eq?` and `ne?`,
+   because that's what a C or JavaScript programmer reaches for, and in
+   the programs converted so far every comparison was structural (keys,
+   keywords). So `1 == 1.0` is false, as `(eq? 1 1.0)` is. slight's
+   numeric `==` is the raw name `` `==`(a, b) ``. Rejected: `==` as
+   slight's numeric `==`, which keeps the name's meaning and makes
+   `name == "ann"` a fault; and both, with `===` for structure.
+2. **The extension is `.sly`.** Rejected: `.sl`, which other tools use,
+   and `.slc`.
+3. **`:tag` and `:tag()` stay different,** as they are in slight, and
+   the compiler is to warn when one tag is used in both shapes in one
+   program: a message sent as `:tag()` and matched as `:tag` is a dead
+   letter, found only when it runs. Not built yet. Rejected: making a
+   bare `:tag` mean the one-element list in some positions, which
+   changes what values are; and no warning.
+
+Still open:
+
 4. **A conditional expression,** `c ? a : b`. A one-line `if ... else`
    is longer than slight's `(if c a b)`. It's left out for now: `?` ends
    identifiers (`nil?`) and `:` starts keywords, so `c ? a :b` would
@@ -339,10 +344,9 @@ fault sites (`car at prog.sl:3:5`) point into the `.sl` file.
    s-expressions, so what a program prints, logs and sends is the same
    whichever syntax wrote it.
 7. **Self-hosting.** A parser for this syntax, written in slight, is
-   larger than the s-expression reader, perhaps three times. It's a
-   reason to build it, if it's built, as a reader that's easy to port:
-   a Pratt parser over a token list, slight-shaped like the rest of the
-   compiler.
+   larger than the s-expression reader, perhaps three times. The reader
+   is a precedence climber over a token list, slight-shaped like the
+   rest of the compiler, so that it ports the same way.
 
 ## Examples
 
@@ -442,7 +446,7 @@ fn table::keys(table) {
 // The store, as chapter 4 leaves it: an actor that runs commands on a
 // table, and answers each at the address that came with it.
 
-@include("tut-table.sl");
+@include("tut-table.sly");
 
 fn run_command(table, cmd) {
     match cmd {

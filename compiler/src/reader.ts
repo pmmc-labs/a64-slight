@@ -24,24 +24,24 @@ import { NIL, cons, float, fitsInt, int, reverse, str, sym, INT_MAX, INT_MIN, TU
 // Tokens
 // ---------------------------------------------------------------------------
 
-type Token =
+export type Token =
     | { readonly kind: 'open' | 'tuple' | 'close' | 'quote'; readonly pos: Pos }
     | { readonly kind: 'keyword' | 'atom' | 'string'; readonly text: string; readonly pos: Pos };
 
-type Cursor = { readonly src: string; readonly file: string; readonly i: number; readonly line: number; readonly col: number };
+export type Cursor = { readonly src: string; readonly file: string; readonly i: number; readonly line: number; readonly col: number };
 
-const peek  = (c: Cursor): string => c.src[c.i] ?? '';
-const atEnd = (c: Cursor): boolean => c.i >= c.src.length;
-const posOf = (c: Cursor): Pos => ({ file: c.file, line: c.line, col: c.col });
-const step  = (c: Cursor): Cursor => peek(c) === '\n'
+export const peek  = (c: Cursor): string => c.src[c.i] ?? '';
+export const atEnd = (c: Cursor): boolean => c.i >= c.src.length;
+export const posOf = (c: Cursor): Pos => ({ file: c.file, line: c.line, col: c.col });
+export const step  = (c: Cursor): Cursor => peek(c) === '\n'
     ? { ...c, i: c.i + 1, line: c.line + 1, col: 1 }
     : { ...c, i: c.i + 1, col: c.col + 1 };
 
-const isSpace     = (ch: string): boolean => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+export const isSpace     = (ch: string): boolean => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
 const isDelimiter = (ch: string): boolean => isSpace(ch) || '()\';"`,'.includes(ch);
-const isDigit     = (ch: string): boolean => ch >= '0' && ch <= '9';
+export const isDigit     = (ch: string): boolean => ch >= '0' && ch <= '9';
 
-function skipWhile(c: Cursor, pred: (ch: string) => boolean): Cursor {
+export function skipWhile(c: Cursor, pred: (ch: string) => boolean): Cursor {
     while (!atEnd(c) && pred(peek(c))) c = step(c);
     return c;
 }
@@ -66,7 +66,7 @@ function tokenize(src: string, file: string): readonly Token[] {
     return tokens;
 }
 
-const isLetter = (ch: string): boolean => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
+export const isLetter = (ch: string): boolean => (ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z');
 const isBlank  = (ch: string): boolean => ch === ' ' || ch === '\t' || ch === '\r';
 
 // The rest of the line at c, and the cursor at its newline (or the end).
@@ -80,7 +80,7 @@ const pastLetters = (s: string, k: number): number => isLetter(s[k] ?? '') ? pas
 
 // A doc block, from its first line (c is at the `=`) to the line after its
 // `=cut`, or to the end of the file.
-function skipDoc(c: Cursor): Cursor {
+export function skipDoc(c: Cursor): Cursor {
     const pos          = posOf(c);
     const [first, eol] = restOfLine(c);
     const word         = first.slice(1, pastLetters(first, 1));
@@ -124,7 +124,7 @@ function nextToken(c: Cursor): [Token | null, Cursor] {
 const ESCAPES: Readonly<Record<string, string>> = { '"': '"', '\\': '\\', n: '\n', t: '\t', r: '\r', e: '\x1b' };
 
 // c is just past the opening quote.
-function readString(c: Cursor, start: Pos): [Token, Cursor] {
+export function readString(c: Cursor, start: Pos): [Token, Cursor] {
     let text = '';
     for (;;) {
         if (atEnd(c)) throw new CompileError('unterminated string', start);
@@ -167,7 +167,7 @@ function readUnicodeEscape(c: Cursor, escPos: Pos): [string, Cursor] {
 // -?D+ is an int. -?D+.D+ is a float, with an optional exponent e[+-]?D+:
 // both sides of the point need digits, so `1.` and `.5` are names, and so
 // is `1e3`. Anything else is null.
-function numberKind(text: string): 'int' | 'float' | null {
+export function numberKind(text: string): 'int' | 'float' | null {
     const pastDigits = (i: number): number => isDigit(text[i] ?? '') ? pastDigits(i + 1) : i;
     const end = (i: number, kind: 'int' | 'float'): 'int' | 'float' | null => i === text.length ? kind : null;
 
