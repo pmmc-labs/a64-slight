@@ -14,7 +14,7 @@ variables:
   name: '{{ident}}(?:::{{ident}})*'
   # what a keyword is made of: anything but white space and what ends one
   kwchar: '[^\s()\[\]{},;"''`]'
-  reserved: '\b(?:fn|let|if|else|cond|case|match|recv|spawn|fork|connect|yield|true|false|self|parent)\b'
+  reserved: '\b(?:fun|let|if|else|cond|case|match|recv|spawn|fork|connect|yield|true|false|self|parent)\b'
   # the process builtins and the prelude's asking, which every program uses
   builtin: '\b(?:send|join|join::race|join::any|join::all|monitor|kill|raise|after|sleep|read|read::any|address|open|disconnect|ask|ask_within|reply|apply|pprint|timer::cancel|clock::us)\b'
 
@@ -25,7 +25,7 @@ contexts:
 
   items:
     - include: comments
-    - include: fn-definition
+    - include: fun-definition
     - include: expressions
 
   # =doc ... =cut, as in Perl's POD, holding Markdown
@@ -49,9 +49,9 @@ contexts:
         - match: '$\n?'
           pop: true
 
-  # fn name(params) { ... }
-  fn-definition:
-    - match: '\b(fn)\s+({{name}}|`[^`\n]+`)'
+  # fun name(params) { ... }
+  fun-definition:
+    - match: '\b(fun)\s+({{name}}|`[^`\n]+`)'
       captures:
         1: keyword.declaration.function.sly
         2: entity.name.function.sly
@@ -150,9 +150,9 @@ contexts:
       captures:
         1: punctuation.definition.symbol.sly
 
-  # fn(params) => e, or fn(params) { ... }
+  # fun(params) => e, or fun(params) { ... }
   lambda:
-    - match: '\bfn\b(?=\s*\()'
+    - match: '\bfun\b(?=\s*\()'
       scope: keyword.declaration.function.anonymous.sly
       push: parameters
 

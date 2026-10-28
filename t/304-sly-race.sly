@@ -3,7 +3,7 @@
 @include("data/sly/tut-store.sly");
 
 // Adds one to a key's value, in two steps: get it, then put it back.
-fn bump(s, key) {
+fun bump(s, key) {
     match call(s, :get(key)) {
         :ok(n) => call(s, :put(key, n + 1)),
     }

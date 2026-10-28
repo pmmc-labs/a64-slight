@@ -4,13 +4,13 @@
 
 // Starts the store and watches it, and passes it every message. When it
 // ends, it starts another, with an empty table.
-fn supervise() {
+fun supervise() {
     let s = spawn store([]);
     monitor(s);
     supervisor(s)
 }
 
-fn supervisor(s) {
+fun supervisor(s) {
     recv {
         :exit(_, result) => {
             pprint([:restarting, result]);

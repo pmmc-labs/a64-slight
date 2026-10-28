@@ -5,7 +5,7 @@
 A doc block, which the reader skips.
 =cut
 
-fn classify(x) {
+fun classify(x) {
     match x {
         []              => :empty,
         [n]             => :one(n),
@@ -20,13 +20,13 @@ fn classify(x) {
 
 pprint(map(classify, [[], [7], :tag(9), [1, 2, 3, 4], #(:k, 5), "s", -1, 3.5]));
 
-fn sign(n) {
+fun sign(n) {
     if n < 0 { :negative } else if n == 0 { :zero } else { :positive }
 }
 
 pprint([1, -2, 0] |> map(sign));
 
-fn grade(n) {
+fun grade(n) {
     cond {
         n >= 90 => "A",
         n >= 80 => "B",
@@ -34,7 +34,7 @@ fn grade(n) {
     }
 }
 
-fn name_of(d) {
+fun name_of(d) {
     case d { 1 => "one", 2 => "two", _ => "many" }
 }
 
@@ -49,18 +49,18 @@ pprint(1 != 2);
 pprint(-(3 * 4) + 10 % 4);
 pprint(7 / 2);
 
-fn swap(pair) {
+fun swap(pair) {
     let [a, b] = pair;
     [b, a]
 }
 
-let add = fn(x, y) => x + y;
-let twice = fn(f, x) { let y = f(x); f(y) };
-pprint([swap([1, 2]), add(2, 3), twice(fn(n) => n * 10, 1)]);
+let add = fun(x, y) => x + y;
+let twice = fun(f, x) { let y = f(x); f(y) };
+pprint([swap([1, 2]), add(2, 3), twice(fun(n) => n * 10, 1)]);
 pprint({ let z = 5; z * z });
 pprint([[0, ...[1, 2]], :t(1, ...[2]), #(1, :a)]);
 
-fn counter(n) {
+fun counter(n) {
     recv {
         :inc()   => counter(n + 1),
         :get(to) => { reply(to, n); counter(n) }
@@ -72,7 +72,7 @@ send(c, :inc());
 send(c, :inc());
 pprint(ask(c, :get()));
 
-fn count_down(n) {
+fun count_down(n) {
     if n == 0 { :lift-off } else { yield count_down(n - 1) }
 }
 

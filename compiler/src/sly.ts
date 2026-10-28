@@ -9,8 +9,8 @@
 //
 // What it reads into what, in short (SYNTAX.md has it all):
 //
-//   fn f(a, b) { body }        (defun f (a b) body...)
-//   fn(a) => e                 (lambda (a) e)
+//   fun f(a, b) { body }       (defun f (a b) body...)
+//   fun(a) => e                (lambda (a) e)
 //   let x = e;                 (let x e)
 //   let [a, b] = e; rest       (match e ((a b) rest...))
 //   f(a, b)                    (f a b)
@@ -52,7 +52,7 @@ type Token =
     | { readonly kind: 'name'; readonly text: string; readonly plain: boolean; readonly pos: Pos }
     | { readonly kind: 'quoted'; readonly text: string; readonly datum: Sexp; readonly pos: Pos };
 
-const RESERVED = ['fn', 'let', 'if', 'else', 'cond', 'case', 'match', 'recv', 'spawn', 'fork', 'connect', 'yield',
+const RESERVED = ['fun', 'let', 'if', 'else', 'cond', 'case', 'match', 'recv', 'spawn', 'fork', 'connect', 'yield',
                   'true', 'false', 'self', 'parent'];
 
 // Longest first, so that `...` isn't read as something shorter.
@@ -217,7 +217,7 @@ export function readSly(src: string, file: string): Sexp {
             i++;
             continue;
         }
-        if (isW(t, 'fn') && ts[i + 1]?.kind === 'name') {
+        if (isW(t, 'fun') && ts[i + 1]?.kind === 'name') {
             const [d, next] = parseDefun(ts, i);
             out.push(d);
             i = next;
@@ -242,7 +242,7 @@ export function readSly(src: string, file: string): Sexp {
     return list(...out);
 }
 
-// fn name(params) { body }
+// fun name(params) { body }
 function parseDefun(ts: Ts, i: number): [Sexp, number] {
     const at   = ts[i]!.pos;
     const name = ts[i + 1]!;
@@ -300,7 +300,7 @@ function parseStatements(ts: Ts, i: number): [readonly Sexp[], number] {
             i++;
             continue;
         }
-        if (isW(t, 'fn') && ts[i + 1]?.kind === 'name') throw new CompileError('a function is defined at the top level only', t.pos);
+        if (isW(t, 'fun') && ts[i + 1]?.kind === 'name') throw new CompileError('a function is defined at the top level only', t.pos);
         if (isW(t, '@include')) throw new CompileError('@include is only allowed at the top level', t.pos);
         if (isW(t, 'let')) {
             const [pattern, j] = parsePattern(ts, i + 1);
@@ -486,7 +486,7 @@ function parseWord(ts: Ts, i: number, w: string, at: Pos): [Sexp, number] {
             const [x, j] = parseExpr(ts, i + 1);
             return [form(at, sym(w, at), x), j];
         }
-        case 'fn': {
+        case 'fun': {
             if (ts[i + 1]?.kind === 'name') throw new CompileError('a function is defined at the top level only', at);
             const [params, j] = parseParams(ts, i + 1);
             if (isP(ts[j], '=>')) {

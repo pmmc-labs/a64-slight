@@ -14,7 +14,7 @@
 (defun ask? ($to @msg)
     (let $f (spawn (Future)))
     (send $to (append @msg (list $f)))
-    (match (join $f)
+    (match (read $f)
         ((:ok    value)  value)
         ((:error reason) (raise reason))))
 

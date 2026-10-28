@@ -1,4 +1,4 @@
-fn tokenize_atom(chars, tokens, acc) {
+fun tokenize_atom(chars, tokens, acc) {
     match chars {
         []            => tokenizer(chars, [acc, ...tokens]),
         [" ", ...rest] => tokenizer(rest, [acc, ...tokens]),
@@ -8,7 +8,7 @@ fn tokenize_atom(chars, tokens, acc) {
     }
 }
 
-fn tokenizer(chars, tokens) {
+fun tokenizer(chars, tokens) {
     match chars {
         []             => reverse(tokens),
         [" ", ...rest] => tokenizer(rest, tokens),
@@ -18,7 +18,7 @@ fn tokenizer(chars, tokens) {
     }
 }
 
-fn lexer(tokens, acc) {
+fun lexer(tokens, acc) {
     match tokens {
         [] => reverse(acc),
         [token, ...rest] => cond {
@@ -29,7 +29,7 @@ fn lexer(tokens, acc) {
     }
 }
 
-fn close_expression(stack, acc) {
+fun close_expression(stack, acc) {
     match stack {
         []              => acc,
         [:MARK, ...rest] => [acc, ...rest],
@@ -37,7 +37,7 @@ fn close_expression(stack, acc) {
     }
 }
 
-fn parser(lexed, acc) {
+fun parser(lexed, acc) {
     match lexed {
         []                => acc,
         [:OPEN, ...rest]  => parser(rest, [:MARK, ...acc]),

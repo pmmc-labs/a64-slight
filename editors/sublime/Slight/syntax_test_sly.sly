@@ -3,15 +3,15 @@
 // A comment.
 // <- comment.line.double-slash punctuation.definition.comment
 
-fn table::get(key, table) {
+fun table::get(key, table) {
 // <- keyword.declaration.function
-// ^^^^^^^^^^ entity.name.function
-//           ^ punctuation.section.parameters.begin
-//            ^^^ variable.parameter
-//               ^ punctuation.separator.parameters
-//                 ^^^^^ variable.parameter
-//                      ^ punctuation.section.parameters.end
-//                        ^ punctuation.section.block.begin
+//  ^^^^^^^^^^ entity.name.function
+//            ^ punctuation.section.parameters.begin
+//             ^^^ variable.parameter
+//                ^ punctuation.separator.parameters
+//                  ^^^^^ variable.parameter
+//                       ^ punctuation.section.parameters.end
+//                         ^ punctuation.section.block.begin
     match table {
 //  ^^^^^ keyword.control.conditional
 //        ^^^^^ variable.other
@@ -46,11 +46,11 @@ let n = -(3 * 4) + 10 % 4 ++ "x\n\q";
 //                           ^^^^^^^ string.quoted.double
 //                             ^^ constant.character.escape
 //                               ^^ invalid.illegal.escape
-let f = fn(x) => x * 1.5e3;
-//      ^^ keyword.declaration.function.anonymous
-//         ^ variable.parameter
-//            ^^ punctuation.separator.arm
-//                   ^^^^^ constant.numeric.float
+let f = fun(x) => x * 1.5e3;
+//      ^^^ keyword.declaration.function.anonymous
+//          ^ variable.parameter
+//             ^^ punctuation.separator.arm
+//                    ^^^^^ constant.numeric.float
 xs |> filter(even?) |> map(square) |> `str/<`(a);
 // ^^ keyword.operator.pipe
 //    ^^^^^^ variable.function
@@ -76,10 +76,10 @@ pprint([self, parent, true, false, @ARGV, %ENV, #(1, 2)]);
 =cut
 // <- keyword.other.doc.end
 
-fn ask?($to, msg) { send($to, msg) }
-//      ^^^ variable.parameter
-//                  ^^^^ support.function.builtin
-//                       ^^^ variable.other
+fun ask?($to, msg) { send($to, msg) }
+//       ^^^ variable.parameter
+//                   ^^^^ support.function.builtin
+//                        ^^^ variable.other
 eval('((lambda (x) x) 1), env);
 //   ^ keyword.operator.quote
 //    ^ punctuation.section.parens.begin

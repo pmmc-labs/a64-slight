@@ -1,7 +1,7 @@
-fn Coords(x, y) { fn(m) => match m { :x => x, :y => y } }
-fn Dimensions(h, w) { fn(m) => match m { :h => h, :w => w } }
+fun Coords(x, y) { fun(m) => match m { :x => x, :y => y } }
+fun Dimensions(h, w) { fun(m) => match m { :h => h, :w => w } }
 
-fn Logger(dims, coords, logs) {
+fun Logger(dims, coords, logs) {
     recv {
         :init => {
             tty::write(
@@ -31,13 +31,13 @@ fn Logger(dims, coords, logs) {
     }
 }
 
-fn Window(name, dims, coords, contents, logger) {
+fun Window(name, dims, coords, contents, logger) {
     recv {
         :refresh => {
             tty::write("\e[s", "\e[", coords(:x) + 1, ";", coords(:y) + 1, "H");
             tty::write("\e[37;46m ", name, str::repeat(" ", math::max(0, dims(:w) - (bytes::len(name) + 6))), self, " ", "\e[0m");
             tty::write("\e[", coords(:x) + 2, ";", coords(:y) + 1, "H");
-            dotimes(0, dims(:h), fn(i) {
+            dotimes(0, dims(:h), fun(i) {
                 tty::write("\e[36;47m", "▏", str::pad_start(str(i), 2, "0"), "▕", "\e[4m", str::repeat(" ", dims(:w)), "\e[0m");
                 tty::write("\e[", coords(:x) + i + 2, ";", coords(:y) + 1, "H")
             });
@@ -49,7 +49,7 @@ fn Window(name, dims, coords, contents, logger) {
     }
 }
 
-fn WindowManager(rows, cols, windows, logger) {
+fun WindowManager(rows, cols, windows, logger) {
     recv {
         :newWindow(name, dims, coords) => {
             send(logger, :log(self, :ALERT, str("+ new Window(", name, ")")));
@@ -59,14 +59,14 @@ fn WindowManager(rows, cols, windows, logger) {
         }
         :EXIT => {
             send(logger, :log(self, :ALERT, "... exiting window-manager"));
-            if cons?(windows) { windows |> map(fn(w) => send(w, :EXIT)) }
+            if cons?(windows) { windows |> map(fun(w) => send(w, :EXIT)) }
         }
     }
 }
 
 // An actor can't wait for the others to end, so it tells them to, and
 // the top level, a task, reads its end.
-fn Keyboard(window_manager, logger) {
+fun Keyboard(window_manager, logger) {
     recv {
         ["q", ..._] => {
             send(window_manager, :EXIT);

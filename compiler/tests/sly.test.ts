@@ -107,7 +107,7 @@ test('the pipe puts its value last', () => {
 });
 
 test('lambdas', () => {
-    same('fn(x) => x + 1; fn(a, b) { let c = a; c }; fn() {};',
+    same('fun(x) => x + 1; fun(a, b) { let c = a; c }; fun() {};',
          '(lambda (x) (+ x 1)) (lambda (a b) (let c a) c) (lambda () ())');
 });
 
@@ -143,7 +143,7 @@ test('the comma after an arm ending in } can be left out', () => {
 test('recv', () => {
     same('recv { :inc => counter(n + 1), msg => msg };', '(recv (:inc (counter (+ n 1))) (msg msg))');
     same('recv;', '(recv)');
-    same('fn f() { let m = recv; m }', '(defun f () (let m (recv)) m)');
+    same('fun f() { let m = recv; m }', '(defun f () (let m (recv)) m)');
 });
 
 test('processes', () => {
@@ -155,33 +155,33 @@ test('processes', () => {
 // --- definitions and lets ---------------------------------------------------
 
 test('functions', () => {
-    same('fn table::get(key, table) { match table { [] => :not-found, } }',
+    same('fun table::get(key, table) { match table { [] => :not-found, } }',
          '(defun table/get (key table) (match table (() :not-found)))');
-    same('fn f() {}', '(defun f () ())');
-    fails('fn f(a::b) { a }', /a parameter is a name/);
-    fails('fn f() { fn g() { 1 } }', /top level only/);
+    same('fun f() {}', '(defun f () ())');
+    fails('fun f(a::b) { a }', /a parameter is a name/);
+    fails('fun f() { fun g() { 1 } }', /top level only/);
 });
 
 test('a let that takes a value apart is a match over the rest', () => {
-    same('fn f() { let [a, b] = g(); h(a); b }', '(defun f () (match (g) ((a b) (h a) b)))');
-    fails('fn f() { let [a, b] = g(); }', /needs something after it/);
+    same('fun f() { let [a, b] = g(); h(a); b }', '(defun f () (match (g) ((a b) (h a) b)))');
+    fails('fun f() { let [a, b] = g(); }', /needs something after it/);
     fails('let [a, b] = g();', /top-level let binds a name/);
 });
 
 test('includes', () => {
     same('@include("lib.sly"); @include(:fs);', '(@include "lib.sly") (@include :fs)');
-    fails('fn f() { @include(:fs); 1 }', /only allowed at the top level/);
+    fails('fun f() { @include(:fs); 1 }', /only allowed at the top level/);
 });
 
 // --- mistakes, and where they are --------------------------------------------
 
 test('a missing semicolon', () => {
     fails('f(1)\ng(2);', /expected ';' after a top-level item/, 2, 1);
-    fails('fn f() { a b }', /expected ';' between statements/, 1, 12);
+    fails('fun f() { a b }', /expected ';' between statements/, 1, 13);
 });
 
 test('an unclosed block', () => {
-    fails('fn f() { a;', /expected '}'/);
+    fails('fun f() { a;', /expected '}'/);
 });
 
 test('reserved words', () => {
@@ -190,7 +190,7 @@ test('reserved words', () => {
 });
 
 test('positions point into the .sly file', () => {
-    const x = toArray(readSly('fn f(x) {\n    x + 1\n}', 'p.sly'))![0]!;
+    const x = toArray(readSly('fun f(x) {\n    x + 1\n}', 'p.sly'))![0]!;
     // (defun f (x) (+ x 1)): the + is at line 2, column 7
     const body = toArray(x)![3]!;
     assert.equal(body.t === 'pair' && body.pos !== null ? `${body.pos.line}:${body.pos.col}` : '', '2:7');
@@ -200,7 +200,7 @@ test('positions point into the .sly file', () => {
 
 test('a name may start with $', () => {
     same('$f; $my_var; f($to, $f);', '$f $my-var (f $to $f)');
-    same('fn ask?($to, msg) { send($to, msg) }', '(defun ask? ($to msg) (send $to msg))');
+    same('fun ask?($to, msg) { send($to, msg) }', '(defun ask? ($to msg) (send $to msg))');
     same('match m { :do($f) => $f };', '(match m ((:do $f) $f))');
     fails('$ x;', /unexpected '\$'/);
     fails('$$;', /unexpected '\$'/);

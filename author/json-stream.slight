@@ -40,4 +40,4 @@
 (let tokens   (spawn (tokenize debugger "")))
 (let chars    (connect :fs/read "tsconfig.json" (char-buffer tokens)))
 
-(pprint (join debugger))
+(pprint (read debugger))

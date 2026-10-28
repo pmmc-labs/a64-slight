@@ -3,7 +3,7 @@
 
 @include("tut-table.sly");
 
-fn run_command(table, cmd) {
+fun run_command(table, cmd) {
     match cmd {
         :put(key, value) => [table::put(key, value, table), :ok(value)],
         :get(key)        => [table, found(table::get(key, table))],
@@ -14,18 +14,18 @@ fn run_command(table, cmd) {
     }
 }
 
-fn found(value) {
+fun found(value) {
     if value == :not-found { :error(:not-found) } else { :ok(value) }
 }
 
 // A key that isn't there counts from 0.
-fn incr(key, table) {
+fun incr(key, table) {
     let n = table::get(key, table);
     let next = if n == :not-found { 1 } else { n + 1 };
     [table::put(key, next, table), :ok(next)]
 }
 
-fn store(table) {
+fun store(table) {
     recv {
         :do(cmd, to) => {
             let [next, answer] = run_command(table, cmd);
@@ -36,6 +36,6 @@ fn store(table) {
 }
 
 // A task's way to run a command: send it, and wait for the reply.
-fn call(s, cmd) {
+fun call(s, cmd) {
     ask(s, :do(cmd))
 }

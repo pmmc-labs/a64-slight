@@ -99,7 +99,7 @@ by `(` is a tagged list (below).
 - `true` and `false` are `#true` and `#false`.
 - `[]` is `()`.
 
-**Reserved words:** `fn`, `let`, `if`, `else`, `cond`, `case`, `match`,
+**Reserved words:** `fun`, `let`, `if`, `else`, `cond`, `case`, `match`,
 `recv`, `spawn`, `fork`, `connect`, `yield`, `true`, `false`, `self`,
 `parent`. A slight name that is one of these is written as a raw name.
 
@@ -118,7 +118,7 @@ separated by `s`, a trailing one allowed.
 ```
 file      = { item }
 item      = fndef | doc | include ";" | "let" ident "=" expr ";" | expr ";"
-fndef     = "fn" name "(" sep(ident, ",") ")" block
+fndef     = "fun" name "(" sep(ident, ",") ")" block
 include   = "@include" "(" (string | keyword) ")"
 rawname   = "`" any characters but "`" "`"
 
@@ -146,7 +146,7 @@ tagged    = keyword "(" sep(expr | spread, ",") ")"
 list      = "[" sep(expr, ",") [ "," spread ] "]" | "[" spread "]"
 spread    = "..." expr
 tuple     = "#(" sep(expr, ",") ")"
-lambda    = "fn" "(" sep(ident, ",") ")" ( "=>" expr | block )
+lambda    = "fun" "(" sep(ident, ",") ")" ( "=>" expr | block )
 
 if        = "if" expr block [ "else" ( if | block ) ]
 cond      = "cond" "{" sep(expr "=>" body, ",") "}"
@@ -214,9 +214,9 @@ first, so the pipe doesn't help with them.
 
 | This syntax | slight |
 |---|---|
-| `fn f(a, b) { body }` | `(defun f (a b) body...)` |
-| `fn(a) => e` | `(lambda (a) e)` |
-| `fn(a) { body }` | `(lambda (a) body...)` |
+| `fun f(a, b) { body }` | `(defun f (a b) body...)` |
+| `fun(a) => e` | `(lambda (a) e)` |
+| `fun(a) { body }` | `(lambda (a) body...)` |
 | `let x = e;` | `(let x e)` |
 | `let p = e; rest` (`p` not a name) | `(match e (p rest...))` |
 | `{ s1; s2; e }` as a body | `s1 s2 e`, the forms of the body |
@@ -298,7 +298,7 @@ local holding a function, or an expression (`adder(1)(2)`). Builtins
 keep their names, through the mapping: `send(pid, msg)`,
 `join(p)`, `str::len(s)`, `math::sqrt(x)`, `tty::write(...)`.
 
-**Top level:** a file is items: `fn` definitions, includes, doc blocks,
+**Top level:** a file is items: `fun` definitions, includes, doc blocks,
 and `let`s and expressions, which are the root's body, in order, as
 now. A top-level `let` with a pattern isn't allowed (it would need the
 rest of the file as its body); write a `match`.
@@ -366,11 +366,11 @@ Still open:
 ### A pipeline of actors
 
 ```
-fn log(what, msg) {
+fun log(what, msg) {
     pprint([self, what, msg])
 }
 
-fn Consumer(f) {
+fun Consumer(f) {
     let msg = recv;
     log(:RECV, msg);
     match msg {
@@ -380,7 +380,7 @@ fn Consumer(f) {
     }
 }
 
-fn Operation(op, next) {
+fun Operation(op, next) {
     let msg = recv;
     log(:OPER, msg);
     match msg {
@@ -389,7 +389,7 @@ fn Operation(op, next) {
     }
 }
 
-fn Producer(sub, items) {
+fun Producer(sub, items) {
     match items {
         [] => {
             pprint([self, :DONE]);
@@ -406,8 +406,8 @@ fn Producer(sub, items) {
 let o1 = spawn Consumer(pprint);
 let o2 = spawn Consumer(pprint);
 
-let op1 = spawn Operation(fn(x) => x + 100, o1);
-let op2 = spawn Operation(fn(x) => x + 200, o2);
+let op1 = spawn Operation(fun(x) => x + 100, o1);
+let op2 = spawn Operation(fun(x) => x + 200, o2);
 
 let p1 = fork Producer(op1, [10, 20, 30, 40, 50, 60]);
 let p2 = fork Producer(op2, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -426,18 +426,18 @@ pprint(:done);
 // The table: a list of [key, value] pairs, newest first, taken apart
 // with match.
 
-fn table::get(key, table) {
+fun table::get(key, table) {
     match table {
         []                => :not-found,
         [[k, v], ...rest] => if k == key { v } else { table::get(key, rest) },
     }
 }
 
-fn table::del(key, table) {
+fun table::del(key, table) {
     table::del_loop(key, table, [])
 }
 
-fn table::del_loop(key, table, seen) {
+fun table::del_loop(key, table, seen) {
     match table {
         []              => reverse(seen),
         [pair, ...rest] =>
@@ -446,11 +446,11 @@ fn table::del_loop(key, table, seen) {
     }
 }
 
-fn table::put(key, value, table) {
+fun table::put(key, value, table) {
     [[key, value], ...table::del(key, table)]
 }
 
-fn table::keys(table) {
+fun table::keys(table) {
     table |> map(car)
 }
 ```
@@ -461,7 +461,7 @@ fn table::keys(table) {
 
 @include("tut-table.sly");
 
-fn run_command(table, cmd) {
+fun run_command(table, cmd) {
     match cmd {
         :put(key, value) => [table::put(key, value, table), :ok(value)],
         :get(key)        => [table, found(table::get(key, table))],
@@ -472,18 +472,18 @@ fn run_command(table, cmd) {
     }
 }
 
-fn found(value) {
+fun found(value) {
     if value == :not-found { :error(:not-found) } else { :ok(value) }
 }
 
 // A key that isn't there counts from 0.
-fn incr(key, table) {
+fun incr(key, table) {
     let n = table::get(key, table);
     let next = if n == :not-found { 1 } else { n + 1 };
     [table::put(key, next, table), :ok(next)]
 }
 
-fn store(table) {
+fun store(table) {
     recv {
         :do(cmd, to) => {
             let [next, answer] = run_command(table, cmd);
@@ -494,7 +494,7 @@ fn store(table) {
 }
 
 // A task's way to run a command: send it, and wait for the reply.
-fn call(s, cmd) {
+fun call(s, cmd) {
     ask(s, :do(cmd))
 }
 ```

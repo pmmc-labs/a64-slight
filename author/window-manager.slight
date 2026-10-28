@@ -61,13 +61,13 @@
             (when (cons? windows)
                 (map (lambda (w) (send w :EXIT)) windows)))))
 
+; An actor can't wait for the others to end, so it tells them to, and
+; the top level, a task, reads its end.
 (defun Keyboard (window-manager logger)
     (recv
         (("q" & _)
             (send window-manager :EXIT)
-            (send logger         :EXIT)
-            (join window-manager)
-            (join logger))
+            (send logger         :EXIT))
         (_
             (Keyboard window-manager logger))))
 
@@ -95,7 +95,7 @@
         (Dimensions 20 (- screen-cols 59))
         (Coords     22  1)))
 
-(join kb)
+(read kb)
 
 (tty/write \e "[" (+ screen-rows 5) ";0H")
 

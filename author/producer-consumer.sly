@@ -1,4 +1,4 @@
-fn Consumer(f) {
+fun Consumer(f) {
     let msg = recv;
     pprint([self, :RECV, msg]);
     match msg {
@@ -8,7 +8,7 @@ fn Consumer(f) {
     }
 }
 
-fn Operation(op, next) {
+fun Operation(op, next) {
     let msg = recv;
     pprint([self, :OPER, msg]);
     match msg {
@@ -21,7 +21,7 @@ fn Operation(op, next) {
     }
 }
 
-fn Producer(sub, items) {
+fun Producer(sub, items) {
     match items {
         [] => {
             pprint([self, :DONE]);
@@ -38,8 +38,8 @@ fn Producer(sub, items) {
 let o1 = spawn Consumer(pprint);
 let o2 = spawn Consumer(pprint);
 
-let op1 = spawn Operation(fn(x) => x + 100, o1);
-let op2 = spawn Operation(fn(x) => x + 200, o2);
+let op1 = spawn Operation(fun(x) => x + 100, o1);
+let op2 = spawn Operation(fun(x) => x + 200, o2);
 
 let p1 = fork Producer(op1, [10, 20, 30, 40, 50, 60]);
 let p2 = fork Producer(op2, [1, 2, 3, 4, 5, 6, 7, 8, 9]);

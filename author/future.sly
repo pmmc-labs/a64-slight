@@ -1,4 +1,4 @@
-fn Calculator() {
+fun Calculator() {
     recv {
         :add(x, y, $f) => { send($f, x + y); Calculator() }
         :sub(x, y, $f) => { send($f, x - y); Calculator() }
@@ -8,12 +8,12 @@ fn Calculator() {
     }
 }
 
-fn Future() {
+fun Future() {
     let msg = recv;
     yield msg
 }
 
-fn ask?($to, msg) {
+fun ask?($to, msg) {
     let $f = spawn Future();
     send($to, append(msg, [$f]));
     match read($f) {

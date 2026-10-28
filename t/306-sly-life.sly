@@ -14,15 +14,15 @@
 // The root keeps the cells' pids, and the states it shows, as tuples of
 // rows. It's a task, so the cells tell it at an address it made.
 
-fn wrap_around(n, size) {
+fun wrap_around(n, size) {
     (n + size) % size
 }
 
-fn glider_cell(x, y) {
+fun glider_cell(x, y) {
     if member?([x, y], [[0, 1], [1, 2], [2, 0], [2, 1], [2, 2]]) { :LIVE } else { :DEAD }
 }
 
-fn next_state(state, n) {
+fun next_state(state, n) {
     match [state, n] {
         [:LIVE, 2] => :LIVE,
         [:LIVE, 3] => :LIVE,
@@ -35,7 +35,7 @@ fn next_state(state, n) {
 
 // Where it is, its state, its next state once it has counted, its
 // neighbours, and the root.
-fn cell(x, y, state, next, neighbors, root) {
+fun cell(x, y, state, next, neighbors, root) {
     recv {
         :neighbors(ns) => cell(x, y, state, next, ns, root),
         :status(from) => {
@@ -59,7 +59,7 @@ fn cell(x, y, state, next, neighbors, root) {
     }
 }
 
-fn watch(cell, neighbors, n) {
+fun watch(cell, neighbors, n) {
     match neighbors {
         [] => send(cell, :counted(n)),
         [neighbor, ...rest] => {
@@ -75,40 +75,40 @@ fn watch(cell, neighbors, n) {
 // --- the root ----------------------------------------------------------------
 
 // h rows of w things, f(x, y) for each.
-fn grid(h, w, f) {
+fun grid(h, w, f) {
     range(0, h)
-        |> map(fn(x) => range(0, w) |> map(fn(y) => f(x, y)) |> list_to_tuple)
+        |> map(fun(x) => range(0, w) |> map(fun(y) => f(x, y)) |> list_to_tuple)
         |> list_to_tuple
 }
 
-fn rows(grid) { tuple::len(grid) }
-fn cols(grid) { tuple::len(tuple::get(grid, 0)) }
-fn at(grid, x, y) { tuple::get(tuple::get(grid, x), y) }
-fn put(grid, x, y, v) { tuple::set(grid, x, tuple::set(tuple::get(grid, x), y, v)) }
+fun rows(grid) { tuple::len(grid) }
+fun cols(grid) { tuple::len(tuple::get(grid, 0)) }
+fun at(grid, x, y) { tuple::get(tuple::get(grid, x), y) }
+fun put(grid, x, y, v) { tuple::set(grid, x, tuple::set(tuple::get(grid, x), y, v)) }
 
-fn each_cell(cells, msg) {
-    tuple_to_list(cells) |> map(fn(row) => tuple_to_list(row) |> map(fn(c) => send(c, msg)))
+fun each_cell(cells, msg) {
+    tuple_to_list(cells) |> map(fun(row) => tuple_to_list(row) |> map(fun(c) => send(c, msg)))
 }
 
-fn neighbors_of(cells, x, y) {
+fun neighbors_of(cells, x, y) {
     [[-1, 0], [-1, 1], [0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1]]
-        |> map(fn(offset) {
+        |> map(fun(offset) {
             let [dx, dy] = offset;
             at(cells, wrap_around(x + dx, rows(cells)), wrap_around(y + dy, cols(cells)))
         })
 }
 
-fn display_grid(states, gen) {
+fun display_grid(states, gen) {
     tty::write("generation ", gen, "\n");
-    tuple_to_list(states) |> map(fn(row) {
-        let line = tuple_to_list(row) |> map(fn(c) => if c == :LIVE { "@" } else { "_" });
+    tuple_to_list(states) |> map(fun(row) {
+        let line = tuple_to_list(row) |> map(fun(c) => if c == :LIVE { "@" } else { "_" });
         tty::write(str::join("", line), "\n")
     })
 }
 
 // Shows the states; then, for the last of n generations, stops the cells,
 // or else has them count.
-fn generation(root, cells, states, n, gen) {
+fun generation(root, cells, states, n, gen) {
     display_grid(states, gen);
     if n == 1 {
         each_cell(cells, :stop);
@@ -120,7 +120,7 @@ fn generation(root, cells, states, n, gen) {
 }
 
 // Waits till every cell is ready, then has them all change.
-fn ready(root, cells, states, n, gen, left) {
+fun ready(root, cells, states, n, gen, left) {
     if left == 0 {
         each_cell(cells, :commit);
         gather(root, cells, states, n, gen, rows(cells) * cols(cells))
@@ -132,7 +132,7 @@ fn ready(root, cells, states, n, gen, left) {
 }
 
 // What every cell is now.
-fn gather(root, cells, states, n, gen, left) {
+fun gather(root, cells, states, n, gen, left) {
     if left == 0 {
         generation(root, cells, states, n - 1, gen + 1)
     } else {
@@ -143,9 +143,9 @@ fn gather(root, cells, states, n, gen, left) {
 }
 
 let root = address();
-let cells = grid(6, 8, fn(x, y) => spawn cell(x, y, glider_cell(x, y), [], [], root));
-dotimes(0, 6, fn(x) {
-    dotimes(0, 8, fn(y) => send(at(cells, x, y), :neighbors(neighbors_of(cells, x, y))))
+let cells = grid(6, 8, fun(x, y) => spawn cell(x, y, glider_cell(x, y), [], [], root));
+dotimes(0, 6, fun(x) {
+    dotimes(0, 8, fun(y) => send(at(cells, x, y), :neighbors(neighbors_of(cells, x, y))))
 });
 
 generation(root, cells, grid(6, 8, glider_cell), 4, 0)

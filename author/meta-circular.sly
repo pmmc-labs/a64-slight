@@ -1,14 +1,14 @@
-fn Lambda(params, body, env) { :Lambda(params, body, env) }
-fn Builtin(body) { :Builtin(body) }
+fun Lambda(params, body, env) { :Lambda(params, body, env) }
+fun Builtin(body) { :Builtin(body) }
 
-fn bind_params(params, args, env) {
+fun bind_params(params, args, env) {
     match [params, args] {
         [[], _]                   => env,
         [[p, ...ps], [a, ...as]]  => bind_params(ps, as, assoc(p, a, env)),
     }
 }
 
-fn eval(expr, env) {
+fun eval(expr, env) {
     pprint([self, :EVAL, expr]);
     cond {
         sym?(expr) => {
@@ -22,7 +22,7 @@ fn eval(expr, env) {
             match expr {
                 [:lambda, params, body] => Lambda(params, body, env),
                 [call, ...args] =>
-                    yield application(eval(call, env), args |> map(fn(a) => eval(a, env)), env),
+                    yield application(eval(call, env), args |> map(fun(a) => eval(a, env)), env),
             }
         }
         true => {
@@ -32,7 +32,7 @@ fn eval(expr, env) {
     }
 }
 
-fn application(call, args, env) {
+fun application(call, args, env) {
     pprint([self, :APPLY, car(call), args]);
     match call {
         :Lambda(params, body, closure_env) => {
@@ -47,10 +47,10 @@ fn application(call, args, env) {
 }
 
 let env =
-    assoc(:+, Builtin(fn(args) => apply(`+`, args)),
-    assoc(:-, Builtin(fn(args) => apply(`-`, args)),
-    assoc(:*, Builtin(fn(args) => apply(`*`, args)),
-    assoc(:/, Builtin(fn(args) => apply(`/`, args)),
+    assoc(:+, Builtin(fun(args) => apply(`+`, args)),
+    assoc(:-, Builtin(fun(args) => apply(`-`, args)),
+    assoc(:*, Builtin(fun(args) => apply(`*`, args)),
+    assoc(:/, Builtin(fun(args) => apply(`/`, args)),
     []))));
 
 let p1 = fork eval('((lambda (x y) (+ x y)) 10 20), env);

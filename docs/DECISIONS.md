@@ -5843,3 +5843,9 @@ evaluator's say, was `[[:lambda, [:x, :y], [:+, :x, :y]], 10, 20]` and
 is `'((lambda (x y) (+ x y)) 10 20)` again. A bare atom ends where a
 keyword does, so `['a, 'b]` is `(a b)`. Rejected for now: `@` names,
 and `(+)` for an operator as a value, which needs `` `+` `` still.)*
+
+*(And: Stevan, "lets change `fn` to `fun`". The `.sly` keyword that
+defines a function, and makes a lambda, is `fun` (ML's, Erlang's and
+Kotlin's word), `fn` an ordinary name again. The D246 entry above keeps
+`fn` as it was decided. With it, the three sketches in `author/` that
+joined an actor read it instead, as their `.sly` versions do.)*

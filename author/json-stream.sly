@@ -1,23 +1,23 @@
-fn char_buffer($s) {
+fun char_buffer($s) {
     recv {
         :open(f) => {
             send($s, :SOD);
             char_buffer($s)
         }
         :line(f, s) => {
-            str::split(s, "") |> map(fn(c) => send($s, c));
+            str::split(s, "") |> map(fun(c) => send($s, c));
             char_buffer($s)
         }
         :eof(f) => send($s, :EOD),
     }
 }
 
-fn flush_buffer($s, buffer) {
+fun flush_buffer($s, buffer) {
     if bytes::len(buffer) > 0 { send($s, :ATOM(buffer)) };
     ""
 }
 
-fn tokenize($s, buffer) {
+fun tokenize($s, buffer) {
     recv {
         :SOD  => { send($s, :SOD); tokenize($s, "") }
         :EOD  => send($s, :EOD),
@@ -33,7 +33,7 @@ fn tokenize($s, buffer) {
     }
 }
 
-fn DEBUG() {
+fun DEBUG() {
     recv {
         :EOD => pprint(:EOD),
         msg  => { pprint(msg); DEBUG() }
