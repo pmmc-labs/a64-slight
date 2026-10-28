@@ -1093,7 +1093,8 @@ A second way to write slight, `.sly`, read into the same s-expressions
 
 1. **The reader** (done): `compiler/src/sly.ts`, chosen by the file's
    extension in `expand.ts`; unit tests against `reader.ts`, and golden
-   tests 303 to 305.
+   tests 303 to 307 (306 and 307: game-of-life-actors and boids,
+   converted, to the examples' own output).
 2. **The warning** for a tag used both bare and as a tagged list in one
    program (D246), which helps the s-expressions too.
 3. **The converters,** `slightc --to-sly` and `--to-slight`, which keep

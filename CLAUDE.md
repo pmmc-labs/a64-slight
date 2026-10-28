@@ -266,7 +266,8 @@ what's running, open or kept (`:system`'s `(:records n)`; golden test
 that's a task, so a task reads one whenever it likes (D245, golden test
 301). A second syntax, C-style, `.sly` (D246, `docs/SYNTAX.md`): its
 reader, `compiler/src/sly.ts`, into the same s-expressions, golden
-tests 303 to 305; its warning, converters and the guide in both wait
+tests 303 to 307 (306 and 307 are game-of-life-actors and boids,
+converted); its warning, converters and the guide in both wait
 (`docs/PLAN.md`, "A C-style syntax"). **Next:** to settle with Stevan
 (`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local

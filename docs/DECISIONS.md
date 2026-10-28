@@ -5819,3 +5819,14 @@ neighbours.
   Rust's `become` for a checked tail call, printing values in this
   syntax, and what a parser in slight would cost the self-hosted
   compiler.
+
+*(Later, D246:* two bigger programs converted, to see how the syntax
+scales: game-of-life-actors and boids, golden tests 306 and 307, each
+to its example's own output, on both targets, with nothing in the
+reader to fix. Code lines grew a sixth to two fifths, from closing
+braces and `if`'s blocks, and the characters other than spaces by 3 to
+5 per cent. The destructuring `let` took most of the nesting out of
+boids, and `|>` out of the game's grids. Found: a function named like
+an operator (boids' `v+`) has no identifier, so it was renamed
+`vec::add`; and `match recv {` reads the `{` as the `recv`'s arms, now
+said in SYNTAX.md.)*

@@ -159,7 +159,9 @@ arm whose body ends with `}` (a block, an `if`, a `match`), the `,` may
 be left out, as in Rust.
 
 The expression after `if`, `match` or `case`, before its `{`, can't
-itself be a bare block, so `if x {` always opens the `if`'s block.
+itself be a bare block, so `if x {` always opens the `if`'s block. Nor
+can it be a bare `recv`: in `match recv {`, the `{` opens the `recv`'s
+arms. Write `recv { ... }` itself, or `match (recv) { ... }`.
 
 ### Patterns
 
