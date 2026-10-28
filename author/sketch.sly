@@ -1,0 +1,10 @@
+fn try::catch(to_try, or_catch) {
+    match join(fork to_try()) {
+        :ok(val)   => val,
+        :error(err) => or_catch(err),
+    }
+}
+
+pprint(try::catch(
+    fn() => 10 / 0,
+    fn(e) => [:OH-NOES, e]));
