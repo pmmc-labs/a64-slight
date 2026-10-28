@@ -75,3 +75,21 @@ pprint([self, parent, true, false, @ARGV, %ENV, #(1, 2)]);
 // <- comment.block.documentation
 =cut
 // <- keyword.other.doc.end
+
+fn ask?($to, msg) { send($to, msg) }
+//      ^^^ variable.parameter
+//                  ^^^^ support.function.builtin
+//                       ^^^ variable.other
+eval('((lambda (x) x) 1), env);
+//   ^ keyword.operator.quote
+//    ^ punctuation.section.parens.begin
+//    ^^^^^^^^^^^^^^^^^^ meta.quoted
+//                    ^ constant.numeric
+//                       ^ source.sly - meta.quoted
+//                        ^^^ variable.other
+let q = ['a, 'b, '42];
+//       ^ keyword.operator.quote
+//        ^ constant.other.symbol
+//            ^ constant.other.symbol
+//                ^^ constant.numeric
+//                  ^ punctuation.section.brackets.end

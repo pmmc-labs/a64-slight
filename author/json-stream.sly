@@ -1,35 +1,35 @@
-fn char_buffer(s) {
+fn char_buffer($s) {
     recv {
         :open(f) => {
-            send(s, :SOD);
-            char_buffer(s)
+            send($s, :SOD);
+            char_buffer($s)
         }
-        :line(f, line) => {
-            str::split(line, "") |> map(fn(c) => send(s, c));
-            char_buffer(s)
+        :line(f, s) => {
+            str::split(s, "") |> map(fn(c) => send($s, c));
+            char_buffer($s)
         }
-        :eof(f) => send(s, :EOD),
+        :eof(f) => send($s, :EOD),
     }
 }
 
-fn flush_buffer(s, buffer) {
-    if bytes::len(buffer) > 0 { send(s, :ATOM(buffer)) };
+fn flush_buffer($s, buffer) {
+    if bytes::len(buffer) > 0 { send($s, :ATOM(buffer)) };
     ""
 }
 
-fn tokenize(s, buffer) {
+fn tokenize($s, buffer) {
     recv {
-        :SOD  => { send(s, :SOD); tokenize(s, "") }
-        :EOD  => send(s, :EOD),
-        "{"   => { send(s, :OBJECT/OPEN);  tokenize(s, flush_buffer(s, buffer)) }
-        "}"   => { send(s, :OBJECT/CLOSE); tokenize(s, flush_buffer(s, buffer)) }
-        "["   => { send(s, :ARRAY/OPEN);   tokenize(s, flush_buffer(s, buffer)) }
-        "]"   => { send(s, :ARRAY/CLOSE);  tokenize(s, flush_buffer(s, buffer)) }
-        ":"   => { send(s, :COLON);        tokenize(s, flush_buffer(s, buffer)) }
-        ","   => { send(s, :COMMA);        tokenize(s, flush_buffer(s, buffer)) }
-        "\""  => tokenize(s, flush_buffer(s, buffer)),
-        " "   => tokenize(s, flush_buffer(s, buffer)),
-        char  => tokenize(s, buffer ++ char),
+        :SOD  => { send($s, :SOD); tokenize($s, "") }
+        :EOD  => send($s, :EOD),
+        "{"   => { send($s, :OBJECT/OPEN);  tokenize($s, flush_buffer($s, buffer)) }
+        "}"   => { send($s, :OBJECT/CLOSE); tokenize($s, flush_buffer($s, buffer)) }
+        "["   => { send($s, :ARRAY/OPEN);   tokenize($s, flush_buffer($s, buffer)) }
+        "]"   => { send($s, :ARRAY/CLOSE);  tokenize($s, flush_buffer($s, buffer)) }
+        ":"   => { send($s, :COLON);        tokenize($s, flush_buffer($s, buffer)) }
+        ","   => { send($s, :COMMA);        tokenize($s, flush_buffer($s, buffer)) }
+        "\""  => tokenize($s, flush_buffer($s, buffer)),
+        " "   => tokenize($s, flush_buffer($s, buffer)),
+        char  => tokenize($s, buffer ++ char),
     }
 }
 

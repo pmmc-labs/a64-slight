@@ -5830,3 +5830,16 @@ boids, and `|>` out of the game's grids. Found: a function named like
 an operator (boids' `v+`) has no identifier, so it was renamed
 `vec::add`; and `match recv {` reads the `{` as the `recv`'s arms, now
 said in SYNTAX.md.)*
+
+*(Later still, D246: Stevan, converting his own sketches in `author/`,
+"yes, allow $ sigils and add the ' s-expression quote", from Claude's
+list of what they showed. A `.sly` name may start with `$`, which the
+name rules leave alone (`$f` is `$f`, `$my_var` `$my-var`), since his
+programs name pids `$f` and `$to` as Perl would, and the conversion had
+to drop them, one clash (`$s` and `s`) with it; `@` stays
+`@include`'s and `@ARGV`'s. And `'datum` is a datum quoted, read by
+`reader.ts` itself (`readDatumAt`): a program as data, a meta-circular
+evaluator's say, was `[[:lambda, [:x, :y], [:+, :x, :y]], 10, 20]` and
+is `'((lambda (x y) (+ x y)) 10 20)` again. A bare atom ends where a
+keyword does, so `['a, 'b]` is `(a b)`. Rejected for now: `@` names,
+and `(+)` for an operator as a value, which needs `` `+` `` still.)*

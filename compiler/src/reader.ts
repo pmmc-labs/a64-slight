@@ -200,6 +200,24 @@ export function read(src: string, file: string): Sexp {
     return reverse(forms);
 }
 
+// One datum from c on, and the cursor after it: what another reader (the
+// .sly one's quote, D246) takes s-expressions with.
+export function readDatumAt(c: Cursor): [Sexp, Cursor] {
+    const start = posOf(c);
+    const tokens: Token[] = [];
+    let depth = 0;
+    for (;;) {
+        if (atEnd(c)) throw new CompileError('expected a datum to quote, not the end of the file', start);
+        const [token, next] = nextToken(c);
+        c = next;
+        if (token === null) continue;
+        tokens.push(token);
+        if (token.kind === 'open' || token.kind === 'tuple') depth++;
+        else if (token.kind === 'close' && --depth < 0) throw new CompileError("unexpected ')'", token.pos);
+        if (depth === 0 && token.kind !== 'quote') return [parseDatum(tokens, 0)[0], c];
+    }
+}
+
 function parseDatum(tokens: readonly Token[], i: number): [Sexp, number] {
     const t = tokens[i]!;
     switch (t.kind) {
@@ -243,7 +261,7 @@ function parseList(tokens: readonly Token[], i: number, open: Pos): [Sexp, numbe
     }
 }
 
-function parseAtom(text: string, pos: Pos): Sexp {
+export function parseAtom(text: string, pos: Pos): Sexp {
     if (text === '.') throw new CompileError('dotted pairs are not part of slight', pos);
     if (text.startsWith('#')) {
         if (text === '#true' || text === '#false') return sym(text, pos);

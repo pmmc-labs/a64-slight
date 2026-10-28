@@ -9,7 +9,8 @@ file_extensions:
   - sly
 
 variables:
-  ident: '[A-Za-z_][A-Za-z0-9_]*\??'
+  # a name may start with the sigil $ (D246)
+  ident: '\$?[A-Za-z_][A-Za-z0-9_]*\??'
   name: '{{ident}}(?:::{{ident}})*'
   # what a keyword is made of: anything but white space and what ends one
   kwchar: '[^\s()\[\]{},;"''`]'
@@ -77,6 +78,7 @@ contexts:
   expressions:
     - include: comments
     - include: strings
+    - include: quoted
     - include: numbers
     - include: keywords
     - include: lambda
@@ -98,6 +100,42 @@ contexts:
           scope: constant.character.escape.sly
         - match: '\\.'
           scope: invalid.illegal.escape.sly
+
+  # '(...), an s-expression, highlighted as the Slight syntax highlights
+  # one, to its matching ); or 'atom
+  quoted:
+    - match: "(')(?=#?\\()"
+      captures:
+        1: keyword.operator.quote.sly
+      push: quoted-list
+    - match: "(')(-?\\d+(?:\\.\\d+)?)(?![^\\s()\\[\\]{},;\"'`])"
+      captures:
+        1: keyword.operator.quote.sly
+        2: constant.numeric.sly
+    - match: "(')(?=\")"
+      captures:
+        1: keyword.operator.quote.sly
+    - match: "(')({{kwchar}}+)"
+      captures:
+        1: keyword.operator.quote.sly
+        2: constant.other.symbol.sly
+
+  quoted-list:
+    - match: '#?\('
+      scope: punctuation.section.parens.begin.sly
+      set: quoted-body
+
+  quoted-body:
+    - meta_scope: meta.quoted.sly
+    - match: '\)'
+      scope: punctuation.section.parens.end.sly
+      pop: true
+    - match: '#?\('
+      scope: punctuation.section.parens.begin.sly
+      push: quoted-body
+    - include: scope:source.slight#comments
+    - include: scope:source.slight#strings
+    - include: scope:source.slight#atoms
 
   numbers:
     - match: '\b\d+\.\d+(?:[eE][+-]?\d+)?\b'

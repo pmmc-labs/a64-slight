@@ -27,12 +27,14 @@
 //   self, parent               $$, ^$$
 //
 // Names: an identifier's `::` is slight's `/`, then `_to_` its `->`, then
-// `_` its `-`, so str_to_int is str->int; a name between backticks is
-// taken as it is. Keywords keep slight's spelling.
+// `_` its `-`, so str_to_int is str->int, and it may start with `$`; a
+// name between backticks is taken as it is. Keywords keep slight's
+// spelling. `'` and a datum is that datum, quoted, read as reader.ts
+// reads s-expressions: '((lambda (x) x) 1).
 
 import { CompileError } from './errors.ts';
-import { atEnd, isDigit, isLetter, isSpace, numberKind, peek, posOf as cursorPos, readString, skipDoc, skipWhile, step,
-         type Cursor } from './reader.ts';
+import { atEnd, isDigit, isLetter, isSpace, numberKind, parseAtom, peek, posOf as cursorPos, readDatumAt, readString,
+         skipDoc, skipWhile, step, type Cursor } from './reader.ts';
 import { NIL, TUPLE, cons, fitsInt, float, form, int, isForm, isSym, list, posOf, str, sym, INT_MAX, INT_MIN,
          type Pos, type Sexp } from './sexp.ts';
 
@@ -43,10 +45,12 @@ import { NIL, TUPLE, cons, fitsInt, float, form, int, isForm, isSym, list, posOf
 // A name is an identifier or a raw name, `text` its slight name; `plain`
 // says it's an identifier without `::`, which is all a parameter or a
 // pattern's binding may be. A word is a reserved word, or @include, @ARGV
-// or %ENV.
+// or %ENV. A quoted token is `'` and the datum after it, as reader.ts
+// reads one.
 type Token =
     | { readonly kind: 'num' | 'str' | 'kw' | 'word' | 'punct'; readonly text: string; readonly pos: Pos }
-    | { readonly kind: 'name'; readonly text: string; readonly plain: boolean; readonly pos: Pos };
+    | { readonly kind: 'name'; readonly text: string; readonly plain: boolean; readonly pos: Pos }
+    | { readonly kind: 'quoted'; readonly text: string; readonly datum: Sexp; readonly pos: Pos };
 
 const RESERVED = ['fn', 'let', 'if', 'else', 'cond', 'case', 'match', 'recv', 'spawn', 'fork', 'connect', 'yield',
                   'true', 'false', 'self', 'parent'];
@@ -108,8 +112,9 @@ function nextToken(c: Cursor): [Token | null, Cursor] {
         return [{ kind: 'str', text: (t as { text: string }).text, pos }, next];
     }
     if (isDigit(ch)) return readNumber(c, pos);
-    if (isIdentStart(ch)) {
-        const end  = identEnd(c);
+    // a name may start with the sigil $ (D246): $f is slight's $f
+    if (isIdentStart(ch) || (ch === '$' && isIdentStart(s[c.i + 1] ?? ''))) {
+        const end  = identEnd(ch === '$' ? step(c) : c);
         const text = s.slice(c.i, end.i);
         if (RESERVED.includes(text)) return [{ kind: 'word', text, pos }, end];
         return [{ kind: 'name', text: slightName(text), plain: !text.includes('::'), pos }, end];
@@ -120,6 +125,7 @@ function nextToken(c: Cursor): [Token | null, Cursor] {
         if (peek(end) !== '`' || text === '') throw new CompileError('a raw name is a name between backticks, on one line', pos);
         return [{ kind: 'name', text, plain: true, pos }, step(end)];
     }
+    if (ch === "'") return readQuoted(c, pos);
     if (ch === ':') {
         const end  = skipWhile(step(c), isKwChar);
         const text = s.slice(c.i + 1, end.i);
@@ -137,6 +143,25 @@ function nextToken(c: Cursor): [Token | null, Cursor] {
         if (s.startsWith(p, c.i)) return [{ kind: 'punct', text: p, pos }, advance(c, p.length)];
     }
     throw new CompileError(`unexpected '${ch}'`, pos);
+}
+
+// 'datum, in slight's s-expressions (D246): a list to its matching `)`,
+// with slight's rules inside it, `;` comments and all; or an atom, which
+// stops where a keyword does, so that ['a, 'b] is a list of two.
+function readQuoted(c: Cursor, pos: Pos): [Token, Cursor] {
+    const d = step(c);
+    if (peek(d) === '(' || (peek(d) === '#' && c.src[d.i + 1] === '(')) {
+        const [datum, end] = readDatumAt(d);
+        return [{ kind: 'quoted', text: "'", datum, pos }, end];
+    }
+    if (peek(d) === '"') {
+        const [t, end] = readString(step(d), cursorPos(d));
+        return [{ kind: 'quoted', text: "'", datum: str((t as { text: string }).text, cursorPos(d)), pos }, end];
+    }
+    const end  = skipWhile(d, isKwChar);
+    const text = c.src.slice(d.i, end.i);
+    if (text === '') throw new CompileError("expected something to quote after '", pos);
+    return [{ kind: 'quoted', text: "'", datum: parseAtom(text, cursorPos(d)), pos }, end];
 }
 
 function advance(c: Cursor, n: number): Cursor {
@@ -172,6 +197,7 @@ function describe(t: Token | undefined): string {
     if (t === undefined) return 'the end of the file';
     if (t.kind === 'str') return 'a string';
     if (t.kind === 'kw') return `':${t.text}'`;
+    if (t.kind === 'quoted') return 'a quoted datum';
     return `'${t.text}'`;
 }
 
@@ -416,6 +442,7 @@ function parsePrimary(ts: Ts, i: number): [Sexp, number] {
         case 'num':  return [number(t.text, t.pos), i + 1];
         case 'str':  return [str(t.text, t.pos), i + 1];
         case 'name': return [sym(t.text, t.pos), i + 1];
+        case 'quoted': return [quote(t.datum, t.pos), i + 1];
         case 'kw':
             if (isP(ts[i + 1], '(')) return parseTagged(ts, i);
             return [quote(sym(t.text, t.pos), t.pos), i + 1];
@@ -596,6 +623,7 @@ export function parsePattern(ts: Ts, i: number): [Sexp, number] {
             return [sym(t.text, t.pos), i + 1];
         case 'num':  return [number(t.text, t.pos), i + 1];
         case 'str':  return [str(t.text, t.pos), i + 1];
+        case 'quoted': return [quote(t.datum, t.pos), i + 1];
         case 'kw':
             if (isP(ts[i + 1], '(')) return parseListPattern(ts, i + 2, ')', [quote(sym(t.text, t.pos), t.pos)], t.pos);
             return [quote(sym(t.text, t.pos), t.pos), i + 1];

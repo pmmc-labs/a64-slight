@@ -49,11 +49,14 @@ starts with `=` and a letter anywhere else is an error, as now.
 **Identifiers** name functions, locals and builtins:
 
 ```
-ident  = (letter | "_") (letter | digit | "_")* "?"?
+ident  = "$"? (letter | "_") (letter | digit | "_")* "?"?
 name   = ident ("::" ident)*
 ```
 
-So `table::get`, `nil?`, `str_to_int`, `Consumer`, `tty::screen::rows`.
+So `table::get`, `nil?`, `str_to_int`, `Consumer`, `tty::screen::rows`,
+`$f`. A name may start with the sigil `$`, as a slight name may, which
+the rules below leave as it is: `$my_var` is `$my-var` (D246). `$$`
+isn't a name: it's `self`.
 Case is significant and carries no meaning: capitals are free for
 anything (`Consumer` for a function an actor runs, say).
 
@@ -104,7 +107,7 @@ by `(` is a tagged list (below).
 `%ENV` and `@include` are written as they are. `%ENV` is one token
 wherever `%` is directly followed by `ENV`.
 
-**Punctuation:** `( ) [ ] { } , ; => ... :: |>` and the operators below.
+**Punctuation:** `( ) [ ] { } , ; => ... :: |> '` and the operators below.
 
 ## Grammar
 
@@ -243,10 +246,18 @@ last item of a block: there would be nothing to bind for.
 A list or tagged list whose elements are all literals (numbers, strings,
 booleans, keywords, `[]`, and such lists) is read as a quoted constant:
 `[1, 2, [:a, "b"]]` is `'(1 2 (a "b"))`. It means the same as
-`(list ...)`, and is made once rather than each time. This is why
-`quote` has no syntax of its own. It also does away with one of the
-s-expression syntax's traps: `'(:inc)` is `((quote inc))`, but
-`[:inc]` is the list `(inc)`.
+`(list ...)`, and is made once rather than each time. It also does
+away with one of the s-expression syntax's traps: `'(:inc)` is
+`((quote inc))`, but `[:inc]` is the list `(inc)`.
+
+**Quoted s-expressions.** `'` and what follows it is that datum,
+quoted, read as the s-expression reader reads one: `'((lambda (x y) (+
+x y)) 10 20)` is the program it looks like, as data, where the same
+written with `[...]` and keywords would be `[[:lambda, [:x, :y], [:+,
+:x, :y]], 10, 20]` (D246). A list runs to its matching `)`, and inside
+it slight's rules apply, `;` comments included. An atom (`'zebra`,
+`'42`, `'"s"`) ends where a keyword does, so `['a, 'b]` is the list
+`(a b)`. A quoted datum is a literal, in a pattern too.
 
 Spread is only at the end, since a list can only be added to at the
 front; `[...xs, a]` is an error (write `append(xs, [a])`).

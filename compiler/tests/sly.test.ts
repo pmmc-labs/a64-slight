@@ -195,3 +195,23 @@ test('positions point into the .sly file', () => {
     const body = toArray(x)![3]!;
     assert.equal(body.t === 'pair' && body.pos !== null ? `${body.pos.line}:${body.pos.col}` : '', '2:7');
 });
+
+// --- sigils and quoting (D246) ----------------------------------------------
+
+test('a name may start with $', () => {
+    same('$f; $my_var; f($to, $f);', '$f $my-var (f $to $f)');
+    same('fn ask?($to, msg) { send($to, msg) }', '(defun ask? ($to msg) (send $to msg))');
+    same('match m { :do($f) => $f };', '(match m ((:do $f) $f))');
+    fails('$ x;', /unexpected '\$'/);
+    fails('$$;', /unexpected '\$'/);
+});
+
+test("' quotes an s-expression, read as slight reads one", () => {
+    same("'((lambda (x y) (+ x y)) 10 20);", "'((lambda (x y) (+ x y)) 10 20)");
+    same("'x; '42; '\"s\"; '(a ; a comment\n b);", "'x '42 '\"s\" '(a b)");
+    same("['a, 'b];", "'(a b)");
+    same("f('(1 2), x);", "(f '(1 2) x)");
+    same("match e { '(1 2) => a, _ => b };", "(match e ('(1 2) a) (_ b))");
+    fails("'(a b", /expected a datum to quote/);
+    fails("';", /expected something to quote/);
+});

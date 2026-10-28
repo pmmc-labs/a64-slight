@@ -16,4 +16,5 @@
 (ok lift-off)
 #true
 ()
+(10 ((lambda (x) x) 1) (a b) (quote inc))
 done

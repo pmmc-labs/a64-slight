@@ -1,9 +1,9 @@
 fn Calculator() {
     recv {
-        :add(x, y, f) => { send(f, x + y); Calculator() }
-        :sub(x, y, f) => { send(f, x - y); Calculator() }
-        :mul(x, y, f) => { send(f, x * y); Calculator() }
-        :div(x, y, f) => { send(f, x / y); Calculator() }
+        :add(x, y, $f) => { send($f, x + y); Calculator() }
+        :sub(x, y, $f) => { send($f, x - y); Calculator() }
+        :mul(x, y, $f) => { send($f, x * y); Calculator() }
+        :div(x, y, $f) => { send($f, x / y); Calculator() }
         other         => raise([:WTF, other]),
     }
 }
@@ -13,10 +13,10 @@ fn Future() {
     yield msg
 }
 
-fn ask?(to, msg) {
-    let f = spawn Future();
-    send(to, append(msg, [f]));
-    match read(f) {
+fn ask?($to, msg) {
+    let $f = spawn Future();
+    send($to, append(msg, [$f]));
+    match read($f) {
         :ok(value)     => value,
         :error(reason) => raise(reason),
     }

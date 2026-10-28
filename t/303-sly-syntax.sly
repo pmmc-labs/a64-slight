@@ -79,4 +79,7 @@ fn count_down(n) {
 pprint(join(fork count_down(3)));
 pprint(join(fork parent) == :ok(self));
 pprint(@ARGV);
+
+let $n = 5;
+pprint([$n * 2, '((lambda (x) x) 1), ['a, 'b], car('(:inc))]);
 :done
