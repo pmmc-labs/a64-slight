@@ -1456,6 +1456,12 @@ language changes.
 it lacks; linked into every program, as the system's libm is now, since
 it's small and the runtime's own C calls it.
 
+**Begun** (Oct 2026): the runtime is compiled with `-ffp-contract=off`
+(`bin/slightc.ts`'s `CFLAGS`). CORE-MATH itself waits: its source is at
+`gitlab.inria.fr`, which this cloud environment's network policy
+refuses, and it has no mirror on GitHub; the host is to be allowed in
+the environment's settings, or the source vendored from the Mac.
+
 #### 2. Shared buffers: big immutable data off the heap
 
 **The problem.** A message is copied into its receiver (D177, D240),

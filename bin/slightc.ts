@@ -52,7 +52,10 @@ import { X86_64 } from '../compiler/src/x86_64.ts';
 const RUNTIME_DIR = fileURLToPath(new URL('../runtime/', import.meta.url));
 const LIB_DIR     = fileURLToPath(new URL('../lib', import.meta.url));
 const CACHE_DIR   = fileURLToPath(new URL('../build/runtime/', import.meta.url));
-const CFLAGS      = ['-O2', '-g', '-std=gnu11', '-Wall', '-Wextra', '-I', RUNTIME_DIR];
+// -ffp-contract=off: clang may otherwise fuse a * b + c into one rounding
+// on AArch64, which x86-64's baseline can't, and a float would come out
+// differently on the two (D253).
+const CFLAGS      = ['-O2', '-g', '-std=gnu11', '-Wall', '-Wextra', '-ffp-contract=off', '-I', RUNTIME_DIR];
 
 // Each target: its code generator, its part of the runtime in assembly,
 // Node's name for it (process.arch), and clang's.
