@@ -12,7 +12,8 @@ groundwork HTTP needs (12), ways to read a device (12a), collecting
 outside `recv` (12b) and looking up host names (12d), where `recv`
 can go (13), and after it, `match`, tuples, and recording and replaying
 a run (D168–D170). HTTP (14) on plain `:tcp` is done (D172–D174). Next: the rest of 12
-(C libraries and TLS), which HTTPS needs, then agents (15).
+(C libraries; not TLS, which goes to curl and a proxy in front, D251),
+then agents (15).
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -369,10 +370,10 @@ the frames as roots, read as they are, and the slots of a function that
 calls another zeroed at its entry; golden tests 187–190, and 134
 changed.
 
-#### 12c. C libraries, and TLS
+#### 12c. C libraries (TLS dropped, D251)
 
-After agents have started (D180): a local model needs only plain HTTP,
-and TLS waits for the first hosted one. HTTPS needs this.
+After agents have started (D180): a local model needs only plain HTTP.
+TLS was to come here, for HTTPS; it won't be vendored (D251, below).
 
 Discussed in Oct 2026 (D151, D152; BACKGROUND.md has what Odin does):
 
@@ -382,14 +383,21 @@ Discussed in Oct 2026 (D151, D152; BACKGROUND.md has what Odin does):
 - Vendored as source under `vendor/`, each at a pinned version with its
   licence and a `VENDOR` file; `slightc` compiles one as it does the
   runtime, and links it statically into the programs that use it.
-- In C: TLS, hashing and crypto, JSON and s-expressions (12a). Database
+- In C: hashing, JSON and s-expressions (12a). Database
   drivers when they're wanted; one that can only block (SQLite) would
   need the runtime's first thread, which isn't decided.
 
-Then TLS, the first vendored library: a `:tls` socket device, on mbedTLS
-unless something better turns up. To settle: confirming mbedTLS, where a
-client finds its CA certificates (macOS keeps them in the Keychain), and
-how a server is given its certificate and key.
+Then TLS was to be the first vendored library, a `:tls` socket device
+on mbedTLS. Withdrawn (D251): vendored code is only what never needs a
+security fix (math, hashes, Unicode's tables), and what does is left to
+programs the system keeps up to date, run as processes. A server sits
+behind a proxy that ends TLS (nginx, Caddy, a cluster's ingress), on
+plain HTTP or a Unix socket (D231); a client's `https://` goes through
+curl, run by `lib/http.slight` with `:exec`, with the system's
+certificates, proxies and HTTP/2; and between machines, ssh
+(`rpc/exec`, D225). Still to build: `https://` through curl, in
+`http/request` and `http/stream`, giving the same responses as plain
+HTTP (to settle: how curl's exit codes and messages become errors).
 
 #### 12d. Looking up host names (done)
 
@@ -565,9 +573,10 @@ calling its devices, connections kept up and `:system` asked from
 outside (D228, golden tests 280–282; done). Next, to settle with the
 user: offering an agent's tools over `rpc`, and to whom a remote call's
 `approve` goes;
-`log`, a builtin; or 12c. TLS (12c) and a reader of server-sent events, for a hosted
-model, wait (the user, Oct 2026: local models first, and curl for
-HTTPS).
+`log`, a builtin; `https://` through curl in `lib/http.slight` (D251),
+and with it a reader of server-sent events, for a hosted model; and
+`llama-server` run by the program, with the OpenAI-compatible protocol
+in `lib/agent.slight` beside ollama's (D251).
 
 - An agent is an actor whose state is its context: the conversation so
   far, its tools, its model's settings. A turn comes in as a message,
@@ -581,7 +590,8 @@ HTTPS).
   D225).
 - Models run outside slight, behind HTTP: a local server such as ollama
   for generative models (it streams JSON lines, which 12a's way of
-  reading JSON makes one message each), a hosted API over HTTPS (12c),
+  reading JSON makes one message each), a hosted API over HTTPS (through
+  curl, D251),
   and a Jev-compatible server for small "System One" models, which give
   a decision (yes or no, a choice, a score) with its probability rather
   than text. JevOS, an open one, runs a 1B model on the CPU in 25-110 ms
@@ -590,6 +600,13 @@ HTTPS).
   (DESIGN.md's open question 2), the libraries are large and in C++, and
   a crash in one would end every actor. A local server costs an HTTP
   request on top, a fraction of a millisecond against the model's tens.
+  And no server to install apart (D251): llama.cpp's `llama-server`,
+  started by the program with `:exec` and watched by a monitor, serves
+  the OpenAI-compatible protocol on localhost, which `lib/agent.slight`
+  would speak beside ollama's, as vLLM, LM Studio and the hosted APIs
+  do. Linking llama.cpp in was turned down: C++, a thread, no GPU in a
+  static Linux binary, a crash ending every actor, and a project that
+  changes daily to follow.
 - `:exec`, a device for running commands, for tools: `(connect :exec
   (list "ls" "-l") expr)` runs the command, its owner gets the output as
   other devices give theirs (stdout and stderr together), then `(:eof
@@ -627,7 +644,8 @@ them:
   image, since `slightc` makes both statically; health checks (a TCP
   probe, or `/healthz` from `lib/http.slight`), as a scratch image has
   no shell. And anyone on the network can call an `rpc` program: a
-  token in `helo` first, then TLS (12c).
+  token in `helo` first; for encryption, ssh (`rpc/exec`) or a proxy
+  in front (D251).
 - More than 8 arguments to a function, on the stack (DESIGN.md).
 - Sockets: IPv6, and more than the 1,000 or so that `select()` holds
   (D113), with `poll`, `kqueue` or `epoll`: `kqueue` on macOS and
@@ -748,8 +766,9 @@ has it: `rand/int`, `rand/float` and `rand/seed` in the runtime,
 `SLIGHT_SEED` or the system, the seed recorded for a replay, and a
 fork's generator split from its parent's, so a process's numbers don't
 depend on the order processes run in (D222). Boids draws its flock with
-them. Golden test 273, and the replay checks. Cryptographic randomness
-waits for TLS.
+them. Golden test 273, and the replay checks. Cryptographic randomness:
+random bytes from the system, through `replay.c` ("Toward general
+purpose", 2; D251).
 
 ### Maps (done, Oct 2026)
 
@@ -803,7 +822,8 @@ with Stevan first.
   machine as in Termite Scheme or Erlang's distribution, which bring
   monitors across machines, names, and what a pid means after a
   reconnect. What's left is under 15 and 16: to whom a remote call's
-  `approve` goes, a token in `helo`, then TLS (12c).
+  `approve` goes, a token in `helo`, and ssh or a proxy for encryption
+  (D251).
 - **Smaller, left out of D168 and D169:** guards in `match` and `recv`;
   and what `#(...)` means outside a pattern (D176 left it open): a tuple
   made of its elements' values, as Clojure's vectors, or a constant, as
@@ -1147,7 +1167,8 @@ the basics. In this order, each step's builtins and devices proposed
 before they're built, as the working rules say; two points are
 **(open)**, and each of them shapes the steps after it.
 
-**(open) C libraries: vendored, or an FFI as well.** D151 and D152 have
+**(open) C libraries: vendored, or an FFI as well.** D251 narrows what
+is vendored to code that never needs a security fix. D151 and D152 have
 vendored libraries, each a builtin or a device that `slightc` knows
 about, so every library is work in the runtime, by us; an FFI would let
 a program bind one itself, but everything from the world goes through
@@ -1173,9 +1194,11 @@ written) as the answer to what they're wanted for.
      without copying it at each step. Binary protocols (PostgreSQL's,
      WebSockets', msgpack) need it.
    - A log device: levels, structured lines to stderr, recorded.
-2. **TLS (12c),** on mbedTLS, the first vendored library, which also
-   brings what a program would otherwise have to wait for: SHA-2, HMAC,
-   base64, and random bytes from the system for keys and tokens (not
+2. **HTTPS, and what TLS would have brought** (D251, in place of TLS
+   on mbedTLS): `https://` through curl in `lib/http.slight`, and a
+   server behind a proxy that ends TLS; SHA-2 and HMAC in C of our own,
+   small and fixed, which never need a security fix; base64, and random
+   bytes from the system for keys and tokens, through `replay.c` (not
    `rand/`'s, which are for simulation, D222). Hex and URL encoding are
    slight's.
 3. **The standard library,** in slight where that's practical (D152):
@@ -1216,9 +1239,10 @@ might shrink to SpecialCasing's mappings, which utf8proc lacks
 (JavaScript's case mapping, D219, takes `ß` to `SS`), if its
 properties give "cased" and "case-ignorable" as D219 needs them. To
 check when utf8proc comes. What vendoring saves is the code not yet
-written: TLS, hashes, base64, random bytes, compression, graphemes.
-SQLite waits on D151's open point, a thread for a library that can only
-block.
+written: graphemes, compression. TLS goes to curl and a proxy instead,
+and hashes, base64 and random bytes are ours (D251). SQLite waits on
+D151's open point, a thread for a library that can only block, or for
+its command-line tool through `:exec`, clumsier but with neither.
 
 ### Numbers in bulk (proposed, Oct 2026)
 
@@ -1273,8 +1297,8 @@ tests. Parsing floats (`strtod`, correctly rounded on both systems) and
 printing them (our own, shortest) are the same everywhere already, and
 `hash` makes every NaN alike (D209).
 
-**What it costs.** It would be the first vendored library, before
-mbedTLS (12c), so it builds D152's machinery: `vendor/`, its `VENDOR`
+**What it costs.** It would be the first vendored library (TLS won't
+be one, D251), so it builds D152's machinery: `vendor/`, its `VENDOR`
 files, compiled once per target and kept, as the runtime is (D150).
 CORE-MATH's functions are a little slower than glibc's (a correctly
 rounded result sometimes needs a second, slower step); `bench/` would

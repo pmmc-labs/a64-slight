@@ -55,6 +55,16 @@ a builtin or a vendored library takes from the world only through
 `replay.c`; that's why C libraries are vendored, and an FFI, which would
 let a call read the world unrecorded, is held back (D249, open).
 
+And: **vendor only what never needs a security fix** (D251): math, a
+hash, Unicode's tables, pinned once and left. What does need them, TLS,
+encryption between machines, a model's runtime, is left to programs the
+system keeps up to date, run as processes at the program's edges, as
+actors are inside it: a proxy (nginx, Caddy) in front of a server, curl
+for a client's `https://`, ssh between machines (`rpc/exec`),
+`llama-server` for a model. Each is updated by the system's package
+manager, a crash in one ends only it, and what crosses comes through
+`:exec`, so it's recorded.
+
 Not what it's for: numbers and data in bulk (no mutable arrays, nothing
 vectorized), systems programming (no control of memory, no FFI), a GUI,
 the browser or a phone (WebAssembly is parked), and, till it uses more
@@ -1133,8 +1143,10 @@ processes that allocate and then wait turn out to hold too much).
   serviced in `select()` through a non-blocking API. Nothing blocks, and
   no slight value holds a C pointer. They're vendored as source under
   `vendor/` (as Odin's are), compiled by `slightc` once per target as the
-  runtime is, and linked statically into the programs that use them. TLS
-  is to be a `:tls` socket device.
+  runtime is, and linked statically into the programs that use them.
+  Only code that never needs a security fix is vendored (D251); TLS
+  isn't: a proxy in front ends it for a server, and curl, through
+  `:exec`, for a client.
 
 ### Recording and replaying a run (D170)
 

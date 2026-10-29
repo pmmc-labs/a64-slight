@@ -1278,7 +1278,8 @@ non-blocking, made for small machines) is the proposal, to confirm in
 the Keychain). Rejected: system libraries (macOS has no OpenSSL to build
 against, versions differ between machines, and testing under qemu would
 need each target's copy); prebuilt binaries in the repository; loading
-libraries with `dlopen`; a package manager.
+libraries with `dlopen`; a package manager. *(Refined by D251: only
+code that never needs a security fix is vendored, and TLS isn't.)*
 
 **D153. The runtime looks up host names itself.** *(User, Oct 2026, after
 Odin's `core:net`.)* `getaddrinfo` blocks, and every process with it
@@ -6047,3 +6048,45 @@ and an FFI is held back (D249). Not for: numbers and data in bulk,
 systems programming, GUIs, the browser or phones, and (till more than
 one core) servers bound by throughput. DESIGN.md, "What slight is for,
 and isn't"; the guide's README, "What slight is for".
+
+**D251. Vendor only what never needs a security fix; leave the rest to
+programs the system keeps up to date, run as processes.** *(Stevan, Oct
+2026: "I am nervous about vendoring a library like this where I would
+need to track security issues", and "instead of a GPU device, what about
+using llama.cpp somehow?", so that slight could run models without an
+ollama server. Agreed as fitting "aggressively simple".)* Refines D151
+and D152, and withdraws TLS from 12c.
+- **Vendored:** code that's pinned once and left, with no security
+  fixes to follow: math (CORE-MATH, if "Numbers in bulk" is agreed), and
+  Unicode's tables. SHA-2, HMAC and base64 are small and fixed, and
+  ours, in C.
+- **Left to processes:** what needs security fixes. A server sits behind
+  a proxy that ends TLS (nginx, Caddy, a cluster's ingress), on plain
+  HTTP or a Unix socket (D231); FastCGI and uwsgi were considered and
+  aren't needed, plain HTTP behind a proxy being the simpler. A client's
+  `https://` goes through curl, run by `lib/http.slight` with `:exec`,
+  with the system's certificates (the Keychain on macOS), proxies and
+  HTTP/2; the same responses as plain HTTP, and streamed as
+  `http/stream` streams (`curl -N`). Between machines, ssh
+  (`rpc/exec`, D225). Each is updated by the system's package manager,
+  a crash in one ends only it, and what crosses comes through `:exec`,
+  so a run still replays (D250's rule).
+- **Models:** llama.cpp's `llama-server`, started by the program with
+  `:exec`, watched by a monitor, on localhost; `lib/agent.slight` to
+  speak its OpenAI-compatible protocol beside ollama's, which reaches
+  vLLM, LM Studio and the hosted APIs too. What a model gives back is
+  tokens, small, so recording them costs little.
+- **Costs accepted:** curl must be installed (copied into a `FROM
+  scratch` image, a line in the containers how-to), a process for each
+  HTTPS request (milliseconds: fine for fetching and models, not for a
+  client calling at a high rate), errors read from curl's exit codes;
+  `llama-server` must be installed, and loads its model once at start.
+- **Rejected:** TLS on mbedTLS, vendored (D152's proposal), for the
+  security fixes it would need for ever; the system's TLS linked
+  dynamically (breaks static binaries on Linux, D227, and differs by
+  system); llama.cpp linked in (C++, the runtime's first thread, no GPU
+  in a static Linux binary, a crash ending every actor, and a project
+  that changes daily); a GPU device of our own (parked already).
+- **Left open:** SQLite (its risk is small enough to vendor, but it
+  needs D151's thread; its command-line tool through `:exec` would do,
+  more clumsily); how curl's failures become errors.

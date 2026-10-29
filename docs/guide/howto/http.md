@@ -65,7 +65,8 @@ body)` give `(:ok (status headers body))`, or `(:error reason)`, such as
 `(http/stream ...)` gives the body as it arrives, line by line or in
 chunks, for streaming APIs such as a local model's.
 
-**Not yet:** HTTPS (`:no-tls` until TLS lands), keep-alive, and a Date
+**Not yet:** HTTPS (`:no-tls` till it goes through curl; a server sits
+behind a proxy such as nginx, which ends TLS), keep-alive, and a Date
 header. One request per connection.
 
 [How-to](README.md)

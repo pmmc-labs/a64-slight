@@ -2049,7 +2049,8 @@ answer comes in time.
 
 `lib/http.slight`: HTTP/1.1 on `:tcp`, a server and a client (D173). One
 request and one reply to each connection, which then closes. HTTPS
-waits for TLS (step 12c).
+is to go through curl (D251); till then an `https://` URL gives
+`:no-tls`.
 
     (@include :http)
 
