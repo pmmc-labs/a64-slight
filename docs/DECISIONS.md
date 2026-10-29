@@ -6034,7 +6034,10 @@ of the runtime. Little: its C is tied to the heap, `select()` and
 usual libraries don't; `dns.c` is small beside c-ares. `unicode.c`'s
 generated tables might shrink to SpecialCasing's if utf8proc comes for
 display width and graphemes, to be checked then. What vendoring saves is
-code not yet written.
+code not yet written. *(Its open points settled by D252: no FFI, and
+regular expressions from a small engine of our own; and its order
+amended by D253: numbers in bulk after step 1, and more than one core
+after them.)*
 
 **D250. What slight is for, and isn't.** *(Stevan, Oct 2026, asked where
 D249's plan would place slight, and to put the answer in DESIGN.md and
@@ -6047,7 +6050,9 @@ a run can't be replayed through, which is why C libraries are vendored
 and an FFI is held back (D249). Not for: numbers and data in bulk,
 systems programming, GUIs, the browser or phones, and (till more than
 one core) servers bound by throughput. DESIGN.md, "What slight is for,
-and isn't"; the guide's README, "What slight is for".
+and isn't"; the guide's README, "What slight is for". *(Amended by D253:
+services, tools and simulations; of numbers in bulk, only numerical
+computing at large stays out.)*
 
 **D251. Vendor only what never needs a security fix; leave the rest to
 programs the system keeps up to date, run as processes.** *(Stevan, Oct
@@ -6107,3 +6112,58 @@ and D152, and withdraws TLS from 12c.
   position compiled its source, when that was a call, as the function's
   tail call. Golden tests 309, 310, 211 and 220, and `t/live.py`'s
   https.)*
+
+**D252. No FFI; regular expressions from a small engine of our own.**
+*(Stevan, Oct 2026, reviewing D249's open points after D251, both as
+Claude recommended.)*
+- **No FFI.** C libraries are vendored (D151, D152), and only code that
+  never needs a security fix (D251); what can't be is run as a process.
+  An FFI call could block, keep C pointers, and read the world without
+  going through `replay.c`, so a run could no longer be replayed whole
+  (D250's rule). Rejected: an FFI now; an FFI parked as the likely way
+  in once the vendored libraries had shown what it must do.
+- **Regular expressions** from an engine of our own, in C: a subset of
+  RE2's syntax, run in time linear in its input (no backtracking), so
+  no pattern can stall a process (each builtin call runs to its end,
+  D151) and there's nothing to patch for one. A builtin, as D151 allows
+  a pure function bounded by its input. Its syntax and builtins are to
+  be proposed with the standard library (PLAN.md, "Toward general
+  purpose", 3). Rejected: none, with a parser library in `lib/` as the
+  answer (wordier for a quick match); vendoring an existing engine
+  (ours is small, and has no release to follow).
+
+**D253. Numbers in bulk, for simulation.** *(Stevan, Oct 2026: "If we
+added numerical features (vectors, matrices, tensors), fixed the float
+handling, and added a GPU device, how would that change things?";
+Claude proposed the three pieces in PLAN.md, "Numbers in bulk", and
+Stevan agreed all three, every point to settle as recommended.)*
+- **What for:** simulation, which slight half has already: actors as
+  agents, the virtual clock as simulated time, seeded orders as Monte
+  Carlo over schedules, replay as reproducibility. D250 becomes
+  "services, tools and simulations"; numerical computing at large
+  (tensors, autodiff, a GPU) stays out.
+- **Order:** after D249's step 1: a libm that gives the same bits
+  everywhere, then shared buffers, then arrays; more than one core
+  (D249's step 7) moves up to follow them.
+- **The libm:** CORE-MATH, vendored, correctly rounded, so expected
+  values come from `mpmath` and D76's 12 places are retired for
+  `math/`; musl's version of any function it lacks; linked into every
+  program; the runtime compiled with `-ffp-contract=off`.
+- **Shared buffers:** strings and arrays of 4 KB or more off the heap,
+  counted references, a handle on the heap (Erlang's binaries); 4 KB to
+  start, tuned by a benchmark; a handle counts its whole buffer toward
+  its process's cap; a slice shared only at the threshold, copied
+  below.
+- **Arrays:** one-dimensional, immutable, unboxed, `:float` and `:int`
+  (63-bit, so an element always reads back); printed `#float(...)` and
+  `#int(...)`, with no literal in source; never mixing kinds element by
+  element; reductions left to right. Matrices a library on them, their
+  multiplication our own loop, not BLAS, whose order and so whose bits
+  vary.
+- **Rejected:** a GPU device (results differing by card and driver,
+  kernels needing a language, and the most machinery slight would have
+  had), llama.cpp in its place (D251), musl's libm alone (the same bits
+  everywhere, but not the right ones, so no independent model for
+  tests), `:float` arrays alone to start, SRFI 4's `#f64(...)`, and
+  pairwise summation (more accurate, but needing a model of its
+  blocking).

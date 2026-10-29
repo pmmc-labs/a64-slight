@@ -34,10 +34,14 @@ bring it up before baking it in further.
 
 What it's meant to be when PLAN.md's "Toward general purpose" is done,
 for checking later decisions against: **a small language for networked
-services and tools on one machine, which can be tested
-deterministically.** A service, a command-line tool, a daemon or an
-agent, written end to end in it, one static binary, without shelling out
-for the basics.
+services, tools and simulations on one machine, which can be tested
+deterministically.** A service, a command-line tool, a daemon, an agent
+or a simulation, written end to end in it, one static binary, without
+shelling out for the basics. Simulations were added by D253: actors as
+agents, the virtual clock as simulated time, seeded orders as Monte
+Carlo over schedules, and replay as reproducibility, with arrays of
+numbers and floats that come out the same on every machine (PLAN.md,
+"Numbers in bulk").
 
 What sets it apart is that last part. Everything a program takes from
 the world goes through `replay.c` (D170), so any run, a production one
@@ -52,8 +56,8 @@ go wrong (D247), that's the reason to choose it.
 
 So: **nothing goes in that a run can't be replayed through.** A device,
 a builtin or a vendored library takes from the world only through
-`replay.c`; that's why C libraries are vendored, and an FFI, which would
-let a call read the world unrecorded, is held back (D249, open).
+`replay.c`; that's why C libraries are vendored, and there's no FFI,
+which would let a call read the world unrecorded (D252).
 
 And: **vendor only what never needs a security fix** (D251): math, a
 hash, Unicode's tables, pinned once and left. What does need them, TLS,
@@ -65,10 +69,11 @@ for a client's `https://`, ssh between machines (`rpc/exec`),
 manager, a crash in one ends only it, and what crosses comes through
 `:exec`, so it's recorded.
 
-Not what it's for: numbers and data in bulk (no mutable arrays, nothing
-vectorized), systems programming (no control of memory, no FFI), a GUI,
-the browser or a phone (WebAssembly is parked), and, till it uses more
-than one core (PLAN.md, its step 7), servers bound by throughput, though
+Not what it's for: numerical computing at large (no mutable arrays,
+tensors, autodiff or GPU: D253's arrays are for simulations), systems
+programming (no control of memory, no FFI), a GUI, the browser or a
+phone (WebAssembly is parked), and, till it uses more than one core
+(PLAN.md, its step 7), servers bound by throughput, though
 a copy per core behind one port serves (`airline`'s `--shard` is the
 same idea). Nor a large ecosystem: that comes from users, not a plan.
 

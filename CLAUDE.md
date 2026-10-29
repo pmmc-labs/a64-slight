@@ -291,15 +291,17 @@ the prelude (`lib/prelude.sli`, its types and sigs) and every library
 have headers, so their helpers are their own; a file without a header is
 spliced in as before; golden test 308. What's missing to make slight
 general purpose, in order, is agreed (D249, `docs/PLAN.md`, "Toward
-general purpose"), with two points open: C libraries vendored only or
-an FFI too, and regular expressions; and what slight is for, and
+general purpose"); and what slight is for, and
 isn't, in DESIGN.md and the guide's README (D250); and a rule, vendor
 only what never needs a security fix, leaving TLS to a proxy in front
-and curl, and models to `llama-server`, as processes (D251); and three proposals
-for numbers in bulk, for simulation, **(open)**: a libm that gives the
-same bits everywhere, shared buffers off the heap, and arrays of
-numbers (`docs/PLAN.md`, "Numbers in bulk"). **Next:** to settle with Stevan
-(`docs/PLAN.md`, 15, and those two points). 12c (C libraries vendored as source, D151, D152) waits; its
+and curl, and models to `llama-server`, as processes (D251); and no FFI, and
+regular expressions from a small linear engine of our own (D252); and
+numbers in bulk, for simulation, agreed (D253, `docs/PLAN.md`, "Numbers
+in bulk"): a libm that gives the same bits everywhere (CORE-MATH),
+shared buffers off the heap, and arrays of numbers, after D249's step 1,
+and more than one core after them. **Next:** D249's step 1, the time of
+day, files beyond reading and writing, binary data and a log device,
+each proposed before it's built. 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan

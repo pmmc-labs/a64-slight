@@ -24,8 +24,9 @@ replayed, so a failure seen once can be seen again, as often as you
 like. [Time](concepts/time.md) and [finding a race](howto/races.md) show
 how.
 
-It isn't for crunching numbers or data in bulk, for systems
-programming, or for a GUI, the browser or a phone. It's young, and its
+It isn't for numerical computing at large (arrays of numbers, for
+simulations, are planned), for systems programming, or for a GUI, the
+browser or a phone. It's young, and its
 library is small: HTTPS goes through curl, a server's through a proxy
 in front of it, and it uses one core. [`PLAN.md`](../PLAN.md)'s "Toward general purpose" says
 what's coming, and in what order.

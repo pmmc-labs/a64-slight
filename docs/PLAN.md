@@ -1169,22 +1169,22 @@ first five, with the types their docs name: `Response`, `Handler`,
 What slight lacks before someone can write a command-line tool, a web
 service, a script over data or a daemon in it without shelling out for
 the basics. In this order, each step's builtins and devices proposed
-before they're built, as the working rules say; two points are
-**(open)**, and each of them shapes the steps after it.
+before they're built, as the working rules say. Numbers in bulk (below,
+D253) come after step 1, and more than one core (7) after them. Two
+points that shaped the rest were settled in Oct 2026 (D252):
 
-**(open) C libraries: vendored, or an FFI as well.** D251 narrows what
-is vendored to code that never needs a security fix. D151 and D152 have
+**C libraries: vendored only, no FFI** (D252). D151 and D152 have
 vendored libraries, each a builtin or a device that `slightc` knows
-about, so every library is work in the runtime, by us; an FFI would let
-a program bind one itself, but everything from the world goes through
-`replay.c` now, and an FFI call can block, keep pointers, and do I/O
-that isn't recorded. Recommendation: vendored only, till the vendored
-libraries have shown what an FFI would need to keep replay whole.
+about, and D251 narrows them to code that never needs a security fix.
+An FFI call could block, keep pointers, and do I/O that isn't recorded,
+so a run could no longer be replayed whole (D250's rule). What can't be
+vendored runs as a process (D251).
 
-**(open) Regular expressions,** absent on purpose so far: a small
-engine of RE2's subset, linear in its input (vendored, or our own), or
-none, and a parser library in `lib/` (combinators, as `calc` is
-written) as the answer to what they're wanted for.
+**Regular expressions: a small engine of our own** (D252), in C, a
+subset of RE2's syntax, its time linear in its input, so no pattern can
+stall a process and there's nothing to patch for one (D251); a builtin,
+as D151 allows a pure function bounded by its input. Its syntax and
+builtins are to be proposed with the standard library (3).
 
 1. **What the runtime is missing,** small things each:
    - The time of day: seconds (or microseconds) since the epoch, read
@@ -1209,9 +1209,9 @@ written) as the answer to what they're wanted for.
    slight's.
 3. **The standard library,** in slight where that's practical (D152):
    `format`, CSV, parsing `@ARGV`, a set, sorted maps beside the hash
-   map (D223), dates (from 1), and text matching as the open point
-   above decides. No mutable array: numeric work and pixel buffers stay
-   out of what slight is for, unless that's decided otherwise.
+   map (D223), dates (from 1), and regular expressions (D252). No
+   mutable array; arrays of numbers, immutable, are Numbers in bulk's
+   (D253).
 4. **Supervisors and a registry,** an OTP's least, in slight on
    `monitor`: restarting what fails (one for one, the rest after one),
    with a limit on restarts in a time, and processes found by name, so
@@ -1229,6 +1229,8 @@ written) as the answer to what they're wanted for.
 7. **More than one core** (Parked, Parallelism): a ceiling on servers,
    not a bar to being general purpose; separate heaps make it easier
    than in most languages, and the run queue and timers are the work.
+   Moved up by D253 to follow Numbers in bulk, since numbers in bulk on
+   one core aren't worth the bother.
 
 And, though not features: a version number and a core that holds still
 for it; one syntax the docs are written in, the other made from it.
@@ -1250,17 +1252,17 @@ and hashes, base64 and random bytes are ours (D251). SQLite waits on
 D151's open point, a thread for a library that can only block, or for
 its command-line tool through `:exec`, clumsier but with neither.
 
-### Numbers in bulk (proposed, Oct 2026)
+### Numbers in bulk (agreed, D253, Oct 2026)
 
-**(open)** Three proposals, for simulation: actors as agents, the
-virtual clock as simulated time, seeded orders as Monte Carlo over
-schedules, and replay as reproducibility are there already; what such
-programs lack is numbers in bulk, the physics, statistics and fields
-over a grid. If agreed, D250's "not for" loses numbers in bulk, slight
-becoming a language for services *and simulations* that can be
-replayed, and D249's order gains these after its step 1, with more than
-one core moving up, since numbers in bulk on one core aren't worth the
-bother. Tensors, autodiff and a GPU stay out (a GPU's results differ by
+Three proposals, for simulation, agreed as written with the points to
+settle settled (D253): actors as agents, the virtual clock as simulated
+time, seeded orders as Monte Carlo over schedules, and replay as
+reproducibility are there already; what such programs lack is numbers
+in bulk, the physics, statistics and fields over a grid. So D250's "not
+for" loses numbers in bulk, slight becoming a language for services
+*and simulations* that can be replayed, and D249's order gains these
+after its step 1, with more than one core moving up after them, since
+numbers in bulk on one core aren't worth the bother. Tensors, autodiff and a GPU stay out (a GPU's results differ by
 card and driver, so replay would have to record them all, and its
 kernels would need a language of their own).
 
@@ -1311,8 +1313,9 @@ rounded result sometimes needs a second, slower step); `bench/` would
 say whether `n-body` and `spectral-norm` notice. Nothing in the
 language changes.
 
-**To settle:** (b) or (c); linked into every program (it's small) or
-only into those that call `math/` (D152's rule).
+**Settled** (D253): (b), CORE-MATH, with musl's version of any function
+it lacks; linked into every program, as the system's libm is now, since
+it's small and the runtime's own C calls it.
 
 #### 2. Shared buffers: big immutable data off the heap
 
@@ -1372,12 +1375,12 @@ How it works:
 buffers, the handle lists, the collector and the message copy, and a
 process's end. Strings gain from it at once, before there are arrays.
 
-**To settle:** the threshold (4 KB to start, below which copying costs
-less than counting, tuned with a `payload` of big strings); whether a
-handle counts its whole buffer toward the cap, or only its slice (the
-whole, I'd say: it's what it keeps alive); and a small slice of a big
-buffer keeping all of it alive, Erlang's known trap: share a slice only
-when it's at the threshold, copy it below.
+**Settled** (D253): the threshold 4 KB to start, below which copying
+costs less than counting, tuned with a `payload` of big strings; a
+handle counts its whole buffer toward the cap, since that's what it
+keeps alive; and a slice is shared only when it's at the threshold, and
+copied below, against Erlang's trap of a small slice keeping a big
+buffer alive.
 
 #### 3. Arrays of numbers
 
@@ -1445,12 +1448,11 @@ twenty builtins in C (`runtime/arrays.c`) with their types in
 Floats stay boxed elsewhere: unboxing them in a loop is TYPES.md's step
 5, types in code generation, which can come after, with benchmarks.
 
-**To settle:** `:int` arrays at all, or `:float` alone to start;
-`#float(...)` or SRFI 4's `#f64(...)`; whether element by element mixes
-an `:int` array with a float (I'd say no: convert it first, through
-`array->list`, or a builtin for it if that's too slow); and
-left to right, or pairwise summation (more accurate, as NumPy's, and
-just as determined, but needing a model of its own for tests).
+**Settled** (D253): `:int` arrays and `:float`; printed `#float(...)`
+and `#int(...)`; element by element never mixes an `:int` array with a
+float (convert it first, through `array->list`, or a builtin for it if
+that's too slow); and reductions left to right, the obvious loop's
+answer, which a Python loop models for the tests.
 
 ### 17. Self-host
 
