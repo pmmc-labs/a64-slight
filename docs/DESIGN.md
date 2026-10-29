@@ -423,6 +423,10 @@ names no program can write.
 ### Builtins and the prelude
 
 [`LANGUAGE.md`](LANGUAGE.md) describes each one as a program sees it.
+Agreed and still to build (D254, PLAN.md's "Step 1, proposed"):
+`clock/now`, the time of day, with `lib/time.slight`; `fs/list`,
+`fs/stat`, `fs/delete`, `fs/rename` and `fs/mkdir`; `bytes/pack` and
+`bytes/unpack`; and `log`, JSON lines on stderr.
 
 **In C (or assembly):**
 - arithmetic: `+ - *` on any two numbers; an integer and a float give a

@@ -1200,7 +1200,9 @@ builtins are to be proposed with the standard library (3).
      WebSockets', msgpack) need it.
    - A log device: levels, structured lines to stderr, recorded.
 
-   Proposed below, "Step 1, proposed".
+   Proposed below, "Step 1, proposed", and agreed (D254): `clock/now`
+   and `lib/time.slight`, `fs/` builtins, `bytes/pack` and
+   `bytes/unpack`, and `log`.
 2. **HTTPS, and what TLS would have brought** (D251, in place of TLS
    on mbedTLS): `https://` through curl in `lib/http.slight` (done,
    golden test 309), and a
@@ -1254,10 +1256,10 @@ and hashes, base64 and random bytes are ours (D251). SQLite waits on
 D151's open point, a thread for a library that can only block, or for
 its command-line tool through `:exec`, clumsier but with neither.
 
-#### Step 1, proposed (open, Oct 2026)
+#### Step 1, proposed (agreed, D254, Oct 2026)
 
-**(open)** The four pieces of step 1, each with options and a
-recommendation. All four are builtins in C, recorded through `replay.c`
+The four pieces of step 1, each with options and a recommendation;
+Stevan took each recommendation (D254). All four are builtins in C, recorded through `replay.c`
 where they take from the world, so a run still replays (D250's rule).
 
 **1. The time of day.**

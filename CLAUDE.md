@@ -299,9 +299,9 @@ regular expressions from a small linear engine of our own (D252); and
 numbers in bulk, for simulation, agreed (D253, `docs/PLAN.md`, "Numbers
 in bulk"): a libm that gives the same bits everywhere (CORE-MATH),
 shared buffers off the heap, and arrays of numbers, after D249's step 1,
-and more than one core after them. **Next:** D249's step 1, the time of
-day, files beyond reading and writing, binary data and a log device,
-each proposed before it's built. 12c (C libraries vendored as source, D151, D152) waits; its
+and more than one core after them. **Next:** D249's step 1, agreed
+(D254): `clock/now` and `lib/time.slight`, the `fs/` builtins,
+`bytes/pack` and `bytes/unpack`, and `log`. 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan

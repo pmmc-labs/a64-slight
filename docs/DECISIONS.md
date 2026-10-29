@@ -6167,3 +6167,43 @@ Stevan agreed all three, every point to settle as recommended.)*
   tests), `:float` arrays alone to start, SRFI 4's `#f64(...)`, and
   pairwise summation (more accurate, but needing a model of its
   blocking).
+
+**D254. D249's step 1: the time of day, files, binary data and a log,
+as builtins.** *(Stevan, Oct 2026, each as Claude recommended, from the
+options in PLAN.md, "Step 1, proposed".)* Each takes from the world only
+through `replay.c`, so a run still replays.
+- **`(clock/now)`:** the microseconds since 1970-01-01T00:00:00Z, POSIX
+  time, an integer as `clock/us` is; the system's real time, recorded,
+  or on the virtual clock its start plus the virtual time, the start
+  `SLIGHT_EPOCH`'s (seconds) or the real time of day when the program
+  starts, recorded either way; `t/run.sh` sets `SLIGHT_EPOCH`. Timers
+  stay on `clock/us`, which never jumps. And `lib/time.slight`, a
+  module in slight: `time/utc` and `time/from-utc` (days-from-civil),
+  `time/iso` and `time/parse-iso`, `time/http`, fixed offsets; no time
+  zones by name. Rejected: milliseconds, as JavaScript's `Date.now()`
+  (a second unit beside `clock/us`); float seconds (a microsecond lost
+  after 2255).
+- **Files:** `fs/list` (sorted by bytes, without `.` and `..`),
+  `fs/stat` (a keyed list: `:kind`, `:size`, `:modified`, `:mode`,
+  following links), `fs/delete` (a file or an empty directory),
+  `fs/rename`, `fs/mkdir` (one level), each a Result, errors as a
+  device's, `(name path)`; each a system call made where it's called,
+  as opening a file is, recorded, and not made in a replay. Trees are
+  `lib/fs.slight`'s, in slight. Refines D151: a one-shot call whose wait
+  is the disk's may be a builtin, since a device, with no thread, would
+  block the same way. Rejected: an `:fs` device of requests and
+  replies; `:exec`, as now.
+- **Binary data:** `(bytes/pack specs values)` and `(bytes/unpack specs
+  s at)`, specs a list of keywords (`:u8`, `:i8`, `:u16be` ... `:i64le`,
+  `:f32be` ... `:f64le`) and `(:bytes n)`; `unpack` gives `(:ok values
+  next)` or `(:error :short)`; out of range faults `:out-of-range` in
+  `pack`, a `u64` past 63 bits `:overflow` in `unpack`. Strings are built
+  from pieces with `str/join` or `~`, one copy. Rejected: Perl's
+  template strings, a builtin for each width and order, Erlang's bit
+  syntax in patterns.
+- **A log:** `(log level msg fields)`, `:debug`, `:info`, `:warn` or
+  `:error`, a line of JSON on stderr, `time` (ISO 8601, from
+  `clock/now`), `level`, `pid`, `msg` and the fields; below
+  `SLIGHT_LOG`'s level (`info` by default) not written; written again in
+  a replay, as stdout is. The runtime's own messages stay as they are.
+  Rejected: s-expression lines, a `:log` device, `eprint` alone.
