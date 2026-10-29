@@ -89,6 +89,7 @@ rm -rf "$dir/in.txt" "$dir/out.txt" "$dir/out.txt.d"
 run SLIGHT_REPLAY="$dir/world.record" world other args </dev/null >"$dir/world.replayed"
 if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(ok ("line one" "line two"))$' "$dir/world.recorded" \
    && grep -q '^(ok ((kind file) (size 18) (modified [0-9]*) (mode [0-9]*)))$' "$dir/world.recorded" \
+   && grep -q '^(random "[0-9a-f]\{32\}")$' "$dir/world.recorded" \
    && grep -q '^(env "recorded")$' "$dir/world.recorded" \
    && grep -q '^(clock #true [0-9]*)$' "$dir/world.recorded" && grep -q '^(now #true [0-9]*)$' "$dir/world.recorded"; then
     check "world replays as recorded" ok

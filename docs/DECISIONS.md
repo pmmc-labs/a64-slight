@@ -6218,3 +6218,28 @@ through `replay.c`, so a run still replays.
   is what a log most often holds. A level that isn't one faults
   `:out-of-range`, which the checker now says of any keyword outside a
   union of them, where it said `:not-a-bool`.)*
+
+**D255. D249's step 2: hashes, MACs, random bytes, and bytes as text.**
+*(Stevan, Oct 2026, as Claude proposed: "As proposed". HTTPS, the rest
+of the step, was D251's.)*
+- **`crypto/`**, for what's about secrets, in `runtime/crypto.c`, our
+  own C, since a hash is a fixed algorithm with no protocol around it,
+  nothing to patch (D251): `crypto/sha256` and `crypto/sha512` (FIPS
+  180-4), `crypto/hmac-sha256` and `crypto/hmac-sha512` (RFC 2104), each
+  giving raw bytes; `crypto/equal?`, in a time that depends on the
+  strings' length alone; and `crypto/random-bytes`, up to 1 MB from the
+  system's entropy (`getentropy`), recorded for a replay, never
+  `rand/`'s, which a seed makes the same every run (D222).
+- **Bytes as text**, as `a->b` (D219): `bytes->base64` and
+  `base64->bytes` (padded), `bytes->base64url` and `base64url->bytes`
+  (unpadded, as JWTs have it, read with its padding too), `bytes->hex`
+  and `hex->bytes`; what can't be read back is `#false`, as `str->int`
+  has it.
+- **Percent-encoding** in slight, `lib/http.slight`'s `http/url-encode`
+  and `http/url-decode` (RFC 3986: `+` is `+`).
+- **Rejected:** SHA-256 and HMAC-SHA256 alone, with SHA-512 and
+  base64url when wanted; `hash/` and `rand/secure-bytes` as names.
+- *(Built, Oct 2026: golden test 317, from `t/models/crypto.py` on
+  Python's hashlib, hmac and base64, where Python takes `+` and `/` in
+  base64url, which RFC 4648 §5 doesn't, and slight doesn't either; and
+  `t/replay/world.slight` draws random bytes, which its replay has.)*

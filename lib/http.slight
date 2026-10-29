@@ -607,3 +607,34 @@
     (if (and (> (bytes/len host) 0) (int? port))
         (list :ok host port target)
         (list :error (list :bad-url url))))
+
+; Percent-encoding (RFC 3986, D255): every byte but the unreserved
+; (letters, digits, - . _ ~) as %XX, so a space is %20, as in a path or a
+; query's value; and back, every %XX made its byte, and nothing else
+; touched, so + stays +. A % without two hex digits after it is #false.
+(defun http/url-encode (s)
+    (str/join "" (map (lambda (i) (http/url-byte i s)) (range 0 (bytes/len s)))))
+
+(defun http/url-byte (i s)
+    (let b (bytes/at s i))
+    (if (http/unreserved? b)
+        (bytes/slice s i (+ i 1))
+        (~ "%" (str/upper (str/pad-start (int->str b 16) 2 "0")))))
+
+(defun http/unreserved? (b)
+    (or (and (>= b 65) (<= b 90)) (and (>= b 97) (<= b 122)) (and (>= b 48) (<= b 57))
+        (== b 45) (== b 46) (== b 95) (== b 126)))
+
+(defun http/url-decode (s)
+    (http/url-decode-at s 0 ()))
+
+; The pieces so far, last first, from i.
+(defun http/url-decode-at (s i pieces)
+    (let at (bytes/index-of s "%" i))
+    (cond
+        ((< at 0) (str/join "" (reverse (cons (bytes/slice s i) pieces))))
+        (#true
+            (let b (hex->bytes (bytes/slice s (+ at 1) (+ at 3))))
+            (if (and (str? b) (== (bytes/len b) 1))
+                (http/url-decode-at s (+ at 3) (cons b (cons (bytes/slice s i at) pieces)))
+                #false))))

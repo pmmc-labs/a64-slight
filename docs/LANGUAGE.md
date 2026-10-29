@@ -1804,9 +1804,42 @@ big-endian (network order) and `le` little-endian.
   `f32` is widened exactly; a `u64` from 2^62, or an `i64` outside slight's
   63 bits, faults (`:overflow`), as arithmetic does.
 
+Bytes as text, and back (D255); what can't be read back is `#false`,
+as `str->int` has it:
+
+- `(bytes->base64 s)`: base64 (RFC 4648), padded with `=` to a multiple
+  of four: `(bytes->base64 "foob")` is `"Zm9vYg=="`. `(base64->bytes
+  s)` reads it back, the padding there and right, every character in
+  the alphabet, or it's `#false`.
+- `(bytes->base64url s)`: base64url, `-` and `_` where base64 has `+`
+  and `/`, and no padding, as JWTs have it. `(base64url->bytes s)` reads
+  it with or without its padding, but right if it's there; `+` and `/`
+  aren't in its alphabet.
+- `(bytes->hex s)`: two lowercase hex digits a byte. `(hex->bytes s)`
+  reads them in either case.
+
 There's no character type: a character is a one-character string, or a
 code point. Build a long string by collecting the pieces in a list and
 joining them.
+
+### Secrets
+
+Hashes, MACs and random bytes for keys and tokens (D255), in C of
+slight's own: a hash is a fixed algorithm, with nothing to patch (D251).
+Each gives raw bytes, which `bytes->hex` or `bytes->base64` show.
+
+- `(crypto/sha256 s)`, `(crypto/sha512 s)`: the digest, 32 or 64
+  bytes (FIPS 180-4).
+- `(crypto/hmac-sha256 key msg)`, `(crypto/hmac-sha512 key msg)`: HMAC
+  (RFC 2104) on either, any length of key.
+- `(crypto/equal? a b)`: whether two strings are the same, in a time
+  that depends on their length alone, not on where they differ, for
+  checking a MAC or a token: `eq?` stops at the first byte that differs,
+  which tells someone timing it how much of a guess was right.
+- `(crypto/random-bytes n)`: `n` bytes (up to 1 MB) from the system's
+  entropy, for a key, a token or a nonce. Not `rand/`'s: those come from
+  a seed, so they're the same every run that has it (D222). A recorded
+  run's are recorded, so a replay has the same.
 
 ### JSON
 
@@ -2236,6 +2269,11 @@ it, such as nginx or Caddy.
   443 for `https`, and the target `"/"` when none is given; and `(:error
   (:bad-url url))` for anything else. It's what `http/request` reads its
   URL with.
+- `(http/url-encode s)`: `s` percent-encoded (RFC 3986): every byte but
+  letters, digits and `-` `.` `_` `~` as `%XX`, so a space is `%20`.
+  `(http/url-decode s)`: each `%XX` made its byte and nothing else
+  changed, so `+` stays `+`; a `%` without two hex digits after it is
+  `#false` (D255).
 - `(http/stream method url headers body how)` makes the same request, and
   gives the reply to the caller as it comes, in messages, as a device
   gives a file (D181, D182). It gives the stream's pid, `s`, at once. The

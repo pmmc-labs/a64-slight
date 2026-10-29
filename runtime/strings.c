@@ -959,3 +959,108 @@ rt_value_t rt_bytes_unpack(rt_value_t specs_, rt_value_t s, rt_value_t at, const
     ok[5] = RT_NIL;
     return (rt_value_t)ok | RT_TAG_LIST;
 }
+
+// --- bytes as text (D255) -----------------------------------------------------
+//
+// base64 (RFC 4648 §4), padded with = to a multiple of four; base64url
+// (§5, - and _ for + and /), as JWTs have it, unpadded, though reading
+// takes it padded too. hex in lowercase, read in either case. What can't
+// be read back is #false, as str->int has it.
+
+static const char B64[]    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char B64URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+static rt_value_t to_base64(rt_value_t s, const char *alphabet, int pad, const char *site) {
+    need_string(s, site);
+    const uint8_t *p   = (const uint8_t *)bytes_of(s);
+    size_t         len = len_of(s), n = 0;
+    char          *out = rt_must(malloc(len / 3 * 4 + 5));
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t v    = (uint32_t)p[i] << 16 | (i + 1 < len ? (uint32_t)p[i + 1] << 8 : 0) | (i + 2 < len ? p[i + 2] : 0);
+        size_t   have = len - i < 3 ? len - i : 3;      // bytes in this group, so have + 1 characters
+        for (size_t j = 0; j < 4; j++) {
+            if (j <= have)  out[n++] = alphabet[v >> (18 - 6 * j) & 63];
+            else if (pad)   out[n++] = '=';
+        }
+    }
+    rt_value_t r = rt_new_string(out, n, site);
+    free(out);
+    return r;
+}
+
+static int b64_digit(uint8_t c, const char *alphabet) {
+    const char *at = c ? strchr(alphabet, c) : NULL;
+    return at ? (int)(at - alphabet) : -1;
+}
+
+// pad_needed: the padding must be there (base64); else it may be, and
+// must be right if it is (base64url).
+static rt_value_t from_base64(rt_value_t s, const char *alphabet, int pad_needed, const char *site) {
+    need_string(s, site);
+    const uint8_t *p   = (const uint8_t *)bytes_of(s);
+    size_t         len = len_of(s), pads = 0;
+    while (pads < len && p[len - 1 - pads] == '=') pads++;
+    size_t data = len - pads, r = data % 4;
+    if (pads > 2 || r == 1 || ((pads || pad_needed) && len % 4 != 0) || (pads && pads != 4 - r)) return RT_FALSE;
+    char  *out = rt_must(malloc(data / 4 * 3 + 3));
+    size_t n   = 0;
+    for (size_t i = 0; i < data; i += 4) {
+        size_t   have = data - i < 4 ? data - i : 4;
+        uint32_t v    = 0;
+        for (size_t j = 0; j < 4; j++) {
+            int d = j < have ? b64_digit(p[i + j], alphabet) : 0;
+            if (d < 0) {
+                free(out);
+                return RT_FALSE;
+            }
+            v = v << 6 | (uint32_t)d;
+        }
+        for (size_t j = 0; j + 1 < have; j++) out[n++] = (char)(v >> (16 - 8 * j));
+    }
+    rt_value_t result = rt_new_string(out, n, site);
+    free(out);
+    return result;
+}
+
+rt_value_t rt_bytes_to_base64(rt_value_t s, const char *site)    { return to_base64(s, B64, 1, site); }
+rt_value_t rt_base64_to_bytes(rt_value_t s, const char *site)    { return from_base64(s, B64, 1, site); }
+rt_value_t rt_bytes_to_base64url(rt_value_t s, const char *site) { return to_base64(s, B64URL, 0, site); }
+rt_value_t rt_base64url_to_bytes(rt_value_t s, const char *site) { return from_base64(s, B64URL, 0, site); }
+
+rt_value_t rt_bytes_to_hex(rt_value_t s, const char *site) {
+    static const char digits[] = "0123456789abcdef";
+    need_string(s, site);
+    const uint8_t *p   = (const uint8_t *)bytes_of(s);
+    size_t         len = len_of(s);
+    char          *out = rt_must(malloc(2 * len + 1));
+    for (size_t i = 0; i < len; i++) {
+        out[2 * i]     = digits[p[i] >> 4];
+        out[2 * i + 1] = digits[p[i] & 15];
+    }
+    rt_value_t r = rt_new_string(out, 2 * len, site);
+    free(out);
+    return r;
+}
+
+static int hex_digit(uint8_t c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+rt_value_t rt_hex_to_bytes(rt_value_t s, const char *site) {
+    need_string(s, site);
+    const uint8_t *p   = (const uint8_t *)bytes_of(s);
+    size_t         len = len_of(s);
+    if (len % 2) return RT_FALSE;
+    char *out = rt_must(malloc(len / 2 + 1));
+    for (size_t i = 0; i < len; i += 2) {
+        int hi = hex_digit(p[i]), lo = hex_digit(p[i + 1]);
+        if (hi < 0 || lo < 0) {
+            free(out);
+            return RT_FALSE;
+        }
+        out[i / 2] = (char)(hi << 4 | lo);
+    }
+    rt_value_t r = rt_new_string(out, len / 2, site);
+    free(out);
+    return r;
+}

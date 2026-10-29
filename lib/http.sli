@@ -25,3 +25,7 @@
 (sig http/listen ((or int str) (fun (Request) Response)) (Result (shape pid int) any))
 
 (sig http/parse-url (str) (or (:ok str int str) (:error any)))
+
+; Percent-encoding (RFC 3986): http/url-decode is #false for a bad %XX.
+(sig http/url-encode (str) str)
+(sig http/url-decode (str) (or str #false))

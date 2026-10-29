@@ -1208,8 +1208,8 @@ builtins are to be proposed with the standard library (3).
    `bytes/unpack` (done, golden test 314, from `t/models/pack.py`),
    and `log` (done, golden tests 315 and 316). Step 1 is done.
 2. **HTTPS, and what TLS would have brought** (D251, in place of TLS
-   on mbedTLS): `https://` through curl in `lib/http.slight` (done,
-   golden test 309), and a
+   on mbedTLS; done, D255, golden test 317): `https://` through curl in
+   `lib/http.slight` (golden test 309), and a
    server behind a proxy that ends TLS; SHA-2 and HMAC in C of our own,
    small and fixed, which never need a security fix; base64, and random
    bytes from the system for keys and tokens, through `replay.c` (not

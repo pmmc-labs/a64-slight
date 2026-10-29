@@ -426,7 +426,10 @@ names no program can write.
 Agreed (D254, PLAN.md's "Step 1, proposed"): `clock/now`, the time of
 day, with `lib/time.slight`; `fs/list`, `fs/stat`, `fs/delete`,
 `fs/rename` and `fs/mkdir` (`runtime/files.c`); `bytes/pack` and
-`bytes/unpack`; and `log`, JSON lines on stderr; all built.
+`bytes/unpack`; and `log`, JSON lines on stderr; all built. And
+(D255): `crypto/sha256`, `crypto/sha512`, their HMACs, `crypto/equal?`
+and `crypto/random-bytes` (`runtime/crypto.c`); base64, base64url and
+hex, `bytes->` and `->bytes`; built.
 
 **In C (or assembly):**
 - arithmetic: `+ - *` on any two numbers; an integer and a float give a

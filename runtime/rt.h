@@ -666,6 +666,26 @@ rt_value_t rt_bytes_unpack(rt_value_t specs, rt_value_t s, rt_value_t at, const 
 extern int rt_log_level;
 rt_value_t rt_log_line(rt_value_t level, rt_value_t msg, rt_value_t fields, const char *site) RT_ASM(rt_log_line);
 
+// What's about secrets (crypto.c, D255): the digests and MACs as strings
+// of their raw bytes; equal? in a time that doesn't depend on where two
+// strings differ; and random bytes from the system, recorded.
+rt_value_t rt_crypto_sha256(rt_value_t msg, const char *site) RT_ASM(rt_crypto_sha256);
+rt_value_t rt_crypto_sha512(rt_value_t msg, const char *site) RT_ASM(rt_crypto_sha512);
+rt_value_t rt_crypto_hmac_sha256(rt_value_t key, rt_value_t msg, const char *site) RT_ASM(rt_crypto_hmac_sha256);
+rt_value_t rt_crypto_hmac_sha512(rt_value_t key, rt_value_t msg, const char *site) RT_ASM(rt_crypto_hmac_sha512);
+rt_value_t rt_crypto_equal(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_crypto_equal);
+rt_value_t rt_crypto_random_bytes(rt_value_t n, const char *site) RT_ASM(rt_crypto_random_bytes);
+
+// Bytes as text and back (strings.c, D255): base64 (RFC 4648 §4, padded),
+// base64url (§5, unpadded), and hex; reading back gives #false for what
+// isn't one.
+rt_value_t rt_bytes_to_base64(rt_value_t s, const char *site) RT_ASM(rt_bytes_to_base64);
+rt_value_t rt_base64_to_bytes(rt_value_t s, const char *site) RT_ASM(rt_base64_to_bytes);
+rt_value_t rt_bytes_to_base64url(rt_value_t s, const char *site) RT_ASM(rt_bytes_to_base64url);
+rt_value_t rt_base64url_to_bytes(rt_value_t s, const char *site) RT_ASM(rt_base64url_to_bytes);
+rt_value_t rt_bytes_to_hex(rt_value_t s, const char *site) RT_ASM(rt_bytes_to_hex);
+rt_value_t rt_hex_to_bytes(rt_value_t s, const char *site) RT_ASM(rt_hex_to_bytes);
+
 // (clock/now): the time of day, microseconds since 1970-01-01T00:00:00Z,
 // recorded; on the virtual clock, SLIGHT_EPOCH's plus the virtual time
 // (D254).

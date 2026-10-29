@@ -48,7 +48,7 @@ enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
     IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER, IO_REALTIME, IO_LIST, IO_STAT, IO_REMOVE,
-    IO_RENAME, IO_MKDIR,
+    IO_RENAME, IO_MKDIR, IO_RANDOM,
 };
 
 static const char *const names[] = {
@@ -61,7 +61,7 @@ static const char *const names[] = {
     [IO_KILL] = "a kill", [IO_PIPE] = "a pipe", [IO_LISTEN_UNIX] = "a listen at a path",
     [IO_PEER] = "a socket's peer", [IO_REALTIME] = "the time of day",
     [IO_LIST] = "a directory's names", [IO_STAT] = "a file's stat", [IO_REMOVE] = "a remove",
-    [IO_RENAME] = "a rename", [IO_MKDIR] = "a mkdir",
+    [IO_RENAME] = "a rename", [IO_MKDIR] = "a mkdir", [IO_RANDOM] = "random bytes",
 };
 
 static int      mode;
@@ -572,6 +572,25 @@ uint32_t rt_io_seed(void) {
     uint32_t    bits;
     if (getentropy(&bits, sizeof bits) != 0) bits = (uint32_t)time(NULL) ^ (uint32_t)getpid() << 16 ^ (uint32_t)(uintptr_t)&here;
     return (uint32_t)done(IO_SEED, bits);
+}
+
+// getentropy gives 256 bytes at most a call; it doesn't fail on a system
+// that has it but for a bad buffer, which this never passes.
+void rt_io_random_bytes(void *buf, size_t len) {
+    if (mode == REPLAY) {
+        uint32_t got;
+        next(IO_RANDOM, buf, len, &got);
+        if (got != len) stop("the record's random bytes are another length than the run asks for");
+        return;
+    }
+    for (size_t at = 0; at < len; at += 256) {
+        size_t n = len - at < 256 ? len - at : 256;
+        if (getentropy((uint8_t *)buf + at, n) != 0) {
+            perror("slight: can't get random bytes");
+            exit(2);
+        }
+    }
+    done_with(IO_RANDOM, 0, buf, len);
 }
 
 uint64_t rt_io_random_seed(const char *given) {

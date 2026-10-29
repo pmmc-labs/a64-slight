@@ -1,0 +1,39 @@
+; What's about secrets, and bytes as text (D255): SHA-256 and SHA-512 on
+; FIPS 180-4's messages and on lengths either side of where the padding
+; needs another block; HMAC on RFC 4231's cases and keys either side of a
+; block; equal?; random bytes, their lengths, two draws differing, and too
+; many or too few; base64 on RFC 4648's vectors, base64url, padded or not,
+; and what neither reads; hex; and lib/http.slight's percent-encoding.
+; Expected output from t/models/crypto.py, on Python's hashlib, hmac and
+; base64.
+
+(@include :http)
+
+(defun hex (s) (bytes->hex s))
+(defun a (n) (str/repeat "a" n))
+(defun kind (pid) (car (cadr (join pid))))
+(defun shown (r) (if (str? r) (hex r) r))
+(defun hmacs (key msg) (list (hex (crypto/hmac-sha256 key msg)) (hex (crypto/hmac-sha512 key msg))))
+
+(pprint (map (lambda (m) (hex (crypto/sha256 m))) (list "" "abc" "abcdbcdecdefdefgefghfghighijhijkijkljklmklmnlmnomnopnopq")))
+(pprint (map (lambda (n) (hex (crypto/sha256 (a n)))) (list 55 56 63 64 65 119 1000000)))
+(pprint (map (lambda (m) (hex (crypto/sha512 m)))
+             (list "" "abc" "abcdefghbcdefghicdefghijdefghijkefghijklfghijklmghijklmnhijklmnoijklmnopjklmnopqklmnopqrlmnopqrsmnopqrstnopqrstu")))
+(pprint (map (lambda (n) (hex (crypto/sha512 (a n)))) (list 111 112 127 128 129 239 1000000)))
+(pprint (hmacs (hex->bytes (str/repeat "0b" 20)) "Hi There"))
+(pprint (hmacs "Jefe" "what do ya want for nothing?"))
+(pprint (hmacs (hex->bytes (str/repeat "aa" 131)) "Test Using Larger Than Block-Size Key - Hash Key First"))
+(pprint (map (lambda (n) (hmacs (str/repeat "k" n) "m")) (list 64 65 128 129)))
+(pprint (list (crypto/equal? "abc" "abc") (crypto/equal? "abc" "abd") (crypto/equal? "abc" "ab") (crypto/equal? "" "")))
+(let r1 (crypto/random-bytes 32))
+(let r2 (crypto/random-bytes 32))
+(pprint (list (bytes/len (crypto/random-bytes 0)) (bytes/len r1) (bytes/len (crypto/random-bytes 300)) (eq? r1 r2)))
+(pprint (kind (fork (crypto/random-bytes -1))))
+(pprint (kind (fork (crypto/random-bytes 1048577))))
+(pprint (map bytes->base64 (list "" "f" "fo" "foo" "foob" "fooba" "foobar")))
+(pprint (map bytes->base64url (list "f" "fo" "foo" (hex->bytes "fbff") (hex->bytes "fbffbf"))))
+(pprint (map base64->bytes (list "" "Zg==" "Zm8=" "Zm9vYmFy" "Zg" "Zg=" "Zg===" "Z===" "Zm9!" "Zm=9" "-_8=")))
+(pprint (map (lambda (s) (shown (base64url->bytes s))) (list "Zg" "Zg==" "Zm8" "Zm8=" "-_8" "-_8=" "Zg=" "Z" "+/8=")))
+(pprint (list (hex "") (hex "\u{0}a~") (hex->bytes "") (hex->bytes "414243") (hex->bytes "4a4B") (hex->bytes "414") (hex->bytes "41zz")))
+(list (http/url-encode "a b&c=d/é~-._") (http/url-decode "%41%2fb+c%20d") (http/url-decode "%4") (http/url-decode "%zz")
+      (http/url-decode "100%"))
