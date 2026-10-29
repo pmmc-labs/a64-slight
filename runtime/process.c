@@ -232,6 +232,37 @@ static void start(rt_proc_t *p) {
 }
 
 // --- heaps --------------------------------------------------------------------
+
+// A process's handles to shared buffers (D253, below): its young ones and
+// its old, kept apart, as on its side (rt_side_t), made when first wanted.
+typedef struct {
+    uint64_t **at;
+    size_t     n, cap;
+    size_t     bytes;                   // the buffers' lengths, all told
+} handles_t;
+
+static handles_t *handles_of(rt_proc_t *p, int old);
+static handles_t *handles_had(const rt_proc_t *p, int old);    // NULL if it has none
+
+static size_t shared_bytes(const rt_proc_t *p, int old) {
+    const handles_t *h = handles_had(p, old);
+    return h ? h->bytes : 0;
+}
+
+// What p's heap holds against its cap: its chunks, and what its handles
+// keep alive.
+static size_t held(const rt_proc_t *p) {
+    return p->heap_bytes + shared_bytes(p, 0) + shared_bytes(p, 1);
+}
+
+static void handles_add(handles_t *h, uint64_t *box) {
+    if (h->n == h->cap) {
+        h->cap = h->cap ? 2 * h->cap : 16;
+        h->at  = rt_must(realloc(h->at, h->cap * sizeof *h->at));
+    }
+    h->at[h->n++] = box;
+    h->bytes     += ((rt_buffer_t *)box[2])->len;
+}
 //
 // Two generations (D200). Everything is allocated in the young one: the
 // nursery, a chunk of 4 KB at first, twice that at each collection that
@@ -245,8 +276,10 @@ static void start(rt_proc_t *p) {
 
 static rt_chunk_t *new_chunk(size_t bytes) {
     rt_chunk_t *c = rt_must(malloc(sizeof *c + bytes));
-    c->next = NULL;
-    c->size = bytes;
+    c->next     = NULL;
+    c->size     = bytes;
+    c->handles  = NULL;
+    c->nhandles = 0;
     return c;
 }
 
@@ -288,13 +321,20 @@ static void adopt(rt_proc_t *p, rt_chunk_t *c) {
     c->next        = *at;
     *at            = c;
     p->heap_bytes += c->size;
-    if (old_in_use(p) >= p->gc_at) cut_slice(p);
+    if (c->nhandles) {
+        handles_t *old = handles_of(p, 1);
+        for (uint64_t i = 0; i < c->nhandles; i++) handles_add(old, c->handles[i]);
+        free(c->handles);
+        c->handles  = NULL;
+        c->nhandles = 0;
+    }
+    if (old_in_use(p) + shared_bytes(p, 1) >= p->gc_at) cut_slice(p);
 }
 
 void rt_heap_grow(uint64_t bytes, const char *site) {
     rt_proc_t *p = rt_current;
     if (!p->nursery) {
-        if (p->heap_bytes + CHUNK_FIRST > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
+        if (held(p) + CHUNK_FIRST > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
         p->nursery     = new_chunk(CHUNK_FIRST);
         p->heap_bytes += CHUNK_FIRST;
         p->heap_ptr    = (uintptr_t)(p->nursery + 1);
@@ -303,7 +343,7 @@ void rt_heap_grow(uint64_t bytes, const char *site) {
     }
     size_t young = young_bytes(p), size = young < CHUNK_MAX ? young : CHUNK_MAX;
     if (size < bytes) size = (bytes + 15) & ~(size_t)15;
-    if (p->heap_bytes + size > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
+    if (held(p) + size > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
     rt_chunk_t *c = new_chunk(size);
     c->next          = p->nursery->next;
     p->nursery->next = c;
@@ -313,30 +353,86 @@ void rt_heap_grow(uint64_t bytes, const char *site) {
     cut_slice(p);
 }
 
-// A big string points at nothing, so it can go straight into the old
-// generation, in a chunk of its own, and no minor collection copies it.
-void *rt_alloc_old(size_t bytes, const char *site) {
-    rt_proc_t *p = rt_current;
-    bytes = (bytes + 15) & ~(size_t)15;
-    if (p->heap_bytes + bytes > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
-    rt_chunk_t *c = new_chunk(bytes);
-    adopt(p, c);
-    return c + 1;
+// --- shared buffers (D253) -----------------------------------------------------
+//
+// A string of RT_SHARED_MIN bytes or more is a buffer off the heap, its
+// references counted, and a handle on the heap: a box of the string's
+// header with RT_BOX_SHARED, where the bytes are, and the buffer. A send
+// copies the handle and counts a reference; nothing copies the bytes. It's
+// safe for the reason the collector needs no write barrier (D200): what's
+// shared never changes, and holds no pointers, so no buffer points into a
+// heap, and no heap's collector has to know about another's.
+//
+// Each process keeps a list of the handles in its heap, the young apart
+// from the old, as its collector does. After a collection, a handle that
+// wasn't copied is garbage, and its buffer loses a reference; one at none
+// is freed. A copy (a message, a fork's values, a result) lists the
+// handles it made in its chunk, and whoever adopts the chunk takes them
+// on; a chunk freed unadopted (a message never taken, a result let go) lets
+// them go. A process's end lets go of all of its own.
+//
+// What a process's young handles hold counts toward collecting it, so one
+// that makes big strings and little else collects them (Erlang's lesson);
+// and what all its handles hold counts toward its heap's cap, since it's
+// what they keep alive.
+
+#define SHARED_YOUNG_MAX CHUNK_MAX      // young handles' bytes past this, and the next call collects
+
+static void buffer_release(rt_buffer_t *b) {
+    if (--b->refs) return;
+    if (poison) memset(b->bytes, 0xab, b->len + 1);
+    free(b);
+}
+
+// A chunk let go of without being adopted: its handles' references go.
+static void free_chunk(rt_chunk_t *c) {
+    for (uint64_t i = 0; i < c->nhandles; i++) buffer_release((rt_buffer_t *)c->handles[i][2]);
+    free(c->handles);
+    free(c);
 }
 
 static void free_chunks(rt_chunk_t *c) {
     for (rt_chunk_t *next; c; c = next) {
         next = c->next;
-        free(c);
+        free_chunk(c);
     }
 }
 
 // A message's record is in its chunk (new_msg).
 static void free_msg(rt_msg_t *m) {
-    free(m->chunk);
+    free_chunk(m->chunk);
+}
+
+// A string of len bytes (RT_SHARED_MIN or more), its bytes copied from
+// bytes, or left for the caller to fill and mark (rt_string_mark). The
+// handle first, so that a heap at its cap faults before the buffer's made.
+rt_value_t rt_new_shared_string(const char *bytes, size_t len, const char *site) {
+    rt_proc_t *p = rt_current;
+    if (held(p) + len > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
+    uint64_t    *box = rt_alloc(32, site);
+    rt_buffer_t *b   = rt_must(malloc(sizeof *b + len + 1));
+    b->refs = 1;
+    b->len  = len;
+    if (bytes) memcpy(b->bytes, bytes, len);
+    b->bytes[len] = '\0';
+    box[0] = (bytes ? rt_string_header(b->bytes, len) : (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING) | RT_BOX_SHARED;
+    box[1] = (uint64_t)(uintptr_t)b->bytes;
+    box[2] = (uint64_t)(uintptr_t)b;
+    box[3] = 0;
+    handles_t *young = handles_of(p, 0);
+    handles_add(young, box);
+    if (young->bytes > SHARED_YOUNG_MAX) cut_slice(p);
+    return (rt_value_t)box | RT_TAG_BOXED;
 }
 
 static void free_heap(rt_proc_t *p) {
+    for (int old = 0; old < 2; old++) {
+        handles_t *h = (handles_t *)handles_had(p, old);
+        if (!h) continue;
+        for (size_t i = 0; i < h->n; i++) buffer_release((rt_buffer_t *)h->at[i][2]);
+        free(h->at);
+        *h = (handles_t){ 0 };
+    }
     free_chunks(p->chunks);
     free_chunks(p->nursery);
     p->chunks     = p->nursery = NULL;
@@ -370,7 +466,7 @@ static int is_pointer(rt_value_t v) {
 static size_t box_bytes(rt_value_t v) {
     uint64_t header = rt_box(v)[0], size = header >> RT_BOX_SIZE_SHIFT;
     switch (header & RT_BOX_TYPE_MASK) {
-        case RT_BOX_STRING:  return (8 + size + 1 + 15) & ~(size_t)15;
+        case RT_BOX_STRING:  return header & RT_BOX_SHARED ? 32 : (8 + size + 1 + 15) & ~(size_t)15;
         case RT_BOX_FLOAT:   return 16;
         case RT_BOX_CLOSURE: return (32 + 8 * size + 15) & ~(size_t)15;
         case RT_BOX_TUPLE:   return (8 + 8 * size + 15) & ~(size_t)15;
@@ -428,6 +524,8 @@ typedef struct {
     size_t      n, todo_cap;
     uintptr_t   lo, hi;                 // static data's bounds, and its two ranges:
     uintptr_t   r0, r1, c0, c1;         // read-only, and the quoted constants
+    size_t     *handles;                // the offsets of the shared strings' handles copied (D253)
+    size_t      nhandles, handles_cap;
 } copying_t;
 
 // Whether v is copied: a cell or a box, but not static data, which is
@@ -462,6 +560,17 @@ WALK void scratch_link(copying_t *c, size_t at, rt_value_t v) {
     c->slots[c->nslots++] = at;
 }
 
+// A shared string's handle copied to offset box: one more reference to its
+// buffer, and noted, for the chunk to list.
+WALK void copy_handle(copying_t *c, size_t box, const uint64_t *from) {
+    ((rt_buffer_t *)from[2])->refs++;
+    if (c->nhandles == c->handles_cap) {
+        c->handles_cap = c->handles_cap ? 2 * c->handles_cap : 8;
+        c->handles     = rt_must(realloc(c->handles, c->handles_cap * sizeof *c->handles));
+    }
+    c->handles[c->nhandles++] = box;
+}
+
 WALK void copy_push(copying_t *c, size_t at, rt_value_t v) {
     if (c->n + 2 > c->todo_cap) {
         c->todo      = stack_grow(c->todo, c->todo_cap, c->local);
@@ -492,6 +601,7 @@ WALK void copy_word(copying_t *c, rt_value_t v, size_t at) {
         }
         scratch_link(c, at, (rt_value_t)box | RT_TAG_BOXED);
         if (rt_box_holds_values(from[0])) copy_push(c, box, v);
+        else if ((from[0] & (RT_BOX_TYPE_MASK | RT_BOX_SHARED)) == (RT_BOX_STRING | RT_BOX_SHARED)) copy_handle(c, box, from);
     }
 }
 
@@ -550,7 +660,13 @@ static rt_chunk_t *copy_walk(const rt_value_t *from, rt_value_t *into, uint64_t 
         rt_value_t shift = (rt_value_t)data - roots;    // offset + shift: where it will be
         for (size_t i = 0; i < c.nslots; i++) *(rt_value_t *)(c.scratch + c.slots[i]) += shift;
         memcpy(data, c.scratch + roots, bytes);
+        if (c.nhandles) {
+            chunk->handles  = rt_must(malloc(c.nhandles * sizeof *chunk->handles));
+            chunk->nhandles = c.nhandles;
+            for (size_t i = 0; i < c.nhandles; i++) chunk->handles[i] = (uint64_t *)(data + c.handles[i] - roots);
+        }
     }
+    free(c.handles);
     for (uint64_t i = 0; i < n; i++) into[i] = ((rt_value_t *)c.scratch)[i];
     if (c.cap > SCRATCH_KEPT) {
         free(c.scratch), free(c.slots);
@@ -806,6 +922,13 @@ static size_t chunk_size(size_t bytes) {
     return bytes < CHUNK_FIRST ? CHUNK_FIRST : bytes < CHUNK_MAX ? bytes : CHUNK_MAX;
 }
 
+// A handle after a collection: kept, where it moved to, if it moved, since
+// it's live; or its buffer's reference let go.
+static void sweep_handle(uint64_t *h, handles_t *kept) {
+    if (h[0] == GC_MOVED_BOX) handles_add(kept, (uint64_t *)(h[1] - RT_TAG_BOXED));
+    else                      buffer_release((rt_buffer_t *)h[2]);
+}
+
 // A minor collection and a major one, named for what they collect, since
 // macOS's <sys/types.h> has major() and minor() macros. The minor one
 // copies what's young and reachable into the old chunk promoted into, and
@@ -819,11 +942,31 @@ static void collect_young(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uin
     p->chunks     = g.chunks;
     p->heap_bytes = g.bytes;
     p->old_ptr    = g.ptr;
+    handles_t *young = handles_had(p, 0);
+    if (young && young->n) {
+        handles_t *old = handles_of(p, 1);
+        for (size_t i = 0; i < young->n; i++) sweep_handle(young->at[i], old);
+        young->n     = 0;
+        young->bytes = 0;
+    }
 }
 
 static void collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
     gc_t g = { .size = chunk_size(p->heap_bytes) };
     trace(&g, roots, n, fp);
+    // Every live handle has moved, the young and the old, before what they
+    // were in is poisoned and freed.
+    if (p->side) {
+        handles_t kept = { 0 };
+        for (int old = 0; old < 2; old++) {
+            handles_t *h = handles_of(p, old);
+            for (size_t i = 0; i < h->n; i++) sweep_handle(h->at[i], &kept);
+            free(h->at);
+            *h = (handles_t){ 0 };
+        }
+        *handles_of(p, 1) = kept;
+        g.live += kept.bytes;
+    }
     // With SLIGHT_POISON set (t/run.sh sets it), a pointer the collector
     // missed finds garbage at once instead of memory that looks fine
     // until it's reused: 0xabab... is a boxed pointer to nowhere.
@@ -855,7 +998,7 @@ static void restart(rt_proc_t *p) {
     for (rt_chunk_t *c = p->nursery->next; c; c = c->next) p->heap_bytes -= c->size;
     free_chunks(p->nursery->next);
     p->nursery->next = NULL;
-    if (grow && p->heap_bytes + size <= heap_max) {
+    if (grow && held(p) + size <= heap_max) {
         free(p->nursery);
         p->nursery     = new_chunk(2 * size);
         p->heap_bytes += size;
@@ -866,7 +1009,7 @@ static void restart(rt_proc_t *p) {
     // is checked. So a heap past its cap gets no room: its next allocation
     // goes to rt_heap_grow, and faults there, with its own site.
     p->heap_ptr   = (uintptr_t)(p->nursery + 1);
-    p->heap_limit = p->heap_bytes > heap_max ? p->heap_ptr : p->heap_ptr + size;
+    p->heap_limit = held(p) > heap_max ? p->heap_ptr : p->heap_ptr + size;
 }
 
 // SLIGHT_GC_VERIFY=1: before a minor collection, a walk over all that's
@@ -938,15 +1081,16 @@ static void check(const rt_proc_t *p, const rt_value_t *roots, uint64_t n, const
 // promotes. SLIGHT_GC_STRESS makes one at every nth call's entry and every
 // recv, and every eighth of those a major one.
 static int due(const rt_proc_t *p) {
-    return gc_stress || (p->nursery && p->nursery->next) || old_in_use(p) >= p->gc_at;
+    return gc_stress || (p->nursery && p->nursery->next) || old_in_use(p) + shared_bytes(p, 1) >= p->gc_at
+        || shared_bytes(p, 0) > SHARED_YOUNG_MAX;
 }
 
 static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
-    int whole = old_in_use(p) >= p->gc_at || (gc_stress && ++stressed % 8 == 0);
+    int whole = old_in_use(p) + shared_bytes(p, 1) >= p->gc_at || (gc_stress && ++stressed % 8 == 0);
     if (!whole && p->nursery) {
         if (gc_verify) check(p, roots, n, fp);
         collect_young(p, roots, n, fp);
-        whole = old_in_use(p) >= p->gc_at;
+        whole = old_in_use(p) + shared_bytes(p, 1) >= p->gc_at;
     }
     if (whole && (p->chunks || p->nursery)) collect_all(p, roots, n, fp);
     restart(p);
@@ -1073,11 +1217,22 @@ typedef struct rt_side {
     rt_addresses_t addresses;           // a task's (D243)
     rt_kept_t      kept;                // a parent's (D244)
     rt_msg_t      *given;               // the result a join or race was woken with, till it runs (D244)
+    handles_t      young_handles, old_handles;   // to shared buffers (D253)
 } rt_side_t;
 
 static rt_side_t *side_of(rt_proc_t *p) {
     if (!p->side) p->side = rt_must(calloc(1, sizeof *p->side));
     return p->side;
+}
+
+static handles_t *handles_of(rt_proc_t *p, int old) {
+    rt_side_t *s = side_of(p);
+    return old ? &s->old_handles : &s->young_handles;
+}
+
+static handles_t *handles_had(const rt_proc_t *p, int old) {
+    if (!p->side) return NULL;
+    return old ? &p->side->old_handles : &p->side->young_handles;
 }
 
 static struct rt_device *devices_of(const rt_proc_t *p) {

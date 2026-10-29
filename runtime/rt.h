@@ -26,7 +26,9 @@
 // count. A string's header has RT_BOX_ASCII too when every byte is below
 // 0x80, so a character is a byte and the str/ builtins index in one step
 // (D219); one made without it is only slower.
-#define RT_BOX_TYPE_MASK  0x7f
+#define RT_BOX_TYPE_MASK  0x3f
+#define RT_BOX_SHARED     0x40    // a string whose bytes are a shared buffer's, off the heap (D253): the box
+                                  // holds where they are and the buffer, rt_buffer_t
 #define RT_BOX_ASCII      0x80
 #define RT_BOX_SIZE_SHIFT    8
 #define RT_BOX_STRING        1
@@ -417,7 +419,20 @@ typedef struct rt_ctx {
 typedef struct rt_chunk {
     struct rt_chunk *next;
     size_t           size;      // bytes after this header
+    uint64_t       **handles;   // a copy's shared strings, for whoever adopts it (process.c), or NULL
+    uint64_t         nhandles;
 } rt_chunk_t;
+
+// A string of RT_SHARED_MIN bytes or more is a buffer off the heap (D253):
+// what's shared never changes, and holds no pointers, so processes share
+// it, a send copying the handle and counting a reference, never the bytes.
+// The bytes end in a NUL that len doesn't count, as a string's do.
+#define RT_SHARED_MIN 4096
+typedef struct rt_buffer {
+    uint64_t refs;
+    uint64_t len;
+    char     bytes[];
+} rt_buffer_t;
 
 typedef struct rt_msg {
     struct rt_msg *next;
@@ -520,7 +535,10 @@ static inline double      rt_float_value(rt_value_t v) {
 }
 static inline uint64_t    rt_string_len(rt_value_t v)   { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
 static inline int         rt_string_ascii(rt_value_t v) { return (rt_box(v)[0] & RT_BOX_ASCII) != 0; }
-static inline const char *rt_string_bytes(rt_value_t v) { return (const char *)(rt_box(v) + 1); }
+static inline const char *rt_string_bytes(rt_value_t v) {
+    const uint64_t *box = rt_box(v);
+    return box[0] & RT_BOX_SHARED ? (const char *)box[1] : (const char *)(box + 1);
+}
 static inline uint64_t    rt_tuple_len(rt_value_t v)    { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
 static inline rt_value_t  rt_tuple_get(rt_value_t v, uint64_t i) { return rt_box(v)[1 + i]; }
 
@@ -871,7 +889,7 @@ extern rt_proc_t *rt_current;
 // Allocates from the current process's heap, in 16-byte units; faults at
 // `site` when the heap is full.
 void *rt_alloc(size_t bytes, const char *site);
-void *rt_alloc_old(size_t bytes, const char *site); // for what points at nothing: straight into the old generation
+rt_value_t rt_new_shared_string(const char *bytes, size_t len, const char *site);   // process.c (D253)
 
 // p, from malloc, calloc or realloc; if it's NULL, the program ends, with
 // exit status 2, since the runtime can't go on without memory.

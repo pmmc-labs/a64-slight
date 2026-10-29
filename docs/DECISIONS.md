@@ -6153,7 +6153,13 @@ Stevan agreed all three, every point to settle as recommended.)*
   counted references, a handle on the heap (Erlang's binaries); 4 KB to
   start, tuned by a benchmark; a handle counts its whole buffer toward
   its process's cap; a slice shared only at the threshold, copied
-  below.
+  below. *(Built for strings, Oct 2026, before the libm, whose source
+  this environment couldn't fetch, Stevan agreeing: a flag in the
+  string's header, `RT_BOX_SHARED`, which took a bit from the box type,
+  now `0x3f`; the young handles' bytes past 1 MB make the next call
+  collect; and slices copied for now, so every buffer's bytes end in
+  their NUL, as a string's do. The 64 KB strings that went straight to
+  the old generation (D200) are shared ones now.)*
 - **Arrays:** one-dimensional, immutable, unboxed, `:float` and `:int`
   (63-bit, so an element always reads back); printed `#float(...)` and
   `#int(...)`, with no literal in source; never mixing kinds element by

@@ -1028,6 +1028,15 @@ What's live is what the process can still reach, and that includes
 whatever a function that hasn't returned has bound with `let`, until it
 returns: a `let` at the top level keeps its value till the program ends.
 
+A string of 4 KB or more isn't in the heap but in a buffer of its own,
+which processes share (D253): sending it, forking with it, or a task's
+result holding it, copies a handle and not the bytes, so a big string
+sent to a thousand processes is in memory once. It's freed when the last
+process holding it has collected it, or ended. Each process counts the
+whole of every such string it holds toward its cap, since that's what
+it keeps alive, and one that makes them and drops them collects as
+often as it needs to. Nothing about it shows to a program but memory.
+
 
 ## Devices
 

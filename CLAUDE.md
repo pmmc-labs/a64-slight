@@ -316,8 +316,12 @@ done, and so is step 2 (D255): `crypto/sha256`, `crypto/sha512`, their
 HMACs, `crypto/equal?` and `crypto/random-bytes` (recorded) in
 `runtime/crypto.c`; `bytes->base64`, `bytes->base64url`, `bytes->hex`
 and back; `http/url-encode` and `http/url-decode` (golden test 317,
-`t/models/crypto.py`). **Next:** the numbers in bulk (D253), the libm
-first: CORE-MATH vendored. 12c (C libraries vendored as source, D151, D152) waits; its
+`t/models/crypto.py`). Numbers in bulk (D253) have begun: the runtime
+compiled with `-ffp-contract=off`, and shared buffers, strings of 4 KB
+or more off the heap, their references counted, a send copying the
+handle (`RT_BOX_SHARED`; golden test 318, `t/live.py`'s memory).
+**Next:** the libm, CORE-MATH vendored, once Stevan has fetched its
+source (`gitlab.inria.fr` is refused here); then arrays of numbers. 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan

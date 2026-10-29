@@ -9,7 +9,10 @@ program, or the system to measure the run.
   does, and its peak resident set is under PEAK; the code before D204
   and D205 held from half a gigabyte to 4 GB on the way. And a million
   tasks and actors, each joined or read as it ends, peak under CHURN:
-  before D244 every pid's entry was kept, 40 MB of them.
+  before D244 every pid's entry was kept, 40 MB of them. And a 32 MB
+  string held by 40 actors at once, which shares one buffer (D253), and
+  600 strings of 1 MB made and dropped, whose buffers are freed: each
+  under PEAK, where copies, or a leak, would be over it.
 - chat: examples/chat.slight in a terminal, with t/live/model.slight as
   its model: what the model sends with terminal escapes in it is shown
   escaped, approvals included; a refused command isn't run; and a fetch
@@ -159,6 +162,8 @@ def memory():
         ('deep', '(error (too-big "sh"))\n()\n', '30 million arrays deep, from a command', PEAK),
         ('wide', None, 'str/pad-start to a width of 4 GB', PEAK),
         ('churn', 'done\n()\n', 'a million tasks and actors, each taken as it ends', CHURN),
+        ('shared', '1342177280\n()\n', 'a 32 MB string held by 40 actors, shared (D253)', PEAK),
+        ('dropped', '629145600\n()\n', '600 strings of 1 MB made and dropped, freed (D253)', PEAK),
     ]
     for name, expected, what, most in cases:
         out, status, peak = peak_run(prog, [name])

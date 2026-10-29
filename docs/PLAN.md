@@ -1520,6 +1520,12 @@ How it works:
 buffers, the handle lists, the collector and the message copy, and a
 process's end. Strings gain from it at once, before there are arrays.
 
+**Built** (Oct 2026, golden test 318, `t/live.py`'s memory: a 32 MB
+string held by 40 actors peaks at 33 MB, and 600 strings of 1 MB made
+and dropped at 13 MB): strings, the arrays still to come; not yet a
+slice sharing its string's buffer, nor a device's read made a buffer as
+it comes, nor the benchmark to tune the threshold with.
+
 **Settled** (D253): the threshold 4 KB to start, below which copying
 costs less than counting, tuned with a `payload` of big strings; a
 handle counts its whole buffer toward the cap, since that's what it

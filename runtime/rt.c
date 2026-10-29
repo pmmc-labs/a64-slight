@@ -532,12 +532,11 @@ void *rt_heap_alloc(void *site, size_t bytes) {
     return rt_alloc(bytes, site);
 }
 
-// A string this long goes straight into the old generation, so no minor
-// collection copies it (D200).
-#define BIG_STRING (64 << 10)
-
+// A string this long is a buffer of its own, off the heap, which no
+// collection copies and a send shares (D253).
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site) {
-    uint64_t *box = len >= BIG_STRING ? rt_alloc_old(8 + len + 1, site) : rt_alloc(8 + len + 1, site);
+    if (len >= RT_SHARED_MIN) return rt_new_shared_string(bytes, len, site);
+    uint64_t *box = rt_alloc(8 + len + 1, site);
     box[0] = bytes ? rt_string_header(bytes, len) : (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
     if (len && bytes) memcpy(box + 1, bytes, len);
     ((char *)(box + 1))[len] = '\0';
@@ -562,7 +561,7 @@ uint64_t rt_string_header(const char *bytes, size_t len) {
 
 void rt_string_mark(rt_value_t s) {
     uint64_t *box = (uint64_t *)rt_box(s);
-    box[0] = rt_string_header(rt_string_bytes(s), rt_string_len(s));
+    box[0] = rt_string_header(rt_string_bytes(s), rt_string_len(s)) | (box[0] & RT_BOX_SHARED);
 }
 
 // The control characters (Unicode's: C0, DEL and C1) as escapes, as the

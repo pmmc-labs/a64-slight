@@ -927,10 +927,31 @@ generation (copying it is the code there was); and a pool of nurseries
 that waiting processes give back, as they do their stacks (later, if
 processes that allocate and then wait turn out to hold too much).
 
+### Shared buffers (D253)
+
+A string of 4 KB or more (`RT_SHARED_MIN`) is an `rt_buffer_t` off the
+heap, its references counted, and a handle in the heap: a box of the
+string's header with `RT_BOX_SHARED`, the bytes' address and the
+buffer's. `rt_string_bytes` reads through it, so nothing else knows. A
+copy (a message, a fork's values, a kept result) copies the handle,
+counts a reference, and lists the handle in its chunk, for whoever adopts
+the chunk; a chunk freed unadopted lets its handles go. Each process
+keeps its handles in two lists, young and old, on its side; after a
+collection a handle that wasn't copied is garbage, and its reference
+goes; at a process's end, all of them. It's safe because what's shared
+never changes and holds no pointers, so no buffer points into a heap, as
+nothing old points at anything young (D200). A process's young handles'
+bytes past 1 MB make its next call collect, and all its handles' bytes
+count toward its cap. Not yet: a slice that shares its string's buffer
+(one is copied, as any slice is), and a device's read made a buffer as
+it comes.
+
 ### Messages
 
 - `send` deep-copies the value into a fresh message chunk and appends it to
-  the target's FIFO mailbox. Static data is not copied. Sharing within a
+  the target's FIFO mailbox. Static data is not copied, and nor is a
+  string of `RT_SHARED_MIN` (4 KB) or more, a buffer off the heap whose
+  handle is copied, its references counted (D253, below). Sharing within a
   message is duplicated (as in the BEAM); that's acceptable at this scale.
   The copy is one walk over the value, into a scratch buffer, which then
   moves into a chunk of just its size; the message's record (its place in
