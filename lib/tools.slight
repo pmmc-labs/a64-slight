@@ -210,7 +210,7 @@
 ; makes no line of its own.
 (defun tools/marked (mark text)
     (let lines (str/split text \n))
-    (let shown (if (eq? (car (reverse lines)) "") (reverse (cdr (reverse lines))) lines))
+    (let shown (match (reverse lines) (("" & rest) (reverse rest)) (_ lines)))
     (str/join "" (map (lambda (line) (str mark line \n)) shown)))
 
 ; --- what's shown ------------------------------------------------------
@@ -277,15 +277,21 @@
 ; What was fetched, as text: a page made plain, its links against the URL
 ; it came from, text as it is, or what it is if it isn't text; after its
 ; status, if that isn't 2xx. A redirect is where it goes.
+; The trailer's ith line, or "" if curl's was cut short.
+(defun tools/field (lines i)
+    (match (nth i lines)
+        (()   "")
+        (line line)))
+
 (defun tools/fetched (output)
     (let parts   (reverse (str/split output (str \n (tools/marker)))))
     (let body    (if (cons? parts) (str/join (str \n (tools/marker)) (reverse (cdr parts))) ""))
-    (let trailer (append (str/split (if (cons? parts) (car parts) "") \n) (list "" "" "" "")))
-    (let code    (car trailer))
-    (let type    (str/lower (caddr trailer)))
-    (let to      (cadddr trailer))
+    (let trailer (str/split (if (cons? parts) (car parts) "") \n))
+    (let code    (tools/field trailer 0))
+    (let type    (str/lower (tools/field trailer 2)))
+    (let to      (tools/field trailer 3))
     (let text    (cond
-                     ((>= (bytes/index-of type "html") 0) (tools/html->text body (cadr trailer)))
+                     ((>= (bytes/index-of type "html") 0) (tools/html->text body (tools/field trailer 1)))
                      ((tools/text? type body)       body)
                      (#true                         (str "not text: " type ", " (bytes/len body) " bytes"))))
     (cond
@@ -549,7 +555,8 @@
     (let page (tools/page url))
     (if (== (bytes/len page) (bytes/len (tools/origin url)))
         (str page "/")
-        (str (str/join "/" (reverse (cdr (reverse (str/split page "/"))))) "/")))
+        ; up to the last /, which page has: it has the origin's //
+        (str (str/slice page 0 (str/last-index-of page "/")) "/")))
 
 ; --- notes -------------------------------------------------------------
 

@@ -104,7 +104,8 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'str/includes?': fn([STR, STR], BOOL),
     'str/starts-with?': fn([STR, STR], BOOL),
     'str/ends-with?': fn([STR, STR], BOOL),
-    'str/split': fn([STR, STR, INT], listOf(STR)),
+    // with no limit, at least one piece: (str/split "" ",") is ("")
+    'str/split': fn([STR, STR, INT], (args) => (args.length === 2 ? consOf(STR, listOf(STR)) : listOf(STR))),
     'str/join': fn([STR, LIST_ANY], STR),
     'str/repeat': fn([STR, INT], STR),
     'str/pad-start': fn([STR, INT, STR], STR),

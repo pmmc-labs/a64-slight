@@ -105,7 +105,7 @@ function readUnit(srcs: readonly Source[], kind: UnitKind, from: Pos | null, cx:
     const forms = srcs.flatMap((src) => spliceFile(src, from, cx, stack, done, imports, units));
     // a program's first file's header too, so a module checked on its own
     // is checked against what it says
-    const h = headerOf(srcs[0]!, cx);
+    const h = kind === 'program' && units.some((u) => u.key === keys[0]) ? null : headerOf(srcs[0]!, cx);
     const [header, reexports] = h === null ? [null, []] : readHeader(h, cx, [...stack, { name: srcs[0]!.name, key }], units);
     if (kind === 'module') {
         const loose = forms.find((f) => !isForm(f, 'defun') && !isForm(f, 'sig') && !isForm(f, 'deftype'));

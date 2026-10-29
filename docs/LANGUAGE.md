@@ -2419,7 +2419,8 @@ socket. Either end can call the other, whichever connected.
 - `(rpc/next v)` sends `v` to the caller at once, from a handler that
   streams; its answer comes after its values. Only from the call's own
   process, whose parent (`^$$`) is the connection: so a handler calls its
-  caller back with `(rpc/call ^$$ name args)`.
+  caller back with `(rpc/call ^$$ name args)`. From a process with no
+  parent, the root, both raise `:not-in-a-call`.
 - `(rpc/serve where handlers)` listens at `where`, a port or
   `"host:port"`, or a Unix socket's path, and gives the listener's pid,
   which `kill` stops. The caller is sent `(:listening at)`, `at` being

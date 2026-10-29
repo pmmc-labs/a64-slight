@@ -1132,8 +1132,9 @@ A file with a header (`X.sli`, `X.slyi`) is a module: its includers see
 what the header declares, and the rest is its own; `modules.ts` links by
 renaming. The prelude and every library have headers. Waiting, till
 Stevan has used types and `.sly` more: whether a richer module system
-(imports under other names, or of some names) is wanted; and the
-libraries checking clean under `--strict` on their own. Every library's
+(imports under other names, or of some names) is wanted. Every library
+checks clean under `--strict` on its own, which `make types` holds them
+to. Every library's
 header is typed (`ds`, `http`, `rpc`, `agent` and `tools` after the
 first five, with the types their docs name: `Response`, `Handler`,
 `Tool`, ...; `t/types/010`).

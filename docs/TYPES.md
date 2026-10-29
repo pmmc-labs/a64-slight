@@ -207,9 +207,10 @@ The checker runs over each function's body, knowing what it was given:
   body: the types of all the values it can end with, together. Every
   function's starts as `never`, and they're all worked out again, each
   put to use as soon as it is, till none changes. From the third round a
-  list a loop builds is a `list<T>`, however long it was (a short tagged
-  list keeps its shape), and one still changing after six is `any`, so
-  the checker always finishes.
+  result that's still changing (a list a loop builds) is a `list<T>`,
+  however long it was (a short tagged list keeps its shape), and one
+  still changing after six is `any`, so the checker always finishes; a
+  result that settled keeps its shape, `(list x y)` a list of two.
 - **A generic call** works its type variables out from the arguments
   that aren't lambdas, then gives each lambda its parameters' types
   from them; a lambda's result can change a variable (`fold/l`'s
@@ -284,9 +285,15 @@ a dead letter, and it's found when the program is compiled.
 
 A pid's type says what kind of process it is, which the language
 already distinguishes (D243): `fork e` gives a `task<T>`, `T` being
-`e`'s type, and `join` on it gives `:ok(T) | :error(any) | :ended`;
+`e`'s type, and `join` on it gives `:ok(T) | :error(any) | :ended`, or
+without `:ended` where the task is started right there, `(join (fork
+e))`, since its value is kept for its parent till it has it (D244), and
+the same for `read` of an actor started there (D245);
 `spawn e` and `connect(...) { e }` give an `actor<M>`; `address()`
-gives an `address<M>`; `self` is the actor's own `actor<M>`.
+gives an `address<M>`; `self` is the actor's own `actor<M>`. `parent`
+(`^$$`) is a `pid`, or `()` in the root, which has none; in a function
+that waits, which runs in an actor and so never in the root, a task, it's
+a `pid`.
 
 ### An actor's mailbox, from its `recv`s
 

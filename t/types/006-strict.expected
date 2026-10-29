@@ -1,4 +1,4 @@
-t/types/006-strict.slight:5:28: warning: car takes a non-empty list, and this may be (list str): it would fault :not-a-cons
+t/types/006-strict.slight:5:32: warning: car takes a non-empty list, and this may be (list str): it would fault :not-a-cons
 t/types/006-strict.slight:8:1: warning: maybe-age says it gives int, and it may give (or int #false)
 t/types/006-strict.slight:11:17: warning: this match has no arm for :c: it would fault :no-match
 t/types/006-strict.slight:14:7: warning: send to a task, which can't be sent to unless it has ended: it would fault :not-an-actor

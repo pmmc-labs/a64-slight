@@ -1,8 +1,8 @@
 ; check: strict
 ; --strict: what might go wrong too, where a type is wider than the one
 ; wanted. What isn't known still says nothing.
-(sig first-word (str) str)
-(defun first-word (s) (car (str/split s " ")))
+(sig first-long ((list str)) str)
+(defun first-long (words) (car (filter (lambda (w) (> (str/len w) 3)) words)))
 
 (sig maybe-age (str) int)
 (defun maybe-age (s) (str->int s))

@@ -157,6 +157,9 @@ export function checkProgram(prelude: Sexp, program: Sexp, opts: CheckOptions = 
             if (capped.includes(k)) continue;
             const g: G = { defs, results, mailboxes, strict, report: null, prelude: fnsP };
             const raw = checkFn(f, g, f.module === 'user' ? fnsU : fnsP);
+            if (same(raw, results[k]!)) continue;
+            // a result that's still changing is a loop's, which a list
+            // it builds could keep growing: from the third round, a list
             const t = round >= 2 ? widen(raw, defs) : raw;
             if (same(t, results[k]!)) continue;
             results[k] = round >= 6 ? ANY : t;
@@ -447,7 +450,7 @@ function nameType(n: string, cx: Cx): Ty {
         case '#true':  return TRUE_T;
         case '#false': return FALSE_T;
         case '$$':     return cx.self;
-        case '^$$':    return union(PID, NIL_T);
+        case '^$$':    return cx.kind === 'actor' ? PID : union(PID, NIL_T);    // the root, a task, has none
         case '@ARGV':  return listOf(STR);
         case '%ENV':   return listOf(shape([STR, STR]));
     }
@@ -1110,7 +1113,7 @@ function processCall(x: Pair, n: string, args: readonly Sexp[], ts: readonly Ty[
                 warn(cx, at(0), `join of an address, which isn't a pid: it faults :not-a-pid`, true);
                 return NEVER;
             }
-            return p.k === 'task' ? union(tagged('ok', p.of), tagged('error', ANY), lit('ended')) : RESULT_ANY;
+            return ended(p, args[0]!);
         }
         case 'monitor': case 'kill': {
             if (only(ts[0]!, 'address')) {
@@ -1130,8 +1133,7 @@ function processCall(x: Pair, n: string, args: readonly Sexp[], ts: readonly Ty[
             }
             const p = ts[0]!;
             if (p.k === 'address') return p.msg;
-            if (p.k === 'task') return union(tagged('ok', p.of), tagged('error', ANY), lit('ended'));
-            if (p.k === 'actor') return RESULT_ANY;
+            if (p.k === 'task' || p.k === 'actor') return ended(p, args[0]!);
             return null;
         }
         case 'address': case 'read/any': case 'open': {
@@ -1146,4 +1148,16 @@ function processCall(x: Pair, n: string, args: readonly Sexp[], ts: readonly Ty[
 }
 
 const tagged = (tag: string, ...items: readonly Ty[]): Ty => shape([lit(tag), ...items]);
+
+// What join or read gives for a process of type p, from expression e:
+// its result, or :ended once its parent has had it (D244). A process
+// started right there, (join (fork ...)), can't have ended for anyone
+// yet: its value is kept for its parent, which this is (D245 for an
+// actor, read from a task).
+function ended(p: Ty, e: Sexp): Ty {
+    const value = p.k === 'task' ? p.of : ANY;
+    const result = union(tagged('ok', value), tagged('error', ANY));
+    const fresh = isForm(e, 'fork') || isForm(e, 'spawn') || isForm(e, 'connect');
+    return fresh ? result : union(result, lit('ended'));
+}
 

@@ -436,9 +436,10 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
   (`// warns:` in `.sly`; at the end, where it moves no line) fails, as
   does a listed one that doesn't come; then `t/types/NAME.slight` (or
   `.sly`), whose `--check` output (`--strict` with a line `; check:
-  strict`) must be `NAME.expected`. A test that faults on purpose lists
-  its warnings; a new warning anywhere else is a bug, in the program or
-  in the checker.
+  strict`) must be `NAME.expected`; and every `lib/*.slight`, checked
+  on its own with `--strict`, must say nothing. A test that faults on
+  purpose lists its warnings; a new warning anywhere else is a bug, in
+  the program or in the checker.
   `t/run.sh t/003-int-max.slight` runs one golden test, for `TARGET`
   (`aarch64` unless set: `TARGET=x86_64 t/run.sh ...`). The golden tests
   run `JOBS` at a time (one per CPU unless set; `JOBS=1` for one at a

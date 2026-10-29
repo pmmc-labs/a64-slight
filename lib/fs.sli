@@ -1,5 +1,5 @@
 ; lib/fs.slight's header (D248): what (@include :fs) gives a program,
 ; docs/LANGUAGE.md, "(@include :fs)". The rest of fs.slight is its own.
 
-(sig slurp (str) (or (:ok (list str)) (:error any) :ended))
-(sig spew (str (list any)) (or (:ok any) (:error any) :ended))
+(sig slurp (str) (or (:ok (list str)) (:error any)))
+(sig spew (str (list any)) (or (:ok any) (:error any)))

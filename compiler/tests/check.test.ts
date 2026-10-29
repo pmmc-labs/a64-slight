@@ -227,6 +227,29 @@ test('the keyboard sends keys', () => {
 (connect :keypress (k))`);
 });
 
+test("a process joined or read where it's started can't have ended for anyone yet", () => {
+    clean('(match (join (fork 5)) ((:ok v) v) ((:error e) 0))', { strict: true });
+    assert.deepEqual(warnings('(let t (fork 5)) (match (join t) ((:ok v) v) ((:error e) 0))', { strict: true }),
+        ['1:18 this match has no arm for :ended: it would fault :no-match']);
+});
+
+test('a function that waits runs in an actor, so it has a parent', () => {
+    clean('(defun w () (recv (m (send ^$$ m) (w))))', { strict: true });
+    assert.deepEqual(warnings('(defun f () (send ^$$ 1))', { strict: true }),
+        ["1:19 send's first argument may be (or pid ()), not just pid: it would fault :not-a-pid"]);
+});
+
+test('str/split with no limit gives a piece at least', () => {
+    clean('(str/len (car (str/split "a b" " ")))', { strict: true });
+    assert.deepEqual(warnings('(car (str/split "a b" " " 0))', { strict: true }),
+        ['1:6 car takes a non-empty list, and this may be (list str): it would fault :not-a-cons']);
+});
+
+test("a function's result keeps its shape unless it keeps changing", () => {
+    // pair's (x x+1) is a list of two, so its cadr is there
+    clean('(defun pair (x) (list x (+ x 1))) (+ 1 (cadr (pair 1)))', { strict: true });
+});
+
 // --- annotations ----------------------------------------------------------------------
 
 test('a call against its sig, and a body against its result', () => {

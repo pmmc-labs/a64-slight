@@ -7,6 +7,9 @@
 // as a test of a fault does. A warning not listed fails, and so does one
 // listed that doesn't come.
 //
+// Every library, checked as a program of its own with --strict, which is
+// how a module's insides are checked (D248), says nothing at all.
+//
 // Then t/types/NAME.slight (or .sly): the checker's own tests. What
 // slightc --check prints for each, with --strict if a line says
 // "; check: strict", is diffed against NAME.expected.
@@ -75,6 +78,12 @@ for (const file of [...programs('t', true), ...programs('examples', true), ...pr
             ...missing.map((m) => `  listed, but no warning at ${m}`),
         ].join('\n'));
     }
+}
+
+for (const file of programs('lib', false)) {
+    count++;
+    const lines = check(file, true);
+    if (lines.length > 0) failures.push([`FAIL ${file} (--strict, on its own)`, ...lines.map((l) => `  ${l}`)].join('\n'));
 }
 
 for (const file of programs('t/types', false)) {

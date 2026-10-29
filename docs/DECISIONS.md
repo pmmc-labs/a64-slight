@@ -5980,6 +5980,23 @@ see too, as with C's. A file without a header is spliced in, as before
   string where a response is wanted is found; one that always raises,
   whose result is `never`, still goes anywhere. Golden test
   `t/types/010`.)*
+
+  *(And: Stevan, "fix the libraries' strict warnings too". Every library
+  checks clean under `--strict` on its own now, and `make types` holds
+  them to it. Most of the 30 warnings were the checker's: `(join (fork
+  e))` and `(read (spawn e))` can't give `:ended`, since the value is kept
+  for the parent, which this is (D244, D245); `^$$` in a function that
+  waits is a pid, since an actor is never the root; `str/split` with no
+  limit gives a piece at least; and a function's result is widened to a
+  list only while it's still changing, so `(list x y)` stays a list of
+  two. The rest were the libraries', fixed by saying what they meant:
+  a calc token's position by a pattern (`calc/at`), the parts of an rpc
+  handler that `help` gives by a pattern, a fetched page's trailer by
+  line with a default, a last empty line dropped by a match, a URL's
+  directory up to its last `/`; `exec`'s answer for a caller that has
+  ended, which no one can get, raised rather than given; and
+  `rpc/next` and `rpc/peer` from a process with no parent, the root,
+  raise `:not-in-a-call`, where they faulted on `()`.)*
 - **In `.sly`, a prototype** (`fun f(x : int) : str;`) is a `sig` alone,
   as a `.slyi` header declares a function.
 - **`--strict` leaves a module's insides to its own check:** checking a

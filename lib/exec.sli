@@ -1,5 +1,5 @@
 ; lib/exec.slight's header (D248): what (@include :exec) gives a program,
 ; docs/LANGUAGE.md, "(@include :exec)". The rest of exec.slight is its own.
 
-(sig exec/run ((list str)) (or (:ok (shape any str)) (:error any) :ended))
-(sig exec/run-within (int (list str)) (or (:ok (shape any str)) (:error any) :ended))
+(sig exec/run ((list str)) (or (:ok (shape any str)) (:error any)))
+(sig exec/run-within (int (list str)) (or (:ok (shape any str)) (:error any)))

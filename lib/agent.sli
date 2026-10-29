@@ -17,4 +17,4 @@
 
 (sig agent/new (str str str (list Tool)) Agent)
 (sig agent/say (Agent str) nil)
-(sig agent/ask (Agent str) (or (:ok str) (:error any) :ended))
+(sig agent/ask (Agent str) (or (:ok str) (:error any)))
