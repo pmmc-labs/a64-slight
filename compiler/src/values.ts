@@ -57,6 +57,7 @@ export const ERRNO_NAMES: readonly string[] = [
     'enoent', 'eacces', 'eperm', 'eexist', 'eisdir', 'enotdir', 'enametoolong', 'eloop', 'erofs', 'enospc',
     'efbig', 'emfile', 'enfile', 'eio', 'econnrefused', 'econnreset', 'epipe', 'etimedout', 'eaddrinuse',
     'eaddrnotavail', 'ehostunreach', 'enetunreach', 'enotfound', 'too-big', 'bad-json', 'bad-sexp', 'io-error',
+    'enotempty', 'exdev', 'ebusy',
 ];
 
 // What JSON's values need beyond #true and #false, in RT_JSON_ order.
@@ -90,9 +91,12 @@ export const SOURCE_WORDS: readonly string[] = ['fs/read', 'fs/write', 'fs/appen
 // What :system says of the process table (D244), in RT_TABLE_ order.
 export const TABLE_WORDS: readonly string[] = ['records'];
 
+// What fs/stat says of a file (D254), in RT_STAT_ order.
+export const STAT_WORDS: readonly string[] = ['file', 'dir', 'link', 'other', 'size', 'modified', 'mode'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
-    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS,
+    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS, ...STAT_WORDS,
 ];

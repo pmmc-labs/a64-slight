@@ -6189,7 +6189,11 @@ through `replay.c`, so a run still replays.
   `fs/rename`, `fs/mkdir` (one level), each a Result, errors as a
   device's, `(name path)`; each a system call made where it's called,
   as opening a file is, recorded, and not made in a replay. Trees are
-  `lib/fs.slight`'s, in slight. Refines D151: a one-shot call whose wait
+  `lib/fs.slight`'s, in slight. *(Built: `fs/stat` doesn't follow a
+  link, `lstat`, its `:kind` then `:link`, so a walk or a delete can't
+  be led out of its tree, where the proposal had it follow one; and the
+  trees are `fs/mkdir-all`, `fs/delete-all` and `fs/walk`. Three errno
+  names came with it, `:enotempty`, `:exdev` and `:ebusy`.)* Refines D151: a one-shot call whose wait
   is the disk's may be a builtin, since a device, with no thread, would
   block the same way. Rejected: an `:fs` device of requests and
   replies; `:exec`, as now.

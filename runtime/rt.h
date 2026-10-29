@@ -180,18 +180,21 @@
 #define RT_ERR_BADJSON      24    // :bad-json      what was read isn't JSON (nor this)
 #define RT_ERR_BADSEXP      25    // :bad-sexp      what was read isn't an s-expression (nor this)
 #define RT_ERR_OTHER        26    // :io-error      anything else
-#define RT_ERR_COUNT        27
+#define RT_ERR_ENOTEMPTY    27    // :enotempty     deleting a directory that has something in it (D254)
+#define RT_ERR_EXDEV        28    // :exdev         renaming to another file system
+#define RT_ERR_EBUSY        29    // :ebusy
+#define RT_ERR_COUNT        30
 
 // The symbols JSON's values need beyond #true and #false (json.c):
 // RT_JSON_x is symbol RT_SYM_JSON + x.
-#define RT_SYM_JSON        102    // RT_SYM_ERRS + RT_ERR_COUNT
+#define RT_SYM_JSON        105    // RT_SYM_ERRS + RT_ERR_COUNT
 #define RT_JSON_NULL         0    // :null
 #define RT_JSON_OBJECT       1    // :object        (:object (key value) ...)
 #define RT_JSON_COUNT        2
 
 // And those the s-expression reader makes (sexp.c): RT_SEXP_x is symbol
 // RT_SYM_SEXP + x.
-#define RT_SYM_SEXP        104    // RT_SYM_JSON + RT_JSON_COUNT
+#define RT_SYM_SEXP        107    // RT_SYM_JSON + RT_JSON_COUNT
 #define RT_SEXP_SYMBOL       0    // :symbol        (:symbol "name"), a name the program doesn't mention
 #define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
 #define RT_SEXP_COUNT        2
@@ -199,7 +202,7 @@
 // What :system (process.c, D171) is asked and answers with: RT_SYS_x is
 // symbol RT_SYM_SYSTEM + x. A process's :heap and :stack are the fault
 // kinds' symbols, which have those names already.
-#define RT_SYM_SYSTEM      106    // RT_SYM_SEXP + RT_SEXP_COUNT
+#define RT_SYM_SYSTEM      109    // RT_SYM_SEXP + RT_SEXP_COUNT
 #define RT_SYS_PROCESSES     0    // :processes     asked for every process; and how many there are
 #define RT_SYS_PROCESS       1    // :process       asked for one; and (:process s info) for each
 #define RT_SYS_RUNTIME       2    // :runtime       asked for the runtime's counts, and (:runtime s info)
@@ -230,7 +233,7 @@
 // it, name being one of these (the same on macOS and Linux, where some of
 // their numbers aren't), or the number of any other. RT_EXEC_x is symbol
 // RT_SYM_EXEC + x.
-#define RT_SYM_EXEC        129    // RT_SYM_SYSTEM + RT_SYS_COUNT
+#define RT_SYM_EXEC        132    // RT_SYM_SYSTEM + RT_SYS_COUNT
 #define RT_EXEC_EXITED       0    // :exited
 #define RT_EXEC_SIGNAL       1    // :signal
 #define RT_EXEC_HUP          2    // :hup           the signals' names, without SIG
@@ -253,14 +256,14 @@
 // Who's at the other end of a Unix connection (socket/peer, process.c,
 // D235): ((:uid u) (:gid g) (:pid p)), :pid being RT_SYS_PID's. RT_PEER_x
 // is symbol RT_SYM_PEER + x.
-#define RT_SYM_PEER        146    // RT_SYM_EXEC + RT_EXEC_COUNT
+#define RT_SYM_PEER        149    // RT_SYM_EXEC + RT_EXEC_COUNT
 #define RT_PEER_UID          0    // :uid
 #define RT_PEER_GID          1    // :gid
 #define RT_PEER_COUNT        2
 
 // What kind a process is (D243), in :system's info as (:kind k): RT_KIND_x
 // is symbol RT_SYM_KIND + x.
-#define RT_SYM_KIND        148    // RT_SYM_PEER + RT_PEER_COUNT
+#define RT_SYM_KIND        151    // RT_SYM_PEER + RT_PEER_COUNT
 #define RT_KIND_KIND         0    // :kind
 #define RT_KIND_TASK         1    // :task          started with fork, or the root
 #define RT_KIND_ACTOR        2    // :actor         started with spawn or connect
@@ -268,7 +271,7 @@
 
 // What open (process.c, D243) opens for a task: RT_SOURCE_x is symbol
 // RT_SYM_SOURCE + x.
-#define RT_SYM_SOURCE      151    // RT_SYM_KIND + RT_KIND_COUNT
+#define RT_SYM_SOURCE      154    // RT_SYM_KIND + RT_KIND_COUNT
 #define RT_SOURCE_FS_READ    0    // :fs/read
 #define RT_SOURCE_FS_WRITE   1    // :fs/write
 #define RT_SOURCE_FS_APPEND  2    // :fs/append
@@ -280,9 +283,21 @@
 
 // What :system's (:runtime s info) says of the process table (D244):
 // RT_TABLE_x is symbol RT_SYM_TABLE + x.
-#define RT_SYM_TABLE       158    // RT_SYM_SOURCE + RT_SOURCE_COUNT
+#define RT_SYM_TABLE       161    // RT_SYM_SOURCE + RT_SOURCE_COUNT
 #define RT_TABLE_RECORDS     0    // :records       entries in use: running, open, or keeping a value
 #define RT_TABLE_COUNT       1
+
+// What fs/stat (files.c, D254) says of a file, (:kind k) among them:
+// RT_STAT_x is symbol RT_SYM_STAT + x.
+#define RT_SYM_STAT        162    // RT_SYM_TABLE + RT_TABLE_COUNT
+#define RT_STAT_FILE         0    // :file
+#define RT_STAT_DIR          1    // :dir
+#define RT_STAT_LINK         2    // :link          a symbolic link, not followed
+#define RT_STAT_OTHER        3    // :other         a socket, a pipe, a device
+#define RT_STAT_SIZE         4    // :size
+#define RT_STAT_MODIFIED     5    // :modified      microseconds since 1970, as clock/now
+#define RT_STAT_MODE         6    // :mode          the permission bits
+#define RT_STAT_COUNT        7
 
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
@@ -596,6 +611,15 @@ rt_value_t rt_sleep(rt_value_t ms, const char *site) RT_ASM(rt_sleep);
 // (clock/us): the microseconds since the program started, on the clock
 // the timers go by (D208).
 rt_value_t rt_clock_us(const char *site) RT_ASM(rt_clock_us);
+
+// Files beyond reading and writing (files.c, D254): each gives (:ok x) or
+// (:error (name path)), name errno's, as rt_errno_name (process.c) has it.
+uint64_t   rt_errno_name(int err);
+rt_value_t rt_fs_list(rt_value_t path, const char *site) RT_ASM(rt_fs_list);
+rt_value_t rt_fs_stat(rt_value_t path, const char *site) RT_ASM(rt_fs_stat);
+rt_value_t rt_fs_delete(rt_value_t path, const char *site) RT_ASM(rt_fs_delete);
+rt_value_t rt_fs_rename(rt_value_t from, rt_value_t to, const char *site) RT_ASM(rt_fs_rename);
+rt_value_t rt_fs_mkdir(rt_value_t path, const char *site) RT_ASM(rt_fs_mkdir);
 
 // (clock/now): the time of day, microseconds since 1970-01-01T00:00:00Z,
 // recorded; on the virtual clock, SLIGHT_EPOCH's plus the virtual time

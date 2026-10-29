@@ -26,6 +26,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdlib.h>
@@ -46,7 +47,8 @@ enum { OFF, RECORD, REPLAY };
 enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
-    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER, IO_REALTIME,
+    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER, IO_REALTIME, IO_LIST, IO_STAT, IO_REMOVE,
+    IO_RENAME, IO_MKDIR,
 };
 
 static const char *const names[] = {
@@ -58,6 +60,8 @@ static const char *const names[] = {
     [IO_WINSIZE] = "the screen's size", [IO_SPAWN] = "a command", [IO_WAIT] = "a wait for a command",
     [IO_KILL] = "a kill", [IO_PIPE] = "a pipe", [IO_LISTEN_UNIX] = "a listen at a path",
     [IO_PEER] = "a socket's peer", [IO_REALTIME] = "the time of day",
+    [IO_LIST] = "a directory's names", [IO_STAT] = "a file's stat", [IO_REMOVE] = "a remove",
+    [IO_RENAME] = "a rename", [IO_MKDIR] = "a mkdir",
 };
 
 static int      mode;
@@ -123,14 +127,18 @@ static int64_t done_with(int kind, int64_t result, const void *data, size_t len)
 
 // --- replaying ----------------------------------------------------------------
 
-// The next entry, which must be of this kind, its bytes put at data (at
-// most cap of them; *len says how many), and errno as it was.
-static int64_t next(int kind, void *data, size_t cap, uint32_t *len) {
+__attribute__((noreturn))
+static void spoilt(int kind) {
+    char say[160];
+    snprintf(say, sizeof say, "the record is cut short or spoilt at entry %" PRIu64 " (%s)", count + 1, name(kind));
+    stop(say);
+}
+
+// The next entry's head, which must be of this kind: its result, its
+// errno and how many bytes follow.
+static void head(int kind, int64_t *result, int32_t *err, uint32_t *n) {
     char    say[160];
     uint8_t k;
-    int64_t result;
-    int32_t err;
-    uint32_t n;
     if (!get(&k, 1)) {
         snprintf(say, sizeof say, "the record ends at entry %" PRIu64 ", where the run asks for %s", count + 1, name(kind));
         stop(say);
@@ -140,11 +148,33 @@ static int64_t next(int kind, void *data, size_t cap, uint32_t *len) {
                  count + 1, name(kind), name(k));
         stop(say);
     }
-    if (!get(&result, sizeof result) || !get(&err, sizeof err) || !get(&n, sizeof n) || n > cap || (n && !get(data, n))) {
-        snprintf(say, sizeof say, "the record is cut short or spoilt at entry %" PRIu64 " (%s)", count + 1, name(kind));
-        stop(say);
-    }
+    if (!get(result, sizeof *result) || !get(err, sizeof *err) || !get(n, sizeof *n)) spoilt(kind);
+}
+
+// The next entry, which must be of this kind, its bytes put at data (at
+// most cap of them; *len says how many), and errno as it was.
+static int64_t next(int kind, void *data, size_t cap, uint32_t *len) {
+    int64_t  result;
+    int32_t  err;
+    uint32_t n;
+    head(kind, &result, &err, &n);
+    if (n > cap || (n && !get(data, n))) spoilt(kind);
     if (len) *len = n;
+    count++;
+    errno = err;
+    return result;
+}
+
+// The same, its bytes, however many, in memory of their own (*data, to
+// free).
+static int64_t next_alloc(int kind, char **data, uint32_t *len) {
+    int64_t  result;
+    int32_t  err;
+    uint32_t n;
+    head(kind, &result, &err, &n);
+    *data = rt_must(malloc(n ? n : 1));
+    if (n && !get(*data, n)) spoilt(kind);
+    *len = n;
     count++;
     errno = err;
     return result;
@@ -263,6 +293,66 @@ int64_t rt_io_realtime(void) {
 int64_t rt_io_epoch(const char *given) {
     if (mode == REPLAY) return replayed(IO_REALTIME);
     return done(IO_REALTIME, given ? strtoll(given, NULL, 10) * 1000000 : realtime());
+}
+
+// --- files (D254) -------------------------------------------------------------
+
+int64_t rt_io_list(const char *path, char **names, uint32_t *len) {
+    if (mode == REPLAY) return next_alloc(IO_LIST, names, len);
+    DIR    *d = opendir(path);
+    rt_buf_t b = { 0 };
+    int64_t n = 0;
+    if (d) {
+        struct dirent *e;
+        errno = 0;
+        while ((e = readdir(d)) != NULL) {
+            if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+            rt_buf_add(&b, e->d_name, strlen(e->d_name) + 1);
+            n++;
+        }
+        int err = errno;
+        closedir(d);
+        if (err) n = -1, errno = err;
+    } else {
+        n = -1;
+    }
+    *names = rt_must(malloc(b.len ? b.len : 1));
+    if (b.len) memcpy(*names, b.bytes, b.len);
+    *len = (uint32_t)b.len;
+    rt_buf_free(&b);
+    return done_with(IO_LIST, n, *names, *len);
+}
+
+int rt_io_stat(const char *path, int64_t got[4]) {
+    if (mode == REPLAY) return (int)next(IO_STAT, got, 4 * sizeof *got, NULL);
+    struct stat st;
+    int r = lstat(path, &st);
+    if (r == 0) {
+        got[0] = S_ISREG(st.st_mode) ? 0 : S_ISDIR(st.st_mode) ? 1 : S_ISLNK(st.st_mode) ? 2 : 3;
+        got[1] = (int64_t)st.st_size;
+#ifdef __APPLE__
+        got[2] = (int64_t)st.st_mtimespec.tv_sec * 1000000 + st.st_mtimespec.tv_nsec / 1000;
+#else
+        got[2] = (int64_t)st.st_mtim.tv_sec * 1000000 + st.st_mtim.tv_nsec / 1000;
+#endif
+        got[3] = (int64_t)(st.st_mode & 07777);
+    }
+    return (int)done_with(IO_STAT, r, got, r == 0 ? 4 * sizeof *got : 0);
+}
+
+int rt_io_remove(const char *path) {
+    if (mode == REPLAY) return (int)replayed(IO_REMOVE);
+    return (int)done(IO_REMOVE, remove(path));
+}
+
+int rt_io_rename(const char *from, const char *to) {
+    if (mode == REPLAY) return (int)replayed(IO_RENAME);
+    return (int)done(IO_RENAME, rename(from, to));
+}
+
+int rt_io_mkdir(const char *path) {
+    if (mode == REPLAY) return (int)replayed(IO_MKDIR);
+    return (int)done(IO_MKDIR, mkdir(path, 0777));
 }
 
 // The sets as select() left them, when it says something is ready.

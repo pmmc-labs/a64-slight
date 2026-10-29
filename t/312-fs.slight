@@ -1,0 +1,47 @@
+; Files beyond reading and writing (D254): a directory made, and made
+; again; its names, sorted by their bytes; a file's kind and size, and a
+; directory's and a link's, not followed; a rename; and a delete, of a
+; directory with something in it, of a file, of what isn't there; and
+; what each says when it fails, errno's name and the path. A file's time
+; and mode, which depend on the clock and the umask, are only said to be
+; numbers.
+
+(@include :fs)
+(@include :exec)
+
+(let d "build/t/312-fs")
+(defun at (name) (str "build/t/312-fs/" name))
+
+; What a run before this one may have left, gone, whatever it was.
+(map fs/delete (list (at "sub") (at "a.txt") (at "b.txt") (at "c.txt") (at "link") d))
+
+(defun stat (path)
+    (match (fs/stat path)
+        ((:ok info)
+            (list (lookup :kind info)
+                  (if (eq? (lookup :kind info) :file) (lookup :size info) :-)
+                  (int? (lookup :modified info))
+                  (int? (lookup :mode info))))
+        (other other)))
+
+(pprint (fs/mkdir d))
+(pprint (fs/mkdir d))
+(pprint (fs/list d))
+(spew (at "b.txt") (list "hello"))
+(spew (at "a.txt") (list ""))
+(pprint (fs/mkdir (at "sub")))
+(pprint (exec/run (list "ln" "-s" "a.txt" (at "link"))))
+(pprint (fs/list d))
+(pprint (map stat (list (at "b.txt") (at "a.txt") (at "sub") (at "link") (at "missing"))))
+(pprint (fs/rename (at "b.txt") (at "c.txt")))
+(pprint (fs/rename (at "b.txt") (at "d.txt")))
+(pprint (fs/list d))
+(pprint (fs/list (at "a.txt")))
+(pprint (fs/list (at "missing")))
+(pprint (fs/mkdir (at "no/such")))
+(pprint (fs/delete d))
+(pprint (match (fs/stat "bad\u{0}path") ((:error (why _)) why)))
+(pprint (map fs/delete (list (at "sub") (at "a.txt") (at "c.txt") (at "link") (at "c.txt"))))
+(pprint (fs/delete d))
+(pprint (fs/list d))
+:done

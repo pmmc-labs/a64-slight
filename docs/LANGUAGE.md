@@ -1181,6 +1181,31 @@ still open in it included (D205).
 
 `lib/fs.slight` has `slurp` and `spew`, written this way.
 
+What isn't reading or writing a file is a builtin, not a device (D254):
+each makes its system call where it's called, as opening a file does,
+and gives `(:ok x)`, or `(:error (name path))` with errno's name as a
+device's failure has it, `:enotempty`, `:exdev` and `:ebusy` among them.
+A path with a NUL in it is `:io-error`. Each is recorded, so a run
+replays without the files; one that changes something isn't made in a
+replay.
+
+- `(fs/list dir)`: the names in the directory, but `.` and `..`, sorted
+  by their bytes, so the order is the same on every file system.
+- `(fs/stat path)`: `(:ok ((:kind k) (:size n) (:modified us) (:mode
+  m)))`: `k` is `:file`, `:dir`, `:link` or `:other` (a socket, a pipe,
+  a device); `us`, the time it was last changed, as `clock/now` counts;
+  and `m`, its permission bits (`493` is `0755`). A symbolic link isn't
+  followed: it's `:link`, its size its target's name's.
+- `(fs/delete path)`: deletes a file, or a directory with nothing in it
+  (`:enotempty` otherwise). `(:ok ())`.
+- `(fs/rename from to)`: moves `from` to `to`, replacing a file there.
+  A failure names `from`. `(:ok ())`.
+- `(fs/mkdir path)`: makes a directory, one level, readable and writable
+  by whom the umask allows. `(:ok ())`.
+
+`lib/fs.slight` has trees on these: `fs/mkdir-all`, `fs/delete-all` and
+`fs/walk`.
+
 ### Sockets
 
     (connect :tcp "host:port" expr)
@@ -1952,7 +1977,7 @@ anything.
 ### (@include :fs)
 
 `lib/fs.slight`: whole files at once, on top of `open`, each in a task
-of its own (D243). Each blocks only its caller.
+of its own (D243), which blocks only its caller; and trees.
 
 - `(slurp path)`: `(:ok lines)`, the file's lines without their
   newlines, as a list of strings.
@@ -1961,6 +1986,20 @@ of its own (D243). Each blocks only its caller.
 
 Either gives `(:error (name path))` if the file can't be opened, read or
 written: `(:error (enoent "notes.txt"))`, say.
+
+And trees, on the `fs/` builtins (Files, under Devices; D254), none of
+them following a link, so none leaves its tree. Each gives `(:ok x)`, or
+the first failure, `(:error (name path))`.
+
+- `(fs/mkdir-all path)`: makes the directory and any it's in that aren't
+  there, as `mkdir -p` does. One that's there already is no failure, if
+  it's a directory. `(:ok ())`.
+- `(fs/delete-all path)`: deletes the file, or the directory and all in
+  it, as `rm -r` does; a link is deleted, not what it points to. What
+  isn't there is no failure. `(:ok ())`.
+- `(fs/walk dir)`: `(:ok paths)`, every path in the tree, `dir/name` and
+  deeper, but not `dir`: each directory before what's in it, and a
+  directory's names in their bytes' order.
 
 ### (@include :time)
 

@@ -101,6 +101,19 @@ int rt_io_wait(int child, int *status, int nohang);
 int rt_io_kill(int pid);
 int rt_io_pipe(int fds[2]);
 
+// Files beyond reading and writing (D254). rt_io_list gives a directory's
+// names but . and .., each ended by a NUL, in *names (malloc'd, *len
+// bytes): how many, or -1 with errno set. rt_io_stat is lstat, its kind (0
+// a file, 1 a directory, 2 a link, 3 anything else), size, modified time
+// in microseconds and mode's permission bits in got. rt_io_remove (a file
+// or an empty directory), rt_io_rename and rt_io_mkdir (mode 0777, less
+// the umask) are the calls, and in a replay aren't made, as a write isn't.
+int64_t rt_io_list(const char *path, char **names, uint32_t *len);
+int     rt_io_stat(const char *path, int64_t got[4]);
+int     rt_io_remove(const char *path);
+int     rt_io_rename(const char *from, const char *to);
+int     rt_io_mkdir(const char *path);
+
 // A text file read a line at a time (the hosts file, resolv.conf).
 FILE *rt_io_fopen(const char *path);
 char *rt_io_fgets(char *line, int size, FILE *f);

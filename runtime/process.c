@@ -2197,7 +2197,7 @@ static rt_device_t *sockets;            // open sockets and commands, and closin
 static uint64_t     ndevices;           // open devices
 static rt_device_t *graveyard;          // closed sockets
 
-static uint64_t errno_name(int err) {
+uint64_t rt_errno_name(int err) {
     switch (err) {
         case ENOENT:        return RT_ERR_ENOENT;
         case EACCES:        return RT_ERR_EACCES;
@@ -2225,13 +2225,16 @@ static uint64_t errno_name(int err) {
         case ERR_TOOBIG:    return RT_ERR_TOOBIG;
         case ERR_BADJSON:   return RT_ERR_BADJSON;
         case ERR_BADSEXP:   return RT_ERR_BADSEXP;
+        case ENOTEMPTY:     return RT_ERR_ENOTEMPTY;
+        case EXDEV:         return RT_ERR_EXDEV;
+        case EBUSY:         return RT_ERR_EBUSY;
         default:            return RT_ERR_OTHER;
     }
 }
 
 // (name path), for errno err, in cells (4 words).
 static rt_value_t io_reason(rt_value_t *cells, int err, rt_value_t path) {
-    return rt_cons_at(cells, rt_symbol(RT_SYM_ERRS + errno_name(err)), rt_cons_at(cells + 2, path, RT_NIL));
+    return rt_cons_at(cells, rt_symbol(RT_SYM_ERRS + rt_errno_name(err)), rt_cons_at(cells + 2, path, RT_NIL));
 }
 
 // A string box of len bytes, in space with room for it (len / 8 + 6

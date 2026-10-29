@@ -168,6 +168,11 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'sleep': fn([INT], NIL_T),
     'clock/us': fn([], INT),
     'clock/now': fn([], INT),
+    'fs/list': fn([STR], okOr(listOf(STR), ANY)),
+    'fs/stat': fn([STR], okOr(listOf(ANY), ANY)),
+    'fs/delete': fn([STR], okOr(NIL_T, ANY)),
+    'fs/rename': fn([STR, STR], okOr(NIL_T, ANY)),
+    'fs/mkdir': fn([STR], okOr(NIL_T, ANY)),
 };
 
 // The type predicates, and what each says yes to: in a test, they narrow.
