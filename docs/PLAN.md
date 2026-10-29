@@ -1220,6 +1220,208 @@ written: TLS, hashes, base64, random bytes, compression, graphemes.
 SQLite waits on D151's open point, a thread for a library that can only
 block.
 
+### Numbers in bulk (proposed, Oct 2026)
+
+**(open)** Three proposals, for simulation: actors as agents, the
+virtual clock as simulated time, seeded orders as Monte Carlo over
+schedules, and replay as reproducibility are there already; what such
+programs lack is numbers in bulk, the physics, statistics and fields
+over a grid. If agreed, D250's "not for" loses numbers in bulk, slight
+becoming a language for services *and simulations* that can be
+replayed, and D249's order gains these after its step 1, with more than
+one core moving up, since numbers in bulk on one core aren't worth the
+bother. Tensors, autodiff and a GPU stay out (a GPU's results differ by
+card and driver, so replay would have to record them all, and its
+kernels would need a language of their own).
+
+In the order they'd be built, each its own step with golden tests, and
+each useful without the ones after it.
+
+#### 1. A libm that gives the same bits everywhere
+
+**The problem.** `math/sin` and the rest call the system's libm, and
+macOS's and glibc's differ in the last bit (D76): `(math/tan 1.0)` is
+`1.557407724654902` on one and `1.5574077246549023` on the other. So a
+run recorded on the Mac doesn't replay on Linux once it computes with
+them, the golden tests compare them to 12 places, and `forest`, `coral`
+and `waves` aren't golden tests at all. The runtime's C is compiled
+with clang's default `-ffp-contract=on`, which may fuse `a * b + c` into
+one rounding on AArch64 but can't on x86-64's baseline, a second way
+the two targets could differ.
+
+**Options.**
+- (a) As now: D76, and replay on the machine that recorded.
+- (b) Vendor CORE-MATH (MIT, plain C, D152): every function correctly
+  rounded, so a result is *the* double nearest the true value, the same
+  everywhere, and what an independent model (Python's `mpmath`) says.
+- (c) Vendor musl's libm (MIT, fdlibm's lineage): the same code on
+  every machine, so the same bits, but not correctly rounded, so a
+  test's expected value has to come from musl itself.
+- (d) LLVM's libc math: correctly rounded too, but C++, and a bigger
+  build.
+
+**Recommendation: (b),** with musl's version of any function CORE-MATH
+lacks (as far as I know it has all twenty-one that `math/` needs from a
+libm: `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh
+exp expm1 log log2 log10 log1p pow cbrt hypot`; to confirm when it's
+vendored). `sqrt`, `floor`, `ceil`, `round` and `trunc` are exact
+already. And `-ffp-contract=off` for the runtime and everything
+vendored; the compiled code already does a multiply and an add as two
+instructions. Then D76 is retired for `math/`: its golden tests compare
+exactly, from `mpmath`, and `forest`, `coral` and `waves` can be golden
+tests. Parsing floats (`strtod`, correctly rounded on both systems) and
+printing them (our own, shortest) are the same everywhere already, and
+`hash` makes every NaN alike (D209).
+
+**What it costs.** It would be the first vendored library, before
+mbedTLS (12c), so it builds D152's machinery: `vendor/`, its `VENDOR`
+files, compiled once per target and kept, as the runtime is (D150).
+CORE-MATH's functions are a little slower than glibc's (a correctly
+rounded result sometimes needs a second, slower step); `bench/` would
+say whether `n-body` and `spectral-norm` notice. Nothing in the
+language changes.
+
+**To settle:** (b) or (c); linked into every program (it's small) or
+only into those that call `math/` (D152's rule).
+
+#### 2. Shared buffers: big immutable data off the heap
+
+**The problem.** A message is copied into its receiver (D177, D240),
+so an array of a million floats, or a 10 MB string, costs a copy at
+every send, and its full size in every heap it reaches, against each
+one's cap (D202, D233). A device's read is copied too, from the
+runtime's buffer into its owner's heap.
+
+**Options.**
+- (a) As now: copy everything.
+- (b) Erlang's reference-counted binaries: a string or array of at
+  least a threshold's size lives off the heap, in a buffer with a count
+  of references; the heap holds a small handle to it; a send copies the
+  handle and adds one to the count; nothing is ever copied, since
+  nothing changes.
+- (c) A heap that all processes share, for big values, with a collector
+  of its own: a second collector, and pauses that cross processes.
+- (d) Moving a value on send, the sender losing it: needs the checker
+  to know a value is used once, a linear type; machinery D247 left out.
+
+**Recommendation: (b),** and it's safe here for the reason D200's
+collector needs no write barrier: what's shared never changes, and
+holds no pointers (only strings and arrays of numbers go off the heap,
+never lists, tuples or closures), so no buffer points into any heap,
+and no heap's collector has to know about another's.
+
+How it works:
+- A handle is a box of three words: the header (its type, string or
+  array, and a flag saying it's shared), the buffer's address, and an
+  offset, so a slice of a shared string or array is a handle too, made
+  without copying. `rt_string_bytes` and the like read through it, a
+  branch on the flag; nothing in the compiled code reads a string's
+  bytes, so the change is the runtime's alone.
+- Each process keeps a list of its handles, young and old as its heap
+  is (D200). After a collection, a handle the collector didn't copy is
+  garbage, and its buffer's count goes down; a buffer at zero is freed.
+  A process's end lets go of all of its handles.
+- A message's chunk (D177) keeps the handles it carries, and they join
+  the receiver's list when it takes the message; a message never taken
+  (a dead letter, a mailbox at the end) lets go of them.
+- Erlang's lesson: a process that allocates little never collects, so
+  it can hold dead buffers for ever. So the bytes a process's young
+  handles refer to count toward collecting it, as if they were in its
+  nursery, and all its handles' bytes count toward its cap.
+- A device reads anything at the threshold or more straight into a
+  buffer, and its owner gets the handle; writing a shared string writes
+  from the buffer.
+- `SLIGHT_POISON` fills a freed buffer; `SLIGHT_GC_VERIFY` checks each
+  buffer's count against the handles that refer to it; `:system` says
+  how many bytes of buffers each process holds, and the runtime in all.
+  Replay isn't touched: where a value lives is never seen.
+- One core now, so the counts are plain integers; with more cores
+  they'd be atomic, and a buffer, never changing, can be read from any.
+
+**What it costs.** Most of the work is in `process.c`: allocating
+buffers, the handle lists, the collector and the message copy, and a
+process's end. Strings gain from it at once, before there are arrays.
+
+**To settle:** the threshold (4 KB to start, below which copying costs
+less than counting, tuned with a `payload` of big strings); whether a
+handle counts its whole buffer toward the cap, or only its slice (the
+whole, I'd say: it's what it keeps alive); and a small slice of a big
+buffer keeping all of it alive, Erlang's known trap: share a slice only
+when it's at the threshold, copy it below.
+
+#### 3. Arrays of numbers
+
+**The problem.** A vector of floats today is a list (16 bytes a cell,
+and a 16-byte box for each float) or a tuple (8 bytes for a pointer to
+each box): three to four times the memory of the numbers, a pointer to
+follow for each, and every result a new box.
+
+**Options.**
+- (a) Arrays of anything, as tuples are: no gain for numbers, which
+  stay boxed.
+- (b) Arrays of one kind of number, unboxed: `:float` (IEEE doubles)
+  and `:int` (slight's 63-bit integers, so an element always reads
+  back), as SRFI 4's vectors and NumPy's arrays are.
+- (c) (b) with shapes, n-dimensional, in the runtime: NumPy's model,
+  and most of its machinery.
+
+**Recommendation: (b),** one-dimensional, immutable, with shapes and
+matrices a library in slight on top. An array of numbers holds no
+pointers, so the collector never walks it (D240), and filling a fresh
+one in place can't break D200's rule that nothing old points at
+anything young.
+
+- Printed `#float(1.0 2.5)` and `#int(1 2)`, in slight's names rather
+  than SRFI 4's `#f64`; `sexp/print` writes that and `sexp/parse` reads
+  it back (D163), `json/print` writes a JSON array. No literal in
+  source, as there's none for a tuple (D176).
+- `eq?` and `hash` compare kind and elements, as for tuples, an element
+  as `eq?` compares floats; an `#int` array is never `eq?` to a
+  `#float` one.
+- Types: `(array float)` and `(array int)` (`array<float>` in `.sly`).
+- The builtins, under `array/`, few, named as `tuple/`'s are where
+  they do the same:
+  - making one: `(array/make :float n x)`, `(list->array :float xs)`,
+    `(array->list a)`, as `tuple/make`, `list->tuple` and `tuple->list`;
+  - reading: `array/len`, `(array/get a i)` (`:out-of-range`, as
+    `tuple/get`), `(array/slice a from to)`, `array/concat`;
+  - `(array/set a i x)`: a copy with one element changed, O(n), as
+    `tuple/set` is, and not for loops;
+  - element by element, each operand an array of the same kind and
+    length or a number: `array/add`, `array/sub`, `array/mul`,
+    `array/div`, faulting as `+` and the rest do (an `#int` sum that
+    overflows faults `:overflow`);
+  - reductions: `array/sum`, `array/dot`, `array/min`, `array/max`,
+    in order, left to right, so the answer is the obvious loop's, and a
+    Python loop is a model of it; clang doesn't vectorize a float
+    reduction without being told it may reorder, so the order holds,
+    while element-by-element loops are free to vectorize.
+- In the prelude: `(array/generate :float n f)`, an array of `(f i)`,
+  written in slight, filling a fresh array through a builtin only
+  `lib/` may call (C can't call back into slight with the collector
+  walking frames, D166, so it can't be a C loop); and `array/map` and
+  `array/fold` on it.
+- Shared buffers (2) make a big one free to send; without them arrays
+  work, copied, as strings do now.
+- Matrices: `lib/matrix.slight`, a module, a matrix a tuple of its rows,
+  its columns and an array; the one operation too slow in slight,
+  multiplying, a builtin, `(array/matmul a b n k m)`, our own loop, each
+  element summed in order. Not BLAS: its order changes with its blocking
+  and its threads, so its bits do.
+
+**What it costs.** A new box type in `rt.h` and `values.ts`, about
+twenty builtins in C (`runtime/arrays.c`) with their types in
+`builtins.ts`, `sexp.c` reading and printing them, and the prelude's few.
+Floats stay boxed elsewhere: unboxing them in a loop is TYPES.md's step
+5, types in code generation, which can come after, with benchmarks.
+
+**To settle:** `:int` arrays at all, or `:float` alone to start;
+`#float(...)` or SRFI 4's `#f64(...)`; whether element by element mixes
+an `:int` array with a float (I'd say no: convert it first, through
+`array->list`, or a builtin for it if that's too slow); and
+left to right, or pairwise summation (more accurate, as NumPy's, and
+just as determined, but needing a model of its own for tests).
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written

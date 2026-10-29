@@ -293,7 +293,10 @@ spliced in as before; golden test 308. What's missing to make slight
 general purpose, in order, is agreed (D249, `docs/PLAN.md`, "Toward
 general purpose"), with two points open: C libraries vendored only or
 an FFI too, and regular expressions; and what slight is for, and
-isn't, in DESIGN.md and the guide's README (D250). **Next:** to settle with Stevan
+isn't, in DESIGN.md and the guide's README (D250); and three proposals
+for numbers in bulk, for simulation, **(open)**: a libm that gives the
+same bits everywhere, shared buffers off the heap, and arrays of
+numbers (`docs/PLAN.md`, "Numbers in bulk"). **Next:** to settle with Stevan
 (`docs/PLAN.md`, 15, and those two points). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
