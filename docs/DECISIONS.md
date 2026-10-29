@@ -6065,9 +6065,9 @@ and D152, and withdraws TLS from 12c.
   HTTP or a Unix socket (D231); FastCGI and uwsgi were considered and
   aren't needed, plain HTTP behind a proxy being the simpler. A client's
   `https://` goes through curl, run by `lib/http.slight` with `:exec`,
-  with the system's certificates (the Keychain on macOS), proxies and
-  HTTP/2; the same responses as plain HTTP, and streamed as
-  `http/stream` streams (`curl -N`). Between machines, ssh
+  with the system's certificates (the Keychain on macOS) and proxies;
+  the same responses as plain HTTP, and streamed as `http/stream`
+  streams. Between machines, ssh
   (`rpc/exec`, D225). Each is updated by the system's package manager,
   a crash in one ends only it, and what crosses comes through `:exec`,
   so a run still replays (D250's rule).
@@ -6089,4 +6089,21 @@ and D152, and withdraws TLS from 12c.
   that changes daily); a GPU device of our own (parked already).
 - **Left open:** SQLite (its risk is small enough to vendor, but it
   needs D151's thread; its command-line tool through `:exec` would do,
-  more clumsily); how curl's failures become errors.
+  more clumsily).
+
+  *(Built, Oct 2026, Stevan: "lets build that one": curl is asked for
+  the reply as it came, `-i --raw --http1.1`, its head included but not
+  a proxy's tunnel's (`--suppress-connect-headers`), no `Expect`, so no
+  100 Continue, and nothing on stderr (`-s`), which `:exec` mixes with
+  stdout; so the code that reads a socket's reply reads it, chunks and
+  all. It sends what `http://` does: no User-Agent or Accept of curl's,
+  no Content-Type unless one's given; `--proto =https`, and no redirect
+  followed. Its exit code is the error, in the device's words where
+  there are some (6 `:enotfound`, 7 `:econnrefused`, 28 `:etimedout`, 55
+  `:epipe`, 56 `:econnreset`), `(:curl code "host:port")` for the rest;
+  and a reply counts only once curl has ended with 0, since one read to
+  the end of its output may have been cut short. `http/parse-url` takes
+  `https://`, port 443. It found a compiler bug: `connect` in tail
+  position compiled its source, when that was a call, as the function's
+  tail call. Golden tests 309, 310, 211 and 220, and `t/live.py`'s
+  https.)*

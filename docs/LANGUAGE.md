@@ -2048,9 +2048,13 @@ answer comes in time.
 ### (@include :http)
 
 `lib/http.slight`: HTTP/1.1 on `:tcp`, a server and a client (D173). One
-request and one reply to each connection, which then closes. HTTPS
-is to go through curl (D251); till then an `https://` URL gives
-`:no-tls`.
+request and one reply to each connection, which then closes. A client's
+`https://` goes through curl, run as a command (`:exec`), which must be
+installed: it checks the server's certificate against the system's, and
+goes through a proxy if the environment names one (`https_proxy`), and
+what comes back is read as a socket's reply is, so it's the same
+responses and streams (D251). A server leaves TLS to a proxy in front of
+it, such as nginx or Caddy.
 
     (@include :http)
 
@@ -2084,10 +2088,16 @@ is to go through curl (D251); till then an `https://` URL gives
   no body) give `(:ok response)`, the response in the same shape, or
   `(:error reason)`. A reason is the device's, such as `(:econnrefused
   "127.0.0.1:1")`, or one of `(:bad-http what)` for a reply that isn't
-  HTTP, `(:bad-url url)`, `:no-tls` for an `https` URL, and `:closed` for
-  a connection that closed before its reply. They wait as long as the
-  reply takes (D236), in a task the caller joins, so an actor, or a
-  handler, can ask too.
+  HTTP, `(:bad-url url)`, and `:closed` for a connection that closed
+  before its reply. Over `https://`, curl's exit code says what failed, in
+  the device's words where there are some, with the host and port:
+  `:enotfound` (6), `:econnrefused` (7), `:etimedout` (28), `:epipe` (55)
+  and `:econnreset` (56); and `(:curl code "host:port")` for the rest, 35
+  and 60 among them, TLS failing, as curl's manual lists them. A reply
+  isn't given till curl has ended with 0, so one cut short is never taken
+  for a whole one. `(:enoent "curl")` means there's no curl. They wait as
+  long as the reply takes (D236), in a task the caller joins, so an
+  actor, or a handler, can ask too.
 - `(http/request-within ms method url headers body)` is `http/request`
   with `(:error :timeout)` if the reply hasn't all come in `ms`
   milliseconds. Its timer doesn't hold up the program's end once the
@@ -2099,8 +2109,8 @@ is to go through curl (D251); till then an `https://` URL gives
   and 304, which have no body. `Expect: 100-continue` gets its 100 at
   once.
 - `(http/parse-url url)`: `(:ok host port target)` for
-  `http://host[:port][/path[?query]]`, the port 80 and the target `"/"`
-  when none is given; `(:error :no-tls)` for `https://`, and `(:error
+  `http://host[:port][/path[?query]]` and `https://...`, the port 80, or
+  443 for `https`, and the target `"/"` when none is given; and `(:error
   (:bad-url url))` for anything else. It's what `http/request` reads its
   URL with.
 - `(http/stream method url headers body how)` makes the same request, and

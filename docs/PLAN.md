@@ -394,10 +394,15 @@ programs the system keeps up to date, run as processes. A server sits
 behind a proxy that ends TLS (nginx, Caddy, a cluster's ingress), on
 plain HTTP or a Unix socket (D231); a client's `https://` goes through
 curl, run by `lib/http.slight` with `:exec`, with the system's
-certificates, proxies and HTTP/2; and between machines, ssh
-(`rpc/exec`, D225). Still to build: `https://` through curl, in
-`http/request` and `http/stream`, giving the same responses as plain
-HTTP (to settle: how curl's exit codes and messages become errors).
+certificates and proxies; and between machines, ssh (`rpc/exec`,
+D225). Built (Oct 2026): `https://` through curl in `http/request`,
+`http/request-within` and `http/stream`, curl asked for the raw HTTP/1.1
+reply, which the same code reads as a socket's; curl's exit code as the
+error, in the device's words where there are some, and a reply given
+only once curl has ended with 0. Golden tests 309 (a stand-in for curl,
+`t/data/curl/curl`), 211 and 220 (real curl, refused), 310 (a compiler
+bug it met: `connect`'s source compiled as a tail call when `connect`
+was one), and `t/live.py`'s https, real curl over real TLS.
 
 #### 12d. Looking up host names (done)
 
@@ -573,8 +578,8 @@ calling its devices, connections kept up and `:system` asked from
 outside (D228, golden tests 280–282; done). Next, to settle with the
 user: offering an agent's tools over `rpc`, and to whom a remote call's
 `approve` goes;
-`log`, a builtin; `https://` through curl in `lib/http.slight` (D251),
-and with it a reader of server-sent events, for a hosted model; and
+`log`, a builtin; a reader of server-sent events, for a hosted model,
+now that `https://` goes through curl (D251, golden test 309); and
 `llama-server` run by the program, with the OpenAI-compatible protocol
 in `lib/agent.slight` beside ollama's (D251).
 
@@ -1195,7 +1200,8 @@ written) as the answer to what they're wanted for.
      WebSockets', msgpack) need it.
    - A log device: levels, structured lines to stderr, recorded.
 2. **HTTPS, and what TLS would have brought** (D251, in place of TLS
-   on mbedTLS): `https://` through curl in `lib/http.slight`, and a
+   on mbedTLS): `https://` through curl in `lib/http.slight` (done,
+   golden test 309), and a
    server behind a proxy that ends TLS; SHA-2 and HMAC in C of our own,
    small and fixed, which never need a security fix; base64, and random
    bytes from the system for keys and tokens, through `replay.c` (not

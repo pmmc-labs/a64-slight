@@ -674,7 +674,7 @@ function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: 
         throw new CompileError(`a ${form} can take at most ${MAX_ARGS} locals into the new process, and this one uses ${free.length}`, x.pos);
     }
     const [pre, st0] = extra.reduce<[Code, St]>(([acc, s], e, i) => {
-        const [c, s1] = compileExpr(e, { ...cx, si: cx.si + i }, s);
+        const [c, s1] = compileExpr(e, { ...cx, si: cx.si + i, tail: false }, s);
         return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
     }, [[], st]);
     const si = cx.si + extra.length;

@@ -45,6 +45,12 @@ program, or the system to measure the run.
   second program can't take the path from it; killed with SIGKILL, it
   leaves the socket behind, which the next to listen there replaces; and
   ended by SIGTERM, it removes it.
+- https: http/request on an https:// URL runs curl (D251), over real TLS
+  to a server here with a certificate made for the run: a whole reply
+  and a chunked one come as over http, and without the certificate to
+  check against, curl's failure comes as (:curl code "host:port"). It
+  takes openssl and curl, and a curl that takes CURL_CA_BUNDLE; without
+  them, it's skipped.
 
 Nothing here depends on how long anything takes: each step waits for
 what it expects to see, and DEADLINE seconds is only how long it waits
@@ -52,6 +58,7 @@ before it says the check failed.
 """
 
 import fcntl
+import http.server
 import os
 import platform
 import pty
@@ -64,8 +71,10 @@ import socket
 import stat
 import struct
 import subprocess
+import ssl
 import sys
 import termios
+import threading
 
 TARGET   = os.environ.get('TARGET', 'aarch64')
 DEADLINE = 120
@@ -523,6 +532,71 @@ def sockets():
           f'status {status}')
 
 
+
+class Answer(http.server.BaseHTTPRequestHandler):
+    protocol_version = 'HTTP/1.1'
+
+    def do_GET(self):
+        body = b'hello over tls\n'
+        self.send_response(200)
+        self.send_header('Content-Length', str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    # The body back, chunked: curl leaves the chunks as they are (--raw).
+    def do_POST(self):
+        body = self.rfile.read(int(self.headers.get('Content-Length', '0')))
+        self.send_response(200)
+        self.send_header('Transfer-Encoding', 'chunked')
+        self.end_headers()
+        for piece in (body[:3], body[3:]):
+            self.wfile.write(b'%x\r\n%s\r\n' % (len(piece), piece))
+        self.wfile.write(b'0\r\n\r\n')
+
+    def log_message(self, *args):
+        pass
+
+
+def https():
+    if shutil.which('openssl') is None or shutil.which('curl') is None:
+        print('skip https: no openssl or no curl')
+        return
+    cert, key = os.path.join(DIR, 'cert.pem'), os.path.join(DIR, 'key.pem')
+    made = subprocess.run(['openssl', 'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-days', '1',
+                           '-keyout', key, '-out', cert, '-subj', '/CN=127.0.0.1',
+                           '-addext', 'subjectAltName=IP:127.0.0.1'], capture_output=True)
+    if made.returncode != 0:
+        print('skip https: openssl made no certificate')
+        return
+    server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), Answer)
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(cert, key)
+    server.socket = context.wrap_socket(server.socket, server_side=True)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    base = f'https://127.0.0.1:{server.server_address[1]}'
+    env = {**ENV, 'no_proxy': '127.0.0.1', 'NO_PROXY': '127.0.0.1'}
+    trusted = {**env, 'CURL_CA_BUNDLE': cert}
+    try:
+        tried = subprocess.run(['curl', '-s', f'{base}/hello'], capture_output=True, env=trusted, timeout=DEADLINE)
+        if tried.stdout != b'hello over tls\n':
+            print("skip https: this curl doesn't take CURL_CA_BUNDLE")
+            return
+        prog = build('https', 't/live/https.slight')
+        r = subprocess.run(RUN + [prog, base], capture_output=True, env=trusted, timeout=DEADLINE)
+        check('https through curl gives a whole reply, and a chunked one, as http does',
+              r.returncode == 0 and r.stdout == b'(200 ("hello over tls" ""))\n(200 ("sent" "back"))\ndone\n',
+              f'exit {r.returncode}, said {r.stdout!r}')
+        r = subprocess.run(RUN + [prog, base], capture_output=True, env=env, timeout=DEADLINE)
+        where = f'"127.0.0.1:{server.server_address[1]}"'
+        check("a certificate curl can't check is curl's failure",
+              r.returncode == 0 and re.fullmatch(rf'(\(error \(curl (35|60) {where}\)\)\n){{2}}done\n', r.stdout.decode()) is not None,
+              f'exit {r.returncode}, said {r.stdout!r}')
+    except subprocess.TimeoutExpired:
+        check('https through curl', False, f'still running after {DEADLINE} s')
+    finally:
+        server.shutdown()
+
+
 os.makedirs(DIR, exist_ok=True)
 keys()
 memory()
@@ -533,5 +607,6 @@ memory_limit()
 timers()
 run_limit()
 sockets()
+https()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

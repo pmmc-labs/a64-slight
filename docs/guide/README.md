@@ -26,8 +26,8 @@ how.
 
 It isn't for crunching numbers or data in bulk, for systems
 programming, or for a GUI, the browser or a phone. It's young, and its
-library is small: there's no HTTPS yet (curl stands in), and it uses
-one core. [`PLAN.md`](../PLAN.md)'s "Toward general purpose" says
+library is small: HTTPS goes through curl, a server's through a proxy
+in front of it, and it uses one core. [`PLAN.md`](../PLAN.md)'s "Toward general purpose" says
 what's coming, and in what order.
 
 ## What's here
