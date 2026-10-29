@@ -104,6 +104,8 @@ tests: `SLIGHT_CLOCK=virtual` swaps the real clock for one that starts at
 and `SLIGHT_GC_STRESS=n` makes it collect at the entry of every nth
 function called (n from 1, every call, which is slow, to 1,000), and at
 every `recv`.
+`SLIGHT_EPOCH=seconds` says where the virtual clock's time of day
+starts, `clock/now`'s (D254), so a test's dates are the same every run.
 `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` are in "Sockets", and
 `SLIGHT_SEED` in "Random numbers", under Builtins.
 
@@ -974,6 +976,14 @@ first, and is still to be taken.
   time of day. On the virtual clock (Running a program) it moves only
   as the timers do, so work takes no time on it; and a recorded run
   replays with the same readings.
+- `(clock/now)`: the time of day, the microseconds since
+  1970-01-01T00:00:00Z, an integer: POSIX time, with no leap seconds
+  (D254). It's the system's clock, which can be set back or forward
+  while a program runs, so a timer goes by `clock/us`, which can't. On
+  the virtual clock it's the virtual time from a start: `SLIGHT_EPOCH`'s
+  seconds, if that's set, or else the time of day when the program
+  started. A recorded run replays with the same readings, its start
+  included. `(@include :time)` makes dates of it.
 
 ### Scheduling
 
@@ -1951,6 +1961,39 @@ of its own (D243). Each blocks only its caller.
 
 Either gives `(:error (name path))` if the file can't be opened, read or
 written: `(:error (enoent "notes.txt"))`, say.
+
+### (@include :time)
+
+`lib/time.slight`: calendar time, from `clock/now`'s microseconds
+(D254), in UTC. POSIX time, so no leap seconds; and no time zones by
+name, only offsets from UTC.
+
+    (@include :time)
+    (time/iso (clock/now))      ; "2026-10-29T14:03:07.123456Z"
+
+- `(time/utc us)`: the date, a keyed list: `(:year y) (:month m) (:day
+  d) (:hour h) (:minute m) (:second s) (:us u) (:weekday w)`, the month
+  from 1, the weekday ISO 8601's, 1 for Monday to 7 for Sunday. Any
+  year an integer holds, before 1970 and before year 0 too.
+- `(time/from-utc date)`: the microseconds of a date, from what of its
+  fields it has, 1970, 1, 1 and 0s for those it hasn't (`:weekday` is
+  ignored). A month past 12, or below 1, moves into the years, and the
+  rest add as they are, so the 32nd of January is the 1st of February,
+  as with JavaScript's `Date.UTC`.
+- `(time/iso us)`: ISO 8601 in UTC, to the microsecond:
+  `"2026-10-29T14:03:07.123456Z"`. A year outside 0 to 9999 has a sign
+  and six digits, `"+010000-01-01..."`, as JavaScript writes it.
+- `(time/iso-offset us minutes)`: the same at a fixed offset from UTC,
+  east positive: `(time/iso-offset us 120)` ends `"+02:00"`.
+- `(time/http us)`: an HTTP date, `"Thu, 29 Oct 2026 14:03:07 GMT"`.
+- `(time/parse-iso s)`: `(:ok us)` for a date, `"2026-10-29"`
+  (midnight, UTC), or a date and a time with its offset, as RFC 3339
+  has them: `"2026-10-29T14:03:07Z"`, `"2026-10-29 16:03:07.5+02:00"`,
+  the `T` (or `t`, or a space) between, seconds and a fraction of any
+  length if they're there (cut at six digits), and `Z` (or `z`) or
+  `+HH:MM` or `-HH:MM`. Anything else, a date that doesn't exist, or a
+  time without an offset, which could be anywhere's, gives `(:error
+  (:bad-time s))`.
 
 ### (@include :map)
 

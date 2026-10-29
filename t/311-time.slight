@@ -1,0 +1,29 @@
+; The time of day and the calendar (D254): clock/now on the virtual clock,
+; which t/run.sh starts at 2026-01-01T00:00:00Z (SLIGHT_EPOCH), moving as
+; the timers do; then lib/time.slight: instants as ISO 8601 and HTTP
+; dates, from 1970 back and forth, leap days, the years 0, 9999 and
+; 10000, and before year 0; a date's fields and back, months and days
+; past their ends carried; fixed offsets; and ISO 8601 read back, and
+; what isn't taken. Expected output from t/models/time.py, on Python's
+; datetime.
+
+(@include :time)
+
+(defun later () (sleep 2500) (clock/now))
+
+(let start (clock/now))
+(pprint (list start (- (cadr (read (spawn (later)))) start) (time/iso start)))
+
+(let instants (list 0 -1 951782400000000 1709210096789012 -62135596800000000
+                    253402300799999999 253402300800000000 -62167219200000000 -62167219200000001))
+(map (lambda (us) (pprint (list (time/iso us) (time/http us)))) instants)
+(pprint (time/utc 1709210096789012))
+(pprint (map (lambda (us) (eq? (time/from-utc (time/utc us)) us)) instants))
+(pprint (time/iso (time/from-utc (list (list :year 2025) (list :month 14) (list :day 32)))))
+(pprint (time/iso (time/from-utc (list (list :year 2024) (list :month 0) (list :day 1) (list :hour 25)))))
+(pprint (list (time/iso-offset 1709210096789012 120) (time/iso-offset 1709210096789012 -330) (time/iso-offset 0 0)))
+(map (lambda (s) (pprint (match (time/parse-iso s) ((:ok us) (list s (time/iso us))) (other other))))
+     (list "2024-02-29" "2024-02-29T12:34:56Z" "2024-02-29 12:34:56.5+02:00" "2024-02-29t12:34z"
+           "1969-12-31T23:59:59.9999999-00:30" "2023-02-29" "2024-13-01" "2024-02-29T24:00:00Z"
+           "2024-02-29T12:34:56" "2024-02-29T12:34:56.Z" "2024-02-29T12:34:56+0200" "24-02-29"))
+:done

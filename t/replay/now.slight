@@ -1,0 +1,10 @@
+; The time of day on the virtual clock (D254): without SLIGHT_EPOCH it
+; starts at the real time of day, recorded, so a replay starts there too;
+; and it moves as the virtual clock does. t/replay.sh records a run and
+; replays it.
+
+(defun later () (sleep 1500) (clock/now))
+
+(let start (clock/now))
+(let after (cadr (read (spawn (later)))))
+(list start (- after start))

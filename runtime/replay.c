@@ -46,7 +46,7 @@ enum { OFF, RECORD, REPLAY };
 enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
-    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER,
+    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER, IO_REALTIME,
 };
 
 static const char *const names[] = {
@@ -57,7 +57,7 @@ static const char *const names[] = {
     [IO_FOPEN] = "a text file", [IO_FGETS] = "a line of a text file", [IO_SEED] = "a seed",
     [IO_WINSIZE] = "the screen's size", [IO_SPAWN] = "a command", [IO_WAIT] = "a wait for a command",
     [IO_KILL] = "a kill", [IO_PIPE] = "a pipe", [IO_LISTEN_UNIX] = "a listen at a path",
-    [IO_PEER] = "a socket's peer",
+    [IO_PEER] = "a socket's peer", [IO_REALTIME] = "the time of day",
 };
 
 static int      mode;
@@ -247,6 +247,22 @@ uint64_t rt_io_clock(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (uint64_t)done(IO_CLOCK, (int64_t)((uint64_t)t.tv_sec * 1000000000 + (uint64_t)t.tv_nsec));
+}
+
+static int64_t realtime(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_REALTIME, &t);
+    return (int64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000;
+}
+
+int64_t rt_io_realtime(void) {
+    if (mode == REPLAY) return replayed(IO_REALTIME);
+    return done(IO_REALTIME, realtime());
+}
+
+int64_t rt_io_epoch(const char *given) {
+    if (mode == REPLAY) return replayed(IO_REALTIME);
+    return done(IO_REALTIME, given ? strtoll(given, NULL, 10) * 1000000 : realtime());
 }
 
 // The sets as select() left them, when it says something is ready.

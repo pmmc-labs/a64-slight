@@ -167,6 +167,7 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'socket/peer': fn([PID], ANY),
     'sleep': fn([INT], NIL_T),
     'clock/us': fn([], INT),
+    'clock/now': fn([], INT),
 };
 
 // The type predicates, and what each says yes to: in a test, they narrow.

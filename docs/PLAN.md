@@ -1201,8 +1201,9 @@ builtins are to be proposed with the standard library (3).
    - A log device: levels, structured lines to stderr, recorded.
 
    Proposed below, "Step 1, proposed", and agreed (D254): `clock/now`
-   and `lib/time.slight`, `fs/` builtins, `bytes/pack` and
-   `bytes/unpack`, and `log`.
+   and `lib/time.slight` (done, golden test 311, from
+   `t/models/time.py`, and `t/replay/now.slight`), `fs/` builtins,
+   `bytes/pack` and `bytes/unpack`, and `log`.
 2. **HTTPS, and what TLS would have brought** (D251, in place of TLS
    on mbedTLS): `https://` through curl in `lib/http.slight` (done,
    golden test 309), and a

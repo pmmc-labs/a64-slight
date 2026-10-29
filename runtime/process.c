@@ -1710,6 +1710,7 @@ static uint64_t  ids_cap, nids;         // ids_cap a power of two, or 0
 static int       virtual_clock;
 static uint64_t  virtual_now;
 static uint64_t  started;               // when the program started, for :system
+static int64_t   epoch;                 // the time of day then, on the virtual clock (D254)
 
 static uint64_t now(void) {
     return virtual_clock ? virtual_now : rt_io_clock();
@@ -1896,6 +1897,13 @@ rt_value_t rt_sleep(rt_value_t ms, const char *site) {
 rt_value_t rt_clock_us(const char *site) {
     (void)site;
     return rt_int((int64_t)((now() - started) / 1000));
+}
+
+// The time of day: the system's, or on the virtual clock its start's
+// plus the virtual time, so a test's dates are the same every run (D254).
+rt_value_t rt_clock_now(const char *site) {
+    (void)site;
+    return rt_int(virtual_clock ? epoch + (int64_t)((now() - started) / 1000) : rt_io_realtime());
 }
 
 // --- the keyboard -------------------------------------------------------------
@@ -3886,13 +3894,17 @@ int main(int argc, char **argv) {
     const char *stress = getenv("SLIGHT_GC_STRESS");
     gc_stress = !stress ? 0 : atoll(stress) < 1 ? 1 : atoll(stress) > QUOTA ? QUOTA : atoll(stress);
     const char *mode = getenv("SLIGHT_CLOCK"), *seed = getenv("SLIGHT_SCHED"), *cap = getenv("SLIGHT_HEAP_MAX");
-    const char *rand_seed = getenv("SLIGHT_SEED");
+    const char *rand_seed = getenv("SLIGHT_SEED"), *epoch_at = getenv("SLIGHT_EPOCH");
     if (seed && (!*seed || strspn(seed, "0123456789") != strlen(seed))) {
         fputs("slight: SLIGHT_SCHED is a number, a seed for the order processes run in\n", stderr);
         return 2;
     }
     if (rand_seed && (!*rand_seed || strspn(rand_seed, "0123456789") != strlen(rand_seed))) {
         fputs("slight: SLIGHT_SEED is a number, a seed for the random numbers\n", stderr);
+        return 2;
+    }
+    if (epoch_at && (!*epoch_at || strlen(epoch_at) > 12 || strspn(epoch_at, "0123456789") != strlen(epoch_at))) {
+        fputs("slight: SLIGHT_EPOCH is a number, the seconds since 1970 that the virtual clock's time of day starts at\n", stderr);
         return 2;
     }
     if (cap && bytes_of(cap) < CHUNK_MAX) {
@@ -3915,6 +3927,7 @@ int main(int argc, char **argv) {
     sched         = settings.sched_seed;
     heap_max      = settings.heap_max;
     started       = now();
+    if (virtual_clock) epoch = rt_io_epoch(epoch_at);
     rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);
     rt_rand_start(p, rt_io_random_seed(rand_seed));
     p->args[0]   = arguments(p, argc, argv);

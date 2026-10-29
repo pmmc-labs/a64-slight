@@ -46,6 +46,12 @@ int  rt_io_replaying(void);
 const char *rt_io_getenv(const char *name);
 
 uint64_t rt_io_clock(void);             // the monotonic clock, in nanoseconds
+int64_t  rt_io_realtime(void);          // the time of day: microseconds since 1970, UTC (D254)
+
+// Where the virtual clock's time of day starts (D254): the seconds given
+// (SLIGHT_EPOCH), or the time of day now, as microseconds, recorded either
+// way, so a replay starts where its run did.
+int64_t rt_io_epoch(const char *given);
 int      rt_io_select(int n, fd_set *in, fd_set *out, struct timeval *timeout);
 ssize_t  rt_io_read(int fd, void *buf, size_t len);
 ssize_t  rt_io_write(int fd, const void *buf, size_t len);

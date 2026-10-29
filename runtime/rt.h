@@ -597,6 +597,11 @@ rt_value_t rt_sleep(rt_value_t ms, const char *site) RT_ASM(rt_sleep);
 // the timers go by (D208).
 rt_value_t rt_clock_us(const char *site) RT_ASM(rt_clock_us);
 
+// (clock/now): the time of day, microseconds since 1970-01-01T00:00:00Z,
+// recorded; on the virtual clock, SLIGHT_EPOCH's plus the virtual time
+// (D254).
+rt_value_t rt_clock_now(const char *site) RT_ASM(rt_clock_now);
+
 // Makes room for `bytes` in the current process's heap: a new chunk.
 // Faults at `site` when the heap would pass its limit.
 void rt_heap_grow(uint64_t bytes, const char *site) RT_ASM(rt_heap_grow);

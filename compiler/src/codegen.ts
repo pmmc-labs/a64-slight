@@ -1110,6 +1110,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'socket/peer':        fixed('rt_socket_peer', 1),
     'sleep':              fixed('rt_sleep', 1),
     'clock/us':           fixed('rt_clock_us', 0),
+    'clock/now':          fixed('rt_clock_now', 0),
     'hash':               fixed('rt_hash', 1),
     'tty/screen/rows':    fixed('rt_screen_rows', 0),
     'tty/screen/cols':    fixed('rt_screen_cols', 0),
