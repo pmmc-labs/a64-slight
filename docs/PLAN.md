@@ -1139,6 +1139,87 @@ header is typed (`ds`, `http`, `rpc`, `agent` and `tools` after the
 first five, with the types their docs name: `Response`, `Handler`,
 `Tool`, ...; `t/types/010`).
 
+### Toward general purpose (order agreed, D249, Oct 2026)
+
+What slight lacks before someone can write a command-line tool, a web
+service, a script over data or a daemon in it without shelling out for
+the basics. In this order, each step's builtins and devices proposed
+before they're built, as the working rules say; two points are
+**(open)**, and each of them shapes the steps after it.
+
+**(open) C libraries: vendored, or an FFI as well.** D151 and D152 have
+vendored libraries, each a builtin or a device that `slightc` knows
+about, so every library is work in the runtime, by us; an FFI would let
+a program bind one itself, but everything from the world goes through
+`replay.c` now, and an FFI call can block, keep pointers, and do I/O
+that isn't recorded. Recommendation: vendored only, till the vendored
+libraries have shown what an FFI would need to keep replay whole.
+
+**(open) Regular expressions,** absent on purpose so far: a small
+engine of RE2's subset, linear in its input (vendored, or our own), or
+none, and a parser library in `lib/` (combinators, as `calc` is
+written) as the answer to what they're wanted for.
+
+1. **What the runtime is missing,** small things each:
+   - The time of day: seconds (or microseconds) since the epoch, read
+     through `replay.c` so a run replays, and on the virtual clock its
+     start plus the virtual time. Calendar dates, formatting and time
+     zones after it, in slight, as a library.
+   - Files beyond reading and writing: listing a directory, a file's
+     size, kind and times, deleting, renaming, making a directory. Today
+     they go through `:exec` (`lib/tools.slight` does).
+   - Binary data: integers and floats packed into bytes and read back,
+     by width and byte order, and a way to build a string of bytes
+     without copying it at each step. Binary protocols (PostgreSQL's,
+     WebSockets', msgpack) need it.
+   - A log device: levels, structured lines to stderr, recorded.
+2. **TLS (12c),** on mbedTLS, the first vendored library, which also
+   brings what a program would otherwise have to wait for: SHA-2, HMAC,
+   base64, and random bytes from the system for keys and tokens (not
+   `rand/`'s, which are for simulation, D222). Hex and URL encoding are
+   slight's.
+3. **The standard library,** in slight where that's practical (D152):
+   `format`, CSV, parsing `@ARGV`, a set, sorted maps beside the hash
+   map (D223), dates (from 1), and text matching as the open point
+   above decides. No mutable array: numeric work and pixel buffers stay
+   out of what slight is for, unless that's decided otherwise.
+4. **Supervisors and a registry,** an OTP's least, in slight on
+   `monitor`: restarting what fails (one for one, the rest after one),
+   with a limit on restarts in a time, and processes found by name, so
+   one restarted can be found again (`rpc` users build their own
+   today). Shutting down in order on SIGTERM needs signals as messages
+   (16, Containers).
+5. **Tooling:** a formatter for both syntaxes, which is also the
+   converters (A C-style syntax, 3); a language server on `check.ts`
+   (its warnings as diagnostics, a name's type on hover, a definition
+   from `modules.ts`); a debugger that steps through a recorded run
+   (D170); a profiler; docs from `=doc` blocks, as perldoc does them.
+6. **Packages:** `@include` takes a path. Dependencies by git URL and
+   hash in a lockfile, a place to fetch them to, and a search path for
+   `@include :name`.
+7. **More than one core** (Parked, Parallelism): a ceiling on servers,
+   not a bar to being general purpose; separate heaps make it easier
+   than in most languages, and the run queue and timers are the work.
+
+And, though not features: a version number and a core that holds still
+for it; one syntax the docs are written in, the other made from it.
+
+**What vendoring takes out of the runtime.** Little, by the look of
+it: what the runtime's C does is tied to its heap, `select()` and
+`replay.c`, which no library does for it. `json.c` and `sexp.c` are
+push parsers that build slight values as bytes arrive (D162, D163),
+which the usual libraries (yyjson, cJSON) don't do; `dns.c` is 353
+lines in `select()`, where c-ares is far bigger and has its own loop.
+`unicode.c`'s 3,600 lines are tables made from the UCD, not code to
+keep; if utf8proc comes for display width and graphemes (16), they
+might shrink to SpecialCasing's mappings, which utf8proc lacks
+(JavaScript's case mapping, D219, takes `ß` to `SS`), if its
+properties give "cased" and "case-ignorable" as D219 needs them. To
+check when utf8proc comes. What vendoring saves is the code not yet
+written: TLS, hashes, base64, random bytes, compression, graphemes.
+SQLite waits on D151's open point, a thread for a library that can only
+block.
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written

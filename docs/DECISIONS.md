@@ -6010,3 +6010,27 @@ see too, as with C's. A file without a header is spliced in, as before
   out: any module system needs interfaces. **Not built:** compiling a
   module apart from its program (whole-program compiling, D141, still
   holds), and private names for headerless files.
+
+**D249. Toward a general-purpose language: what's missing, and in what
+order.** *(Stevan, Oct 2026, asked "what is missing to make this a
+general purpose language?", and agreed the answer as the way to go.)*
+The order is PLAN.md's "Toward general purpose": the small things the
+runtime lacks (the time of day, files beyond reading and writing,
+binary data, a log device); TLS on mbedTLS, which brings hashing,
+base64 and random bytes for keys with it; a standard library, in slight
+where that's practical; supervisors and a registry on `monitor`;
+tooling (a formatter that's also the converters, a language server on
+the checker, a debugger over recorded runs); packages; and more than
+one core last, since it's a ceiling on servers and not a bar to being
+general purpose. Each builtin or device among them is still proposed
+before it's built. **Open:** whether C libraries are only vendored
+(D151, D152) or an FFI comes too (recommended: vendored only, till they
+show what an FFI would need to keep replay whole); and regular
+expressions, a small linear engine or none, with a parser library as
+the answer. **Asked:** whether vendored libraries would take code out
+of the runtime. Little: its C is tied to the heap, `select()` and
+`replay.c`; `json.c` and `sexp.c` build values as bytes come, which the
+usual libraries don't; `dns.c` is small beside c-ares. `unicode.c`'s
+generated tables might shrink to SpecialCasing's if utf8proc comes for
+display width and graphemes, to be checked then. What vendoring saves is
+code not yet written.

@@ -289,8 +289,11 @@ declares and nothing else, what a header includes being seen too;
 with its file in them (`map/bit (in lib/map.slight)`, shown without);
 the prelude (`lib/prelude.sli`, its types and sigs) and every library
 have headers, so their helpers are their own; a file without a header is
-spliced in as before; golden test 308. **Next:** to settle with Stevan
-(`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
+spliced in as before; golden test 308. What's missing to make slight
+general purpose, in order, is agreed (D249, `docs/PLAN.md`, "Toward
+general purpose"), with two points open: C libraries vendored only or
+an FFI too, and regular expressions. **Next:** to settle with Stevan
+(`docs/PLAN.md`, 15, and those two points). 12c (C libraries vendored as source, D151, D152, then
 TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
 models first, and curl for HTTPS. Each has points to settle with Stevan
 first (`docs/PLAN.md`). Self-hosting waits
