@@ -30,6 +30,38 @@ bring it up before baking it in further.
 - **Ahead-of-time compilation only.** No `eval`, no code loading at
   runtime, no hot reload.
 
+## What slight is for, and isn't (D250)
+
+What it's meant to be when PLAN.md's "Toward general purpose" is done,
+for checking later decisions against: **a small language for networked
+services and tools on one machine, which can be tested
+deterministically.** A service, a command-line tool, a daemon or an
+agent, written end to end in it, one static binary, without shelling out
+for the basics.
+
+What sets it apart is that last part. Everything a program takes from
+the world goes through `replay.c` (D170), so any run, a production one
+included, can be recorded and replayed exactly, run on the virtual clock,
+and tried under seeded orders to find races. Other languages bolt that
+on (FoundationDB's simulation, Rust's madsim and turmoil, Antithesis
+from outside the program); in slight it's how the language works. With
+actors whose isolation comes from immutability rather than a type
+system (Pony), Erlang's model in Go's deployment shape (no VM, a static
+binary, `FROM scratch`), and a checker that warns only of what's sure to
+go wrong (D247), that's the reason to choose it.
+
+So: **nothing goes in that a run can't be replayed through.** A device,
+a builtin or a vendored library takes from the world only through
+`replay.c`; that's why C libraries are vendored, and an FFI, which would
+let a call read the world unrecorded, is held back (D249, open).
+
+Not what it's for: numbers and data in bulk (no mutable arrays, nothing
+vectorized), systems programming (no control of memory, no FFI), a GUI,
+the browser or a phone (WebAssembly is parked), and, till it uses more
+than one core (PLAN.md, its step 7), servers bound by throughput, though
+a copy per core behind one port serves (`airline`'s `--shard` is the
+same idea). Nor a large ecosystem: that comes from users, not a plan.
+
 ## Language
 
 ### Syntax

@@ -6034,3 +6034,16 @@ usual libraries don't; `dns.c` is small beside c-ares. `unicode.c`'s
 generated tables might shrink to SpecialCasing's if utf8proc comes for
 display width and graphemes, to be checked then. What vendoring saves is
 code not yet written.
+
+**D250. What slight is for, and isn't.** *(Stevan, Oct 2026, asked where
+D249's plan would place slight, and to put the answer in DESIGN.md and
+the guide.)* A small language for networked services and tools on one
+machine, which can be tested deterministically: its draw is that every
+run can be replayed, on a virtual clock and under seeded orders, with
+actors made safe by immutability, and Go's way of shipping (a static
+binary) rather than a VM's. The rule that follows: nothing goes in that
+a run can't be replayed through, which is why C libraries are vendored
+and an FFI is held back (D249). Not for: numbers and data in bulk,
+systems programming, GUIs, the browser or phones, and (till more than
+one core) servers bound by throughput. DESIGN.md, "What slight is for,
+and isn't"; the guide's README, "What slight is for".
