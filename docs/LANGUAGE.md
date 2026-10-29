@@ -106,6 +106,7 @@ function called (n from 1, every call, which is slow, to 1,000), and at
 every `recv`.
 `SLIGHT_EPOCH=seconds` says where the virtual clock's time of day
 starts, `clock/now`'s (D254), so a test's dates are the same every run.
+`SLIGHT_LOG=level` is the least `log` writes (Output, under Builtins).
 `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` are in "Sockets", and
 `SLIGHT_SEED` in "Random numbers", under Builtins.
 
@@ -1876,6 +1877,26 @@ under Files.
   `()`. `(tty/write "\e[2J")` clears a terminal.
 - `(tty/screen/rows)`, `(tty/screen/cols)`: the terminal's size, asked
   each time; 24 and 80 when stdout isn't a terminal.
+- `(log level msg fields)`: writes a line of JSON to stderr, what log
+  collectors read, and slight too, with `:json` (D254). `level` is
+  `:debug`, `:info`, `:warn` or `:error`; `msg` a string; `fields` an
+  association list, `(list (list "port" 8080))`, each name a string or a
+  keyword, or `()`. Returns `()`.
+
+      (log :info "listening" (list (list "port" 8080)))
+      ; {"time":"2026-10-29T14:03:07.123456Z","level":"info","pid":1,"msg":"listening","port":8080}
+
+  `time` is `clock/now`'s, as `time/iso` writes it, and `pid` the
+  process's number. A field's value is written as `json/print` writes
+  it, except that what JSON can't hold, a pid, a function, a keyword
+  other than `:null`, a float that isn't finite, is a string, as `str`
+  writes it, wherever it is: `(list :error (list :enoent "x"))` is
+  `["error",["enoent","x"]]`, so logging an error never faults. A line
+  below `SLIGHT_LOG`'s level (`debug`, `info`, `warn` or `error`; `info`
+  if it isn't set) isn't written. stdout is flushed first, so the two
+  come in the order they were written; and a replay writes them again.
+  A level that isn't one faults (`:out-of-range`), and so does a field
+  that isn't a name and a value.
 
 ### Functions
 

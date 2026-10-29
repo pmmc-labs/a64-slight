@@ -20,7 +20,7 @@ variables:
   # what can be at the head of a form and be a function: not a number,
   # a keyword, or a # word
   head: '(?!{{number}})[^\s()''";`,:#][^\s()''";`,]*'
-  builtin: '(?:send|join|join/race|join/any|join/all|monitor|kill|raise|after|sleep|read|read/any|address|open|disconnect|ask|ask-within|reply|apply|pprint|timer/cancel|clock/us|clock/now){{ends}}'
+  builtin: '(?:send|join|join/race|join/any|join/all|monitor|kill|raise|after|sleep|read|read/any|address|open|disconnect|ask|ask-within|reply|apply|pprint|log|timer/cancel|clock/us|clock/now){{ends}}'
 
 contexts:
   main:

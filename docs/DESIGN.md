@@ -426,8 +426,7 @@ names no program can write.
 Agreed (D254, PLAN.md's "Step 1, proposed"): `clock/now`, the time of
 day, with `lib/time.slight`; `fs/list`, `fs/stat`, `fs/delete`,
 `fs/rename` and `fs/mkdir` (`runtime/files.c`); `bytes/pack` and
-`bytes/unpack`; all built; and still to build, `log`, JSON lines on
-stderr.
+`bytes/unpack`; and `log`, JSON lines on stderr; all built.
 
 **In C (or assembly):**
 - arithmetic: `+ - *` on any two numbers; an integer and a float give a

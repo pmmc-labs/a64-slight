@@ -174,6 +174,7 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'fs/rename': fn([STR, STR], okOr(NIL_T, ANY)),
     'fs/mkdir': fn([STR], okOr(NIL_T, ANY)),
     'bytes/pack': fn([LIST_ANY, LIST_ANY], STR),
+    'log': fn([union(lit('debug'), lit('info'), lit('warn'), lit('error')), STR, LIST_ANY], NIL_T),
     'bytes/unpack': fn([LIST_ANY, STR, INT], union(tagged('ok', LIST_ANY, INT), tagged('error', lit('short')))),
 };
 
@@ -239,7 +240,8 @@ export function faultFor(t: Ty): string | null {
         case 'pid': case 'task': case 'actor': case 'address': return 'not-a-pid';
         case 'or':
             if (t.of.every((x) => x.k === 'int' || x.k === 'float')) return 'not-a-number';
-            if (t.of.every((x) => x.k === 'lit')) return 'not-a-bool';
+            if (t.of.every((x) => x.k === 'lit' && (x.name === '#true' || x.name === '#false'))) return 'not-a-bool';
+            if (t.of.every((x) => x.k === 'lit')) return 'out-of-range';  // a keyword that isn't one of them (log's level)
             return null;
         default: return null;
     }

@@ -100,9 +100,12 @@ export const PACK_WORDS: readonly string[] = [
     'i64le', 'f32be', 'f32le', 'f64be', 'f64le', 'bytes', 'short',
 ];
 
+// log's levels below :error (D254), in RT_LOG_ order.
+export const LOG_WORDS: readonly string[] = ['debug', 'info', 'warn'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
-    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS, ...STAT_WORDS, ...PACK_WORDS,
+    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS, ...STAT_WORDS, ...PACK_WORDS, ...LOG_WORDS,
 ];

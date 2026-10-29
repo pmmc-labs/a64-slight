@@ -3906,6 +3906,16 @@ int main(int argc, char **argv) {
         fputs("slight: SLIGHT_SEED is a number, a seed for the random numbers\n", stderr);
         return 2;
     }
+    const char *log_at = getenv("SLIGHT_LOG");
+    if (log_at) {
+        static const char *const levels[] = { "debug", "info", "warn", "error" };
+        rt_log_level = -1;
+        for (int i = 0; i < 4; i++) if (strcmp(log_at, levels[i]) == 0) rt_log_level = i;
+        if (rt_log_level < 0) {
+            fputs("slight: SLIGHT_LOG is the least level log writes: debug, info, warn or error\n", stderr);
+            return 2;
+        }
+    }
     if (epoch_at && (!*epoch_at || strlen(epoch_at) > 12 || strspn(epoch_at, "0123456789") != strlen(epoch_at))) {
         fputs("slight: SLIGHT_EPOCH is a number, the seconds since 1970 that the virtual clock's time of day starts at\n", stderr);
         return 2;

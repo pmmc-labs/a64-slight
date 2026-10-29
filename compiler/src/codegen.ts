@@ -1118,6 +1118,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'fs/mkdir':           fixed('rt_fs_mkdir', 1),
     'bytes/pack':         fixed('rt_bytes_pack', 2),
     'bytes/unpack':       fixed('rt_bytes_unpack', 3),
+    'log':                fixed('rt_log_line', 3),
     'hash':               fixed('rt_hash', 1),
     'tty/screen/rows':    fixed('rt_screen_rows', 0),
     'tty/screen/cols':    fixed('rt_screen_cols', 0),

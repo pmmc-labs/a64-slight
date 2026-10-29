@@ -6211,3 +6211,10 @@ through `replay.c`, so a run still replays.
   `SLIGHT_LOG`'s level (`info` by default) not written; written again in
   a replay, as stdout is. The runtime's own messages stay as they are.
   Rejected: s-expression lines, a `:log` device, `eprint` alone.
+- *(All four built, Oct 2026, golden tests 311 to 316. And in `log`, a
+  field's value that JSON can't hold, a pid, a function, a keyword, an
+  infinity, is written as `str` writes it, at any depth, where
+  `json/print` would fault: an error reason, `(:error (:enoent "x"))`,
+  is what a log most often holds. A level that isn't one faults
+  `:out-of-range`, which the checker now says of any keyword outside a
+  union of them, where it said `:not-a-bool`.)*

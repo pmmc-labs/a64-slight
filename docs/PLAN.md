@@ -1206,7 +1206,7 @@ builtins are to be proposed with the standard library (3).
    (done, `runtime/files.c`, golden test 312, and trees in
    `lib/fs.slight`, 313, and `t/replay/world.slight`), `bytes/pack` and
    `bytes/unpack` (done, golden test 314, from `t/models/pack.py`),
-   `bytes/pack` and `bytes/unpack`, and `log`.
+   and `log` (done, golden tests 315 and 316). Step 1 is done.
 2. **HTTPS, and what TLS would have brought** (D251, in place of TLS
    on mbedTLS): `https://` through curl in `lib/http.slight` (done,
    golden test 309), and a

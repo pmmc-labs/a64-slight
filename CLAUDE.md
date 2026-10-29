@@ -309,7 +309,12 @@ each a Result and recorded, and trees on them in `lib/fs.slight`,
 `fs/mkdir-all`, `fs/delete-all` and `fs/walk` (golden tests 312, 313);
 and numbers as bytes, `bytes/pack` and `bytes/unpack`, by specs of
 keywords, `:u8` to `:f64le` and `(:bytes n)` (golden test 314,
-`t/models/pack.py`). **Next:** the rest of step 1, `log`. 12c (C libraries vendored as source, D151, D152) waits; its
+`t/models/pack.py`); and `log`, a line of JSON on stderr, its time,
+level, pid, message and fields, what JSON can't hold written as `str`
+writes it, filtered by `SLIGHT_LOG` (golden tests 315, 316). Step 1 is
+done. **Next:** to settle with Stevan: D249's step 2 (SHA-2, HMAC,
+base64, random bytes), or the numbers in bulk (D253), or step 15's
+models. 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan
@@ -525,6 +530,8 @@ over real TLS, to a server with a certificate made for the run);
   (`clock/now`) there; without it, at the real time of day when the
   program starts, recorded for a replay either way (D254). `t/run.sh`
   sets `1767225600`, 2026-01-01T00:00:00Z.
+- `SLIGHT_LOG=level` (`debug`, `info`, `warn` or `error`) is the least
+  level `log` writes; `info` without it (D254).
 - `SLIGHT_SEED=n` seeds the random numbers (`rand/`); without it they
   come from the system's entropy, different every run, and are recorded
   for a replay either way (D222). `t/run.sh` sets `1`.

@@ -325,6 +325,14 @@
 #define RT_PACK_SHORT        19    // :short
 #define RT_PACK_COUNT       20
 
+// log's levels (json.c, D254), below :error, which is RT_SYM_ERROR:
+// RT_LOG_x is symbol RT_SYM_LOG + x.
+#define RT_SYM_LOG         189    // RT_SYM_PACK + RT_PACK_COUNT
+#define RT_LOG_DEBUG         0    // :debug
+#define RT_LOG_INFO          1    // :info
+#define RT_LOG_WARN          2    // :warn
+#define RT_LOG_COUNT         3
+
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it
@@ -651,6 +659,12 @@ rt_value_t rt_fs_mkdir(rt_value_t path, const char *site) RT_ASM(rt_fs_mkdir);
 // D254): numbers as bytes, by width and order, and back.
 rt_value_t rt_bytes_pack(rt_value_t specs, rt_value_t values, const char *site) RT_ASM(rt_bytes_pack);
 rt_value_t rt_bytes_unpack(rt_value_t specs, rt_value_t s, rt_value_t at, const char *site) RT_ASM(rt_bytes_unpack);
+
+// (log level msg fields) (json.c, D254): a line of JSON on stderr, unless
+// level is below rt_log_level (0 :debug, 1 :info, 2 :warn, 3 :error),
+// which SLIGHT_LOG sets.
+extern int rt_log_level;
+rt_value_t rt_log_line(rt_value_t level, rt_value_t msg, rt_value_t fields, const char *site) RT_ASM(rt_log_line);
 
 // (clock/now): the time of day, microseconds since 1970-01-01T00:00:00Z,
 // recorded; on the virtual clock, SLIGHT_EPOCH's plus the virtual time
