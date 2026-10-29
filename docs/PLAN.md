@@ -1199,6 +1199,8 @@ builtins are to be proposed with the standard library (3).
      without copying it at each step. Binary protocols (PostgreSQL's,
      WebSockets', msgpack) need it.
    - A log device: levels, structured lines to stderr, recorded.
+
+   Proposed below, "Step 1, proposed".
 2. **HTTPS, and what TLS would have brought** (D251, in place of TLS
    on mbedTLS): `https://` through curl in `lib/http.slight` (done,
    golden test 309), and a
@@ -1251,6 +1253,137 @@ written: graphemes, compression. TLS goes to curl and a proxy instead,
 and hashes, base64 and random bytes are ours (D251). SQLite waits on
 D151's open point, a thread for a library that can only block, or for
 its command-line tool through `:exec`, clumsier but with neither.
+
+#### Step 1, proposed (open, Oct 2026)
+
+**(open)** The four pieces of step 1, each with options and a
+recommendation. All four are builtins in C, recorded through `replay.c`
+where they take from the world, so a run still replays (D250's rule).
+
+**1. The time of day.**
+
+`clock/us` is the microseconds since the program started, on the clock
+timers go by, and never the time of day (D208). Nothing gives the date.
+
+- (a) `(clock/now)`: the microseconds since 1970-01-01T00:00:00Z, an
+  integer, as `clock/us` is (63 bits hold them for 146,000 years),
+  POSIX time, so without leap seconds. On the real clock it's the
+  system's (`CLOCK_REALTIME`), through a new `rt_io_realtime`, recorded;
+  it can jump when the system's clock is set, which is why timers stay
+  on `clock/us`. On the virtual clock it's the virtual time plus a
+  start: `SLIGHT_EPOCH`'s, in seconds, if it's set, or the real time of
+  day when the program starts, recorded either way, as `SLIGHT_SEED`
+  is for random numbers (D222). `t/run.sh` sets `SLIGHT_EPOCH`, so a
+  test's dates are the same every run.
+- (b) As (a), in milliseconds, JavaScript's `Date.now()`, which `str/`
+  and `math/` follow elsewhere (D219, D221): familiar, but a second unit
+  beside `clock/us`.
+- (c) Seconds, as a float: precise to a microsecond only till 2255, and
+  floats print with an exponent.
+
+Then the calendar, in slight, `lib/time.slight`, a module: a time made
+a UTC date and back, `(time/utc us)` giving a keyed list (`:year`
+`:month` `:day` `:hour` `:minute` `:second` `:us` `:weekday`) and
+`(time/from-utc fields)`, by Howard Hinnant's days-from-civil, exact
+over any year; `(time/iso us)`, ISO 8601 (`"2026-10-29T14:03:07.123456Z"`),
+and `(time/parse-iso s)`, a Result; `(time/http us)`, the HTTP date
+(`"Thu, 29 Oct 2026 14:03:07 GMT"`), which `lib/http.slight`'s
+missing Date header wants; and a fixed offset from UTC, in minutes, for
+`time/iso` to write. Not time zones by name: they need the system's
+zone database, which changes (D251's kind of thing to leave to the
+system); reading `/etc/localtime` in slight is a later option.
+
+**Recommendation: (a),** and `lib/time.slight` as above. Golden tests
+from Python's `datetime`, and `t/replay/` for a recorded run's dates.
+
+**2. Files beyond reading and writing.**
+
+Only `:fs/read`, `:fs/write` and `:fs/append`; anything else goes
+through `:exec` (`ls`, `rm`, `mv`), as `lib/tools.slight` does.
+
+- (a) Builtins, each a system call made where it's called, as a file
+  device's `open` already is: `(fs/list dir)`, the names in it, sorted
+  by their bytes so the order is the same on every file system, without
+  `.` and `..`; `(fs/stat path)`, a keyed list, `:kind` (`:file`,
+  `:dir`, `:link` or `:other`), `:size`, `:modified` (microseconds, as
+  `clock/now`), `:mode`, following a link as `stat` does;
+  `(fs/delete path)`, a file or an empty directory, as C's `remove`;
+  `(fs/rename from to)`; `(fs/mkdir path)`, one level, its mode 0777
+  less the umask. Each gives `(:ok value)` or `(:error (name path))`,
+  errno's names as a device's are (`:enoent`, `:eacces`, `:enotempty`,
+  ...), and goes through `replay.c`: recorded with what it gave, and in
+  a replay not made, as no write is.
+- (b) An `:fs` device that answers requests as messages, as D151 says
+  of anything with I/O. But with no thread in the runtime, it would
+  make the same system call on the scheduler's stack, blocking the
+  same way; it only makes each call a message and a reply.
+- (c) As now, `:exec`: a process per call, and output to parse.
+
+**Recommendation: (a).** A call waits as long as the disk does, as
+opening a file does now; on a network file system that can be long,
+which a thread for the file system would fix, as D151's open point
+would for SQLite. A whole tree (`mkdir -p`, `rm -r`, a walk) is
+slight's, in `lib/fs.slight`, on these. Golden tests in `build/t/`, as
+the tests that write files do.
+
+**3. Binary data.**
+
+Strings are bytes, and `bytes/at`, `bytes/slice` and `bytes/index-of`
+read them, but nothing turns a number into its bytes or back.
+
+- (a) `(bytes/pack specs values)` and `(bytes/unpack specs s at)`, the
+  specs a list of keywords: `:u8` and `:i8`; `:u16be`, `:u16le`,
+  `:i16be`, `:i16le`, and the same for 32 and 64 bits; `:f32be`,
+  `:f32le`, `:f64be`, `:f64le`; and `(:bytes n)`, `n` bytes as they
+  are. `pack` gives a string; a value out of its spec's range faults
+  (`:out-of-range`), and an `f32` is rounded to the nearest float, as
+  IEEE says. `unpack` gives `(:ok values next)`, `next` the index after
+  them, or `(:error :short)` when `s` hasn't all of them yet, so a
+  reader can wait for more; a `u64` that doesn't fit slight's 63 bits
+  faults (`:overflow`), as arithmetic does. Specs are data, so a
+  protocol's are a list it names once.
+- (b) Perl's `pack` and `unpack`, a template string (`"n N a*"`):
+  terse, and familiar to anyone who knows Perl, but a little language
+  to parse, and letters to look up.
+- (c) A builtin for each width and order (`bytes/u32be`,
+  `bytes/get-u32be`, ...): forty names, where (a) has two.
+- (d) Erlang's bit syntax, in `match`'s patterns: the best to read, but
+  new syntax, and a change to patterns (D168), the most machinery.
+
+Building a string without copying at each step needs nothing new:
+`str/join` and `~` copy once, at the end, over a list of pieces.
+
+**Recommendation: (a).** Golden tests from Python's `struct`, which has
+the same widths and orders.
+
+**4. A log.**
+
+There's no way for a program to write to stderr: `pprint` and
+`tty/write` write to stdout, and only the runtime's own faults, dead
+letters and errors go to stderr.
+
+- (a) A builtin, `(log level msg fields)`: `level` one of `:debug`,
+  `:info`, `:warn` and `:error`; `msg` a string; `fields` an
+  association list, `(list (list "port" 8080))`, or `()`. It writes one
+  line to stderr, as JSON: `{"time":"2026-10-29T14:03:07.123456Z",
+  "level":"info","pid":3,"msg":"listening","port":8080}`, the time
+  `clock/now`'s, the fields as `json/print` writes them. Lines below
+  `SLIGHT_LOG`'s level (`info` unless it's set) aren't written. JSON
+  lines are what log collectors read (a container's logs, Loki,
+  CloudWatch), and slight reads them back with `:json`. In a replay
+  they're written again, as stdout is, so a recorded run's log comes
+  back with it.
+- (b) As (a), but s-expressions, one a line, which slight reads back
+  with `:sexp`: slight's own, but nothing else reads them.
+- (c) A `:log` device, a process that owns the log, which programs send
+  lines to: a process and a mailbox for what a write does.
+- (d) Just `(eprint x)`, `pprint` to stderr, and logging a library in
+  slight on it.
+
+**Recommendation: (a).** The runtime's own messages (`fault in ...`)
+stay as they are: golden tests say them, and they're for people. A
+log's lines on the virtual clock, with `SLIGHT_EPOCH` set, are the same
+every run, so golden tests check them.
 
 ### Numbers in bulk (agreed, D253, Oct 2026)
 
