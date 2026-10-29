@@ -120,7 +120,11 @@ What fits where:
 - `A` is an `A | B`. An `A | B` fits where a `C` is wanted if both `A`
   and `B` do.
 - A `fun(A) -> B` fits where a `fun(C) -> D` is wanted if a `C` is an
-  `A` and a `B` is a `D`, and the arities are equal.
+  `A` and a `B` is a `D`, and the arities are equal. Two function types
+  overlap unless their arities differ or their results don't overlap:
+  a handler that gives a `str` is no `fun(Request) -> Response`. A
+  function whose result is `never`, one that always raises, overlaps
+  any.
 - `task<T>`, `actor<M>` and `address<M>` are each a `pid` (an address is
   `pid?`). An `actor<M>` fits where an `actor<N>` is wanted if every `N`
   is an `M`: an actor that takes more messages can stand in for one that
@@ -191,8 +195,9 @@ The checker runs over each function's body, knowing what it was given:
   builtin as a value is a function of any arity, since one with
   optional arguments takes the ones it's called with (D219).
 - **The prelude's functions** have `sig`s, in its header,
-  `lib/prelude.sli` (D248), and so do the libraries', in theirs (typed
-  where their docs make it certain, `any` elsewhere for now):
+  `lib/prelude.sli` (D248), and so do the libraries', in theirs, with
+  types for what their docs name (`Response`, `Handler`, `Tool`,
+  `Cell`, ...):
   `lookup<K, V>(k : K, table : list<[K, V]>) : V | :not-found`,
   `nth<T>(i : int, xs : list<T>) : T | nil`, and so on.
 - **A parameter without a type is `any`,** in the function's body.

@@ -1,22 +1,33 @@
 ; lib/ds.slight's header (D248): what (@include :ds) gives a program,
 ; docs/LANGUAGE.md, "(@include :ds)". The rest of ds.slight is its own.
+;
+; Each structure is an actor (D243), which a task asks and anyone sends
+; to; its messages are ds.slight's own, so these are the way in.
 
-(sig cell/new (any) any)
-(sig cell/get (any) any)
-(sig cell/set (any any) any)
-(sig cell/update (any any) any)
-(sig cell/swap (any any) any)
-(sig dict/new () any)
-(sig dict/put (any any any) any)
-(sig dict/delete (any any) any)
-(sig dict/get (any any) any)
-(sig dict/update (any any any any) any)
-(sig dict/keys (any) any)
-(sig dict/size (any) any)
-(sig queue/new () any)
-(sig queue/push (any any) any)
-(sig queue/pop (any) any)
-(sig queue/size (any) any)
-(sig channel/new () any)
-(sig channel/put (any any) any)
-(sig channel/take (any) any)
+(deftype Cell (actor any))
+(deftype Dict (actor any))
+(deftype Queue (actor any))
+(deftype Channel (actor any))
+
+(sig cell/new (any) Cell)
+(sig cell/get (Cell) any)
+(sig cell/set (Cell any) nil)
+(sig cell/update (Cell (fun (any) any)) nil)
+(sig cell/swap (Cell (fun (any) any)) any)
+
+(sig dict/new () Dict)
+(sig dict/put (Dict any any) nil)
+(sig dict/delete (Dict any) nil)
+(sig dict/get (Dict any) any)
+(sig dict/update (Dict any (fun (any) any) any) nil)
+(sig dict/keys (Dict) (list any))
+(sig dict/size (Dict) int)
+
+(sig queue/new () Queue)
+(sig queue/push (Queue any) nil)
+(sig queue/pop (Queue) any)
+(sig queue/size (Queue) int)
+
+(sig channel/new () Channel)
+(sig channel/put (Channel any) nil)
+(sig channel/take (Channel) any)

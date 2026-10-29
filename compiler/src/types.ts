@@ -211,6 +211,10 @@ export function meet(a: Ty, b: Ty, defs: Defs, depth = 0): Ty {
         case 'fun':
             if (b.k !== 'fun') return NEVER;
             if (a.params !== null && b.params !== null && a.params.length !== b.params.length) return NEVER;
+            // nor one whose results are never the other's: a handler that
+            // gives a string where a response is wanted (one that always
+            // raises, giving never, goes anywhere)
+            if (a.result.k !== 'never' && b.result.k !== 'never' && meet(a.result, b.result, defs, depth + 1).k === 'never') return NEVER;
             return a.params === null ? b : a;
         case 'pid':
             return b.k === 'pid' || b.k === 'task' || b.k === 'actor' || b.k === 'address' ? b : NEVER;

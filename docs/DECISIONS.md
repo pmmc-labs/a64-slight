@@ -5969,6 +5969,17 @@ see too, as with C's. A file without a header is spliced in, as before
   `:tools` include it. The prelude's types and sigs moved into
   `lib/prelude.sli`; the libraries' sigs are typed where their docs make
   it certain (`fs`, `exec`, `calc`, `map`, `test`) and `any` elsewhere.
+  *(Later, D248: Stevan, "let's type the remaining headers". `ds`,
+  `http`, `rpc`, `agent` and `tools` are typed too, with types for what
+  their docs name (`Request`, `Response`, `Headers`, `Method`,
+  `Handler`, `Conn`, `Where`, `Tool`, `Args`, `Agent`, `Approve`,
+  `Notes`, and a `Cell`, `Dict`, `Queue` and `Channel` that are each an
+  `actor`, so joining one is found). Every library checks clean against
+  its header, and every program against them. Two function types no
+  longer overlap when their results don't, so a handler that gives a
+  string where a response is wanted is found; one that always raises,
+  whose result is `never`, still goes anywhere. Golden test
+  `t/types/010`.)*
 - **In `.sly`, a prototype** (`fun f(x : int) : str;`) is a `sig` alone,
   as a `.slyi` header declares a function.
 - **`--strict` leaves a module's insides to its own check:** checking a
