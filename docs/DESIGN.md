@@ -425,9 +425,9 @@ names no program can write.
 [`LANGUAGE.md`](LANGUAGE.md) describes each one as a program sees it.
 Agreed (D254, PLAN.md's "Step 1, proposed"): `clock/now`, the time of
 day, with `lib/time.slight`; `fs/list`, `fs/stat`, `fs/delete`,
-`fs/rename` and `fs/mkdir` (`runtime/files.c`); all built; and still to
-build, `bytes/pack` and
-`bytes/unpack`; and `log`, JSON lines on stderr.
+`fs/rename` and `fs/mkdir` (`runtime/files.c`); `bytes/pack` and
+`bytes/unpack`; all built; and still to build, `log`, JSON lines on
+stderr.
 
 **In C (or assembly):**
 - arithmetic: `+ - *` on any two numbers; an integer and a float give a

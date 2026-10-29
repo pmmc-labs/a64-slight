@@ -173,6 +173,8 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'fs/delete': fn([STR], okOr(NIL_T, ANY)),
     'fs/rename': fn([STR, STR], okOr(NIL_T, ANY)),
     'fs/mkdir': fn([STR], okOr(NIL_T, ANY)),
+    'bytes/pack': fn([LIST_ANY, LIST_ANY], STR),
+    'bytes/unpack': fn([LIST_ANY, STR, INT], union(tagged('ok', LIST_ANY, INT), tagged('error', lit('short')))),
 };
 
 // The type predicates, and what each says yes to: in a test, they narrow.

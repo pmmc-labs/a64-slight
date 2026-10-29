@@ -299,6 +299,32 @@
 #define RT_STAT_MODE         6    // :mode          the permission bits
 #define RT_STAT_COUNT        7
 
+// bytes/pack's and bytes/unpack's specs (strings.c, D254), and :short, an
+// unpack that hasn't the bytes yet: RT_PACK_x is symbol RT_SYM_PACK + x.
+// The first 18 are numbers, a width and an order each.
+#define RT_SYM_PACK        169    // RT_SYM_STAT + RT_STAT_COUNT
+#define RT_PACK_U8            0    // :u8
+#define RT_PACK_I8            1    // :i8
+#define RT_PACK_U16BE         2    // :u16be
+#define RT_PACK_U16LE         3    // :u16le
+#define RT_PACK_I16BE         4    // :i16be
+#define RT_PACK_I16LE         5    // :i16le
+#define RT_PACK_U32BE         6    // :u32be
+#define RT_PACK_U32LE         7    // :u32le
+#define RT_PACK_I32BE         8    // :i32be
+#define RT_PACK_I32LE         9    // :i32le
+#define RT_PACK_U64BE        10    // :u64be
+#define RT_PACK_U64LE        11    // :u64le
+#define RT_PACK_I64BE        12    // :i64be
+#define RT_PACK_I64LE        13    // :i64le
+#define RT_PACK_F32BE        14    // :f32be
+#define RT_PACK_F32LE        15    // :f32le
+#define RT_PACK_F64BE        16    // :f64be
+#define RT_PACK_F64LE        17    // :f64le
+#define RT_PACK_BYTES        18    // :bytes
+#define RT_PACK_SHORT        19    // :short
+#define RT_PACK_COUNT       20
+
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it
@@ -620,6 +646,11 @@ rt_value_t rt_fs_stat(rt_value_t path, const char *site) RT_ASM(rt_fs_stat);
 rt_value_t rt_fs_delete(rt_value_t path, const char *site) RT_ASM(rt_fs_delete);
 rt_value_t rt_fs_rename(rt_value_t from, rt_value_t to, const char *site) RT_ASM(rt_fs_rename);
 rt_value_t rt_fs_mkdir(rt_value_t path, const char *site) RT_ASM(rt_fs_mkdir);
+
+// (bytes/pack specs values) and (bytes/unpack specs s at) (strings.c,
+// D254): numbers as bytes, by width and order, and back.
+rt_value_t rt_bytes_pack(rt_value_t specs, rt_value_t values, const char *site) RT_ASM(rt_bytes_pack);
+rt_value_t rt_bytes_unpack(rt_value_t specs, rt_value_t s, rt_value_t at, const char *site) RT_ASM(rt_bytes_unpack);
 
 // (clock/now): the time of day, microseconds since 1970-01-01T00:00:00Z,
 // recorded; on the virtual clock, SLIGHT_EPOCH's plus the virtual time

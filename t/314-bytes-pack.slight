@@ -1,0 +1,33 @@
+; Numbers as bytes and back (D254): every width and order, at the ends
+; of their ranges; floats, an f32 rounded to the nearest; bytes as they
+; are; unpack from an offset, its next index, and short of bytes; an int
+; packed as a float; and what faults: a value out of its spec's range, a
+; string of the wrong length, a spec that isn't one, values and specs of
+; different lengths, a float spec given a string, a u64 past 63 bits, and
+; an offset past the end. Expected output from t/models/pack.py, on
+; Python's struct.
+
+(defun bytes-of (s) (map (lambda (i) (bytes/at s i)) (range 0 (bytes/len s))))
+(defun kind (pid) (car (cadr (join pid))))
+
+(let specs (list :u8 :i8 :u16be :u16le :i16be :i16le :u32be :u32le :i32be :i32le :u64be :u64le :i64be :i64le
+                 :f32be :f32le :f64be :f64le (list :bytes 3)))
+(let values (list 255 -128 65535 258 -32768 32767 4294967295 16909060 -2147483648 -2 4611686018427387903 1
+                  -4611686018427387904 -1 0.1 -2.5 1.0e300 -0.0 "abc"))
+(let s (bytes/pack specs values))
+(pprint (bytes-of s))
+(pprint (bytes/unpack specs s 0))
+(pprint (bytes/unpack (list :u16le :u8) s 2))
+(pprint (bytes/unpack (list :u32be) s (- (bytes/len s) 2)))
+(pprint (bytes/unpack () s (bytes/len s)))
+(pprint (bytes-of (bytes/pack (list :f64be :u8) (list 1 0))))
+(pprint (bytes/unpack (list :i8 :u8) (bytes/pack (list :u8 :i8) (list 200 -56)) 0))
+(pprint (kind (fork (bytes/pack (list :u8) (list 256)))))
+(pprint (kind (fork (bytes/pack (list :i8) (list 128)))))
+(pprint (kind (fork (bytes/pack (list (list :bytes 2)) (list "abc")))))
+(pprint (kind (fork (bytes/pack (list :u7) (list 1)))))
+(pprint (kind (fork (bytes/pack (list :u8 :u8) (list 1)))))
+(pprint (kind (fork (bytes/pack (list :u8) (list 1 2)))))
+(pprint (kind (fork (bytes/pack (list :f64le) (list "x")))))
+(pprint (kind (fork (bytes/unpack (list :u64be) (bytes/pack (list :i64be) (list -1)) 0))))
+(kind (fork (bytes/unpack (list :u8) "ab" 3)))

@@ -1783,6 +1783,26 @@ found in one step:
 - `(bytes/index-of s m [from])`: the byte index of the first `m` at or
   after `from` (clamped), or -1.
 
+Numbers as bytes, for binary protocols and files (D254), by specs, a
+list of keywords, each a width and an order: `:u8` and `:i8`; `:u16be`,
+`:u16le`, `:i16be` and `:i16le`, and the same for 32 and 64 bits;
+`:f32be`, `:f32le`, `:f64be` and `:f64le`; and `(:bytes n)`, `n` bytes
+as they are. `u` is unsigned, `i` two's complement, `f` IEEE, `be`
+big-endian (network order) and `le` little-endian.
+
+- `(bytes/pack specs values)`: a string of the values' bytes, each as
+  its spec says, the lists the same length. A value out of its spec's
+  range faults (`:out-of-range`), as does a string of the wrong length
+  for `(:bytes n)`, a spec that isn't one, or lists of different
+  lengths; a float spec takes an integer too, and an `f32` is the
+  nearest one to the value. `(bytes/pack (list :u8 :u16be) (list 1
+  258))` is the bytes 1, 1, 2.
+- `(bytes/unpack specs s at)`: reads the values back from index `at`:
+  `(:ok values next)`, `next` the index after them, or `(:error :short)`
+  if `s` hasn't all their bytes yet, so a reader can wait for more. An
+  `f32` is widened exactly; a `u64` from 2^62, or an `i64` outside slight's
+  63 bits, faults (`:overflow`), as arithmetic does.
+
 There's no character type: a character is a one-character string, or a
 code point. Build a long string by collecting the pieces in a list and
 joining them.

@@ -806,3 +806,156 @@ rt_value_t rt_tty_write(rt_value_t args, const char *site) {
     rt_buf_free(&b);
     return RT_NIL;
 }
+
+// --- numbers as bytes (D254) --------------------------------------------------
+//
+// A spec is one of RT_PACK_'s 18 number keywords, a width, signed or not
+// (or a float), and an order; or (:bytes n), n bytes as they are. pack
+// writes each value as its spec says, and unpack reads them back.
+
+typedef struct {
+    uint8_t width, sign, flt, big;
+} spec_t;
+
+static const spec_t specs[] = {
+    { 1, 0, 0, 1 }, { 1, 1, 0, 1 },                                    // u8 i8
+    { 2, 0, 0, 1 }, { 2, 0, 0, 0 }, { 2, 1, 0, 1 }, { 2, 1, 0, 0 },    // u16be u16le i16be i16le
+    { 4, 0, 0, 1 }, { 4, 0, 0, 0 }, { 4, 1, 0, 1 }, { 4, 1, 0, 0 },    // u32 i32
+    { 8, 0, 0, 1 }, { 8, 0, 0, 0 }, { 8, 1, 0, 1 }, { 8, 1, 0, 0 },    // u64 i64
+    { 4, 0, 1, 1 }, { 4, 0, 1, 0 }, { 8, 0, 1, 1 }, { 8, 0, 1, 0 },    // f32 f64
+};
+
+// The spec x, or -1 for (:bytes n), with n in *n; anything else faults.
+static int spec_of(rt_value_t x, int64_t *n, const char *site) {
+    for (int k = 0; k < (int)(sizeof specs / sizeof *specs); k++) {
+        if (x == rt_symbol(RT_SYM_PACK + (uint64_t)k)) return k;
+    }
+    if (rt_is_cons(x) && rt_car(x) == rt_symbol(RT_SYM_PACK + RT_PACK_BYTES) && rt_is_cons(rt_cdr(x))
+        && rt_cdr(rt_cdr(x)) == RT_NIL) {
+        *n = rt_need_int(rt_car(rt_cdr(x)), site);
+        if (*n >= 0) return -1;
+    }
+    rt_fault(RT_FAULT_RANGE, x, site);
+}
+
+rt_value_t rt_bytes_pack(rt_value_t specs_, rt_value_t values, const char *site) {
+    need_list(specs_, site);
+    need_list(values, site);
+    rt_buf_t   out = { 0 };
+    rt_value_t vs  = values;
+    for (rt_value_t ss = specs_; ss != RT_NIL; ss = rt_cdr(ss)) {
+        need_list(rt_cdr(ss), site);
+        int64_t n = 0;
+        int     k = spec_of(rt_car(ss), &n, site);
+        if (!rt_is_cons(vs)) {
+            rt_buf_free(&out);
+            rt_fault(RT_FAULT_RANGE, values, site);     // fewer values than specs
+        }
+        rt_value_t v = rt_car(vs);
+        vs = rt_cdr(vs);
+        need_list(vs, site);
+        uint8_t  b[8];
+        uint64_t bits;
+        if (k < 0) {
+            need_string(v, site);
+            if ((int64_t)len_of(v) != n) rt_fault(RT_FAULT_RANGE, v, site);
+            rt_buf_add(&out, bytes_of(v), (size_t)n);
+            continue;
+        }
+        spec_t s = specs[k];
+        if (s.flt) {
+            if (!rt_is_float(v) && (v & RT_TAG_INT_MASK)) rt_fault(RT_FAULT_NOT_NUMBER, v, site);
+            double d = rt_is_float(v) ? rt_float_value(v) : (double)rt_int_value(v);
+            if (s.width == 4) {
+                float    f = (float)d;                  // the nearest float, as IEEE rounds
+                uint32_t w;
+                memcpy(&w, &f, 4);
+                bits = w;
+            } else {
+                memcpy(&bits, &d, 8);
+            }
+        } else {
+            int64_t x  = rt_need_int(v, site);
+            int     ok = s.sign ? (s.width == 8 || (x >= -(INT64_C(1) << (s.width * 8 - 1)) && x < (INT64_C(1) << (s.width * 8 - 1))))
+                                : (x >= 0 && (s.width == 8 || x < (INT64_C(1) << (s.width * 8))));
+            if (!ok) rt_fault(RT_FAULT_RANGE, v, site);
+            bits = (uint64_t)x;
+        }
+        for (int i = 0; i < s.width; i++) {
+            int shift = 8 * (s.big ? s.width - 1 - i : i);
+            b[i] = (uint8_t)(bits >> shift);
+        }
+        rt_buf_add(&out, (const char *)b, s.width);
+    }
+    if (vs != RT_NIL) {
+        rt_buf_free(&out);
+        rt_fault(RT_FAULT_RANGE, values, site);         // more values than specs
+    }
+    return buf_to_string(&out, site);
+}
+
+rt_value_t rt_bytes_unpack(rt_value_t specs_, rt_value_t s, rt_value_t at, const char *site) {
+    need_list(specs_, site);
+    need_string(s, site);
+    int64_t i = rt_need_int(at, site);
+    size_t  len = len_of(s);
+    if (i < 0 || (uint64_t)i > len) rt_fault(RT_FAULT_RANGE, at, site);
+    const uint8_t *p = (const uint8_t *)bytes_of(s);
+    builder_t      out;
+    builder_init(&out);
+    for (rt_value_t ss = specs_; ss != RT_NIL; ss = rt_cdr(ss)) {
+        need_list(rt_cdr(ss), site);
+        int64_t n = 0;
+        int     k = spec_of(rt_car(ss), &n, site);
+        int64_t w = k < 0 ? n : specs[k].width;
+        if ((uint64_t)w > len - (uint64_t)i) {
+            rt_value_t *why = rt_alloc(32, site);
+            why[0] = rt_symbol(RT_SYM_ERROR);
+            why[1] = (rt_value_t)(why + 2) | RT_TAG_LIST;
+            why[2] = rt_symbol(RT_SYM_PACK + RT_PACK_SHORT);
+            why[3] = RT_NIL;
+            return (rt_value_t)why | RT_TAG_LIST;
+        }
+        if (k < 0) {
+            builder_add(&out, rt_new_string((const char *)p + i, (size_t)n, site), site);
+            i += n;
+            continue;
+        }
+        spec_t   sp   = specs[k];
+        uint64_t bits = 0;
+        for (int j = 0; j < sp.width; j++) {
+            int shift = 8 * (sp.big ? sp.width - 1 - j : j);
+            bits |= (uint64_t)p[i + j] << shift;
+        }
+        i += sp.width;
+        rt_value_t v;
+        if (sp.flt && sp.width == 4) {
+            uint32_t b32 = (uint32_t)bits;
+            float    f;
+            memcpy(&f, &b32, 4);
+            v = rt_new_float((double)f, site);
+        } else if (sp.flt) {
+            double d;
+            memcpy(&d, &bits, 8);
+            v = rt_new_float(d, site);
+        } else {
+            int64_t x = sp.sign && sp.width < 8 && (bits >> (sp.width * 8 - 1)) ? (int64_t)(bits | (~UINT64_C(0) << (sp.width * 8)))
+                                                                                  : (int64_t)bits;
+            // 63 bits hold every value but a u64 from 2^62 and an i64
+            // outside -2^62 to 2^62 - 1
+            if ((!sp.sign && sp.width == 8 && bits >> 62) || x < -(INT64_C(1) << 62) || x >= (INT64_C(1) << 62)) {
+                rt_fault(RT_FAULT_OVERFLOW, rt_int(i - sp.width), site);
+            }
+            v = rt_int(x);
+        }
+        builder_add(&out, v, site);
+    }
+    rt_value_t *ok = rt_alloc(48, site);
+    ok[0] = rt_symbol(RT_SYM_OK);
+    ok[1] = (rt_value_t)(ok + 2) | RT_TAG_LIST;
+    ok[2] = out.list;
+    ok[3] = (rt_value_t)(ok + 4) | RT_TAG_LIST;
+    ok[4] = rt_int(i);
+    ok[5] = RT_NIL;
+    return (rt_value_t)ok | RT_TAG_LIST;
+}

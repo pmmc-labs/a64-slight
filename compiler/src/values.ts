@@ -94,9 +94,15 @@ export const TABLE_WORDS: readonly string[] = ['records'];
 // What fs/stat says of a file (D254), in RT_STAT_ order.
 export const STAT_WORDS: readonly string[] = ['file', 'dir', 'link', 'other', 'size', 'modified', 'mode'];
 
+// bytes/pack's and bytes/unpack's specs, and :short (D254), in RT_PACK_ order.
+export const PACK_WORDS: readonly string[] = [
+    'u8', 'i8', 'u16be', 'u16le', 'i16be', 'i16le', 'u32be', 'u32le', 'i32be', 'i32le', 'u64be', 'u64le', 'i64be',
+    'i64le', 'f32be', 'f32le', 'f64be', 'f64le', 'bytes', 'short',
+];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
-    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS, ...STAT_WORDS,
+    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS, ...STAT_WORDS, ...PACK_WORDS,
 ];

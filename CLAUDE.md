@@ -306,9 +306,10 @@ HTTP's (golden test 311, `t/models/time.py`); and files beyond reading
 and writing, `fs/list` (sorted), `fs/stat` (not following a link),
 `fs/delete`, `fs/rename` and `fs/mkdir`, builtins in `runtime/files.c`,
 each a Result and recorded, and trees on them in `lib/fs.slight`,
-`fs/mkdir-all`, `fs/delete-all` and `fs/walk` (golden tests 312, 313).
-**Next:** the rest of step 1: `bytes/pack` and `bytes/unpack`, and
-`log`. 12c (C libraries vendored as source, D151, D152) waits; its
+`fs/mkdir-all`, `fs/delete-all` and `fs/walk` (golden tests 312, 313);
+and numbers as bytes, `bytes/pack` and `bytes/unpack`, by specs of
+keywords, `:u8` to `:f64le` and `(:bytes n)` (golden test 314,
+`t/models/pack.py`). **Next:** the rest of step 1, `log`. 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan
@@ -439,7 +440,7 @@ its time limit; timers that
 nothing can come of, which don't hold up the end; a Unix socket left by
 SIGKILL, replaced, and removed by SIGTERM; https through real curl,
 over real TLS, to a server with a certificate made for the run);
-`headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers, `timer-ids.py`, a model of `timer/cancel`'s index, and `time.py`, of `lib/time.slight`, on Python's datetime); `data/` (files the tests read or include, JSONTestSuite's among them, `sly/`, the tutorial's store in the C-style syntax, and `http-raw.slight`, a raw server and client for the HTTP tests, and `curl/curl`, a stand-in for curl, for `https://` without a network; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment (`//` in place of `;` in a `.sly` test). |
+`headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers, `timer-ids.py`, a model of `timer/cancel`'s index, and `time.py`, of `lib/time.slight`, on Python's datetime, and `pack.py`, of `bytes/pack` and `bytes/unpack`, on Python's struct); `data/` (files the tests read or include, JSONTestSuite's among them, `sly/`, the tutorial's store in the C-style syntax, and `http-raw.slight`, a raw server and client for the HTTP tests, and `curl/curl`, a stand-in for curl, for `https://` without a network; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment (`//` in place of `;` in a `.sly` test). |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
 ## Commands
