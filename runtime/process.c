@@ -1220,11 +1220,15 @@ enum {
     ITEM_TOLD,                          // the answer, to the device that asked
 };
 
+// A message's item is only its head, kept in the message's own chunk, so
+// that a message crosses islands in one allocation, freed as the message
+// is; every other kind is allocated whole.
 typedef struct item {
     struct item *next;
     uint64_t     id;                    // its island and number there, which a record names it by
-    int          kind;
-    int          wakes;                 // a watch's: WATCH_TELLS or WATCH_READ
+    uint8_t      kind;
+    uint8_t      wakes;                 // a watch's: WATCH_TELLS or WATCH_READ
+    uint8_t      in_msg;                // a message's, in its chunk
     rt_value_t   to;                    // the pid (or address) it's for
     rt_value_t   from;                  // the pid it's from, or about
     rt_msg_t    *msg;                   // a message, or a result
@@ -1245,8 +1249,12 @@ typedef struct item {
 
 enum { SOURCE_KEYS = 1, SOURCE_SYSTEM };       // island 0's (D256)
 
+#define ITEM_HEAD ((offsetof(item_t, code) + 15) & ~(size_t)15)
+
+// Each on lines of its own (128 bytes, the M-series' pair of lines), so
+// one island's pushes and looks don't stall another's.
 typedef struct {
-    pthread_mutex_t  lock;
+    _Alignas(128) pthread_mutex_t lock;
     item_t          *first, *last;      // the inbox, oldest first
     _Atomic uint64_t waiting;           // how many, looked at without the lock
     int              asleep;            // waiting in select(), to be woken by a byte on wake
@@ -1256,7 +1264,7 @@ typedef struct {
 
 static island_t         isles[RT_ISLANDS_MAX];
 static uint64_t         nislands = 1;   // (islands): SLIGHT_ISLANDS, or one per core
-static _Atomic uint64_t busy     = 1;   // islands that may do something more, and items not yet handled
+static _Alignas(128) _Atomic uint64_t busy = 1;    // islands that may do something more, and items not yet handled
 static _Atomic int      many;           // whether an island beside 0 has started
 static pthread_mutex_t  starting = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t         sched_seed;     // SLIGHT_SCHED, from which each island's generator starts
@@ -1382,9 +1390,10 @@ static int spin(void) {
     uint64_t until = spin_clock() + SPIN_NS;
     for (;;) {
         for (int i = 0; i < 64; i++) {
-            if (atomic_load_explicit(&isles[my.island].waiting, memory_order_relaxed) || atomic_load(&busy) == 0) return 1;
+            if (atomic_load_explicit(&isles[my.island].waiting, memory_order_relaxed)) return 1;
             relax();
         }
+        if (atomic_load(&busy) == 0) return 1;  // busy is every island's: looked at less often
         if (spin_clock() > until) return 0;
     }
 }
@@ -1616,10 +1625,10 @@ static rt_side_t *side_of(rt_proc_t *p) {
 }
 
 // A message to or from another island, counted: the bytes are its copy's,
-// not its record's.
-static void count_crossing(crossed_t *c, const rt_msg_t *m) {
+// not its record's, nor the item it carries (extra).
+static void count_crossing(crossed_t *c, const rt_msg_t *m, size_t extra) {
     c->n++;
-    c->bytes += m->chunk->size - sizeof *m;
+    c->bytes += m->chunk->size - sizeof *m - extra;
 }
 
 static handles_t *handles_of(rt_proc_t *p, int old) {
@@ -1715,12 +1724,26 @@ static void close_address(rt_proc_t *p, rt_value_t a) {
 // its record, which is freed as it's taken (D199).
 _Static_assert(sizeof(rt_msg_t) % 16 == 0, "a message's record keeps the copy after it 16-aligned");
 
-static rt_msg_t *new_msg_on(island_state_t *s, rt_value_t msg) {
+static rt_msg_t *new_msg_reserving(island_state_t *s, rt_value_t msg, size_t more) {
     rt_value_t  v;
-    rt_chunk_t *c = copy_values_after(s, &msg, &v, 1, sizeof(rt_msg_t));
+    rt_chunk_t *c = copy_values_after(s, &msg, &v, 1, sizeof(rt_msg_t) + more);
     rt_msg_t   *m = (rt_msg_t *)(c + 1);
     *m = (rt_msg_t){ .next = NULL, .value = v, .chunk = c, .device = 0 };
     return m;
+}
+
+static rt_msg_t *new_msg_on(island_state_t *s, rt_value_t msg) {
+    return new_msg_reserving(s, msg, 0);
+}
+
+// Whether m's chunk holds no copy, only its record (and a far message's
+// item): a message with nothing to copy, freed as it's taken rather than
+// adopted (D199).
+static int bare(const rt_msg_t *m) {
+    rt_value_t v = m->value;
+    if (!rt_is_cons(v) && (v & RT_TAG_MASK) != RT_TAG_BOXED) return 1;
+    uintptr_t a = (uintptr_t)v, lo = (uintptr_t)(m->chunk + 1);
+    return a < lo || a >= lo + m->chunk->size;
 }
 
 static rt_msg_t *new_msg(rt_value_t msg) {
@@ -1748,10 +1771,17 @@ static void read_on(rt_proc_t *p, rt_value_t pid);
 rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *site) {
     if ((pid & RT_TAG_MASK) != RT_TAG_PID) rt_fault(RT_FAULT_NOT_PID, pid, site);
     if (rt_pid_island(pid) != rt_pid_island(p->pid)) {     // its island checks it, when it takes it (D256)
-        rt_msg_t *m = new_msg_on(p->isle, msg);
-        count_crossing(&p->isle->sent, m);
-        count_crossing(&side_of(p)->sent, m);
-        cross(ITEM_MSG, pid, p->pid, m);
+        rt_msg_t *m  = new_msg_reserving(p->isle, msg, ITEM_HEAD);
+        item_t   *it = (item_t *)(void *)(m + 1);
+        memset(it, 0, ITEM_HEAD);
+        it->kind   = ITEM_MSG;
+        it->in_msg = 1;
+        it->to     = pid;
+        it->from   = p->pid;
+        it->msg    = m;
+        count_crossing(&p->isle->sent, m, ITEM_HEAD);
+        count_crossing(&side_of(p)->sent, m, ITEM_HEAD);
+        push(rt_pid_island(pid), it);
         return RT_NIL;
     }
     if (rt_is_address(pid)) {
@@ -1786,8 +1816,8 @@ rt_value_t rt_recv(rt_proc_t *p, rt_value_t *args, uint64_t n, rt_code_t code) {
         if (!p->mail) p->mail_last = NULL;
         rt_value_t v = m->value;
         p->reading = m->device;
-        if (m->chunk->size == sizeof *m) free_msg(m);
-        else                             adopt(p, m->chunk);
+        if (bare(m)) free_msg(m);
+        else         adopt(p, m->chunk);
         return v;
     }
     p->code = code;
@@ -1950,8 +1980,8 @@ static rt_value_t take_given(rt_proc_t *p) {
     rt_msg_t *m = p->side->given;
     p->side->given = NULL;
     rt_value_t v = m->value;
-    if (m->chunk->size == sizeof *m) free_msg(m);
-    else                             adopt(p, m->chunk);
+    if (bare(m)) free_msg(m);
+    else         adopt(p, m->chunk);
     return v;
 }
 
@@ -2205,8 +2235,8 @@ static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char 
                 if (!other && p->mail_last == m) p->mail_last = last;
                 rt_value_t v = m->value;
                 if (!rt_is_address(src) && !other) p->reading = src;
-                if (m->chunk->size == sizeof *m) free_msg(m);
-                else                             adopt(p, m->chunk);
+                if (bare(m)) free_msg(m);
+                else         adopt(p, m->chunk);
                 if (!pair) return v;
                 rt_value_t *cells = rt_alloc(4 * sizeof *cells, site);
                 return rt_cons_at(cells, src, rt_cons_at(cells + 2, v, RT_NIL));
@@ -2325,14 +2355,15 @@ static void take_item(item_t *it) {
     entry_t   *e = rt_is_address(it->to) ? NULL : slot(it->to);
     rt_proc_t *t = e ? e->proc : NULL;
     switch (it->kind) {
-        case ITEM_MSG:
-            count_crossing(&my.received, it->msg);
+        case ITEM_MSG: {
+            size_t extra = it->in_msg ? ITEM_HEAD : 0;
+            count_crossing(&my.received, it->msg, extra);
             if (!e) {
                 rt_proc_t *o = address_owner(it->to);
-                if (o) count_crossing(&side_of(o)->received, it->msg);
+                if (o) count_crossing(&side_of(o)->received, it->msg, extra);
                 to_address(it->to, it->msg);
             } else if (t && t->actor) {
-                count_crossing(&side_of(t)->received, it->msg);
+                count_crossing(&side_of(t)->received, it->msg, extra);
                 deliver(t, it->msg);
             } else if (t) {                       // a task, which only another island's send could reach
                 rt_dead_letter(it->msg->value, "send to a task");
@@ -2344,6 +2375,7 @@ static void take_item(item_t *it) {
                 free_msg(it->msg);              // ended: it disappears, as here
             }
             break;
+        }
         case ITEM_START:
             start_here(it);
             break;
@@ -2406,12 +2438,14 @@ static void take_inbox(uint64_t poll) {
         rt_io_took(poll, ids, n);
         free(ids);
     }
-    for (item_t *next; it; it = next) {
+    uint64_t n = 0;
+    for (item_t *next; it; it = next, n++) {
         next = it->next;
+        int own = !it->in_msg;                  // else it's in its message, which may be gone after
         take_item(it);
-        free(it);
-        atomic_fetch_sub(&busy, 1);
+        if (own) free(it);
     }
+    atomic_fetch_sub(&busy, n);                 // once, after: busy is never 0 too soon
 }
 
 // Replaying, the items the record says, in its order, each waited for
@@ -2443,8 +2477,9 @@ static void take_these(const uint64_t *ids, uint32_t n) {
             select(s->wake[0] + 1, &in, NULL, NULL, NULL);
             drain_wake();
         }
+        int own = !it->in_msg;
         take_item(it);
-        free(it);
+        if (own) free(it);
         atomic_fetch_sub(&busy, 1);
     }
 }
@@ -2689,7 +2724,7 @@ static void ring(void) {
     for (uint64_t t = my.nalarms ? now() : 0; my.nalarms && my.alarms[0].due <= t; ) {
         alarm_t    a = next_alarm();
         if (far(a.pid)) {
-            count_crossing(&my.sent, a.msg);    // its island's: the process that set it may have ended
+            count_crossing(&my.sent, a.msg, 0); // its island's: the process that set it may have ended
             cross(ITEM_MSG, a.pid, 0, a.msg);
             continue;
         }
@@ -4971,7 +5006,11 @@ void rt_run(void) {
         events();
         rt_proc_t *p = dequeue();
         if (!p) {
-            if (!idle() && !quiesce()) return;   // nothing more can come, here or anywhere (D256)
+            // Nothing more can come but from another island: watch the
+            // inbox a while before counting this island done, since an
+            // answer is often on its way, and the count is every
+            // island's (D256).
+            if (!idle() && !(atomic_load(&many) && spin()) && !quiesce()) return;
             continue;
         }
         if (!p->stack) start(p);

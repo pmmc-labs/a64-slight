@@ -190,6 +190,20 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The cloud machine, 31 Oct: a message crossing islands, one allocation
+
+A message to another island was two allocations, its chunk and an inbox
+item of some 200 bytes, zeroed, both freed by the island that took it.
+Now the item's head, 48 bytes, rides in the message's chunk, freed with
+it; an island takes itself off the count of busy islands only after
+watching its inbox a while, rather than at every lull; the inboxes and
+the count are on cache lines of their own; and a take uncounts its
+items at once. `fan-in-mc 10000000` on 4 islands: 2.0 to 2.6 s, from
+7.8 to 10.5, and a third of the memory. A ping-pong whose halves are on
+neighbouring islands, every message crossing, is unchanged at a few
+microseconds a round trip on this VM's 4 vCPUs, where every island
+spinning leaves none spare: the M2 Max is to say what it is there.
+
 ### The M2 Max, 30 Oct, 22:31: processes on every island (D256)
 
 `2026-10-30-2231-macos-apple-m2-max`, 12 islands, each doing its share

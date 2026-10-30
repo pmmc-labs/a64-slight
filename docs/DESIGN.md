@@ -1068,7 +1068,8 @@ an island with nothing to do watches its inbox for 50 µs first, so a
 reply that comes back quickly needs no wake (two islands' round trip,
 3.4 µs on the cloud machine, where a wake through the pipe took 50).
 What crosses is an item: a message, already copied into its chunk by
-the sender; a start, for `spawn/on`, which the island makes and answers
+the sender, the item's head in the same chunk, so that crossing is one
+allocation; a start, for `spawn/on`, which the island makes and answers
 with its pid, the spawner waiting, so each island numbers only its own;
 and kills, watches and ends. A pid not on this island reads as ended
 (`slot`), except where send, kill, monitor and read see to it. An
