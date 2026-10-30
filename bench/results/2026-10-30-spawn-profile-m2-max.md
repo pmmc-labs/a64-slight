@@ -597,3 +597,126 @@ none. Counted with lldb breakpoints on each one, at n = 1000 and 2000,
 Next: count `MAP_STALL`, `MAP_REWIND` and `FLUSH_RESTART_OTHER_NONSPEC`
 at each commit in between, to find which brings the flushes. Then find
 what in that commit flushes the pipeline.
+
+### The flushes, commit by commit
+
+The same dylib, at each commit built for section 5. Five runs each,
+medians per process, `SLIGHT_ISLANDS=1`:
+
+| commit | cycles | instructions | `MAP_STALL` | `MAP_REWIND` | `FLUSH_RESTART_OTHER_NONSPEC` |
+|---|---:|---:|---:|---:|---:|
+| `118291f` | 421.70 | 2256.88 | 14.48 | 10.77 | 0.08 |
+| `5d9c4fe` | 408.58 | 2255.90 | 16.74 | 8.71 | 0.10 |
+| `9b871bf` | 432.80 | 2310.14 | 17.22 | 8.99 | 0.08 |
+| `9d52b93` | 431.88 | 2309.96 | 17.29 | 9.36 | 0.08 |
+| `20d78b3` | 510.64 | 2528.58 | 14.61 | 8.54 | 0.02 |
+| `0d3e608` | 562.73 | 2641.78 | 16.18 | 10.35 | 0.02 |
+| `e46e023` | 472.88 | 2451.07 | 18.23 | 10.07 | 0.06 |
+| `ebb2312` | 490.04 | 2287.15 | **39.94** | **14.37** | **0.91** |
+| HEAD | 472.97 | 2267.89 | 41.25 | 13.13 | 0.95 |
+
+So the cost has two causes, one after the other. Islands, step 1
+(`20d78b3`) really did cost what it seemed: about 220 instructions a
+process of `_tlv_get_addr` calls, with no flushes. `ebb2312` took those
+calls off the path, and in the same commit nearly one flush a process
+arrived, with map stalls more than doubled. That's why its cycles
+didn't come down, and why `retire+196` became the hot spot then.
+
+### What flushes: `retire` without a call
+
+More throwaway builds of HEAD, each edited, built and restored as
+above. Cycles and instructions are medians of seven with
+`/usr/bin/time -l`; times are hyperfine's, `-N -w 3 -r 20`. All with
+`SLIGHT_ISLANDS=1`, all printing 499999500000.
+
+| build | what changes in HEAD | instructions | cycles |
+|---|---|---:|---:|
+| HEAD | (none) | 2284 | 472–482 |
+| E1 | `retire`: `s = &my`, a thread-local call, not `p->isle` | 2298 | 435–443 |
+| E2 | `to_scheduler`: `&my.scheduler`, not `&p->isle->scheduler` | 2299 | 477 |
+| E3 | `enqueue`: `s = &my`, not `p->isle` | 2296 | 479 |
+| E1+E2+E3 | all three | 2328 | 442 |
+| F | `retire(island_state_t *s, rt_proc_t *p)`, `rt_run` passing `&my` (in a register there), the stack released through `s`: no `p->isle`, no thread-local call | 2285 | 474–480 |
+| H1 | F with a call to an empty `noinline` function first in `retire` | 2287 | 436–442 |
+| H2 | F with that call just before `free(p)` | 2286 | 439 |
+| T | HEAD with `__asm__ volatile("");` after `free(p)`, so it isn't a tail call | 2285 | 446 |
+| `118291f` | | 2273 | 425–433 |
+
+E1 took back most of the gap, and E2 and E3 none. F showed it isn't
+where `retire` gets its island's pointer: a register is as slow as
+`p->isle`. H1 and H2 showed it's whether `retire` makes a call. Any
+call, anywhere in it, does. In HEAD, `retire`'s path for a process's
+end saves four registers at its entry, makes no call, restores them,
+and jumps to `free`, a tail call. Every build that puts a real `bl` in
+that path is fast.
+
+hyperfine:
+
+| build | n = 1M, `SLIGHT_ISLANDS=1` | n = 1M, default islands |
+|---|---:|---:|
+| `118291f` | 126.4–128.2 ms | 126.1 ms |
+| HEAD | 139.9–140.6 ms | 140.2 ms |
+| E1 | 128.4–131.0 ms | |
+| F | 139.3 ms | 139.8 ms |
+| H1 | 128.8 ms | |
+| T | 128.4 ms | 128.1 ms |
+
+The counters for the builds that matter (five runs each, medians per
+process):
+
+| build | cycles | instructions | `MAP_STALL` | `MAP_REWIND` | `FLUSH_RESTART_OTHER_NONSPEC` |
+|---|---:|---:|---:|---:|---:|
+| `118291f` | 424.88 | 2257.94 | 14.61 | 10.67 | 0.07 |
+| HEAD | 469.17 | 2267.54 | 35.99 | 14.59 | 0.89 |
+| E1 | 430.08 | 2282.39 | 18.07 | 11.27 | 0.06 |
+| F | 468.48 | 2268.23 | 35.58 | 14.43 | 0.92 |
+| H1 | 431.49 | 2271.56 | 17.40 | 11.20 | 0.06 |
+| H2 | 436.04 | 2270.41 | 19.36 | 11.22 | 0.17 |
+
+With a call in `retire`, the flush is gone, and the stalls and cycles
+with it.
+
+### Conclusion, revised
+
+On this Mac, HEAD's 12 to 14 ns a process over `118291f` is about one
+pipeline flush a process, 0.9 against 0.07, and the stalls around it.
+It's in `retire`, whose shape `ebb2312` changed:
+register saves at its entry, a path with no call, the restores (the
+`ldp` at `retire+196` where the samples gather), then a tail jump into
+`free`. A call anywhere in it removes the flush. `118291f`'s `retire`
+also ended in a tail jump to `free`, but its prologue was shrink-wrapped
+after the stack's release and it reached the island through globals.
+Every build since `ebb2312` in which `retire` makes no call has the
+flush.
+
+What isn't known is which mechanism in the core flushes. The counter
+says it isn't a branch mispredict or a memory-order violation. It's
+the M2's "other". The likeliest suspect is a misprediction in how the
+core pairs a reload from the stack with the store that saved it, since
+the stall is on such a reload and `free` saves its own registers into
+the same stack words straight after. With only three counters, I
+couldn't test that further.
+
+The earlier explanations are withdrawn: the thread-local block's place,
+the scheduler's line, cache misses, and the atomics.
+
+### The likely fix (not applied)
+
+Make `free(p)` in `retire` an ordinary call, not a tail call: build T,
+one instruction, no thread-local, no new argument. In
+`runtime/process.c`:
+
+    static void retire(rt_proc_t *p) {
+        ...
+        settle_on(s, rt_pid_number(p->pid));
+        free(p);
+        __asm__ volatile("");                       // no tail call
+    }
+
+It takes back about 12 of the 14 ms a million processes, at both island
+settings. With a comment saying why: a tail jump into `free` from this
+path costs the M2 a flush a process. A sturdier form, so that the next
+change to `retire` doesn't bring the flush back, needs checking on its
+own: `free` from `rt_run` after `retire` returns, for example. Linux
+and the x86-64 target should be measured before and after, since the
+cost was never seen there.
