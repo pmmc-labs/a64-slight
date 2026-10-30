@@ -178,6 +178,26 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 30 Oct, 17:51: a chunk's header two words again
+
+`2026-10-30-1751-macos-apple-m2-max` (`82dda3f`):
+
+| | 24 Oct | 17:10 | 17:51 |
+|---|---:|---:|---:|
+| `spawn` | 0.122 s, 48 MB | 0.145 s, 64 MB | 0.142 s, 49 MB |
+| `fan-in` | 0.355 s, 461 MB | 0.412 s, 613 MB | 0.373 s, 461 MB |
+| `ping-pong` | 0.285 s | 0.282 s | 0.280 s |
+
+- **Memory, as it was.** `fan-in` is 5 per cent over 24 Oct.
+- **`spawn`, 16 per cent over, is islands' price for now.** It runs 4
+  per cent more instructions than on 24 Oct (`118291f`), about 70 a
+  process: `finish` looking for watchers on other islands and a parent
+  there, `rt_send` and `rt_recv` checking a pid's island, and the
+  scheduler's loop its inbox. On the cloud machine that's 5 per cent,
+  the best of seven runs 0.219 s against 0.208. How many islands there
+  are makes no difference, to the start (2 ms) or to a million
+  processes. Still 3 times faster than Go's goroutines (0.42 s).
+
 ### The M2 Max, 30 Oct, 17:10: no thread-locals, and a chunk's header
 
 `2026-10-30-1710-macos-apple-m2-max`, with no thread-local on the
