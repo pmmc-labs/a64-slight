@@ -720,3 +720,47 @@ change to `retire` doesn't bring the flush back, needs checking on its
 own: `free` from `rt_run` after `retire` returns, for example. Linux
 and the x86-64 target should be measured before and after, since the
 cost was never seen there.
+
+### The fix, measured
+
+`39af1e5` moves `free(p)` out of `retire` into its two callers,
+`rt_run` and `end_other`. I compared it with `118291f`, with the commit
+before it (`44fc73d`), and with build T on top of it: `free(p);
+__asm__ volatile("");` back at the end of `retire`, and the callers'
+`free(p)` removed (a throwaway build, `runtime/` restored after). All
+four print 499999500000 with one island and with the default.
+
+In `39af1e5`'s binary, `retire` still makes no call on its fast path.
+It now ends in `ret`, and `rt_run` calls `free` straight after. In T,
+`retire` calls `free` itself, then returns.
+
+hyperfine, `-N -w 3 -r 20`, n = 1000000:
+
+| build | `SLIGHT_ISLANDS=1` | default islands |
+|---|---:|---:|
+| `118291f` | 126.0 ± 0.6 ms | 125.2 ± 1.2 ms |
+| `44fc73d` | 140.1 ± 1.5 ms | 139.8 ± 1.6 ms |
+| `39af1e5` | 129.8 ± 0.8 ms | 129.9 ± 0.8 ms |
+| T on `39af1e5` | 129.8 ± 2.1 ms | 129.5 ± 0.8 ms |
+
+The kperf dylib, `SLIGHT_ISLANDS=1`, five runs each, medians per
+process:
+
+| build | cycles | instructions | `MAP_STALL` | `MAP_REWIND` | `FLUSH_RESTART_OTHER_NONSPEC` |
+|---|---:|---:|---:|---:|---:|
+| `118291f` | 421.78 | 2257.59 | 14.82 | 10.55 | 0.08 |
+| `44fc73d` | 470.44 | 2267.84 | 41.76 | 12.91 | 0.95 |
+| `39af1e5` | 436.30 | 2267.73 | 20.73 | 11.36 | 0.18 |
+| T | 429.19 | 2268.52 | 18.14 | 11.86 | 0.07 |
+
+**Verdict:** yes, HEAD loses the flush, from 0.95 to 0.18 a process,
+and it's as fast as T on the clock (129.8 against 129.8 ms, and 129.9
+against 129.5). T is a little cleaner on the counters: 0.07 flushes, as
+at `118291f`, and 7 fewer cycles a process. That's within hyperfine's
+noise. Both stay about 4 ms a million processes (1 per cent) over
+`118291f`.
+
+So the tail jump into `free` was most of the trigger. `39af1e5`'s
+`retire` still makes no call, yet loses most of the flush. The 0.1
+flushes it keeps, which T doesn't, suggest a call inside `retire` is
+still worth a little more.
