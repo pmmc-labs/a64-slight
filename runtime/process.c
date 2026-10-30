@@ -2006,13 +2006,16 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
 }
 
 
+// Takes p, which has ended, out of its island; its caller frees it. Not
+// here: from a function that makes no call of its own, a tail jump into
+// free costs the M2 a pipeline flush a process, 12 ns of spawn's (D256,
+// results/2026-10-30-spawn-profile-m2-max.md).
 static void retire(rt_proc_t *p) {
     island_state_t *s = p->isle;
     s->retired_calls += calls_of(p);
     if (p->stack) release_stack(p);
     at_on(s, rt_pid_number(p->pid))->proc = NULL;
     settle_on(s, rt_pid_number(p->pid));
-    free(p);
 }
 
 static _Noreturn void end(rt_proc_t *p, int ok, rt_value_t value, int logged) {
@@ -2244,6 +2247,7 @@ static void end_other(rt_proc_t *p, rt_value_t reason) {
     // A sleeper's timer stays, and is dropped when it's due.
     finish(p, 0, reason, 0);
     retire(p);
+    free(p);
 }
 
 rt_value_t rt_kill(rt_value_t pid, const char *site) {
@@ -4517,7 +4521,10 @@ void rt_run(void) {
         // back: it paused (and queued itself again), waits in recv, join
         // or sleep, or ended
         if (p->state == RT_WAITING)   release_stack(p);
-        else if (p->state == RT_DONE) retire(p);
+        else if (p->state == RT_DONE) {
+            retire(p);
+            free(p);
+        }
     }
 }
 
