@@ -197,6 +197,22 @@ Each run's full tables are in `bench/results/`. What they say:
   the best of seven runs 0.219 s against 0.208. How many islands there
   are makes no difference, to the start (2 ms) or to a million
   processes. Still 3 times faster than Go's goroutines (0.42 s).
+- **Profiled on the Mac, the cause is still open**
+  (`results/2026-10-30-spawn-profile-m2-max.md`). It isn't work: 10
+  more instructions a process (2284 against 2274), but 46 more cycles,
+  IPC 5.22 to 4.72, 13 to 15 ns a process by hyperfine. Nor
+  thread-locals (0.003 lookups a process, counted under lldb), nor
+  malloc (61 ms a million in both). The time arrived with islands' step
+  1 (`20d78b3`), building each commit in between, and shows as a wait
+  at `retire`'s epilogue. But the island's state as plain globals,
+  the scheduler's registers on cache lines of their own, and both
+  together leave the time where it is: with both, the wait leaves
+  `retire` and spreads over everything else. So it's a latency that
+  surfaces wherever there's room, not one load. Finding it needs the
+  core's counters (L1D misses, load and memory-ordering stalls, under
+  `sudo`), or `20d78b3` taken apart change by change. Left there for
+  now: 11 per cent on one benchmark, with ping-pong, thread-ring and
+  payload as they were.
 
 ### The M2 Max, 30 Oct, 17:10: no thread-locals, and a chunk's header
 
