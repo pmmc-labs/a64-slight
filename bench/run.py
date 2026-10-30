@@ -28,8 +28,9 @@ slight-arrays is slight with arrays of numbers (D253), in the benchmarks
 written for them too (spectral-norm), its program NAME-arrays.slight.
 slight-mc is slight on every island (D256), its program NAME-mc.slight
 placing its actors across (islands), one per core: parallel-fib, fan-in
-and spectral-norm (on arrays, so compared with slight-arrays). It's in
-the every-core table, beside Go's, Erlang's and Rust's.
+and spectral-norm (on arrays, so compared with slight-arrays), and
+spawn, idle-memory and ping-pong, each island doing its share locally.
+It's in the every-core table, beside Go's, Erlang's and Rust's.
 
 The results go to bench/results/, as JSON and as a Markdown summary, named
 for the date and the machine.
@@ -151,12 +152,12 @@ BENCHMARKS = {
     'deriv':         Benchmark(ALL,    '1000',  '2000000',  deriv),
     'n-body':        Benchmark(ALL,    '1000',  '1000000',  None),
     'spectral-norm': Benchmark(ALL + ('slight-arrays', 'slight-mc'), '100', '1000', None),
-    'ping-pong':     Benchmark(ACTORS, '10000', '2000000',  lambda n: [n]),
+    'ping-pong':     Benchmark(ACTORS + ('slight-mc',), '10000', '2000000', lambda n: [n]),
     'payload':       Benchmark(ACTORS, '10000', '1000000',  lambda n: [n, 5050]),
     'thread-ring':   Benchmark(ACTORS, '10000', '10000000', lambda n: [n % 503 + 1]),
     'fan-in':        Benchmark(ACTORS + ('slight-mc',), '10000', '10000000', lambda n: [n // 100 * 5050]),
-    'spawn':         Benchmark(ACTORS, '10000', '1000000',  lambda n: [n * (n - 1) // 2]),
-    'idle-memory':   Benchmark(ACTORS, '10000', '1000000',  lambda n: [n]),
+    'spawn':         Benchmark(ACTORS + ('slight-mc',), '10000', '1000000', lambda n: [n * (n - 1) // 2]),
+    'idle-memory':   Benchmark(ACTORS + ('slight-mc',), '10000', '1000000', lambda n: [n]),
     'parallel-fib':  Benchmark(ACTORS + ('slight-mc',), '15', '30', lambda k: [64 * fib(k)]),
     'latency':       Benchmark(ACTORS, '1',     '10',       latency),
     'bank':          Benchmark(('slight', 'c', 'python'), '10000', '1000000', bank),

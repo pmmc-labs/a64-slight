@@ -1,0 +1,26 @@
+; spawn on every island (D256): a spawner on each of (islands) islands
+; starts its share of the n processes there, one after another, each
+; sending its number back to it and ending; each spawner sums its share
+; and sends that on, so only one message an island crosses.
+
+(defun start (i n me)
+    (when (< i n)
+        (spawn (send me i))
+        (start (+ i 1) n me)))
+
+; The share's sum, to the top level's address once it's all come.
+(defun gather (to n acc)
+    (if (== n 0) (send to acc) (recv (i (gather to (- n 1) (+ acc i))))))
+
+(defun share (to lo hi)
+    (start lo hi $$)
+    (gather to (- hi lo) 0))
+
+(defun total (from k acc)
+    (if (== k 0) acc (total from (- k 1) (+ acc (read from)))))
+
+(let n  (str->int (car @ARGV)))
+(let k  (islands))
+(let me (address))
+(dotimes 0 k (lambda (b) (spawn/on b (share me (div (* b n) k) (div (* (+ b 1) n) k)))))
+(total me k 0)

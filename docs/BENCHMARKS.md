@@ -105,8 +105,13 @@ itself (or, for `n-body`, against C's).
   `NAME-mc.slight`, which places its actors with `(spawn/on (% i
   (islands)) ...)`; `spectral-norm`'s on arrays, a band of rows made on
   each island, the vector crossing as a shared buffer, so it's compared
-  with `slight-arrays`. In the every-core table, beside Go's, Erlang's
-  and Rust's.
+  with `slight-arrays`. And `spawn`, `idle-memory` and `ping-pong`, each
+  island doing its share locally and sending one answer on: a spawner
+  per island starting its share of the processes; a keeper per island
+  starting its share waiting, all of them waiting at once before any is
+  asked; a ping-pong pair per island, its share of the round trips. In
+  the every-core table, beside Go's, Erlang's and Rust's (whose
+  `ping-pong` is one pair, so says nothing of spreading).
 - **`parallel-fib 30`:** 64 processes each work out `fib(30)`: work more
   than one core can share.
 - **`latency 10`:** how long a message waits for its turn while other
@@ -213,7 +218,18 @@ every-core time beside its one-core one, and over it:
 ### The cloud machine, 30 Oct: slight on every island (D256)
 
 The best of three on the cloud machine's 4 cores, `SLIGHT_ISLANDS=4`,
-before the M2 Max's run:
+before the M2 Max's run; then `spawn`, `idle-memory` and `ping-pong`,
+added after it:
+
+| | one core | every island | ÷ one core |
+|---|---:|---:|---:|
+| `spawn 1000000` | 0.246 s | 0.120 s | 0.49 |
+| `idle-memory 1000000` | 0.687 s, 442 MB | 0.315 s, 448 MB | 0.46 |
+| `ping-pong 2000000` | 0.418 s | 0.179 s | 0.43 |
+
+A waiting process costs what it does on one core, wherever it waits;
+starting them, and conversations that stay on their island, go about
+twice as fast on 4 cores. The first three:
 
 | | one core | every island | ÷ one core |
 |---|---:|---:|---:|
