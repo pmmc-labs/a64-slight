@@ -9,8 +9,17 @@
 // order, a run can be made again, exactly: to see a bug that came from
 // the world again, under a debugger, as often as it takes.
 //
-// The record is a line saying what it is, the settings, arguments and
-// environment (rt_io_settings_t), then an entry for each call, in order:
+// With islands (D256), each island keeps a record of its own: island 0's
+// at the path given, island k's beside it, at path.k. Each is the world
+// as that island saw it: besides its calls, which items it took from its
+// inbox, when (at which of its scheduler's looks), and what it saw of
+// another island's doings. An item is named, not kept: the island that
+// sent it, replaying too, sends it again, so a run's islands replay
+// together, each taking its items as it did.
+//
+// The record is a line saying what it is, the island's number, and on
+// island 0's the settings, arguments and environment (rt_io_settings_t),
+// then an entry for each call, in order:
 // what kind of
 // call, its result, errno, and the bytes it filled in. Numbers are in the
 // machine's own order: a record is for replaying where it was made. It's
@@ -40,7 +49,7 @@
 
 #include "io.h"
 
-#define MAGIC "slight record 3\n"
+#define MAGIC "slight record 4\n"
 
 enum { OFF, RECORD, REPLAY };
 
@@ -48,7 +57,7 @@ enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
     IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER, IO_REALTIME, IO_LIST, IO_STAT, IO_REMOVE,
-    IO_RENAME, IO_MKDIR, IO_RANDOM,
+    IO_RENAME, IO_MKDIR, IO_RANDOM, IO_SEEN, IO_TOOK, IO_WAKE,
 };
 
 static const char *const names[] = {
@@ -62,12 +71,24 @@ static const char *const names[] = {
     [IO_PEER] = "a socket's peer", [IO_REALTIME] = "the time of day",
     [IO_LIST] = "a directory's names", [IO_STAT] = "a file's stat", [IO_REMOVE] = "a remove",
     [IO_RENAME] = "a rename", [IO_MKDIR] = "a mkdir", [IO_RANDOM] = "random bytes",
+    [IO_SEEN] = "what another island did", [IO_TOOK] = "an inbox's items", [IO_WAKE] = "an inbox's pipe",
 };
 
 static int                mode;
+static const char        *base;          // island 0's record, beside which the others are
 static RT_ISLAND FILE    *record;        // each island's own (D256)
 static RT_ISLAND uint64_t count;         // entries written or read so far
 static char               token;         // what rt_io_fopen gives when replaying: a FILE * never used as one
+
+// The next entry's head, read before it's wanted, to see whether it's the
+// one an island's inbox takes now (rt_io_due).
+static RT_ISLAND struct {
+    int      have;
+    uint8_t  kind;
+    int64_t  result;
+    int32_t  err;
+    uint32_t n;
+} ahead;
 
 static const char *name(int kind) {
     return kind > 0 && kind < (int)(sizeof names / sizeof *names) ? names[kind] : "something unknown";
@@ -136,10 +157,23 @@ static void spoilt(int kind) {
 
 // The next entry's head, which must be of this kind: its result, its
 // errno and how many bytes follow.
+static void head(int kind, int64_t *result, int32_t *err, uint32_t *n);
+
+// The next entry's kind, its head read and kept; 0 at the record's end.
+static int peek(void) {
+    if (ahead.have) return ahead.kind;
+    if (!get(&ahead.kind, 1)) return 0;
+    if (!get(&ahead.result, sizeof ahead.result) || !get(&ahead.err, sizeof ahead.err) || !get(&ahead.n, sizeof ahead.n)) {
+        spoilt(ahead.kind);
+    }
+    ahead.have = 1;
+    return ahead.kind;
+}
+
 static void head(int kind, int64_t *result, int32_t *err, uint32_t *n) {
-    char    say[160];
-    uint8_t k;
-    if (!get(&k, 1)) {
+    char say[160];
+    int  k = peek();
+    if (!k) {
         snprintf(say, sizeof say, "the record ends at entry %" PRIu64 ", where the run asks for %s", count + 1, name(kind));
         stop(say);
     }
@@ -148,7 +182,10 @@ static void head(int kind, int64_t *result, int32_t *err, uint32_t *n) {
                  count + 1, name(kind), name(k));
         stop(say);
     }
-    if (!get(result, sizeof *result) || !get(err, sizeof *err) || !get(n, sizeof *n)) spoilt(kind);
+    *result    = ahead.result;
+    *err       = ahead.err;
+    *n         = ahead.n;
+    ahead.have = 0;
 }
 
 // The next entry, which must be of this kind, its bytes put at data (at
@@ -227,6 +264,39 @@ static FILE *open_record(const char *path) {
     return fd >= 0 ? fdopen(fd, "wb") : NULL;
 }
 
+// Island k's record: island 0's at base, the others' beside it. Each
+// starts with what it is, and which island's.
+static void open_island(uint64_t k) {
+    char path[4096];
+    if (k) snprintf(path, sizeof path, "%s.%" PRIu64, base, k);
+    else   snprintf(path, sizeof path, "%s", base);
+    record = mode == RECORD ? open_record(path) : fopen(path, "rb");
+    if (!record) {
+        fprintf(stderr, "slight: can't %s %s: %s\n", mode == RECORD ? "record to" : "replay", path, strerror(errno));
+        exit(2);
+    }
+    fcntl(fileno(record), F_SETFD, FD_CLOEXEC);    // not a command's
+    if (mode == RECORD) {
+        put(MAGIC, strlen(MAGIC));
+        put(&k, sizeof k);
+        fflush(record);
+        return;
+    }
+    char     magic[sizeof MAGIC - 1];
+    uint64_t was;
+    if (!get(magic, sizeof magic) || memcmp(magic, MAGIC, sizeof magic) != 0) stop("that isn't a record of a run");
+    if (!get(&was, sizeof was)) stop("the record is cut short");
+    if (was != k) {
+        char say[200];
+        snprintf(say, sizeof say, "that's island %" PRIu64 "'s record: a run's islands replay together, from island 0's", was);
+        stop(say);
+    }
+}
+
+void rt_io_island(uint64_t k) {
+    if (mode) open_island(k);
+}
+
 void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *s) {
     const char *rec = rt_io_getenv("SLIGHT_RECORD"), *play = rt_io_getenv("SLIGHT_REPLAY");
     if (rec && play) {
@@ -234,30 +304,25 @@ void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *s) {
         exit(2);
     }
     if (!rec && !play) return;
-    record = rec ? open_record(rec) : fopen(play, "rb");
-    if (!record) {
-        fprintf(stderr, "slight: can't %s %s: %s\n", rec ? "record to" : "replay", rec ? rec : play, strerror(errno));
-        exit(2);
-    }
-    fcntl(fileno(record), F_SETFD, FD_CLOEXEC);    // not a command's
     mode = rec ? RECORD : REPLAY;
+    base = rec ? rec : play;
+    open_island(0);
     uint8_t  clock;
     uint32_t n = 0;
     if (mode == RECORD) {
-        put(MAGIC, strlen(MAGIC));
         clock = (uint8_t)s->virtual_clock;
         put(&clock, 1);
         put(&s->sched_seed, sizeof s->sched_seed);
         put(&s->heap_max, sizeof s->heap_max);
+        put(&s->islands, sizeof s->islands);
         put_strings((uint32_t)*argc, *argv);
         while ((*env)[n]) n++;
         put_strings(n, *env);
         fflush(record);
         return;
     }
-    char magic[sizeof MAGIC - 1];
-    if (!get(magic, sizeof magic) || memcmp(magic, MAGIC, sizeof magic) != 0) stop("that isn't a record of a run");
-    if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed) || !get(&s->heap_max, sizeof s->heap_max)) {
+    if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed) || !get(&s->heap_max, sizeof s->heap_max)
+        || !get(&s->islands, sizeof s->islands)) {
         stop("the record is cut short");
     }
     s->virtual_clock = clock;
@@ -268,6 +333,32 @@ void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *s) {
 
 int rt_io_replaying(void) {
     return mode == REPLAY;
+}
+
+// --- islands (D256) -----------------------------------------------------------
+
+int rt_io_seen(int seen) {
+    if (mode == REPLAY) return (int)replayed(IO_SEEN);
+    return (int)done(IO_SEEN, seen);
+}
+
+void rt_io_took(uint64_t poll, const uint64_t *ids, uint32_t n) {
+    done_with(IO_TOOK, (int64_t)poll, ids, n * sizeof *ids);
+}
+
+int rt_io_due(uint64_t poll, uint64_t **ids, uint32_t *n) {
+    if (peek() != IO_TOOK || ahead.result != (int64_t)poll) return 0;
+    char    *data;
+    uint32_t len;
+    next_alloc(IO_TOOK, &data, &len);
+    *ids = (uint64_t *)(void *)data;
+    *n   = len / sizeof **ids;
+    return 1;
+}
+
+int rt_io_wake(int fd) {
+    if (mode == REPLAY) return (int)replayed(IO_WAKE);
+    return (int)done(IO_WAKE, fd);
 }
 
 int rt_io_logging(void) {

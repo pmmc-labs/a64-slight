@@ -1041,7 +1041,7 @@ RT_EXEC_INT`, since a symbol is its name.
   page's 40 KB; there's no `detach`, since the children nobody takes
   are few and small, and go when their parent ends.
 
-### Islands: more than one core (D256; steps 1, 2 and 5 built)
+### Islands: more than one core (D256; steps 1 to 6 built)
 
 Each island is today's runtime, single-threaded, on a thread of its
 own, with its own process table, run queue, timers, devices, stack pool
@@ -1058,8 +1058,8 @@ many push to and one pops, and the island delivers it into the local
 mailbox, so compiled code, the collector and every mailbox stay
 single-threaded. Big strings and arrays cross as handles, their counts
 atomic. Each island records its own run, its inbox's deliveries among
-its inputs, and replays on its own. `docs/PLAN.md`, "More than one
-core: islands", has the steps.
+its inputs, and the islands replay together. `docs/PLAN.md`, "More than
+one core: islands", has the steps.
 
 As built (`process.c`, "islands"): an inbox is a list under a mutex,
 taken whole at each of the island's scheduler's decisions (`events`),
@@ -1090,6 +1090,21 @@ orphans are island 0's to reap, and every island's commands are in one
 list under a lock that they're started under, so island 0 can tell them
 from orphans.
 
+Replay (step 6) keeps a record per island, `f` and `f.k`, on the
+island's thread. An item is named by its island and that island's count
+of items sent, which a replay makes again, so a record names what its
+inbox took and when, by the count of the scheduler's looks at it
+(`events`), and keeps nothing of it: the senders, replaying too, send
+the items again, and an island waits for the ones its record says to
+take, holding back any that come early. What an island sees of the
+others outside a take (whether its inbox has something, as it goes idle
+or wakes from `select()`; whether an island has started, for `:system`)
+is recorded as a seen value, and the number of the pipe that wakes it,
+which `select()`'s recorded sets name, as an entry of its own. So the
+islands replay together, each exactly, but not one alone, which would
+need every message's contents kept, closures' code and static data
+placed again on macOS, whose programs load at a different address each
+run (option (b), D256's step 6, put off).
 ### Scheduler
 
 - Single core (on each island, once there are islands, D256). A **FIFO run queue** (D86): simple, and deterministic on

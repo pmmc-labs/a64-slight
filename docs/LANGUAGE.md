@@ -152,9 +152,16 @@ than time. So (D170):
   replay uses them, and the seed its random numbers started from,
   whether `SLIGHT_SEED` gave it or the system did.
 
-  A run that's recorded or replayed stays on its first island, so far: a
-  `spawn/on` to another island ends it, with exit status 2, till each
-  island records its own (D256).
+  With islands (D256), each records its own: `SLIGHT_RECORD=file` writes
+  island 0's record to `file` and island k's to `file.k`, each what that
+  island took from outside and what it saw of the others: which messages
+  came from another island, and when, as it took them. `SLIGHT_REPLAY=file`
+  replays them all together, each island from its own record, the
+  messages between them sent again and each taken when its record says,
+  so the run goes exactly as it did, however its threads went; how many
+  islands there were is the record's too. An island's record doesn't
+  replay alone (`file.2` stops, saying so), since it names the messages
+  that came to it rather than keeping them.
 
 ### @ARGV
 

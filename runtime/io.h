@@ -34,11 +34,26 @@ typedef struct {
     int      virtual_clock;
     uint64_t sched_seed;                // SLIGHT_SCHED, or 0
     uint64_t heap_max;                  // SLIGHT_HEAP_MAX, or the default: where a heap faults
+    uint64_t islands;                   // SLIGHT_ISLANDS, or one per core (D256)
 } rt_io_settings_t;
 
 void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *settings);
 int  rt_io_replaying(void);
 int  rt_io_logging(void);               // recording or replaying
+
+// Islands (D256). rt_io_island opens island k's record, on its thread, as
+// it starts. What an island sees of another's doings is the world to it:
+// rt_io_seen records what it saw, or gives what the record says. Its
+// inbox's items are named, not kept, since their senders send them again:
+// rt_io_took records which it took at its scheduler's poll'th look, and
+// rt_io_due, replaying, gives them if that's when it took some. rt_io_wake
+// records the number of the pipe its inbox wakes it through, which
+// select()'s recorded sets say, and gives that number back.
+void rt_io_island(uint64_t k);
+int  rt_io_seen(int seen);
+void rt_io_took(uint64_t poll, const uint64_t *ids, uint32_t n);
+int  rt_io_due(uint64_t poll, uint64_t **ids, uint32_t *n);
+int  rt_io_wake(int fd);
 
 // getenv, for the variables that say where the runtime reads and writes
 // (SLIGHT_RECORD, SLIGHT_REPLAY, SLIGHT_HOSTS, SLIGHT_RESOLV_CONF): NULL

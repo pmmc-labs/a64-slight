@@ -127,6 +127,9 @@ typedef struct rt_isle {
     struct ready      *ready;           // socket_events's
     uint64_t           ready_cap;
     crossed_t          sent, received;  // messages to and from other islands
+    uint64_t           items;           // items pushed to other islands, each named by its number (replay)
+    uint64_t           polls;           // looks at the inbox, a record's clock for taking items (replay)
+    int                wake_fd;         // the wake pipe's number, as select()'s sets have it: a replay's, the record's
 } island_state_t;
 
 static RT_ISLAND island_state_t my;
@@ -1219,6 +1222,7 @@ enum {
 
 typedef struct item {
     struct item *next;
+    uint64_t     id;                    // its island and number there, which a record names it by
     int          kind;
     int          wakes;                 // a watch's: WATCH_TELLS or WATCH_READ
     rt_value_t   to;                    // the pid (or address) it's for
@@ -1256,6 +1260,7 @@ static _Atomic uint64_t busy     = 1;   // islands that may do something more, a
 static _Atomic int      many;           // whether an island beside 0 has started
 static pthread_mutex_t  starting = PTHREAD_MUTEX_INITIALIZER;
 static uint64_t         sched_seed;     // SLIGHT_SCHED, from which each island's generator starts
+static int              logging;        // SLIGHT_RECORD or SLIGHT_REPLAY: the inbox goes as the record says
 
 // Whether pid (or an address) is this island's; and whether v is a pid,
 // or an address, of another's.
@@ -1289,9 +1294,10 @@ static void start_island(uint64_t k) {
     if (k == 0 || atomic_load(&isles[k].started)) return;
     pthread_mutex_lock(&starting);
     if (!atomic_load(&isles[k].started)) {
-        if (!atomic_load(&many)) {
+        if (!atomic_load(&many)) {              // on island 0, the only one so far
             share_tables();
             open_island(0);
+            my.wake_fd = rt_io_wake(isles[0].wake[0]);
             atomic_store(&isles[0].started, 1);
         }
         open_island(k);
@@ -1322,6 +1328,7 @@ static void push(uint64_t k, item_t *it) {
     island_t *s = &isles[k];
     start_island(k);
     it->next = NULL;
+    it->id   = my.island << 56 | ++my.items;
     atomic_fetch_add(&busy, 1);
     pthread_mutex_lock(&s->lock);
     if (s->last) s->last->next = it;
@@ -1432,6 +1439,8 @@ static void *island_main(void *arg) {
     pthread_sigmask(SIG_BLOCK, &all, NULL);     // signals are island 0's
     my.island = (uint64_t)(uintptr_t)arg;
     my.sched  = sched_seed ? sched_seed + my.island * 0x9e3779b97f4a7c15u : 0;
+    rt_io_island(my.island);
+    my.wake_fd = rt_io_wake(isles[my.island].wake[0]);
     if (awake()) rt_run();
     return NULL;
 }
@@ -2379,14 +2388,24 @@ static void take_item(item_t *it) {
     }
 }
 
-// Takes what's in this island's inbox, in the order it came.
-static void take_inbox(void) {
+// Takes what's in this island's inbox, in the order it came; recording,
+// it says which, at its poll'th look.
+static void take_inbox(uint64_t poll) {
     island_t *s = &isles[my.island];
     pthread_mutex_lock(&s->lock);
     item_t *it = s->first;
     s->first = s->last = NULL;
     atomic_store(&s->waiting, 0);
     pthread_mutex_unlock(&s->lock);
+    if (logging) {
+        uint32_t n = 0;
+        for (item_t *x = it; x; x = x->next) n++;
+        uint64_t *ids = rt_must(malloc(n * sizeof *ids));
+        n = 0;
+        for (item_t *x = it; x; x = x->next) ids[n++] = x->id;
+        rt_io_took(poll, ids, n);
+        free(ids);
+    }
     for (item_t *next; it; it = next) {
         next = it->next;
         take_item(it);
@@ -2395,14 +2414,70 @@ static void take_inbox(void) {
     }
 }
 
+// Replaying, the items the record says, in its order, each waited for
+// till its sender, replaying too, has sent it; others that have come
+// wait for their turn.
+static void take_these(const uint64_t *ids, uint32_t n) {
+    island_t *s = &isles[my.island];
+    for (uint32_t i = 0; i < n; i++) {
+        item_t *it;
+        for (;;) {
+            pthread_mutex_lock(&s->lock);
+            item_t **link = &s->first, *before = NULL;
+            while (*link && (*link)->id != ids[i]) {
+                before = *link;
+                link   = &before->next;
+            }
+            it = *link;
+            if (it) {
+                *link = it->next;
+                if (s->last == it) s->last = before;
+                atomic_fetch_sub(&s->waiting, 1);
+            }
+            s->asleep = !it;
+            pthread_mutex_unlock(&s->lock);
+            if (it) break;
+            fd_set in;
+            FD_ZERO(&in);
+            FD_SET(s->wake[0], &in);
+            select(s->wake[0] + 1, &in, NULL, NULL, NULL);
+            drain_wake();
+        }
+        take_item(it);
+        free(it);
+        atomic_fetch_sub(&busy, 1);
+    }
+}
+
+// A look at the inbox, at each of the scheduler's decisions: recorded or
+// replayed, by the count of looks, which is the same in both (D256).
+static void poll_logged(void) {
+    uint64_t poll = ++my.polls;
+    if (rt_io_replaying()) {
+        uint64_t *ids;
+        uint32_t  n;
+        if (rt_io_due(poll, &ids, &n)) {
+            take_these(ids, n);
+            free(ids);
+        }
+    } else if (atomic_load(&isles[my.island].waiting)) {
+        take_inbox(poll);
+    }
+}
+
+// Whether something has come from another island: the world to this one,
+// so recorded, and in a replay, read from the record (D256). With no other
+// island started nothing can, and there's nothing to record.
+static int inbox_now(void) {
+    if (!atomic_load(&many)) return 0;
+    if (rt_io_replaying()) return rt_io_seen(0);
+    int any = atomic_load(&isles[my.island].waiting) != 0;
+    return logging ? rt_io_seen(any) : any;
+}
+
 // An actor on island k, another, made there, which numbers it itself;
 // the caller waits for its pid, keeping its stack, as join does.
 static rt_value_t place(uint64_t k, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, int source) {
-    if (rt_io_logging()) {
-        fflush(stdout);
-        fputs("slight: a run that's recorded or replayed is on one island, so far (D256)\n", stderr);
-        exit(2);
-    }
     rt_proc_t *p  = rt_current;
     item_t    *it = new_item(ITEM_START, 0, p->pid);
     rt_proc_t  child;
@@ -2780,15 +2855,16 @@ static int wait_for(int64_t us) {
     // An island that may wait is woken by an item for it (D256).
     island_t *s     = &isles[my.island];
     int       inbox = us != 0 && atomic_load(&many);
-    if (inbox && spin()) return IO_INBOX;
     if (inbox) {
+        int any = rt_io_replaying() ? rt_io_seen(0) : spin();
         pthread_mutex_lock(&s->lock);
-        int any = s->first != NULL;
+        if (!rt_io_replaying()) any = any || s->first != NULL;
         s->asleep = !any;
         pthread_mutex_unlock(&s->lock);
+        if (logging && !rt_io_replaying()) rt_io_seen(any);
         if (any) return IO_INBOX;
-        FD_SET(s->wake[0], &in);
-        if (s->wake[0] > max) max = s->wake[0];
+        FD_SET(my.wake_fd, &in);
+        if (my.wake_fd > max) max = my.wake_fd;
     }
     struct timeval tv, *timeout = NULL;
     if (us >= 0) {
@@ -2801,13 +2877,13 @@ static int wait_for(int64_t us) {
         pthread_mutex_lock(&s->lock);
         s->asleep = 0;
         pthread_mutex_unlock(&s->lock);
-        if (got > 0 && FD_ISSET(s->wake[0], &in)) {
+        if (got > 0 && FD_ISSET(my.wake_fd, &in)) {
             drain_wake();
-            FD_CLR(s->wake[0], &in);
+            FD_CLR(my.wake_fd, &in);
         }
     }
     if (got <= 0) return 0;
-    int saw = (keys && FD_ISSET(STDIN_FILENO, &in) ? IO_KEYS : 0) | (atomic_load(&s->waiting) ? IO_INBOX : 0);
+    int saw = (keys && FD_ISSET(STDIN_FILENO, &in) ? IO_KEYS : 0) | (inbox_now() ? IO_INBOX : 0);
     return saw | (socket_events(&in, &out) ? IO_SOCKETS : 0);
 }
 
@@ -2837,7 +2913,8 @@ static int next_key(void) {
 // scheduler's loop looks the island up once, not at each decision.
 __attribute__((always_inline))
 static inline void events(void) {
-    if (atomic_load_explicit(&isles[my.island].waiting, memory_order_relaxed)) take_inbox();
+    if (logging) poll_logged();
+    else if (atomic_load_explicit(&isles[my.island].waiting, memory_order_relaxed)) take_inbox(0);
     if (my.nalarms) ring();                     // tested here, where the island's state is to hand
     if (virtual_clock || (!listening() && !my.nsockets)) return;
     uint64_t t = now();
@@ -2859,7 +2936,7 @@ static inline void events(void) {
 // real, keys and time standing still meanwhile (D185); then a key, then
 // the clock moves; only when nothing else can happen does it wait for real.
 static int idle(void) {
-    if (atomic_load(&isles[my.island].waiting)) return 1;    // what's come from another island first (D256)
+    if (inbox_now()) return 1;                  // what's come from another island first (D256)
     fflush(stdout);                             // so a program stopped as it waits has lost none of it (D229)
     drop_orphans();
     if (!listening() && !my.nalarms && !sockets_waiting()) return 0;
@@ -4666,8 +4743,10 @@ static void tell_one(rt_device_t *d, snapshot_t r, const rt_value_t *pids, uint6
     d->snap_pids.n = mark;
 }
 
+// Another island's doing, so recorded (D256).
 static int island_started(uint64_t k) {
-    return k == 0 || atomic_load(&isles[k].started);
+    int up = k == 0 || atomic_load(&isles[k].started);
+    return logging ? rt_io_seen(up) : up;
 }
 
 // Asks island k, for d, the question being answered.
@@ -5138,17 +5217,19 @@ int main(int argc, char **argv) {
     size_t room  = limit && limit / 4 < HEAP_DEFAULT ? (limit / 4 > CHUNK_MAX ? limit / 4 : CHUNK_MAX) : HEAP_DEFAULT;
     rt_io_settings_t settings = {
         mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0, cap ? bytes_of(cap) : room,
+        islands_wanted(getenv("SLIGHT_ISLANDS")),
     };
-    char           **env      = environ;
-    rt_io_start(&argc, &argv, &env, &settings); // replaying, the record's settings, arguments and environment
-    virtual_clock = settings.virtual_clock;
-    my.sched         = settings.sched_seed;
-    sched_seed    = settings.sched_seed;
-    nislands      = islands_wanted(getenv("SLIGHT_ISLANDS"));
-    if (!nislands) {
+    if (!settings.islands) {
         fputs("slight: SLIGHT_ISLANDS is how many islands, from 1 to 256\n", stderr);
         return 2;
     }
+    char           **env      = environ;
+    rt_io_start(&argc, &argv, &env, &settings); // replaying, the record's settings, arguments and environment
+    logging       = rt_io_logging();
+    virtual_clock = settings.virtual_clock;
+    my.sched      = settings.sched_seed;
+    sched_seed    = settings.sched_seed;
+    nislands      = settings.islands;
     heap_max      = settings.heap_max;
     started       = now();
     if (virtual_clock) epoch = rt_io_epoch(epoch_at);

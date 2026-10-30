@@ -6363,3 +6363,18 @@ on placement, each point as below.)*
   other than 0, as a pid prints; and PID 1's reaping on island 0 checks
   a list of every island's commands, kept under the lock they're
   started under.)*
+- *(Step 6 changed and built, Oct 2026. Claude proposed cutting "any
+  island replays on its own": it needs every message's contents in the
+  record, so a serializer for any value, closures' code and static data
+  relocated (macOS loads a program at a different address each run),
+  shared buffers written out and sharing kept, and a mode where the main
+  thread runs as island k. Offered (a) the islands replaying together,
+  each record naming the items its inbox took and when, by the count of
+  the scheduler's looks, not keeping them, since the senders replay
+  too; (b) as agreed; (c) (a) now and (b) if it's wanted. Stevan took
+  (c). Settled in building it: what an island sees of another's doings
+  outside a take (whether its inbox has something, whether an island
+  has started) is a recorded value; the wake pipe's number is recorded,
+  since select()'s recorded sets name it; the island count is in the
+  record's settings; an island's record given alone stops, saying
+  so.)*

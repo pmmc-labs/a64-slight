@@ -24,6 +24,12 @@
 # orders as first in, first out; without it, a recorded run must replay
 # the same, and two runs must differ.
 #
+# t/replay/islands.slight runs on four islands (D256), workers on three of
+# them sending to a collector in an order that varies from run to run: a
+# recorded run writes a record for each island, and replaying them, with
+# SLIGHT_ISLANDS other than it was, or under SLIGHT_SCHED, prints what
+# the run did; an island's record replayed alone stops, saying so.
+#
 # t/replay/now.slight reads the time of day on the virtual clock (D254):
 # without SLIGHT_EPOCH, from the real time of day, so a recorded run must
 # replay the same, its start after 2026; with it, from there.
@@ -49,7 +55,7 @@ check() {                               # check what ok-or-not
     fi
 }
 
-for name in world net exec order rand now; do
+for name in world net exec order rand now islands; do
     if ! node bin/slightc.ts --target "$TARGET" -o "$dir/$name" "t/replay/$name.slight" >"$dir/$name.compile" 2>&1; then
         cat "$dir/$name.compile"
         check "$name (compile)" no
@@ -132,6 +138,34 @@ else
     check "exec replays as recorded" no
 fi
 if [ -e "$dir/exec.out" ]; then check "exec's replay runs no command" no; else check "exec's replay runs no command" ok; fi
+
+# islands: each island's record, replayed together.
+run SLIGHT_ISLANDS=4 SLIGHT_RECORD="$dir/islands.record" islands </dev/null >"$dir/islands.recorded"
+run SLIGHT_ISLANDS=1 SLIGHT_REPLAY="$dir/islands.record" islands </dev/null >"$dir/islands.replayed"
+if cmp -s "$dir/islands.recorded" "$dir/islands.replayed" && grep -q '^(runs [0-9]* -*[0-9]*)$' "$dir/islands.recorded" \
+   && grep -q '^((0 #true) (1 #true) (2 #true) (3 #true))$' "$dir/islands.recorded" \
+   && [ -s "$dir/islands.record.1" ] && [ -s "$dir/islands.record.3" ] && [ ! -e "$dir/islands.record.4" ]; then
+    check "islands replay as recorded, each from its own record" ok
+else
+    diff -u "$dir/islands.recorded" "$dir/islands.replayed"
+    check "islands replay as recorded, each from its own record" no
+fi
+run SLIGHT_ISLANDS=4 SLIGHT_SCHED=7 SLIGHT_RECORD="$dir/islands.sched" islands </dev/null >"$dir/islands.sched.recorded"
+run SLIGHT_REPLAY="$dir/islands.sched" islands </dev/null >"$dir/islands.sched.replayed"
+if cmp -s "$dir/islands.sched.recorded" "$dir/islands.sched.replayed" && grep -q '^exit: 0$' "$dir/islands.sched.recorded"; then
+    check "islands under SLIGHT_SCHED replay as recorded" ok
+else
+    diff -u "$dir/islands.sched.recorded" "$dir/islands.sched.replayed"
+    check "islands under SLIGHT_SCHED replay as recorded" no
+fi
+run SLIGHT_REPLAY="$dir/islands.record.2" islands </dev/null >"$dir/islands.alone"
+if grep -q "^replay: that's island 2's record: a run's islands replay together, from island 0's$" "$dir/islands.alone" \
+   && grep -q '^exit: 2$' "$dir/islands.alone"; then
+    check "an island's record alone doesn't replay" ok
+else
+    cat "$dir/islands.alone"
+    check "an island's record alone doesn't replay" no
+fi
 
 # A record of one program, replayed by another, stops where they part.
 run SLIGHT_REPLAY="$dir/world.record" net </dev/null >"$dir/net.wrong"

@@ -1,0 +1,50 @@
+; Islands, recorded and replayed (D256): workers on islands 1 to 3 send
+; to a collector on island 0, in an order that varies from run to run,
+; as the threads go; a timer set on island 2 for island 0; a kill across
+; islands and the end it brings; and :system asked of every island. Each
+; island records what it saw of the others, and a replay of them all
+; gives what the recorded run did (t/replay.sh).
+
+(defun worker (to k n)
+    (when (> n 0)
+        (send to (list k n))
+        (worker to k (- n 1))))
+
+; The order they came in, as runs of one worker's: (k count) each.
+(defun collect (to n runs)
+    (if (== n 0)
+        (send to (reverse runs))
+        (recv ((k _) (collect to (- n 1) (counted k runs))))))
+
+(defun counted (k runs)
+    (match runs
+        (((j c) & rest) (if (== j k) (cons (list k (+ c 1)) rest) (cons (list k 1) runs)))
+        (_              (list (list k 1)))))
+
+(defun later (to)
+    (after 5 to :later)
+    (recv (never never)))
+
+(defun sleeper ()
+    (recv (never never)))
+
+(let me (address))
+(let c (spawn (collect me 30000 ())))
+(dotimes 1 4 (lambda (k) (spawn/on k (worker c k 10000))))
+(let runs (read me))
+(pprint (list :runs (length runs) (hash runs)))
+
+(spawn/on 2 (later me))
+(pprint (read me))
+
+(let s (spawn/on 3 (sleeper)))
+(kill s)
+(pprint (read s))
+
+(match (open :system)
+    ((:ok d)
+        (send d (list :runtime))
+        (match (read d)
+            ((:runtime _ info) (pprint (map (lambda (i) (list (lookup :island i) (lookup :started i))) (lookup :islands info)))))
+        (disconnect d)))
+:done

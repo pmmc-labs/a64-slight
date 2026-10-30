@@ -346,7 +346,10 @@ island 0's: `:system` telling of every island, asked through their
 inboxes, `(:processes k)`, each process's messages to and from other
 islands counted (`:sent`, `:received`), `(:runtime)`'s `:islands`,
 `log` saying an island, and PID 1's orphans told from every island's
-commands (golden test 331); steps 3 and 4 came with step 2. 12c (C libraries vendored as source, D151, D152) waits; its
+commands (golden test 331); steps 3 and 4 came with step 2; and step
+6, replay per island: `SLIGHT_RECORD=f` writes `f` and `f.k`, each
+island's, naming what its inbox took and when, and `SLIGHT_REPLAY=f`
+replays the islands together (t/replay.sh's islands checks). 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan
@@ -555,8 +558,9 @@ over real TLS, to a server with a certificate made for the run);
   run, straight to the next timer. `t/run.sh` sets it too.
 - `SLIGHT_RECORD=file` when running a compiled program writes everything
   it takes from the world (the clock, keys, reads, sockets, lookups) to
-  `file`; `SLIGHT_REPLAY=file` runs it again from the record, exactly,
-  touching nothing but stdout and stderr (D170).
+  `file`, and island k's to `file.k` (D256); `SLIGHT_REPLAY=file` runs it
+  again from the record, its islands together, exactly, touching nothing
+  but stdout and stderr (D170).
 - `SLIGHT_SCHED=n` runs processes in an order picked by a generator seeded
   with `n`, the same for each `n`, to look for races (D170).
 - `SLIGHT_EPOCH=seconds` starts the virtual clock's time of day

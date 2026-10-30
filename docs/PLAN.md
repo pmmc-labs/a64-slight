@@ -1733,7 +1733,12 @@ pid a test prints.
    the order asked; output a value or line in one write, stdio's lock
    keeping them whole, and `log` saying a process's island; PID 1's
    orphans told from every island's commands, t/live.py's signals.)*
-6. **Replay per island,** and `SLIGHT_SCHED` per island.
+6. **Replay per island,** and `SLIGHT_SCHED` per island. *(Done, Oct
+   2026, as D256's option (c): the islands replay together, each from
+   its own record, `f` and `f.k`, which names the items its inbox took
+   and when rather than keeping them; one island alone is put off, as
+   (b). `SLIGHT_SCHED` was already per island, from step 2. t/replay.sh's
+   islands checks.)*
 7. **Checks and numbers:** golden tests whose output doesn't depend on
    the order islands run in, the same on one island or four (the VM3
    sketch's test); ThreadSanitizer over them; `SLIGHT_GC_STRESS` with
