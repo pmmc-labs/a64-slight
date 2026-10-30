@@ -1813,6 +1813,29 @@ makes `reaction` shorter; (b) is what makes slight a simulation
 language: SimPy's style, agents as actors, on every core, the same
 results on 1 island or 64.
 
+**An example to build it around: protein folding on a lattice.**
+Stevan's suggestion, after a friend at a genetics company asked whether
+slight could fold proteins. Not structure prediction (AlphaFold's deep
+learning on GPUs, which slight would only drive, as a command), nor
+all-atom molecular dynamics (GROMACS', OpenMM's: a floating-point inner
+loop over pairs of atoms, where slight would be far behind C and further
+behind a GPU); but the HP model, each residue a bead on a 2D or 3D
+lattice, hydrophobic or polar, the energy minus one for each pair of H
+beads touching but not bonded, explored by Monte Carlo moves (end,
+corner and crankshaft moves, or pull moves) with replica exchange: a
+replica an actor at its own temperature, spread across islands, a swap
+between neighbouring temperatures a message, accepted by Metropolis's
+rule from the replicas' seeded generators. It's checkable (the lowest
+energies of the standard benchmark sequences are published, and a
+short sequence's can be found by brute force, in a Python model), the
+same to the last bit on any machine and any number of islands (seeded,
+split random numbers, CORE-MATH), replayable, and drawable live on
+island 0 as `reaction` is. It would want (a)'s regions and barrier, a
+swap every k sweeps being a time step, and none of (b). A later step:
+slight as the coordinator of real tools' runs, many short trajectories
+run as commands and chosen adaptively, as Folding@home's Markov state
+models are.
+
 Measured alongside, for whoever picks this up: a message crossing
 islands is one allocation now, and `fan-in-mc` four times faster on the
 cloud machine; a ping-pong whose halves are on neighbouring islands
