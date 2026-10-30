@@ -4,6 +4,8 @@
 #               $(TARGETS), and that the guide's code is the code tested
 #               (t/guide.py)
 # make check    type-check the compiler (needs `npm install` first)
+# make tsan     ThreadSanitizer over what runs on more than one island, for
+#               the machine's own target (t/tsan.sh; needs clang's TSan)
 # make bench    the benchmarks, against other languages (bench/run.py,
 #               docs/BENCHMARKS.md); BENCH passes it options: BENCH=--quick
 #
@@ -65,6 +67,9 @@ live:
 		echo "# $$target live"; TARGET=$$target python3 t/live.py || fail=1; \
 	done; exit $$fail
 
+tsan:
+	./t/tsan.sh
+
 # rt.h must not collide with the system headers (see t/headers.c)
 headers:
 	$(CC) -std=gnu11 -Wall -Wextra -fsyntax-only t/headers.c
@@ -86,4 +91,4 @@ clean:
 		rm -rf "./sketch.dSYM"; \
     fi
 
-.PHONY: test unit guide types golden replay live headers check bench clean
+.PHONY: test unit guide types golden replay live tsan headers check bench clean

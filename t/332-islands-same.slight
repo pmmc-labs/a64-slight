@@ -1,0 +1,5 @@
+; Work spread over the islands, four of them (t/run.sh's), gives what it
+; gives on one (t/333): t/data/islands-same.slight. Expected output from
+; Python, working each part out on its own.
+
+(@include "data/islands-same.slight")

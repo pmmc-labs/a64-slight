@@ -1,0 +1,4 @@
+; t/332's program on one island: the same output (D256).
+; env: SLIGHT_ISLANDS=1
+
+(@include "data/islands-same.slight")

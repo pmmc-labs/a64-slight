@@ -1,0 +1,17 @@
+; parallel-fib on every island (D256): the 64 workers placed in turn on
+; each of (islands) islands, a thread per core, each sending fib(k) to an
+; address of the top level's, which sums the answers as they come.
+
+(defun fib (n)
+    (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+
+(defun work (to k)
+    (send to (fib k)))
+
+(defun total (from n acc)
+    (if (== n 0) acc (total from (- n 1) (+ acc (read from)))))
+
+(let k  (str->int (car @ARGV)))
+(let me (address))
+(dotimes 0 64 (lambda (i) (spawn/on (% i (islands)) (work me k))))
+(total me 64 0)
