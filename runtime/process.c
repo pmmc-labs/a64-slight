@@ -317,13 +317,29 @@ static void handles_add(handles_t *h, uint64_t *box) {
 // old_ptr says how far it's filled. A waiting process costs its struct,
 // so these are as few fields as will do.
 
-static rt_chunk_t *new_chunk(size_t bytes) {
-    rt_chunk_t *c = rt_must(malloc(sizeof *c + bytes));
-    c->next     = NULL;
-    c->size     = bytes;
-    c->handles  = NULL;
-    c->nhandles = 0;
+_Static_assert(sizeof(rt_chunk_t) == 16, "a chunk's header keeps what's after it 16-aligned");
+
+// A copy's handles to shared buffers, after its chunk's bytes.
+typedef struct {
+    uint64_t **at;
+    uint64_t   n;
+} chunk_handles_t;
+
+static chunk_handles_t *handles_after(rt_chunk_t *c) {
+    return (chunk_handles_t *)((char *)(c + 1) + c->size);
+}
+
+// A chunk of bytes, and room for its handles after them if it shares.
+static rt_chunk_t *new_chunk_sharing(size_t bytes, int shares) {
+    rt_chunk_t *c = rt_must(malloc(sizeof *c + bytes + (shares ? sizeof(chunk_handles_t) : 0)));
+    c->next   = NULL;
+    c->size   = bytes;
+    c->shares = shares != 0;
     return c;
+}
+
+static rt_chunk_t *new_chunk(size_t bytes) {
+    return new_chunk_sharing(bytes, 0);
 }
 
 static size_t young_bytes(const rt_proc_t *p) {
@@ -363,11 +379,11 @@ static void cut_slice(rt_proc_t *p) {
 // adopt, which takes every message, stays small enough to inline.
 __attribute__((noinline))
 static void adopt_handles(rt_proc_t *p, rt_chunk_t *c) {
-    handles_t *old = handles_of(p, 1);
-    for (uint64_t i = 0; i < c->nhandles; i++) handles_add(old, c->handles[i]);
-    free(c->handles);
-    c->handles  = NULL;
-    c->nhandles = 0;
+    handles_t       *old = handles_of(p, 1);
+    chunk_handles_t *h   = handles_after(c);
+    for (uint64_t i = 0; i < h->n; i++) handles_add(old, h->at[i]);
+    free(h->at);
+    c->shares = 0;
 }
 
 __attribute__((always_inline))
@@ -376,7 +392,7 @@ static inline void adopt(rt_proc_t *p, rt_chunk_t *c) {
     c->next        = *at;
     *at            = c;
     p->heap_bytes += c->size;
-    if (c->nhandles) adopt_handles(p, c);
+    if (c->shares) adopt_handles(p, c);
     if (old_in_use(p) + shared_bytes(p, 1) >= p->gc_at) cut_slice(p);
 }
 
@@ -436,9 +452,10 @@ static void buffer_release(rt_buffer_t *b) {
 
 // A chunk let go of without being adopted: its handles' references go.
 static void free_chunk(rt_chunk_t *c) {
-    if (c->nhandles) {
-        for (uint64_t i = 0; i < c->nhandles; i++) buffer_release((rt_buffer_t *)c->handles[i][2]);
-        free(c->handles);
+    if (c->shares) {
+        chunk_handles_t *h = handles_after(c);
+        for (uint64_t i = 0; i < h->n; i++) buffer_release((rt_buffer_t *)h->at[i][2]);
+        free(h->at);
     }
     free(c);
 }
@@ -717,16 +734,17 @@ static rt_chunk_t *copy_walk(island_state_t *s, const rt_value_t *from, rt_value
     for (uint64_t i = 0; i < n; i++) copy(&c, from[i], 8 * i);
     if (c.todo != local) free(c.todo);
     size_t      bytes = c.used - roots;
-    rt_chunk_t *chunk = reserve + bytes ? new_chunk(reserve + bytes) : NULL;
+    rt_chunk_t *chunk = reserve + bytes ? new_chunk_sharing(reserve + bytes, c.nhandles > 0) : NULL;
     if (bytes) {
         char      *data  = (char *)(chunk + 1) + reserve;
         rt_value_t shift = (rt_value_t)data - roots;    // offset + shift: where it will be
         for (size_t i = 0; i < c.nslots; i++) *(rt_value_t *)(c.scratch + c.slots[i]) += shift;
         memcpy(data, c.scratch + roots, bytes);
         if (c.nhandles) {
-            chunk->handles  = rt_must(malloc(c.nhandles * sizeof *chunk->handles));
-            chunk->nhandles = c.nhandles;
-            for (size_t i = 0; i < c.nhandles; i++) chunk->handles[i] = (uint64_t *)(data + c.handles[i] - roots);
+            chunk_handles_t *h = handles_after(chunk);
+            h->at = rt_must(malloc(c.nhandles * sizeof *h->at));
+            h->n  = c.nhandles;
+            for (size_t i = 0; i < c.nhandles; i++) h->at[i] = (uint64_t *)(data + c.handles[i] - roots);
         }
     }
     free(c.handles);

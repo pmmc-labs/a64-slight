@@ -433,11 +433,14 @@ typedef struct rt_ctx {
 
 // A chunk of a process's heap; the chunks are a list, newest first. A
 // message arrives as a chunk of its own, and joins the old generation's.
+// Two words, so that a message with nothing to copy, a chunk of just its
+// record, is as small as can be: a copy's handles to shared strings (D253),
+// for whoever adopts it, are after its size bytes, in the few that have them
+// (process.c).
 typedef struct rt_chunk {
     struct rt_chunk *next;
-    size_t           size;      // bytes after this header
-    uint64_t       **handles;   // a copy's shared strings, for whoever adopts it (process.c), or NULL
-    uint64_t         nhandles;
+    uint64_t         size : 63; // bytes after this header, but for the handles
+    uint64_t         shares : 1;    // whether it has handles after them
 } rt_chunk_t;
 
 // A string of RT_SHARED_MIN bytes or more is a buffer off the heap (D253):

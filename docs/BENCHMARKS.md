@@ -178,6 +178,36 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 30 Oct, 17:10: no thread-locals, and a chunk's header
+
+`2026-10-30-1710-macos-apple-m2-max`, with no thread-local on the
+busiest paths (`ebb2312`):
+
+| | 24 Oct | 16:22 | 17:10 |
+|---|---:|---:|---:|
+| `ping-pong` | 0.285 s | 0.345 s | 0.282 s |
+| `thread-ring` | 0.493 s | 0.637 s | 0.506 s |
+| `spawn` | 0.122 s | 0.143 s | 0.145 s |
+| `fan-in` | 0.355 s | 0.420 s | 0.412 s |
+| `payload` | 0.566 s | 0.569 s | 0.556 s |
+
+- **Messages, back where they were.** `ping-pong`, `thread-ring` and
+  `payload` are within 3 per cent of 24 Oct, islands and all.
+- **`spawn` and `fan-in` weren't the thread-locals.** `fan-in` took
+  628 MB, where it took 472 on 24 Oct: 16 bytes more for each of its
+  10 million messages, which pile up in one mailbox. Shared buffers
+  (D253) had put a copy's handles in every chunk's header, making it
+  four words, so a message with nothing to copy was a malloc of 64
+  bytes, not 48. The header is two words again: a bit of its size says
+  whether the chunk has handles, and only such a chunk has them, after
+  its bytes. On the cloud machine `fan-in` then takes 639 MB where it
+  took 798, and runs in about 1.0 s where it took 1.1 to 5.3 (it was
+  paging); `spawn` 66 MB where it took 82. Under callgrind `spawn` is
+  4 per cent over 24 Oct (about 70 instructions a process, `finish`
+  looking for watchers on other islands, and the scheduler's loop for
+  its inbox), so most of its 19 per cent on the Mac should have been
+  the bigger message too.
+
 ### The M2 Max, 30 Oct, 16:22: one thread-local, and then none
 
 `2026-10-30-1622-macos-apple-m2-max`, the five programs that had slowed,
