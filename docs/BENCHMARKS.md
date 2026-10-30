@@ -190,6 +190,30 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 30 Oct, 22:31: processes on every island (D256)
+
+`2026-10-30-2231-macos-apple-m2-max`, 12 islands, each doing its share
+of `spawn`, `idle-memory` and `ping-pong` where it is:
+
+| | slight | slight-mc | Go, every core | Rust, every core | Erlang, every core |
+|---|---:|---:|---:|---:|---:|
+| `spawn 1000000` | 0.132 s | 0.026 s (0.20) | 0.388 s | 0.606 s | 0.908 s |
+| `idle-memory 1000000` | 0.317 s, 615 MB | 0.101 s (0.32), 621 MB | 1.051 s, 2890 MB | 1.408 s, 1097 MB | 1.914 s, 2795 MB |
+| `ping-pong 2000000` | 0.281 s | 0.064 s (0.23) | | | |
+
+- **Starting processes:** 38 million a second on 12 islands, 5.1 times
+  one core's 7.6 million; 15 times Go's every core, 23 times Rust's and
+  35 times Erlang's.
+- **A million waiting:** in 0.10 s, a third of one core's time, and the
+  same memory, about 600 bytes a process wherever it waits: Go's and
+  Erlang's take 4.6 times as much, Rust's 1.8.
+- **Conversations that stay on their island:** 62 million messages a
+  second, 4.4 times one core's. (Go's and Rust's `ping-pong` is one
+  pair, so their every-core times say nothing of spreading.)
+- Starting and freeing processes and messages lean on malloc and on
+  memory, which the cores share, so these spread less than computation
+  (`parallel-fib`, 7.9 times): 3 to 5 times on 12 cores.
+
 ### The M2 Max, 30 Oct, 21:51: slight on every island (D256)
 
 `2026-10-30-2151-macos-apple-m2-max`, 12 cores, so 12 islands; each
