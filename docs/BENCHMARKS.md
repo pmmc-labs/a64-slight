@@ -178,6 +178,29 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 30 Oct, 15:33: arrays, and what islands' thread-locals cost
+
+`2026-10-30-1533-macos-apple-m2-max`, at islands' step 2 (`0d3e608`).
+
+- **`spectral-norm` with arrays** (D253): 0.086 s, against 0.478 s for
+  the lists, and 0.12 s for Node, 0.59 for Chez, 0.047 for C: 5.6 times
+  faster than the lists, and 1.8 times C, though it makes its matrix
+  and the transpose through `array/generate` first. 43 MB at its peak.
+- **What sends and processes cost, slower since 24 Oct:** `ping-pong`
+  0.285 s to 0.416, `thread-ring` 0.493 to 0.748, `spawn` 0.122 to
+  0.171, `fan-in` 0.355 to 0.452; `fib` and `binary-trees` much as they
+  were. On the cloud machine, under callgrind, the same programs run 6
+  to 10 per cent more instructions: shared buffers' (D253) half of it,
+  `adopt` no longer inlined among it, and islands' (D256) the other
+  half. The rest of macOS's 30 to 50 per cent is the thread-locals of
+  islands' step 1: macOS reaches each through a call, a variable at a
+  time, about twenty for each message. So an island's state became one
+  thread-local struct, `my`, which a function reaches with one call;
+  `adopt` is inlined again, a chunk's handles taken apart from it; and
+  `rt_send` looks a pid of its own island up in the table at once.
+  Under callgrind, `ping-pong` is then 5 per cent over 24 Oct, from 10,
+  `thread-ring` 6 from 9. The M2 Max is to say what that comes to there.
+
 ### The cloud machine, 30 Oct: `spectral-norm` with arrays (D253)
 
 x86-64, n = 1000, the median of five, not saved (the cloud machine's
