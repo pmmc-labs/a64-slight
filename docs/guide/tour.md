@@ -199,7 +199,9 @@ Processes share nothing. A `fork` copies the locals its expression uses
 into the new process, and each process has a heap of its own, collected
 on its own. The runtime runs every process on one core and preempts
 them, so no process can hold up the rest. Processes are about
-structure, not parallel speed: a million of them is fine.
+structure, not parallel speed: a million of them is fine. Speed comes
+from placing actors on the other cores, islands, with `spawn/on`
+([Use every core](howto/cores.md)).
 
 The top level of a program is a task too.
 

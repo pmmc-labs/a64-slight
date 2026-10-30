@@ -27,8 +27,9 @@ how.
 It has arrays of numbers, for simulations, but it isn't for numerical
 computing at large (no tensors, nor a GPU), for systems programming, or for a GUI, the
 browser or a phone. It's young, and its
-library is small: HTTPS goes through curl, a server's through a proxy
-in front of it, and it uses one core. [`PLAN.md`](../PLAN.md)'s "Toward general purpose" says
+library is small: HTTPS goes through curl, and a server's through a proxy
+in front of it. It uses every core, but only as a program places its
+actors on them ([using every core](howto/cores.md)). [`PLAN.md`](../PLAN.md)'s "Toward general purpose" says
 what's coming, and in what order.
 
 ## What's here
@@ -72,6 +73,7 @@ The guide has four parts, each for a different need:
   [an HTTP server and client](howto/http.md),
   [shipping a program in a container](howto/containers.md),
   [tests](howto/testing.md),
+  [using every core](howto/cores.md),
   [finding a deadlock](howto/deadlocks.md) with `:system`, and
   [finding a race](howto/races.md) with `SLIGHT_SCHED` and a replay.
 

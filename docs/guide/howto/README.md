@@ -19,6 +19,11 @@ explain why things are the way they are.
 - [Serve and call HTTP](http.md): a server with routes, and a client
 - [Ship a program in a container](containers.md): `FROM scratch`
 
+**More than one core**
+
+- [Use every core](cores.md): actors placed on islands with `spawn/on`,
+  what crossing costs, island 0's terminal, and replaying
+
 **Getting it right**
 
 - [Test a program](testing.md): TAP with `(@include :test)`

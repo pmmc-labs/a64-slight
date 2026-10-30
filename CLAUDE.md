@@ -80,7 +80,7 @@ interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 UTF-8 by convention: the `str/` builtins count characters (a bad byte is
 a character of its own, as in Go), and the `bytes/` ones count bytes
 (D148, D219).
-`examples/` has twenty-nine example programs (all but
+`examples/` has thirty example programs (all but
 `ping-pong-tournament`, `top`, `chat`, `airline-gen`, `forest`, `sieve`,
 `snails`, `coral`, `waves` and `etch` are golden tests; `etch`, an
 Etch A Sketch on the keyboard, whose every step is a persistent map kept
@@ -94,7 +94,10 @@ branch, drawn in Braille, the same picture under any schedule, draws
 with `math/sin`, whose last bits differ between machines, D76; `sieve`,
 the prime sieve as a chain of processes, a process per prime, drawn as
 Ulam's spiral in half blocks, writes its pixels in the order its
-messages come), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149), the latest
+messages come), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149): `reaction`,
+Gray-Scott in bands of rows across islands, drawn live on island 0, the
+same picture on one island or twelve, a golden test in its quiet mode
+(`--steps`, from `t/models/reaction.py`, D256); and
 `airline`, a simulated day branched with what-ifs, each run till it
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it
@@ -349,7 +352,12 @@ islands counted (`:sent`, `:received`), `(:runtime)`'s `:islands`,
 commands (golden test 331); steps 3 and 4 came with step 2; and step
 6, replay per island: `SLIGHT_RECORD=f` writes `f` and `f.k`, each
 island's, naming what its inbox took and when, and `SLIGHT_REPLAY=f`
-replays the islands together (t/replay.sh's islands checks). 12c (C libraries vendored as source, D151, D152) waits; its
+replays the islands together (t/replay.sh's islands checks); and step 7,
+checks and numbers: one program's output on four islands and on one
+(golden tests 332, 333), `make tsan`, the collector stressed on every
+island test, `slight-mc` in `bench/` (`docs/BENCHMARKS.md`),
+`examples/reaction.slight`, and the guide's "Use every core". Islands
+are built. 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan
@@ -481,7 +489,7 @@ its time limit; timers that
 nothing can come of, which don't hold up the end; a Unix socket left by
 SIGKILL, replaced, and removed by SIGTERM; https through real curl,
 over real TLS, to a server with a certificate made for the run);
-`headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers, `timer-ids.py`, a model of `timer/cancel`'s index, and `time.py`, of `lib/time.slight`, on Python's datetime, `pack.py`, of `bytes/pack` and `bytes/unpack`, on Python's struct, and `crypto.py`, of the hashes, MACs and encodings, on Python's hashlib, hmac and base64, and `math.py`, of `math/` on mpmath, which writes test 319's program too, and `arrays.py`, of the `array/` builtins on Python's floats, which writes test 321's); `data/` (files the tests read or include, JSONTestSuite's among them, `sly/`, the tutorial's store in the C-style syntax, and `http-raw.slight`, a raw server and client for the HTTP tests, and `curl/curl`, a stand-in for curl, for `https://` without a network; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment (`//` in place of `;` in a `.sly` test). |
+`tsan.sh` (`make tsan`); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers, `timer-ids.py`, a model of `timer/cancel`'s index, and `time.py`, of `lib/time.slight`, on Python's datetime, `pack.py`, of `bytes/pack` and `bytes/unpack`, on Python's struct, and `crypto.py`, of the hashes, MACs and encodings, on Python's hashlib, hmac and base64, and `math.py`, of `math/` on mpmath, which writes test 319's program too, and `arrays.py`, of the `array/` builtins on Python's floats, which writes test 321's, and `reaction.py`, of `examples/reaction.slight`'s simulation); `data/` (files the tests read or include, JSONTestSuite's among them, `sly/`, the tutorial's store in the C-style syntax, and `http-raw.slight`, a raw server and client for the HTTP tests, and `curl/curl`, a stand-in for curl, for `https://` without a network; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment (`//` in place of `;` in a `.sly` test). |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
 ## Commands
@@ -510,6 +518,12 @@ over real TLS, to a server with a certificate made for the run);
   come at the end. A golden test that runs longer than `TIMEOUT` seconds
   (default 60) is killed and fails.
 - `make check`: `tsc --noEmit`.
+- `make tsan`: ThreadSanitizer over what runs on more than one island
+  (`t/tsan.sh`): the island golden tests, the every-island benchmarks
+  and `t/replay/islands.slight`, for the machine's own target, built with
+  `SLIGHT_CC` as the compiler with `-fsanitize=thread`. Not part of `make
+  test`: it needs clang's sanitizer runtime (Xcode has it; on Ubuntu,
+  `apt-get install libclang-rt-18-dev`).
 - `make bench`: the benchmarks, slight against C, Go, Erlang, Node, Perl,
   Python, Chez Scheme and Rust, and SimPy in `bank`, if it's installed (`bench/run.py`; `BENCH=--quick` for small sizes, and see
   `--help`). Not part of `make test`. Measure on the Mac: timings under

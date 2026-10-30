@@ -100,6 +100,13 @@ itself (or, for `n-body`, against C's).
   message at once, then each asked for one. Its peak memory, less
   `startup`'s, over a million is what a waiting process costs (with its
   pid in a list, as every version keeps them).
+- **`slight-mc`:** slight on every island (D256), one per core:
+  `parallel-fib`, `fan-in` and `spectral-norm` again, each as
+  `NAME-mc.slight`, which places its actors with `(spawn/on (% i
+  (islands)) ...)`; `spectral-norm`'s on arrays, a band of rows made on
+  each island, the vector crossing as a shared buffer, so it's compared
+  with `slight-arrays`. In the every-core table, beside Go's, Erlang's
+  and Rust's.
 - **`parallel-fib 30`:** 64 processes each work out `fib(30)`: work more
   than one core can share.
 - **`latency 10`:** how long a message waits for its turn while other
@@ -177,6 +184,29 @@ change, hash tables, bignums, regular expressions) aren't here.
 ## Results
 
 Each run's full tables are in `bench/results/`. What they say:
+
+### The cloud machine, 30 Oct: slight on every island (D256)
+
+The best of three on the cloud machine's 4 cores, `SLIGHT_ISLANDS=4`,
+before the M2 Max's run:
+
+| | one core | every island | ÷ one core |
+|---|---:|---:|---:|
+| `parallel-fib 30` | 0.579 s | 0.174 s | 0.30 |
+| `spectral-norm 1000`, arrays | 0.196 s | 0.072 s | 0.37 |
+| `fan-in 10000000` | 1.36 s | 10.2 s | 7.4 |
+
+- **Work spreads:** 3.3 times as fast on 4 cores for `parallel-fib`,
+  2.7 for `spectral-norm`, whose 40 products each send the vector to
+  every band and join the shares.
+- **One mailbox for every island is the worst case,** as it is for Go
+  and Rust, whose every-core `fan-in` is 12 and 15 times their one
+  core's on the M2 Max. Under callgrind, about 1,000 instructions a
+  message, a third of them malloc and free: a message crossing islands
+  is two allocations, its chunk and its inbox item (some 200 bytes,
+  zeroed), both freed by another thread. One allocation, the item kept
+  in the message's chunk, and items pushed in batches, are what would
+  bring it down, if a program that needs it comes.
 
 ### The M2 Max, 30 Oct, 17:51: a chunk's header two words again
 

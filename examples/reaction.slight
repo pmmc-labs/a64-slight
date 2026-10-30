@@ -1,0 +1,211 @@
+; Reaction and diffusion on every island (D256): Gray-Scott's two
+; chemicals on a grid the size of the screen, spots that grow, split and
+; wander. The grid is cut into bands of rows, a band on each island, an
+; actor holding its rows as arrays of floats (D253); an actor on island 0
+; runs the steps, handing each band the rows beside it, and every eighth
+; step draws the frame in half blocks, while it answers keys, which are
+; island 0's: q stops it. A cell's next value depends only on the cells
+; around it, so the picture is the same on one island or twelve, only
+; slower.
+;
+;     node bin/slightc.ts --target x86_64 -o reaction examples/reaction.slight
+;     ./reaction                       every island, q to stop
+;     SLIGHT_ISLANDS=1 ./reaction      one
+;     ./reaction --steps 200 48 24     no terminal: 200 steps on a 48 by 24
+;                                      grid, then the sum of v (a golden test,
+;                                      from t/models/reaction.py)
+; args: --steps 200 48 24
+
+(defun du () 0.16)
+(defun dv () 0.08)
+(defun feed () 0.037)
+(defun kill-rate () 0.06)
+
+; --- a band ---------------------------------------------------------------------
+
+; The cell at row i (-1 the row above the band, rows the one below) and
+; column j, which wraps round.
+(defun at (a up down w rows i j)
+    (let jj (cond ((< j 0) (+ j w)) ((>= j w) (- j w)) (#true j)))
+    (cond
+        ((< i 0)     (array/get up jj))
+        ((>= i rows) (array/get down jj))
+        (#true       (array/get a (+ (* i w) jj)))))
+
+(defun laplacian (a up down w rows i j)
+    (- (+ (+ (at a up down w rows (- i 1) j) (at a up down w rows (+ i 1) j))
+          (+ (at a up down w rows i (- j 1)) (at a up down w rows i (+ j 1))))
+       (* 4.0 (array/get a (+ (* i w) j)))))
+
+; One step of u and v, given the rows above and below the band, each (u v).
+(defun step-u (u v above below w rows)
+    (array/generate :float (* w rows)
+        (lambda (k)
+            (let i (div k w))
+            (let j (% k w))
+            (let x (array/get u k))
+            (let y (array/get v k))
+            (+ x (+ (* (du) (laplacian u (car above) (car below) w rows i j))
+                    (- (* (feed) (- 1.0 x)) (* x (* y y))))))))
+
+(defun step-v (u v above below w rows)
+    (array/generate :float (* w rows)
+        (lambda (k)
+            (let i (div k w))
+            (let j (% k w))
+            (let x (array/get u k))
+            (let y (array/get v k))
+            (+ y (+ (* (dv) (laplacian v (cadr above) (cadr below) w rows i j))
+                    (- (* x (* y y)) (* (+ (feed) (kill-rate)) y)))))))
+
+(defun row (a w i) (array/slice a (* i w) (* (+ i 1) w)))
+
+; Rows lo to hi of a w-wide grid: u 1 everywhere, and v a quarter in
+; squares round the seeds, u a half there.
+(defun seeded (w lo hi seeds which)
+    (array/generate :float (* w (- hi lo))
+        (lambda (k)
+            (let y (+ lo (div k w)))
+            (let x (% k w))
+            (let in (not (nil? (find (lambda (s) (and (< (math/abs (- x (car s))) 3) (< (math/abs (- y (cadr s))) 3))) seeds))))
+            (cond
+                ((== which 0) (if in 0.5 1.0))
+                (#true        (if in 0.25 0.0))))))
+
+(defun band (id w lo hi seeds)
+    (serve id w (- hi lo) (seeded w lo hi seeds 0) (seeded w lo hi seeds 1)))
+
+(defun serve (id w rows u v)
+    (recv
+        ((:edges to)
+            (send to (list :done id (edges u v w rows) ()))
+            (serve id w rows u v))
+        ((:step to picture above below)
+            (let u2 (step-u u v above below w rows))
+            (let v2 (step-v u v above below w rows))
+            (send to (list :done id (edges u2 v2 w rows) (if picture v2 ())))
+            (serve id w rows u2 v2))))
+
+; A band's top and bottom rows, each (u v).
+(defun edges (u v w rows)
+    (list (list (row u w 0) (row v w 0)) (list (row u w (- rows 1)) (row v w (- rows 1)))))
+
+; --- running it -----------------------------------------------------------------
+
+; Seeds for an h by w grid: n points from a little LCG, the same each run.
+(defun seeds (w h n x acc)
+    (if (== n 0) acc (seed w h n (lcg x) acc)))
+
+(defun seed (w h n x2 acc)
+    (let x3 (lcg x2))
+    (seeds w h (- n 1) x3 (cons (list (% (div x2 7) w) (% (div x3 7) h)) acc)))
+
+(defun lcg (x) (% (+ (* x 1103515245) 12345) 2147483648))
+
+; The bands, one per island, rows split as evenly as they go.
+(defun start (w h)
+    (let k  (math/min (islands) (div h 2)))
+    (let ss (seeds w h (math/max 3 (div (* w h) 400)) 7 ()))
+    (map (lambda (b) (spawn/on b (band b w (div (* b h) k) (div (* (+ b 1) h) k) ss))) (range 0 k)))
+
+; Each band its neighbours' edges, for a step; or asked for its own
+; edges, before the first. What's asked goes on in go-on, with k.
+(defun step (bands edges picture k)
+    (let n (length bands))
+    (dotimes 0 n
+        (lambda (i)
+            (send (nth i bands)
+                (list :step $$ picture (cadr (nth (% (+ i (- n 1)) n) edges)) (car (nth (% (+ i 1) n) edges))))))
+    (gather n () k))
+
+(defun ask-edges (bands k)
+    (map (lambda (b) (send b (list :edges $$))) bands)
+    (gather (length bands) () k))
+
+; The bands' answers, put in band order, each (edges picture); keys
+; meanwhile, q stopping it.
+(defun gather (left done k)
+    (if (== left 0)
+        (go-on k (map cdr (sort-by car done)))
+        (recv
+            ((:done id es pic) (gather (- left 1) (cons (list id es pic) done) k))
+            ((:key ("q" & _))  (go-on k :quit))
+            ((:key _)          (gather left done k)))))
+
+; Where answers go: k says what asked for them.
+(defun go-on (k answers)
+    (match (list k answers)
+        (((:live bands keys w h n started picture) :quit)
+            (finish bands keys n))
+        (((:live bands keys w h n started picture) _)
+            (when picture (draw (map cadr answers) w h n started))
+            (play bands keys (map car answers) (+ n 1) w h started))
+        (((:quiet bands n) _)
+            (if (== n 0)
+                (total bands answers)
+                (step bands (map car answers) (== n 1) (list :quiet bands (- n 1)))))))
+
+; --- the picture ----------------------------------------------------------------
+
+(defun palette () (tuple 16 17 18 19 20 21 27 33 39 45 51 87 123 159 195 231))
+
+(defun colour (x) (tuple/get (palette) (math/max 0 (math/min 15 (math/floor (* x 40.0))))))
+
+(defun render (v w h)
+    (str/join "\n"
+        (map (lambda (y)
+                 (str/join ""
+                     (map (lambda (x)
+                              (str \e "[38;5;" (colour (array/get v (+ (* y w) x)))
+                                   "m" \e "[48;5;" (colour (array/get v (+ (* (+ y 1) w) x))) "m▀"))
+                          (range 0 w))))
+             (range 0 (div h 2)))))
+
+(defun draw (pics w h n started)
+    (let v (fold/l (array/make :float 0 0.0) array/concat pics))
+    (let secs (/ (- (clock/us) started) 1000000.0))
+    (tty/write \e "[H" (render v w h) \e "[0m\n"
+               "step " n " on " (islands) " islands, " (math/round (/ n (math/max secs 0.001))) " a second, q to stop  "))
+
+(defun play (bands keys edges n w h started)
+    (let picture (== (% n 8) 0))
+    (step bands edges picture (list :live bands keys w h n started picture)))
+
+; The bands go, and so does the keyboard's actor: while one's connected,
+; the program waits for keys rather than ending.
+(defun finish (bands keys n)
+    (map kill bands)
+    (kill keys)
+    (tty/write \e "[0m" \e "[?25h\n")
+    (list :steps n))
+
+(defun keys (to)
+    (connect :keypress (forward to)))
+
+(defun forward (to)
+    (recv (k (send to (list :key k)) (forward to))))
+
+(defun live ()
+    (let w (tty/screen/cols))
+    (let h (* 2 (- (tty/screen/rows) 2)))
+    (let bands (start w h))
+    (let keys  (keys $$))
+    (tty/write \e "[?25l" \e "[2J")
+    (ask-edges bands (list :live bands keys w h -1 (clock/us) #false)))
+
+; No terminal: n steps, then the sum of v, a band at a time, each's rows
+; in order.
+(defun quiet (n w h)
+    (let bands (start w h))
+    (ask-edges bands (list :quiet bands n)))
+
+(defun total (bands answers)
+    (map kill bands)
+    (array/sum (fold/l (array/make :float 0 0.0) array/concat (map cadr answers))))
+
+(defun main (argv)
+    (match argv
+        (("--steps" n w h) (quiet (str->int n) (str->int w) (str->int h)))
+        (_                 (live))))
+
+(cadr (read (spawn (main @ARGV))))

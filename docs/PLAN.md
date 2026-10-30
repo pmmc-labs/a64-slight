@@ -1745,7 +1745,14 @@ pid a test prints.
    islands; `bench/` with `slight-mc`, `parallel-fib`, `fan-in` and
    `spectral-norm` placed across islands, in D237's every-core table; an
    example, a simulation on islands drawn live on island 0; and
-   LANGUAGE.md, DESIGN.md and the guide.
+   LANGUAGE.md, DESIGN.md and the guide. *(Done, Oct 2026: golden tests
+   332 and 333, one program on four islands and on one; `make tsan`
+   (`t/tsan.sh`), clean, and a race planted in `push` caught; every
+   island test under `SLIGHT_GC_STRESS=7` and `SLIGHT_GC_VERIFY=1`;
+   `slight-mc` in `bench/`; `examples/reaction.slight`, Gray-Scott in
+   bands across islands, drawn live on island 0, its quiet mode a golden
+   test from `t/models/reaction.py`; and the guide's "Use every core".
+   Islands are built.)*
 
 qemu runs threads, but on this x86-64 machine the memory model isn't
 AArch64's, so ordering bugs show only on the Mac, where each step is

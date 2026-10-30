@@ -6378,3 +6378,11 @@ on placement, each point as below.)*
   since select()'s recorded sets name it; the island count is in the
   record's settings; an island's record given alone stops, saying
   so.)*
+- *(Step 7 built, Oct 2026, and with it the islands: the same program's
+  output on one island and four (golden tests 332, 333); ThreadSanitizer
+  (`make tsan`), clean; the collector stressed and verified on every
+  island test; `slight-mc` in the benchmarks, work spreading 2.7 to 3.3
+  times on 4 cores, and many senders to one mailbox across islands 7.4
+  times slower, as Go's and Rust's are, its two allocations a crossing
+  left for when a program needs it; `examples/reaction.slight`; the
+  guide's "Use every core".)*

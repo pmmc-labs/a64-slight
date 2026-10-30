@@ -1,0 +1,16 @@
+; Collatz's steps from n to 1.
+(defun steps (n acc)
+    (cond
+        ((== n 1)       acc)
+        ((== (% n 2) 0) (steps (div n 2) (+ acc 1)))
+        (#true          (steps (+ (* 3 n) 1) (+ acc 1)))))
+
+; f of each element, the ith worked out on island i mod (islands) and
+; sent to an address of its own; the answers read in order.
+(defun pmap (f xs)
+    (let tos (map (lambda (_) (address)) xs))
+    (dotimes 0 (length xs)
+        (lambda (i) (spawn/on (% i (islands)) (send (nth i tos) (f (nth i xs))))))
+    (map read tos))
+
+(pprint (pmap (lambda (n) (steps n 0)) (range 1 13)))

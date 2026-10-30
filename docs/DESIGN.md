@@ -72,10 +72,10 @@ manager, a crash in one ends only it, and what crosses comes through
 Not what it's for: numerical computing at large (no mutable arrays,
 tensors, autodiff or GPU: D253's arrays are for simulations), systems
 programming (no control of memory, no FFI), a GUI, the browser or a
-phone (WebAssembly is parked), and, till it uses more than one core
-(PLAN.md, its step 7), servers bound by throughput, though
-a copy per core behind one port serves (`airline`'s `--shard` is the
-same idea). Nor a large ecosystem: that comes from users, not a plan.
+phone (WebAssembly is parked). It uses more than one core only as a
+program places its actors on islands (D256), so a server bound by
+throughput spreads its connections' actors itself, or runs a copy per
+core behind one port (`airline`'s `--shard` is the same idea). Nor a large ecosystem: that comes from users, not a plan.
 
 ## Language
 
@@ -1041,7 +1041,7 @@ RT_EXEC_INT`, since a symbol is its name.
   page's 40 KB; there's no `detach`, since the children nobody takes
   are few and small, and go when their parent ends.
 
-### Islands: more than one core (D256; steps 1 to 6 built)
+### Islands: more than one core (D256; built)
 
 Each island is today's runtime, single-threaded, on a thread of its
 own, with its own process table, run queue, timers, devices, stack pool
@@ -1261,8 +1261,8 @@ run (option (b), D256's step 6, put off).
   when it waits again, as a reader's lines, D158) and `(:end s)`;
   `(:process s info)` or `(:ended s pid result)`; or `(:runtime s
   info)`. An `info` is a list of `(key value)`. `(:processes)` copies
-  every process's at once, outside any heap; with one core nothing runs
-  meanwhile, so they all describe one moment. A process's reductions
+  every process's on an island at once, outside any heap; nothing runs
+  there meanwhile, so each island's describe one moment (D256). A process's reductions
   are counted per slice (`calls`, `slice` in `rt_proc_t`), and where it
   is (`:in`) comes from a table the compiler emits of every function's
   entry and name (`slight_functions`): a process holding a stack is at
