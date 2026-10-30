@@ -1064,7 +1064,10 @@ A pid says its island: `#<pid 5@2>` is the fifth process made on island
   island, so another island's pid faults (`:not-a-task`).
 
 The terminal and `:system` are island 0's: `connect :keypress` or
-`connect :system` from another island starts its actor on island 0.
+`connect :system` from another island starts its actor on island 0
+(though a task's `open :system` is its own island's), and `:system`
+tells of every island, asking the others through their inboxes, with
+each process's messages to and from other islands counted.
 Commands (`:exec`), files and sockets are the island's that opens them.
 Each island's virtual clock (`SLIGHT_CLOCK=virtual`) is its own, moving
 when nothing can run on that island. The program ends once no island can
@@ -1474,20 +1477,28 @@ A device that tells about the program's processes and the runtime
 answers its owner, whose first message is `(:open s)`. It's asked:
 
 - `(:processes)`: it answers with `(:process s info)` for each process
-  that hasn't ended, in the order of their pids, and then `(:end s)`.
-  It copies what it tells of them all at once, so that it all describes
-  one moment: nothing runs in between. Then it sends them one at a
-  time, as a file sends lines: the next when the owner, having taken
-  the last, waits in `recv` again; so a million processes never pile up
-  in a mailbox. A `(:processes)` asked before the last one's `(:end s)`
-  is answered after it.
-- `(:process pid)`: it answers at once, with `(:process s info)`, or
+  that hasn't ended, island by island, island 0's first, and on each in
+  the order of their pids, and then `(:end s)`. It copies what it tells
+  of an island's processes all at once, so that each island's describes
+  one moment: nothing runs there in between, though each island's
+  moment is its own. Then it sends them one at a time, as a file sends
+  lines: the next when the owner, having taken the last, waits in
+  `recv` again; so a million processes never pile up in a mailbox. A
+  `(:processes)` asked before the last one's `(:end s)` is answered
+  after it.
+- `(:processes k)`: the same, for island `k`'s processes alone.
+- `(:process pid)`: it answers with `(:process s info)`, or
   `(:ended s pid result)` if `pid` has ended, `result` being what `join`
   would give, or `:ended`. A device is a process that has ended and
   kept nothing.
-- `(:runtime)`: it answers at once, with `(:runtime s info)`.
+- `(:runtime)`: it answers with `(:runtime s info)`.
 
-Anything else is a dead letter. An `info` is a list of `(key value)`,
+Anything else is a dead letter, `(:processes k)` with no island `k`
+among them. A question about the device's own island is answered at
+once; one about another is asked of that island, through its inbox, and
+answered when it replies, a moment later. Either way the answers come in
+the order the questions were asked: one that waits on another island
+holds up those after it (D256). An `info` is a list of `(key value)`,
 which `lookup` reads; more keys may come. A process's:
 
 - `(:pid p)`, and `(:parent q)`, the process that forked it (`()` for
@@ -1514,15 +1525,29 @@ which `lookup` reads; more keys may come. A process's:
 - `(:stack held)`: whether it holds a stack (waiting in `recv`, it gives
   its back).
 - `(:devices pids)`: the devices it owns.
+- `(:island k)`: the island it's on (D256).
+- `(:sent (n bytes))`: the messages it has sent to processes on other
+  islands, and the bytes copied for them, not counting a shared
+  buffer's, which crosses as a handle. A timer's message (`after`) to
+  another island counts to the island it was set on, not the process,
+  which may have ended by then.
+- `(:received (n bytes))`: the messages from other islands given to it,
+  to it or to one of its addresses.
 
-The runtime's: `(:processes n)` that haven't ended; `(:pids n)` made,
-processes and devices, ended or not; `(:records n)` of those the runtime
-still holds an entry for: running, open, or keeping a task's value for
-its parent (D244); `(:ready n)` in the run queue;
-`(:timers n)` pending; `(:devices n)` open; `(:heap bytes)` in use by
-all the processes; `(:heap-max bytes)`, the most one process's heap
-holds (D233); `(:stacks n)` held; `(:clock ms)` since the program
-started; and `(:reductions n)`, made by every process, ended or not.
+The runtime's, every island's added up: `(:processes n)` that haven't
+ended; `(:pids n)` made, processes and devices, ended or not;
+`(:records n)` of those the runtime still holds an entry for: running,
+open, or keeping a task's value for its parent (D244); `(:ready n)` in
+the run queues; `(:timers n)` pending; `(:devices n)` open; `(:heap
+bytes)` in use by all the processes; `(:heap-max bytes)`, the most one
+process's heap holds (D233); `(:stacks n)` held; `(:clock ms)` since the
+program started; `(:reductions n)`, made by every process, ended or not;
+and `(:islands infos)`, an info for each island, started or not, in
+order: `(:island k)`, `(:started b)`, `(:processes n)`, `(:ready n)`,
+`(:timers n)`, `(:devices n)`, `(:heap bytes)`, `(:shared bytes)` (the
+shared buffers its processes hold, D253), `(:reductions n)`, and
+`(:sent (n bytes))` and `(:received (n bytes))`, its messages to and
+from other islands.
 
 A timer's message to the device is answered when it's due, so this
 shows where every process is, once a second (`examples/top.slight` is a
@@ -2094,7 +2119,8 @@ under Files.
       ; {"time":"2026-10-29T14:03:07.123456Z","level":"info","pid":1,"msg":"listening","port":8080}
 
   `time` is `clock/now`'s, as `time/iso` writes it, and `pid` the
-  process's number. A field's value is written as `json/print` writes
+  process's number, followed by `"island":k` for a process on island k
+  other than 0, as a pid prints (D256). A field's value is written as `json/print` writes
   it, except that what JSON can't hold, a pid, a function, a keyword
   other than `:null`, a float that isn't finite, is a string, as `str`
   writes it, wherever it is: `(list :error (list :enoent "x"))` is

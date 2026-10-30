@@ -1717,14 +1717,22 @@ pid a test prints.
    read only there, and `SIGCHLD` passed to every island's pipe, each
    reaping its own commands; `pprint` in one write. A spinning wait
    before an island sleeps, which took 200,000 round trips from 10 s to
-   0.68. Still to do there: PID 1's orphans with commands on more than
-   one island, since island 0 can't tell another's command from an
-   orphan; `:system` telling of other islands; and a run recorded or
-   replayed is on one island, a `spawn/on` elsewhere ending it.)*
-3. **Shared buffers across islands:** atomic counts.
-4. **The end and deadlock** counted across islands.
+   0.68. Still to do there, then: PID 1's orphans with commands on more
+   than one island, and `:system` telling of other islands, both done
+   in step 5; and a run recorded or replayed is on one island, a
+   `spawn/on` elsewhere ending it, till step 6.)*
+3. **Shared buffers across islands:** atomic counts. *(Done with step
+   2.)*
+4. **The end and deadlock** counted across islands. *(Done with step
+   2.)*
 5. **Island 0's:** signals, `:keypress`, `:system` and its counts of
-   what crosses, and output under a lock.
+   what crosses, and output under a lock. *(Done, Oct 2026, golden test
+   331: `:system` tells of every island, `(:processes k)` of one, each
+   process's `:island`, `:sent` and `:received`, and `(:runtime)`'s
+   `:islands`, other islands asked through their inboxes, answers in
+   the order asked; output a value or line in one write, stdio's lock
+   keeping them whole, and `log` saying a process's island; PID 1's
+   orphans told from every island's commands, t/live.py's signals.)*
 6. **Replay per island,** and `SLIGHT_SCHED` per island.
 7. **Checks and numbers:** golden tests whose output doesn't depend on
    the order islands run in, the same on one island or four (the VM3

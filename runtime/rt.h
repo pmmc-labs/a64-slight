@@ -347,6 +347,16 @@
 #define RT_ARRAY_FLOAT       0    // :float
 #define RT_ARRAY_COUNT       1
 
+// What :system says of islands (D256): RT_ISLE_x is symbol RT_SYM_ISLE + x.
+#define RT_SYM_ISLE        194    // RT_SYM_ARRAY + RT_ARRAY_COUNT
+#define RT_ISLE_ISLAND       0    // :island        the island a process is on, or an island's number
+#define RT_ISLE_STARTED      1    // :started       whether an island's thread has started
+#define RT_ISLE_SENT         2    // :sent          messages to other islands, and their bytes
+#define RT_ISLE_RECEIVED     3    // :received      messages from other islands, and their bytes
+#define RT_ISLE_SHARED       4    // :shared        the bytes of the shared buffers its processes hold
+#define RT_ISLE_ISLANDS      5    // :islands       each island's counts, in (:runtime s info)
+#define RT_ISLE_COUNT        6
+
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it

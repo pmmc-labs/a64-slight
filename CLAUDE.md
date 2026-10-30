@@ -341,7 +341,12 @@ state an island's (`RT_ISLAND`, thread-local) and pids with their
 island's bits, is done (golden test 324), and step 2, islands as
 threads: `spawn/on`, `(island)`, `(islands)`, `SLIGHT_ISLANDS` (which
 `t/run.sh` sets to 4), inboxes, and sends, monitors, kills, reads and
-the end across islands (golden tests 325 to 330). 12c (C libraries vendored as source, D151, D152) waits; its
+the end across islands (golden tests 325 to 330); and step 5, what's
+island 0's: `:system` telling of every island, asked through their
+inboxes, `(:processes k)`, each process's messages to and from other
+islands counted (`:sent`, `:received`), `(:runtime)`'s `:islands`,
+`log` saying an island, and PID 1's orphans told from every island's
+commands (golden test 331); steps 3 and 4 came with step 2. 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan

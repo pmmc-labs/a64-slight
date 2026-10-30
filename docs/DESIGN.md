@@ -1041,7 +1041,7 @@ RT_EXEC_INT`, since a symbol is its name.
   page's 40 KB; there's no `detach`, since the children nobody takes
   are few and small, and go when their parent ends.
 
-### Islands: more than one core (D256; steps 1 and 2 built)
+### Islands: more than one core (D256; steps 1, 2 and 5 built)
 
 Each island is today's runtime, single-threaded, on a thread of its
 own, with its own process table, run queue, timers, devices, stack pool
@@ -1076,6 +1076,19 @@ actor's end goes to its parent, a task on another island, and is kept
 there apart from its mail, as a record keeps one here (D245). The
 program ends when `busy`, the islands that may still do something and
 the items not yet handled, comes to 0.
+
+`:system` (step 5) asks other islands through their inboxes: an `ASK`
+item, answered by a `TOLD` with that island's snapshots (taken in one
+moment there), a process's, or its counts, which the device adds to
+what it sends. `(:processes)` and `(:runtime)` go to each started island
+in turn, in order, the device's own island answered in place; a question
+that waits holds up those asked after it, so answers come in order. A
+process counts its messages to and from other islands, and their bytes,
+in its side record, made the first time one crosses, so a process that
+never sends across pays nothing; each island counts its own too. PID 1's
+orphans are island 0's to reap, and every island's commands are in one
+list under a lock that they're started under, so island 0 can tell them
+from orphans.
 
 ### Scheduler
 

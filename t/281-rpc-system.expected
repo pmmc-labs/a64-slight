@@ -1,5 +1,5 @@
-(processes pids records ready timers devices heap heap-max stacks clock reductions)
-(pid parent kind state joining in mail heap reductions stack devices)
+(processes pids records ready timers devices heap heap-max stacks clock reductions islands)
+(pid parent kind state joining in mail heap reductions stack devices island sent received)
 #true
 "#<pid 1>"
 (1 2)

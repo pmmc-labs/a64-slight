@@ -6344,3 +6344,22 @@ on placement, each point as below.)*
   keeps one (D245); `:keypress` and `:system` from another island
   placed on island 0; and an island watching its inbox for 50 µs
   before it sleeps.)*
+- *(Step 5 agreed and built, Oct 2026. Claude proposed, Stevan took
+  each recommendation: `(:processes)` tells every island's processes,
+  island by island, each island's snapshot one moment of its own, and
+  `(:processes k)` one island's (rather than island 0's alone, or only
+  per island); a question about another island is answered when that
+  island replies, and the device answers in the order asked, a waiting
+  question holding up those after it (rather than answering local ones
+  at once, out of order); each process's `(:island k)`, `(:sent (n
+  bytes))` and `(:received (n bytes))`, kept in its side record so a
+  process that never crosses pays nothing, which spawn's cost had just
+  shown matters; and `(:runtime)` the whole program's counts, added up,
+  with each island's in `(:islands infos)` (rather than island 0's,
+  with `(:runtime k)` for another's). Settled in building it: a timer's
+  message counts to its island, not the process that set it; a task's
+  `open :system` is its own island's device and asks the others as
+  island 0's does; `log` writes `"island":k` after the pid for an island
+  other than 0, as a pid prints; and PID 1's reaping on island 0 checks
+  a list of every island's commands, kept under the lock they're
+  started under.)*

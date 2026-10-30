@@ -98,7 +98,7 @@ RUN = run_prefix()
 
 # The runs are on the real clock, with nothing else from the golden
 # tests' settings.
-ENV = {k: v for k, v in os.environ.items() if not k.startswith('SLIGHT_')}
+ENV = {k: v for k, v in os.environ.items() if not k.startswith('SLIGHT_')} | {'SLIGHT_ISLANDS': '4'}   # as t/run.sh, D256
 
 failed = 0
 

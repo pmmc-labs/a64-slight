@@ -1,0 +1,81 @@
+; :system across islands (D256): (:runtime) adds up every island's counts
+; and gives each island's in :islands, an island not started among them;
+; (:processes) tells every island's processes, island by island, and
+; (:processes k) one island's; (:process pid) asks pid's island. Each
+; process counts its messages to and from other islands, and the bytes
+; copied for them, as :sent and :received; a timer's message counts to its
+; island alone, since the process that set it may have ended. Answers
+; come in the order they were asked, though one waits on another island;
+; a device opened on island 3 asks the others as island 0's does; a kill
+; and a question go to an island in the order they're sent; and an island
+; that isn't there is a dead letter. A log line from island 2 says its
+; island, on island 2's virtual clock. Expected output worked out by
+; hand: a list of n numbers, keywords and pids is n cells, 16 bytes each.
+
+(defun echo ()
+    (recv ((:ping to n) (send to (list :pong n)) (echo))))
+
+(defun ask (s q)
+    (send s q)
+    (read s))
+
+(defun keys (info ks)
+    (map (lambda (k) (lookup k info)) ks))
+
+; From a task on island 3, whose device is island 3's.
+(defun from-3 (to e)
+    (send to (list :from-3 (join (fork (asked-from-3 e))))))
+
+(defun asked-from-3 (e)
+    (match (open :system)
+        ((:ok s)
+            (list (island)
+                (match (ask s (list :process e)) ((:process _ i) (keys i (list :pid :state))))
+                (match (ask s (list :runtime)) ((:runtime _ info) (map (lambda (i) (lookup :started i)) (lookup :islands info))))))))
+
+(defun show (s)
+    (match (read s)
+        ((:process _ i) (pprint (keys i (list :pid :island :kind :state :sent :received))) (show s))
+        ((:end _)       :end)))
+
+(let me (address))
+(let e1 (spawn/on 1 (echo)))
+(let e2 (spawn/on 2 (echo)))
+(send e1 (list :ping me 1))
+(pprint (read me))
+(send e2 (list :ping me 2))
+(pprint (read me))
+(after 0 e2 (list :ping me 3))
+(pprint (read me))
+
+(let s (match (open :system) ((:ok s) s)))
+(match (ask s (list :runtime))
+    ((:runtime _ info)
+        (pprint (lookup :processes info))
+        (map (lambda (i) (pprint (keys i (list :island :started :processes :ready :sent :received))))
+            (lookup :islands info))))
+
+(send s (list :processes))
+(show s)
+(send s (list :processes 2))
+(show s)
+
+(send s (list :process e1))
+(send s (list :runtime))
+(pprint (car (read s)))
+(pprint (car (read s)))
+
+(spawn/on 3 (from-3 me e2))
+(pprint (read me))
+
+(kill e1)
+(pprint (ask s (list :process e1)))
+(send s (list :processes 4))
+(disconnect s)
+
+(defun logging (to)
+    (log :info "there" ())
+    (send to :logged))
+(spawn/on 2 (logging me))
+(pprint (read me))
+:done

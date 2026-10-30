@@ -1,0 +1,20 @@
+(pong 1)
+(pong 2)
+(pong 3)
+3
+(0 #true 1 0 (3 144) (3 96))
+(1 #true 1 0 (1 32) (1 48))
+(2 #true 1 0 (2 64) (2 96))
+(3 #false 0 0 (0 0) (0 0))
+(#<pid 1> 0 task running (2 96) (3 96))
+(#<pid 1@1> 1 actor recv (1 32) (1 48))
+(#<pid 1@2> 2 actor recv (2 64) (2 96))
+(#<pid 1@2> 2 actor recv (2 64) (2 96))
+process
+runtime
+(from-3 (ok (3 (#<pid 1@2> recv) (#true #true #true #true))))
+(ended #<pid 2> #<pid 1@1> ended)
+dead letter: (processes 4) (open at t/331-islands-system.slight:51:15)
+{"time":"2026-01-01T00:00:00.000000Z","level":"info","pid":2,"island":2,"msg":"there"}
+logged
+done

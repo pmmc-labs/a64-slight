@@ -640,12 +640,14 @@ rt_value_t rt_log_line(rt_value_t level, rt_value_t msg, rt_value_t fields, cons
     }
     if (l < rt_log_level) return RT_NIL;
     rt_buf_t b = { 0 };
-    char     pid[32];
+    char     pid[64];
     put(&b, "{\"time\":\"");
     put_time(&b, rt_int_value(rt_clock_now(site)));
     put(&b, "\",\"level\":\"");
     put(&b, level_names[l]);
-    snprintf(pid, sizeof pid, "\",\"pid\":%" PRIu64 ",\"msg\":", rt_pid_number(rt_current->pid));
+    uint64_t k = rt_pid_island(rt_current->pid);   // as a pid prints, island 0's without it (D256)
+    if (k) snprintf(pid, sizeof pid, "\",\"pid\":%" PRIu64 ",\"island\":%" PRIu64 ",\"msg\":", rt_pid_number(rt_current->pid), k);
+    else   snprintf(pid, sizeof pid, "\",\"pid\":%" PRIu64 ",\"msg\":", rt_pid_number(rt_current->pid));
     put(&b, pid);
     put_string(&b, msg);
     for (rt_value_t f = fields; f != RT_NIL; f = rt_cdr(f)) {

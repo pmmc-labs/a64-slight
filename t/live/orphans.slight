@@ -1,9 +1,22 @@
 ; t/live.py's signals, as PID 1: a command leaves a process of its own,
 ; which is the program's once the command has ended, and which, when it
-; ends, stays a zombie unless the program waits for it (D229).
+; ends, stays a zombie unless the program waits for it (D229). A command
+; on island 2 meanwhile is island 2's to wait for, though its SIGCHLD
+; comes to island 0, which reaps the orphans, too (D256): left is said
+; only if island 2 has its command's end. Island 2 is kept busy as its
+; command ends, so island 0, idle, would be first to it.
 
 (@include :exec)
 
+(defun fib (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+
+(defun run-there (to)
+    (send to (exec/run (list "sh" "-c" "sleep 0.1; echo there"))))
+
+(let me (address))
+(spawn/on 2 (run-there me))
+(spawn/on 2 (fib 38))
 (exec/run (list "sh" "-c" "sleep 0.2 & echo left"))
-(pprint :left)
+(let there (read me))
+(pprint (if (eq? there (list :ok (list 0 (~ "there" \n)))) :left (list :wrong there)))
 (sleep 600000)
