@@ -337,7 +337,11 @@ the types `(array float)` and `(array int)` (golden tests 320 to 323,
 is under way. Candidates, none agreed: a simulation library across
 islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in
-conservative windows on a `clock/hold` builtin; Stevan leans to
+conservative windows on a `clock/hold` builtin, with an HP-lattice
+protein folding by replica exchange across islands as the example to
+build it around; and branching a replay, a recorded run going another
+way from a point, as `airline` does by hand (`docs/PLAN.md`, "Branching
+a replay", an idea to propose); Stevan leans to
 simulation over servers, D257), and D249's step 3, the standard library
 (`format`, CSV, `@ARGV` parsing, sets, sorted maps, regular
 expressions), each to be proposed first. Done before that: more than
