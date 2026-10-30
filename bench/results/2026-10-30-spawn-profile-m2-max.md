@@ -425,3 +425,97 @@ did:
   across `sample` files and prints the side-by-side table.
 - `counts.py COMMITS...`: `/usr/bin/time -l` on each commit's binary,
   seven times in turn, with medians.
+
+## Experiments
+
+These were run later the same day, on throwaway builds of HEAD (`d1d83c6`). Each
+build edited `runtime/` (asserting the edit matched), built its own
+binary, and then ran `git checkout -- runtime/`. None of these changes
+is committed.
+
+    node bin/slightc.ts -o /tmp/spawn-head bench/spawn/spawn.slight
+
+    # A: thread-locals as plain globals (rt.h)
+    perl -0pi -e 's/#define RT_ISLAND _Thread_local\n/#define RT_ISLAND\n/ or die' runtime/rt.h
+    node bin/slightc.ts -o /tmp/spawn-A bench/spawn/spawn.slight
+    git checkout -- runtime/
+
+    # B: the scheduler on lines of its own (process.c's island_state_t)
+    #     _Alignas(64) rt_ctx_t scheduler;
+    #     _Alignas(64) void *free_stacks;
+    node bin/slightc.ts -o /tmp/spawn-B bench/spawn/spawn.slight
+    git checkout -- runtime/
+
+    # C: both edits
+    node bin/slightc.ts -o /tmp/spawn-C bench/spawn/spawn.slight
+    git checkout -- runtime/
+
+All four print 499999500000 for 1000000. `nm -m` shows `_my` in
+`__thread_vars` for HEAD and B. For A and C it's in `__bss`, and they
+have no thread-locals left. Every run below had `SLIGHT_ISLANDS=1`.
+
+    SLIGHT_ISLANDS=1 hyperfine -N -w 3 -r 20 '/tmp/spawn-head 1000000' '/tmp/spawn-A 1000000' \
+        '/tmp/spawn-B 1000000' '/tmp/spawn-C 1000000'
+    # /usr/bin/time -l, 7 runs of each, alternating, medians (counts.py, with SLIGHT_ISLANDS=1)
+    SLIGHT_ISLANDS=1 /tmp/spawn-C 30000000 > /dev/null & pid=$!
+    sample $pid 6 1 -mayDie -file sample-C.txt
+
+| build | hyperfine, n = 1M | instructions/process | cycles/process | IPC | `retire+196` | all of `retire` | `rt_switch+100` (`ret`) |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| HEAD | 141.1 ± 2.2 ms | 2284 | 478 | 4.78 | 269 | 360 | 237 |
+| A | 139.2 ± 2.4 ms | 2288 | 477 | 4.79 | 290 | 395 | 212 |
+| B | 139.1 ± 1.7 ms | 2284 | 476 | 4.79 | 253 | 365 | 242 |
+| C | 138.5 ± 2.1 ms | 2288 | 477 | 4.80 | **23** | **128** | 231 |
+
+The sample columns are self samples from one run each at n = 30M, of
+3,300 to 3,600 in all. `retire`'s epilogue `ldp x20, x19, [sp, #0x10]`
+is at +196 in all four builds, so the offsets compare directly.
+
+Larger n, five runs each, with 24 Oct's binary (`118291f`) beside them:
+
+| n | `118291f` | HEAD | A | B | C |
+|---:|---:|---:|---:|---:|---:|
+| 10M | 1.227 s | 1.362 s | 1.358 s | 1.359 s | 1.363 s |
+| 30M | 3.702 s | 4.124 s | 4.132 s | 4.145 s | 4.132 s |
+
+Where each build's state landed, from lldb at a breakpoint on `retire`
+(`p &my`, `p &my.scheduler`, and the fields beside it):
+
+| build | `&my` | `&my.scheduler` | `&my.ready_tail` | `&my.free_stacks` | where |
+|---|---|---|---|---|---|
+| HEAD | `0x11ff04418` | `0x11ff04450` | `0x11ff04448` | `0x11ff044f8` | malloc'd TLV block. `ready_tail` and the scheduler's x19–x20 share line `…4440`. |
+| A | `0x1000908a0` | `0x1000908d8` | `0x1000908d0` | `0x100090980` | `__bss`. Still sharing line `0x1000908c0`. |
+| B | `0x12d0040c0` | `0x12d004100` | `0x12d0040f0` | `0x12d0041c0` | malloc'd TLV block. The scheduler starts a line, and `free_stacks` the line after its last. |
+| C | `0x100090900` | `0x100090940` | `0x100090930` | `0x100090a00` | `__bss`, with lines of its own as in B. |
+
+`sudo` asks for a password here, so there are no kperf counters.
+
+### What they show
+
+None of the variants takes the time back. At every n, A, B and C are
+within 1.5 per cent of HEAD, with the same instructions (2284 to 2288)
+and cycles (476 to 478) per process. They're still 11 per cent behind
+`118291f` at 10M and 30M. Only C, with both changes, takes the stall
+off `retire+196`: 23 samples where HEAD has 269. A and B alone don't
+touch it. Even then the time doesn't go. In C's profile against HEAD's,
+`retire` loses 8.7 ms per million, and the same amount comes back spread
+over `finish` (+1.9), libmalloc (+1.9), `memset`, `copy_values_after`,
+`rt_send` and others. (C's run took fewer samples, 3316 against 3604,
+but hyperfine at 30M says it ran no faster. `sample`'s count isn't the
+run's length.)
+
+So it was neither of the report's explanations. The thread-local
+block's place in the heap (A) isn't the cause, and neither is the line
+the scheduler's registers share with `nrecords` and the run queue (B).
+Both together (C) aren't the cause either. The wait at `retire+196` is
+where a latency comes to the surface, not where it comes from. When
+`ebb2312` took the thread-local calls away, their samples went to
+`retire`; when C clears `retire`, they go everywhere else. The cost is
+the same in each case. The section "Conclusion" above stands for
+*where* the samples fall (and for what isn't the cause: instructions,
+thread-locals, malloc). Its explanation of *why*, and the fixes
+proposed from it, are withdrawn. The cause is still open. It came with
+`20d78b3` and outlasted every change measured here, so the next step is
+counters (L1D misses, and load or memory-ordering stalls, for
+`118291f` against HEAD), which need `sudo`, or bisecting `20d78b3`'s
+own changes one at a time.
