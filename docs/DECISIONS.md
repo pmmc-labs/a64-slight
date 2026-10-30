@@ -6285,3 +6285,51 @@ of the step, was D251's.)*
   Python's hashlib, hmac and base64, where Python takes `+` and `/` in
   base64url, which RFC 4648 §5 doesn't, and slight doesn't either; and
   `t/replay/world.slight` draws random bytes, which its replay has.)*
+
+**D256. More than one core: islands.** *(Stevan, Oct 2026. Claude
+proposed a scheduler thread per core over shared run queues, with
+stealing, replay kept to one core; Stevan agreed to limit replay to
+one core ("nothing stops someone from executing a bunch at once"), but
+asked instead whether each core couldn't be isolated, as `rpc` keeps
+programs apart, "one way in and one way out, or multiple, but
+explicit"; then whether actors could be declared shared; and settled
+on placement, each point as below.)*
+- **Islands:** each core runs today's single-threaded runtime, on a
+  thread of its own, with nothing shared but an inbox per island and
+  the shared buffers, which never change. The scheduler, the collector,
+  mailboxes, watches and compiled code stay single-threaded; the
+  cross-thread code is the inboxes, a count for the end, and atomic
+  buffer counts. Prior art: Seastar's shard per core, Dart's isolates.
+- **A fixed set, by placement:** `(islands)` of them, one per core
+  unless `SLIGHT_ISLANDS` says, island 0 the main one, each started the
+  first time something's placed on it; `(spawn/on k expr)` places an
+  actor, `(island)` says where a process is; nothing moves on its own,
+  and `fork` stays on its parent's island. Stevan: "I like the more
+  explicit control."
+- **Pids carry their island, and a send goes where its pid says:**
+  across islands through the target's inbox, in order between any two
+  processes. Each island numbers its own pids. Printed `#<pid 5@2>`
+  (Stevan's thought too), island 0's as now, so single-island programs
+  and the tests print as they did; an address `#<address 3.1@2>`. 8
+  bits of island below the address bit: a pid's number 52 bits, an
+  address's task 32 and its number 20, wrapping past a million and
+  skipping numbers still open.
+- **Shared buffers cross without a copy,** their counts atomic: "I
+  think it is important", for frames of simulations, among others.
+- **`:system` counts what crosses islands,** each actor's and each
+  island's.
+- **Island 0 owns signals, the terminal and `:system`,** so a TUI
+  there stays responsive while other islands compute, for pictures of a
+  simulation as it runs (Stevan's point).
+- **Replay per island:** an island's inbox is input from the world to
+  it, recorded; each island replays on its own or with the rest. (This
+  goes past "replay on one core", which Stevan had accepted.)
+- **Rejected:** one scheduler over every core, with stealing (atomics
+  in every send, a run on N cores not replayable); channels between
+  islands as devices (every message wrapped, where routed pids keep
+  `send` as it is); actors declared shared, reachable from other
+  islands alone (a reply's asker would have to be shared too, or
+  addresses an exception); an island made per call (a thread per
+  branch of a simulation); and, for printing, `#<pid 2.5>` (taken by
+  addresses), `#<pid 2:5>`, `#<pid 5 on 2>`, and the island always
+  shown (every pid a test prints changing).

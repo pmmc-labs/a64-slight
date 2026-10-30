@@ -1238,7 +1238,8 @@ builtins are to be proposed with the standard library (3).
    not a bar to being general purpose; separate heaps make it easier
    than in most languages, and the run queue and timers are the work.
    Moved up by D253 to follow Numbers in bulk, since numbers in bulk on
-   one core aren't worth the bother.
+   one core aren't worth the bother. Agreed as islands (D256, below,
+   "More than one core: islands").
 
 And, though not features: a version number and a core that holds still
 for it; one syntax the docs are written in, the other made from it.
@@ -1615,172 +1616,110 @@ builtin to make an `:int` array a `:float` one (through `array->list`
 and `list->array` for now), and unboxed floats in compiled code
 (TYPES.md's step 5), each for when a benchmark asks.
 
-### More than one core (proposed, D249's step 7, Oct 2026)
+### More than one core: islands (agreed, D256, Oct 2026)
 
 **The problem.** One OS thread runs every process, so a server or a
 simulation uses one core of the M2 Max's twelve. The airline's
 what-ifs get more by running copies of the program, a share each
-(`--shard k/n`, D218), which is the workaround this would make
-unnecessary. `bench/` says what's at stake: Go and Erlang on every core
-against one (D237's table), and `parallel-fib`, `fan-in` and `spawn`,
-which slight runs on one.
+(`--shard k/n`, D218), which is the workaround this makes unnecessary.
 
-The design suits it unusually well (BACKGROUND.md, "Multiple cores"): a
-heap per process, nothing shared that changes, messages copied, and a
-collector that only ever touches its own process's heap, so there's no
-stop-the-world pause to arrange. Compiled code holds its process in
-`x28` (`r15`) and preempts itself by counting reductions, so it never
-touches shared state, and needs no change. Everything to synchronize is
-in `process.c`.
+**What was agreed** (D256, after a first proposal of one scheduler over
+every core, with stealing, that Stevan turned down for something more
+isolated, as `rpc` between programs is): **islands**. Each island is
+today's single-threaded runtime on a thread of its own: its own process
+table, run queue, timers, `select()` loop, stack pool and record.
+Nothing is shared between islands but an inbox each, and the shared
+buffers, which never change.
 
-**What has to hold.** What a program means doesn't change: messages
-from one process to another arrive in the order they were sent, and
-nothing else is promised about order, as now. What changes is that a
-run on N cores isn't one fixed order any more, so the question is
-what becomes of replay, `SLIGHT_SCHED` and the golden tests.
+- **A fixed set, made when the program starts:** `(islands)` of them,
+  one per core unless `SLIGHT_ISLANDS` says, island 0 the main one; an
+  island's thread starts the first time something is placed on it.
+  Nothing moves between islands on its own: where an actor runs is the
+  program's choice, `(spawn/on k expr)`, k from 0 below `(islands)`,
+  and `(island)` says which one a process is on. A program spreads its
+  work with `(spawn/on (% i (islands)) ...)`, and runs the same on one
+  core or twelve; `SLIGHT_ISLANDS=1` is today's runtime exactly.
+  `fork` stays on its parent's island, so a `join` is always local.
+- **Pids carry their island,** and a send goes wherever its pid says:
+  within an island, today's send, with no atomics; to another, the
+  message copied into a chunk, as now, and the chunk pushed onto that
+  island's inbox, a queue many push to and one pops, which wakes it,
+  its scheduler delivering into the local mailbox. Messages from one
+  sender to one receiver still arrive in order. Monitoring, killing
+  and an actor's end cross the same way, as messages. Each island
+  numbers its own pids, so each is the same from run to run, whatever
+  the others do. A pid prints `#<pid 5@2>`, pid 5 at island 2, and
+  island 0's as now, `#<pid 5>`; an address `#<address 3.1@2>`.
+- **The bits:** 8 of island (up to 256), below the address bit, so a
+  pid keeps 52 bits of its number, and an address its task's 32 and
+  20 of its own number (from 28), which wraps past a million, skipping
+  any still open (a task's open ones are few).
+- **Shared buffers cross islands without a copy** (D253): a big string
+  or array is sent as its handle, its reference count atomic. So a
+  frame of a simulation, an array of a million floats or a screen's 4
+  MB, goes to the island that draws it for the price of a handle.
+- **Island 0 owns the signals, the terminal and `:system`:** the other
+  islands' threads block signals, so they come to island 0's (`SIGCHLD`
+  wakes each island that has commands, each reaping its own); `:keypress`
+  and `:system` are island 0's devices wherever they're connected, their
+  messages crossing to an owner elsewhere; and output, from any island,
+  goes out a whole value or line at a time, under a lock. So a TUI on
+  island 0 answers keys and redraws at idle latency (D238) however hard
+  the other islands compute, its collections touching only its own
+  small heaps: real-time pictures of a running simulation.
+- **`:system` counts what crosses:** each actor's messages and bytes to
+  and from other islands, and each island's totals, run queue and
+  shared bytes, asked of each island through its inbox.
+- **Replay per island** (D170): what comes through an island's inbox is
+  input from outside it, recorded as a socket's read is; each island
+  records its own run (`SLIGHT_RECORD=f` writes `f` for island 0, `f.2`
+  for island 2 and so on), and any island replays exactly, on its own or
+  with the rest. `SLIGHT_SCHED` seeds each island's order apart. A
+  simulation spanning islands carries its time in its messages, since
+  each island's virtual clock is its own.
+- **The end, and deadlock:** the program ends when every island is idle,
+  every inbox empty, and nothing pending anywhere that could make a
+  process ready, island 0 printing its root's value as now; one shared
+  count of busy islands and messages in flight says so, and lets the
+  deadlock message see across islands.
 
-#### Point 1: determinism
+**Rejected:** one scheduler over every core with stealing, and a lock
+or an atomic in every send (the first proposal); channels between
+islands as devices (`(:from c v)` wrapped around every message, where
+pids that cross keep `send` as it is); actors declared shared, only they
+reachable from another island (a reply needs its asker shared too, or
+an exception for addresses); an island per `spawn/island` call (a
+thread for each of a simulation's thousand branches); `#<pid 2.5>`,
+taken by addresses, and `#<pid 0:5>` everywhere, which changes every
+pid a test prints.
 
-- **(a) One core when a run must repeat; N otherwise.** Recording,
-  replaying and `SLIGHT_SCHED` run on one core, exactly as now, the
-  same code; a run on N cores isn't recorded and can't be replayed. A
-  program whose result doesn't depend on the order of its messages
-  (tasks forked and joined: `parallel-fib`, the airline's what-ifs, a
-  map over a list in tasks) gives the same result on any number of
-  cores, and the tests check that; one that races finds its race on one
-  core with `SLIGHT_SCHED`, as now. The virtual clock works on N cores
-  (time moves when every core is idle and no device is ready), the
-  order of what happens at one instant being the cores'.
-- **(b) Deterministic rounds** (bulk-synchronous, as Kendo and DThreads
-  make threads repeatable): each core runs its own processes for a
-  round of reductions; a message to another core's process waits for
-  the round's end, when all are delivered in a fixed order (by sender,
-  then send); placement is a function of the pid. A run is then the
-  same on N cores every time, and replays, for the same N. The costs: a
-  barrier every round, which every core waits at for the slowest; a
-  message across cores waiting up to a round, which a server's latency
-  feels (D238 measures it); no stealing, since that depends on timing;
-  and devices and timers let in only at barriers. Research, more than
-  engineering.
-- **(c) Record the interleaving:** every mailbox's order of arrival, and
-  the pids in the order they were made, and in a replay make each core
-  wait for the next recorded event. The record grows with the traffic,
-  and a replay runs at the speed of its slowest wait.
+**The steps,** each with `make test` passing:
 
-**Recommendation: (a).** It keeps today's deterministic modes exactly
-as they are, adds a mode that isn't, and says so; most of what numbers
-in bulk wants on N cores, independent work forked and joined, is
-deterministic by construction anyway. (b) is the one that would make
-"replayable on N cores" true, and could come after (a) if it's wanted:
-(a)'s locks and queues are what it would build on.
-
-#### Point 2: the scheduler
-
-- **(a) A thread per core, each with its own run queue, an idle one
-  taking half of another's** (the BEAM's and Go's design). A fork or a
-  spawn goes on its parent's core's queue, near what it was copied
-  from; stealing spreads them. An idle thread sleeps on a condition
-  variable, woken by an enqueue on a core with none awake.
-- **(b) One shared run queue, under a lock:** simplest, but every
-  enqueue and dequeue contends, which `ping-pong` and `fan-in` would
-  feel at once.
-- **(c) A fixed share of pids per core, no stealing:** simple, and
-  balances badly when the work isn't even.
-
-**Recommendation: (a).** One core is (a) with nothing to steal from.
-
-#### Point 3: devices and timers
-
-- **(a) A thread of their own:** today's `events()` and `idle()`, the
-  `select()` over sockets, commands, keys and signals, and the timers,
-  move to an I/O thread, nearly unchanged, which makes processes ready
-  on the schedulers' queues. A process that opens a device or sets a
-  timer hands it over under a lock, and a pipe wakes the I/O thread
-  from its `select()`.
-- **(b) Whichever scheduler is idle polls** (the BEAM's check-io): no
-  extra thread, but every scheduler can be in `select()`, which needs
-  more care than it saves.
-
-**Recommendation: (a).**
-
-#### Point 4: what's shared, and how
-
-- **Mailboxes:** a queue many can push to and one pops (Vyukov's, a
-  compare-and-swap a send), and the process's state changed by
-  compare-and-swap, so a message arriving as its receiver decides to
-  wait wakes it exactly once.
-- **The process table:** its page array allocated once, big enough
-  never to move (its pages already don't), the pid counter atomic, and
-  an entry's fields (an exit record, a page's count of live entries)
-  under a lock per page.
-- **Watches** (join, read, monitor, `join/race`): a lock per process,
-  taken by whoever adds a watch and by the process as it ends, so an
-  end is never missed or told twice.
-- **`kill`:** of a process running on another core, a flag it sees the
-  next time it's back in its scheduler, within a quantum (1,000
-  reductions); no signal between cores.
-- **Shared buffers' counts** (D253): atomic.
-- **Per core:** the stack pool, `rt_current` (thread-local), the copy's
-  scratch, `SLIGHT_GC_STRESS`'s count.
-- **Output:** `pprint`, `tty/write` and `log` each write a whole line
-  or value at once, under a lock, so lines from two cores don't mix.
-- **The end:** the program ends, or is deadlocked, when every core is
-  idle with nothing queued and the I/O thread has nothing that could
-  make a process ready: today's test, counted across cores.
-- **`:system`:** each process's state as of when it was looked at, no
-  longer one instant's picture of all of them.
-
-On AArch64 every one of these needs the right ordering (acquire and
-release, C11's atomics; compiled code needs none); x86-64's stronger
-ordering hides mistakes that the M2 Max would show, so the Mac is where
-it's proven.
-
-#### Point 5: how many cores by default
-
-- **(a) One, unless `SLIGHT_CORES` says** (a number, or `all`): a
-  program behaves as it does today until it asks; repeatable runs stay
-  the default.
-- **(b) Every core, as Go and Erlang:** faster by default, and a
-  program whose output depends on order prints differently from run to
-  run until someone sets `SLIGHT_CORES=1`.
-
-**Recommendation: (a),** to revisit when there's a release to make a
-default for.
-
-#### What it costs, and how it's checked
-
-Every send pays a compare-and-swap or two, and every end a lock: on one
-core, `ping-pong` and `payload` say how much, and if it's more than a
-few per cent, one core could take the plain path (point 1's (a) makes
-that easy, one core being a mode). The work, in order, each a step with
-`make test` passing:
-
-1. Per-core scheduler state and a thread-local `rt_current`, still on
-   one thread (a refactor, nothing to see).
-2. The I/O thread (point 3), still one scheduler.
-3. The locks and atomics of point 4, and N schedulers, a fork going
-   to its parent's core, without stealing.
-4. Stealing, idle cores sleeping, and the end counted across cores.
-5. Checks: the golden tests on one core (`t/run.sh` sets
-   `SLIGHT_CORES=1`, as it sets the virtual clock); a set whose output
-   doesn't depend on order run on 4 cores too, the VM3 sketch's test,
-   the same results on one core or N; ThreadSanitizer (`clang
-   -fsanitize=thread`) over that set; `SLIGHT_GC_STRESS` on N cores;
-   and `bench/` with `slight-mc`, beside `go-mc`, `erlang-mc` and
-   `rust-mc` in D237's every-core table.
+1. **Island state:** the runtime's globals (`process.c`'s table, queue,
+   timers and devices, and `replay.c`'s, `dns.c`'s and `tty.c`'s) made
+   an island's, thread-local, still on one thread; pids with their
+   island's bits, always 0 yet, masked where a pid is looked up, and
+   address numbers skipping open ones as they wrap.
+2. **Islands as threads:** `SLIGHT_ISLANDS`, `(islands)`, `(island)`,
+   `(spawn/on k expr)`, the inboxes, sends, monitors, kills and ends
+   across them, and `#<pid 5@2>`; `t/run.sh` sets `SLIGHT_ISLANDS=4`, so
+   `(islands)` is the same on every machine.
+3. **Shared buffers across islands:** atomic counts.
+4. **The end and deadlock** counted across islands.
+5. **Island 0's:** signals, `:keypress`, `:system` and its counts of
+   what crosses, and output under a lock.
+6. **Replay per island,** and `SLIGHT_SCHED` per island.
+7. **Checks and numbers:** golden tests whose output doesn't depend on
+   the order islands run in, the same on one island or four (the VM3
+   sketch's test); ThreadSanitizer over them; `SLIGHT_GC_STRESS` with
+   islands; `bench/` with `slight-mc`, `parallel-fib`, `fan-in` and
+   `spectral-norm` placed across islands, in D237's every-core table; an
+   example, a simulation on islands drawn live on island 0; and
+   LANGUAGE.md, DESIGN.md and the guide.
 
 qemu runs threads, but on this x86-64 machine the memory model isn't
-AArch64's, so ordering bugs show only on the Mac. Several sessions,
-most of it in `process.c`, whose 4,100 lines assume one thread
-throughout.
-
-**Rejected, unless Stevan wants them:** many OS processes talking over
-`rpc` as a cluster on one machine (no runtime change at all, and what
-the airline does already, but messages through sockets and nothing
-shared); a GIL-style lock around the runtime (every send and every
-allocation contending); and dirty schedulers for long builtins (no FFI,
-D252, and `array/matmul` on a big array holds one core of N, not the
-program).
+AArch64's, so ordering bugs show only on the Mac, where each step is
+proven.
 
 ### 17. Self-host
 
@@ -1812,8 +1751,9 @@ grows. BACKGROUND.md has the discussions so far.
 
 ### Parallelism
 
-- Multiple cores: a scheduler thread per core, with run queues that
-  steal from each other ("Multiple cores").
+- Multiple cores: agreed as islands (D256, "More than one core:
+  islands", above), not the scheduler over every core, with stealing,
+  that BACKGROUND.md's "Multiple cores" sketches.
 
 ## The ts-slight examples
 

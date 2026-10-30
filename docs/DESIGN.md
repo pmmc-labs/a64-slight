@@ -1041,9 +1041,29 @@ RT_EXEC_INT`, since a symbol is its name.
   page's 40 KB; there's no `detach`, since the children nobody takes
   are few and small, and go when their parent ends.
 
+### Islands: more than one core (D256, agreed, not yet built)
+
+Each island is today's runtime, single-threaded, on a thread of its
+own, with its own process table, run queue, timers, devices, stack pool
+and record; nothing is shared between islands but an inbox each and
+the shared buffers (D253), which never change. A fixed set, `(islands)`
+of them, one per core unless `SLIGHT_ISLANDS` says; island 0 is the
+main one, and owns the signals, the terminal and `:system`. A program
+places an actor with `(spawn/on k expr)`; nothing moves on its own, and
+`fork` stays on its parent's island. A pid carries its island in 8 bits
+below the address bit (`#<pid 5@2>`, island 0's printed as now), each
+island numbering its own; a send to another island's pid copies the
+message into a chunk and pushes it onto that island's inbox, a queue
+many push to and one pops, and the island delivers it into the local
+mailbox, so compiled code, the collector and every mailbox stay
+single-threaded. Big strings and arrays cross as handles, their counts
+atomic. Each island records its own run, its inbox's deliveries among
+its inputs, and replays on its own. `docs/PLAN.md`, "More than one
+core: islands", has the steps.
+
 ### Scheduler
 
-- Single core. A **FIFO run queue** (D86): simple, and deterministic on
+- Single core (on each island, once there are islands, D256). A **FIFO run queue** (D86): simple, and deterministic on
   one core. A preempted process goes to the back of the queue, but only
   if another process is ready; otherwise it keeps running (D91). `yield`
   always goes to the back.
