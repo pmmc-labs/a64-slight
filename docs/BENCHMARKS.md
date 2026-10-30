@@ -178,6 +178,39 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 30 Oct, 16:22: one thread-local, and then none
+
+`2026-10-30-1622-macos-apple-m2-max`, the five programs that had slowed,
+with an island's state one thread-local struct (`e46e023`):
+
+| | 24 Oct | 15:33 | 16:22 |
+|---|---:|---:|---:|
+| `ping-pong` | 0.285 s | 0.416 s | 0.345 s |
+| `thread-ring` | 0.493 s | 0.748 s | 0.637 s |
+| `spawn` | 0.122 s | 0.171 s | 0.143 s |
+| `fan-in` | 0.355 s | 0.452 s | 0.420 s |
+| `payload` | 0.566 s | 0.618 s | 0.569 s |
+
+- **Half way back.** `payload`, whose time is copying, is where it was;
+  the others are still 18 to 29 per cent over, where callgrind on Linux
+  says 5. Counted as macOS pays them (the runtime built with
+  `-fPIC -ftls-model=global-dynamic` as a shared library, so each
+  thread-local is a call to `__tls_get_addr`, as it's one to
+  `tlv_get_addr` on macOS), a message still made six: `rt_current` in
+  `rt_send` and `rt_recv`, and `my` in `copy_walk`, `to_scheduler`,
+  `events` and `rt_recv` again; and a process, `spawn`'s, six more.
+  At 2 to 3 ns each, that's the difference.
+- **So none, where it's busiest.** Compiled code keeps the process in a
+  register (x28, r15), so it hands it to `rt_send`, `rt_recv`,
+  `rt_fork` and `rt_spawn` (as it does `rt_preempt` and `rt_exit`); a
+  process points at its island's state (`isle`), which the run queue,
+  the switch to the scheduler, the copy of a message, the table and a
+  process's end reach through it; and `events` is inlined into the
+  scheduler's loop, which looks the island up once. Counted the same
+  way, `ping-pong`, `thread-ring`, `fan-in`, `payload` and `spawn` make
+  under a thousand lookups in a run, where they made one or two million.
+  The M2 Max is to say whether that's all of it.
+
 ### The M2 Max, 30 Oct, 15:33: arrays, and what islands' thread-locals cost
 
 `2026-10-30-1533-macos-apple-m2-max`, at islands' step 2 (`0d3e608`).

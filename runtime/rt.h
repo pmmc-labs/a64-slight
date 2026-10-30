@@ -520,6 +520,9 @@ typedef struct rt_proc {
     struct rt_side *side;       // what few processes need, made when first wanted: the devices
                                 // it owns, a task's addresses, a joiner's result, a parent's
                                 // kept children (process.c)
+    struct rt_isle *isle;       // its island's state (process.c), the thread-local of the thread
+                                // it runs on, reached through it on the busiest paths, since on
+                                // macOS each use of a thread-local is a call (D256)
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -630,9 +633,12 @@ extern const uintptr_t slight_functions[]    RT_ASM(slight_functions);
 // in a new process, a task, with the values deep-copied into its heap;
 // rt_spawn does the same for an actor (D243); rt_connect starts an actor,
 // and sends it every key from :keypress; rt_connect_system does too, and
-// gives the new process a :system device (D171).
-rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
-rt_value_t rt_spawn(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_spawn);
+// gives the new process a :system device (D171). Compiled code hands
+// rt_fork, rt_spawn, rt_send and rt_recv the process, which it keeps in a
+// register, since on macOS looking up rt_current, a thread-local, is a
+// call, and these are the busiest (D256).
+rt_value_t rt_fork(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
+rt_value_t rt_spawn(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_spawn);
 rt_value_t rt_spawn_on(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) RT_ASM(rt_spawn_on);
 rt_value_t rt_island_of(const char *site) RT_ASM(rt_island_of);
 rt_value_t rt_islands(const char *site) RT_ASM(rt_islands);
@@ -666,8 +672,8 @@ rt_value_t rt_disconnect(rt_value_t pid, const char *site) RT_ASM(rt_disconnect)
 // (socket/peer c): who's at the other end of the Unix connection c, as
 // ((:uid u) (:gid g) (:pid p)), or () for any other pid (D235).
 rt_value_t rt_socket_peer(rt_value_t c, const char *site) RT_ASM(rt_socket_peer);
-rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
-rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
+rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
+rt_value_t rt_recv(rt_proc_t *p, rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
 void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_letter);
 void       rt_yield(void) RT_ASM(rt_yield);
 

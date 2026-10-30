@@ -617,7 +617,7 @@ function compileRecv(x: Pair, clauses: readonly Sexp[], cx: Cx, st: St): [Code, 
     const t = st.t;
     return [[
         `${top}:`,
-        t.call('rt_recv', [FRAME, imm(params), addr(entry)], false),
+        t.call('rt_recv', [PROC, FRAME, imm(params), addr(entry)], false),
         t.storeSlot(msg),
         code,
         t.call('rt_dead_letter', [inSlot(msg), addr(site)], false),
@@ -689,10 +689,12 @@ function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: 
     const [site, st4]  = siteLabel(st3, form, x.pos);
     const st5 = free.length > 0 ? useSlot(st4, si + free.length - 1) : st4;
     const t = st.t;
+    // fork and spawn are handed the process, as send is (D256)
+    const proc = fn === 'rt_fork' || fn === 'rt_spawn' ? [PROC] : [];
     return [[
         pre,
         free.map((name, i) => t.copySlot(lookup(cx.env, name)!, si + i, name)),
-        t.call(fn, [addr(entry), imm(free.length), slotAddr(si), addr(site),
+        t.call(fn, [...proc, addr(entry), imm(free.length), slotAddr(si), addr(site),
                     ...extra.map((_, i) => inSlot(cx.si + i)), ...flags.map(imm)], false),
     ], st5];
 }
@@ -993,10 +995,13 @@ const PREDICATES: readonly string[] = ['int?', 'nil?', 'cons?', 'pid?', 'sym?', 
 // are passed as (). The call's site goes in the register after the
 // arguments, for the faults the C code raises. A variadic builtin gets its
 // arguments as one list.
-type CBuiltin = { readonly fn: string; readonly min: number; readonly max: number; readonly variadic: boolean };
+// proc: the process goes first, for a builtin so busy that its looking the
+// process up would show (D256).
+type CBuiltin = { readonly fn: string; readonly min: number; readonly max: number; readonly variadic: boolean; readonly proc: boolean };
 
-const fixed    = (fn: string, min: number, max = min): CBuiltin => ({ fn, min, max, variadic: false });
-const variadic = (fn: string): CBuiltin => ({ fn, min: 0, max: 1, variadic: true });
+const fixed    = (fn: string, min: number, max = min): CBuiltin => ({ fn, min, max, variadic: false, proc: false });
+const variadic = (fn: string): CBuiltin => ({ fn, min: 0, max: 1, variadic: true, proc: false });
+const withProc = (fn: string, n: number): CBuiltin => ({ ...fixed(fn, n), proc: true });
 
 const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'str?':               fixed('rt_is_str', 1),
@@ -1118,7 +1123,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'rand/float':         fixed('rt_rand_float', 0),
     'rand/seed':          fixed('rt_rand_seed', 1),
     'lambda?':            fixed('rt_is_lambda', 1),
-    'send':               fixed('rt_send', 2),
+    'send':               withProc('rt_send', 2),
     'join':               fixed('rt_join', 1),
     'join/race':          fixed('rt_join_race', 1),
     'address':            fixed('rt_address', 0),
@@ -1363,7 +1368,7 @@ function compileCBuiltin(x: Pair, name: string, b: CBuiltin, args: readonly Sexp
     const [code, ops, st1] = callOperands(args, cx, st);
     const [site, st2] = siteLabel(st1, name, x.pos);
     const missing = [...Array(b.max - args.length).keys()].map(() => imm('RT_NIL'));
-    return [[code, st.t.call(b.fn, [...ops, ...missing, addr(site)], false)], st2];
+    return [[code, st.t.call(b.fn, [...(b.proc ? [PROC] : []), ...ops, ...missing, addr(site)], false)], st2];
 }
 
 function checkArity(x: Pair, name: string, args: readonly Sexp[], n: number): void {

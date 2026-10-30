@@ -89,8 +89,10 @@ static entry_t gone = { .ended = 1, .dead = 1 };
 
 // What's an island's own (D256), one thread-local, `my`, since macOS
 // reaches each thread-local through a call: a function that uses any of
-// this pays one, where a thread-local apiece paid one for each.
-typedef struct {
+// this pays one, where a thread-local apiece paid one for each. A process
+// points at its island's, so a send and a recv, which compiled code hands
+// the process, pay none.
+typedef struct rt_isle {
     uint64_t           island;          // which island this thread is, 0 the main one
     page_t           **pages;           // the process table, by pid number >> PAGE_BITS; the root is 1
     uint64_t           nprocs, pages_cap;   // pids made; and room in pages
@@ -122,10 +124,14 @@ typedef struct {
 
 static RT_ISLAND island_state_t my;
 
-// The entry of pid number id.
-static entry_t *at(uint64_t id) {
-    page_t *g = my.pages[id >> PAGE_BITS];
+// The entry of pid number id, in s's table, or this island's.
+static entry_t *at_on(const island_state_t *s, uint64_t id) {
+    page_t *g = s->pages[id >> PAGE_BITS];
     return g ? &g->e[id & (PAGE_SIZE - 1)] : &gone;
+}
+
+static entry_t *at(uint64_t id) {
+    return at_on(&my, id);
 }
 
 // Another island's pid reads as one that has ended, keeping nothing, but
@@ -158,11 +164,12 @@ static uint64_t sched_next(void) {      // splitmix64
 }
 
 static void enqueue(rt_proc_t *p) {
+    island_state_t *s = p->isle;                // this island's: p is
     p->state      = RT_READY;
     p->next_ready = NULL;
-    if (my.ready_tail) my.ready_tail->next_ready = p;
-    else            my.ready_head = p;
-    my.ready_tail = p;
+    if (s->ready_tail) s->ready_tail->next_ready = p;
+    else               s->ready_head = p;
+    s->ready_tail = p;
 }
 
 static rt_proc_t *dequeue(void) {
@@ -201,7 +208,7 @@ static void unqueue(rt_proc_t *p) {
 // Back to the scheduler. Returns when the scheduler switches back, which
 // for a process that's waiting or done is never.
 static void to_scheduler(rt_proc_t *p) {
-    rt_switch(&p->ctx, &my.scheduler);
+    rt_switch(&p->ctx, &p->isle->scheduler);
 }
 
 // --- stacks -------------------------------------------------------------------
@@ -223,9 +230,9 @@ static void *get_stack(void) {
 }
 
 static void release_stack(rt_proc_t *p) {
-    *(void **)p->stack = my.free_stacks;
-    my.free_stacks = p->stack;
-    p->stack    = NULL;
+    *(void **)p->stack = p->isle->free_stacks;
+    p->isle->free_stacks = p->stack;
+    p->stack = NULL;
 }
 
 // The calls p has made: those of its slices before this one, and this
@@ -695,10 +702,10 @@ WALK void copy(copying_t *c, rt_value_t v, size_t at) {
 // values themselves go first in scratch, as words that point into it like
 // any other, and are taken out of it at the end. Each word noted is made
 // where it will be before the copy is moved.
-static rt_chunk_t *copy_walk(const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve) {
+static rt_chunk_t *copy_walk(island_state_t *s, const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve) {
     rt_value_t local[RT_WORK_LOCAL];
     copying_t  c = {
-        .scratch = my.scratch, .slots = my.slots, .cap = my.scratch_cap,
+        .scratch = s->scratch, .slots = s->slots, .cap = s->scratch_cap,
         .todo = local, .local = local, .todo_cap = RT_WORK_LOCAL,
         .r0 = (uintptr_t)slight_rodata_start, .r1 = (uintptr_t)slight_rodata_end,
         .c0 = (uintptr_t)slight_const_start, .c1 = (uintptr_t)slight_const_end,
@@ -729,24 +736,24 @@ static rt_chunk_t *copy_walk(const rt_value_t *from, rt_value_t *into, uint64_t 
         c.scratch = NULL, c.slots = NULL;
         c.cap = 0;
     }
-    my.scratch     = c.scratch;
-    my.slots       = c.slots;
-    my.scratch_cap = c.cap;
+    s->scratch     = c.scratch;
+    s->slots       = c.slots;
+    s->scratch_cap = c.cap;
     return chunk;
 }
 
 // Values with no pointer among them, as fork's and join's often are, and
 // many messages, need no walk.
-static rt_chunk_t *copy_values_after(const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve) {
+static rt_chunk_t *copy_values_after(island_state_t *s, const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve) {
     for (uint64_t i = 0; i < n; i++) {
-        if (rt_is_cons(from[i]) || (from[i] & RT_TAG_MASK) == RT_TAG_BOXED) return copy_walk(from, into, n, reserve);
+        if (rt_is_cons(from[i]) || (from[i] & RT_TAG_MASK) == RT_TAG_BOXED) return copy_walk(s, from, into, n, reserve);
     }
     for (uint64_t i = 0; i < n; i++) into[i] = from[i];
     return reserve ? new_chunk(reserve) : NULL;
 }
 
 static rt_chunk_t *copy_values(const rt_value_t *from, rt_value_t *into, uint64_t n) {
-    return copy_values_after(from, into, n, 0);
+    return copy_values_after(&my, from, into, n, 0);
 }
 
 // A copy of v in the current process's heap.
@@ -1409,45 +1416,59 @@ rt_value_t rt_islands(const char *site) {
 
 // --- processes ----------------------------------------------------------------
 
-// A new pid, for e. Pids start at 1: the root.
-static rt_value_t new_entry(entry_t e) {
-    uint64_t id = ++my.nprocs, n = id >> PAGE_BITS;
-    if (n >= my.pages_cap) {
-        uint64_t cap = my.pages_cap ? my.pages_cap * 2 : 64;
-        my.pages = rt_must(realloc(my.pages, cap * sizeof *my.pages));
-        memset(my.pages + my.pages_cap, 0, (cap - my.pages_cap) * sizeof *my.pages);
-        my.pages_cap = cap;
+// A new pid, for e, in s's table (this island's). Pids start at 1: the
+// root.
+static rt_value_t new_entry_on(island_state_t *s, entry_t e) {
+    uint64_t id = ++s->nprocs, n = id >> PAGE_BITS;
+    if (n >= s->pages_cap) {
+        uint64_t cap = s->pages_cap ? s->pages_cap * 2 : 64;
+        s->pages = rt_must(realloc(s->pages, cap * sizeof *s->pages));
+        memset(s->pages + s->pages_cap, 0, (cap - s->pages_cap) * sizeof *s->pages);
+        s->pages_cap = cap;
     }
-    if (!my.pages[n]) my.pages[n] = rt_must(calloc(1, sizeof *my.pages[n]));
-    my.pages[n]->live++;
-    my.pages[n]->e[id & (PAGE_SIZE - 1)] = e;
-    my.nrecords++;
-    return my.island << RT_ISLAND_SHIFT | id << RT_PID_SHIFT | RT_TAG_PID;
+    if (!s->pages[n]) s->pages[n] = rt_must(calloc(1, sizeof *s->pages[n]));
+    s->pages[n]->live++;
+    s->pages[n]->e[id & (PAGE_SIZE - 1)] = e;
+    s->nrecords++;
+    return s->island << RT_ISLAND_SHIFT | id << RT_PID_SHIFT | RT_TAG_PID;
+}
+
+static rt_value_t new_entry(entry_t e) {
+    return new_entry_on(&my, e);
 }
 
 // Whether nothing more can come of pid number id's entry: no process, no
 // device, and no value kept. If so, it's dead, and its page goes once all
 // of its entries are, and the last pid in it has been made.
-static void settle(uint64_t id) {
-    entry_t *e = at(id);
+static void settle_on(island_state_t *s, uint64_t id) {
+    entry_t *e = at_on(s, id);
     if (e->dead || e->proc || e->device || !e->ended) return;
     e->dead = 1;
-    my.nrecords--;
+    s->nrecords--;
     uint64_t n = id >> PAGE_BITS;
-    if (--my.pages[n]->live == 0 && my.nprocs >= (n + 1) * PAGE_SIZE - 1) {
-        free(my.pages[n]);
-        my.pages[n] = NULL;
+    if (--s->pages[n]->live == 0 && s->nprocs >= (n + 1) * PAGE_SIZE - 1) {
+        free(s->pages[n]);
+        s->pages[n] = NULL;
     }
 }
 
-rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
+static void settle(uint64_t id) {
+    settle_on(&my, id);
+}
+
+static rt_proc_t *new_process_on(island_state_t *s, rt_code_t code, rt_value_t parent) {
     rt_proc_t *p = rt_must(calloc(1, sizeof *p));
-    p->pid      = new_entry((entry_t){ .proc = p });
+    p->pid      = new_entry_on(s, (entry_t){ .proc = p });
     p->parent   = parent;
     p->code     = code;
     p->gc_at    = GC_MIN;
+    p->isle     = s;
     enqueue(p);
     return p;
+}
+
+rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
+    return new_process_on(&my, code, parent);
 }
 
 // pid's entry. Every pid came from fork, so it has one. Don't hold on to
@@ -1474,24 +1495,24 @@ static void fail_start(rt_proc_t *p, rt_value_t reason) {
 
 // A task (fork) or an actor (spawn, and connect's processes): only an
 // actor can recv or be sent to (D243).
-static rt_proc_t *new_child(rt_code_t code, uint64_t n, const rt_value_t *values, int actor) {
-    rt_proc_t  *p = rt_new_process(code, rt_current->pid);
+static rt_proc_t *new_child(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, int actor) {
+    rt_proc_t  *p = new_process_on(parent->isle, code, parent->pid);
     p->actor = (uint8_t)actor;
-    slot(p->pid)->actor = (uint8_t)actor;
-    rt_rand_split(rt_current, p);
-    rt_chunk_t *c = copy_values(values, p->args, n);
+    at_on(p->isle, rt_pid_number(p->pid))->actor = (uint8_t)actor;
+    rt_rand_split(parent, p);
+    rt_chunk_t *c = copy_values_after(p->isle, values, p->args, n, 0);
     if (c) adopt(p, c);
     return p;
 }
 
-rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
+rt_value_t rt_fork(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
     (void)site;
-    return new_child(code, n, values, 0)->pid;
+    return new_child(parent, code, n, values, 0)->pid;
 }
 
-rt_value_t rt_spawn(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
+rt_value_t rt_spawn(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
     (void)site;
-    return new_child(code, n, values, 1)->pid;
+    return new_child(parent, code, n, values, 1)->pid;
 }
 
 // A live process that's sent a message, a timer's included, or told of
@@ -1645,12 +1666,16 @@ static void close_address(rt_proc_t *p, rt_value_t a) {
 // its record, which is freed as it's taken (D199).
 _Static_assert(sizeof(rt_msg_t) % 16 == 0, "a message's record keeps the copy after it 16-aligned");
 
-static rt_msg_t *new_msg(rt_value_t msg) {
+static rt_msg_t *new_msg_on(island_state_t *s, rt_value_t msg) {
     rt_value_t  v;
-    rt_chunk_t *c = copy_values_after(&msg, &v, 1, sizeof(rt_msg_t));
+    rt_chunk_t *c = copy_values_after(s, &msg, &v, 1, sizeof(rt_msg_t));
     rt_msg_t   *m = (rt_msg_t *)(c + 1);
     *m = (rt_msg_t){ .next = NULL, .value = v, .chunk = c, .device = 0 };
     return m;
+}
+
+static rt_msg_t *new_msg(rt_value_t msg) {
+    return new_msg_on(&my, msg);
 }
 
 // Into p's mailbox; p wakes if it's waiting for a message.
@@ -1671,22 +1696,22 @@ static void read_on(rt_proc_t *p, rt_value_t pid);
 
 // To a process that has ended, a message just disappears, as in Erlang. A
 // device takes it at once.
-rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
+rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *site) {
     if ((pid & RT_TAG_MASK) != RT_TAG_PID) rt_fault(RT_FAULT_NOT_PID, pid, site);
-    if (!here(pid)) {                           // its island checks it, when it takes it (D256)
-        cross(ITEM_MSG, pid, rt_current->pid, new_msg(msg));
+    if (rt_pid_island(pid) != rt_pid_island(p->pid)) {     // its island checks it, when it takes it (D256)
+        cross(ITEM_MSG, pid, p->pid, new_msg_on(p->isle, msg));
         return RT_NIL;
     }
     if (rt_is_address(pid)) {
-        to_address(pid, new_msg(msg));
+        to_address(pid, new_msg_on(p->isle, msg));
         return RT_NIL;
     }
-    entry_t *e = at(rt_pid_number(pid));        // this island's, as just seen
+    entry_t *e = at_on(p->isle, rt_pid_number(pid));      // this island's, as just seen
     need_actor(e, pid, site);
     if (e->proc) {
-        deliver(e->proc, new_msg(msg));
+        deliver(e->proc, new_msg_on(p->isle, msg));
     } else if (e->device) {
-        rt_current->at = (uintptr_t)__builtin_return_address(0);   // for :system
+        p->at = (uintptr_t)__builtin_return_address(0);   // for :system
         command(e->device, msg);
     }
     return RT_NIL;
@@ -1695,8 +1720,7 @@ rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
 // A device's message is cut only now, when its owner waits again after
 // taking the last one, so whatever the owner did with that one, (:read
 // how) or disconnect, applies to the next (D158).
-rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) {
-    rt_proc_t *p = rt_current;
+rt_value_t rt_recv(rt_proc_t *p, rt_value_t *args, uint64_t n, rt_code_t code) {
     if (!p->actor) rt_fault(RT_FAULT_NOT_ACTOR, p->pid, "recv");   // the compiler refuses it; this is a backstop
     if (p->reading) {
         rt_value_t device = p->reading;
@@ -1881,7 +1905,7 @@ static rt_value_t take_given(rt_proc_t *p) {
 
 static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     uint64_t id = rt_pid_number(p->pid);
-    entry_t *e  = at(id);
+    entry_t *e  = at_on(p->isle, id);
     int      had = 0;                          // whether the parent is told now, as those waiting are
     e->ok    = ok;
     e->value = value;                          // in p's heap till it's told to whoever waits, below
@@ -1934,7 +1958,8 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     for (uint64_t i = 0; s && i < s->watches.n; i++) {
         if (s->watches.at[i].wakes != WATCH_CHILD) cross(ITEM_UNWATCH, s->watches.at[i].pid, p->pid, NULL);
     }
-    if (p->parent != RT_NIL && !here(p->parent) && p->parent_task) tell_far(p->parent, p->pid, WATCH_CHILD, result_msg(e));
+    int        far_parent = p->parent != RT_NIL && rt_pid_island(p->parent) != rt_pid_island(p->pid);
+    if (far_parent && p->parent_task) tell_far(p->parent, p->pid, WATCH_CHILD, result_msg(e));
 
     // A task's value is kept for its parent till it has it: the root's
     // for the program to print, and one that ended before its parent
@@ -1942,9 +1967,9 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     // parent is a task, which can read it, so that it needn't be reading
     // as the actor ends (D245); an actor's parent can't read, and is told
     // only if it monitors. Else it's :ended now (D243).
-    rt_proc_t *parent = p->parent == RT_NIL ? NULL : slot(p->parent)->proc;
+    rt_proc_t *parent = p->parent == RT_NIL || far_parent ? NULL : at_on(p->isle, rt_pid_number(p->parent))->proc;
     if (p->parent == RT_NIL || (!had && parent && (!p->actor || !parent->actor))) {
-        e->chunk = copy_values(&value, &e->value, 1);
+        e->chunk = copy_values_after(p->isle, &value, &e->value, 1, 0);
         if (parent) keep_for(parent, id);
     } else {
         e->value = RT_NIL;
@@ -1964,23 +1989,26 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
 
 
 static void retire(rt_proc_t *p) {
-    my.retired_calls += calls_of(p);
+    island_state_t *s = p->isle;
+    s->retired_calls += calls_of(p);
     if (p->stack) release_stack(p);
-    slot(p->pid)->proc = NULL;
-    settle(rt_pid_number(p->pid));
+    at_on(s, rt_pid_number(p->pid))->proc = NULL;
+    settle_on(s, rt_pid_number(p->pid));
     free(p);
 }
 
-void rt_end(int ok, rt_value_t value, int logged) {
-    rt_proc_t *p = rt_current;
+static _Noreturn void end(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     finish(p, ok, value, logged);
     to_scheduler(p);                            // which retires it
     __builtin_unreachable();
 }
 
+void rt_end(int ok, rt_value_t value, int logged) {
+    end(rt_current, ok, value, logged);
+}
+
 void rt_exit(rt_proc_t *p, rt_value_t result) {
-    (void)p;                                    // it's rt_current
-    rt_end(1, result, 0);
+    end(p, 1, result, 0);
 }
 
 rt_value_t rt_raise(rt_value_t reason, const char *site) {
@@ -2339,11 +2367,11 @@ static rt_value_t place(uint64_t k, rt_code_t code, uint64_t n, const rt_value_t
 rt_value_t rt_spawn_on(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) {
     int64_t k = rt_need_int(where, site);
     if (k < 0 || (uint64_t)k >= nislands) rt_fault(RT_FAULT_RANGE, where, site);
-    if ((uint64_t)k == my.island) return rt_spawn(code, n, values, site);
+    if ((uint64_t)k == my.island) return rt_spawn(rt_current, code, n, values, site);
     return place((uint64_t)k, code, n, values, site, 0);
 }
 
-static void events(void);
+static inline void events(void);
 
 void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t entry) {
     p->at = entry;
@@ -2355,11 +2383,11 @@ void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp
     }
     refill(p);
     events();                                   // so a busy process can't hold up a timer or a key
-    if (my.killed) {                               // from another island, as it ran (D256)
-        my.killed = 0;
+    if (p->isle->killed) {                      // from another island, as it ran (D256)
+        p->isle->killed = 0;
         rt_end(0, rt_symbol(RT_SYM_KILLED), 0);
     }
-    if (my.ready_head) {
+    if (p->isle->ready_head) {
         enqueue(p);
         to_scheduler(p);
     }
@@ -2633,7 +2661,7 @@ static uint64_t        input_seen;      // when stdin was last looked at while b
 // there.
 rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
     if (my.island) return place(0, code, n, values, site, SOURCE_KEYS);
-    rt_value_t pid = rt_spawn(code, n, values, site);
+    rt_value_t pid = rt_spawn(rt_current, code, n, values, site);
     keys_for(slot(pid)->proc);
     return pid;
 }
@@ -2742,10 +2770,12 @@ static int next_key(void) {
 
 // At every decision the scheduler makes, and when a process is preempted:
 // fires the timers that are due, and on the real clock, every 10 ms, takes
-// the keys typed since and sees to the sockets.
-static void events(void) {
+// the keys typed since and sees to the sockets. Inlined, so the
+// scheduler's loop looks the island up once, not at each decision.
+__attribute__((always_inline))
+static inline void events(void) {
     if (atomic_load_explicit(&isles[my.island].waiting, memory_order_relaxed)) take_inbox();
-    ring();
+    if (my.nalarms) ring();                     // tested here, where the island's state is to hand
     if (virtual_clock || (!listening() && !my.nsockets)) return;
     uint64_t t = now();
     if (t - input_seen < INPUT_EVERY) return;
@@ -3513,7 +3543,7 @@ static int fs_open(rt_proc_t *p, const char *site, rt_value_t path, uint64_t mod
 rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                          rt_value_t path, uint64_t mode) {
     if (!rt_is_string(path)) rt_fault(RT_FAULT_NOT_STRING, path, site);
-    rt_value_t pid = rt_spawn(code, n, values, site);
+    rt_value_t pid = rt_spawn(rt_current, code, n, values, site);
     rt_proc_t *p   = slot(pid)->proc;
     int        err = fs_open(p, site, path, mode);
     if (err) {
@@ -3713,7 +3743,7 @@ rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, 
     } else if (!rt_is_string(where)) {
         rt_fault(RT_FAULT_NOT_STRING, where, site);
     }
-    rt_value_t pid = rt_spawn(code, n, values, site);
+    rt_value_t pid = rt_spawn(rt_current, code, n, values, site);
     rt_proc_t *p   = slot(pid)->proc;
     int        err = mode == RT_TCP_LISTEN  ? listen_at(p, site, where)
                    : mode == RT_TCP_CONNECT ? tcp_connect(p, site, rt_string_bytes(where), rt_string_len(where))
@@ -3729,7 +3759,7 @@ rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *value
                              rt_value_t dev) {
     rt_device_t *d = entry(dev, site)->device;
     if (!d) rt_fault(RT_FAULT_NOT_DEVICE, dev, site);
-    rt_value_t pid = rt_spawn(code, n, values, site);
+    rt_value_t pid = rt_spawn(rt_current, code, n, values, site);
     rt_proc_t *p   = slot(pid)->proc;
     unown(d);
     d->owner   = pid;
@@ -4060,7 +4090,7 @@ static int exec_start(rt_proc_t *p, const char *site, rt_value_t cmd, uint64_t l
 rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
                            rt_value_t cmd) {
     uint64_t   len = need_command(cmd, site);
-    rt_value_t pid = rt_spawn(code, n, values, site);
+    rt_value_t pid = rt_spawn(rt_current, code, n, values, site);
     rt_proc_t *p   = slot(pid)->proc;
     int        err = exec_start(p, site, cmd, len);
     if (err) {
@@ -4404,7 +4434,7 @@ static void system_command(rt_device_t *d, rt_value_t msg) {
 // :system is island 0's too (D256).
 rt_value_t rt_connect_system(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
     if (my.island) return place(0, code, n, values, site, SOURCE_SYSTEM);
-    rt_value_t pid = rt_spawn(code, n, values, site);
+    rt_value_t pid = rt_spawn(rt_current, code, n, values, site);
     system_for(slot(pid)->proc, site);
     return pid;
 }
