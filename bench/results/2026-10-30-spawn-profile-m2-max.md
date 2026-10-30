@@ -519,3 +519,81 @@ proposed from it, are withdrawn. The cause is still open. It came with
 counters (L1D misses, and load or memory-ordering stalls, for
 `118291f` against HEAD), which need `sudo`, or bisecting `20d78b3`'s
 own changes one at a time.
+
+### Hardware counters
+
+macOS has no command-line tool for these counters, and Xcode.app isn't
+installed. So I wrote a small dylib, injected with
+`DYLD_INSERT_LIBRARIES`, that sets up the PMU through the private
+`kperf` and `kperfdata` frameworks and counts the main thread from load
+to exit. With `SLIGHT_ISLANDS=1`, all of spawn's work runs on that
+thread. A Python runner ran it as root (Stevan ran `sudo`):
+`118291f`, HEAD and C, alternating, seven runs each, n = 1000000, with
+medians. The event names are from `/usr/share/kpep/a15.plist`, the M2's
+database.
+
+The counters on this Mac need care:
+
+- **Three events at a time.** kpep puts events on counters 2, 3 and 4
+  first. A fourth goes on counter 5, one of 5–7, the "power" counters
+  that macOS keeps. Then none of the configurable counters counts,
+  though no call reports an error. So events that only counters 5–7
+  take can't be read here: memory-order violations, branch and return
+  mispredicts, and misses for retired loads.
+- **A read is current only after a switch.** The kernel brings a
+  thread's configurable counters up to date when it switches the thread
+  out; the fixed ones (cycles, instructions) are read live. So the dylib
+  sleeps 1 ms before each read, start and end. That costs the thread no
+  cycles.
+- **A self-test checks it.** Before counting, the dylib walks 64 MB, a
+  load every 64 bytes. It saw about 1.9 million L1D load misses for the
+  1 million lines walked.
+
+Per process, medians of seven:
+
+| event | `118291f` | HEAD | C | HEAD − `118291f` |
+|---|---:|---:|---:|---:|
+| `FIXED_CYCLES` | 425.08 | 469.70 | 466.49 | +44.61 |
+| `FIXED_INSTRUCTIONS` | 2257.41 | 2267.23 | 2270.95 | +9.81 |
+| `L1D_CACHE_MISS_LD` | 14.43 | 13.70 | 13.40 | −0.73 |
+| `L1D_CACHE_MISS_ST` | 7.59 | 7.93 | 7.90 | +0.34 |
+| `L1D_CACHE_WRITEBACK` | 14.90 | 15.16 | 15.16 | +0.26 |
+| `L1D_TLB_MISS` | 12.38 | 13.52 | 14.55 | +1.14 |
+| `L1I_CACHE_MISS_DEMAND` | 0.00 | 0.00 | 0.00 | 0.00 |
+| `LDST_X64_UOP` (crossing 64 bytes) | 13.25 | 9.68 | 10.70 | −3.57 |
+| `MAP_STALL` (cycles) | 14.91 | 36.45 | 36.30 | **+21.54** |
+| `MAP_STALL_DISPATCH` (cycles) | 11.76 | 14.23 | 12.02 | +2.47 |
+| `MAP_REWIND` (cycles) | 10.74 | 14.25 | 13.02 | +3.51 |
+| `MAP_DISPATCH_BUBBLE` | 4.90 | 7.17 | 7.60 | +2.28 |
+| `FETCH_RESTART` | 4.16 | 3.16 | 5.72 | −1.00 |
+| `FLUSH_RESTART_OTHER_NONSPEC` | 0.09 | 0.90 | 0.94 | **+0.81** |
+
+The cycles and instructions agree with `/usr/bin/time`'s: +45 cycles and
++10 instructions a process.
+
+**It isn't cache misses.** L1D load and store misses, write-backs and
+L1I misses are the same in both, within one a process. TLB misses go up
+by one. The report's guess, a load of the scheduler's line waiting on
+the cache, is wrong on this evidence too: there are no extra misses to
+wait for.
+
+**The extra cycles are the front end held up, and pipeline flushes.**
+The map unit, which renames and hands instructions on, stalls 21.5
+cycles a process more. Only 2.5 of those are back-pressure from
+dispatch, so the rest is the core waiting on something other than a
+full scheduler. HEAD also makes 0.8 more "other" flushes a process, 0.09
+against 0.90. These are flushes and restarts not caused by a branch
+mispredict or a memory-order violation. It also spends 3.5 more cycles
+a process rewinding after flushes. A flush that refills the pipeline
+costs a few tens of cycles, so 0.8 of them a process could account for
+much of the +45. C has the same flushes and stalls as HEAD, which fits
+its taking back none of the time.
+
+**Not the new atomics.** HEAD has `ldar` and `ldaddal` in `rt_run`,
+`finish`, `copy_values_after` and `take_inbox`, and `118291f` has
+none. Counted with lldb breakpoints on each one, at n = 1000 and 2000,
+`rt_run`'s idle-path pair runs once a program and the rest never run.
+
+Next: count `MAP_STALL`, `MAP_REWIND` and `FLUSH_RESTART_OTHER_NONSPEC`
+at each commit in between, to find which brings the flushes. Then find
+what in that commit flushes the pipeline.
