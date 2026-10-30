@@ -681,14 +681,14 @@ test('recv clauses and patterns', () => {
 
 test('a receive function restarts at its own entry with its parameters', () => {
     const asm = compile('(defun loop (a b) (recv (m (loop b a))))');
-    assert.match(asm, /Lrecv_\d+:\n {4}mov {2}x0, sp\n {4}mov {2}x1, #2\n {4}LOADADDR x2, fn_loop\n {4}bl {3}rt_recv/);
+    assert.match(asm, /Lrecv_\d+:\n {4}mov {2}x0, x28\n {4}mov {2}x1, sp\n {4}mov {2}x2, #2\n {4}LOADADDR x3, fn_loop\n {4}bl {3}rt_recv/);
     assert.match(asm, /bl {3}rt_dead_letter\n {4}b {4}Lrecv_\d+/);
 });
 
 test('fork compiles its body as a function of its own, taking the locals it uses', () => {
     const asm = compile('(let a 1) (let b "two") (fork (pprint (list b a)))');
     assert.match(asm, /Lfork_\d+: {4}\/\/ fork at test\.slight:1:25/);
-    assert.match(asm, /LOADADDR x0, Lfork_\d+\n {4}mov {2}x1, #2\n {4}add {2}x2, sp, #\d+\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_fork/);
+    assert.match(asm, /mov {2}x0, x28\n {4}LOADADDR x1, Lfork_\d+\n {4}mov {2}x2, #2\n {4}add {2}x3, sp, #\d+\n {4}LOADADDR x4, Lsite_\d+\n {4}bl {3}rt_fork/);
     fails('(fork)', 'test.slight:1:1: fork takes 1 argument, not 0');
     fails('(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (fork (list a b c d e f g h i))',
           'test.slight:1:91: a fork can take at most 8 locals into the new process, and this one uses 9');

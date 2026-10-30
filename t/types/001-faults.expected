@@ -1,0 +1,9 @@
+t/types/001-faults.slight:5:16: warning: str/len's argument is int, not str: it faults :not-a-string
+t/types/001-faults.slight:6:12: warning: +'s second argument is :two, not num: it faults :not-a-number
+t/types/001-faults.slight:7:15: warning: cons's second argument is int, not (list any): it faults :not-a-list
+t/types/001-faults.slight:8:18: warning: join/race's argument is (shape int int), not (list pid): it faults :not-a-pid
+t/types/001-faults.slight:9:7: warning: car takes a non-empty list, and this is (): it faults :not-a-cons
+t/types/001-faults.slight:10:13: warning: cadr takes a list of at least 2 conses down, and this is (:only): it faults :not-a-cons
+t/types/001-faults.slight:11:11: warning: this test is int, not bool: it faults :not-a-bool
+t/types/001-faults.slight:13:8: warning: what's called here is int, not fun: it faults :not-a-function
+t/types/001-faults.slight:15:8: warning: what's called here takes 2 arguments, and it's given 1: it faults :arity

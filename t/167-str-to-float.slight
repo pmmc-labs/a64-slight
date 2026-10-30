@@ -14,3 +14,4 @@
 ; an integer is str->int's, but str->float takes one too
 (pprint (list (str->int "12") (str->float "12") (str->int "1.5")))
 (str->float 12)
+; warns: 16:13

@@ -1,0 +1,17 @@
+; connect in tail position, with a call for its source: the call gives the
+; source, and isn't the function's tail call (it was, till D251's https
+; through curl met it, and connect was given the call's value as its
+; process's).
+
+(defun command () (list "sh" "-c" "echo hi"))
+
+(defun run (out)
+    (recv
+        ((:open p)     (send p (list :eof)) (run out))
+        ((:line p s)   (run (cons s out)))
+        ((:eof p)      (run out))
+        ((:exited p n) (list n (reverse out)))))
+
+(defun started () (connect :exec (command) (run ())))
+
+(read (started))

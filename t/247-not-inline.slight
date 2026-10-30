@@ -13,3 +13,4 @@
 (pprint (kind (fork (not 5))))
 (pprint (kind (fork (if (not 6) 1 2))))
 :done
+; warns: 13:26 14:30

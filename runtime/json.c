@@ -15,7 +15,9 @@
 
 #include "rt.h"
 
+#include <inttypes.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -414,9 +416,9 @@ static void put(rt_buf_t *b, const char *s) {
     rt_buf_add(b, s, strlen(s));
 }
 
-static void put_string(rt_buf_t *b, rt_value_t s) {
-    const unsigned char *p   = (const unsigned char *)rt_string_bytes(s);
-    size_t               len = rt_string_len(s), from = 0;
+// len bytes at p, as a JSON string.
+static void put_bytes(rt_buf_t *b, const unsigned char *p, size_t len) {
+    size_t from = 0;
     put(b, "\"");
     for (size_t i = 0; i < len; i++) {
         const char *e = p[i] == '"' ? "\\\"" : p[i] == '\\' ? "\\\\" : p[i] == '\b' ? "\\b" : p[i] == '\f' ? "\\f"
@@ -439,6 +441,10 @@ static void put_string(rt_buf_t *b, rt_value_t s) {
     put(b, "\"");
 }
 
+static void put_string(rt_buf_t *b, rt_value_t s) {
+    put_bytes(b, (const unsigned char *)rt_string_bytes(s), rt_string_len(s));
+}
+
 __attribute__((noreturn))
 static void not_json(rt_buf_t *b, rt_work_t *w, rt_value_t v, const char *site) {
     rt_buf_free(b);
@@ -446,8 +452,42 @@ static void not_json(rt_buf_t *b, rt_work_t *w, rt_value_t v, const char *site) 
     rt_fault(RT_FAULT_NOT_JSON, v, site);
 }
 
-// Compact JSON, on one line (D161). What JSON can't hold faults.
-rt_value_t rt_json_print(rt_value_t v, const char *site) {
+// v as str writes it, as a JSON string.
+static void put_rendered(rt_buf_t *b, rt_value_t v) {
+    rt_buf_t r = { 0 };
+    rt_render(&r, v, 1);
+    put_bytes(b, (const unsigned char *)r.bytes, r.len);
+    rt_buf_free(&r);
+}
+
+// An array of numbers as a JSON array (D253); a float JSON can't hold,
+// NaN or infinite, as a string if lenient, and otherwise 0, for a fault.
+static int put_array(rt_buf_t *b, rt_value_t v, int lenient) {
+    put(b, "[");
+    for (uint64_t i = 0; i < rt_array_len(v); i++) {
+        if (i) put(b, ",");
+        if (rt_is_box(v, RT_BOX_INTS)) {
+            char num[24];
+            snprintf(num, sizeof num, "%" PRId64, (int64_t)rt_array_data(v)[i]);
+            put(b, num);
+            continue;
+        }
+        double d = rt_array_float(v, i);
+        if (isfinite(d)) {
+            rt_render_float(b, d);
+        } else if (lenient) {
+            put(b, isnan(d) ? "\"nan\"" : d < 0 ? "\"-inf\"" : "\"inf\"");
+        } else {
+            return 0;
+        }
+    }
+    put(b, "]");
+    return 1;
+}
+
+// Compact JSON, on one line (D161). What JSON can't hold faults; or, if
+// lenient, as log has it (D254), is written as a string, as str writes it.
+static rt_value_t print_json(rt_value_t v, int lenient, const char *site) {
     rt_buf_t  b = { 0 };
     rt_work_t w;
     rt_work_init(&w);
@@ -471,6 +511,10 @@ rt_value_t rt_json_print(rt_value_t v, const char *site) {
             put_string(&b, v);
         } else if (!(v & RT_TAG_INT_MASK) || (rt_is_float(v) && isfinite(rt_float_value(v)))) {
             rt_render(&b, v, 0);
+        } else if (rt_is_array(v)) {
+            if (!put_array(&b, v, lenient)) not_json(&b, &w, v, site);
+        } else if (lenient) {
+            put_rendered(&b, v);
         } else {
             not_json(&b, &w, v, site);
         }
@@ -500,14 +544,23 @@ rt_value_t rt_json_print(rt_value_t v, const char *site) {
                 w.n -= 2;
                 continue;
             }
-            if (!rt_is_cons(rest)) not_json(&b, &w, rest, site);
+            if (!rt_is_cons(rest) && !lenient) not_json(&b, &w, rest, site);
             if (how & WRITTEN) put(&b, ",");
+            if (!rt_is_cons(rest)) {            // a list's improper end, lenient: the last element
+                put_rendered(&b, rest);
+                w.items[w.n - 2] = RT_NIL;
+                w.items[w.n - 1] = how | WRITTEN;
+                continue;
+            }
             w.items[w.n - 2] = rt_cdr(rest);
             w.items[w.n - 1] = how | WRITTEN;
             v = rt_car(rest);
             if (how & IN_OBJECT) {              // (key value)
                 if (!rt_is_cons(v) || !rt_is_string(rt_car(v)) || !rt_is_cons(rt_cdr(v)) || rt_cdr(rt_cdr(v)) != RT_NIL) {
-                    not_json(&b, &w, v, site);
+                    if (!lenient) not_json(&b, &w, v, site);
+                    put_rendered(&b, v);        // lenient: the entry as its key, its value null
+                    put(&b, ":null");
+                    continue;
                 }
                 put_string(&b, rt_car(v));
                 put(&b, ":");
@@ -516,4 +569,100 @@ rt_value_t rt_json_print(rt_value_t v, const char *site) {
             break;
         }
     }
+}
+
+rt_value_t rt_json_print(rt_value_t v, const char *site) {
+    return print_json(v, 0, site);
+}
+
+// --- log (D254) ---------------------------------------------------------------
+//
+// One line of JSON on stderr: {"time":...,"level":...,"pid":...,"msg":...}
+// and the fields, what log collectors read, and slight with :json. A
+// field's value is written as json/print writes it, but anything JSON
+// can't hold (a pid, a function, a keyword but :null, a float that isn't
+// finite), at any depth, is a string, as str writes it: logging an error,
+// (:error (:enoent "x")), never faults. Lines
+// below rt_log_level aren't written. stdout is flushed first, so the two
+// come in the order they were written.
+
+int rt_log_level = 1;                       // :info
+
+static const char *const level_names[] = { "debug", "info", "warn", "error" };
+
+static int level_of(rt_value_t level, const char *site) {
+    if (level == rt_symbol(RT_SYM_ERROR)) return 3;
+    for (int i = 0; i < RT_LOG_COUNT; i++) {
+        if (level == rt_symbol(RT_SYM_LOG + (uint64_t)i)) return i;
+    }
+    rt_fault(RT_FAULT_RANGE, level, site);
+}
+
+// The day of the days since 1970 (Hinnant's civil_from_days, as
+// lib/time.slight has it), floor being their floored division.
+static void civil(int64_t days, int64_t *y, int *m, int *d) {
+    int64_t z   = days + 719468;
+    int64_t era = (z >= 0 ? z : z - 146096) / 146097;
+    int64_t doe = z - era * 146097;
+    int64_t yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    int64_t doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    int64_t mp  = (5 * doy + 2) / 153;
+    *d = (int)(doy - (153 * mp + 2) / 5 + 1);
+    *m = (int)(mp < 10 ? mp + 3 : mp - 9);
+    *y = yoe + era * 400 + (*m <= 2);
+}
+
+// The time as time/iso writes it, for a year from 0 to 9999.
+static void put_time(rt_buf_t *b, int64_t us) {
+    int64_t day  = us / 86400000000 - (us % 86400000000 < 0);
+    int64_t rest = us - day * 86400000000, y;
+    int     m, d;
+    civil(day, &y, &m, &d);
+    char s[40];
+    snprintf(s, sizeof s, "%04" PRId64 "-%02d-%02dT%02d:%02d:%02d.%06dZ", y, m, d, (int)(rest / 3600000000),
+             (int)(rest / 60000000 % 60), (int)(rest / 1000000 % 60), (int)(rest % 1000000));
+    put(b, s);
+}
+
+
+rt_value_t rt_log_line(rt_value_t level, rt_value_t msg, rt_value_t fields, const char *site) {
+    int l = level_of(level, site);
+    if (!rt_is_string(msg)) rt_fault(RT_FAULT_NOT_STRING, msg, site);
+    // each field (name value), a name a string or a keyword, before
+    // anything's written
+    for (rt_value_t f = fields; f != RT_NIL; f = rt_cdr(f)) {
+        if (!rt_is_cons(f)) rt_fault(RT_FAULT_NOT_LIST, fields, site);
+        rt_value_t x = rt_car(f);
+        if (!rt_is_cons(x) || !rt_is_cons(rt_cdr(x)) || rt_cdr(rt_cdr(x)) != RT_NIL
+            || !(rt_is_string(rt_car(x)) || (rt_car(x) & RT_TAG_MASK) == RT_TAG_SYMBOL)) {
+            rt_fault(RT_FAULT_RANGE, x, site);
+        }
+    }
+    if (l < rt_log_level) return RT_NIL;
+    rt_buf_t b = { 0 };
+    char     pid[64];
+    put(&b, "{\"time\":\"");
+    put_time(&b, rt_int_value(rt_clock_now(site)));
+    put(&b, "\",\"level\":\"");
+    put(&b, level_names[l]);
+    uint64_t k = rt_pid_island(rt_current->pid);   // as a pid prints, island 0's without it (D256)
+    if (k) snprintf(pid, sizeof pid, "\",\"pid\":%" PRIu64 ",\"island\":%" PRIu64 ",\"msg\":", rt_pid_number(rt_current->pid), k);
+    else   snprintf(pid, sizeof pid, "\",\"pid\":%" PRIu64 ",\"msg\":", rt_pid_number(rt_current->pid));
+    put(&b, pid);
+    put_string(&b, msg);
+    for (rt_value_t f = fields; f != RT_NIL; f = rt_cdr(f)) {
+        rt_value_t name = rt_car(rt_car(f)), v = rt_car(rt_cdr(rt_car(f)));
+        put(&b, ",");
+        if (rt_is_string(name)) put_string(&b, name);
+        else                    put_rendered(&b, name);
+        put(&b, ":");
+        rt_value_t text = print_json(v, 1, site);
+        rt_buf_add(&b, rt_string_bytes(text), rt_string_len(text));
+    }
+    put(&b, "}\n");
+    fflush(stdout);
+    fwrite(b.bytes, 1, b.len, stderr);
+    fflush(stderr);
+    rt_buf_free(&b);
+    return RT_NIL;
 }

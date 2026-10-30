@@ -1,0 +1,27 @@
+; lib/fs.slight's trees, on the fs/ builtins (D254): a path of
+; directories made, and made again; one through a file, which fails; a
+; tree walked, a directory before what's in it, names in order, a link
+; said and not followed; and the tree deleted, the link with it but not
+; what it points to, and deleted again, which isn't a failure.
+
+(@include :fs)
+(@include :exec)
+
+(fs/delete-all "build/t/313-tree")
+(fs/delete-all "build/t/313-outside")
+
+(pprint (fs/mkdir-all "build/t/313-tree/a/b/c"))
+(pprint (fs/mkdir-all "build/t/313-tree/a/b"))
+(spew "build/t/313-tree/a/x.txt" (list "x"))
+(spew "build/t/313-tree/a/b/c/y.txt" (list "y"))
+(fs/mkdir-all "build/t/313-outside")
+(spew "build/t/313-outside/kept.txt" (list "kept"))
+(exec/run (list "ln" "-s" "../../313-outside" "build/t/313-tree/a/out"))
+(pprint (fs/mkdir-all "build/t/313-tree/a/x.txt/d"))
+(pprint (fs/walk "build/t/313-tree"))
+(pprint (fs/delete-all "build/t/313-tree"))
+(pprint (fs/walk "build/t/313-tree"))
+(pprint (slurp "build/t/313-outside/kept.txt"))
+(pprint (fs/delete-all "build/t/313-tree"))
+(pprint (fs/delete-all "build/t/313-outside"))
+:done

@@ -1,5 +1,6 @@
-; Everything a run takes from outside: @ARGV, %ENV, keys, the real clock,
-; a file read and a file written, the screen's size. t/replay.sh records a
+; Everything a run takes from outside: @ARGV, %ENV, keys, the real clock
+; and the time of day, a file read and a file written, a file's stat and
+; a directory made (D254), random bytes (D255), the screen's size. t/replay.sh records a
 ; run of it and replays it, with other arguments, no stdin, no files, and
 ; without the variable it reads.
 
@@ -21,8 +22,12 @@
 (connect :keypress (keys to 0))
 (pprint (cadr (read (spawn (ticking)))))
 (pprint (list :clock (> (clock/us) 4999) (clock/us)))
+(pprint (list :now (> (clock/now) 1767225600000000) (clock/now)))
 (pprint (slurp (car @ARGV)))
 (pprint (spew (cadr @ARGV) (list "written")))
+(pprint (fs/stat (car @ARGV)))
+(pprint (fs/mkdir (str (cadr @ARGV) ".d")))
+(pprint (list :random (bytes->hex (crypto/random-bytes 16))))
 (pprint (read to))
 (pprint (list :screen (tty/screen/rows) (tty/screen/cols)))
 (pprint (list :env (lookup "SLIGHT_REPLAY_TEST" %ENV)))

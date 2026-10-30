@@ -1,0 +1,5 @@
+t/types/005-annotations.slight:20:1: warning: name-of says it gives str, and it gives int
+t/types/005-annotations.slight:22:7: warning: area's argument is (:square int), not Shape
+t/types/005-annotations.slight:23:15: warning: insert's second argument is str, not int
+t/types/005-annotations.slight:25:17: warning: this is str, not int
+t/types/005-annotations.slight:26:10: warning: str/len's argument is (or int :not-found), not str: it faults :not-a-string

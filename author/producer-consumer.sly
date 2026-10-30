@@ -1,0 +1,50 @@
+fun Consumer(f) {
+    let msg = recv;
+    pprint([self, :RECV, msg]);
+    match msg {
+        :on-next(v)     => { f(v); Consumer(f) }
+        :on-completed() => [],
+        :on-error(e)    => raise(e),
+    }
+}
+
+fun Operation(op, next) {
+    let msg = recv;
+    pprint([self, :OPER, msg]);
+    match msg {
+        :on-next(v) => {
+            send(next, :on-next(op(v)));
+            Operation(op, next)
+        }
+        :on-completed() => send(next, :on-completed()),
+        :on-error(e)    => send(next, :on-error(e)),
+    }
+}
+
+fun Producer(sub, items) {
+    match items {
+        [] => {
+            pprint([self, :DONE]);
+            send(sub, :on-completed())
+        }
+        [item, ...rest] => {
+            send(sub, :on-next(item));
+            pprint([self, :SENT, item]);
+            yield Producer(sub, rest)
+        }
+    }
+}
+
+let o1 = spawn Consumer(pprint);
+let o2 = spawn Consumer(pprint);
+
+let op1 = spawn Operation(fun(x) => x + 100, o1);
+let op2 = spawn Operation(fun(x) => x + 200, o2);
+
+let p1 = fork Producer(op1, [10, 20, 30, 40, 50, 60]);
+let p2 = fork Producer(op2, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
+
+pprint([join(p1), join(p2)]);
+pprint([read(o1), read(o2)]);
+pprint([read(op1), read(op2)]);
+pprint(:done);

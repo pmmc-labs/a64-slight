@@ -28,3 +28,4 @@
     (watcher 4))
 
 (read (spawn (top-level)))
+; warns: 25:23

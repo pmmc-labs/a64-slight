@@ -1,0 +1,14 @@
+; lib/time.slight's header (D248): what (@include :time) gives a program,
+; docs/LANGUAGE.md, "(@include :time)". The rest of time.slight is its own.
+
+; A date in UTC, a keyed list: (:year y) (:month m) (:day d) (:hour h)
+; (:minute m) (:second s) (:us u) (:weekday w), the month from 1 and the
+; weekday 1 for Monday to 7 for Sunday.
+(deftype Date (list (shape sym int)))
+
+(sig time/utc (int) Date)
+(sig time/from-utc (Date) int)
+(sig time/iso (int) str)
+(sig time/iso-offset (int int) str)
+(sig time/http (int) str)
+(sig time/parse-iso (str) (Result int (shape :bad-time str)))

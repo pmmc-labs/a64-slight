@@ -1,0 +1,202 @@
+; Calendar time, in slight (D254): the microseconds (clock/now) made a
+; date in UTC and back, written and read as ISO 8601, and as HTTP's
+; dates. Opt-in, (@include :time).
+;
+;     (time/iso (clock/now))                   ; "2026-10-29T14:03:07.123456Z"
+;     (lookup :year (time/utc (clock/now)))    ; 2026
+;
+; A date is a keyed list, as (time/utc us) gives it:
+;
+;     (:year 2026) (:month 10) (:day 29) (:hour 14) (:minute 3)
+;     (:second 7) (:us 123456) (:weekday 4)
+;
+; the month from 1, the weekday ISO 8601's, 1 for Monday to 7 for Sunday.
+; Days come from Howard Hinnant's days_from_civil and civil_from_days,
+; exact for any year an integer holds. POSIX time, so no leap seconds; no
+; time zones by name (D254), but a fixed offset from UTC, in minutes.
+
+(defun time/utc (us)
+    (match (time/parts us)
+        (#(y mo d h mi sec u w)
+            (list (list :year y) (list :month mo) (list :day d) (list :hour h) (list :minute mi)
+                  (list :second sec) (list :us u) (list :weekday w)))))
+
+; A date's parts, as a tuple: year, month, day, hour, minute, second,
+; microsecond and weekday.
+(defun time/parts (us)
+    (let days (time/floor us 86400000000))
+    (let rest (- us (* days 86400000000)))
+    (match (time/civil days)
+        (#(y mo d)
+            (tuple y mo d (div rest 3600000000) (% (div rest 60000000) 60) (% (div rest 1000000) 60)
+                   (% rest 1000000) (+ (math/mod (+ days 3) 7) 1)))))
+
+; The microseconds of a date, from what of :year, :month, :day, :hour,
+; :minute, :second and :us it has (1970, 1, 1 and 0s for the rest). A
+; month past 12 or below 1 goes into the years, and the rest add as they
+; are, so the 32nd of January is the 1st of February, as JavaScript's
+; Date.UTC has it.
+(defun time/from-utc (fields)
+    (let month0 (- (time/field fields :month 1) 1))
+    (let year   (+ (time/field fields :year 1970) (time/floor month0 12)))
+    (let days   (+ (time/days year (+ (math/mod month0 12) 1) 1) (- (time/field fields :day 1) 1)))
+    (+ (* (+ (* (+ (* (+ (* days 24) (time/field fields :hour 0)) 60) (time/field fields :minute 0)) 60)
+             (time/field fields :second 0))
+          1000000)
+       (time/field fields :us 0)))
+
+(defun time/field (fields name default)
+    (let v (lookup name fields))
+    (if (eq? v :not-found) default v))
+
+; ISO 8601 in UTC, to the microsecond: "2026-10-29T14:03:07.123456Z".
+(defun time/iso (us)
+    (~ (time/stamp us) "Z"))
+
+; The same, at a fixed offset from UTC, in minutes, east positive:
+; (time/iso-offset us 120) is "2026-10-29T16:03:07.123456+02:00".
+(defun time/iso-offset (us minutes)
+    (let a (math/abs minutes))
+    (~ (time/stamp (+ us (* minutes 60000000)))
+       (if (< minutes 0) "-" "+") (time/two (div a 60)) ":" (time/two (% a 60))))
+
+(defun time/stamp (us)
+    (match (time/parts us)
+        (#(y mo d h mi sec u _)
+            (~ (time/year y) "-" (time/two mo) "-" (time/two d) "T" (time/two h) ":" (time/two mi) ":" (time/two sec)
+               "." (str/pad-start (str u) 6 "0")))))
+
+; Four digits from year 0 to 9999, and a sign and six beyond, as
+; ISO 8601's expanded years and JavaScript's toISOString have them.
+(defun time/year (y)
+    (cond
+        ((and (>= y 0) (<= y 9999)) (str/pad-start (str y) 4 "0"))
+        ((< y 0)                    (~ "-" (str/pad-start (str (- 0 y)) 6 "0")))
+        (#true                      (~ "+" (str/pad-start (str y) 6 "0")))))
+
+(defun time/two (n) (str/pad-start (str n) 2 "0"))
+
+; HTTP's date (RFC 9110, IMF-fixdate): "Thu, 29 Oct 2026 14:03:07 GMT".
+; A year outside 0 to 9999, which HTTP has no way to write, is written as
+; time/iso writes it.
+(defun time/http (us)
+    (match (time/parts us)
+        (#(y mo d h mi sec _ w)
+            (~ (time/name "MonTueWedThuFriSatSun" w) ", " (time/two d) " " (time/name "JanFebMarAprMayJunJulAugSepOctNovDec" mo) " "
+               (time/year y) " " (time/two h) ":" (time/two mi) ":" (time/two sec) " GMT"))))
+
+; The ith (from 1) of the three-letter names in names.
+(defun time/name (names i) (bytes/slice names (* (- i 1) 3) (* i 3)))
+
+; ISO 8601 read back, as RFC 3339 has it: a date, "2026-10-29", which is
+; its midnight in UTC; or a date and a time with its offset,
+; "2026-10-29T14:03:07Z", "2026-10-29 16:03:07.5+02:00", the T or a space
+; between them, a fraction of a second of any length (past six digits,
+; cut), and Z or an offset. A time without an offset isn't taken: it
+; could be anywhere's. (:ok us), or (:error (:bad-time s)).
+(defun time/parse-iso (s)
+    (let y  (time/digits s 0 4))
+    (let mo (time/digits s 5 2))
+    (let d  (time/digits s 8 2))
+    (cond
+        ((not (and (int? y) (int? mo) (int? d) (time/at? s 4 "-") (time/at? s 7 "-") (time/date-ok? y mo d)))
+            (time/bad s))
+        ((== (bytes/len s) 10)
+            (list :ok (time/from-utc (list (list :year y) (list :month mo) (list :day d)))))
+        ((or (time/at? s 10 "T") (time/at? s 10 "t") (time/at? s 10 " "))
+            (time/parse-clock s (list (list :year y) (list :month mo) (list :day d))))
+        (#true (time/bad s))))
+
+; The time, from index 11: hours and minutes, maybe seconds and a
+; fraction, then the offset.
+(defun time/parse-clock (s date)
+    (let h  (time/digits s 11 2))
+    (let mi (time/digits s 14 2))
+    (let sec (if (time/at? s 16 ":") (time/digits s 17 2) 0))
+    (let at (if (time/at? s 16 ":") 19 16))
+    (let frac (if (time/at? s at ".") (time/fraction s (+ at 1) (+ at 1)) (list 0 at)))
+    (cond
+        ((not (and (int? h) (int? mi) (int? sec) (time/at? s 13 ":") (< h 24) (< mi 60) (< sec 60) (cons? frac)))
+            (time/bad s))
+        (#true
+            (let offset (time/offset s (cadr frac)))
+            (if (int? offset)
+                (list :ok (- (time/from-utc (append (list (list :hour h) (list :minute mi) (list :second sec) (list :us (car frac))) date))
+                             (* offset 60000000)))
+                (time/bad s)))))
+
+; A fraction's digits from i, at least one: (us next), or #false.
+(defun time/fraction (s start i)
+    (cond
+        ((and (< i (bytes/len s)) (time/digit? (bytes/at s i))) (time/fraction s start (+ i 1)))
+        ((== i start) #false)
+        (#true (list (str->int (str/pad-end (bytes/slice s start (if (> (- i start) 6) (+ start 6) i)) 6 "0")) i))))
+
+; The offset at i, which must end s: Z, or +HH:MM or -HH:MM, in minutes
+; east of UTC; or #false.
+(defun time/offset (s i)
+    (let n (bytes/len s))
+    (let h (time/digits s (+ i 1) 2))
+    (let m (time/digits s (+ i 4) 2))
+    (cond
+        ((and (== n (+ i 1)) (or (time/at? s i "Z") (time/at? s i "z"))) 0)
+        ((not (and (== n (+ i 6)) (or (time/at? s i "+") (time/at? s i "-")) (time/at? s (+ i 3) ":") (int? h) (int? m)))
+            #false)
+        ((or (> h 23) (> m 59)) #false)
+        ((time/at? s i "-") (- 0 (+ (* h 60) m)))
+        (#true (+ (* h 60) m))))
+
+(defun time/bad (s) (list :error (list :bad-time s)))
+
+; Is the byte at i the one character c?
+(defun time/at? (s i c)
+    (and (< i (bytes/len s)) (== (bytes/at s i) (bytes/at c 0))))
+
+(defun time/digit? (b) (and (>= b 48) (<= b 57)))
+
+; The n digits from i as a number, or #false if they aren't all there.
+(defun time/digits (s i n)
+    (if (> (+ i n) (bytes/len s)) #false (time/digits-loop s i (+ i n) 0)))
+
+(defun time/digits-loop (s i end acc)
+    (cond
+        ((== i end) acc)
+        ((time/digit? (bytes/at s i)) (time/digits-loop s (+ i 1) end (+ (* acc 10) (- (bytes/at s i) 48))))
+        (#true #false)))
+
+(defun time/date-ok? (y m d)
+    (and (>= m 1) (<= m 12) (>= d 1) (<= d (time/month-days y m))))
+
+(defun time/month-days (y m)
+    (cond
+        ((== m 2) (if (time/leap? y) 29 28))
+        ((member? m (list 4 6 9 11)) 30)
+        (#true 31)))
+
+(defun time/leap? (y)
+    (or (== (math/mod y 400) 0) (and (== (math/mod y 4) 0) (not (== (math/mod y 100) 0)))))
+
+; a divided by b, rounded down, as Hinnant's code needs for days before
+; 1970: div rounds toward zero.
+(defun time/floor (a b) (div (- a (math/mod a b)) b))
+
+; The days since 1970-01-01 of year y, month m (1 to 12), day d.
+(defun time/days (y m d)
+    (let y1  (if (<= m 2) (- y 1) y))
+    (let era (time/floor y1 400))
+    (let yoe (- y1 (* era 400)))
+    (let doy (+ (div (+ (* 153 (if (> m 2) (- m 3) (+ m 9))) 2) 5) (- d 1)))
+    (let doe (+ (+ (* yoe 365) (- (div yoe 4) (div yoe 100))) doy))
+    (+ (* era 146097) (- doe 719468)))
+
+; #(year month day) of the days since 1970-01-01.
+(defun time/civil (days)
+    (let z   (+ days 719468))
+    (let era (time/floor z 146097))
+    (let doe (- z (* era 146097)))
+    (let yoe (div (+ (- doe (div doe 1460)) (- (div doe 36524) (div doe 146096))) 365))
+    (let doy (- doe (+ (* 365 yoe) (- (div yoe 4) (div yoe 100)))))
+    (let mp  (div (+ (* 5 doy) 2) 153))
+    (let d   (+ (- doy (div (+ (* 153 mp) 2) 5)) 1))
+    (let m   (if (< mp 10) (+ mp 3) (- mp 9)))
+    (tuple (+ (+ yoe (* era 400)) (if (<= m 2) 1 0)) m d))

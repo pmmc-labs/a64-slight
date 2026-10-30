@@ -8,3 +8,4 @@
 (fork (pprint :other))
 (sleep -10)
 (pprint :back)
+; warns: 5:28 6:28 7:31

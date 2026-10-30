@@ -77,7 +77,10 @@ itself (or, for `n-body`, against C's).
   slight's and Erlang's vectors are lists, made again each step; the
   others' arrays, changed in place. Each sum in the C version's order
   (Python's in loops, since its `sum` of floats rounds differently from
-  3.12 on); the norm printed times 10^9.
+  3.12 on); the norm printed times 10^9. And `slight-arrays`, slight
+  with arrays of numbers (D253), `spectral-norm-arrays.slight`: the
+  matrix and its transpose made once, a million floats each, and each
+  product `array/matmul`, summing in C's order, so the norm agrees.
 - **`ping-pong 2000000`:** round trips between two processes.
 - **`payload 1000000`:** `ping-pong` with each message carrying the same
   list of 100 integers there and back (D237): what copying a message's
@@ -97,6 +100,18 @@ itself (or, for `n-body`, against C's).
   message at once, then each asked for one. Its peak memory, less
   `startup`'s, over a million is what a waiting process costs (with its
   pid in a list, as every version keeps them).
+- **`slight-mc`:** slight on every island (D256), one per core:
+  `parallel-fib`, `fan-in` and `spectral-norm` again, each as
+  `NAME-mc.slight`, which places its actors with `(spawn/on (% i
+  (islands)) ...)`; `spectral-norm`'s on arrays, a band of rows made on
+  each island, the vector crossing as a shared buffer, so it's compared
+  with `slight-arrays`. And `spawn`, `idle-memory` and `ping-pong`, each
+  island doing its share locally and sending one answer on: a spawner
+  per island starting its share of the processes; a keeper per island
+  starting its share waiting, all of them waiting at once before any is
+  asked; a ping-pong pair per island, its share of the round trips. In
+  the every-core table, beside Go's, Erlang's and Rust's (whose
+  `ping-pong` is one pair, so says nothing of spreading).
 - **`parallel-fib 30`:** 64 processes each work out `fib(30)`: work more
   than one core can share.
 - **`latency 10`:** how long a message waits for its turn while other
@@ -174,6 +189,267 @@ change, hash tables, bignums, regular expressions) aren't here.
 ## Results
 
 Each run's full tables are in `bench/results/`. What they say:
+
+### The cloud machine, 31 Oct: a message crossing islands, one allocation
+
+A message to another island was two allocations, its chunk and an inbox
+item of some 200 bytes, zeroed, both freed by the island that took it.
+Now the item's head, 48 bytes, rides in the message's chunk, freed with
+it; an island takes itself off the count of busy islands only after
+watching its inbox a while, rather than at every lull; the inboxes and
+the count are on cache lines of their own; and a take uncounts its
+items at once. `fan-in-mc 10000000` on 4 islands: 2.0 to 2.6 s, from
+7.8 to 10.5, and a third of the memory. A ping-pong whose halves are on
+neighbouring islands, every message crossing, is unchanged at a few
+microseconds a round trip on this VM's 4 vCPUs, where every island
+spinning leaves none spare: the M2 Max is to say what it is there.
+
+### The M2 Max, 30 Oct, 22:31: processes on every island (D256)
+
+`2026-10-30-2231-macos-apple-m2-max`, 12 islands, each doing its share
+of `spawn`, `idle-memory` and `ping-pong` where it is:
+
+| | slight | slight-mc | Go, every core | Rust, every core | Erlang, every core |
+|---|---:|---:|---:|---:|---:|
+| `spawn 1000000` | 0.132 s | 0.026 s (0.20) | 0.388 s | 0.606 s | 0.908 s |
+| `idle-memory 1000000` | 0.317 s, 615 MB | 0.101 s (0.32), 621 MB | 1.051 s, 2890 MB | 1.408 s, 1097 MB | 1.914 s, 2795 MB |
+| `ping-pong 2000000` | 0.281 s | 0.064 s (0.23) | | | |
+
+- **Starting processes:** 38 million a second on 12 islands, 5.1 times
+  one core's 7.6 million; 15 times Go's every core, 23 times Rust's and
+  35 times Erlang's.
+- **A million waiting:** in 0.10 s, a third of one core's time, and the
+  same memory, about 600 bytes a process wherever it waits: Go's and
+  Erlang's take 4.6 times as much, Rust's 1.8.
+- **Conversations that stay on their island:** 62 million messages a
+  second, 4.4 times one core's. (Go's and Rust's `ping-pong` is one
+  pair, so their every-core times say nothing of spreading.)
+- Starting and freeing processes and messages lean on malloc and on
+  memory, which the cores share, so these spread less than computation
+  (`parallel-fib`, 7.9 times): 3 to 5 times on 12 cores.
+
+### The M2 Max, 30 Oct, 21:51: slight on every island (D256)
+
+`2026-10-30-2151-macos-apple-m2-max`, 12 cores, so 12 islands; each
+every-core time beside its one-core one, and over it:
+
+| | slight | slight-mc | Go | Go, every core | Rust | Rust, every core | Erlang | Erlang, every core |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `parallel-fib 30` | 0.283 s | 0.036 s (0.13) | 0.167 | 0.021 (0.13) | 0.147 | 0.018 (0.12) | 0.915 | 0.138 (0.15) |
+| `spectral-norm 1000` | 0.084 s, arrays | 0.018 s (0.21) | 0.047 | 0.047 (1.0) | | | 0.701 | 0.486 (0.69) |
+| `fan-in 10000000` | 0.362 s | 1.296 s (3.6) | 0.287 | 3.528 (12.3) | 0.266 | 4.155 (15.6) | 1.838 | 1.099 (0.60) |
+
+- **Work spreads as far as Go's and Rust's:** `parallel-fib` is 7.9
+  times as fast on 12 islands, as theirs are 8.0 and 8.2 times, and
+  still about 1.7 times their time, as on one core.
+- **`spectral-norm` on 12 islands, 0.018 s, is the fastest of all:**
+  4.7 times `slight-arrays`, and 2.6 times faster than C, Go and Go on
+  every core (whose program, the Benchmarks Game's, doesn't spread its
+  work), the bands' products sharing the vector as a handle.
+- **`fan-in` to one mailbox costs slight least, but Erlang:** 3.6 times
+  its one core's, where Go's is 12 and Rust's 16; Erlang's every core
+  is faster than its one. slight's CPU, 13 s in 1.3, is the islands
+  that wait spinning before they sleep, and the senders; and its memory
+  77 MB where one core holds 484, since the mailbox is emptied as fast
+  as the other islands fill it.
+
+### The cloud machine, 30 Oct: slight on every island (D256)
+
+The best of three on the cloud machine's 4 cores, `SLIGHT_ISLANDS=4`,
+before the M2 Max's run; then `spawn`, `idle-memory` and `ping-pong`,
+added after it:
+
+| | one core | every island | ÷ one core |
+|---|---:|---:|---:|
+| `spawn 1000000` | 0.246 s | 0.120 s | 0.49 |
+| `idle-memory 1000000` | 0.687 s, 442 MB | 0.315 s, 448 MB | 0.46 |
+| `ping-pong 2000000` | 0.418 s | 0.179 s | 0.43 |
+
+A waiting process costs what it does on one core, wherever it waits;
+starting them, and conversations that stay on their island, go about
+twice as fast on 4 cores. The first three:
+
+| | one core | every island | ÷ one core |
+|---|---:|---:|---:|
+| `parallel-fib 30` | 0.579 s | 0.174 s | 0.30 |
+| `spectral-norm 1000`, arrays | 0.196 s | 0.072 s | 0.37 |
+| `fan-in 10000000` | 1.36 s | 10.2 s | 7.4 |
+
+- **Work spreads:** 3.3 times as fast on 4 cores for `parallel-fib`,
+  2.7 for `spectral-norm`, whose 40 products each send the vector to
+  every band and join the shares.
+- **One mailbox for every island is the worst case,** as it is for Go
+  and Rust, whose every-core `fan-in` is 12 and 15 times their one
+  core's on the M2 Max. Under callgrind, about 1,000 instructions a
+  message, a third of them malloc and free: a message crossing islands
+  is two allocations, its chunk and its inbox item (some 200 bytes,
+  zeroed), both freed by another thread. One allocation, the item kept
+  in the message's chunk, and items pushed in batches, are what would
+  bring it down, if a program that needs it comes.
+
+### The M2 Max, 30 Oct, 17:51: a chunk's header two words again
+
+`2026-10-30-1751-macos-apple-m2-max` (`82dda3f`):
+
+| | 24 Oct | 17:10 | 17:51 |
+|---|---:|---:|---:|
+| `spawn` | 0.122 s, 48 MB | 0.145 s, 64 MB | 0.142 s, 49 MB |
+| `fan-in` | 0.355 s, 461 MB | 0.412 s, 613 MB | 0.373 s, 461 MB |
+| `ping-pong` | 0.285 s | 0.282 s | 0.280 s |
+
+- **Memory, as it was.** `fan-in` is 5 per cent over 24 Oct.
+- **`spawn`, 16 per cent over, is islands' price for now.** It runs 4
+  per cent more instructions than on 24 Oct (`118291f`), about 70 a
+  process: `finish` looking for watchers on other islands and a parent
+  there, `rt_send` and `rt_recv` checking a pid's island, and the
+  scheduler's loop its inbox. On the cloud machine that's 5 per cent,
+  the best of seven runs 0.219 s against 0.208. How many islands there
+  are makes no difference, to the start (2 ms) or to a million
+  processes. Still 3 times faster than Go's goroutines (0.42 s).
+- **Profiled on the Mac, the cause is still open**
+  (`results/2026-10-30-spawn-profile-m2-max.md`). It isn't work: 10
+  more instructions a process (2284 against 2274), but 46 more cycles,
+  IPC 5.22 to 4.72, 13 to 15 ns a process by hyperfine. Nor
+  thread-locals (0.003 lookups a process, counted under lldb), nor
+  malloc (61 ms a million in both). The time arrived with islands' step
+  1 (`20d78b3`), building each commit in between, and shows as a wait
+  at `retire`'s epilogue. But the island's state as plain globals,
+  the scheduler's registers on cache lines of their own, and both
+  together leave the time where it is: with both, the wait leaves
+  `retire` and spreads over everything else. So it's a latency that
+  surfaces wherever there's room, not one load. Finding it needs the
+  core's counters (L1D misses, load and memory-ordering stalls, under
+  `sudo`), or `20d78b3` taken apart change by change.
+- **Found, with the core's counters** (the same report, kperf through
+  an injected dylib, as root): no more cache misses, but 0.95 pipeline
+  flushes a process where 24 Oct had 0.08, of the M2's "other" kind,
+  neither a mispredict nor a memory-order violation, and map stalls
+  around them. Counted at each commit, they came with `ebb2312`, which
+  left `retire` a function that makes no call and ends in a tail jump
+  into `free`; any call in it took the flush away. `39af1e5` has
+  `retire`'s callers free the process, an ordinary call: 0.18 flushes,
+  and `spawn` 129.8 ms (hyperfine, n = 1M) where it was 140.1, against
+  24 Oct's 126.0, 1 per cent a process. Which mechanism in the core
+  flushes is still unknown.
+
+### The M2 Max, 30 Oct, 17:10: no thread-locals, and a chunk's header
+
+`2026-10-30-1710-macos-apple-m2-max`, with no thread-local on the
+busiest paths (`ebb2312`):
+
+| | 24 Oct | 16:22 | 17:10 |
+|---|---:|---:|---:|
+| `ping-pong` | 0.285 s | 0.345 s | 0.282 s |
+| `thread-ring` | 0.493 s | 0.637 s | 0.506 s |
+| `spawn` | 0.122 s | 0.143 s | 0.145 s |
+| `fan-in` | 0.355 s | 0.420 s | 0.412 s |
+| `payload` | 0.566 s | 0.569 s | 0.556 s |
+
+- **Messages, back where they were.** `ping-pong`, `thread-ring` and
+  `payload` are within 3 per cent of 24 Oct, islands and all.
+- **`spawn` and `fan-in` weren't the thread-locals.** `fan-in` took
+  628 MB, where it took 472 on 24 Oct: 16 bytes more for each of its
+  10 million messages, which pile up in one mailbox. Shared buffers
+  (D253) had put a copy's handles in every chunk's header, making it
+  four words, so a message with nothing to copy was a malloc of 64
+  bytes, not 48. The header is two words again: a bit of its size says
+  whether the chunk has handles, and only such a chunk has them, after
+  its bytes. On the cloud machine `fan-in` then takes 639 MB where it
+  took 798, and runs in about 1.0 s where it took 1.1 to 5.3 (it was
+  paging); `spawn` 66 MB where it took 82. Under callgrind `spawn` is
+  4 per cent over 24 Oct (about 70 instructions a process, `finish`
+  looking for watchers on other islands, and the scheduler's loop for
+  its inbox), so most of its 19 per cent on the Mac should have been
+  the bigger message too.
+
+### The M2 Max, 30 Oct, 16:22: one thread-local, and then none
+
+`2026-10-30-1622-macos-apple-m2-max`, the five programs that had slowed,
+with an island's state one thread-local struct (`e46e023`):
+
+| | 24 Oct | 15:33 | 16:22 |
+|---|---:|---:|---:|
+| `ping-pong` | 0.285 s | 0.416 s | 0.345 s |
+| `thread-ring` | 0.493 s | 0.748 s | 0.637 s |
+| `spawn` | 0.122 s | 0.171 s | 0.143 s |
+| `fan-in` | 0.355 s | 0.452 s | 0.420 s |
+| `payload` | 0.566 s | 0.618 s | 0.569 s |
+
+- **Half way back.** `payload`, whose time is copying, is where it was;
+  the others are still 18 to 29 per cent over, where callgrind on Linux
+  says 5. Counted as macOS pays them (the runtime built with
+  `-fPIC -ftls-model=global-dynamic` as a shared library, so each
+  thread-local is a call to `__tls_get_addr`, as it's one to
+  `tlv_get_addr` on macOS), a message still made six: `rt_current` in
+  `rt_send` and `rt_recv`, and `my` in `copy_walk`, `to_scheduler`,
+  `events` and `rt_recv` again; and a process, `spawn`'s, six more.
+  At 2 to 3 ns each, that's the difference.
+- **So none, where it's busiest.** Compiled code keeps the process in a
+  register (x28, r15), so it hands it to `rt_send`, `rt_recv`,
+  `rt_fork` and `rt_spawn` (as it does `rt_preempt` and `rt_exit`); a
+  process points at its island's state (`isle`), which the run queue,
+  the switch to the scheduler, the copy of a message, the table and a
+  process's end reach through it; and `events` is inlined into the
+  scheduler's loop, which looks the island up once. Counted the same
+  way, `ping-pong`, `thread-ring`, `fan-in`, `payload` and `spawn` make
+  under a thousand lookups in a run, where they made one or two million.
+  The M2 Max is to say whether that's all of it.
+
+### The M2 Max, 30 Oct, 15:33: arrays, and what islands' thread-locals cost
+
+`2026-10-30-1533-macos-apple-m2-max`, at islands' step 2 (`0d3e608`).
+
+- **`spectral-norm` with arrays** (D253): 0.086 s, against 0.478 s for
+  the lists, and 0.12 s for Node, 0.59 for Chez, 0.047 for C: 5.6 times
+  faster than the lists, and 1.8 times C, though it makes its matrix
+  and the transpose through `array/generate` first. 43 MB at its peak.
+- **What sends and processes cost, slower since 24 Oct:** `ping-pong`
+  0.285 s to 0.416, `thread-ring` 0.493 to 0.748, `spawn` 0.122 to
+  0.171, `fan-in` 0.355 to 0.452; `fib` and `binary-trees` much as they
+  were. On the cloud machine, under callgrind, the same programs run 6
+  to 10 per cent more instructions: shared buffers' (D253) half of it,
+  `adopt` no longer inlined among it, and islands' (D256) the other
+  half. The rest of macOS's 30 to 50 per cent is the thread-locals of
+  islands' step 1: macOS reaches each through a call, a variable at a
+  time, about twenty for each message. So an island's state became one
+  thread-local struct, `my`, which a function reaches with one call;
+  `adopt` is inlined again, a chunk's handles taken apart from it; and
+  `rt_send` looks a pid of its own island up in the table at once.
+  Under callgrind, `ping-pong` is then 5 per cent over 24 Oct, from 10,
+  `thread-ring` 6 from 9. The M2 Max is to say what that comes to there.
+
+### The cloud machine, 30 Oct: `spectral-norm` with arrays (D253)
+
+x86-64, n = 1000, the median of five, not saved (the cloud machine's
+numbers are for ratios):
+
+| | time | memory |
+|---|---:|---:|
+| C | 0.064 s | 2.1 MB |
+| Go, one core | 0.094 s | 1.8 MB |
+| Node | 0.188 s | 54 MB |
+| slight, arrays | 0.200 s | 41 MB |
+| slight, lists | 0.721 s | 3.8 MB |
+
+- **Arrays against lists:** 3.6 times faster. The forty products, in
+  `array/matmul`, take about 0.03 s, less than C's whole run, since C
+  works out each of A's elements as it goes and this program makes A
+  and its transpose once; the rest is making them, through
+  `array/generate`, two million calls of a slight function.
+- **Making them:** through one list as long as the array at first,
+  0.27 s and 87 MB at its peak; a list of 512 at a time since, which
+  dies young, the chunks joined in a tree, 0.16 s and 41 MB. A builtin
+  that filled a fresh array would take the lists out (D253 turned it
+  down until a benchmark asked); what's left is calling the function,
+  a float box for each result.
+- **`array/matmul` on a vector:** the kind's test hoisted out of its
+  loops, and a vector (one column) summed in a register: the products
+  went from about 0.12 s to 0.03.
+- **`n-body`:** not written with arrays. Its five bodies are scalar
+  arithmetic on each pair, with nothing to do element by element across
+  an array; arrays would be `array/get` in place of a tuple's pattern,
+  each element a float box all the same. What it needs is floats
+  unboxed in compiled code (TYPES.md's step 5), not arrays.
 
 ### The cloud machine, 23 Oct: `bank`, a simulation (D241, D242)
 

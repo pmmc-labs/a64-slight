@@ -61,11 +61,13 @@ Matching on `(method path)` as a list is the router.
 
 **A client:** `(http/get url)` and `(http/request method url headers
 body)` give `(:ok (status headers body))`, or `(:error reason)`, such as
-`(:econnrefused "127.0.0.1:1")`. `http/request-within` adds a timeout.
+`(:econnrefused "127.0.0.1:1")`. An `https://` URL goes through curl,
+which must be installed. `http/request-within` adds a timeout.
 `(http/stream ...)` gives the body as it arrives, line by line or in
 chunks, for streaming APIs such as a local model's.
 
-**Not yet:** HTTPS (`:no-tls` until TLS lands), keep-alive, and a Date
-header. One request per connection.
+**Not yet:** HTTPS for a server (it sits behind a proxy such as nginx,
+which ends TLS), keep-alive, and a Date header. One request per
+connection.
 
 [How-to](README.md)

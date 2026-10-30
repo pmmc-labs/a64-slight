@@ -1,0 +1,10 @@
+(ok ())
+(ok ())
+(error (enotdir "build/t/313-tree/a/x.txt/d"))
+(ok ("build/t/313-tree/a" "build/t/313-tree/a/b" "build/t/313-tree/a/b/c" "build/t/313-tree/a/b/c/y.txt" "build/t/313-tree/a/out" "build/t/313-tree/a/x.txt"))
+(ok ())
+(error (enoent "build/t/313-tree"))
+(ok ("kept"))
+(ok ())
+(ok ())
+done

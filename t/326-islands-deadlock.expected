@@ -1,0 +1,2 @@
+deadlock: the root process is waiting in the top level for a message to #<address 1.0>, and nothing else can run
+exit: 1

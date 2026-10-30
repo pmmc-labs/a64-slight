@@ -44,6 +44,8 @@ import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord, TOP_P
 import { isReceiveBody, stateFunctions } from './classify.ts';
 import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
+import { eraseTypes } from './check.ts';
+import { displayName, PRELUDE_SUFFIX } from './modules.ts';
 import { AARCH64 } from './aarch64.ts';
 import { ACC, addr, FP, FRAME, imm, inSlot, LEFT, PROC, slotAddr, word, type BitOp, type Code, type Cond, type FloatOp, type Operand, type Target } from './target.ts';
 
@@ -100,13 +102,16 @@ type St = {
 // The special forms, and those the expander turns into others (expand.ts),
 // which it leaves none of: neither kind can be a name.
 const SPECIAL_FORMS: readonly string[] = [
-    'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'spawn', 'connect', 'recv', 'yield',
-    'if', 'when', 'case', 'and', 'or', 'match', '@include',
+    'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'spawn', 'spawn/on', 'connect', 'recv', 'yield',
+    'if', 'when', 'case', 'and', 'or', 'match', '@include', 'deftype', 'sig', 'the',
 ];
 
 // --- the program ------------------------------------------------------------
 
-export function compileProgram(forms: Sexp, prelude: Sexp = NIL, t: Target = AARCH64): string {
+export function compileProgram(typed: Sexp, typedPrelude: Sexp = NIL, t: Target = AARCH64): string {
+    // types say nothing to the code (D247): deftype and sig go, (the T e) is e
+    const forms   = eraseTypes(typed);
+    const prelude = eraseTypes(typedPrelude);
     const preludeForms = toArray(prelude)!;
     preludeForms.forEach((f) => {
         if (!isForm(f, 'defun')) throw new CompileError(`the prelude can only define functions, not ${show(f)}`, posOf(f));
@@ -259,9 +264,9 @@ function compileFunction(entry: string, d: Defun, free: readonly string[], fns: 
     const [body, st1] = compileBody(d.body, cx, { ...st, slots: locals.length, calls: false });
     const size = 16 * Math.ceil(st1.slots / 2);
     if (size > 4095) throw new CompileError(`${d.name.name} needs too many frame slots (${st1.slots})`, d.pos);
-    const [overflow, st2] = faultLabel(st1, 'RT_FAULT_STACK', d.name.name, at);
+    const [overflow, st2] = faultLabel(st1, 'RT_FAULT_STACK', displayName(d.name.name), at);
     const [preempt, st3]  = label(st2, 'preempt');
-    const [name, st4]     = cString(d.name.name, st3);
+    const [name, st4]     = cString(displayName(d.name.name), st3);
     const t    = st.t;
     const stub = [`${preempt}:`, t.call('rt_preempt', [PROC, FRAME, imm(locals.length), FP, addr(entry)], false), t.jump(`${preempt}_done`)];
     return [[
@@ -426,7 +431,7 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     if (constant !== undefined) return compileExpr(constant, cx, st);
     const fn = lookupFn(cx.fns, x.name);
     if (fn !== null && fn.state) throw new CompileError(`${fn.name} waits for messages, so it can't be used as a value`, x.pos);
-    if (fn !== null) return loadClosure(staticClosure(fn.label, fn.arity, fn.name, st));
+    if (fn !== null) return loadClosure(staticClosure(fn.label, fn.arity, displayName(fn.name), st));
     if (isBuiltin(x.name)) return loadClosure(builtinWrapper(x, st));
     throw new CompileError(`unknown name '${x.name}'`, x.pos);
 }
@@ -484,6 +489,9 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
         case 'fork': case 'spawn':
             checkArity(x, head.name, args, 1);
             return compileFork(x, head.name, args[0]!, head.name === 'fork' ? 'rt_fork' : 'rt_spawn', cx, st);
+        case 'spawn/on':                        // (spawn/on k expr): an actor on island k (D256)
+            checkArity(x, 'spawn/on', args, 2);
+            return compileFork(x, 'spawn/on', args[1]!, 'rt_spawn_on', cx, st, [args[0]!]);
         case 'connect':
             return compileConnect(x, args, cx, st);
         case 'yield': {
@@ -609,7 +617,7 @@ function compileRecv(x: Pair, clauses: readonly Sexp[], cx: Cx, st: St): [Code, 
     const t = st.t;
     return [[
         `${top}:`,
-        t.call('rt_recv', [FRAME, imm(params), addr(entry)], false),
+        t.call('rt_recv', [PROC, FRAME, imm(params), addr(entry)], false),
         t.storeSlot(msg),
         code,
         t.call('rt_dead_letter', [inSlot(msg), addr(site)], false),
@@ -669,22 +677,24 @@ function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: 
         throw new CompileError(`a ${form} can take at most ${MAX_ARGS} locals into the new process, and this one uses ${free.length}`, x.pos);
     }
     const [pre, st0] = extra.reduce<[Code, St]>(([acc, s], e, i) => {
-        const [c, s1] = compileExpr(e, { ...cx, si: cx.si + i }, s);
+        const [c, s1] = compileExpr(e, { ...cx, si: cx.si + i, tail: false }, s);
         return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
     }, [[], st]);
     const si = cx.si + extra.length;
     const where = x.pos === null ? form : `${form} at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
-    const [entry, st1] = label(st0, form);
+    const [entry, st1] = label(st0, form.replace('/', '_'));
     const d: Defun = { name: sym(where, x.pos), params: free.map((n) => sym(n, x.pos)), body: list(expr), pos: x.pos };
     const [code, st2]  = compileFunction(entry, d, [], cx.fns, form === 'fork' ? 'task' : 'actor', st1, null);
     const st3: St = { ...st2, slots: st0.slots, lambdas: [st2.lambdas, code] };
     const [site, st4]  = siteLabel(st3, form, x.pos);
     const st5 = free.length > 0 ? useSlot(st4, si + free.length - 1) : st4;
     const t = st.t;
+    // fork and spawn are handed the process, as send is (D256)
+    const proc = fn === 'rt_fork' || fn === 'rt_spawn' ? [PROC] : [];
     return [[
         pre,
         free.map((name, i) => t.copySlot(lookup(cx.env, name)!, si + i, name)),
-        t.call(fn, [addr(entry), imm(free.length), slotAddr(si), addr(site),
+        t.call(fn, [...proc, addr(entry), imm(free.length), slotAddr(si), addr(site),
                     ...extra.map((_, i) => inSlot(cx.si + i)), ...flags.map(imm)], false),
     ], st5];
 }
@@ -985,10 +995,13 @@ const PREDICATES: readonly string[] = ['int?', 'nil?', 'cons?', 'pid?', 'sym?', 
 // are passed as (). The call's site goes in the register after the
 // arguments, for the faults the C code raises. A variadic builtin gets its
 // arguments as one list.
-type CBuiltin = { readonly fn: string; readonly min: number; readonly max: number; readonly variadic: boolean };
+// proc: the process goes first, for a builtin so busy that its looking the
+// process up would show (D256).
+type CBuiltin = { readonly fn: string; readonly min: number; readonly max: number; readonly variadic: boolean; readonly proc: boolean };
 
-const fixed    = (fn: string, min: number, max = min): CBuiltin => ({ fn, min, max, variadic: false });
-const variadic = (fn: string): CBuiltin => ({ fn, min: 0, max: 1, variadic: true });
+const fixed    = (fn: string, min: number, max = min): CBuiltin => ({ fn, min, max, variadic: false, proc: false });
+const variadic = (fn: string): CBuiltin => ({ fn, min: 0, max: 1, variadic: true, proc: false });
+const withProc = (fn: string, n: number): CBuiltin => ({ ...fixed(fn, n), proc: true });
 
 const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'str?':               fixed('rt_is_str', 1),
@@ -1038,6 +1051,8 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'json/print':         fixed('rt_json_print', 1),
     'sexp/parse':         fixed('rt_sexp_parse', 1),
     'sexp/print':         fixed('rt_sexp_print', 1),
+    'island':             fixed('rt_island_of', 0),
+    'islands':            fixed('rt_islands', 0),
     'tuple?':             fixed('rt_is_tuple_p', 1),
     'tuple/len':          fixed('rt_tuple_len_of', 1),
     'tuple/get':          fixed('rt_tuple_ref', 2),
@@ -1048,6 +1063,25 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'tuple/slice':        fixed('rt_tuple_slice', 3),
     'list->tuple':        fixed('rt_tuple', 1),
     'tuple->list':        fixed('rt_tuple_to_list', 1),
+    'array?':             fixed('rt_is_array_p', 1),
+    'array/make':         fixed('rt_array_make', 3),
+    'list->array':        fixed('rt_list_to_array', 2),
+    'array->list':        fixed('rt_array_to_list', 1),
+    'array/kind':         fixed('rt_array_kind', 1),
+    'array/len':          fixed('rt_array_len_of', 1),
+    'array/get':          fixed('rt_array_ref', 2),
+    'array/set':          fixed('rt_array_set', 3),
+    'array/slice':        fixed('rt_array_slice', 3),
+    'array/concat':       fixed('rt_array_concat', 2),
+    'array/add':          fixed('rt_array_add', 2),
+    'array/sub':          fixed('rt_array_sub', 2),
+    'array/mul':          fixed('rt_array_mul', 2),
+    'array/div':          fixed('rt_array_div', 2),
+    'array/sum':          fixed('rt_array_sum', 1),
+    'array/min':          fixed('rt_array_min', 1),
+    'array/max':          fixed('rt_array_max', 1),
+    'array/dot':          fixed('rt_array_dot', 2),
+    'array/matmul':       fixed('rt_array_matmul', 5),
     'float?':             fixed('rt_is_flt', 1),
     'num?':               fixed('rt_is_num', 1),
     'math/ceil':          fixed('rt_ceil', 1),
@@ -1089,7 +1123,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'rand/float':         fixed('rt_rand_float', 0),
     'rand/seed':          fixed('rt_rand_seed', 1),
     'lambda?':            fixed('rt_is_lambda', 1),
-    'send':               fixed('rt_send', 2),
+    'send':               withProc('rt_send', 2),
     'join':               fixed('rt_join', 1),
     'join/race':          fixed('rt_join_race', 1),
     'address':            fixed('rt_address', 0),
@@ -1105,6 +1139,27 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'socket/peer':        fixed('rt_socket_peer', 1),
     'sleep':              fixed('rt_sleep', 1),
     'clock/us':           fixed('rt_clock_us', 0),
+    'clock/now':          fixed('rt_clock_now', 0),
+    'fs/list':            fixed('rt_fs_list', 1),
+    'fs/stat':            fixed('rt_fs_stat', 1),
+    'fs/delete':          fixed('rt_fs_delete', 1),
+    'fs/rename':          fixed('rt_fs_rename', 2),
+    'fs/mkdir':           fixed('rt_fs_mkdir', 1),
+    'bytes/pack':         fixed('rt_bytes_pack', 2),
+    'bytes/unpack':       fixed('rt_bytes_unpack', 3),
+    'log':                fixed('rt_log_line', 3),
+    'crypto/sha256':      fixed('rt_crypto_sha256', 1),
+    'crypto/sha512':      fixed('rt_crypto_sha512', 1),
+    'crypto/hmac-sha256': fixed('rt_crypto_hmac_sha256', 2),
+    'crypto/hmac-sha512': fixed('rt_crypto_hmac_sha512', 2),
+    'crypto/equal?':      fixed('rt_crypto_equal', 2),
+    'crypto/random-bytes': fixed('rt_crypto_random_bytes', 1),
+    'bytes->base64':      fixed('rt_bytes_to_base64', 1),
+    'base64->bytes':      fixed('rt_base64_to_bytes', 1),
+    'bytes->base64url':   fixed('rt_bytes_to_base64url', 1),
+    'base64url->bytes':   fixed('rt_base64url_to_bytes', 1),
+    'bytes->hex':         fixed('rt_bytes_to_hex', 1),
+    'hex->bytes':         fixed('rt_hex_to_bytes', 1),
     'hash':               fixed('rt_hash', 1),
     'tty/screen/rows':    fixed('rt_screen_rows', 0),
     'tty/screen/cols':    fixed('rt_screen_cols', 0),
@@ -1313,7 +1368,7 @@ function compileCBuiltin(x: Pair, name: string, b: CBuiltin, args: readonly Sexp
     const [code, ops, st1] = callOperands(args, cx, st);
     const [site, st2] = siteLabel(st1, name, x.pos);
     const missing = [...Array(b.max - args.length).keys()].map(() => imm('RT_NIL'));
-    return [[code, st.t.call(b.fn, [...ops, ...missing, addr(site)], false)], st2];
+    return [[code, st.t.call(b.fn, [...(b.proc ? [PROC] : []), ...ops, ...missing, addr(site)], false)], st2];
 }
 
 function checkArity(x: Pair, name: string, args: readonly Sexp[], n: number): void {
@@ -1513,8 +1568,9 @@ function compileCompareTest(name: string, args: readonly Sexp[], ifFalse: string
 // argument's, with the branches the other way round. Not a program's own
 // not (D80), nor a local called not.
 function isPreludeNot(x: Sexp, cx: Cx): boolean {
-    if (!isForm(x, 'not') || lookup(cx.env, 'not') !== null || toArray(x)?.length !== 2) return false;
-    const fn = lookupFn(cx.fns, 'not');
+    const head = isForm(x, `not${PRELUDE_SUFFIX}`) ? `not${PRELUDE_SUFFIX}` : 'not';
+    if (!isForm(x, head) || lookup(cx.env, head) !== null || toArray(x)?.length !== 2) return false;
+    const fn = lookupFn(cx.fns, head);
     return fn !== null && fn.module === 'prelude';
 }
 
@@ -1549,7 +1605,10 @@ function lookup(env: Env, name: string): number | null {
     return null;
 }
 
+// A library's code names the prelude's f as `f (prelude)` (modules.ts,
+// D248), so the program's own f doesn't take its place.
 function lookupFn(fns: Fns, name: string): Fn | null {
+    if (name.endsWith(PRELUDE_SUFFIX)) return findFn(fns, name.slice(0, -PRELUDE_SUFFIX.length), 'prelude');
     for (; fns !== null; fns = fns.next) if (fns.fn.name === name) return fns.fn;
     return null;
 }

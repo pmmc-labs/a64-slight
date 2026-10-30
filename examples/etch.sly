@@ -1,0 +1,161 @@
+// An Etch A Sketch in Braille, with undo and redo as deep as you like.
+//
+//     node bin/slightc.ts --target x86_64 -o etch examples/etch.sly
+//     ./etch
+//
+// The arrow keys move the pen a dot (with shift, four); space lifts it
+// and puts it down; c changes its colour; u undoes a key, r redoes it; x
+// clears, which can be undone too; p plays the whole drawing back from
+// the start; q or Escape stops.
+//
+// The drawing is a persistent map (lib/map.slight) from a cell of the
+// screen to its Braille dots and colour, and every key that changes it
+// keeps the one before: undo is a list of whole drawings, each sharing
+// all but what one key changed with the one before it, so a thousand
+// steps of history cost about what the drawing does. The screen is only
+// ever told what differs between two of them, so undoing, redoing,
+// clearing and playing back all draw only the cells that change.
+//
+// The keys come from connect(:keypress), which puts the terminal in raw
+// mode while it runs; and can be piped in:
+//
+//     printf '\e[C\e[C\e[1;2B c\e[Dup q' | ./etch
+
+@include(:map);
+
+fun palette(i) { tuple::get(#(231, 196, 208, 226, 46, 51, 33, 201), i) }
+
+fun dot(x, y) {
+    let dx = x % 2;
+    let dy = y % 4;
+    if dy < 3 { bit::shl(1, dy + 3 * dx) } else { bit::shl(64, dx) }
+}
+
+fun at(key, cols) { str("\e[", inc(div(key, cols)), ";", inc(key % cols), "H") }
+
+// What to write to turn the screen showing old into one showing new.
+fun diff(old, new, cols) {
+    let changed = map::fold([], fun(acc, k, v) {
+        if map::get(old, k) == v {
+            acc
+        } else {
+            [str(at(k, cols), "\e[38;5;", palette(tuple::get(v, 1)), "m",
+                 codes_to_str([10240 + tuple::get(v, 0)])), ...acc]
+        }
+    }, new);
+    let cleared = map::fold([], fun(acc, k, v) {
+        if map::has?(new, k) { acc } else { [str(at(k, cols), " "), ...acc] }
+    }, old);
+    str::join("", append(changed, cleared))
+}
+
+fun plot(canvas, cols, x, y, colour) {
+    let key = div(y, 4) * cols + div(x, 2);
+    let was = match map::get(canvas, key) { :not-found => #(0, colour), c => c }
+    map::put(canvas, key, #(bit::or(tuple::get(was, 0), dot(x, y)), colour))
+}
+
+fun sign(v) { cond { v > 0 => 1, v < 0 => -1, true => 0 } }
+fun clamp(v, lo, hi) { math::max(lo, math::min(hi, v)) }
+
+// The dots from [x, y] to [x2, y2], which share a row or a column.
+fun trail(canvas, cols, x, y, x2, y2, colour) {
+    fold::l(canvas,
+            fun(c, i) => plot(c, cols, x + i * sign(x2 - x), y + i * sign(y2 - y), colour),
+            range(0, inc(math::max(math::abs(x2 - x), math::abs(y2 - y)))))
+}
+
+// --- the sketch, #(canvas, undo, redo, x, y, pen, colour), and geo, #(cols, rows) ---
+
+fun sketch(st, geo) {
+    tty::write(status(st, geo));
+    recv {
+        [:ArrowUp, ...mods]    => sketch(move(st, geo, 0, -1, mods), geo),
+        [:ArrowDown, ...mods]  => sketch(move(st, geo, 0, 1, mods), geo),
+        [:ArrowLeft, ...mods]  => sketch(move(st, geo, -1, 0, mods), geo),
+        [:ArrowRight, ...mods] => sketch(move(st, geo, 1, 0, mods), geo),
+        [" ", ..._]            => sketch(tuple::set(st, 5, !tuple::get(st, 5)), geo),
+        ["c", ..._]            => sketch(tuple::set(st, 6, inc(tuple::get(st, 6)) % 8), geo),
+        ["u", ..._]            => sketch(undo(st, geo), geo),
+        ["r", ..._]            => sketch(redo(st, geo), geo),
+        ["x", ..._]            => sketch(change(st, geo, map::new()), geo),
+        ["p", ..._]            => sketch(play(st, geo), geo),
+        ["q", ..._]            => [length(tuple::get(st, 1)), map::size(tuple::get(st, 0))],
+        [:Escape, ..._]        => [length(tuple::get(st, 1)), map::size(tuple::get(st, 0))],
+        _                      => sketch(st, geo),
+    }
+}
+
+fun status(st, geo) {
+    let #(canvas, undo, redo, x, y, pen, colour) = st;
+    str("\e[", inc(tuple::get(geo, 1)), ";1H\e[0m\e[K",
+        if pen { "pen down" } else { "pen up  " }, "  \e[38;5;", palette(colour), "m●\e[0m  ",
+        length(undo), " to undo, ", length(redo), " to redo, ", map::size(canvas), " cells lit",
+        at(div(y, 4) * tuple::get(geo, 0) + div(x, 2), tuple::get(geo, 0)))
+}
+
+fun move(st, geo, dx, dy, mods) {
+    let #(canvas, undo, redo, x, y, pen, colour) = st;
+    let n = if member?(:shift, mods) { 4 } else { 1 }
+    let x2 = clamp(x + n * dx, 0, dec(2 * tuple::get(geo, 0)));
+    let y2 = clamp(y + n * dy, 0, dec(4 * tuple::get(geo, 1)));
+    let moved = #(canvas, undo, redo, x2, y2, pen, colour);
+    if pen { change(moved, geo, trail(canvas, tuple::get(geo, 0), x, y, x2, y2, colour)) } else { moved }
+}
+
+// st with new as its drawing, the old one kept to undo to.
+fun change(st, geo, new) {
+    let #(canvas, undo, redo, x, y, pen, colour) = st;
+    if new == canvas {
+        st
+    } else {
+        tty::write(diff(canvas, new, tuple::get(geo, 0)));
+        #(new, [canvas, ...undo], [], x, y, pen, colour)
+    }
+}
+
+fun undo(st, geo) {
+    match st {
+        #(canvas, [], redo, x, y, pen, colour) => st,
+        #(canvas, [prev, ...older], redo, x, y, pen, colour) => {
+            tty::write(diff(canvas, prev, tuple::get(geo, 0)));
+            #(prev, older, [canvas, ...redo], x, y, pen, colour)
+        }
+    }
+}
+
+fun redo(st, geo) {
+    match st {
+        #(canvas, undo, [], x, y, pen, colour) => st,
+        #(canvas, undo, [next, ...newer], x, y, pen, colour) => {
+            tty::write(diff(canvas, next, tuple::get(geo, 0)));
+            #(next, [canvas, ...undo], newer, x, y, pen, colour)
+        }
+    }
+}
+
+// Every drawing undo keeps, oldest first, then this one: the screen
+// cleared, and each step drawn in turn.
+fun play(st, geo) {
+    let cols = tuple::get(geo, 0);
+    let now = tuple::get(st, 0);
+    tty::write(diff(now, map::new(), cols));
+    fold::l(map::new(),
+            fun(shown, next) { tty::write(diff(shown, next, cols)); sleep(25); next },
+            reverse([now, ...tuple::get(st, 1)]));
+    st
+}
+
+// --- the run ------------------------------------------------------------------
+
+let cols = tty::screen::cols();
+let rows = tty::screen::rows() - 2;
+tty::write("\e[2J\e[", rows + 2, ";1H\e[2m",
+           "arrows: move (shift: 4)  space: pen  c: colour  u/r: undo/redo  x: clear  p: replay  q: quit", "\e[0m");
+match read(connect(:keypress) { sketch(#(map::new(), [], [], cols, 2 * rows, true, 0), #(cols, rows)) }) {
+    :ok([steps, lit]) => {
+        tty::write("\e[0m\e[", rows + 2, ";1H\e[K",
+                   steps, " steps kept, each a whole drawing sharing all but one key's change with the one before\n");
+        [:steps, steps, :cells, lit]
+    }
+}

@@ -21,6 +21,15 @@ files can be given, and together they're one program, read in order. On
 Linux the program is a static binary, which runs on any Linux of its
 machine's kind, in an empty container (`FROM scratch`) too (D227).
 
+Every program's types are checked first (Types, below), and what's sure
+to go wrong when it runs is a warning, on stderr; the program is
+compiled anyway:
+
+    hello.slight:3:10: warning: str/len's argument is int, not str: it faults :not-a-string
+
+`--check` checks and compiles nothing. `--strict` also warns where a
+value may not be what's wanted, and makes any warning an error.
+
 A program is a sequence of top-level forms:
 
 - A `defun` defines a function. Every function is global, and they can
@@ -95,8 +104,13 @@ tests: `SLIGHT_CLOCK=virtual` swaps the real clock for one that starts at
 and `SLIGHT_GC_STRESS=n` makes it collect at the entry of every nth
 function called (n from 1, every call, which is slow, to 1,000), and at
 every `recv`.
+`SLIGHT_EPOCH=seconds` says where the virtual clock's time of day
+starts, `clock/now`'s (D254), so a test's dates are the same every run.
+`SLIGHT_LOG=level` is the least `log` writes (Output, under Builtins).
 `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` are in "Sockets", and
-`SLIGHT_SEED` in "Random numbers", under Builtins.
+`SLIGHT_SEED` in "Random numbers", under Builtins. `SLIGHT_ISLANDS=n`
+says how many islands there are, from 1 to 256, one for each core
+without it (Islands, under Processes).
 
 ### Replaying a run, and other orders
 
@@ -137,6 +151,17 @@ than time. So (D170):
   A record keeps its run's seed and its clock (real or virtual), so a
   replay uses them, and the seed its random numbers started from,
   whether `SLIGHT_SEED` gave it or the system did.
+
+  With islands (D256), each records its own: `SLIGHT_RECORD=file` writes
+  island 0's record to `file` and island k's to `file.k`, each what that
+  island took from outside and what it saw of the others: which messages
+  came from another island, and when, as it took them. `SLIGHT_REPLAY=file`
+  replays them all together, each island from its own record, the
+  messages between them sent again and each taken when its record says,
+  so the run goes exactly as it did, however its threads went; how many
+  islands there were is the record's too. An island's record doesn't
+  replay alone (`file.2` stops, saying so), since it names the messages
+  that came to it rather than keeping them.
 
 ### @ARGV
 
@@ -184,8 +209,38 @@ often it's asked for, and a file that includes itself, directly or not,
 is a compile error. Every program starts with an unwritten
 `(@include :prelude)`.
 
-It's not a module system: there's one namespace, and the whole program
-is compiled at once (D141).
+**A file with a header is a module** (D248). The header is a file beside
+it with the same name: `X.sli` (in s-expressions) or `X.slyi` (in the
+C-style syntax) for `X.slight` or `X.sly`. It holds `deftype` and `sig`
+forms, and `@include`s of other modules, and nothing else:
+
+    ; lib/map.sli
+    (deftype (Map K V) tuple)
+    (sig (map/get K V) ((Map K V) K) (or V :not-found))
+    (sig (map/put K V) ((Map K V) K V) (Map K V))
+
+A file that includes a module sees the functions its header has a `sig`
+for, and its header's types; the rest of the module's functions and
+types are its own, and naming one is a compile error that says whose it
+is (`map/bit is private to lib/map.slight: its header doesn't declare
+it`). A `sig` of `any`s exports a function without saying more. What a
+header includes, whoever includes the header sees too, as with C's
+headers. A module's own names don't clash with anyone else's, and its
+code calls the prelude's functions, whatever the program that includes
+it defines. A module defines functions and types, and nothing else runs
+at its top level. Every library has a header, and so does the prelude,
+whose helpers (`map-loop`, `sort-merge`, ...) are its own.
+
+A file without a header is spliced in where it's included, as it always
+was: its names are its includer's, and its top-level forms run there.
+The program is still compiled whole (D141), the modules with it.
+
+In the C-style syntax, a header declares a function by its prototype,
+the function without its body, which is its `sig`:
+
+    // shape.slyi
+    type Shape = :rect(num, num) | :square(num);
+    fun shape::area(s : Shape) : num;
 
 
 ## Syntax
@@ -221,6 +276,11 @@ list too. `'(:inc)` is the list `((quote inc))`, not the message
 `(:inc)`. Write `(list :inc)`, or `'(inc)`.
 
 `$$` is the current process, and `^$$` its parent (Processes).
+
+A file ending in `.sly` is in a second syntax, C-style, with the same
+meaning: `fun f(a, b) { ... }`, `let x = e;`, infix operators, `[a,
+...xs]`, `:tag(a)`, `match x { p => e, ... }`. `docs/SYNTAX.md` has it
+all (D246). Either kind of file can include the other.
 
 `\n`, `\r`, `\t` and `\e` are also names, for the one-character strings,
 and `math/PI` is the float 3.141592653589793. They're constants rather than
@@ -286,10 +346,15 @@ forms in order (Files).
   step, where a list takes a step per element (D169). They print as
   `#(1 "a" b)`. `(tuple 1 "a" :b)` makes one, and a pattern such as
   `#(n s k)` takes one apart.
+- **Arrays**: numbers of one kind, unboxed, side by side: `:float`, IEEE
+  doubles, or `:int`, integers (D253). They print as `#float(1.0 2.5)`
+  and `#int(1 2)`. There's no literal: `(list->array :float (list 1
+  2.5))` makes one (Arrays, under Builtins).
 - **Functions**: a `defun` used as a value, a `lambda`, or a builtin used
   as a value. They print as `#<function name>` or
   `#<function lambda at prog.slight:3:9>`.
-- **Pids**: a process, or a device. They print as `#<pid 2>`.
+- **Pids**: a process, or a device. They print as `#<pid 2>`, and one on
+  another island than the main one with its island, `#<pid 5@2>` (D256).
 
 Nothing can be changed once it's made, and nothing has a cycle.
 
@@ -399,6 +464,19 @@ waits, which is the usual way to start one:
 An actor can't be joined: a task that wants its value reads the actor's
 pid. Its value is kept for its parent if that's a task, till the parent
 has read it, and otherwise isn't kept (Processes, D243, D245).
+
+### spawn/on
+
+    (spawn/on k expr)
+
+As `spawn`, but the actor is on island `k`, from 0 below `(islands)`
+(Islands, under Processes, D256). `k` is worked out first, by the
+caller; an island that isn't one faults (`:out-of-range`), as does
+anything but an integer (`:not-an-int`). On the caller's own island it's
+`spawn`; on another, the caller waits while that island makes the actor,
+and gets its pid, `#<pid 1@2>`.
+
+    (spawn/on (% i (islands)) (work me i))
 
 ### connect
 
@@ -510,6 +588,69 @@ be bound (`$$`, `cond`, ...). There are no guards: match the shape, and
 test the rest in the body, with `cond`.
 
 
+## Types
+
+The compiler knows what it can of each value's type, and says, before
+the program runs, what will go wrong if it gets there: a builtin given
+what it never takes, a test that's never a boolean, a match none of
+whose arms can match, an arm nothing can reach, a message an actor can
+never take, a task sent to or an actor joined (D247, `docs/TYPES.md`).
+It knows the builtins' types, the prelude's, literals', what patterns
+and tests say of a value, and what each function gives; where it knows
+nothing, it says nothing. Types say nothing to the code: a program runs
+the same with them or without.
+
+A type is a name, `int`, `float`, `num` (either), `str`, `sym`, `bool`,
+`nil`, `pid`, `tuple`, `fun`, `array` (of either kind), `any` or
+`never`; a keyword, `#true` or
+`#false`, that value alone; or a form: `(list T)`, a list of `T`s;
+`(shape A B)`, a list of an `A` and a `B`, and `(shape A & T)`, an `A`
+then a list of type `T`; `(:tag A B)`, a list headed by `:tag`, with `&`
+for the rest as in patterns; `(tuple A B)`; `(array int)` and `(array
+float)`; `(fun (A B) C)`; `(or A B)`;
+`(task T)`, a task whose value is a `T`; `(actor M)`, an actor that takes
+messages of type `M`; `(address M)`; or a name `deftype` gave, with its
+parameters: `(Result int str)`.
+
+### deftype
+
+    (deftype Name type)
+    (deftype (Name A B) type)
+
+Top level only. Names a type; `A` and `B` stand for the types it's
+given. A type may mention itself, and one declared after it:
+
+    (deftype (Tree T) (or :leaf (:node (Tree T) T (Tree T))))
+
+The prelude names `(Result T E)`, `(or (:ok T) (:error E))`, and `Json`,
+what `json/parse` gives.
+
+### sig
+
+    (sig name (param-type ...) result-type)
+    (sig name (param-type ...) result-type (recv message-type))
+    (sig (name A B) (param-type ...) result-type)
+
+Top level only, one for a function, which must be defined. Says what its
+parameters and its result are, and, for a function that waits, what the
+actor it's in takes; a call, and the function's body, are checked
+against it. A `sig` with type variables is generic: each call works out
+what they are from its arguments.
+
+    (sig (map A B) ((fun (A) B) (list A)) (list B))
+    (sig counter (int) int (recv (or (:inc) (:get (address int)) :stop)))
+
+### the
+
+    (the type expr)
+
+`expr`, checked to be a `type`, and taken to be one after; not a
+conversion. `(let n (the int (ask c (list :get))))`.
+
+In `.sly`, a type's `:` has a space on each side: `fun f(x : int, y) :
+str { ... }` (`docs/SYNTAX.md`).
+
+
 ## Functions and calls
 
 `(f a b)` calls `f`. The arguments are evaluated left to right, and a
@@ -543,9 +684,10 @@ compile error.
 
 ## Processes
 
-Everything runs in processes, on one core. Each has its own heap and a
-mailbox. Processes share nothing; they talk by sending messages, which
-are copied.
+Everything runs in processes, each on an island, a core of its own
+(Islands, below), the main one unless the program places it elsewhere.
+Each has its own heap and a mailbox. Processes share nothing; they talk
+by sending messages, which are copied.
 
 There are two kinds (D243). A **task**, started with `(fork expr)`,
 computes a value: it can't wait in `recv`, nor be sent to, and `join`
@@ -869,6 +1011,14 @@ first, and is still to be taken.
   time of day. On the virtual clock (Running a program) it moves only
   as the timers do, so work takes no time on it; and a recorded run
   replays with the same readings.
+- `(clock/now)`: the time of day, the microseconds since
+  1970-01-01T00:00:00Z, an integer: POSIX time, with no leap seconds
+  (D254). It's the system's clock, which can be set back or forward
+  while a program runs, so a timer goes by `clock/us`, which can't. On
+  the virtual clock it's the virtual time from a start: `SLIGHT_EPOCH`'s
+  seconds, if that's set, or else the time of day when the program
+  started. A recorded run replays with the same readings, its start
+  included. `(@include :time)` makes dates of it.
 
 ### Scheduling
 
@@ -885,6 +1035,60 @@ if another is ready. Every loop is a tail call, so no process can hold
 up the rest.
 `SLIGHT_SCHED` changes the order, for testing (under "Replaying a run,
 and other orders").
+
+### Islands
+
+Each core runs an **island** (D256): the runtime, as one core has it,
+on a thread of its own, with its own processes, run queue, timers and
+devices. Islands share nothing but the messages that cross between them
+and the big strings and arrays that go without a copy (The heap). There
+are `(islands)` of them, one for each core unless `SLIGHT_ISLANDS` says
+how many (1 to 256); island 0 is the main one, where the root runs, and
+`(island)` is the number of the one the caller is on. An island's thread
+starts the first time something's placed on it, so a program that never
+places anything runs on one, as it would without islands.
+
+Nothing moves from island to island on its own: a process runs where
+it's started. `fork` starts a task on its parent's island, as `spawn`
+does an actor, and `(spawn/on k expr)` starts an actor on island `k`.
+A program spreads its work with `(spawn/on (% i (islands)) ...)`, and
+runs the same, if slower, on one island.
+
+A pid says its island: `#<pid 5@2>` is the fifth process made on island
+2, each island numbering its own, and island 0's print as before,
+`#<pid 5>`. A pid works the same wherever it's used:
+
+- `send` and `after` to another island's process copy the message
+  there, in order: messages from one process to another arrive in the
+  order they were sent, wherever each is. A message sent to a task
+  there goes nowhere, said as a dead letter.
+- `monitor` of another island's process, and `read` of one from a task,
+  tell its end as they would of one here; an actor's end comes to its
+  parent if that's a task, wherever it is, to be read.
+- `kill` of another island's process ends it when its island takes the
+  word, a moment later; `kill` doesn't wait for that.
+- `join` and `join/race` take a task, which is always on its parent's
+  island, so another island's pid faults (`:not-a-task`).
+
+The terminal and `:system` are island 0's: `connect :keypress` or
+`connect :system` from another island starts its actor on island 0
+(though a task's `open :system` is its own island's), and `:system`
+tells of every island, asking the others through their inboxes, with
+each process's messages to and from other islands counted.
+Commands (`:exec`), files and sockets are the island's that opens them.
+Each island's virtual clock (`SLIGHT_CLOCK=virtual`) is its own, moving
+when nothing can run on that island. The program ends once no island can
+do anything more, and no message is on its way to one; the root's value
+is printed then, and a deadlock is told as before, across islands.
+
+A computation on one island doesn't slow another: a terminal program on
+island 0 answers keys while islands 1 to 7 work, say, and a big array
+or string, a frame of a simulation, goes to island 0 as a handle.
+
+    (defun work (to n) (send to (list n (fib n))))
+    (let me (address))
+    (dotimes 0 20 (lambda (i) (spawn/on (% i (islands)) (work me (+ i 15)))))
+    (sort-by car (map (lambda (_) (read me)) (range 0 20)))
 
 ### The heap
 
@@ -911,6 +1115,16 @@ or not.
 What's live is what the process can still reach, and that includes
 whatever a function that hasn't returned has bound with `let`, until it
 returns: a `let` at the top level keeps its value till the program ends.
+
+A string of 4 KB or more, or an array of numbers of 4 KB or more (512
+elements), isn't in the heap but in a buffer of its own, which
+processes share (D253): sending it, forking with it, or a task's result
+holding it, copies a handle and not the bytes, so a big string sent to
+a thousand processes is in memory once. It's freed when the last
+process holding it has collected it, or ended. Each process counts the
+whole of every such string it holds toward its cap, since that's what
+it keeps alive, and one that makes them and drops them collects as
+often as it needs to. Nothing about it shows to a program but memory.
 
 
 ## Devices
@@ -1065,6 +1279,31 @@ still open in it included (D205).
     ; (:ok ("first line" "second line"))
 
 `lib/fs.slight` has `slurp` and `spew`, written this way.
+
+What isn't reading or writing a file is a builtin, not a device (D254):
+each makes its system call where it's called, as opening a file does,
+and gives `(:ok x)`, or `(:error (name path))` with errno's name as a
+device's failure has it, `:enotempty`, `:exdev` and `:ebusy` among them.
+A path with a NUL in it is `:io-error`. Each is recorded, so a run
+replays without the files; one that changes something isn't made in a
+replay.
+
+- `(fs/list dir)`: the names in the directory, but `.` and `..`, sorted
+  by their bytes, so the order is the same on every file system.
+- `(fs/stat path)`: `(:ok ((:kind k) (:size n) (:modified us) (:mode
+  m)))`: `k` is `:file`, `:dir`, `:link` or `:other` (a socket, a pipe,
+  a device); `us`, the time it was last changed, as `clock/now` counts;
+  and `m`, its permission bits (`493` is `0755`). A symbolic link isn't
+  followed: it's `:link`, its size its target's name's.
+- `(fs/delete path)`: deletes a file, or a directory with nothing in it
+  (`:enotempty` otherwise). `(:ok ())`.
+- `(fs/rename from to)`: moves `from` to `to`, replacing a file there.
+  A failure names `from`. `(:ok ())`.
+- `(fs/mkdir path)`: makes a directory, one level, readable and writable
+  by whom the umask allows. `(:ok ())`.
+
+`lib/fs.slight` has trees on these: `fs/mkdir-all`, `fs/delete-all` and
+`fs/walk`.
 
 ### Sockets
 
@@ -1245,20 +1484,28 @@ A device that tells about the program's processes and the runtime
 answers its owner, whose first message is `(:open s)`. It's asked:
 
 - `(:processes)`: it answers with `(:process s info)` for each process
-  that hasn't ended, in the order of their pids, and then `(:end s)`.
-  It copies what it tells of them all at once, so that it all describes
-  one moment: nothing runs in between. Then it sends them one at a
-  time, as a file sends lines: the next when the owner, having taken
-  the last, waits in `recv` again; so a million processes never pile up
-  in a mailbox. A `(:processes)` asked before the last one's `(:end s)`
-  is answered after it.
-- `(:process pid)`: it answers at once, with `(:process s info)`, or
+  that hasn't ended, island by island, island 0's first, and on each in
+  the order of their pids, and then `(:end s)`. It copies what it tells
+  of an island's processes all at once, so that each island's describes
+  one moment: nothing runs there in between, though each island's
+  moment is its own. Then it sends them one at a time, as a file sends
+  lines: the next when the owner, having taken the last, waits in
+  `recv` again; so a million processes never pile up in a mailbox. A
+  `(:processes)` asked before the last one's `(:end s)` is answered
+  after it.
+- `(:processes k)`: the same, for island `k`'s processes alone.
+- `(:process pid)`: it answers with `(:process s info)`, or
   `(:ended s pid result)` if `pid` has ended, `result` being what `join`
   would give, or `:ended`. A device is a process that has ended and
   kept nothing.
-- `(:runtime)`: it answers at once, with `(:runtime s info)`.
+- `(:runtime)`: it answers with `(:runtime s info)`.
 
-Anything else is a dead letter. An `info` is a list of `(key value)`,
+Anything else is a dead letter, `(:processes k)` with no island `k`
+among them. A question about the device's own island is answered at
+once; one about another is asked of that island, through its inbox, and
+answered when it replies, a moment later. Either way the answers come in
+the order the questions were asked: one that waits on another island
+holds up those after it (D256). An `info` is a list of `(key value)`,
 which `lookup` reads; more keys may come. A process's:
 
 - `(:pid p)`, and `(:parent q)`, the process that forked it (`()` for
@@ -1285,15 +1532,29 @@ which `lookup` reads; more keys may come. A process's:
 - `(:stack held)`: whether it holds a stack (waiting in `recv`, it gives
   its back).
 - `(:devices pids)`: the devices it owns.
+- `(:island k)`: the island it's on (D256).
+- `(:sent (n bytes))`: the messages it has sent to processes on other
+  islands, and the bytes copied for them, not counting a shared
+  buffer's, which crosses as a handle. A timer's message (`after`) to
+  another island counts to the island it was set on, not the process,
+  which may have ended by then.
+- `(:received (n bytes))`: the messages from other islands given to it,
+  to it or to one of its addresses.
 
-The runtime's: `(:processes n)` that haven't ended; `(:pids n)` made,
-processes and devices, ended or not; `(:records n)` of those the runtime
-still holds an entry for: running, open, or keeping a task's value for
-its parent (D244); `(:ready n)` in the run queue;
-`(:timers n)` pending; `(:devices n)` open; `(:heap bytes)` in use by
-all the processes; `(:heap-max bytes)`, the most one process's heap
-holds (D233); `(:stacks n)` held; `(:clock ms)` since the program
-started; and `(:reductions n)`, made by every process, ended or not.
+The runtime's, every island's added up: `(:processes n)` that haven't
+ended; `(:pids n)` made, processes and devices, ended or not;
+`(:records n)` of those the runtime still holds an entry for: running,
+open, or keeping a task's value for its parent (D244); `(:ready n)` in
+the run queues; `(:timers n)` pending; `(:devices n)` open; `(:heap
+bytes)` in use by all the processes; `(:heap-max bytes)`, the most one
+process's heap holds (D233); `(:stacks n)` held; `(:clock ms)` since the
+program started; `(:reductions n)`, made by every process, ended or not;
+and `(:islands infos)`, an info for each island, started or not, in
+order: `(:island k)`, `(:started b)`, `(:processes n)`, `(:ready n)`,
+`(:timers n)`, `(:devices n)`, `(:heap bytes)`, `(:shared bytes)` (the
+shared buffers its processes hold, D253), `(:reductions n)`, and
+`(:sent (n bytes))` and `(:received (n bytes))`, its messages to and
+from other islands.
 
 A timer's message to the device is answered when it's due, so this
 shows where every process is, once a second (`examples/top.slight` is a
@@ -1360,10 +1621,12 @@ keeps it in `Math` (D221).
   domain they give `nan` or `inf` rather than faulting: `(math/sqrt -1)`
   is `nan`, and `(math/log 0)` is `-inf`. `math/expm1` and
   `math/log1p` keep their precision near 0, where `(math/exp x)` less
-  one, or `(math/log (+ 1 x))`, lose it. Beside `math/sqrt`, which is
-  exact everywhere, each is only as good as the platform's C library,
-  which can be a bit off in the last place, and so differ between
-  machines (D76).
+  one, or `(math/log (+ 1 x))`, lose it. Each is correctly rounded, the
+  float nearest the exact result, so the same on every machine: they're
+  CORE-MATH's (`vendor/core-math`, D253), not the C library's, which
+  can be a bit off in the last place and differ between machines (D76).
+  So a run that computes with them replays on any machine, not only
+  the one that recorded it, and `math/pow` on two floats too.
 - `(math/nan? x)`: whether `x` is the float `nan`; anything else is
   `#false`. `nan` is the one value that isn't `==` to itself.
 - `math/PI`, `math/E`: 3.141592653589793 and 2.718281828459045.
@@ -1462,6 +1725,7 @@ Each takes one value of any type, and gives `#true` or `#false`.
 - `int?`, `float?`, and `num?` for either.
 - `str?`: a string.
 - `tuple?`: a tuple.
+- `array?`: an array of numbers, of either kind.
 - `lambda?`: a function, of any kind.
 - `pid?`: a pid, a device's included.
 
@@ -1513,6 +1777,85 @@ element by element, and a tuple is never `eq?` to a list.
     (tuple/get p 1)                      4
     (tuple/set p 0 5)                    #(5 4)
     (match p (#(x y) (+ x y)))           7
+
+### Arrays
+
+An array holds numbers of one kind, side by side, unboxed (D253):
+`:float`, IEEE doubles, or `:int`, integers, each in 63 bits as any
+integer is, so an element always reads back. It suits a vector, a
+field over a grid or a series, where a list takes a cell and a box for
+each float. An element is one step away, as a tuple's is, and an array
+never changes: `array/set` makes a new one, copying the rest, so it's
+not for a loop that changes an element at a time; `array/generate`,
+`array/map` and the arithmetic below make a whole one at once.
+
+- `(array/make kind n x)`: `n` elements, each `x`; `kind` is `:float`
+  or `:int`, and anything else faults (`:out-of-range`), as does a
+  negative `n`.
+- `(list->array kind xs)`, `(array->list a)`. A `:float` array takes
+  any numbers, an integer made the nearest float, as `int->float` makes
+  it; an `:int` one takes only integers (`:not-an-int`). To make an
+  `:int` array a `:float` one: `(list->array :float (array->list a))`.
+- `(array/kind a)`: `:float` or `:int`. `(array/len a)`: how many.
+- `(array/get a i)`: the element at index `i`, from 0, checked as
+  `tuple/get` checks it.
+- `(array/set a i x)`: a new array, `a` with `x` at index `i`.
+- `(array/slice a start end)`: a new array of the elements from `start`
+  up to but not including `end`, each clamped, as `tuple/slice`.
+- `(array/concat a b)`: `a`'s elements, then `b`'s.
+
+Element by element, each operand an array or a number, the arrays of
+one kind and length (a length that differs faults `:out-of-range`,
+showing it), and at least one of them an array:
+
+- `(array/add a b)`, `(array/sub a b)`, `(array/mul a b)`: as `+`, `-`
+  and `*` on each pair, so `(array/mul a 2)` doubles every element and
+  `(array/sub 1 a)` takes each from 1. On `:int` arrays a result past 63
+  bits faults (`:overflow`).
+- `(array/div a b)`: as `/`, always a `:float` array; a zero anywhere
+  in `b` faults (`:div-by-zero`), before any element is worked out.
+
+The operands of a call are all of its arrays' kind: an `:int` array's
+are integers (`:not-an-int` otherwise, a `:float` array among them), and
+a `:float` array's any numbers (`:not-a-number` otherwise, an `:int`
+array among them), an integer taken as a float, as `+` takes one. An
+`:int` array never mixes with a float, so a result's kind is never a
+surprise.
+
+Reductions, in order, from the first element to the last, so the answer
+is the obvious loop's, each sum and product rounded on its own (a sum
+in another order, or with a product and a sum fused, can differ in the
+last bits):
+
+- `(array/sum a)`: from 0 (or `0.0`), so an empty array's is that.
+  `(array/sum (list->array :float (list 1.0e16 1.0 -1.0e16 1.0)))` is `1.0`:
+  the first 1.0 is lost against 1e16.
+- `(array/dot a b)`: the sum of the products of each pair, of two
+  arrays of one kind and length.
+- `(array/min a)`, `(array/max a)`: the least or greatest element, the
+  first on a tie, as `math/min` and `math/max` take them two at a time;
+  so a `nan` is the answer only if it's first. An empty array faults
+  (`:out-of-range`).
+- `(array/matmul a b n k m)`: `a` as `n` rows of `k` elements times `b`
+  as `k` rows of `m`, an array of `n` rows of `m`, row by row: each
+  element the `array/dot` of a row of `a` and a column of `b`, summed in
+  the same order. Arrays of other lengths fault (`:out-of-range`).
+  `lib/matrix.slight` (`(@include :matrix)`) is matrices on it.
+
+Anything but an array where one goes faults (`:not-an-array`). `eq?`
+compares arrays element by element, an element as `eq?` compares
+numbers, so `-0.0` and `0.0` are alike and a `nan` is like nothing; an
+`:int` array is never `eq?` to a `:float` one, nor to a list or a tuple.
+An array of 4 KB or more (512 elements) is shared, as a big string is
+(The heap). `json/print` writes an array as a JSON array, and
+`sexp/print` as `#float(...)` or `#int(...)`, which `sexp/parse` reads
+back. The prelude has `array/generate`, `array/map` and `array/fold`.
+
+    (let a (list->array :float (list 1 2 3)))
+    (array/mul a 2)                      #float(2.0 4.0 6.0)
+    (array/dot a a)                      14.0
+    (array/generate :int 4 (lambda (i) (* i i)))
+                                         #int(0 1 4 9)
 
 ### Strings
 
@@ -1643,9 +1986,62 @@ found in one step:
 - `(bytes/index-of s m [from])`: the byte index of the first `m` at or
   after `from` (clamped), or -1.
 
+Numbers as bytes, for binary protocols and files (D254), by specs, a
+list of keywords, each a width and an order: `:u8` and `:i8`; `:u16be`,
+`:u16le`, `:i16be` and `:i16le`, and the same for 32 and 64 bits;
+`:f32be`, `:f32le`, `:f64be` and `:f64le`; and `(:bytes n)`, `n` bytes
+as they are. `u` is unsigned, `i` two's complement, `f` IEEE, `be`
+big-endian (network order) and `le` little-endian.
+
+- `(bytes/pack specs values)`: a string of the values' bytes, each as
+  its spec says, the lists the same length. A value out of its spec's
+  range faults (`:out-of-range`), as does a string of the wrong length
+  for `(:bytes n)`, a spec that isn't one, or lists of different
+  lengths; a float spec takes an integer too, and an `f32` is the
+  nearest one to the value. `(bytes/pack (list :u8 :u16be) (list 1
+  258))` is the bytes 1, 1, 2.
+- `(bytes/unpack specs s at)`: reads the values back from index `at`:
+  `(:ok values next)`, `next` the index after them, or `(:error :short)`
+  if `s` hasn't all their bytes yet, so a reader can wait for more. An
+  `f32` is widened exactly; a `u64` from 2^62, or an `i64` outside slight's
+  63 bits, faults (`:overflow`), as arithmetic does.
+
+Bytes as text, and back (D255); what can't be read back is `#false`,
+as `str->int` has it:
+
+- `(bytes->base64 s)`: base64 (RFC 4648), padded with `=` to a multiple
+  of four: `(bytes->base64 "foob")` is `"Zm9vYg=="`. `(base64->bytes
+  s)` reads it back, the padding there and right, every character in
+  the alphabet, or it's `#false`.
+- `(bytes->base64url s)`: base64url, `-` and `_` where base64 has `+`
+  and `/`, and no padding, as JWTs have it. `(base64url->bytes s)` reads
+  it with or without its padding, but right if it's there; `+` and `/`
+  aren't in its alphabet.
+- `(bytes->hex s)`: two lowercase hex digits a byte. `(hex->bytes s)`
+  reads them in either case.
+
 There's no character type: a character is a one-character string, or a
 code point. Build a long string by collecting the pieces in a list and
 joining them.
+
+### Secrets
+
+Hashes, MACs and random bytes for keys and tokens (D255), in C of
+slight's own: a hash is a fixed algorithm, with nothing to patch (D251).
+Each gives raw bytes, which `bytes->hex` or `bytes->base64` show.
+
+- `(crypto/sha256 s)`, `(crypto/sha512 s)`: the digest, 32 or 64
+  bytes (FIPS 180-4).
+- `(crypto/hmac-sha256 key msg)`, `(crypto/hmac-sha512 key msg)`: HMAC
+  (RFC 2104) on either, any length of key.
+- `(crypto/equal? a b)`: whether two strings are the same, in a time
+  that depends on their length alone, not on where they differ, for
+  checking a MAC or a token: `eq?` stops at the first byte that differs,
+  which tells someone timing it how much of a guess was right.
+- `(crypto/random-bytes n)`: `n` bytes (up to 1 MB) from the system's
+  entropy, for a key, a token or a nonce. Not `rand/`'s: those come from
+  a seed, so they're the same every run that has it (D222). A recorded
+  run's are recorded, so a replay has the same.
 
 ### JSON
 
@@ -1665,10 +2061,11 @@ order, duplicates kept. `{"a": [1, 2.5], "b": null}` is
   pass through.
 - `(json/print v)`: `v` as compact JSON, on one line, so what it gives
   is NDJSON as it is: `(json/print (list 1 "a" :null))` is
-  `"[1,\"a\",null]"`. A tuple is an array too. A float keeps its point or exponent, and a string
+  `"[1,\"a\",null]"`. A tuple is an array too, and so is an array of
+  numbers (D253). A float keeps its point or exponent, and a string
   escapes `"`, `\` and the control characters. Anything JSON can't
   hold faults (`:not-json`): any other symbol, a pid, a function, `nan`
-  or `inf`, or an object's member that isn't `(key value)` with a string
+  or `inf` (in an array of floats too), or an object's member that isn't `(key value)` with a string
   key.
 
 A file or socket can be read as JSON too: `(:read :json)`, under Files.
@@ -1683,7 +2080,9 @@ forms, and a program can read slight's own source:
   `json/parse`. The text is what the compiler reads: lists, integers and
   floats, strings with the same escapes, symbols and keywords, `#true`
   and `#false`, `'x` as `(quote x)`, `#(...)` as a tuple (which in a
-  program is a pattern, D176), comments, and doc blocks, which it
+  program is a pattern, D176), `#float(...)` and `#int(...)` as arrays
+  of numbers (D253), which hold only numbers, an `#int`'s integers in 63
+  bits (and which a program can't have in its source), comments, and doc blocks, which it
   skips. So, as in a file, a line that starts with `=` and a letter is a
   doc block's, or an error: `(sexp/parse "=x")` is `(:error (:bad-sexp
   1))`, but `" =x"` and `"(=x)"` read `=x` as a name. And `:a` reads as
@@ -1700,8 +2099,9 @@ forms, and a program can read slight's own source:
   A string escapes `"`, `\` and the control characters; a float always
   has digits on both sides of its point (`1.0e+21`); a symbol is its
   name, without a colon; `(:symbol "name")` is `name`; a tuple is
-  `#(...)`. Anything that isn't data faults (`:not-sexp`): a pid, a
-  function, `nan` or `inf`. `pprint` quotes a string the same way.
+  `#(...)`, and an array `#float(...)` or `#int(...)`. Anything that
+  isn't data faults (`:not-sexp`): a pid, a function, `nan` or `inf`
+  (in an array of floats too). `pprint` quotes a string the same way.
 
 A file or socket can be read as s-expressions too: `(:read :sexp)`,
 under Files.
@@ -1716,6 +2116,27 @@ under Files.
   `()`. `(tty/write "\e[2J")` clears a terminal.
 - `(tty/screen/rows)`, `(tty/screen/cols)`: the terminal's size, asked
   each time; 24 and 80 when stdout isn't a terminal.
+- `(log level msg fields)`: writes a line of JSON to stderr, what log
+  collectors read, and slight too, with `:json` (D254). `level` is
+  `:debug`, `:info`, `:warn` or `:error`; `msg` a string; `fields` an
+  association list, `(list (list "port" 8080))`, each name a string or a
+  keyword, or `()`. Returns `()`.
+
+      (log :info "listening" (list (list "port" 8080)))
+      ; {"time":"2026-10-29T14:03:07.123456Z","level":"info","pid":1,"msg":"listening","port":8080}
+
+  `time` is `clock/now`'s, as `time/iso` writes it, and `pid` the
+  process's number, followed by `"island":k` for a process on island k
+  other than 0, as a pid prints (D256). A field's value is written as `json/print` writes
+  it, except that what JSON can't hold, a pid, a function, a keyword
+  other than `:null`, a float that isn't finite, is a string, as `str`
+  writes it, wherever it is: `(list :error (list :enoent "x"))` is
+  `["error",["enoent","x"]]`, so logging an error never faults. A line
+  below `SLIGHT_LOG`'s level (`debug`, `info`, `warn` or `error`; `info`
+  if it isn't set) isn't written. stdout is flushed first, so the two
+  come in the order they were written; and a replay writes them again.
+  A level that isn't one faults (`:out-of-range`), and so does a field
+  that isn't a name and a value.
 
 ### Functions
 
@@ -1789,6 +2210,19 @@ Random numbers (D222):
 - `(rand/shuffle xs)`: the elements of `xs` in an order each of whose
   arrangements is as likely.
 
+Arrays of numbers (D253):
+
+- `(array/generate kind n f)`: an array of kind `:float` or `:int` of
+  `(f i)` for each `i` from 0 to `n - 1`.
+- `(array/map f a)`: `(f x)` for each element, an array of `a`'s kind.
+- `(array/fold acc f a)`: `(f acc x)` for each element, from the left,
+  as `fold/l`.
+
+`array/generate` calls `f` in order, from 0 up, and goes through a list
+of up to 512 elements at a time, since a builtin in C can't call back
+into slight: about a sixth of a microsecond an element. The arithmetic
+under Arrays is C's.
+
 Processes: `join/any` and `join/all`, under Waiting for a process.
 
 Its helpers (`fold/r-loop`, `reverse-onto`, `length-loop`, `sum-loop`,
@@ -1837,7 +2271,7 @@ anything.
 ### (@include :fs)
 
 `lib/fs.slight`: whole files at once, on top of `open`, each in a task
-of its own (D243). Each blocks only its caller.
+of its own (D243), which blocks only its caller; and trees.
 
 - `(slurp path)`: `(:ok lines)`, the file's lines without their
   newlines, as a list of strings.
@@ -1846,6 +2280,53 @@ of its own (D243). Each blocks only its caller.
 
 Either gives `(:error (name path))` if the file can't be opened, read or
 written: `(:error (enoent "notes.txt"))`, say.
+
+And trees, on the `fs/` builtins (Files, under Devices; D254), none of
+them following a link, so none leaves its tree. Each gives `(:ok x)`, or
+the first failure, `(:error (name path))`.
+
+- `(fs/mkdir-all path)`: makes the directory and any it's in that aren't
+  there, as `mkdir -p` does. One that's there already is no failure, if
+  it's a directory. `(:ok ())`.
+- `(fs/delete-all path)`: deletes the file, or the directory and all in
+  it, as `rm -r` does; a link is deleted, not what it points to. What
+  isn't there is no failure. `(:ok ())`.
+- `(fs/walk dir)`: `(:ok paths)`, every path in the tree, `dir/name` and
+  deeper, but not `dir`: each directory before what's in it, and a
+  directory's names in their bytes' order.
+
+### (@include :time)
+
+`lib/time.slight`: calendar time, from `clock/now`'s microseconds
+(D254), in UTC. POSIX time, so no leap seconds; and no time zones by
+name, only offsets from UTC.
+
+    (@include :time)
+    (time/iso (clock/now))      ; "2026-10-29T14:03:07.123456Z"
+
+- `(time/utc us)`: the date, a keyed list: `(:year y) (:month m) (:day
+  d) (:hour h) (:minute m) (:second s) (:us u) (:weekday w)`, the month
+  from 1, the weekday ISO 8601's, 1 for Monday to 7 for Sunday. Any
+  year an integer holds, before 1970 and before year 0 too.
+- `(time/from-utc date)`: the microseconds of a date, from what of its
+  fields it has, 1970, 1, 1 and 0s for those it hasn't (`:weekday` is
+  ignored). A month past 12, or below 1, moves into the years, and the
+  rest add as they are, so the 32nd of January is the 1st of February,
+  as with JavaScript's `Date.UTC`.
+- `(time/iso us)`: ISO 8601 in UTC, to the microsecond:
+  `"2026-10-29T14:03:07.123456Z"`. A year outside 0 to 9999 has a sign
+  and six digits, `"+010000-01-01..."`, as JavaScript writes it.
+- `(time/iso-offset us minutes)`: the same at a fixed offset from UTC,
+  east positive: `(time/iso-offset us 120)` ends `"+02:00"`.
+- `(time/http us)`: an HTTP date, `"Thu, 29 Oct 2026 14:03:07 GMT"`.
+- `(time/parse-iso s)`: `(:ok us)` for a date, `"2026-10-29"`
+  (midnight, UTC), or a date and a time with its offset, as RFC 3339
+  has them: `"2026-10-29T14:03:07Z"`, `"2026-10-29 16:03:07.5+02:00"`,
+  the `T` (or `t`, or a space) between, seconds and a fraction of any
+  length if they're there (cut at six digits), and `Z` (or `z`) or
+  `+HH:MM` or `-HH:MM`. Anything else, a date that doesn't exist, or a
+  time without an offset, which could be anywhere's, gives `(:error
+  (:bad-time s))`.
 
 ### (@include :map)
 
@@ -1886,11 +2367,42 @@ A map is a tuple, so `tuple?` says `#true` of one, and `pprint` shows the
 trie; `map->list` is the way to show it. A `nan` key is never found again,
 since `nan` isn't `eq?` to itself.
 
-Its helpers (`map/get-hashed`, `map/put-hashed`, `map/delete-hashed`,
-which take the key's hash, for tests; `map/bit`, `map/slot`,
-`map/bucket-index`, `map/leaf`, `map/put-at`, `map/pair`,
-`map/delete-at`, `map/collapse`, `map/walk` and `map/walk-slots`) are
-visible too, but not meant to be called.
+Its header (`lib/map.sli`, D248) also gives `map/get-hashed`,
+`map/put-hashed` and `map/delete-hashed`, which take the key's hash, for
+tests; the rest of its functions (`map/bit`, `map/slot`, `map/walk`, ...)
+are its own.
+
+### (@include :matrix)
+
+`lib/matrix.slight`: matrices of numbers on arrays (D253). A matrix is
+`#(rows cols a)`, `a` its elements row by row, an array of either kind;
+a value, as an array is, so a change gives a new matrix.
+
+    (@include :matrix)
+
+    (let m (matrix/from-rows :float (list (list 1 2) (list 3 4))))
+    (matrix/mul m m)                       #(2 2 #float(7.0 10.0 15.0 22.0))
+    (matrix/->rows (matrix/transpose m))   ((1.0 3.0) (2.0 4.0))
+
+- `(matrix/new rows cols a)`: of an array as long as `rows` times
+  `cols`. `(matrix/make kind rows cols x)`: each element `x`.
+  `(matrix/identity kind n)`: `n` by `n`, ones down the diagonal.
+  `(matrix/from-rows kind rows)`: of a list of rows, each a list of
+  numbers, all as long.
+- `(matrix/rows m)`, `(matrix/cols m)`, `(matrix/data m)`: its parts.
+- `(matrix/get m i j)`, `(matrix/set m i j x)`: row `i`, column `j`,
+  from 0. `(matrix/row m i)`, `(matrix/col m j)`: as arrays.
+  `(matrix/->rows m)`: its rows as lists.
+- `(matrix/transpose m)`; `(matrix/add a b)`, `(matrix/sub a b)`, of one
+  shape; `(matrix/scale m x)`, every element times `x`.
+- `(matrix/mul a b)`: `a` times `b`, `a`'s columns as many as `b`'s
+  rows, through `array/matmul`, each element summed in order.
+  `(matrix/apply m v)`: `m` times a column, an array as long as `m` has
+  columns, giving an array as long as it has rows.
+
+A shape that doesn't fit what it's given to raises `(:bad-shape what)`,
+and an index outside the matrix `(:out-of-range (i j))`. Its header,
+`lib/matrix.sli`, has the type `(Matrix N)`.
 
 ### (@include :ds)
 
@@ -1944,8 +2456,13 @@ answer comes in time.
 ### (@include :http)
 
 `lib/http.slight`: HTTP/1.1 on `:tcp`, a server and a client (D173). One
-request and one reply to each connection, which then closes. HTTPS
-waits for TLS (step 12c).
+request and one reply to each connection, which then closes. A client's
+`https://` goes through curl, run as a command (`:exec`), which must be
+installed: it checks the server's certificate against the system's, and
+goes through a proxy if the environment names one (`https_proxy`), and
+what comes back is read as a socket's reply is, so it's the same
+responses and streams (D251). A server leaves TLS to a proxy in front of
+it, such as nginx or Caddy.
 
     (@include :http)
 
@@ -1979,10 +2496,16 @@ waits for TLS (step 12c).
   no body) give `(:ok response)`, the response in the same shape, or
   `(:error reason)`. A reason is the device's, such as `(:econnrefused
   "127.0.0.1:1")`, or one of `(:bad-http what)` for a reply that isn't
-  HTTP, `(:bad-url url)`, `:no-tls` for an `https` URL, and `:closed` for
-  a connection that closed before its reply. They wait as long as the
-  reply takes (D236), in a task the caller joins, so an actor, or a
-  handler, can ask too.
+  HTTP, `(:bad-url url)`, and `:closed` for a connection that closed
+  before its reply. Over `https://`, curl's exit code says what failed, in
+  the device's words where there are some, with the host and port:
+  `:enotfound` (6), `:econnrefused` (7), `:etimedout` (28), `:epipe` (55)
+  and `:econnreset` (56); and `(:curl code "host:port")` for the rest, 35
+  and 60 among them, TLS failing, as curl's manual lists them. A reply
+  isn't given till curl has ended with 0, so one cut short is never taken
+  for a whole one. `(:enoent "curl")` means there's no curl. They wait as
+  long as the reply takes (D236), in a task the caller joins, so an
+  actor, or a handler, can ask too.
 - `(http/request-within ms method url headers body)` is `http/request`
   with `(:error :timeout)` if the reply hasn't all come in `ms`
   milliseconds. Its timer doesn't hold up the program's end once the
@@ -1993,6 +2516,16 @@ waits for TLS (step 12c).
   length is read to the end of the connection, except for HEAD, 1xx, 204
   and 304, which have no body. `Expect: 100-continue` gets its 100 at
   once.
+- `(http/parse-url url)`: `(:ok host port target)` for
+  `http://host[:port][/path[?query]]` and `https://...`, the port 80, or
+  443 for `https`, and the target `"/"` when none is given; and `(:error
+  (:bad-url url))` for anything else. It's what `http/request` reads its
+  URL with.
+- `(http/url-encode s)`: `s` percent-encoded (RFC 3986): every byte but
+  letters, digits and `-` `.` `_` `~` as `%XX`, so a space is `%20`.
+  `(http/url-decode s)`: each `%XX` made its byte and nothing else
+  changed, so `+` stays `+`; a `%` without two hex digits after it is
+  `#false` (D255).
 - `(http/stream method url headers body how)` makes the same request, and
   gives the reply to the caller as it comes, in messages, as a device
   gives a file (D181, D182). It gives the stream's pid, `s`, at once. The
@@ -2216,6 +2749,10 @@ argument it needs, or with one that isn't a string.
   `[Next](https://example.com/docs/next)`. A link to a place on the same
   page (`#top`), by a scheme a fetch can't follow (`mailto:`,
   `javascript:`), or with no text (an image's) is just its text.
+- `(tools/read path)`: the file's bytes, as a string, or it raises why
+  not; `(tools/save path text)` makes the file hold `text` and nothing
+  else, or raises why not. What the tools to read and write files are
+  made of, in a task of their own (D243).
 
 The commands these run are given their arguments directly, with no
 shell (but `run`'s), so a path or a text can't be taken for anything
@@ -2306,7 +2843,8 @@ socket. Either end can call the other, whichever connected.
 - `(rpc/next v)` sends `v` to the caller at once, from a handler that
   streams; its answer comes after its values. Only from the call's own
   process, whose parent (`^$$`) is the connection: so a handler calls its
-  caller back with `(rpc/call ^$$ name args)`.
+  caller back with `(rpc/call ^$$ name args)`. From a process with no
+  parent, the root, both raise `:not-in-a-call`.
 - `(rpc/serve where handlers)` listens at `where`, a port or
   `"host:port"`, or a Unix socket's path, and gives the listener's pid,
   which `kill` stops. The caller is sent `(:listening at)`, `at` being

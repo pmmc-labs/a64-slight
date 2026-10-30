@@ -1,0 +1,64 @@
+// game-of-life, without actors: a grid is a tuple of rows, each a tuple
+// of cells, :LIVE or :DEAD, so any cell is two steps away (D169). It
+// starts with a glider on a 6 by 8 grid that wraps around at its edges,
+// and prints four generations, each computed from the last by the usual
+// rules, which are a match on a cell and its count of living neighbours.
+
+fun init_grid(h, w, init_cell) {
+    range(0, h)
+        |> map(fun(x) => range(0, w) |> map(fun(y) => init_cell(x, y)) |> list_to_tuple)
+        |> list_to_tuple
+}
+
+fun grid_rows(grid) { tuple::len(grid) }
+fun grid_cols(grid) { tuple::len(tuple::get(grid, 0)) }
+
+fun wrap_around(n, size) { (n + size) % size }
+
+fun cell_at(x, y, grid) {
+    tuple::get(tuple::get(grid, wrap_around(x, grid_rows(grid))), wrap_around(y, grid_cols(grid)))
+}
+
+fun glider_cell(x, y) {
+    if member?([x, y], [[0, 1], [1, 2], [2, 0], [2, 1], [2, 2]]) { :LIVE } else { :DEAD }
+}
+
+fun living_neighbors(x, y, grid) {
+    fold::l(0, fun(n, offset) {
+        let [dx, dy] = offset;
+        if cell_at(x + dx, y + dy, grid) == :LIVE { n + 1 } else { n }
+    }, [[-1, 0], [-1, 1], [0, 1], [1, 1], [1, 0], [1, -1], [0, -1], [-1, -1]])
+}
+
+fun next_state(cell, n) {
+    match [cell, n] {
+        [:LIVE, 2] => :LIVE,
+        [:LIVE, 3] => :LIVE,
+        [:DEAD, 3] => :LIVE,
+        _          => :DEAD,
+    }
+}
+
+fun tick(grid) {
+    init_grid(grid_rows(grid), grid_cols(grid),
+        fun(x, y) => next_state(cell_at(x, y, grid), living_neighbors(x, y, grid)))
+}
+
+fun display_grid(grid, gen) {
+    tty::write("generation ", gen, "\n");
+    tuple_to_list(grid) |> map(fun(row) {
+        let line = tuple_to_list(row) |> map(fun(c) => if c == :LIVE { "@" } else { "_" });
+        tty::write(str::join("", line), "\n")
+    })
+}
+
+fun run_n_generations(n, grid, gen) {
+    if n == 0 {
+        gen
+    } else {
+        display_grid(grid, gen);
+        run_n_generations(n - 1, tick(grid), gen + 1)
+    }
+}
+
+run_n_generations(4, init_grid(6, 8, glider_cell), 0)

@@ -1,0 +1,44 @@
+; env: PATH=t/data/curl:/usr/bin:/bin
+; https:// through curl (D251), with a stand-in for curl that answers as
+; curl -i --raw --http1.1 does, without a network (t/data/curl/curl):
+; what curl is asked for each method, with headers (an empty one as
+; "name;") and a body on its input; a chunked reply, read as a socket's;
+; a status that isn't 200; curl's failures as its exit code says, in the
+; device's words where there are some; a reply cut short, and one read to
+; its end whose end was a failure; and a stream, which hears them the
+; same way.
+
+(@include :http)
+
+(defun shown (result)
+    (match result
+        ((:ok (status _ body)) (list status (str/split body "\n")))
+        (other                 other)))
+
+(defun heard (s acc)
+    (recv
+        ((:head _ status _) (heard s (cons (list :head status) acc)))
+        ((:line _ text)     (heard s (cons (list :line text) acc)))
+        ((:eof _)           (reverse (cons (list :eof) acc)))
+        ((:error p reason)  (reverse (cons (list :error reason (eq? p s)) acc)))))
+
+(defun streamed (url)
+    (cadr (read (spawn (heard (http/stream :get url () "" :lines) ())))))
+
+(let base "https://example.test")
+(map pprint (list
+    (shown (http/get (str base "/args")))
+    (shown (http/request :post (str base "/args") (list (list "Content-Type" "text/plain") (list "x-empty" "")) "a body\nof two lines"))
+    (shown (http/request :delete (str base "/args") (list (list "x-n" 3)) ""))
+    (shown (http/request :head (str base "/args") () ""))
+    (shown (http/get (str base "/chunked")))
+    (shown (http/get (str base "/missing")))
+    (shown (http/get (str base "/nohost")))
+    (shown (http/get (str base "/refused")))
+    (shown (http/get "https://example.test:8443/cert"))
+    (shown (http/get (str base "/short")))
+    (shown (http/get (str base "/reset")))
+    (shown (http/get (str base "/to-eof")))
+    (streamed (str base "/chunked"))
+    (streamed (str base "/refused"))))
+:done

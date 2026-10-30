@@ -133,6 +133,14 @@ rt_value_t rt_max(rt_value_t a, rt_value_t b, const char *site) {
 }
 
 // These always give floats, as `/` does.
+// CORE-MATH's (vendor/core-math, D253): each the double nearest the exact
+// result, so the same on every machine, where libms differ in the last
+// bit (D76). sqrt is IEEE's, correctly rounded already.
+double cr_sin(double), cr_cos(double), cr_tan(double), cr_asin(double), cr_acos(double), cr_atan(double);
+double cr_sinh(double), cr_cosh(double), cr_tanh(double), cr_asinh(double), cr_acosh(double), cr_atanh(double);
+double cr_exp(double), cr_expm1(double), cr_log(double), cr_log2(double), cr_log10(double), cr_log1p(double);
+double cr_cbrt(double), cr_pow(double, double), cr_atan2(double, double), cr_hypot(double, double);
+
 static rt_value_t math(rt_value_t x, double (*f)(double), const char *site) {
     return rt_new_float(f(as_double(x, site)), site);
 }
@@ -141,7 +149,7 @@ static rt_value_t math(rt_value_t x, double (*f)(double), const char *site) {
 // bits overflows, and a negative exponent, whose result isn't an integer,
 // is out of range. A float on either side gives a float (D221).
 rt_value_t rt_pow(rt_value_t a, rt_value_t b, const char *site) {
-    if (!is_int(a) || !is_int(b)) return rt_new_float(pow(as_double(a, site), as_double(b, site)), site);
+    if (!is_int(a) || !is_int(b)) return rt_new_float(cr_pow(as_double(a, site), as_double(b, site)), site);
     int64_t base = rt_int_value(a), e = rt_int_value(b), r = 1;
     if (e < 0) rt_fault(RT_FAULT_RANGE, b, site);
     // Once the base's square overflows, so does the result: what's left of
@@ -154,32 +162,32 @@ rt_value_t rt_pow(rt_value_t a, rt_value_t b, const char *site) {
 }
 
 rt_value_t rt_sqrt(rt_value_t x, const char *site) { return math(x, sqrt, site); }
-rt_value_t rt_sin(rt_value_t x, const char *site)  { return math(x, sin, site); }
-rt_value_t rt_cos(rt_value_t x, const char *site)  { return math(x, cos, site); }
-rt_value_t rt_tan(rt_value_t x, const char *site)  { return math(x, tan, site); }
-rt_value_t rt_exp(rt_value_t x, const char *site)  { return math(x, exp, site); }
-rt_value_t rt_asin(rt_value_t x, const char *site)  { return math(x, asin, site); }
-rt_value_t rt_acos(rt_value_t x, const char *site)  { return math(x, acos, site); }
-rt_value_t rt_atan(rt_value_t x, const char *site)  { return math(x, atan, site); }
-rt_value_t rt_sinh(rt_value_t x, const char *site)  { return math(x, sinh, site); }
-rt_value_t rt_cosh(rt_value_t x, const char *site)  { return math(x, cosh, site); }
-rt_value_t rt_tanh(rt_value_t x, const char *site)  { return math(x, tanh, site); }
-rt_value_t rt_asinh(rt_value_t x, const char *site) { return math(x, asinh, site); }
-rt_value_t rt_acosh(rt_value_t x, const char *site) { return math(x, acosh, site); }
-rt_value_t rt_atanh(rt_value_t x, const char *site) { return math(x, atanh, site); }
-rt_value_t rt_log(rt_value_t x, const char *site)   { return math(x, log, site); }
-rt_value_t rt_log2(rt_value_t x, const char *site)  { return math(x, log2, site); }
-rt_value_t rt_log10(rt_value_t x, const char *site) { return math(x, log10, site); }
-rt_value_t rt_log1p(rt_value_t x, const char *site) { return math(x, log1p, site); }
-rt_value_t rt_expm1(rt_value_t x, const char *site) { return math(x, expm1, site); }
-rt_value_t rt_cbrt(rt_value_t x, const char *site)  { return math(x, cbrt, site); }
+rt_value_t rt_sin(rt_value_t x, const char *site)  { return math(x, cr_sin, site); }
+rt_value_t rt_cos(rt_value_t x, const char *site)  { return math(x, cr_cos, site); }
+rt_value_t rt_tan(rt_value_t x, const char *site)  { return math(x, cr_tan, site); }
+rt_value_t rt_exp(rt_value_t x, const char *site)  { return math(x, cr_exp, site); }
+rt_value_t rt_asin(rt_value_t x, const char *site)  { return math(x, cr_asin, site); }
+rt_value_t rt_acos(rt_value_t x, const char *site)  { return math(x, cr_acos, site); }
+rt_value_t rt_atan(rt_value_t x, const char *site)  { return math(x, cr_atan, site); }
+rt_value_t rt_sinh(rt_value_t x, const char *site)  { return math(x, cr_sinh, site); }
+rt_value_t rt_cosh(rt_value_t x, const char *site)  { return math(x, cr_cosh, site); }
+rt_value_t rt_tanh(rt_value_t x, const char *site)  { return math(x, cr_tanh, site); }
+rt_value_t rt_asinh(rt_value_t x, const char *site) { return math(x, cr_asinh, site); }
+rt_value_t rt_acosh(rt_value_t x, const char *site) { return math(x, cr_acosh, site); }
+rt_value_t rt_atanh(rt_value_t x, const char *site) { return math(x, cr_atanh, site); }
+rt_value_t rt_log(rt_value_t x, const char *site)   { return math(x, cr_log, site); }
+rt_value_t rt_log2(rt_value_t x, const char *site)  { return math(x, cr_log2, site); }
+rt_value_t rt_log10(rt_value_t x, const char *site) { return math(x, cr_log10, site); }
+rt_value_t rt_log1p(rt_value_t x, const char *site) { return math(x, cr_log1p, site); }
+rt_value_t rt_expm1(rt_value_t x, const char *site) { return math(x, cr_expm1, site); }
+rt_value_t rt_cbrt(rt_value_t x, const char *site)  { return math(x, cr_cbrt, site); }
 
 rt_value_t rt_atan2(rt_value_t y, rt_value_t x, const char *site) {
-    return rt_new_float(atan2(as_double(y, site), as_double(x, site)), site);
+    return rt_new_float(cr_atan2(as_double(y, site), as_double(x, site)), site);
 }
 
 rt_value_t rt_hypot(rt_value_t x, rt_value_t y, const char *site) {
-    return rt_new_float(hypot(as_double(x, site), as_double(y, site)), site);
+    return rt_new_float(cr_hypot(as_double(x, site), as_double(y, site)), site);
 }
 
 // The remainder of a floored division: its sign is b's, so (mod -1 5) is 4,

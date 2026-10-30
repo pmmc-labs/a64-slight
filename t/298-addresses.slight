@@ -59,3 +59,4 @@
 (pprint (join (fork (read/any ()))))
 (pprint (join (fork (read $$))))
 :done
+; warns: 58:22

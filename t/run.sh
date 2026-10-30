@@ -1,9 +1,10 @@
 #!/bin/sh
-# Golden tests: compile each t/NNN-name.slight, examples/name.slight and
-# docs/guide/code/name.slight that has a .expected next to it (or the
-# files given), run it, and diff
+# Golden tests: compile each t/NNN-name.slight (or .sly, D246),
+# examples/name.slight and docs/guide/code/name.slight that has a
+# .expected next to it (or the files given), run it, and diff
 # what it prints against the .expected: stdout and stderr together, then
-# "exit: N" if it exits with N other than 0. A line "; stdin: bytes" is
+# "exit: N" if it exits with N other than 0. A line "; stdin: bytes"
+# ("// stdin: bytes" in a .sly file) is
 # what the test reads from stdin (keys, say), written
 # with printf %b's escapes: \n, \r, \t, \\, and \0nnn in octal (\033 is
 # ESC); without one, stdin is empty. A line "; args: words" gives the
@@ -36,6 +37,11 @@ export SLIGHT_HEAP_MAX=64M
 export SLIGHT_CLOCK=virtual
 # And the random numbers start from the same seed every run (D222).
 export SLIGHT_SEED=1
+# And there are four islands (D256), so (islands) is the same on every
+# machine, whatever its cores.
+export SLIGHT_ISLANDS=4
+# And the time of day starts at 2026-01-01T00:00:00Z (D254).
+export SLIGHT_EPOCH=1767225600
 
 # The watchdog leaves a file to say it killed the test, since its own
 # output can't go down the pipe to diff: diff would wait for it.
@@ -58,13 +64,14 @@ output() {
 # $bin.fail.
 if [ "$1" = "--one" ]; then
     src=$2
-    name=$(basename "$src" .slight)
+    name=$(basename "$src")
+    name=${name%.*}
     bin=build/t/$TARGET/$name
-    printf '%b' "$(sed -n 's/^; stdin: //p' "$src")" >"$bin.stdin"
+    printf '%b' "$(sed -nE 's#^(;|//) stdin: ##p' "$src")" >"$bin.stdin"
     if ! node bin/slightc.ts --target "$TARGET" -o "$bin" "$src" >"$bin.fail" 2>&1; then
         echo "FAIL $name (compile)"
         exit 1
-    elif output "$bin" "$bin.stdin" "$(sed -n 's/^; args: //p' "$src")" "$(sed -n 's/^; env: //p' "$src")" | diff -u "${src%.slight}.expected" - >"$bin.fail"; then
+    elif output "$bin" "$bin.stdin" "$(sed -nE 's#^(;|//) args: ##p' "$src")" "$(sed -nE 's#^(;|//) env: ##p' "$src")" | diff -u "${src%.*}.expected" - >"$bin.fail"; then
         rm -f "$bin.fail"
         echo "ok   $name"
     else
@@ -76,8 +83,8 @@ fi
 
 if [ $# -eq 0 ]; then
     set --
-    for src in t/*.slight examples/*.slight docs/guide/code/*.slight; do
-        [ -f "${src%.slight}.expected" ] && set -- "$@" "$src"
+    for src in t/*.slight t/*.sly examples/*.slight docs/guide/code/*.slight; do
+        [ -f "${src%.*}.expected" ] && set -- "$@" "$src"
     done
 fi
 mkdir -p "build/t/$TARGET"
@@ -86,13 +93,15 @@ JOBS=${JOBS-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}
 # Build the runtime first, so that the tests don't all build it at once.
 node bin/slightc.ts --runtime --target "$TARGET" || exit 2
 for src in "$@"; do
-    rm -f "build/t/$TARGET/$(basename "$src" .slight).fail"
+    name=$(basename "$src")
+    rm -f "build/t/$TARGET/${name%.*}.fail"
 done
 printf '%s\n' "$@" | xargs -n 1 -P "$JOBS" ./t/run.sh --one
 
 fail=0
 for src in "$@"; do
-    name=$(basename "$src" .slight)
+    name=$(basename "$src")
+    name=${name%.*}
     if [ -f "build/t/$TARGET/$name.fail" ]; then
         [ $fail -eq 0 ] && echo
         echo "--- $name"

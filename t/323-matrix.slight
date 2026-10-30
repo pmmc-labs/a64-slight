@@ -1,0 +1,31 @@
+; lib/matrix.slight (D253): a matrix made from rows, of one value, the
+; identity; read by element, row and column; transposed, added, scaled,
+; multiplied, and times a column; and what it turns down, which it
+; raises, and raise isn't logged. Expected output worked out by hand.
+
+(@include :matrix)
+
+(defun try (pid)
+    (match (join pid)
+        ((:ok v)    v)
+        ((:error e) (list :error e))))
+
+(let m (matrix/from-rows :float (list (list 1 2 3) (list 4 5 6))))
+(let n (matrix/from-rows :int (list (list 1 2) (list 3 4) (list 5 6))))
+(pprint m)
+(pprint (list (matrix/rows m) (matrix/cols m) (matrix/get m 1 2) (matrix/row m 1) (matrix/col m 2)))
+(pprint (matrix/->rows (matrix/transpose m)))
+(pprint (matrix/->rows (matrix/mul (matrix/from-rows :int (list (list 1 2 3) (list 4 5 6))) n)))
+(pprint (matrix/->rows (matrix/add m (matrix/scale m 0.5))))
+(pprint (matrix/->rows (matrix/sub m m)))
+(pprint (matrix/apply m (list->array :float (list 1 0 -1))))
+(pprint (eq? (matrix/mul (matrix/identity :int 3) n) n))
+(pprint (matrix/->rows (matrix/set (matrix/make :int 2 2 0) 0 1 7)))
+(pprint (matrix/from-rows :int ()))
+(pprint (try (fork (matrix/get m 2 0))))
+(pprint (try (fork (matrix/get m 0 3))))
+(pprint (try (fork (matrix/mul m m))))
+(pprint (try (fork (matrix/add m n))))
+(pprint (try (fork (matrix/from-rows :int (list (list 1 2) (list 3))))))
+(pprint (try (fork (matrix/new 2 2 (array/make :int 3 0)))))
+:done

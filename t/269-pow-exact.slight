@@ -11,3 +11,4 @@
 (pprint (kind (fork (math/pow 2147483648 2))))
 (pprint (kind (fork (math/pow 2 -1))))
 (kind (fork (math/pow "2" 2)))
+; warns: 13:23

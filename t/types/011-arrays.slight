@@ -1,0 +1,21 @@
+; Arrays of numbers (D253): their kinds followed from list->array and
+; array/make, elements from array/get and reductions, sigs that say
+; (array float), a type variable in an array, and what's sure to fault.
+(sig mean ((array float)) float)
+(defun mean (a) (/ (array/sum a) (array/len a)))
+
+(sig (twice N) ((array N)) (array N))
+(defun twice (a) (array/add a a))
+
+(defun floats () (list->array :float (list 1 2)))
+(defun ints () (array/make :int 3 0))
+
+(defun a () (mean (ints)))
+(defun b () (str/len (array/get (floats) 0)))
+(defun c () (str/len (array/sum (twice (ints)))))
+(defun d () (array/len (list 1 2)))
+(defun e () (list->array :double (list 1)))
+(defun f () (array/kind "a"))
+(defun g () (the (array int) (array->list (ints))))
+(defun h () (the (array int) (array/div (ints) 2)))
+(defun i () (mean (floats)))

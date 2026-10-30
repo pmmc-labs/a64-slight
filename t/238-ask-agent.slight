@@ -8,7 +8,7 @@
 ; calls it, and its answer is the call's result; and one whose model
 ; isn't there, whose error is.
 
-(@include :tools)
+(@include :tools) (@include :http)
 
 (defun handler (req)
     (match (json/parse (lookup :body req))

@@ -1,0 +1,4 @@
+t/types/007-typed.sly:10:9: warning: this arm takes nothing this actor is sent, which is CounterMsg
+t/types/007-typed.sly:17:9: warning: this actor takes CounterMsg, and this is :inc: it would be a dead letter
+t/types/007-typed.sly:21:15: warning: this is int, not str
+t/types/007-typed.sly:22:10: warning: str::len's argument is int, not str: it faults :not-a-string

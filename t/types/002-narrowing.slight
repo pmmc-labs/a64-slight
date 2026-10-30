@@ -1,0 +1,27 @@
+; Narrowing: each test says what a value is where it's true, and what it
+; isn't after. Nothing here can fault, and nothing is said.
+(sig describe ((or int str :none (list int))) str)
+(defun describe (x)
+    (cond
+        ((int? x)        (int->str (+ x 1)))
+        ((eq? x :none)   "none")
+        ((str? x)        (str/upper x))
+        (#true           (str/join "," x))))
+
+(sig parse-age (str) (or int :bad))
+(defun parse-age (s)
+    (let n (str->int s))
+    (if (and n (>= n 0)) n :bad))
+
+(sig total ((list (or int #false))) int)
+(defun total (xs) (fold/l 0 (lambda (acc x) (if (not x) acc (+ acc x))) xs))
+
+(sig shape-area ((or (:circle float) (:rect float float))) float)
+(defun shape-area (s)
+    (match s
+        ((:circle r) (* 3.0 (* r r)))
+        ((:rect w h) (* w h))))
+
+(list (describe 1) (describe "a") (describe :none) (describe (list 1 2))
+      (parse-age "41") (total (list 1 #false 2))
+      (shape-area (list :rect 2.0 3.0)))

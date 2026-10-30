@@ -1,0 +1,11 @@
+; lib/fs.slight's header (D248): what (@include :fs) gives a program,
+; docs/LANGUAGE.md, "(@include :fs)". The rest of fs.slight is its own.
+
+(sig slurp (str) (or (:ok (list str)) (:error any)))
+(sig spew (str (list any)) (or (:ok any) (:error any)))
+
+; Trees (D254): mkdir -p, rm -r, and every path under a directory, none
+; following a link.
+(sig fs/mkdir-all (str) (or (:ok ()) (:error any)))
+(sig fs/delete-all (str) (or (:ok ()) (:error any)))
+(sig fs/walk (str) (or (:ok (list str)) (:error any)))

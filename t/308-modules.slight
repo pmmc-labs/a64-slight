@@ -1,0 +1,19 @@
+; Modules (D248): a file with a header beside it is a module, and a
+; program that includes it sees what its header declares, and nothing
+; else. counter's own step and shape's own sq don't clash with the
+; program's, and counter's call to the prelude's inc isn't the program's
+; inc. A function shows as it's written, without its module.
+(@include "data/modules/counter.slight")
+(@include "data/modules/shape.sly")
+
+(defun step (n) (* n 100))
+(defun inc (n) (- n 1))
+(defun sq (x) :mine)
+
+(pprint (list (step 1) (inc 1) (sq 2)))
+(pprint (counter/run 3))
+(pprint counter/run)
+(pprint (counter/get-step))
+(pprint ((counter/get-step) 41))
+(pprint (list (shape/area (list :rect 2 3)) (shape/area (list :square 4))))
+:done

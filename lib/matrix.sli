@@ -1,0 +1,25 @@
+; lib/matrix.slight's header (D248): what (@include :matrix) gives a
+; program, docs/LANGUAGE.md, "(@include :matrix)". The rest of
+; matrix.slight is its own.
+
+; a matrix is #(rows cols a), a its elements row by row (D253)
+(deftype (Matrix N) (tuple int int (array N)))
+
+(sig (matrix/new N) (int int (array N)) (Matrix N))
+(sig matrix/make ((or :float :int) int int num) (Matrix num))
+(sig matrix/identity ((or :float :int) int) (Matrix num))
+(sig matrix/from-rows ((or :float :int) (list (list num))) (Matrix num))
+(sig matrix/rows ((Matrix num)) int)
+(sig matrix/cols ((Matrix num)) int)
+(sig (matrix/data N) ((Matrix N)) (array N))
+(sig (matrix/get N) ((Matrix N) int int) N)
+(sig (matrix/set N) ((Matrix N) int int N) (Matrix N))
+(sig (matrix/row N) ((Matrix N) int) (array N))
+(sig (matrix/col N) ((Matrix N) int) (array N))
+(sig (matrix/->rows N) ((Matrix N)) (list (list N)))
+(sig (matrix/transpose N) ((Matrix N)) (Matrix N))
+(sig (matrix/add N) ((Matrix N) (Matrix N)) (Matrix N))
+(sig (matrix/sub N) ((Matrix N) (Matrix N)) (Matrix N))
+(sig (matrix/scale N) ((Matrix N) num) (Matrix N))
+(sig (matrix/mul N) ((Matrix N) (Matrix N)) (Matrix N))
+(sig (matrix/apply N) ((Matrix N) (array N)) (array N))

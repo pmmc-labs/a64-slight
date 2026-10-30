@@ -1,0 +1,10 @@
+; lib/test.slight's header (D248): what (@include :test) gives a program,
+; docs/LANGUAGE.md, "(@include :test)". The rest of test.slight is its own.
+
+; a test: given how many ran and failed before it, how many have after
+(deftype Test (fun (int int) (shape int int)))
+
+(sig run-tests ((list Test)) any)
+(sig ok (bool any) Test)
+(sig is (any any any) Test)
+(sig diag (any) Test)

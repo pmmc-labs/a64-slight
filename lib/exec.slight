@@ -39,4 +39,6 @@
         ((_ (:exited _ n))      (list n (str/join "" (reverse chunks))))
         ((_ (:error _ reason))  (raise reason))
         ((_ :timeout)           (list (list :timeout ms) (str/join "" (reverse chunks))))
-        (_                      :caller-ended)))
+        ; the caller has ended: there's no one to answer, and the task's
+        ; end closes the device, which kills the command (D193)
+        (_                      (raise :caller-ended))))

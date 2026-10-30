@@ -13,7 +13,7 @@
 ; with no tools, whose request has none; and an agent killed while a tool
 ; runs, which kills the tool.
 
-(@include :agent)
+(@include :agent) (@include :http)
 
 ; --- the fake ollama ---------------------------------------------------
 

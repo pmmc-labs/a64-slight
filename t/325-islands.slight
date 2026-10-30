@@ -1,0 +1,54 @@
+; Islands (D256): (islands), 4 as t/run.sh sets it, and (island); actors
+; placed with spawn/on, one on each island, numbered by their own island
+; (#<pid 1@1>), their parent this task on island 0; what they send back,
+; and their ends, which their parent reads; after, to an actor on another
+; island; a monitor across islands, of an actor killed from a third; a
+; fault on another island, which its parent reads; a big string there and
+; back, shared, not copied; and what faults: an island out of range, one
+; that isn't an integer, and a join of another island's actor. Expected
+; output worked out by hand.
+
+(defun forever () (recv (_ (forever))))
+(defun report (to) (send to (list (island) $$ ^$$)))
+(defun watcher (to target)
+    (monitor target)
+    (send to :watching)
+    (recv ((:exit p r) (send to (list :saw p r)))))
+(defun echo (to) (recv (x (send to (list :echo (island) x)))))
+(defun crash () (car 5))
+(defun try (pid)
+    (match (join pid)
+        ((:ok v)          v)
+        ((:error (k & _)) (list :error k))))
+
+(pprint (list (islands) (island)))
+(let me (address))
+(let ps (map (lambda (k) (spawn/on k (report me))) (range 0 4)))
+(pprint ps)
+(pprint (sort (lambda (a b) (< (car a) (car b))) (map (lambda (_) (read me)) ps)))
+(pprint (map (lambda (p) (read p)) ps))
+
+(let e (spawn/on 3 (echo me)))
+(after 5 e :ping)
+(pprint (read me))
+
+(let f (spawn/on 1 (forever)))
+(let w (spawn/on 2 (watcher me f)))
+(pprint (read me))
+(kill f)
+(pprint (read me))
+
+(let c (spawn/on 3 (crash)))
+(pprint (read c))
+
+(let s (str/repeat "ab" 5000))
+(spawn/on 1 (send me (list (bytes/len s) (eq? s (~ (str/repeat "ab" 4999) "ab")))))
+(pprint (read me))
+(spawn/on 2 (send me s))
+(pprint (eq? (read me) s))
+
+(pprint (try (fork (spawn/on 4 ()))))
+(pprint (try (fork (spawn/on :one ()))))
+(pprint (try (fork (join (spawn/on 1 ())))))
+:done
+; warns: 18:22 51:30 52:26

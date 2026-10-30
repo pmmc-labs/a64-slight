@@ -1,0 +1,22 @@
+// docs/TYPES.md's counter in the C-style syntax, with its types: the
+// warnings speak the syntax they're about.
+type CounterMsg = :inc() | :get(address<:count(int)>) | :stop;
+
+fun counter(n : int) recv CounterMsg {
+    recv {
+        :inc()   => counter(n + 1),
+        :get(to) => { send(to, :count(n)); counter(n) }
+        :stop    => n,
+        :reset   => counter(0),
+    }
+}
+
+fun twice<A>(f : fun(A) -> A, x : A) : A { f(f(x)) }
+
+let c = spawn counter(0);
+send(c, :inc);
+send(c, :inc());
+let to = address();
+send(c, :get(to));
+let s : str = twice(fun(x) => x + 1, 5);
+str::len(twice(fun(x : int) => x * 2, 3))

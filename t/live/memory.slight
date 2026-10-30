@@ -12,6 +12,11 @@
 ;   churn    half a million tasks, each joined, and as many actors, each
 ;            read: a pid's entry goes once nothing can come of it, and its
 ;            page once all of the page's have (D244)
+;   shared   a 32 MB string held by 40 actors at once, each given it as a
+;            spawn's value: shared, not copied (D253), so the peak is one
+;            of it, not 1.3 GB
+;   dropped  600 strings of 1 MB, each made and dropped: their buffers
+;            freed as they're collected (D253)
 
 (defun reading ()
     (recv
@@ -28,11 +33,26 @@
             (read (spawn n))
             (churn (- n 1)))))
 
+; Holds s till it's told to end, then says how long it was.
+(defun holder (to s)
+    (recv (:end (send to (bytes/len s)) :done)))
+
+(defun shared (s)
+    (let me (address))
+    (let actors (map (lambda (_) (spawn (holder me s))) (range 0 40)))
+    (map (lambda (a) (send a :end)) actors)
+    (fold/l 0 (lambda (sum _) (+ sum (read me))) actors))
+
+(defun dropped (n total)
+    (if (== n 0) total (dropped (- n 1) (+ total (bytes/len (str/repeat "x" 1048576))))))
+
 (defun run-case (name)
     (match name
         ("endless" (command "printf '\"'; head -c 536870912 /dev/zero | tr '\\000' a"))
         ("deep"    (command "head -c 31457280 /dev/zero | tr '\\000' '['; head -c 31457280 /dev/zero | tr '\\000' ']'"))
         ("wide"    (join (fork (str/pad-start (str 1) 4000000000 "x"))))
-        ("churn"   (churn 500000))))
+        ("churn"   (churn 500000))
+        ("shared"  (shared (str/repeat "x" 33554432)))
+        ("dropped" (dropped 600 0))))
 
 (pprint (run-case (car @ARGV)))

@@ -4,6 +4,8 @@
 #               $(TARGETS), and that the guide's code is the code tested
 #               (t/guide.py)
 # make check    type-check the compiler (needs `npm install` first)
+# make tsan     ThreadSanitizer over what runs on more than one island, for
+#               the machine's own target (t/tsan.sh; needs clang's TSan)
 # make bench    the benchmarks, against other languages (bench/run.py,
 #               docs/BENCHMARKS.md); BENCH passes it options: BENCH=--quick
 #
@@ -36,7 +38,7 @@ endif
 sketch:
 	node bin/slightc.ts -o "./sketch" "author/sketch.slight"
 
-test: unit headers guide golden replay live
+test: unit headers guide types golden replay live
 
 unit:
 	node --test "compiler/tests/**/*.test.ts"
@@ -55,10 +57,18 @@ replay:
 guide:
 	python3 t/guide.py
 
+# Every program checks clean but for the warnings it lists, and the
+# checker's own tests (t/types/) say what they should (D247)
+types:
+	node t/types.ts
+
 live:
 	@fail=0; for target in $(TARGETS); do \
 		echo "# $$target live"; TARGET=$$target python3 t/live.py || fail=1; \
 	done; exit $$fail
+
+tsan:
+	./t/tsan.sh
 
 # rt.h must not collide with the system headers (see t/headers.c)
 headers:
@@ -81,4 +91,4 @@ clean:
 		rm -rf "./sketch.dSYM"; \
     fi
 
-.PHONY: test unit guide golden replay live headers check bench clean
+.PHONY: test unit guide types golden replay live tsan headers check bench clean

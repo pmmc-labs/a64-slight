@@ -56,14 +56,22 @@
 ; one of those named help comes first.
 (defun rpc/help (handlers)
     (let text "What can be called here: each call's name, what it does, and its parameters.")
-    (let described (append (map cdr (map rpc/without-f handlers)) (list (list "help" text ()))))
+    (let described (append (map rpc/described handlers) (list (list "help" text ()))))
     (rpc/handler "help" text () (lambda () described)))
 
-(defun rpc/without-f (h) (reverse (cdr (reverse h))))
+; What help says of a handler: (name description params), all but its f.
+(defun rpc/described (h)
+    (match h ((_ name description params _) (list name description params))))
 
 ; For a call that streams: (next id v) goes to the caller at once. Only
 ; from the call's own process, whose parent is the connection.
-(defun rpc/next (v) (send ^$$ (list :rpc/next $$ (sexp/print v))))
+(defun rpc/next (v) (send (rpc/conn) (list :rpc/next $$ (sexp/print v))))
+
+; The connection a call came on: its process's parent. A process that
+; isn't a call's, the root say, whose parent is (), raises why.
+(defun rpc/conn ()
+    (let conn ^$$)
+    (if (pid? conn) conn (raise :not-in-a-call)))
 
 ; Who called (D235): ((uid u) (gid g) (pid p)) for a caller at the other
 ; end of a Unix socket, as socket/peer gives it, the kernel's word for
@@ -71,7 +79,7 @@
 ; rpc/next. It asks the connection, which holds the socket, with an
 ; address for the answer (D243).
 (defun rpc/peer ()
-    (let conn ^$$)
+    (let conn (rpc/conn))
     (let to (address))
     (send conn (list :rpc/peer to))
     (let got (read/any (list to conn)))
@@ -410,7 +418,7 @@
 ; A call's process. Its answer is printed here, so one that isn't data
 ; faults the call, not the connection.
 (defun rpc/run (f values)
-    (send ^$$ (list :rpc/done $$ (sexp/print (apply f values)))))
+    (send (rpc/conn) (list :rpc/done $$ (sexp/print (apply f values)))))
 
 ; A process the connection monitors has ended: a call from there, whose
 ; answer, if it ended well, has gone already; or the process that waits

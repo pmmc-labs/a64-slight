@@ -1,0 +1,16 @@
+; https:// through curl (D251), for t/live.py: real curl, over real TLS,
+; to a server of t/live.py's at the URL it's given. A whole reply, and a
+; chunked one to a POST, echoing its body.
+
+(@include :http)
+
+(defun shown (result)
+    (match result
+        ((:ok (status _ body)) (list status (str/split body "\n")))
+        (other                 other)))
+
+(let base (car @ARGV))
+(map pprint (list
+    (shown (http/get (str base "/hello")))
+    (shown (http/request :post (str base "/echo") (list (list "content-type" "text/plain")) "sent\nback"))))
+:done

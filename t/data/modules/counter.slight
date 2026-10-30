@@ -1,0 +1,13 @@
+; A module, since counter.sli is beside it (D248): counter/run and
+; counter/get-step are what it gives; counter/loop and step are its own.
+(defun counter/run (n) (counter/loop n 0))
+
+(defun counter/loop (n acc)
+    (if (== n 0)
+        acc
+        (counter/loop (dec n) (step acc))))
+
+; the prelude's inc, whatever a program that includes this calls inc
+(defun step (acc) (inc acc))
+
+(defun counter/get-step () step)

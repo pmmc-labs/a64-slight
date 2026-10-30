@@ -34,10 +34,26 @@ typedef struct {
     int      virtual_clock;
     uint64_t sched_seed;                // SLIGHT_SCHED, or 0
     uint64_t heap_max;                  // SLIGHT_HEAP_MAX, or the default: where a heap faults
+    uint64_t islands;                   // SLIGHT_ISLANDS, or one per core (D256)
 } rt_io_settings_t;
 
 void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *settings);
 int  rt_io_replaying(void);
+int  rt_io_logging(void);               // recording or replaying
+
+// Islands (D256). rt_io_island opens island k's record, on its thread, as
+// it starts. What an island sees of another's doings is the world to it:
+// rt_io_seen records what it saw, or gives what the record says. Its
+// inbox's items are named, not kept, since their senders send them again:
+// rt_io_took records which it took at its scheduler's poll'th look, and
+// rt_io_due, replaying, gives them if that's when it took some. rt_io_wake
+// records the number of the pipe its inbox wakes it through, which
+// select()'s recorded sets say, and gives that number back.
+void rt_io_island(uint64_t k);
+int  rt_io_seen(int seen);
+void rt_io_took(uint64_t poll, const uint64_t *ids, uint32_t n);
+int  rt_io_due(uint64_t poll, uint64_t **ids, uint32_t *n);
+int  rt_io_wake(int fd);
 
 // getenv, for the variables that say where the runtime reads and writes
 // (SLIGHT_RECORD, SLIGHT_REPLAY, SLIGHT_HOSTS, SLIGHT_RESOLV_CONF): NULL
@@ -46,6 +62,12 @@ int  rt_io_replaying(void);
 const char *rt_io_getenv(const char *name);
 
 uint64_t rt_io_clock(void);             // the monotonic clock, in nanoseconds
+int64_t  rt_io_realtime(void);          // the time of day: microseconds since 1970, UTC (D254)
+
+// Where the virtual clock's time of day starts (D254): the seconds given
+// (SLIGHT_EPOCH), or the time of day now, as microseconds, recorded either
+// way, so a replay starts where its run did.
+int64_t rt_io_epoch(const char *given);
 int      rt_io_select(int n, fd_set *in, fd_set *out, struct timeval *timeout);
 ssize_t  rt_io_read(int fd, void *buf, size_t len);
 ssize_t  rt_io_write(int fd, const void *buf, size_t len);
@@ -95,6 +117,19 @@ int rt_io_wait(int child, int *status, int nohang);
 int rt_io_kill(int pid);
 int rt_io_pipe(int fds[2]);
 
+// Files beyond reading and writing (D254). rt_io_list gives a directory's
+// names but . and .., each ended by a NUL, in *names (malloc'd, *len
+// bytes): how many, or -1 with errno set. rt_io_stat is lstat, its kind (0
+// a file, 1 a directory, 2 a link, 3 anything else), size, modified time
+// in microseconds and mode's permission bits in got. rt_io_remove (a file
+// or an empty directory), rt_io_rename and rt_io_mkdir (mode 0777, less
+// the umask) are the calls, and in a replay aren't made, as a write isn't.
+int64_t rt_io_list(const char *path, char **names, uint32_t *len);
+int     rt_io_stat(const char *path, int64_t got[4]);
+int     rt_io_remove(const char *path);
+int     rt_io_rename(const char *from, const char *to);
+int     rt_io_mkdir(const char *path);
+
 // A text file read a line at a time (the hosts file, resolv.conf).
 FILE *rt_io_fopen(const char *path);
 char *rt_io_fgets(char *line, int size, FILE *f);
@@ -103,6 +138,9 @@ void  rt_io_fclose(FILE *f);
 // Random bits, for what has to differ between runs and not be guessed (a
 // lookup's query ids).
 uint32_t rt_io_seed(void);
+
+// len bytes from the system's entropy, for keys and tokens (D255).
+void rt_io_random_bytes(void *buf, size_t len);
 
 // The run's seed for its random numbers (D222): the number given, if one
 // is (SLIGHT_SEED), or else the system's entropy. Recorded either way, so

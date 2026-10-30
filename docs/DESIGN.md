@@ -30,6 +30,53 @@ bring it up before baking it in further.
 - **Ahead-of-time compilation only.** No `eval`, no code loading at
   runtime, no hot reload.
 
+## What slight is for, and isn't (D250)
+
+What it's meant to be when PLAN.md's "Toward general purpose" is done,
+for checking later decisions against: **a small language for networked
+services, tools and simulations on one machine, which can be tested
+deterministically.** A service, a command-line tool, a daemon, an agent
+or a simulation, written end to end in it, one static binary, without
+shelling out for the basics. Simulations were added by D253: actors as
+agents, the virtual clock as simulated time, seeded orders as Monte
+Carlo over schedules, and replay as reproducibility, with arrays of
+numbers and floats that come out the same on every machine (PLAN.md,
+"Numbers in bulk").
+
+What sets it apart is that last part. Everything a program takes from
+the world goes through `replay.c` (D170), so any run, a production one
+included, can be recorded and replayed exactly, run on the virtual clock,
+and tried under seeded orders to find races. Other languages bolt that
+on (FoundationDB's simulation, Rust's madsim and turmoil, Antithesis
+from outside the program); in slight it's how the language works. With
+actors whose isolation comes from immutability rather than a type
+system (Pony), Erlang's model in Go's deployment shape (no VM, a static
+binary, `FROM scratch`), and a checker that warns only of what's sure to
+go wrong (D247), that's the reason to choose it.
+
+So: **nothing goes in that a run can't be replayed through.** A device,
+a builtin or a vendored library takes from the world only through
+`replay.c`; that's why C libraries are vendored, and there's no FFI,
+which would let a call read the world unrecorded (D252).
+
+And: **vendor only what never needs a security fix** (D251): math, a
+hash, Unicode's tables, pinned once and left. What does need them, TLS,
+encryption between machines, a model's runtime, is left to programs the
+system keeps up to date, run as processes at the program's edges, as
+actors are inside it: a proxy (nginx, Caddy) in front of a server, curl
+for a client's `https://`, ssh between machines (`rpc/exec`),
+`llama-server` for a model. Each is updated by the system's package
+manager, a crash in one ends only it, and what crosses comes through
+`:exec`, so it's recorded.
+
+Not what it's for: numerical computing at large (no mutable arrays,
+tensors, autodiff or GPU: D253's arrays are for simulations), systems
+programming (no control of memory, no FFI), a GUI, the browser or a
+phone (WebAssembly is parked). It uses more than one core only as a
+program places its actors on islands (D256), so a server bound by
+throughput spreads its connections' actors itself, or runs a copy per
+core behind one port (`airline`'s `--shard` is the same idea). Nor a large ecosystem: that comes from users, not a plan.
+
 ## Language
 
 ### Syntax
@@ -55,6 +102,11 @@ The reader (`compiler/src/reader.ts`, D37) reads:
 - the names `\n`, `\r`, `\t` and `\e`, constants for those one-character
   strings, and `math/PI`
 
+A second syntax, C-style, is read into the same s-expressions: a file
+ending in `.sly` goes to `compiler/src/sly.ts` instead (D246,
+`docs/SYNTAX.md`), and nothing after the reader knows which syntax a
+program was in.
+
 ### Types
 
 | Type     | Notes |
@@ -70,6 +122,14 @@ The reader (`compiler/src/reader.ts`, D37) reads:
 
 Booleans are the reserved symbols `#true` and `#false`.
 
+Those are what values are, when the program runs. Before it does, the
+compiler checks what it can of them (D247, `docs/TYPES.md`): a type is
+one of those, or a keyword alone, a list's shape, a union, `any`; it's
+inferred from literals, the builtins, the prelude's sigs, patterns and
+tests, and said, if a program wants, with `deftype`, `sig` and `the`.
+It warns only about what's certain to go wrong, unless `--strict`, and
+never changes the code.
+
 ### Special forms (10)
 
 | Form | Meaning |
@@ -80,9 +140,10 @@ Booleans are the reserved symbols `#true` and `#false`.
 | `(cond (test body...) ...)` | The conditional the others become (below). Each test must be `#true` or `#false`, or the process faults; so does running out of clauses. |
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
-| `(fork expr)` | Runs `expr` in a new process and returns its pid. |
+| `(fork expr)` | Runs `expr` in a new process and returns its pid: a task. `(spawn expr)` starts an actor (D243), and `(spawn/on k expr)` one on island `k` (D256). |
 | `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`, or a Unix socket, `(connect :unix path expr)` or `(connect :unix/listen path expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
 | `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
+| `(deftype ...)`, `(sig ...)`, `(the type expr)` | Types (D247): a type's name and a function's types, at the top level, and an expression's. The checker reads them; code generation leaves them out (`(the T e)` is `e`). Not counted among the 10, since none does anything when the program runs. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
 Function bodies and clause bodies can hold several forms, as if wrapped in
@@ -113,8 +174,15 @@ file's forms where it stands, the path relative to the file it's in;
 Only at the top level. A file is included once however often it's asked
 for, and a file that includes itself, directly or not, is an error. Every
 program starts with an unwritten `(@include :prelude)`, whose definitions
-the compiler keeps apart (D80). It's not a module system: everything is
-still one program, compiled whole.
+the compiler keeps apart (D80). A file with a header beside it, `X.sli`
+or `X.slyi`, is a module (D248): its includers see what the header
+declares (`sig`s and `deftype`s), the rest is its own, and what a header
+includes its includers see too. `compiler/src/modules.ts` makes the
+units one program again by renaming: a module's names get its file in
+them, which no program can write, and each name a unit's code mentions
+becomes the one it means there. Everything is still one program,
+compiled whole; a header could let a module be compiled apart one day,
+but nothing needs that yet.
 
 A function takes at most 8 parameters, one register each (see the
 register convention below). More could go on the stack later.
@@ -355,6 +423,13 @@ names no program can write.
 ### Builtins and the prelude
 
 [`LANGUAGE.md`](LANGUAGE.md) describes each one as a program sees it.
+Agreed (D254, PLAN.md's "Step 1, proposed"): `clock/now`, the time of
+day, with `lib/time.slight`; `fs/list`, `fs/stat`, `fs/delete`,
+`fs/rename` and `fs/mkdir` (`runtime/files.c`); `bytes/pack` and
+`bytes/unpack`; and `log`, JSON lines on stderr; all built. And
+(D255): `crypto/sha256`, `crypto/sha512`, their HMACs, `crypto/equal?`
+and `crypto/random-bytes` (`runtime/crypto.c`); base64, base64url and
+hex, `bytes->` and `->bytes`; built.
 
 **In C (or assembly):**
 - arithmetic: `+ - *` on any two numbers; an integer and a float give a
@@ -687,6 +762,10 @@ REPL and line editing are slight code over key events.
   type), then the elements, a word each. Closures and tuples are the
   boxes that hold values, which copying and the collector go into
   (`rt_box_holds_values`, `rt_box_first_value` in `rt.h`).
+- **Arrays of numbers** (D253): header (how many elements, and
+  `RT_BOX_FLOATS` or `RT_BOX_INTS`), then the elements, a double or an
+  int64 each, unboxed; or, at 4 KB or more, a shared buffer's handle
+  (below). They hold no values, so nothing walks them.
 - **Every heap object is a multiple of 16 bytes**, padded at the end: a
   closure with an odd number of captured values, and most strings. Copying
   and the collector copy whole 16-byte units.
@@ -852,10 +931,62 @@ generation (copying it is the code there was); and a pool of nurseries
 that waiting processes give back, as they do their stacks (later, if
 processes that allocate and then wait turn out to hold too much).
 
+### The libm (D253)
+
+`math/`'s functions are CORE-MATH's, vendored (`vendor/core-math/`, the
+first vendored code, D152) and compiled with the runtime: each result is
+the double nearest the exact one, so the same on every machine, and the
+runtime is compiled with `-ffp-contract=off`, so clang fuses no `a * b +
+c` into one rounding on AArch64 that x86-64 would round twice. A run that
+computes with floats replays on any machine.
+
+### Shared buffers (D253)
+
+A string or an array of numbers of 4 KB or more (`RT_SHARED_MIN`) is an
+`rt_buffer_t` off the heap, its references counted, and a handle in the
+heap: a box of its header with `RT_BOX_SHARED`, the data's address and
+the buffer's. `rt_string_bytes` and `rt_array_data` read through it, so
+nothing else knows. A
+copy (a message, a fork's values, a kept result) copies the handle,
+counts a reference, and lists the handle in its chunk, for whoever adopts
+the chunk; a chunk freed unadopted lets its handles go. Each process
+keeps its handles in two lists, young and old, on its side; after a
+collection a handle that wasn't copied is garbage, and its reference
+goes; at a process's end, all of them. It's safe because what's shared
+never changes and holds no pointers, so no buffer points into a heap, as
+nothing old points at anything young (D200). A process's young handles'
+bytes past 1 MB make its next call collect, and all its handles' bytes
+count toward its cap. Not yet: a slice that shares its string's or
+array's buffer (one is copied, as any slice is), and a device's read made
+a buffer as it comes; and an array `sexp/parse` reads is in the heap,
+whatever its size, as the reader builds into whatever it's given.
+
+### Arrays of numbers (D253)
+
+`runtime/arrays.c`: `rt_new_array` makes one, in the heap or, at 4 KB or
+more, shared, for the builtin to fill before anything else runs. Element
+by element, an operation's operands are all its arrays' kind, so its
+result's kind is the arrays' (`array/div`'s always `:float`); an `:int`
+result is checked against 63 bits. Reductions and `array/matmul` sum in
+order, left to right, each product and sum rounded apart
+(`-ffp-contract=off`), so a Python loop is their model
+(`t/models/arrays.py`); `array/matmul` goes a row of the result at a
+time, adding a row of `b` times an element of `a`, which reads `b` along
+its rows and keeps each element's order. `array/generate`, `array/map`
+and `array/fold` are the prelude's, `array/generate` through lists of up
+to 512 at a time, joined in a tree, since C can't call back into slight
+while the collector walks its frames (D166).
+`lib/matrix.slight` is matrices on arrays, a module. The type is
+`(array float)`, `(array int)`, or `array` for either (`types.ts`).
+`:int` is the same symbol as `:exec`'s SIGINT, `RT_SYM_EXEC +
+RT_EXEC_INT`, since a symbol is its name.
+
 ### Messages
 
 - `send` deep-copies the value into a fresh message chunk and appends it to
-  the target's FIFO mailbox. Static data is not copied. Sharing within a
+  the target's FIFO mailbox. Static data is not copied, and nor is a
+  string of `RT_SHARED_MIN` (4 KB) or more, a buffer off the heap whose
+  handle is copied, its references counted (D253, below). Sharing within a
   message is duplicated (as in the BEAM); that's acceptable at this scale.
   The copy is one walk over the value, into a scratch buffer, which then
   moves into a chunk of just its size; the message's record (its place in
@@ -910,9 +1041,74 @@ processes that allocate and then wait turn out to hold too much).
   page's 40 KB; there's no `detach`, since the children nobody takes
   are few and small, and go when their parent ends.
 
+### Islands: more than one core (D256; built)
+
+Each island is today's runtime, single-threaded, on a thread of its
+own, with its own process table, run queue, timers, devices, stack pool
+and record; nothing is shared between islands but an inbox each and
+the shared buffers (D253), which never change. A fixed set, `(islands)`
+of them, one per core unless `SLIGHT_ISLANDS` says; island 0 is the
+main one, and owns the signals, the terminal and `:system`. A program
+places an actor with `(spawn/on k expr)`; nothing moves on its own, and
+`fork` stays on its parent's island. A pid carries its island in 8 bits
+below the address bit (`#<pid 5@2>`, island 0's printed as now), each
+island numbering its own; a send to another island's pid copies the
+message into a chunk and pushes it onto that island's inbox, a queue
+many push to and one pops, and the island delivers it into the local
+mailbox, so compiled code, the collector and every mailbox stay
+single-threaded. Big strings and arrays cross as handles, their counts
+atomic. Each island records its own run, its inbox's deliveries among
+its inputs, and the islands replay together. `docs/PLAN.md`, "More than
+one core: islands", has the steps.
+
+As built (`process.c`, "islands"): an inbox is a list under a mutex,
+taken whole at each of the island's scheduler's decisions (`events`),
+and a pipe that wakes the island only when it's blocked in `select()`;
+an island with nothing to do watches its inbox for 50 µs first, so a
+reply that comes back quickly needs no wake (two islands' round trip,
+3.4 µs on the cloud machine, where a wake through the pipe took 50).
+What crosses is an item: a message, already copied into its chunk by
+the sender, the item's head in the same chunk, so that crossing is one
+allocation; a start, for `spawn/on`, which the island makes and answers
+with its pid, the spawner waiting, so each island numbers only its own;
+and kills, watches and ends. A pid not on this island reads as ended
+(`slot`), except where send, kill, monitor and read see to it. An
+actor's end goes to its parent, a task on another island, and is kept
+there apart from its mail, as a record keeps one here (D245). The
+program ends when `busy`, the islands that may still do something and
+the items not yet handled, comes to 0.
+
+`:system` (step 5) asks other islands through their inboxes: an `ASK`
+item, answered by a `TOLD` with that island's snapshots (taken in one
+moment there), a process's, or its counts, which the device adds to
+what it sends. `(:processes)` and `(:runtime)` go to each started island
+in turn, in order, the device's own island answered in place; a question
+that waits holds up those asked after it, so answers come in order. A
+process counts its messages to and from other islands, and their bytes,
+in its side record, made the first time one crosses, so a process that
+never sends across pays nothing; each island counts its own too. PID 1's
+orphans are island 0's to reap, and every island's commands are in one
+list under a lock that they're started under, so island 0 can tell them
+from orphans.
+
+Replay (step 6) keeps a record per island, `f` and `f.k`, on the
+island's thread. An item is named by its island and that island's count
+of items sent, which a replay makes again, so a record names what its
+inbox took and when, by the count of the scheduler's looks at it
+(`events`), and keeps nothing of it: the senders, replaying too, send
+the items again, and an island waits for the ones its record says to
+take, holding back any that come early. What an island sees of the
+others outside a take (whether its inbox has something, as it goes idle
+or wakes from `select()`; whether an island has started, for `:system`)
+is recorded as a seen value, and the number of the pipe that wakes it,
+which `select()`'s recorded sets name, as an entry of its own. So the
+islands replay together, each exactly, but not one alone, which would
+need every message's contents kept, closures' code and static data
+placed again on macOS, whose programs load at a different address each
+run (option (b), D256's step 6, put off).
 ### Scheduler
 
-- Single core. A **FIFO run queue** (D86): simple, and deterministic on
+- Single core (on each island, once there are islands, D256). A **FIFO run queue** (D86): simple, and deterministic on
   one core. A preempted process goes to the back of the queue, but only
   if another process is ready; otherwise it keeps running (D91). `yield`
   always goes to the back.
@@ -1066,8 +1262,8 @@ processes that allocate and then wait turn out to hold too much).
   when it waits again, as a reader's lines, D158) and `(:end s)`;
   `(:process s info)` or `(:ended s pid result)`; or `(:runtime s
   info)`. An `info` is a list of `(key value)`. `(:processes)` copies
-  every process's at once, outside any heap; with one core nothing runs
-  meanwhile, so they all describe one moment. A process's reductions
+  every process's on an island at once, outside any heap; nothing runs
+  there meanwhile, so each island's describe one moment (D256). A process's reductions
   are counted per slice (`calls`, `slice` in `rt_proc_t`), and where it
   is (`:in`) comes from a table the compiler emits of every function's
   entry and name (`slight_functions`): a process holding a stack is at
@@ -1080,8 +1276,10 @@ processes that allocate and then wait turn out to hold too much).
   serviced in `select()` through a non-blocking API. Nothing blocks, and
   no slight value holds a C pointer. They're vendored as source under
   `vendor/` (as Odin's are), compiled by `slightc` once per target as the
-  runtime is, and linked statically into the programs that use them. TLS
-  is to be a `:tls` socket device.
+  runtime is, and linked statically into the programs that use them.
+  Only code that never needs a security fix is vendored (D251); TLS
+  isn't: a proxy in front ends it for a server, and curl, through
+  `:exec`, for a client.
 
 ### Recording and replaying a run (D170)
 
@@ -1226,7 +1424,10 @@ that's just a walk over every function.
 
 1. **Read** text into s-expressions with source positions.
 2. **Expand** (`expand.ts`): splice in what `@include` asks for, and make
-   `if`, `when`, `case`, `and` and `or` into `cond`.
+   `if`, `when`, `case`, `and` and `or` into `cond`, keeping `match`.
+   **Check the types** (`check.ts`, D247): warnings, on the source's
+   forms and places. Then make `match` into `cond` too, and erase the
+   types (`deftype`, `sig`, `the`).
 3. **Check and expand** the 10 special forms. `let` becomes nested scopes,
    `quote` becomes constants.
 4. **Resolve names** as locals, globals or builtins. Check arity on calls

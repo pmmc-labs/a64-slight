@@ -806,3 +806,261 @@ rt_value_t rt_tty_write(rt_value_t args, const char *site) {
     rt_buf_free(&b);
     return RT_NIL;
 }
+
+// --- numbers as bytes (D254) --------------------------------------------------
+//
+// A spec is one of RT_PACK_'s 18 number keywords, a width, signed or not
+// (or a float), and an order; or (:bytes n), n bytes as they are. pack
+// writes each value as its spec says, and unpack reads them back.
+
+typedef struct {
+    uint8_t width, sign, flt, big;
+} spec_t;
+
+static const spec_t specs[] = {
+    { 1, 0, 0, 1 }, { 1, 1, 0, 1 },                                    // u8 i8
+    { 2, 0, 0, 1 }, { 2, 0, 0, 0 }, { 2, 1, 0, 1 }, { 2, 1, 0, 0 },    // u16be u16le i16be i16le
+    { 4, 0, 0, 1 }, { 4, 0, 0, 0 }, { 4, 1, 0, 1 }, { 4, 1, 0, 0 },    // u32 i32
+    { 8, 0, 0, 1 }, { 8, 0, 0, 0 }, { 8, 1, 0, 1 }, { 8, 1, 0, 0 },    // u64 i64
+    { 4, 0, 1, 1 }, { 4, 0, 1, 0 }, { 8, 0, 1, 1 }, { 8, 0, 1, 0 },    // f32 f64
+};
+
+// The spec x, or -1 for (:bytes n), with n in *n; anything else faults.
+static int spec_of(rt_value_t x, int64_t *n, const char *site) {
+    for (int k = 0; k < (int)(sizeof specs / sizeof *specs); k++) {
+        if (x == rt_symbol(RT_SYM_PACK + (uint64_t)k)) return k;
+    }
+    if (rt_is_cons(x) && rt_car(x) == rt_symbol(RT_SYM_PACK + RT_PACK_BYTES) && rt_is_cons(rt_cdr(x))
+        && rt_cdr(rt_cdr(x)) == RT_NIL) {
+        *n = rt_need_int(rt_car(rt_cdr(x)), site);
+        if (*n >= 0) return -1;
+    }
+    rt_fault(RT_FAULT_RANGE, x, site);
+}
+
+rt_value_t rt_bytes_pack(rt_value_t specs_, rt_value_t values, const char *site) {
+    need_list(specs_, site);
+    need_list(values, site);
+    rt_buf_t   out = { 0 };
+    rt_value_t vs  = values;
+    for (rt_value_t ss = specs_; ss != RT_NIL; ss = rt_cdr(ss)) {
+        need_list(rt_cdr(ss), site);
+        int64_t n = 0;
+        int     k = spec_of(rt_car(ss), &n, site);
+        if (!rt_is_cons(vs)) {
+            rt_buf_free(&out);
+            rt_fault(RT_FAULT_RANGE, values, site);     // fewer values than specs
+        }
+        rt_value_t v = rt_car(vs);
+        vs = rt_cdr(vs);
+        need_list(vs, site);
+        uint8_t  b[8];
+        uint64_t bits;
+        if (k < 0) {
+            need_string(v, site);
+            if ((int64_t)len_of(v) != n) rt_fault(RT_FAULT_RANGE, v, site);
+            rt_buf_add(&out, bytes_of(v), (size_t)n);
+            continue;
+        }
+        spec_t s = specs[k];
+        if (s.flt) {
+            if (!rt_is_float(v) && (v & RT_TAG_INT_MASK)) rt_fault(RT_FAULT_NOT_NUMBER, v, site);
+            double d = rt_is_float(v) ? rt_float_value(v) : (double)rt_int_value(v);
+            if (s.width == 4) {
+                float    f = (float)d;                  // the nearest float, as IEEE rounds
+                uint32_t w;
+                memcpy(&w, &f, 4);
+                bits = w;
+            } else {
+                memcpy(&bits, &d, 8);
+            }
+        } else {
+            int64_t x  = rt_need_int(v, site);
+            int     ok = s.sign ? (s.width == 8 || (x >= -(INT64_C(1) << (s.width * 8 - 1)) && x < (INT64_C(1) << (s.width * 8 - 1))))
+                                : (x >= 0 && (s.width == 8 || x < (INT64_C(1) << (s.width * 8))));
+            if (!ok) rt_fault(RT_FAULT_RANGE, v, site);
+            bits = (uint64_t)x;
+        }
+        for (int i = 0; i < s.width; i++) {
+            int shift = 8 * (s.big ? s.width - 1 - i : i);
+            b[i] = (uint8_t)(bits >> shift);
+        }
+        rt_buf_add(&out, (const char *)b, s.width);
+    }
+    if (vs != RT_NIL) {
+        rt_buf_free(&out);
+        rt_fault(RT_FAULT_RANGE, values, site);         // more values than specs
+    }
+    return buf_to_string(&out, site);
+}
+
+rt_value_t rt_bytes_unpack(rt_value_t specs_, rt_value_t s, rt_value_t at, const char *site) {
+    need_list(specs_, site);
+    need_string(s, site);
+    int64_t i = rt_need_int(at, site);
+    size_t  len = len_of(s);
+    if (i < 0 || (uint64_t)i > len) rt_fault(RT_FAULT_RANGE, at, site);
+    const uint8_t *p = (const uint8_t *)bytes_of(s);
+    builder_t      out;
+    builder_init(&out);
+    for (rt_value_t ss = specs_; ss != RT_NIL; ss = rt_cdr(ss)) {
+        need_list(rt_cdr(ss), site);
+        int64_t n = 0;
+        int     k = spec_of(rt_car(ss), &n, site);
+        int64_t w = k < 0 ? n : specs[k].width;
+        if ((uint64_t)w > len - (uint64_t)i) {
+            rt_value_t *why = rt_alloc(32, site);
+            why[0] = rt_symbol(RT_SYM_ERROR);
+            why[1] = (rt_value_t)(why + 2) | RT_TAG_LIST;
+            why[2] = rt_symbol(RT_SYM_PACK + RT_PACK_SHORT);
+            why[3] = RT_NIL;
+            return (rt_value_t)why | RT_TAG_LIST;
+        }
+        if (k < 0) {
+            builder_add(&out, rt_new_string((const char *)p + i, (size_t)n, site), site);
+            i += n;
+            continue;
+        }
+        spec_t   sp   = specs[k];
+        uint64_t bits = 0;
+        for (int j = 0; j < sp.width; j++) {
+            int shift = 8 * (sp.big ? sp.width - 1 - j : j);
+            bits |= (uint64_t)p[i + j] << shift;
+        }
+        i += sp.width;
+        rt_value_t v;
+        if (sp.flt && sp.width == 4) {
+            uint32_t b32 = (uint32_t)bits;
+            float    f;
+            memcpy(&f, &b32, 4);
+            v = rt_new_float((double)f, site);
+        } else if (sp.flt) {
+            double d;
+            memcpy(&d, &bits, 8);
+            v = rt_new_float(d, site);
+        } else {
+            int64_t x = sp.sign && sp.width < 8 && (bits >> (sp.width * 8 - 1)) ? (int64_t)(bits | (~UINT64_C(0) << (sp.width * 8)))
+                                                                                  : (int64_t)bits;
+            // 63 bits hold every value but a u64 from 2^62 and an i64
+            // outside -2^62 to 2^62 - 1
+            if ((!sp.sign && sp.width == 8 && bits >> 62) || x < -(INT64_C(1) << 62) || x >= (INT64_C(1) << 62)) {
+                rt_fault(RT_FAULT_OVERFLOW, rt_int(i - sp.width), site);
+            }
+            v = rt_int(x);
+        }
+        builder_add(&out, v, site);
+    }
+    rt_value_t *ok = rt_alloc(48, site);
+    ok[0] = rt_symbol(RT_SYM_OK);
+    ok[1] = (rt_value_t)(ok + 2) | RT_TAG_LIST;
+    ok[2] = out.list;
+    ok[3] = (rt_value_t)(ok + 4) | RT_TAG_LIST;
+    ok[4] = rt_int(i);
+    ok[5] = RT_NIL;
+    return (rt_value_t)ok | RT_TAG_LIST;
+}
+
+// --- bytes as text (D255) -----------------------------------------------------
+//
+// base64 (RFC 4648 §4), padded with = to a multiple of four; base64url
+// (§5, - and _ for + and /), as JWTs have it, unpadded, though reading
+// takes it padded too. hex in lowercase, read in either case. What can't
+// be read back is #false, as str->int has it.
+
+static const char B64[]    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+static const char B64URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+
+static rt_value_t to_base64(rt_value_t s, const char *alphabet, int pad, const char *site) {
+    need_string(s, site);
+    const uint8_t *p   = (const uint8_t *)bytes_of(s);
+    size_t         len = len_of(s), n = 0;
+    char          *out = rt_must(malloc(len / 3 * 4 + 5));
+    for (size_t i = 0; i < len; i += 3) {
+        uint32_t v    = (uint32_t)p[i] << 16 | (i + 1 < len ? (uint32_t)p[i + 1] << 8 : 0) | (i + 2 < len ? p[i + 2] : 0);
+        size_t   have = len - i < 3 ? len - i : 3;      // bytes in this group, so have + 1 characters
+        for (size_t j = 0; j < 4; j++) {
+            if (j <= have)  out[n++] = alphabet[v >> (18 - 6 * j) & 63];
+            else if (pad)   out[n++] = '=';
+        }
+    }
+    rt_value_t r = rt_new_string(out, n, site);
+    free(out);
+    return r;
+}
+
+static int b64_digit(uint8_t c, const char *alphabet) {
+    const char *at = c ? strchr(alphabet, c) : NULL;
+    return at ? (int)(at - alphabet) : -1;
+}
+
+// pad_needed: the padding must be there (base64); else it may be, and
+// must be right if it is (base64url).
+static rt_value_t from_base64(rt_value_t s, const char *alphabet, int pad_needed, const char *site) {
+    need_string(s, site);
+    const uint8_t *p   = (const uint8_t *)bytes_of(s);
+    size_t         len = len_of(s), pads = 0;
+    while (pads < len && p[len - 1 - pads] == '=') pads++;
+    size_t data = len - pads, r = data % 4;
+    if (pads > 2 || r == 1 || ((pads || pad_needed) && len % 4 != 0) || (pads && pads != 4 - r)) return RT_FALSE;
+    char  *out = rt_must(malloc(data / 4 * 3 + 3));
+    size_t n   = 0;
+    for (size_t i = 0; i < data; i += 4) {
+        size_t   have = data - i < 4 ? data - i : 4;
+        uint32_t v    = 0;
+        for (size_t j = 0; j < 4; j++) {
+            int d = j < have ? b64_digit(p[i + j], alphabet) : 0;
+            if (d < 0) {
+                free(out);
+                return RT_FALSE;
+            }
+            v = v << 6 | (uint32_t)d;
+        }
+        for (size_t j = 0; j + 1 < have; j++) out[n++] = (char)(v >> (16 - 8 * j));
+    }
+    rt_value_t result = rt_new_string(out, n, site);
+    free(out);
+    return result;
+}
+
+rt_value_t rt_bytes_to_base64(rt_value_t s, const char *site)    { return to_base64(s, B64, 1, site); }
+rt_value_t rt_base64_to_bytes(rt_value_t s, const char *site)    { return from_base64(s, B64, 1, site); }
+rt_value_t rt_bytes_to_base64url(rt_value_t s, const char *site) { return to_base64(s, B64URL, 0, site); }
+rt_value_t rt_base64url_to_bytes(rt_value_t s, const char *site) { return from_base64(s, B64URL, 0, site); }
+
+rt_value_t rt_bytes_to_hex(rt_value_t s, const char *site) {
+    static const char digits[] = "0123456789abcdef";
+    need_string(s, site);
+    const uint8_t *p   = (const uint8_t *)bytes_of(s);
+    size_t         len = len_of(s);
+    char          *out = rt_must(malloc(2 * len + 1));
+    for (size_t i = 0; i < len; i++) {
+        out[2 * i]     = digits[p[i] >> 4];
+        out[2 * i + 1] = digits[p[i] & 15];
+    }
+    rt_value_t r = rt_new_string(out, 2 * len, site);
+    free(out);
+    return r;
+}
+
+static int hex_digit(uint8_t c) {
+    return c >= '0' && c <= '9' ? c - '0' : c >= 'a' && c <= 'f' ? c - 'a' + 10 : c >= 'A' && c <= 'F' ? c - 'A' + 10 : -1;
+}
+
+rt_value_t rt_hex_to_bytes(rt_value_t s, const char *site) {
+    need_string(s, site);
+    const uint8_t *p   = (const uint8_t *)bytes_of(s);
+    size_t         len = len_of(s);
+    if (len % 2) return RT_FALSE;
+    char *out = rt_must(malloc(len / 2 + 1));
+    for (size_t i = 0; i < len; i += 2) {
+        int hi = hex_digit(p[i]), lo = hex_digit(p[i + 1]);
+        if (hi < 0 || lo < 0) {
+            free(out);
+            return RT_FALSE;
+        }
+        out[i / 2] = (char)(hi << 4 | lo);
+    }
+    rt_value_t r = rt_new_string(out, len / 2, site);
+    free(out);
+    return r;
+}

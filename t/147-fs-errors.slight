@@ -23,3 +23,4 @@
 (pprint (disconnect $$))
 (connect :fs/read 42 (reader))
 (pprint :not-reached)
+; warns: 22:33

@@ -18,6 +18,9 @@
 #define RT_TAG_SYMBOL        5    // 101    compile-time id
 #define RT_TAG_PID           7    // 111    process id << 3
 #define RT_PID_SHIFT         3
+#define RT_ISLAND_SHIFT     55    // a pid's island (D256), in the 8 bits below an address's bit
+#define RT_ISLANDS_MAX     256
+#define RT_ROOT       (1 << RT_PID_SHIFT | RT_TAG_PID)   // the root's pid: 1, on island 0
 #define RT_SYMBOL_SHIFT      3    // a symbol is id << 3 | RT_TAG_SYMBOL
 
 // A boxed value points at a header word: the box's type in the low seven
@@ -26,13 +29,17 @@
 // count. A string's header has RT_BOX_ASCII too when every byte is below
 // 0x80, so a character is a byte and the str/ builtins index in one step
 // (D219); one made without it is only slower.
-#define RT_BOX_TYPE_MASK  0x7f
+#define RT_BOX_TYPE_MASK  0x3f
+#define RT_BOX_SHARED     0x40    // a string or array whose data is a shared buffer's, off the heap (D253): the
+                                  // box holds where it is and the buffer, rt_buffer_t
 #define RT_BOX_ASCII      0x80
 #define RT_BOX_SIZE_SHIFT    8
 #define RT_BOX_STRING        1
 #define RT_BOX_FLOAT         2    // size 8: an IEEE double
 #define RT_BOX_CLOSURE       3    // size: how many captured values
 #define RT_BOX_TUPLE         4    // size: how many elements, which follow the header (D169)
+#define RT_BOX_FLOATS        5    // an array of :float (D253): size, how many doubles, which follow it
+#define RT_BOX_INTS          6    // an array of :int: size, how many int64s (each in 63 bits), which follow it
 
 // A closure's words after the header: the code, its arity, its name (a C
 // string, for printing), then the captured values. Offsets are from a
@@ -73,7 +80,8 @@
 #define RT_FAULT_NOT_TUPLE  22    // :not-a-tuple     a tuple operation was given something else
 #define RT_FAULT_NOT_ACTOR  23    // :not-an-actor    a task was sent to, or asked to recv (D243)
 #define RT_FAULT_NOT_TASK   24    // :not-a-task      an actor was joined (D243)
-#define RT_FAULT_COUNT      24
+#define RT_FAULT_NOT_ARRAY  25    // :not-an-array    an array operation was given something else (D253)
+#define RT_FAULT_COUNT      25
 
 // Symbols the runtime makes: every program has them, after #false and
 // #true, in this order (values.ts, RUNTIME_SYMBOLS). The fault kinds
@@ -89,7 +97,7 @@
 // in the order :ctrl :alt :shift. Their symbols follow the fault kinds:
 // RT_KEY_x is symbol RT_SYM_KEYS + x. compiler/tests/values.test.ts reads
 // the names from here.
-#define RT_SYM_KEYS         30    // RT_SYM_FAULTS + RT_FAULT_COUNT
+#define RT_SYM_KEYS         31    // RT_SYM_FAULTS + RT_FAULT_COUNT
 #define RT_KEY_UP            0    // :ArrowUp       the arrows are in the order of
 #define RT_KEY_DOWN          1    // :ArrowDown     their escape sequences, ESC [ A
 #define RT_KEY_RIGHT         2    // :ArrowRight    to ESC [ D
@@ -131,7 +139,7 @@
 // (:sexp f v), and of source (:form f form line) and (:doc f text line). A
 // command also takes (:eof), which closes its input. RT_DEV_x is symbol
 // RT_SYM_DEVICE + x.
-#define RT_SYM_DEVICE       60    // RT_SYM_KEYS + RT_KEY_COUNT
+#define RT_SYM_DEVICE       61    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
 #define RT_DEV_LINE          1    // :line
 #define RT_DEV_EOF           2    // :eof
@@ -152,7 +160,7 @@
 // Why a device failed, from errno: a device's owner ends with
 // (:error (name path)), path being the file's, or the socket's "host:port"
 // (a listener's port). RT_ERR_x is symbol RT_SYM_ERRS + x.
-#define RT_SYM_ERRS         75    // RT_SYM_DEVICE + RT_DEV_COUNT
+#define RT_SYM_ERRS         76    // RT_SYM_DEVICE + RT_DEV_COUNT
 #define RT_ERR_ENOENT        0    // :enoent        no such file or directory
 #define RT_ERR_EACCES        1    // :eacces        permission denied
 #define RT_ERR_EPERM         2    // :eperm         operation not permitted
@@ -180,18 +188,21 @@
 #define RT_ERR_BADJSON      24    // :bad-json      what was read isn't JSON (nor this)
 #define RT_ERR_BADSEXP      25    // :bad-sexp      what was read isn't an s-expression (nor this)
 #define RT_ERR_OTHER        26    // :io-error      anything else
-#define RT_ERR_COUNT        27
+#define RT_ERR_ENOTEMPTY    27    // :enotempty     deleting a directory that has something in it (D254)
+#define RT_ERR_EXDEV        28    // :exdev         renaming to another file system
+#define RT_ERR_EBUSY        29    // :ebusy
+#define RT_ERR_COUNT        30
 
 // The symbols JSON's values need beyond #true and #false (json.c):
 // RT_JSON_x is symbol RT_SYM_JSON + x.
-#define RT_SYM_JSON        102    // RT_SYM_ERRS + RT_ERR_COUNT
+#define RT_SYM_JSON        106    // RT_SYM_ERRS + RT_ERR_COUNT
 #define RT_JSON_NULL         0    // :null
 #define RT_JSON_OBJECT       1    // :object        (:object (key value) ...)
 #define RT_JSON_COUNT        2
 
 // And those the s-expression reader makes (sexp.c): RT_SEXP_x is symbol
 // RT_SYM_SEXP + x.
-#define RT_SYM_SEXP        104    // RT_SYM_JSON + RT_JSON_COUNT
+#define RT_SYM_SEXP        108    // RT_SYM_JSON + RT_JSON_COUNT
 #define RT_SEXP_SYMBOL       0    // :symbol        (:symbol "name"), a name the program doesn't mention
 #define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
 #define RT_SEXP_COUNT        2
@@ -199,7 +210,7 @@
 // What :system (process.c, D171) is asked and answers with: RT_SYS_x is
 // symbol RT_SYM_SYSTEM + x. A process's :heap and :stack are the fault
 // kinds' symbols, which have those names already.
-#define RT_SYM_SYSTEM      106    // RT_SYM_SEXP + RT_SEXP_COUNT
+#define RT_SYM_SYSTEM      110    // RT_SYM_SEXP + RT_SEXP_COUNT
 #define RT_SYS_PROCESSES     0    // :processes     asked for every process; and how many there are
 #define RT_SYS_PROCESS       1    // :process       asked for one; and (:process s info) for each
 #define RT_SYS_RUNTIME       2    // :runtime       asked for the runtime's counts, and (:runtime s info)
@@ -230,7 +241,7 @@
 // it, name being one of these (the same on macOS and Linux, where some of
 // their numbers aren't), or the number of any other. RT_EXEC_x is symbol
 // RT_SYM_EXEC + x.
-#define RT_SYM_EXEC        129    // RT_SYM_SYSTEM + RT_SYS_COUNT
+#define RT_SYM_EXEC        133    // RT_SYM_SYSTEM + RT_SYS_COUNT
 #define RT_EXEC_EXITED       0    // :exited
 #define RT_EXEC_SIGNAL       1    // :signal
 #define RT_EXEC_HUP          2    // :hup           the signals' names, without SIG
@@ -253,14 +264,14 @@
 // Who's at the other end of a Unix connection (socket/peer, process.c,
 // D235): ((:uid u) (:gid g) (:pid p)), :pid being RT_SYS_PID's. RT_PEER_x
 // is symbol RT_SYM_PEER + x.
-#define RT_SYM_PEER        146    // RT_SYM_EXEC + RT_EXEC_COUNT
+#define RT_SYM_PEER        150    // RT_SYM_EXEC + RT_EXEC_COUNT
 #define RT_PEER_UID          0    // :uid
 #define RT_PEER_GID          1    // :gid
 #define RT_PEER_COUNT        2
 
 // What kind a process is (D243), in :system's info as (:kind k): RT_KIND_x
 // is symbol RT_SYM_KIND + x.
-#define RT_SYM_KIND        148    // RT_SYM_PEER + RT_PEER_COUNT
+#define RT_SYM_KIND        152    // RT_SYM_PEER + RT_PEER_COUNT
 #define RT_KIND_KIND         0    // :kind
 #define RT_KIND_TASK         1    // :task          started with fork, or the root
 #define RT_KIND_ACTOR        2    // :actor         started with spawn or connect
@@ -268,7 +279,7 @@
 
 // What open (process.c, D243) opens for a task: RT_SOURCE_x is symbol
 // RT_SYM_SOURCE + x.
-#define RT_SYM_SOURCE      151    // RT_SYM_KIND + RT_KIND_COUNT
+#define RT_SYM_SOURCE      155    // RT_SYM_KIND + RT_KIND_COUNT
 #define RT_SOURCE_FS_READ    0    // :fs/read
 #define RT_SOURCE_FS_WRITE   1    // :fs/write
 #define RT_SOURCE_FS_APPEND  2    // :fs/append
@@ -280,9 +291,71 @@
 
 // What :system's (:runtime s info) says of the process table (D244):
 // RT_TABLE_x is symbol RT_SYM_TABLE + x.
-#define RT_SYM_TABLE       158    // RT_SYM_SOURCE + RT_SOURCE_COUNT
+#define RT_SYM_TABLE       162    // RT_SYM_SOURCE + RT_SOURCE_COUNT
 #define RT_TABLE_RECORDS     0    // :records       entries in use: running, open, or keeping a value
 #define RT_TABLE_COUNT       1
+
+// What fs/stat (files.c, D254) says of a file, (:kind k) among them:
+// RT_STAT_x is symbol RT_SYM_STAT + x.
+#define RT_SYM_STAT        163    // RT_SYM_TABLE + RT_TABLE_COUNT
+#define RT_STAT_FILE         0    // :file
+#define RT_STAT_DIR          1    // :dir
+#define RT_STAT_LINK         2    // :link          a symbolic link, not followed
+#define RT_STAT_OTHER        3    // :other         a socket, a pipe, a device
+#define RT_STAT_SIZE         4    // :size
+#define RT_STAT_MODIFIED     5    // :modified      microseconds since 1970, as clock/now
+#define RT_STAT_MODE         6    // :mode          the permission bits
+#define RT_STAT_COUNT        7
+
+// bytes/pack's and bytes/unpack's specs (strings.c, D254), and :short, an
+// unpack that hasn't the bytes yet: RT_PACK_x is symbol RT_SYM_PACK + x.
+// The first 18 are numbers, a width and an order each.
+#define RT_SYM_PACK        170    // RT_SYM_STAT + RT_STAT_COUNT
+#define RT_PACK_U8            0    // :u8
+#define RT_PACK_I8            1    // :i8
+#define RT_PACK_U16BE         2    // :u16be
+#define RT_PACK_U16LE         3    // :u16le
+#define RT_PACK_I16BE         4    // :i16be
+#define RT_PACK_I16LE         5    // :i16le
+#define RT_PACK_U32BE         6    // :u32be
+#define RT_PACK_U32LE         7    // :u32le
+#define RT_PACK_I32BE         8    // :i32be
+#define RT_PACK_I32LE         9    // :i32le
+#define RT_PACK_U64BE        10    // :u64be
+#define RT_PACK_U64LE        11    // :u64le
+#define RT_PACK_I64BE        12    // :i64be
+#define RT_PACK_I64LE        13    // :i64le
+#define RT_PACK_F32BE        14    // :f32be
+#define RT_PACK_F32LE        15    // :f32le
+#define RT_PACK_F64BE        16    // :f64be
+#define RT_PACK_F64LE        17    // :f64le
+#define RT_PACK_BYTES        18    // :bytes
+#define RT_PACK_SHORT        19    // :short
+#define RT_PACK_COUNT       20
+
+// log's levels (json.c, D254), below :error, which is RT_SYM_ERROR:
+// RT_LOG_x is symbol RT_SYM_LOG + x.
+#define RT_SYM_LOG         190    // RT_SYM_PACK + RT_PACK_COUNT
+#define RT_LOG_DEBUG         0    // :debug
+#define RT_LOG_INFO          1    // :info
+#define RT_LOG_WARN          2    // :warn
+#define RT_LOG_COUNT         3
+
+// An array's kinds (arrays.c, D253): :float is symbol RT_SYM_ARRAY +
+// RT_ARRAY_FLOAT, and :int is SIGINT's name, RT_SYM_EXEC + RT_EXEC_INT.
+#define RT_SYM_ARRAY       193    // RT_SYM_LOG + RT_LOG_COUNT
+#define RT_ARRAY_FLOAT       0    // :float
+#define RT_ARRAY_COUNT       1
+
+// What :system says of islands (D256): RT_ISLE_x is symbol RT_SYM_ISLE + x.
+#define RT_SYM_ISLE        194    // RT_SYM_ARRAY + RT_ARRAY_COUNT
+#define RT_ISLE_ISLAND       0    // :island        the island a process is on, or an island's number
+#define RT_ISLE_STARTED      1    // :started       whether an island's thread has started
+#define RT_ISLE_SENT         2    // :sent          messages to other islands, and their bytes
+#define RT_ISLE_RECEIVED     3    // :received      messages from other islands, and their bytes
+#define RT_ISLE_SHARED       4    // :shared        the bytes of the shared buffers its processes hold
+#define RT_ISLE_ISLANDS      5    // :islands       each island's counts, in (:runtime s info)
+#define RT_ISLE_COUNT        6
 
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
@@ -342,6 +415,11 @@
 // (where C names would otherwise get a leading underscore).
 #define RT_ASM(name) __asm__(#name)
 
+// An island's own (D256): each island, a thread running the scheduler
+// on its processes, has its own copy of what's marked so, and nothing of
+// another's but its inbox.
+#define RT_ISLAND _Thread_local
+
 typedef uint64_t rt_value_t;
 
 // Compiled code, as the runtime holds it: the trampoline calls it with its
@@ -365,10 +443,26 @@ typedef struct rt_ctx {
 
 // A chunk of a process's heap; the chunks are a list, newest first. A
 // message arrives as a chunk of its own, and joins the old generation's.
+// Two words, so that a message with nothing to copy, a chunk of just its
+// record, is as small as can be: a copy's handles to shared strings (D253),
+// for whoever adopts it, are after its size bytes, in the few that have them
+// (process.c).
 typedef struct rt_chunk {
     struct rt_chunk *next;
-    size_t           size;      // bytes after this header
+    uint64_t         size : 63; // bytes after this header, but for the handles
+    uint64_t         shares : 1;    // whether it has handles after them
 } rt_chunk_t;
+
+// A string of RT_SHARED_MIN bytes or more is a buffer off the heap (D253):
+// what's shared never changes, and holds no pointers, so processes share
+// it, a send copying the handle and counting a reference, never the bytes.
+// The bytes end in a NUL that len doesn't count, as a string's do.
+#define RT_SHARED_MIN 4096
+typedef struct rt_buffer {
+    _Atomic uint64_t refs;      // atomic, since islands share it (D256)
+    uint64_t len;
+    char     bytes[];
+} rt_buffer_t;
 
 typedef struct rt_msg {
     struct rt_msg *next;
@@ -385,7 +479,7 @@ typedef struct rt_msg {
 // READING: a task in read or read/any, keeping its stack, woken by a
 // message to one of its sources or by a watch on a pid among them (D243).
 // DONE: ended, about to be freed.
-typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_RACING, RT_SLEEPING, RT_READING, RT_DONE } rt_state_t;
+typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_RACING, RT_SLEEPING, RT_READING, RT_PLACING, RT_DONE } rt_state_t;
 
 // One monitor: someone to tell when a process ends. It's on the watched
 // process's list, in the order they asked, and on the watcher's, so that
@@ -414,6 +508,7 @@ typedef struct rt_proc {
     rt_state_t      state;
     uint8_t         keypress;   // connected to :keypress
     uint8_t         actor;      // started with spawn or connect, so it can recv and be sent to (D243)
+    uint8_t         parent_task;    // its parent, on another island, is a task, which can read its end (D256)
     void           *stack;      // the bottom of its stack (above the guard page), or NULL
     rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c)
     rt_chunk_t     *chunks;     // the old generation, newest first, the messages it's taken among them
@@ -438,6 +533,9 @@ typedef struct rt_proc {
     struct rt_side *side;       // what few processes need, made when first wanted: the devices
                                 // it owns, a task's addresses, a joiner's result, a parent's
                                 // kept children (process.c)
+    struct rt_isle *isle;       // its island's state (process.c), the thread-local of the thread
+                                // it runs on, reached through it on the busiest paths, since on
+                                // macOS each use of a thread-local is a call (D256)
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -446,15 +544,22 @@ static inline rt_value_t rt_car(rt_value_t v) { return ((const rt_value_t *)(v -
 static inline rt_value_t rt_cdr(rt_value_t v) { return ((const rt_value_t *)(v - RT_TAG_LIST))[1]; }
 static inline int        rt_is_cons(rt_value_t v) { return (v & RT_TAG_MASK) == RT_TAG_LIST && v != RT_NIL; }
 
+// A pid: its number in its island's table, from RT_PID_SHIFT, in 52 bits,
+// and its island above that (D256), each island numbering its own.
+static inline uint64_t rt_pid_number(rt_value_t v) { return (v >> RT_PID_SHIFT) & ((1ULL << 52) - 1); }
+static inline uint64_t rt_pid_island(rt_value_t v) { return (v >> RT_ISLAND_SHIFT) & (RT_ISLANDS_MAX - 1); }
+
 // An address (D243): a place a task makes to be sent to. An immediate under
-// the pid tag, with the top bit set: the task's index in its low 32 bits
-// (as a pid's, from RT_PID_SHIFT), and its number among the task's
-// addresses above them, so it can't be taken for a pid.
+// the pid tag, with the top bit set: the task's number in its low 32 bits
+// (as a pid's, from RT_PID_SHIFT), its number among the task's addresses
+// in the 20 above them, and its island above those, as a pid's.
 #define RT_ADDRESS_BIT    (1ULL << 63)
 #define RT_ADDRESS_SHIFT  35
 static inline int      rt_is_address(rt_value_t v)   { return (v & RT_TAG_MASK) == RT_TAG_PID && (v & RT_ADDRESS_BIT); }
 static inline uint64_t rt_address_task(rt_value_t v) { return (v >> RT_PID_SHIFT) & 0xffffffffu; }
-static inline uint64_t rt_address_number(rt_value_t v) { return (v & ~RT_ADDRESS_BIT) >> RT_ADDRESS_SHIFT; }
+static inline uint64_t rt_address_number(rt_value_t v) {
+    return (v >> RT_ADDRESS_SHIFT) & ((1ULL << (RT_ISLAND_SHIFT - RT_ADDRESS_SHIFT)) - 1);
+}
 
 static inline const uint64_t *rt_box(rt_value_t v) { return (const uint64_t *)(v - RT_TAG_BOXED); }
 static inline int rt_is_box(rt_value_t v, uint64_t type) {
@@ -471,8 +576,26 @@ static inline double      rt_float_value(rt_value_t v) {
 }
 static inline uint64_t    rt_string_len(rt_value_t v)   { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
 static inline int         rt_string_ascii(rt_value_t v) { return (rt_box(v)[0] & RT_BOX_ASCII) != 0; }
-static inline const char *rt_string_bytes(rt_value_t v) { return (const char *)(rt_box(v) + 1); }
+static inline const char *rt_string_bytes(rt_value_t v) {
+    const uint64_t *box = rt_box(v);
+    return box[0] & RT_BOX_SHARED ? (const char *)box[1] : (const char *)(box + 1);
+}
 static inline uint64_t    rt_tuple_len(rt_value_t v)    { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
+
+// Arrays of numbers (arrays.c, D253): their elements follow the header,
+// or, at RT_SHARED_MIN bytes or more, are a shared buffer's, as a big
+// string's bytes are.
+static inline int rt_is_array(rt_value_t v) { return rt_is_box(v, RT_BOX_FLOATS) || rt_is_box(v, RT_BOX_INTS); }
+static inline uint64_t rt_array_len(rt_value_t v) { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
+static inline const uint64_t *rt_array_data(rt_value_t v) {
+    const uint64_t *box = rt_box(v);
+    return box[0] & RT_BOX_SHARED ? (const uint64_t *)box[1] : box + 1;
+}
+static inline double rt_array_float(rt_value_t v, uint64_t i) {
+    double d;
+    __builtin_memcpy(&d, rt_array_data(v) + i, sizeof d);
+    return d;
+}
 static inline rt_value_t  rt_tuple_get(rt_value_t v, uint64_t i) { return rt_box(v)[1 + i]; }
 
 // The values a box holds, which copying and the collector go into: a
@@ -523,9 +646,15 @@ extern const uintptr_t slight_functions[]    RT_ASM(slight_functions);
 // in a new process, a task, with the values deep-copied into its heap;
 // rt_spawn does the same for an actor (D243); rt_connect starts an actor,
 // and sends it every key from :keypress; rt_connect_system does too, and
-// gives the new process a :system device (D171).
-rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
-rt_value_t rt_spawn(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_spawn);
+// gives the new process a :system device (D171). Compiled code hands
+// rt_fork, rt_spawn, rt_send and rt_recv the process, which it keeps in a
+// register, since on macOS looking up rt_current, a thread-local, is a
+// call, and these are the busiest (D256).
+rt_value_t rt_fork(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
+rt_value_t rt_spawn(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_spawn);
+rt_value_t rt_spawn_on(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) RT_ASM(rt_spawn_on);
+rt_value_t rt_island_of(const char *site) RT_ASM(rt_island_of);
+rt_value_t rt_islands(const char *site) RT_ASM(rt_islands);
 rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect);
 rt_value_t rt_connect_system(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect_system);
 
@@ -556,8 +685,8 @@ rt_value_t rt_disconnect(rt_value_t pid, const char *site) RT_ASM(rt_disconnect)
 // (socket/peer c): who's at the other end of the Unix connection c, as
 // ((:uid u) (:gid g) (:pid p)), or () for any other pid (D235).
 rt_value_t rt_socket_peer(rt_value_t c, const char *site) RT_ASM(rt_socket_peer);
-rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
-rt_value_t rt_recv(rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
+rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
+rt_value_t rt_recv(rt_proc_t *p, rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
 void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_letter);
 void       rt_yield(void) RT_ASM(rt_yield);
 
@@ -596,6 +725,51 @@ rt_value_t rt_sleep(rt_value_t ms, const char *site) RT_ASM(rt_sleep);
 // (clock/us): the microseconds since the program started, on the clock
 // the timers go by (D208).
 rt_value_t rt_clock_us(const char *site) RT_ASM(rt_clock_us);
+
+// Files beyond reading and writing (files.c, D254): each gives (:ok x) or
+// (:error (name path)), name errno's, as rt_errno_name (process.c) has it.
+uint64_t   rt_errno_name(int err);
+rt_value_t rt_fs_list(rt_value_t path, const char *site) RT_ASM(rt_fs_list);
+rt_value_t rt_fs_stat(rt_value_t path, const char *site) RT_ASM(rt_fs_stat);
+rt_value_t rt_fs_delete(rt_value_t path, const char *site) RT_ASM(rt_fs_delete);
+rt_value_t rt_fs_rename(rt_value_t from, rt_value_t to, const char *site) RT_ASM(rt_fs_rename);
+rt_value_t rt_fs_mkdir(rt_value_t path, const char *site) RT_ASM(rt_fs_mkdir);
+
+// (bytes/pack specs values) and (bytes/unpack specs s at) (strings.c,
+// D254): numbers as bytes, by width and order, and back.
+rt_value_t rt_bytes_pack(rt_value_t specs, rt_value_t values, const char *site) RT_ASM(rt_bytes_pack);
+rt_value_t rt_bytes_unpack(rt_value_t specs, rt_value_t s, rt_value_t at, const char *site) RT_ASM(rt_bytes_unpack);
+
+// (log level msg fields) (json.c, D254): a line of JSON on stderr, unless
+// level is below rt_log_level (0 :debug, 1 :info, 2 :warn, 3 :error),
+// which SLIGHT_LOG sets.
+extern int rt_log_level;
+rt_value_t rt_log_line(rt_value_t level, rt_value_t msg, rt_value_t fields, const char *site) RT_ASM(rt_log_line);
+
+// What's about secrets (crypto.c, D255): the digests and MACs as strings
+// of their raw bytes; equal? in a time that doesn't depend on where two
+// strings differ; and random bytes from the system, recorded.
+rt_value_t rt_crypto_sha256(rt_value_t msg, const char *site) RT_ASM(rt_crypto_sha256);
+rt_value_t rt_crypto_sha512(rt_value_t msg, const char *site) RT_ASM(rt_crypto_sha512);
+rt_value_t rt_crypto_hmac_sha256(rt_value_t key, rt_value_t msg, const char *site) RT_ASM(rt_crypto_hmac_sha256);
+rt_value_t rt_crypto_hmac_sha512(rt_value_t key, rt_value_t msg, const char *site) RT_ASM(rt_crypto_hmac_sha512);
+rt_value_t rt_crypto_equal(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_crypto_equal);
+rt_value_t rt_crypto_random_bytes(rt_value_t n, const char *site) RT_ASM(rt_crypto_random_bytes);
+
+// Bytes as text and back (strings.c, D255): base64 (RFC 4648 §4, padded),
+// base64url (§5, unpadded), and hex; reading back gives #false for what
+// isn't one.
+rt_value_t rt_bytes_to_base64(rt_value_t s, const char *site) RT_ASM(rt_bytes_to_base64);
+rt_value_t rt_base64_to_bytes(rt_value_t s, const char *site) RT_ASM(rt_base64_to_bytes);
+rt_value_t rt_bytes_to_base64url(rt_value_t s, const char *site) RT_ASM(rt_bytes_to_base64url);
+rt_value_t rt_base64url_to_bytes(rt_value_t s, const char *site) RT_ASM(rt_base64url_to_bytes);
+rt_value_t rt_bytes_to_hex(rt_value_t s, const char *site) RT_ASM(rt_bytes_to_hex);
+rt_value_t rt_hex_to_bytes(rt_value_t s, const char *site) RT_ASM(rt_hex_to_bytes);
+
+// (clock/now): the time of day, microseconds since 1970-01-01T00:00:00Z,
+// recorded; on the virtual clock, SLIGHT_EPOCH's plus the virtual time
+// (D254).
+rt_value_t rt_clock_now(const char *site) RT_ASM(rt_clock_now);
 
 // Makes room for `bytes` in the current process's heap: a new chunk.
 // Faults at `site` when the heap would pass its limit.
@@ -691,6 +865,28 @@ rt_value_t rt_tuple_remove(rt_value_t t, rt_value_t i, const char *site) RT_ASM(
 rt_value_t rt_tuple_slice(rt_value_t t, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_tuple_slice);
 rt_value_t rt_tuple_to_list(rt_value_t t, const char *site) RT_ASM(rt_tuple_to_list);
 
+// Arrays of numbers (arrays.c, D253): :float and :int, unboxed.
+rt_value_t rt_is_array_p(rt_value_t v) RT_ASM(rt_is_array_p);
+rt_value_t rt_array_make(rt_value_t kind, rt_value_t n, rt_value_t x, const char *site) RT_ASM(rt_array_make);
+rt_value_t rt_list_to_array(rt_value_t kind, rt_value_t xs, const char *site) RT_ASM(rt_list_to_array);
+rt_value_t rt_array_to_list(rt_value_t a, const char *site) RT_ASM(rt_array_to_list);
+rt_value_t rt_array_kind(rt_value_t a, const char *site) RT_ASM(rt_array_kind);
+rt_value_t rt_array_len_of(rt_value_t a, const char *site) RT_ASM(rt_array_len_of);
+rt_value_t rt_array_ref(rt_value_t a, rt_value_t i, const char *site) RT_ASM(rt_array_ref);
+rt_value_t rt_array_set(rt_value_t a, rt_value_t i, rt_value_t x, const char *site) RT_ASM(rt_array_set);
+rt_value_t rt_array_slice(rt_value_t a, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_array_slice);
+rt_value_t rt_array_concat(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_concat);
+rt_value_t rt_array_add(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_add);
+rt_value_t rt_array_sub(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_sub);
+rt_value_t rt_array_mul(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_mul);
+rt_value_t rt_array_div(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_div);
+rt_value_t rt_array_sum(rt_value_t a, const char *site) RT_ASM(rt_array_sum);
+rt_value_t rt_array_min(rt_value_t a, const char *site) RT_ASM(rt_array_min);
+rt_value_t rt_array_max(rt_value_t a, const char *site) RT_ASM(rt_array_max);
+rt_value_t rt_array_dot(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_dot);
+rt_value_t rt_array_matmul(rt_value_t a, rt_value_t b, rt_value_t rows, rt_value_t inner, rt_value_t cols,
+                           const char *site) RT_ASM(rt_array_matmul);
+
 // S-expressions as data (sexp.c, D155).
 rt_value_t rt_sexp_parse(rt_value_t s, const char *site) RT_ASM(rt_sexp_parse);
 rt_value_t rt_sexp_print(rt_value_t v, const char *site) RT_ASM(rt_sexp_print);
@@ -772,12 +968,18 @@ void rt_preempt(rt_proc_t *proc, rt_value_t *frame, uint64_t n, const uintptr_t 
 // --- the runtime itself -------------------------------------------------------
 
 // The process that is running.
-extern rt_proc_t *rt_current;
+extern RT_ISLAND rt_proc_t *rt_current;
 
 // Allocates from the current process's heap, in 16-byte units; faults at
 // `site` when the heap is full.
 void *rt_alloc(size_t bytes, const char *site);
-void *rt_alloc_old(size_t bytes, const char *site); // for what points at nothing: straight into the old generation
+rt_value_t rt_new_shared_string(const char *bytes, size_t len, const char *site);   // process.c (D253)
+// A shared box of header (the box's type and size, without RT_BOX_SHARED)
+// for len bytes, its data's address in *data (process.c, D253).
+rt_value_t rt_new_shared(uint64_t header, size_t len, char **data, const char *site);
+// A fresh array of type (RT_BOX_FLOATS or RT_BOX_INTS) of n elements, to
+// be filled through rt_array_data (arrays.c).
+rt_value_t rt_new_array(uint64_t type, uint64_t n, const char *site);
 
 // p, from malloc, calloc or realloc; if it's NULL, the program ends, with
 // exit status 2, since the runtime can't go on without memory.
@@ -835,10 +1037,17 @@ static inline rt_value_t rt_work_pop(rt_work_t *w) {
     return w->items[--w->n];
 }
 
+// A pid or an address as pprint shows it, into buf (of at least 64): #<pid
+// 5>, and #<pid 5@2> on island 2 (D256); #<address 3.1>, #<address 3.1@2>.
+void rt_pid_text(char *buf, size_t size, rt_value_t v);
+
 // Appends v as pprint shows it. With raw, a string is its bytes, without
 // quotes (str and tty/write); strings inside lists are always quoted, and
 // escaped as rt_quote does.
 void rt_render(rt_buf_t *b, rt_value_t v, int raw);
+
+// Appends d as pprint shows a float: the shortest that reads back as it.
+void rt_render_float(rt_buf_t *b, double d);
 
 // Appends len bytes as a string the reader takes back: in double quotes,
 // with ", \ and the control characters escaped, so it stays on one line
@@ -935,11 +1144,15 @@ int  rt_json_build(const char *text, size_t len, rt_build_alloc_t alloc, void *c
 // sexp/parse reads). rt_sexp_reset keeps those two, and where it is in a
 // line.
 typedef struct rt_sexp {
-    unsigned char *quoted;      // for each list open, and the top level: whether a ' waits there
+    unsigned char *quoted;      // for each list open, and the top level: whether a ' waits there, and
+                                // whether it's an array's, of numbers only (sexp.c's Q_)
     size_t         depth, cap;
     int            state, num, hex, k;
     uint32_t       code;        // a \u{...} escape's, so far
-    const char    *word;        // what's left of #true or #false
+    const char    *word;        // what's left of #true, #false, #float or #int
+    int            array;       // which of the last two it is, or 0
+    uint64_t       mag;         // a number's digits so far, for an #int's 63 bits
+    int            neg;
     int            docs, closed;
     int            mid_line;    // the last byte taken wasn't a newline
     size_t         seen, lines; // bytes and newlines taken since the reset

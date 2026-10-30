@@ -12,7 +12,8 @@ groundwork HTTP needs (12), ways to read a device (12a), collecting
 outside `recv` (12b) and looking up host names (12d), where `recv`
 can go (13), and after it, `match`, tuples, and recording and replaying
 a run (D168–D170). HTTP (14) on plain `:tcp` is done (D172–D174). Next: the rest of 12
-(C libraries and TLS), which HTTPS needs, then agents (15).
+(C libraries; not TLS, which goes to curl and a proxy in front, D251),
+then agents (15).
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).
@@ -369,10 +370,10 @@ the frames as roots, read as they are, and the slots of a function that
 calls another zeroed at its entry; golden tests 187–190, and 134
 changed.
 
-#### 12c. C libraries, and TLS
+#### 12c. C libraries (TLS dropped, D251)
 
-After agents have started (D180): a local model needs only plain HTTP,
-and TLS waits for the first hosted one. HTTPS needs this.
+After agents have started (D180): a local model needs only plain HTTP.
+TLS was to come here, for HTTPS; it won't be vendored (D251, below).
 
 Discussed in Oct 2026 (D151, D152; BACKGROUND.md has what Odin does):
 
@@ -382,14 +383,26 @@ Discussed in Oct 2026 (D151, D152; BACKGROUND.md has what Odin does):
 - Vendored as source under `vendor/`, each at a pinned version with its
   licence and a `VENDOR` file; `slightc` compiles one as it does the
   runtime, and links it statically into the programs that use it.
-- In C: TLS, hashing and crypto, JSON and s-expressions (12a). Database
+- In C: hashing, JSON and s-expressions (12a). Database
   drivers when they're wanted; one that can only block (SQLite) would
   need the runtime's first thread, which isn't decided.
 
-Then TLS, the first vendored library: a `:tls` socket device, on mbedTLS
-unless something better turns up. To settle: confirming mbedTLS, where a
-client finds its CA certificates (macOS keeps them in the Keychain), and
-how a server is given its certificate and key.
+Then TLS was to be the first vendored library, a `:tls` socket device
+on mbedTLS. Withdrawn (D251): vendored code is only what never needs a
+security fix (math, hashes, Unicode's tables), and what does is left to
+programs the system keeps up to date, run as processes. A server sits
+behind a proxy that ends TLS (nginx, Caddy, a cluster's ingress), on
+plain HTTP or a Unix socket (D231); a client's `https://` goes through
+curl, run by `lib/http.slight` with `:exec`, with the system's
+certificates and proxies; and between machines, ssh (`rpc/exec`,
+D225). Built (Oct 2026): `https://` through curl in `http/request`,
+`http/request-within` and `http/stream`, curl asked for the raw HTTP/1.1
+reply, which the same code reads as a socket's; curl's exit code as the
+error, in the device's words where there are some, and a reply given
+only once curl has ended with 0. Golden tests 309 (a stand-in for curl,
+`t/data/curl/curl`), 211 and 220 (real curl, refused), 310 (a compiler
+bug it met: `connect`'s source compiled as a tail call when `connect`
+was one), and `t/live.py`'s https, real curl over real TLS.
 
 #### 12d. Looking up host names (done)
 
@@ -565,9 +578,10 @@ calling its devices, connections kept up and `:system` asked from
 outside (D228, golden tests 280–282; done). Next, to settle with the
 user: offering an agent's tools over `rpc`, and to whom a remote call's
 `approve` goes;
-`log`, a builtin; or 12c. TLS (12c) and a reader of server-sent events, for a hosted
-model, wait (the user, Oct 2026: local models first, and curl for
-HTTPS).
+`log`, a builtin; a reader of server-sent events, for a hosted model,
+now that `https://` goes through curl (D251, golden test 309); and
+`llama-server` run by the program, with the OpenAI-compatible protocol
+in `lib/agent.slight` beside ollama's (D251).
 
 - An agent is an actor whose state is its context: the conversation so
   far, its tools, its model's settings. A turn comes in as a message,
@@ -581,7 +595,8 @@ HTTPS).
   D225).
 - Models run outside slight, behind HTTP: a local server such as ollama
   for generative models (it streams JSON lines, which 12a's way of
-  reading JSON makes one message each), a hosted API over HTTPS (12c),
+  reading JSON makes one message each), a hosted API over HTTPS (through
+  curl, D251),
   and a Jev-compatible server for small "System One" models, which give
   a decision (yes or no, a choice, a score) with its probability rather
   than text. JevOS, an open one, runs a 1B model on the CPU in 25-110 ms
@@ -590,6 +605,13 @@ HTTPS).
   (DESIGN.md's open question 2), the libraries are large and in C++, and
   a crash in one would end every actor. A local server costs an HTTP
   request on top, a fraction of a millisecond against the model's tens.
+  And no server to install apart (D251): llama.cpp's `llama-server`,
+  started by the program with `:exec` and watched by a monitor, serves
+  the OpenAI-compatible protocol on localhost, which `lib/agent.slight`
+  would speak beside ollama's, as vLLM, LM Studio and the hosted APIs
+  do. Linking llama.cpp in was turned down: C++, a thread, no GPU in a
+  static Linux binary, a crash ending every actor, and a project that
+  changes daily to follow.
 - `:exec`, a device for running commands, for tools: `(connect :exec
   (list "ls" "-l") expr)` runs the command, its owner gets the output as
   other devices give theirs (stdout and stderr together), then `(:eof
@@ -627,13 +649,15 @@ them:
   image, since `slightc` makes both statically; health checks (a TCP
   probe, or `/healthz` from `lib/http.slight`), as a scratch image has
   no shell. And anyone on the network can call an `rpc` program: a
-  token in `helo` first, then TLS (12c).
+  token in `helo` first; for encryption, ssh (`rpc/exec`) or a proxy
+  in front (D251).
 - More than 8 arguments to a function, on the stack (DESIGN.md).
 - Sockets: IPv6, and more than the 1,000 or so that `select()` holds
   (D113), with `poll`, `kqueue` or `epoll`: `kqueue` on macOS and
   `epoll` on Linux, as tokio waits (D224), for everything `select()`
   waits on now, sockets, files, commands and the terminal; an HTTP
-  server meets the limit first.
+  server meets the limit first. Waits till a program needs it: slight
+  leans to simulation, not servers (D257).
 - Dropping exit records, and bounded mailboxes (D88).
 - Optimizations, when profiling asks for them: the heap pointer in a
   register (D57), captured values read from the closure (D79), denser
@@ -748,8 +772,9 @@ has it: `rand/int`, `rand/float` and `rand/seed` in the runtime,
 `SLIGHT_SEED` or the system, the seed recorded for a replay, and a
 fork's generator split from its parent's, so a process's numbers don't
 depend on the order processes run in (D222). Boids draws its flock with
-them. Golden test 273, and the replay checks. Cryptographic randomness
-waits for TLS.
+them. Golden test 273, and the replay checks. Cryptographic randomness:
+random bytes from the system, through `replay.c` ("Toward general
+purpose", 2; D251).
 
 ### Maps (done, Oct 2026)
 
@@ -803,7 +828,8 @@ with Stevan first.
   machine as in Termite Scheme or Erlang's distribution, which bring
   monitors across machines, names, and what a pid means after a
   reconnect. What's left is under 15 and 16: to whom a remote call's
-  `approve` goes, a token in `helo`, then TLS (12c).
+  `approve` goes, a token in `helo`, and ssh or a proxy for encryption
+  (D251).
 - **Smaller, left out of D168 and D169:** guards in `match` and `recv`;
   and what `#(...)` means outside a pattern (D176 left it open): a tuple
   made of its elements' values, as Clojure's vectors, or a constant, as
@@ -1086,6 +1112,714 @@ kept), D124 and D128 (a task opens a device, and is told its failure),
 D157 (`ask` without a box), and D220 (`join/race` is `read/any` over
 pids).
 
+### A C-style syntax (agreed, D246; the reader built, Oct 2026)
+
+A second way to write slight, `.sly`, read into the same s-expressions
+(`docs/SYNTAX.md`). In steps, each with passing tests:
+
+1. **The reader** (done): `compiler/src/sly.ts`, chosen by the file's
+   extension in `expand.ts`; unit tests against `reader.ts`, and golden
+   tests 303 to 307 (306 and 307: game-of-life-actors and boids,
+   converted, to the examples' own output).
+2. **The warning** for a tag used both bare and as a tagged list in one
+   program (D246), which helps the s-expressions too: done for a send
+   to an actor whose recvs are known, by the type checker (D247).
+3. **The converters,** `slightc --to-sly` and `--to-slight`, which keep
+   comments and doc blocks, and lay a program out by rules of their own.
+4. **The guide in both syntaxes:** every program in `docs/guide/code/`
+   converted, and run to the same `.expected`; the pages could then show
+   either.
+
+Each of 2 to 4 waits for Stevan to have written some `.sly` and to say
+it's worth keeping.
+
+### Types (agreed and built, D247, Oct 2026)
+
+A checker that warns before a program is compiled (`docs/TYPES.md`), in
+the steps that document gives, each with passing tests:
+
+1. **The lint** (done): `types.ts`, `check.ts`, `builtins.ts`; what's
+   certain from literals, builtins, patterns and tests; `slightc
+   --check`; `make types` over every program.
+2. **Processes** (done): task, actor and address types, mailboxes from
+   `recv`, dead letters, an actor joined, the keyboard.
+3. **Annotations** (done): `deftype`, `sig`, `the`, their `.sly`
+   syntax, generics, and the prelude's sigs.
+4. **`--strict`** (done).
+5. **Types in code generation:** waits, till the checker has been used
+   a while, and then only with benchmarks to show it's worth it.
+
+Also waiting: typed devices beyond the keyboard, parameters' types from
+their use (success typings), and contracts checked at run time.
+
+### Modules (built, D248, Oct 2026)
+
+A file with a header (`X.sli`, `X.slyi`) is a module: its includers see
+what the header declares, and the rest is its own; `modules.ts` links by
+renaming. The prelude and every library have headers. Waiting, till
+Stevan has used types and `.sly` more: whether a richer module system
+(imports under other names, or of some names) is wanted. Every library
+checks clean under `--strict` on its own, which `make types` holds them
+to. Every library's
+header is typed (`ds`, `http`, `rpc`, `agent` and `tools` after the
+first five, with the types their docs name: `Response`, `Handler`,
+`Tool`, ...; `t/types/010`).
+
+### Toward general purpose (order agreed, D249, Oct 2026)
+
+What slight lacks before someone can write a command-line tool, a web
+service, a script over data or a daemon in it without shelling out for
+the basics. In this order, each step's builtins and devices proposed
+before they're built, as the working rules say. Numbers in bulk (below,
+D253) come after step 1, and more than one core (7) after them. Two
+points that shaped the rest were settled in Oct 2026 (D252):
+
+**C libraries: vendored only, no FFI** (D252). D151 and D152 have
+vendored libraries, each a builtin or a device that `slightc` knows
+about, and D251 narrows them to code that never needs a security fix.
+An FFI call could block, keep pointers, and do I/O that isn't recorded,
+so a run could no longer be replayed whole (D250's rule). What can't be
+vendored runs as a process (D251).
+
+**Regular expressions: a small engine of our own** (D252), in C, a
+subset of RE2's syntax, its time linear in its input, so no pattern can
+stall a process and there's nothing to patch for one (D251); a builtin,
+as D151 allows a pure function bounded by its input. Its syntax and
+builtins are to be proposed with the standard library (3).
+
+1. **What the runtime is missing,** small things each:
+   - The time of day: seconds (or microseconds) since the epoch, read
+     through `replay.c` so a run replays, and on the virtual clock its
+     start plus the virtual time. Calendar dates, formatting and time
+     zones after it, in slight, as a library.
+   - Files beyond reading and writing: listing a directory, a file's
+     size, kind and times, deleting, renaming, making a directory. Today
+     they go through `:exec` (`lib/tools.slight` does).
+   - Binary data: integers and floats packed into bytes and read back,
+     by width and byte order, and a way to build a string of bytes
+     without copying it at each step. Binary protocols (PostgreSQL's,
+     WebSockets', msgpack) need it.
+   - A log device: levels, structured lines to stderr, recorded.
+
+   Proposed below, "Step 1, proposed", and agreed (D254): `clock/now`
+   and `lib/time.slight` (done, golden test 311, from
+   `t/models/time.py`, and `t/replay/now.slight`), `fs/` builtins
+   (done, `runtime/files.c`, golden test 312, and trees in
+   `lib/fs.slight`, 313, and `t/replay/world.slight`), `bytes/pack` and
+   `bytes/unpack` (done, golden test 314, from `t/models/pack.py`),
+   and `log` (done, golden tests 315 and 316). Step 1 is done.
+2. **HTTPS, and what TLS would have brought** (D251, in place of TLS
+   on mbedTLS; done, D255, golden test 317): `https://` through curl in
+   `lib/http.slight` (golden test 309), and a
+   server behind a proxy that ends TLS; SHA-2 and HMAC in C of our own,
+   small and fixed, which never need a security fix; base64, and random
+   bytes from the system for keys and tokens, through `replay.c` (not
+   `rand/`'s, which are for simulation, D222). Hex and URL encoding are
+   slight's.
+3. **The standard library,** in slight where that's practical (D152):
+   `format`, CSV, parsing `@ARGV`, a set, sorted maps beside the hash
+   map (D223), dates (from 1), and regular expressions (D252). No
+   mutable array; arrays of numbers, immutable, are Numbers in bulk's
+   (D253).
+4. **Supervisors and a registry,** an OTP's least, in slight on
+   `monitor`: restarting what fails (one for one, the rest after one),
+   with a limit on restarts in a time, and processes found by name, so
+   one restarted can be found again (`rpc` users build their own
+   today). Shutting down in order on SIGTERM needs signals as messages
+   (16, Containers).
+5. **Tooling:** a formatter for both syntaxes, which is also the
+   converters (A C-style syntax, 3); a language server on `check.ts`
+   (its warnings as diagnostics, a name's type on hover, a definition
+   from `modules.ts`); a debugger that steps through a recorded run
+   (D170); a profiler; docs from `=doc` blocks, as perldoc does them.
+6. **Packages:** `@include` takes a path. Dependencies by git URL and
+   hash in a lockfile, a place to fetch them to, and a search path for
+   `@include :name`.
+7. **More than one core** (Parked, Parallelism): a ceiling on servers,
+   not a bar to being general purpose; separate heaps make it easier
+   than in most languages, and the run queue and timers are the work.
+   Moved up by D253 to follow Numbers in bulk, since numbers in bulk on
+   one core aren't worth the bother. Agreed as islands (D256, below,
+   "More than one core: islands").
+
+And, though not features: a version number and a core that holds still
+for it; one syntax the docs are written in, the other made from it.
+
+**What vendoring takes out of the runtime.** Little, by the look of
+it: what the runtime's C does is tied to its heap, `select()` and
+`replay.c`, which no library does for it. `json.c` and `sexp.c` are
+push parsers that build slight values as bytes arrive (D162, D163),
+which the usual libraries (yyjson, cJSON) don't do; `dns.c` is 353
+lines in `select()`, where c-ares is far bigger and has its own loop.
+`unicode.c`'s 3,600 lines are tables made from the UCD, not code to
+keep; if utf8proc comes for display width and graphemes (16), they
+might shrink to SpecialCasing's mappings, which utf8proc lacks
+(JavaScript's case mapping, D219, takes `ß` to `SS`), if its
+properties give "cased" and "case-ignorable" as D219 needs them. To
+check when utf8proc comes. What vendoring saves is the code not yet
+written: graphemes, compression. TLS goes to curl and a proxy instead,
+and hashes, base64 and random bytes are ours (D251). SQLite waits on
+D151's open point, a thread for a library that can only block, or for
+its command-line tool through `:exec`, clumsier but with neither.
+
+#### Step 1, proposed (agreed, D254, Oct 2026)
+
+The four pieces of step 1, each with options and a recommendation;
+Stevan took each recommendation (D254). All four are builtins in C, recorded through `replay.c`
+where they take from the world, so a run still replays (D250's rule).
+
+**1. The time of day.**
+
+`clock/us` is the microseconds since the program started, on the clock
+timers go by, and never the time of day (D208). Nothing gives the date.
+
+- (a) `(clock/now)`: the microseconds since 1970-01-01T00:00:00Z, an
+  integer, as `clock/us` is (63 bits hold them for 146,000 years),
+  POSIX time, so without leap seconds. On the real clock it's the
+  system's (`CLOCK_REALTIME`), through a new `rt_io_realtime`, recorded;
+  it can jump when the system's clock is set, which is why timers stay
+  on `clock/us`. On the virtual clock it's the virtual time plus a
+  start: `SLIGHT_EPOCH`'s, in seconds, if it's set, or the real time of
+  day when the program starts, recorded either way, as `SLIGHT_SEED`
+  is for random numbers (D222). `t/run.sh` sets `SLIGHT_EPOCH`, so a
+  test's dates are the same every run.
+- (b) As (a), in milliseconds, JavaScript's `Date.now()`, which `str/`
+  and `math/` follow elsewhere (D219, D221): familiar, but a second unit
+  beside `clock/us`.
+- (c) Seconds, as a float: precise to a microsecond only till 2255, and
+  floats print with an exponent.
+
+Then the calendar, in slight, `lib/time.slight`, a module: a time made
+a UTC date and back, `(time/utc us)` giving a keyed list (`:year`
+`:month` `:day` `:hour` `:minute` `:second` `:us` `:weekday`) and
+`(time/from-utc fields)`, by Howard Hinnant's days-from-civil, exact
+over any year; `(time/iso us)`, ISO 8601 (`"2026-10-29T14:03:07.123456Z"`),
+and `(time/parse-iso s)`, a Result; `(time/http us)`, the HTTP date
+(`"Thu, 29 Oct 2026 14:03:07 GMT"`), which `lib/http.slight`'s
+missing Date header wants; and a fixed offset from UTC, in minutes, for
+`time/iso` to write. Not time zones by name: they need the system's
+zone database, which changes (D251's kind of thing to leave to the
+system); reading `/etc/localtime` in slight is a later option.
+
+**Recommendation: (a),** and `lib/time.slight` as above. Golden tests
+from Python's `datetime`, and `t/replay/` for a recorded run's dates.
+
+**2. Files beyond reading and writing.**
+
+Only `:fs/read`, `:fs/write` and `:fs/append`; anything else goes
+through `:exec` (`ls`, `rm`, `mv`), as `lib/tools.slight` does.
+
+- (a) Builtins, each a system call made where it's called, as a file
+  device's `open` already is: `(fs/list dir)`, the names in it, sorted
+  by their bytes so the order is the same on every file system, without
+  `.` and `..`; `(fs/stat path)`, a keyed list, `:kind` (`:file`,
+  `:dir`, `:link` or `:other`), `:size`, `:modified` (microseconds, as
+  `clock/now`), `:mode`, following a link as `stat` does;
+  `(fs/delete path)`, a file or an empty directory, as C's `remove`;
+  `(fs/rename from to)`; `(fs/mkdir path)`, one level, its mode 0777
+  less the umask. Each gives `(:ok value)` or `(:error (name path))`,
+  errno's names as a device's are (`:enoent`, `:eacces`, `:enotempty`,
+  ...), and goes through `replay.c`: recorded with what it gave, and in
+  a replay not made, as no write is.
+- (b) An `:fs` device that answers requests as messages, as D151 says
+  of anything with I/O. But with no thread in the runtime, it would
+  make the same system call on the scheduler's stack, blocking the
+  same way; it only makes each call a message and a reply.
+- (c) As now, `:exec`: a process per call, and output to parse.
+
+**Recommendation: (a).** A call waits as long as the disk does, as
+opening a file does now; on a network file system that can be long,
+which a thread for the file system would fix, as D151's open point
+would for SQLite. A whole tree (`mkdir -p`, `rm -r`, a walk) is
+slight's, in `lib/fs.slight`, on these. Golden tests in `build/t/`, as
+the tests that write files do.
+
+**3. Binary data.**
+
+Strings are bytes, and `bytes/at`, `bytes/slice` and `bytes/index-of`
+read them, but nothing turns a number into its bytes or back.
+
+- (a) `(bytes/pack specs values)` and `(bytes/unpack specs s at)`, the
+  specs a list of keywords: `:u8` and `:i8`; `:u16be`, `:u16le`,
+  `:i16be`, `:i16le`, and the same for 32 and 64 bits; `:f32be`,
+  `:f32le`, `:f64be`, `:f64le`; and `(:bytes n)`, `n` bytes as they
+  are. `pack` gives a string; a value out of its spec's range faults
+  (`:out-of-range`), and an `f32` is rounded to the nearest float, as
+  IEEE says. `unpack` gives `(:ok values next)`, `next` the index after
+  them, or `(:error :short)` when `s` hasn't all of them yet, so a
+  reader can wait for more; a `u64` that doesn't fit slight's 63 bits
+  faults (`:overflow`), as arithmetic does. Specs are data, so a
+  protocol's are a list it names once.
+- (b) Perl's `pack` and `unpack`, a template string (`"n N a*"`):
+  terse, and familiar to anyone who knows Perl, but a little language
+  to parse, and letters to look up.
+- (c) A builtin for each width and order (`bytes/u32be`,
+  `bytes/get-u32be`, ...): forty names, where (a) has two.
+- (d) Erlang's bit syntax, in `match`'s patterns: the best to read, but
+  new syntax, and a change to patterns (D168), the most machinery.
+
+Building a string without copying at each step needs nothing new:
+`str/join` and `~` copy once, at the end, over a list of pieces.
+
+**Recommendation: (a).** Golden tests from Python's `struct`, which has
+the same widths and orders.
+
+**4. A log.**
+
+There's no way for a program to write to stderr: `pprint` and
+`tty/write` write to stdout, and only the runtime's own faults, dead
+letters and errors go to stderr.
+
+- (a) A builtin, `(log level msg fields)`: `level` one of `:debug`,
+  `:info`, `:warn` and `:error`; `msg` a string; `fields` an
+  association list, `(list (list "port" 8080))`, or `()`. It writes one
+  line to stderr, as JSON: `{"time":"2026-10-29T14:03:07.123456Z",
+  "level":"info","pid":3,"msg":"listening","port":8080}`, the time
+  `clock/now`'s, the fields as `json/print` writes them. Lines below
+  `SLIGHT_LOG`'s level (`info` unless it's set) aren't written. JSON
+  lines are what log collectors read (a container's logs, Loki,
+  CloudWatch), and slight reads them back with `:json`. In a replay
+  they're written again, as stdout is, so a recorded run's log comes
+  back with it.
+- (b) As (a), but s-expressions, one a line, which slight reads back
+  with `:sexp`: slight's own, but nothing else reads them.
+- (c) A `:log` device, a process that owns the log, which programs send
+  lines to: a process and a mailbox for what a write does.
+- (d) Just `(eprint x)`, `pprint` to stderr, and logging a library in
+  slight on it.
+
+**Recommendation: (a).** The runtime's own messages (`fault in ...`)
+stay as they are: golden tests say them, and they're for people. A
+log's lines on the virtual clock, with `SLIGHT_EPOCH` set, are the same
+every run, so golden tests check them.
+
+### Numbers in bulk (agreed, D253, Oct 2026)
+
+Three proposals, for simulation, agreed as written with the points to
+settle settled (D253): actors as agents, the virtual clock as simulated
+time, seeded orders as Monte Carlo over schedules, and replay as
+reproducibility are there already; what such programs lack is numbers
+in bulk, the physics, statistics and fields over a grid. So D250's "not
+for" loses numbers in bulk, slight becoming a language for services
+*and simulations* that can be replayed, and D249's order gains these
+after its step 1, with more than one core moving up after them, since
+numbers in bulk on one core aren't worth the bother. Tensors, autodiff and a GPU stay out (a GPU's results differ by
+card and driver, so replay would have to record them all, and its
+kernels would need a language of their own).
+
+In the order they'd be built, each its own step with golden tests, and
+each useful without the ones after it.
+
+#### 1. A libm that gives the same bits everywhere
+
+**The problem.** `math/sin` and the rest call the system's libm, and
+macOS's and glibc's differ in the last bit (D76): `(math/tan 1.0)` is
+`1.557407724654902` on one and `1.5574077246549023` on the other. So a
+run recorded on the Mac doesn't replay on Linux once it computes with
+them, the golden tests compare them to 12 places, and `forest`, `coral`
+and `waves` aren't golden tests at all. The runtime's C is compiled
+with clang's default `-ffp-contract=on`, which may fuse `a * b + c` into
+one rounding on AArch64 but can't on x86-64's baseline, a second way
+the two targets could differ.
+
+**Options.**
+- (a) As now: D76, and replay on the machine that recorded.
+- (b) Vendor CORE-MATH (MIT, plain C, D152): every function correctly
+  rounded, so a result is *the* double nearest the true value, the same
+  everywhere, and what an independent model (Python's `mpmath`) says.
+- (c) Vendor musl's libm (MIT, fdlibm's lineage): the same code on
+  every machine, so the same bits, but not correctly rounded, so a
+  test's expected value has to come from musl itself.
+- (d) LLVM's libc math: correctly rounded too, but C++, and a bigger
+  build.
+
+**Recommendation: (b),** with musl's version of any function CORE-MATH
+lacks (as far as I know it has all twenty-one that `math/` needs from a
+libm: `sin cos tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh
+exp expm1 log log2 log10 log1p pow cbrt hypot`; to confirm when it's
+vendored). `sqrt`, `floor`, `ceil`, `round` and `trunc` are exact
+already. And `-ffp-contract=off` for the runtime and everything
+vendored; the compiled code already does a multiply and an add as two
+instructions. Then D76 is retired for `math/`: its golden tests compare
+exactly, from `mpmath`, and `forest`, `coral` and `waves` can be golden
+tests. Parsing floats (`strtod`, correctly rounded on both systems) and
+printing them (our own, shortest) are the same everywhere already, and
+`hash` makes every NaN alike (D209).
+
+**What it costs.** It would be the first vendored library (TLS won't
+be one, D251), so it builds D152's machinery: `vendor/`, its `VENDOR`
+files, compiled once per target and kept, as the runtime is (D150).
+CORE-MATH's functions are a little slower than glibc's (a correctly
+rounded result sometimes needs a second, slower step); `bench/` would
+say whether `n-body` and `spectral-norm` notice. Nothing in the
+language changes.
+
+**Settled** (D253): (b), CORE-MATH, with musl's version of any function
+it lacks; linked into every program, as the system's libm is now, since
+it's small and the runtime's own C calls it.
+
+**Built** (Oct 2026): the runtime compiled with `-ffp-contract=off`
+(`bin/slightc.ts`'s `CFLAGS`), and CORE-MATH's 21 functions vendored in
+`vendor/core-math/` (its `VENDOR` file says from where and how to
+update them), `runtime/numbers.c` calling them; golden test 319, each
+compared exactly with mpmath (`t/models/math.py`). Still to do: `forest`,
+`coral` and `waves` as golden tests, each needing a model of its
+picture.
+
+#### 2. Shared buffers: big immutable data off the heap
+
+**The problem.** A message is copied into its receiver (D177, D240),
+so an array of a million floats, or a 10 MB string, costs a copy at
+every send, and its full size in every heap it reaches, against each
+one's cap (D202, D233). A device's read is copied too, from the
+runtime's buffer into its owner's heap.
+
+**Options.**
+- (a) As now: copy everything.
+- (b) Erlang's reference-counted binaries: a string or array of at
+  least a threshold's size lives off the heap, in a buffer with a count
+  of references; the heap holds a small handle to it; a send copies the
+  handle and adds one to the count; nothing is ever copied, since
+  nothing changes.
+- (c) A heap that all processes share, for big values, with a collector
+  of its own: a second collector, and pauses that cross processes.
+- (d) Moving a value on send, the sender losing it: needs the checker
+  to know a value is used once, a linear type; machinery D247 left out.
+
+**Recommendation: (b),** and it's safe here for the reason D200's
+collector needs no write barrier: what's shared never changes, and
+holds no pointers (only strings and arrays of numbers go off the heap,
+never lists, tuples or closures), so no buffer points into any heap,
+and no heap's collector has to know about another's.
+
+How it works:
+- A handle is a box of three words: the header (its type, string or
+  array, and a flag saying it's shared), the buffer's address, and an
+  offset, so a slice of a shared string or array is a handle too, made
+  without copying. `rt_string_bytes` and the like read through it, a
+  branch on the flag; nothing in the compiled code reads a string's
+  bytes, so the change is the runtime's alone.
+- Each process keeps a list of its handles, young and old as its heap
+  is (D200). After a collection, a handle the collector didn't copy is
+  garbage, and its buffer's count goes down; a buffer at zero is freed.
+  A process's end lets go of all of its handles.
+- A message's chunk (D177) keeps the handles it carries, and they join
+  the receiver's list when it takes the message; a message never taken
+  (a dead letter, a mailbox at the end) lets go of them.
+- Erlang's lesson: a process that allocates little never collects, so
+  it can hold dead buffers for ever. So the bytes a process's young
+  handles refer to count toward collecting it, as if they were in its
+  nursery, and all its handles' bytes count toward its cap.
+- A device reads anything at the threshold or more straight into a
+  buffer, and its owner gets the handle; writing a shared string writes
+  from the buffer.
+- `SLIGHT_POISON` fills a freed buffer; `SLIGHT_GC_VERIFY` checks each
+  buffer's count against the handles that refer to it; `:system` says
+  how many bytes of buffers each process holds, and the runtime in all.
+  Replay isn't touched: where a value lives is never seen.
+- One core now, so the counts are plain integers; with more cores
+  they'd be atomic, and a buffer, never changing, can be read from any.
+
+**What it costs.** Most of the work is in `process.c`: allocating
+buffers, the handle lists, the collector and the message copy, and a
+process's end. Strings gain from it at once, before there are arrays.
+
+**Built** (Oct 2026, golden test 318, `t/live.py`'s memory: a 32 MB
+string held by 40 actors peaks at 33 MB, and 600 strings of 1 MB made
+and dropped at 13 MB): strings, the arrays still to come; not yet a
+slice sharing its string's buffer, nor a device's read made a buffer as
+it comes, nor the benchmark to tune the threshold with.
+
+**Settled** (D253): the threshold 4 KB to start, below which copying
+costs less than counting, tuned with a `payload` of big strings; a
+handle counts its whole buffer toward the cap, since that's what it
+keeps alive; and a slice is shared only when it's at the threshold, and
+copied below, against Erlang's trap of a small slice keeping a big
+buffer alive.
+
+#### 3. Arrays of numbers
+
+**The problem.** A vector of floats today is a list (16 bytes a cell,
+and a 16-byte box for each float) or a tuple (8 bytes for a pointer to
+each box): three to four times the memory of the numbers, a pointer to
+follow for each, and every result a new box.
+
+**Options.**
+- (a) Arrays of anything, as tuples are: no gain for numbers, which
+  stay boxed.
+- (b) Arrays of one kind of number, unboxed: `:float` (IEEE doubles)
+  and `:int` (slight's 63-bit integers, so an element always reads
+  back), as SRFI 4's vectors and NumPy's arrays are.
+- (c) (b) with shapes, n-dimensional, in the runtime: NumPy's model,
+  and most of its machinery.
+
+**Recommendation: (b),** one-dimensional, immutable, with shapes and
+matrices a library in slight on top. An array of numbers holds no
+pointers, so the collector never walks it (D240), and filling a fresh
+one in place can't break D200's rule that nothing old points at
+anything young.
+
+- Printed `#float(1.0 2.5)` and `#int(1 2)`, in slight's names rather
+  than SRFI 4's `#f64`; `sexp/print` writes that and `sexp/parse` reads
+  it back (D163), `json/print` writes a JSON array. No literal in
+  source, as there's none for a tuple (D176).
+- `eq?` and `hash` compare kind and elements, as for tuples, an element
+  as `eq?` compares floats; an `#int` array is never `eq?` to a
+  `#float` one.
+- Types: `(array float)` and `(array int)` (`array<float>` in `.sly`).
+- The builtins, under `array/`, few, named as `tuple/`'s are where
+  they do the same:
+  - making one: `(array/make :float n x)`, `(list->array :float xs)`,
+    `(array->list a)`, as `tuple/make`, `list->tuple` and `tuple->list`;
+  - reading: `array/len`, `(array/get a i)` (`:out-of-range`, as
+    `tuple/get`), `(array/slice a from to)`, `array/concat`;
+  - `(array/set a i x)`: a copy with one element changed, O(n), as
+    `tuple/set` is, and not for loops;
+  - element by element, each operand an array of the same kind and
+    length or a number: `array/add`, `array/sub`, `array/mul`,
+    `array/div`, faulting as `+` and the rest do (an `#int` sum that
+    overflows faults `:overflow`);
+  - reductions: `array/sum`, `array/dot`, `array/min`, `array/max`,
+    in order, left to right, so the answer is the obvious loop's, and a
+    Python loop is a model of it; clang doesn't vectorize a float
+    reduction without being told it may reorder, so the order holds,
+    while element-by-element loops are free to vectorize.
+- In the prelude: `(array/generate :float n f)`, an array of `(f i)`,
+  written in slight, filling a fresh array through a builtin only
+  `lib/` may call (C can't call back into slight with the collector
+  walking frames, D166, so it can't be a C loop); and `array/map` and
+  `array/fold` on it.
+- Shared buffers (2) make a big one free to send; without them arrays
+  work, copied, as strings do now.
+- Matrices: `lib/matrix.slight`, a module, a matrix a tuple of its rows,
+  its columns and an array; the one operation too slow in slight,
+  multiplying, a builtin, `(array/matmul a b n k m)`, our own loop, each
+  element summed in order. Not BLAS: its order changes with its blocking
+  and its threads, so its bits do.
+
+**What it costs.** A new box type in `rt.h` and `values.ts`, about
+twenty builtins in C (`runtime/arrays.c`) with their types in
+`builtins.ts`, `sexp.c` reading and printing them, and the prelude's few.
+Floats stay boxed elsewhere: unboxing them in a loop is TYPES.md's step
+5, types in code generation, which can come after, with benchmarks.
+
+**Settled** (D253): `:int` arrays and `:float`; printed `#float(...)`
+and `#int(...)`; element by element never mixes an `:int` array with a
+float (convert it first, through `array->list`, or a builtin for it if
+that's too slow); and reductions left to right, the obvious loop's
+answer, which a Python loop models for the tests.
+
+**Built** (Oct 2026, golden tests 320 to 323, `t/models/arrays.py`):
+as proposed, but for `array/generate`, which goes through a list rather
+than a builtin only `lib/` may call (D253 says why); with `array/kind`,
+`array?` and `array/concat`, and `array/div` always `:float`. Not yet: a
+builtin to make an `:int` array a `:float` one (through `array->list`
+and `list->array` for now), and unboxed floats in compiled code
+(TYPES.md's step 5), each for when a benchmark asks.
+
+### More than one core: islands (agreed, D256, Oct 2026)
+
+**The problem.** One OS thread runs every process, so a server or a
+simulation uses one core of the M2 Max's twelve. The airline's
+what-ifs get more by running copies of the program, a share each
+(`--shard k/n`, D218), which is the workaround this makes unnecessary.
+
+**What was agreed** (D256, after a first proposal of one scheduler over
+every core, with stealing, that Stevan turned down for something more
+isolated, as `rpc` between programs is): **islands**. Each island is
+today's single-threaded runtime on a thread of its own: its own process
+table, run queue, timers, `select()` loop, stack pool and record.
+Nothing is shared between islands but an inbox each, and the shared
+buffers, which never change.
+
+- **A fixed set, made when the program starts:** `(islands)` of them,
+  one per core unless `SLIGHT_ISLANDS` says, island 0 the main one; an
+  island's thread starts the first time something is placed on it.
+  Nothing moves between islands on its own: where an actor runs is the
+  program's choice, `(spawn/on k expr)`, k from 0 below `(islands)`,
+  and `(island)` says which one a process is on. A program spreads its
+  work with `(spawn/on (% i (islands)) ...)`, and runs the same on one
+  core or twelve; `SLIGHT_ISLANDS=1` is today's runtime exactly.
+  `fork` stays on its parent's island, so a `join` is always local.
+- **Pids carry their island,** and a send goes wherever its pid says:
+  within an island, today's send, with no atomics; to another, the
+  message copied into a chunk, as now, and the chunk pushed onto that
+  island's inbox, a queue many push to and one pops, which wakes it,
+  its scheduler delivering into the local mailbox. Messages from one
+  sender to one receiver still arrive in order. Monitoring, killing
+  and an actor's end cross the same way, as messages. Each island
+  numbers its own pids, so each is the same from run to run, whatever
+  the others do. A pid prints `#<pid 5@2>`, pid 5 at island 2, and
+  island 0's as now, `#<pid 5>`; an address `#<address 3.1@2>`.
+- **The bits:** 8 of island (up to 256), below the address bit, so a
+  pid keeps 52 bits of its number, and an address its task's 32 and
+  20 of its own number (from 28), which wraps past a million, skipping
+  any still open (a task's open ones are few).
+- **Shared buffers cross islands without a copy** (D253): a big string
+  or array is sent as its handle, its reference count atomic. So a
+  frame of a simulation, an array of a million floats or a screen's 4
+  MB, goes to the island that draws it for the price of a handle.
+- **Island 0 owns the signals, the terminal and `:system`:** the other
+  islands' threads block signals, so they come to island 0's (`SIGCHLD`
+  wakes each island that has commands, each reaping its own); `:keypress`
+  and `:system` are island 0's devices wherever they're connected, their
+  messages crossing to an owner elsewhere; and output, from any island,
+  goes out a whole value or line at a time, under a lock. So a TUI on
+  island 0 answers keys and redraws at idle latency (D238) however hard
+  the other islands compute, its collections touching only its own
+  small heaps: real-time pictures of a running simulation.
+- **`:system` counts what crosses:** each actor's messages and bytes to
+  and from other islands, and each island's totals, run queue and
+  shared bytes, asked of each island through its inbox.
+- **Replay per island** (D170): what comes through an island's inbox is
+  input from outside it, recorded as a socket's read is; each island
+  records its own run (`SLIGHT_RECORD=f` writes `f` for island 0, `f.2`
+  for island 2 and so on), and any island replays exactly, on its own or
+  with the rest. `SLIGHT_SCHED` seeds each island's order apart. A
+  simulation spanning islands carries its time in its messages, since
+  each island's virtual clock is its own.
+- **The end, and deadlock:** the program ends when every island is idle,
+  every inbox empty, and nothing pending anywhere that could make a
+  process ready, island 0 printing its root's value as now; one shared
+  count of busy islands and messages in flight says so, and lets the
+  deadlock message see across islands.
+
+**Rejected:** one scheduler over every core with stealing, and a lock
+or an atomic in every send (the first proposal); channels between
+islands as devices (`(:from c v)` wrapped around every message, where
+pids that cross keep `send` as it is); actors declared shared, only they
+reachable from another island (a reply needs its asker shared too, or
+an exception for addresses); an island per `spawn/island` call (a
+thread for each of a simulation's thousand branches); `#<pid 2.5>`,
+taken by addresses, and `#<pid 0:5>` everywhere, which changes every
+pid a test prints.
+
+**The steps,** each with `make test` passing:
+
+1. **Island state:** the runtime's globals (`process.c`'s table, queue,
+   timers and devices, and `replay.c`'s, `dns.c`'s and `tty.c`'s) made
+   an island's, thread-local, still on one thread; pids with their
+   island's bits, always 0 yet, masked where a pid is looked up, and
+   address numbers skipping open ones as they wrap. *(Done, Oct 2026:
+   `RT_ISLAND`, C's `_Thread_local`, on what's an island's, the
+   settings, the terminal's state and what signal handlers touch left
+   global; `rt_pid_number`, `rt_pid_island` and `rt_pid_text`; golden
+   test 324, an address number wrapping past one still open. Under
+   callgrind, `ping-pong` runs 2.2 per cent more instructions and
+   `fan-in` 0.16; on macOS, where a thread-local is reached through a
+   call, the M2 Max says.)*
+2. **Islands as threads:** `SLIGHT_ISLANDS`, `(islands)`, `(island)`,
+   `(spawn/on k expr)`, the inboxes, sends, monitors, kills and ends
+   across them, and `#<pid 5@2>`; `t/run.sh` sets `SLIGHT_ISLANDS=4`, so
+   `(islands)` is the same on every machine. *(Done, Oct 2026, golden
+   tests 325 to 330, with step 4's end and deadlock, which it couldn't
+   do without, and some of 3's and 5's: shared buffers' counts atomic;
+   `:keypress` and `:system` placed on island 0 from any island, keys
+   read only there, and `SIGCHLD` passed to every island's pipe, each
+   reaping its own commands; `pprint` in one write. A spinning wait
+   before an island sleeps, which took 200,000 round trips from 10 s to
+   0.68. Still to do there, then: PID 1's orphans with commands on more
+   than one island, and `:system` telling of other islands, both done
+   in step 5; and a run recorded or replayed is on one island, a
+   `spawn/on` elsewhere ending it, till step 6.)*
+3. **Shared buffers across islands:** atomic counts. *(Done with step
+   2.)*
+4. **The end and deadlock** counted across islands. *(Done with step
+   2.)*
+5. **Island 0's:** signals, `:keypress`, `:system` and its counts of
+   what crosses, and output under a lock. *(Done, Oct 2026, golden test
+   331: `:system` tells of every island, `(:processes k)` of one, each
+   process's `:island`, `:sent` and `:received`, and `(:runtime)`'s
+   `:islands`, other islands asked through their inboxes, answers in
+   the order asked; output a value or line in one write, stdio's lock
+   keeping them whole, and `log` saying a process's island; PID 1's
+   orphans told from every island's commands, t/live.py's signals.)*
+6. **Replay per island,** and `SLIGHT_SCHED` per island. *(Done, Oct
+   2026, as D256's option (c): the islands replay together, each from
+   its own record, `f` and `f.k`, which names the items its inbox took
+   and when rather than keeping them; one island alone is put off, as
+   (b). `SLIGHT_SCHED` was already per island, from step 2. t/replay.sh's
+   islands checks.)*
+7. **Checks and numbers:** golden tests whose output doesn't depend on
+   the order islands run in, the same on one island or four (the VM3
+   sketch's test); ThreadSanitizer over them; `SLIGHT_GC_STRESS` with
+   islands; `bench/` with `slight-mc`, `parallel-fib`, `fan-in` and
+   `spectral-norm` placed across islands, in D237's every-core table; an
+   example, a simulation on islands drawn live on island 0; and
+   LANGUAGE.md, DESIGN.md and the guide. *(Done, Oct 2026: golden tests
+   332 and 333, one program on four islands and on one; `make tsan`
+   (`t/tsan.sh`), clean, and a race planted in `push` caught; every
+   island test under `SLIGHT_GC_STRESS=7` and `SLIGHT_GC_VERIFY=1`;
+   `slight-mc` in `bench/`; `examples/reaction.slight`, Gray-Scott in
+   bands across islands, drawn live on island 0, its quiet mode a golden
+   test from `t/models/reaction.py`; and the guide's "Use every core".
+   Islands are built.)*
+
+qemu runs threads, but on this x86-64 machine the memory model isn't
+AArch64's, so ordering bugs show only on the Mac, where each step is
+proven.
+
+### Simulation across islands (proposed, open, Oct 2026)
+
+Proposed by Claude after islands (D256) and D257 (simulation before
+servers); Stevan asked for it written down, to pick up later. Not yet
+agreed: the options and the recommendation stand as offered.
+
+**The problem.** On one island slight simulates well: agents are
+actors, time is the virtual clock, `after` and `sleep` are events, and
+`bank` comes to SimPy's waits (D241). Across islands each island's
+virtual clock is its own, so an agent on island 2 can't safely send
+another one a message timed for an island whose clock may be past it.
+`examples/reaction.slight` steps everything in lockstep by hand. The
+library should give that a shape, and the same answer on any number of
+islands.
+
+- **(a) Time-stepped, a library alone (`lib/sim.slight`).** The world
+  cut into regions, an actor each, placed across the islands; each step
+  the library hands every region its neighbours' edges, the region's
+  step function gives its new state and the edges to send on, a barrier
+  gathers them, and every kth step an observer gets their outputs:
+  `(sim/grid regions init step edges)`, `(sim/run g n every observe)`.
+  Cellular automata, diffusion, agents in synchronous ticks; the same on
+  any number of islands, as `reaction` is. No runtime change.
+- **(b) Discrete events, in conservative windows (one new builtin).**
+  Agents stay actors with `after`, `sleep` and `recv`, with one rule: an
+  interaction takes at least a lookahead L of simulated time. Every
+  island runs to the window's end T+L, exchanges what crossed, meets the
+  rest at a barrier, and goes on. The runtime would need
+  `(clock/hold t)`: the island's virtual clock held at t, and once
+  nothing there can happen before t (every actor waiting, the next timer
+  at t or later, the inbox empty), moved to t and `(:held t)` sent to
+  the caller. The library: `(sim/after delay pid msg)` for a timed
+  message, delay at least L; a keeper per island that takes them and
+  sets them as local timers; and a barrier that counts what each island
+  sent, so no window starts before every keeper has its own. For the
+  same answer on any number of islands, events due together fire in an
+  order that doesn't depend on placement: every `sim/after` goes through
+  a keeper, the same island's too, sorted by time, the agent's own sim
+  id (not its pid, which says its island) and its sequence. Its
+  `clock/hold`, and how a held clock records and replays, would be a
+  proposal of their own.
+- **(c) Both,** (a) first, sharing its regions and barrier with (b).
+
+Rejected as offered: optimistic simulation (Time Warp: running ahead
+and rolling back), which immutable state makes cheap to save but whose
+anti-messages and global virtual time are a lot of machinery; and one
+virtual clock for every island, which would make every timer a
+conversation between islands.
+
+**Recommendation: (c).** (a) is small, needs no runtime change, and
+makes `reaction` shorter; (b) is what makes slight a simulation
+language: SimPy's style, agents as actors, on every core, the same
+results on 1 island or 64.
+
+Measured alongside, for whoever picks this up: a message crossing
+islands is one allocation now, and `fan-in-mc` four times faster on the
+cloud machine; a ping-pong whose halves are on neighbouring islands
+costs a few microseconds a round trip on the cloud machine's 4 vCPUs,
+worse with more islands, which the M2 Max should measure before more
+work goes into crossing latency (`docs/BENCHMARKS.md`, 31 Oct).
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written
@@ -1116,8 +1850,9 @@ grows. BACKGROUND.md has the discussions so far.
 
 ### Parallelism
 
-- Multiple cores: a scheduler thread per core, with run queues that
-  steal from each other ("Multiple cores").
+- Multiple cores: agreed as islands (D256, "More than one core:
+  islands", above), not the scheduler over every core, with stealing,
+  that BACKGROUND.md's "Multiple cores" sketches.
 
 ## The ts-slight examples
 

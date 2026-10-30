@@ -1,0 +1,31 @@
+; lib/http.slight's header (D248): what (@include :http) gives a program,
+; docs/LANGUAGE.md, "(@include :http)". The rest of http.slight is its own.
+
+; A header, (name value): a name is a string, and a value is written as
+; str writes it.
+(deftype Headers (list (shape str any)))
+
+; A request as a handler gets it, a keyed list for lookup: (:method m),
+; (:path p), (:query q), (:headers hs), (:body b).
+(deftype Request (list (shape sym any)))
+
+; A response, (status headers body), a handler's and a client's.
+(deftype Response (shape int Headers str))
+
+; GET, POST, ... as a keyword (:get), or any method as a string.
+(deftype Method (or sym str))
+
+(sig http/get (str) (Result Response any))
+(sig http/request (Method str Headers str) (Result Response any))
+(sig http/request-within (int Method str Headers str) (Result Response any))
+(sig http/stream (Method str Headers str (or :lines :chunks)) pid)
+
+; port: a number, 0 for the system's pick, or "host:port" (D226)
+(sig http/serve ((or int str) (fun (Request) Response)) pid)
+(sig http/listen ((or int str) (fun (Request) Response)) (Result (shape pid int) any))
+
+(sig http/parse-url (str) (or (:ok str int str) (:error any)))
+
+; Percent-encoding (RFC 3986): http/url-decode is #false for a bad %XX.
+(sig http/url-encode (str) str)
+(sig http/url-decode (str) (or str #false))

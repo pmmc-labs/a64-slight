@@ -1,0 +1,9 @@
+; env: SLIGHT_LOG=warn
+; log below SLIGHT_LOG's level isn't written (D254): here :warn, so
+; :debug and :info go nowhere, and :warn and :error are lines.
+
+(log :debug "a" ())
+(log :info "b" ())
+(log :warn "c" ())
+(log :error "d" (list (list "n" 1)))
+:done

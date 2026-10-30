@@ -1,11 +1,13 @@
+; env: no_proxy=127.0.0.1 NO_PROXY=127.0.0.1
 ; The ways a stream fails (D181): each is (:error s reason), in place of
 ; whatever hadn't come yet, with the reasons http/request gives. A URL it
 ; can't use still gives a pid, and the error comes from it. A refused
-; connection ends the stream's process before it can say so (D136), and
-; its watcher tells the caller. Then replies that aren't HTTP: none at
-; all, a start line that isn't one, a head cut short, a bad chunk size,
-; and a chunked body cut short, after its first line (a line it hadn't
-; finished doesn't come).
+; connection comes the same over https, through curl (D251), whose exit
+; says so, and http, which ends the stream's process before it can say so
+; (D136), its watcher telling the caller. Then replies that aren't HTTP:
+; none at all, a start line that isn't one, a head cut short, a bad chunk
+; size, and a chunked body cut short, after its first line (a line it
+; hadn't finished doesn't come).
 
 (@include :http)
 (@include "data/http-raw.slight")
@@ -31,7 +33,7 @@
 (let port (cadr up))
 (let base (str "http://127.0.0.1:" port))
 (let r (list
-    (streamed "https://127.0.0.1/")
+    (streamed "https://127.0.0.1:1/")
     (streamed "ftp://127.0.0.1/")
     (streamed "http://127.0.0.1:1/")
     (streamed (str base "/nothing"))

@@ -38,3 +38,4 @@
 (pprint (kind (fork (math/mod 1.5 2))))
 (pprint (kind (fork (int->float 1.5))))
 (kind (fork (math/hypot "3" 4)))
+; warns: 38:31 39:33 40:25

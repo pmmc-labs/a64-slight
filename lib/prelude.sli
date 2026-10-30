@@ -1,0 +1,50 @@
+; The prelude's header (D248): the functions every program sees, with
+; their types, and the types every program can name (D247). What
+; prelude.slight defines that isn't here (map-loop, sort-merge, ask/via
+; ...) is its own.
+
+; --- types --------------------------------------------------------------------
+
+; What can fail: what the runtime's (:ok value) and (:error reason) are.
+(deftype (Result T E) (or (:ok T) (:error E)))
+
+; JSON as json/parse gives it (docs/LANGUAGE.md, JSON).
+(deftype Json (or :null bool int float str (list Json) (:object & (list (shape str Json)))))
+
+; --- functions ----------------------------------------------------------------
+
+(sig (inc N) (N) N)
+(sig (dec N) (N) N)
+(sig not (bool) bool)
+(sig (fold/l A B) (A (fun (A B) A) (list B)) A)
+(sig (fold/r A B) (A (fun (B A) A) (list B)) A)
+(sig (reverse A) ((list A)) (list A))
+(sig length ((list any)) int)
+(sig (append A) ((list A) (list A)) (list A))
+(sig (sum N) ((list N)) (or N int))
+(sig (product N) ((list N)) (or N int))
+(sig (map A B) ((fun (A) B) (list A)) (list B))
+(sig (filter A) ((fun (A) bool) (list A)) (list A))
+(sig (remove A) ((fun (A) bool) (list A)) (list A))
+(sig (take A) (int (list A)) (list A))
+(sig (skip A) (int (list A)) (list A))
+(sig (nth A) (int (list A)) (or A nil))
+(sig (find A) ((fun (A) bool) (list A)) (or A nil))
+(sig member? (any (list any)) bool)
+(sig (range N) (N N) (list N))
+(sig (dotimes N) (N N (fun (N) any)) nil)
+(sig (zip A B) ((list A) (list B)) (list (shape A B)))
+(sig (sort A) ((fun (A A) bool) (list A)) (list A))
+(sig (sort-by A) ((fun (A) num) (list A)) (list A))
+(sig (assoc K V) (K V (list (shape K V))) (list (shape K V)))
+(sig (lookup K V) (K (list (shape K V))) (or V :not-found))
+(sig array/generate ((or :float :int) int (fun (int) num)) array)
+(sig (array/map N) ((fun (N) N) (array N)) (array N))
+(sig (array/fold A) (A (fun (A num) A) array) A)
+(sig (rand/pick A) ((list A)) (or A nil))
+(sig (rand/shuffle A) ((list A)) (list A))
+(sig join/any ((list pid)) (or (:ok any) (:error (list any))))
+(sig join/all ((list pid)) (or (:ok (list any)) (:error any)))
+(sig ask (pid (list any)) any)
+(sig ask-within (int pid (list any)) any)
+(sig reply (pid any) nil)

@@ -1,0 +1,19 @@
+; fan-in on every island (D256): the 100 senders placed in turn on each
+; of (islands) islands, all sending to one actor on island 0, so nearly
+; every message crosses to it through its island's inbox.
+
+(defun sender (to s m)
+    (when (> m 0)
+        (send to s)
+        (sender to s (- m 1))))
+
+(defun gather (n sum)
+    (if (== n 0) sum (recv (s (gather (- n 1) (+ sum s))))))
+
+(defun top-level (argv)
+    (let n  (str->int (car argv)))
+    (let me $$)
+    (dotimes 1 101 (lambda (s) (spawn/on (% s (islands)) (sender me s (div n 100)))))
+    (gather n 0))
+
+(cadr (read (spawn (top-level @ARGV))))

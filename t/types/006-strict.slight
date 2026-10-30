@@ -1,0 +1,16 @@
+; check: strict
+; --strict: what might go wrong too, where a type is wider than the one
+; wanted. What isn't known still says nothing.
+(sig first-long ((list str)) str)
+(defun first-long (words) (car (filter (lambda (w) (> (str/len w) 3)) words)))
+
+(sig maybe-age (str) int)
+(defun maybe-age (s) (str->int s))
+
+(sig kind ((or :a :b :c)) int)
+(defun kind (k) (match k (:a 1) (:b 2)))
+
+(defun loose (x) (str/len x))
+(send (fork 1) :hi)
+(+ 1 (maybe-age "4"))
+(str/len 5)

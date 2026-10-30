@@ -43,3 +43,73 @@
         ((line & rest)
             (send f (list :write line \n))
             (spew-each f rest))))
+
+; Trees, on the fs/ builtins (D254): a directory and those it's in, a
+; tree deleted, and a tree's paths. None follows a link: fs/stat says a
+; link is one, so a walk or a delete stays in its tree. Each gives (:ok x),
+; or the first failure, (:error (name path)).
+
+; Makes the directory at path, and any it's in that aren't there yet, as
+; mkdir -p does. One that's there is no failure, if it's a directory.
+(defun fs/mkdir-all (path)
+    (match (fs/mkdir path)
+        ((:ok _)              (list :ok ()))
+        ((:error (:eexist _)) (if (fs/dir? path) (list :ok ()) (fs/mkdir path)))
+        ((:error (:enoent _)) (fs/mkdir-in path (str/last-index-of path "/")))
+        (failed               failed)))
+
+(defun fs/mkdir-in (path slash)
+    (if (> slash 0)
+        (match (fs/mkdir-all (str/slice path 0 slash))
+            ((:ok _) (fs/mkdir path))
+            (failed  failed))
+        (fs/mkdir path)))
+
+; Deletes path, and if it's a directory, all in it, as rm -r does. What
+; isn't there is no failure.
+(defun fs/delete-all (path)
+    (match (fs/stat path)
+        ((:ok info)           (if (eq? (lookup :kind info) :dir) (fs/delete-in path (fs/list path)) (fs/delete path)))
+        ((:error (:enoent _)) (list :ok ()))
+        (failed               failed)))
+
+(defun fs/delete-in (path listed)
+    (match listed
+        ((:ok names) (fs/delete-each path names))
+        (failed      failed)))
+
+(defun fs/delete-each (path names)
+    (match names
+        (()            (fs/delete path))
+        ((name & rest) (match (fs/delete-all (str path "/" name))
+                           ((:ok _) (fs/delete-each path rest))
+                           (failed  failed)))))
+
+; Every path in the tree at dir, not dir itself: each directory before
+; what's in it, the names in a directory in their bytes' order.
+(defun fs/walk (dir)
+    (match (fs/walk-into dir ())
+        ((:ok paths) (list :ok (reverse paths)))
+        (failed      failed)))
+
+; acc is the paths so far, last first.
+(defun fs/walk-into (dir acc)
+    (match (fs/list dir)
+        ((:ok names) (fs/walk-names dir names acc))
+        (failed      failed)))
+
+(defun fs/walk-names (dir names acc)
+    (match names
+        (()            (list :ok acc))
+        ((name & rest)
+            (let path (str dir "/" name))
+            (if (fs/dir? path)
+                (match (fs/walk-into path (cons path acc))
+                    ((:ok more) (fs/walk-names dir rest more))
+                    (failed     failed))
+                (fs/walk-names dir rest (cons path acc))))))
+
+(defun fs/dir? (path)
+    (match (fs/stat path)
+        ((:ok info) (eq? (lookup :kind info) :dir))
+        (_          #false)))

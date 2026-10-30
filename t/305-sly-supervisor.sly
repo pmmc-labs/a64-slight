@@ -1,0 +1,31 @@
+// docs/guide/code/tut-5-supervisor.slight in the C-style syntax (D246):
+// the fault's site is in the .sly file the store is in.
+@include("data/sly/tut-store.sly");
+
+// Starts the store and watches it, and passes it every message. When it
+// ends, it starts another, with an empty table.
+fun supervise() {
+    let s = spawn store([]);
+    monitor(s);
+    supervisor(s)
+}
+
+fun supervisor(s) {
+    recv {
+        :exit(_, result) => {
+            pprint([:restarting, result]);
+            supervise()
+        }
+        msg => {
+            send(s, msg);
+            supervisor(s)
+        }
+    }
+}
+
+let sup = spawn supervise();
+call(sup, :put("apple", 3));
+call(sup, :put("color", "red"));
+pprint(join(fork ask_within(1000, sup, :do(:incr("color")))));
+pprint(call(sup, :get("apple")));
+call(sup, :put("apple", 4))

@@ -80,7 +80,7 @@ interface (`compiler/src/target.ts`; `aarch64.ts`, `x86_64.ts`), and
 UTF-8 by convention: the `str/` builtins count characters (a bad byte is
 a character of its own, as in Go), and the `bytes/` ones count bytes
 (D148, D219).
-`examples/` has twenty-nine example programs (all but
+`examples/` has thirty example programs (all but
 `ping-pong-tournament`, `top`, `chat`, `airline-gen`, `forest`, `sieve`,
 `snails`, `coral`, `waves` and `etch` are golden tests; `etch`, an
 Etch A Sketch on the keyboard, whose every step is a persistent map kept
@@ -94,7 +94,10 @@ branch, drawn in Braille, the same picture under any schedule, draws
 with `math/sin`, whose last bits differ between machines, D76; `sieve`,
 the prime sieve as a chain of processes, a process per prime, drawn as
 Ulam's spiral in half blocks, writes its pixels in the order its
-messages come), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149), the latest
+messages come), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149): `reaction`,
+Gray-Scott in bands of rows across islands, drawn live on island 0, the
+same picture on one island or twelve, a golden test in its quiet mode
+(`--steps`, from `t/models/reaction.py`, D256); and
 `airline`, a simulated day branched with what-ifs, each run till it
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it
@@ -264,10 +267,107 @@ can come of its entries, so a program that runs for good holds only
 what's running, open or kept (`:system`'s `(:records n)`; golden test
 302, t/live.py's memory); and an actor's end kept so too, for a parent
 that's a task, so a task reads one whenever it likes (D245, golden test
-301). **Next:** to settle with Stevan
-(`docs/PLAN.md`, 15). 12c (C libraries vendored as source, D151, D152, then
-TLS, which HTTPS needs: `https://` is `:no-tls` till then) waits: local
-models first, and curl for HTTPS. Each has points to settle with Stevan
+301). A second syntax, C-style, `.sly` (D246, `docs/SYNTAX.md`): its
+reader, `compiler/src/sly.ts`, into the same s-expressions, golden
+tests 303 to 307 (306 and 307 are game-of-life-actors and boids,
+converted); its converters and the guide in both wait
+(`docs/PLAN.md`, "A C-style syntax"). Types (D247, `docs/TYPES.md`): a
+checker, `compiler/src/check.ts` on `types.ts` and `builtins.ts`, run on
+every program before it's compiled, which warns only about what's sure
+to go wrong if that code runs (a builtin given what it never takes, a
+test that's never a boolean, a match none of whose arms can match, an
+arm nothing reaches, a message no recv of the actor takes, an actor
+joined), by inference: literals, the builtins, the prelude's sigs,
+patterns and tests narrowing, each function's result, and an actor's
+mailbox from its recvs; `--strict` also says what might, and makes
+warnings errors; `--check` only checks. Annotations, erased before code
+generation: `deftype`, `sig` and `the`, and in `.sly` `x : int` (a space
+each side), `fun f<A>(...) : R recv M`, `type Name = T;`. `make types`
+checks every program clean but for what it lists (`; warns: L:C`), and
+`t/types/` is the checker's golden tests. Modules (D248): a file with a
+header beside it (`X.sli`, or `X.slyi` in `.sly`, of `deftype`s, `sig`s
+and `@include`s) is a module, whose includers see what the header
+declares and nothing else, what a header includes being seen too;
+`compiler/src/modules.ts` links the units by renaming a module's names
+with its file in them (`map/bit (in lib/map.slight)`, shown without);
+the prelude (`lib/prelude.sli`, its types and sigs) and every library
+have headers, so their helpers are their own; a file without a header is
+spliced in as before; golden test 308. What's missing to make slight
+general purpose, in order, is agreed (D249, `docs/PLAN.md`, "Toward
+general purpose"); and what slight is for, and
+isn't, in DESIGN.md and the guide's README (D250); and a rule, vendor
+only what never needs a security fix, leaving TLS to a proxy in front
+and curl, and models to `llama-server`, as processes (D251); and no FFI, and
+regular expressions from a small linear engine of our own (D252); and
+numbers in bulk, for simulation, agreed (D253, `docs/PLAN.md`, "Numbers
+in bulk"): a libm that gives the same bits everywhere (CORE-MATH),
+shared buffers off the heap, and arrays of numbers, after D249's step 1,
+and more than one core after them. D249's step 1, agreed (D254), has begun: `clock/now`, the time of day,
+recorded, on the virtual clock from `SLIGHT_EPOCH` (which `t/run.sh`
+sets to 2026-01-01), and `lib/time.slight`, dates in UTC, ISO 8601 and
+HTTP's (golden test 311, `t/models/time.py`); and files beyond reading
+and writing, `fs/list` (sorted), `fs/stat` (not following a link),
+`fs/delete`, `fs/rename` and `fs/mkdir`, builtins in `runtime/files.c`,
+each a Result and recorded, and trees on them in `lib/fs.slight`,
+`fs/mkdir-all`, `fs/delete-all` and `fs/walk` (golden tests 312, 313);
+and numbers as bytes, `bytes/pack` and `bytes/unpack`, by specs of
+keywords, `:u8` to `:f64le` and `(:bytes n)` (golden test 314,
+`t/models/pack.py`); and `log`, a line of JSON on stderr, its time,
+level, pid, message and fields, what JSON can't hold written as `str`
+writes it, filtered by `SLIGHT_LOG` (golden tests 315, 316). Step 1 is
+done, and so is step 2 (D255): `crypto/sha256`, `crypto/sha512`, their
+HMACs, `crypto/equal?` and `crypto/random-bytes` (recorded) in
+`runtime/crypto.c`; `bytes->base64`, `bytes->base64url`, `bytes->hex`
+and back; `http/url-encode` and `http/url-decode` (golden test 317,
+`t/models/crypto.py`). Numbers in bulk (D253) are done: the runtime
+compiled with `-ffp-contract=off`, and shared buffers, strings of 4 KB
+or more off the heap, their references counted, a send copying the
+handle (`RT_BOX_SHARED`; golden test 318, `t/live.py`'s memory); and
+the libm: CORE-MATH's 21 functions vendored in `vendor/core-math/`, so
+`math/` is correctly rounded and the same on every machine (golden test
+319, exact against mpmath, `t/models/math.py`); and arrays of numbers,
+`:float` and `:int`, unboxed, immutable, printed `#float(...)` and
+`#int(...)` and read back by `sexp/parse`, shared at 4 KB, the
+`array/` builtins in `runtime/arrays.c` (element by element,
+reductions left to right, `array/matmul`), `array/generate`,
+`array/map` and `array/fold` in the prelude, `lib/matrix.slight`, and
+the types `(array float)` and `(array int)` (golden tests 320 to 323,
+`t/models/arrays.py`; the checker's 011 and 012). `bench/`'s `slight-arrays`,
+`spectral-norm` with arrays (`docs/BENCHMARKS.md`). **Next:** nothing
+is under way. Candidates, none agreed: a simulation library across
+islands (`docs/PLAN.md`, "Simulation across islands", proposed and
+open: time-stepped regions in `lib/sim.slight`, then discrete events in
+conservative windows on a `clock/hold` builtin; Stevan leans to
+simulation over servers, D257), and D249's step 3, the standard library
+(`format`, CSV, `@ARGV` parsing, sets, sorted maps, regular
+expressions), each to be proposed first. Done before that: more than
+one core (D249's step 7, moved up by D253), agreed as islands (D256,
+`docs/PLAN.md`, "More than one core: islands"): a thread per core, each
+today's runtime, sharing nothing but an inbox each and the shared
+buffers; actors placed with `(spawn/on k expr)`, pids printed `#<pid
+5@2>`, island 0 owning signals, the terminal and `:system`, and replay
+per island; to be built in seven steps, of which step 1, the runtime's
+state an island's (`RT_ISLAND`, thread-local) and pids with their
+island's bits, is done (golden test 324), and step 2, islands as
+threads: `spawn/on`, `(island)`, `(islands)`, `SLIGHT_ISLANDS` (which
+`t/run.sh` sets to 4), inboxes, and sends, monitors, kills, reads and
+the end across islands (golden tests 325 to 330); and step 5, what's
+island 0's: `:system` telling of every island, asked through their
+inboxes, `(:processes k)`, each process's messages to and from other
+islands counted (`:sent`, `:received`), `(:runtime)`'s `:islands`,
+`log` saying an island, and PID 1's orphans told from every island's
+commands (golden test 331); steps 3 and 4 came with step 2; and step
+6, replay per island: `SLIGHT_RECORD=f` writes `f` and `f.k`, each
+island's, naming what its inbox took and when, and `SLIGHT_REPLAY=f`
+replays the islands together (t/replay.sh's islands checks); and step 7,
+checks and numbers: one program's output on four islands and on one
+(golden tests 332, 333), `make tsan`, the collector stressed on every
+island test, `slight-mc` in `bench/` (`docs/BENCHMARKS.md`),
+`examples/reaction.slight`, and the guide's "Use every core". Islands
+are built. 12c (C libraries vendored as source, D151, D152) waits; its
+TLS is withdrawn (D251): `https://` goes through curl in
+`lib/http.slight`, its raw reply read as a socket's, its exit code the
+error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan
 first (`docs/PLAN.md`). Self-hosting waits
 till the language settles (17). Update this section as steps land.
 
@@ -278,7 +378,9 @@ till the language settles (17). Update this section as steps land.
 2. [`docs/DESIGN.md`](docs/DESIGN.md): the language, runtime and compiler
    as agreed. **(open)** marks proposals that haven't been confirmed.
 3. [`docs/PLAN.md`](docs/PLAN.md): the build order and the example-port
-   table.
+   table. [`docs/SYNTAX.md`](docs/SYNTAX.md) and
+   [`docs/TYPES.md`](docs/TYPES.md) have the C-style syntax and the types
+   in full.
 4. [`docs/DECISIONS.md`](docs/DECISIONS.md): why, and what was turned down.
    Check it before "improving" something; it may have been decided against.
 5. [`docs/BACKGROUND.md`](docs/BACKGROUND.md): AVM, VM3, the spike, prior
@@ -379,30 +481,43 @@ to get them back from git (`3fd71e0`).
 | Path | |
 |---|---|
 | `bin/slightc.ts` | The driver: read and expand (with the files it includes), compile, write `out.S`, link with clang |
-| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `expand.ts` (`@include`, and the forms that become `cond`), `pattern.ts` (`match`'s and `recv`'s patterns, as tests and bindings), `split.ts` (a `recv` anywhere a tail call could go, made the whole body of a generated receive function), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
+| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `sly.ts` (the C-style syntax, `.sly`, read into the same forms, D246, `docs/SYNTAX.md`), `expand.ts` (`@include`, and the forms that become `cond`; with `keepMatch`, all but `match`, for the checker), `modules.ts` (a file with a header is a module: linking the units by renaming, D248), `types.ts` (types: union, meet, fits, reading and showing them, D247), `check.ts` (the type checker, its warnings, and `eraseTypes`), `builtins.ts` (the builtins' types), `pattern.ts` (`match`'s and `recv`'s patterns, as tests and bindings), `split.ts` (a `recv` anywhere a tail call could go, made the whole body of a generated receive function), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
-| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c` (the string builtins, D219), `unicode.c` (Unicode's case mappings and the properties they need, made by `gen-unicode.py`; don't edit it), `numbers.c`, `tuples.c`, `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
-| `lib/` | The built-ins `(@include :name)` asks for: `prelude.slight` (in every program), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `map.slight` (a persistent map, a hash trie, D223), `rpc.slight` (calls between programs, and people, over a connection, D225), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
+| `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c` (the string builtins, D219), `files.c` (`fs/list`, `fs/stat`, `fs/delete`, `fs/rename`, `fs/mkdir`, D254), `crypto.c` (SHA-2, HMAC, `crypto/equal?`, `crypto/random-bytes`, D255), `unicode.c` (Unicode's case mappings and the properties they need, made by `gen-unicode.py`; don't edit it), `numbers.c`, `tuples.c`, `arrays.c` (arrays of numbers, D253), `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
+| `vendor/` | Vendored C, unmodified, compiled with the runtime (D152, D251): `core-math/`, CORE-MATH's functions for `math/` (D253), with its `LICENSE` and a `VENDOR` file saying where it came from and how to update it |
+| `lib/` | The built-ins `(@include :name)` asks for, each with its header, `NAME.sli`, which says what a program sees of it (D248): `prelude.slight` (in every program; `prelude.sli` has its types and sigs), `test.slight` (TAP), `fs.slight` (`slurp` and `spew`, and trees: `fs/mkdir-all`, `fs/delete-all`, `fs/walk`), `ds.slight` (data structures as processes), `http.slight` (HTTP/1.1 on `:tcp`, a server and a client, D173, whose replies can also be streamed, D181, and `https://` through curl, D251), `agent.slight` (a conversation with a model on ollama's `/api/chat`, D184, which can call tools, D187), `exec.slight` (`exec/run`, a command run to its end), `calc.slight` (`calc/eval`, arithmetic as people write it, D190), `map.slight` (a persistent map, a hash trie, D223), `matrix.slight` (matrices on arrays of numbers, D253), `time.slight` (dates from `clock/now`, ISO 8601 and HTTP's, D254), `rpc.slight` (calls between programs, and people, over a connection, D225), `tools.slight` (tools for an agent: files, commands, fetching, arithmetic, notes and other agents, D188–D192) |
 | `examples/` | Example programs; each with a `.expected` is a golden test |
 | `docs/guide/` | The guide, for learning slight: `README.md` (what's in it and what's to come), `tour.md`, `tutorial/` (a key-value store, a chapter a page), `concepts/` (the ideas, and why), `howto/` (recipes); `code/`, its programs (`tut-` the tutorial's, `con-` the concepts', `howto-` the recipes', and `data/`, files they read), each with a `.expected`, golden tests too, and the files of functions they include (`tut-table.slight`, `tut-store.slight`, `tut-ttl.slight`, `tut-log.slight`, `tut-serve.slight`); a program that writes a file takes its path from `; args:`, under `build/t/`. A `lisp` block in a page follows `<!-- code: path -->`, and an output block `<!-- output: path -->`, and `t/guide.py` checks each is in its file as it stands (README.md's too) |
+| `editors/sublime/` | `Slight/`, a Sublime Text package: `Slight.sublime-syntax` for `.slight` and `Sly.sublime-syntax` for `.sly` (D246), each with its `Comments (...).tmPreferences` and `syntax_test_...`, Sublime's own test of it; `README.md` says how to install it |
 | `bench/` | Benchmarks (D194, D201, `docs/BENCHMARKS.md`): `NAME/` holds a program in each language it's written in (`.slight`, `.c`, `.go`, `.erl`, `.js`, `.pl`, `.py`, `.ss` for Chez Scheme, and `.rs` for Rust, the actor programs alone, on tokio, D224); `Cargo.toml` and `Cargo.lock`, the Rust programs as one package, and `rt.rs`, the runtime they start; `run.py`, the harness, which builds, checks, times and summarizes them; `airline.py`, which runs `examples/airline.slight` with sets of options and times them (D214); `rusage.c`, which measures one run; `chez-compile.ss`, which compiles a Chez program ahead of time; `results/`, the runs worth keeping, as JSON and Markdown |
-| `t/` | Golden tests: `NNN-name.slight` + `NNN-name.expected`; `run.sh`; `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's; SIGTERM, as PID 1 too, and a command's orphan, as PID 1; a runaway
+| `t/` | Golden tests: `NNN-name.slight` (or `.sly`, D246) + `NNN-name.expected`; `run.sh`; `types.ts` (`make types`) and `types/` (the type checker's golden tests, its warnings, D247); `replay.sh` and `replay/` (recording and replaying, and seeded orders: checks that take more than one run); `live.py` and `live/` (what a golden test can't see: keys on a stack all but full, on the real clock; the peak memory of reading and building values; the chat in a terminal, with a model of its own; a day the size of a small airline's; SIGTERM, as PID 1 too, and a command's orphan, as PID 1; a runaway
 process in a cgroup of 256 MB, faulting at its cap; a command killed at
 its time limit; timers that
 nothing can come of, which don't hold up the end; a Unix socket left by
-SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers, and `timer-ids.py`, a model of `timer/cancel`'s index); `data/` (files the tests read or include, JSONTestSuite's among them, and `http-raw.slight`, a raw server and client for the HTTP tests; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment. |
+SIGKILL, replaced, and removed by SIGTERM; https through real curl,
+over real TLS, to a server with a certificate made for the run);
+`tsan.sh` (`make tsan`); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers, `timer-ids.py`, a model of `timer/cancel`'s index, and `time.py`, of `lib/time.slight`, on Python's datetime, `pack.py`, of `bytes/pack` and `bytes/unpack`, on Python's struct, and `crypto.py`, of the hashes, MACs and encodings, on Python's hashlib, hmac and base64, and `math.py`, of `math/` on mpmath, which writes test 319's program too, and `arrays.py`, of the `array/` builtins on Python's floats, which writes test 321's, and `reaction.py`, of `examples/reaction.slight`'s simulation); `data/` (files the tests read or include, JSONTestSuite's among them, `sly/`, the tutorial's store in the C-style syntax, and `http-raw.slight`, a raw server and client for the HTTP tests, and `curl/curl`, a stand-in for curl, for `https://` without a network; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment (`//` in place of `;` in a `.sly` test). |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
 ## Commands
 
 - `npm install` once, for `typescript` (used only by `make check`).
 - `make test`: unit tests, the runtime header check, the guide's check
-  (`t/guide.py`), then the golden tests,
+  (`t/guide.py`), the type checks (`t/types.ts`), then the golden tests,
   the replay checks and the live checks (`t/live.py`, Python 3) for each
   of `TARGETS` (aarch64 and x86_64 on an x86-64 machine, aarch64 on
   arm64). About two minutes on a cloud session.
-- `make unit`, `make guide`, `make golden`, `make replay`, `make live`,
-  `make headers`: one at a time.
+- `make unit`, `make guide`, `make types`, `make golden`, `make replay`,
+  `make live`, `make headers`: one at a time. `make types` checks every
+  test, example and guide program as `slightc --check` does, in one
+  process: a warning a program doesn't list in a `; warns: L:C ...` line
+  (`// warns:` in `.sly`; at the end, where it moves no line) fails, as
+  does a listed one that doesn't come; then `t/types/NAME.slight` (or
+  `.sly`), whose `--check` output (`--strict` with a line `; check:
+  strict`) must be `NAME.expected`; and every `lib/*.slight`, checked
+  on its own with `--strict`, must say nothing. A test that faults on
+  purpose lists its warnings; a new warning anywhere else is a bug, in
+  the program or in the checker.
   `t/run.sh t/003-int-max.slight` runs one golden test, for `TARGET`
   (`aarch64` unless set: `TARGET=x86_64 t/run.sh ...`). The golden tests
   run `JOBS` at a time (one per CPU unless set; `JOBS=1` for one at a
@@ -410,6 +525,12 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
   come at the end. A golden test that runs longer than `TIMEOUT` seconds
   (default 60) is killed and fails.
 - `make check`: `tsc --noEmit`.
+- `make tsan`: ThreadSanitizer over what runs on more than one island
+  (`t/tsan.sh`): the island golden tests, the every-island benchmarks
+  and `t/replay/islands.slight`, for the machine's own target, built with
+  `SLIGHT_CC` as the compiler with `-fsanitize=thread`. Not part of `make
+  test`: it needs clang's sanitizer runtime (Xcode has it; on Ubuntu,
+  `apt-get install libclang-rt-18-dev`).
 - `make bench`: the benchmarks, slight against C, Go, Erlang, Node, Perl,
   Python, Chez Scheme and Rust, and SimPy in `bank`, if it's installed (`bench/run.py`; `BENCH=--quick` for small sizes, and see
   `--help`). Not part of `make test`. Measure on the Mac: timings under
@@ -424,9 +545,13 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
   result with `qemu-aarch64 ./out`, and an x86-64 one directly. The
   runtime is compiled the first time it's needed, for each target, and
   kept in `build/runtime/` until a runtime file changes (D150);
-  `--runtime` only builds it.
-- Exit codes from `slightc`: 0 ok, 1 compile error, 2 usage or toolchain
-  error. `SLIGHT_CC` overrides the C compiler command.
+  `--runtime` only builds it. The types are checked first, warnings to
+  stderr (D247); `--check` only checks, and `--strict` warns of what
+  might go wrong too (in the program's own files: a module it includes
+  is checked strictly on its own, `--check --strict lib/map.slight`,
+  D248), and makes a warning an error.
+- Exit codes from `slightc`: 0 ok, 1 compile error (or a warning, with
+  `--strict`), 2 usage or toolchain error. `SLIGHT_CC` overrides the C compiler command.
 - `SLIGHT_POISON=1` when running a compiled program makes the collector
   fill what it frees (a nursery started again included) with garbage, so
   a pointer it missed fails at once. `t/run.sh` sets it.
@@ -454,10 +579,19 @@ SIGKILL, replaced, and removed by SIGTERM); `headers.c`; `models/` (Python model
   run, straight to the next timer. `t/run.sh` sets it too.
 - `SLIGHT_RECORD=file` when running a compiled program writes everything
   it takes from the world (the clock, keys, reads, sockets, lookups) to
-  `file`; `SLIGHT_REPLAY=file` runs it again from the record, exactly,
-  touching nothing but stdout and stderr (D170).
+  `file`, and island k's to `file.k` (D256); `SLIGHT_REPLAY=file` runs it
+  again from the record, its islands together, exactly, touching nothing
+  but stdout and stderr (D170).
 - `SLIGHT_SCHED=n` runs processes in an order picked by a generator seeded
   with `n`, the same for each `n`, to look for races (D170).
+- `SLIGHT_EPOCH=seconds` starts the virtual clock's time of day
+  (`clock/now`) there; without it, at the real time of day when the
+  program starts, recorded for a replay either way (D254). `t/run.sh`
+  sets `1767225600`, 2026-01-01T00:00:00Z.
+- `SLIGHT_LOG=level` (`debug`, `info`, `warn` or `error`) is the least
+  level `log` writes; `info` without it (D254).
+- `SLIGHT_ISLANDS=n` says how many islands there are (D256), 1 to 256;
+  one for each core without it. `t/run.sh` sets `4`.
 - `SLIGHT_SEED=n` seeds the random numbers (`rand/`); without it they
   come from the system's entropy, different every run, and are recorded
   for a replay either way (D222). `t/run.sh` sets `1`.
@@ -477,5 +611,6 @@ The golden tests check stdout and stderr together, plus `exit: N` when the
 status isn't 0. Write expected output by working it out independently (by
 hand, or in Python: an output that depends on scheduling can come from a
 small model of the run queue, as in `t/models/`), never by
-copying what the compiler printed. Don't let a test depend on the last bit
-of a libm function other than `sqrt`: macOS's and glibc's differ (D76).
+copying what the compiler printed. `math/`'s functions are CORE-MATH's,
+correctly rounded, so a test can compare them exactly, with what mpmath
+gives (D253, retiring D76 for `math/`).

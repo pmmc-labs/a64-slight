@@ -194,8 +194,14 @@
 (defun calc/unknown (name at)
     (raise (str "at byte " at ": there's no " name ": the functions are sqrt, abs, floor, ceil, round, sin, cos, tan, exp, min and max, and the constants pi and e")))
 
+; Where a token is: its last element, (:op "+" at) or (:open at).
+(defun calc/at (token)
+    (match token
+        ((_ at)   at)
+        ((_ _ at) at)))
+
 (defun calc/stuck (token wanted)
-    (raise (str "at byte " (car (reverse token)) ": " (calc/shown token) " where " wanted " should be")))
+    (raise (str "at byte " (calc/at token) ": " (calc/shown token) " where " wanted " should be")))
 
 (defun calc/shown (token)
     (match token

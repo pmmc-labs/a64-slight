@@ -43,3 +43,4 @@
 (pprint (kind (fork (sym->str "a"))))
 (pprint (kind (fork (~ "a" 1))))
 (kind (fork (~ 'a "b")))
+; warns: 37:31 38:31 43:31 44:28 45:16

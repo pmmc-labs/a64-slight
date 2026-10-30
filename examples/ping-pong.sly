@@ -1,0 +1,32 @@
+// ping-pong: a pinger and a ponger play 30 rounds. The pinger sends, and
+// waits for the reply in the middle of its loop (D167). The ponger answers
+// the pinger's stop too, and the root reads how the pinger ended (D243).
+
+fun ponger() {
+    recv {
+        :stop(from) => {
+            send(from, :pong-done);
+            :pong-done
+        }
+        :ping(from) => {
+            send(from, :pong(self));
+            ponger()
+        }
+    }
+}
+
+fun pinger(target, n) {
+    if n == 0 {
+        send(target, :stop(self));
+        let last = recv;
+        [:ping-done, last]
+    } else {
+        send(target, :ping(self));
+        let reply = recv;
+        pprint([:round, n, :reply, reply]);
+        pinger(target, n - 1)
+    }
+}
+
+let pong = spawn ponger();
+read(spawn pinger(pong, 30))

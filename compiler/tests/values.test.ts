@@ -3,9 +3,9 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
-import { DEVICE_WORDS, ERRNO_NAMES, EXEC_WORDS, FAULT_KINDS, FLOAT_HEADER, FLOAT_VALUE, intWord, JSON_WORDS, KEY_NAMES, KIND_WORDS, MAX_ARGS, PEER_WORDS, SOURCE_WORDS, RESERVED_SYMBOLS, TABLE_WORDS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS, TAG_BOXED, tupleElement, tupleHeader } from '../src/values.ts';
+import { ARRAY_WORDS, DEVICE_WORDS, ISLAND_WORDS, ERRNO_NAMES, EXEC_WORDS, FAULT_KINDS, FLOAT_HEADER, FLOAT_VALUE, intWord, JSON_WORDS, KEY_NAMES, KIND_WORDS, MAX_ARGS, PEER_WORDS, SOURCE_WORDS, RESERVED_SYMBOLS, LOG_WORDS, PACK_WORDS, STAT_WORDS, TABLE_WORDS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS, TAG_BOXED, tupleElement, tupleHeader } from '../src/values.ts';
 
 const RT_H = readFileSync(new URL('../../runtime/rt.h', import.meta.url), 'utf8');
 
@@ -60,6 +60,11 @@ test("the runtime's symbols follow #true, as rt.h numbers them", () => {
     assert.equal(BigInt(id(KIND_WORDS[0]!)), define('RT_SYM_KIND'));
     assert.equal(BigInt(id(SOURCE_WORDS[0]!)), define('RT_SYM_SOURCE'));
     assert.equal(BigInt(id(TABLE_WORDS[0]!)), define('RT_SYM_TABLE'));
+    assert.equal(BigInt(id(STAT_WORDS[0]!)), define('RT_SYM_STAT'));
+    assert.equal(BigInt(id(PACK_WORDS[0]!)), define('RT_SYM_PACK'));
+    assert.equal(BigInt(id(LOG_WORDS[0]!)), define('RT_SYM_LOG'));
+    assert.equal(BigInt(id(ARRAY_WORDS[0]!)), define('RT_SYM_ARRAY'));
+    assert.equal(BigInt(id(ISLAND_WORDS[0]!)), define('RT_SYM_ISLE'));
 });
 
 test('no name is in the runtime\'s symbols twice', () => {
@@ -87,6 +92,9 @@ test("a device's words, the errno names and the data's words are rt.h's, in orde
         ['RT_SYS_', SYSTEM_WORDS, 'RT_SYS_COUNT'], ['RT_EXEC_', EXEC_WORDS, 'RT_EXEC_COUNT'],
         ['RT_PEER_', PEER_WORDS, 'RT_PEER_COUNT'], ['RT_KIND_', KIND_WORDS, 'RT_KIND_COUNT'],
         ['RT_SOURCE_', SOURCE_WORDS, 'RT_SOURCE_COUNT'], ['RT_TABLE_', TABLE_WORDS, 'RT_TABLE_COUNT'],
+        ['RT_STAT_', STAT_WORDS, 'RT_STAT_COUNT'], ['RT_PACK_', PACK_WORDS, 'RT_PACK_COUNT'],
+        ['RT_LOG_', LOG_WORDS, 'RT_LOG_COUNT'], ['RT_ARRAY_', ARRAY_WORDS, 'RT_ARRAY_COUNT'],
+        ['RT_ISLE_', ISLAND_WORDS, 'RT_ISLE_COUNT'],
     ] as const;
     for (const [prefix, names, count] of groups) {
         const found = [...RT_H.matchAll(new RegExp(`^#define ${prefix}\\w+\\s+(\\d+)\\s+// :(\\S+)`, 'gm'))];
@@ -102,4 +110,17 @@ test('nil is the list tag on a null pointer', () => {
 
 test('a call passes as many arguments as a waiting process keeps', () => {
     assert.equal(BigInt(MAX_ARGS), define('RT_MAX_ARGS'));
+});
+
+// On macOS a C name gets a leading underscore unless rt.h gives it the
+// assembly's own with RT_ASM, so a builtin without one links on Linux
+// and nowhere else: every runtime function the compiler can call (in a
+// string in its source, as the builtin tables have them) must have one.
+test('every runtime function the compiler calls is declared with RT_ASM', () => {
+    const declared = new Set([...RT_H.matchAll(/RT_ASM\((rt_[a-z0-9_]+)\)/g)].map((m) => m[1]!));
+    const src = new URL('../src/', import.meta.url);
+    const called = new Set(readdirSync(src).filter((f) => f.endsWith('.ts'))
+        .flatMap((f) => [...readFileSync(new URL(f, src), 'utf8').matchAll(/'(rt_[a-z0-9_]+)'/g)].map((m) => m[1]!)));
+    assert.ok(called.has('rt_tuple_ref') && called.has('rt_array_kind'));
+    assert.deepEqual([...called].filter((name) => !declared.has(name)), []);
 });

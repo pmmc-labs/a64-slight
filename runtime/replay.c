@@ -9,8 +9,17 @@
 // order, a run can be made again, exactly: to see a bug that came from
 // the world again, under a debugger, as often as it takes.
 //
-// The record is a line saying what it is, the settings, arguments and
-// environment (rt_io_settings_t), then an entry for each call, in order:
+// With islands (D256), each island keeps a record of its own: island 0's
+// at the path given, island k's beside it, at path.k. Each is the world
+// as that island saw it: besides its calls, which items it took from its
+// inbox, when (at which of its scheduler's looks), and what it saw of
+// another island's doings. An item is named, not kept: the island that
+// sent it, replaying too, sends it again, so a run's islands replay
+// together, each taking its items as it did.
+//
+// The record is a line saying what it is, the island's number, and on
+// island 0's the settings, arguments and environment (rt_io_settings_t),
+// then an entry for each call, in order:
 // what kind of
 // call, its result, errno, and the bytes it filled in. Numbers are in the
 // machine's own order: a record is for replaying where it was made. It's
@@ -26,6 +35,7 @@
 #include <netinet/in.h>
 #include <netinet/tcp.h>
 #include <arpa/inet.h>
+#include <dirent.h>
 #include <signal.h>
 #include <spawn.h>
 #include <stdlib.h>
@@ -39,14 +49,15 @@
 
 #include "io.h"
 
-#define MAGIC "slight record 3\n"
+#define MAGIC "slight record 4\n"
 
 enum { OFF, RECORD, REPLAY };
 
 enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
-    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER,
+    IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER, IO_REALTIME, IO_LIST, IO_STAT, IO_REMOVE,
+    IO_RENAME, IO_MKDIR, IO_RANDOM, IO_SEEN, IO_TOOK, IO_WAKE,
 };
 
 static const char *const names[] = {
@@ -57,13 +68,27 @@ static const char *const names[] = {
     [IO_FOPEN] = "a text file", [IO_FGETS] = "a line of a text file", [IO_SEED] = "a seed",
     [IO_WINSIZE] = "the screen's size", [IO_SPAWN] = "a command", [IO_WAIT] = "a wait for a command",
     [IO_KILL] = "a kill", [IO_PIPE] = "a pipe", [IO_LISTEN_UNIX] = "a listen at a path",
-    [IO_PEER] = "a socket's peer",
+    [IO_PEER] = "a socket's peer", [IO_REALTIME] = "the time of day",
+    [IO_LIST] = "a directory's names", [IO_STAT] = "a file's stat", [IO_REMOVE] = "a remove",
+    [IO_RENAME] = "a rename", [IO_MKDIR] = "a mkdir", [IO_RANDOM] = "random bytes",
+    [IO_SEEN] = "what another island did", [IO_TOOK] = "an inbox's items", [IO_WAKE] = "an inbox's pipe",
 };
 
-static int      mode;
-static FILE    *record;
-static uint64_t count;                  // entries written or read so far
-static char     token;                  // what rt_io_fopen gives when replaying: a FILE * never used as one
+static int                mode;
+static const char        *base;          // island 0's record, beside which the others are
+static RT_ISLAND FILE    *record;        // each island's own (D256)
+static RT_ISLAND uint64_t count;         // entries written or read so far
+static char               token;         // what rt_io_fopen gives when replaying: a FILE * never used as one
+
+// The next entry's head, read before it's wanted, to see whether it's the
+// one an island's inbox takes now (rt_io_due).
+static RT_ISLAND struct {
+    int      have;
+    uint8_t  kind;
+    int64_t  result;
+    int32_t  err;
+    uint32_t n;
+} ahead;
 
 static const char *name(int kind) {
     return kind > 0 && kind < (int)(sizeof names / sizeof *names) ? names[kind] : "something unknown";
@@ -123,15 +148,32 @@ static int64_t done_with(int kind, int64_t result, const void *data, size_t len)
 
 // --- replaying ----------------------------------------------------------------
 
-// The next entry, which must be of this kind, its bytes put at data (at
-// most cap of them; *len says how many), and errno as it was.
-static int64_t next(int kind, void *data, size_t cap, uint32_t *len) {
-    char    say[160];
-    uint8_t k;
-    int64_t result;
-    int32_t err;
-    uint32_t n;
-    if (!get(&k, 1)) {
+__attribute__((noreturn))
+static void spoilt(int kind) {
+    char say[160];
+    snprintf(say, sizeof say, "the record is cut short or spoilt at entry %" PRIu64 " (%s)", count + 1, name(kind));
+    stop(say);
+}
+
+// The next entry's head, which must be of this kind: its result, its
+// errno and how many bytes follow.
+static void head(int kind, int64_t *result, int32_t *err, uint32_t *n);
+
+// The next entry's kind, its head read and kept; 0 at the record's end.
+static int peek(void) {
+    if (ahead.have) return ahead.kind;
+    if (!get(&ahead.kind, 1)) return 0;
+    if (!get(&ahead.result, sizeof ahead.result) || !get(&ahead.err, sizeof ahead.err) || !get(&ahead.n, sizeof ahead.n)) {
+        spoilt(ahead.kind);
+    }
+    ahead.have = 1;
+    return ahead.kind;
+}
+
+static void head(int kind, int64_t *result, int32_t *err, uint32_t *n) {
+    char say[160];
+    int  k = peek();
+    if (!k) {
         snprintf(say, sizeof say, "the record ends at entry %" PRIu64 ", where the run asks for %s", count + 1, name(kind));
         stop(say);
     }
@@ -140,11 +182,36 @@ static int64_t next(int kind, void *data, size_t cap, uint32_t *len) {
                  count + 1, name(kind), name(k));
         stop(say);
     }
-    if (!get(&result, sizeof result) || !get(&err, sizeof err) || !get(&n, sizeof n) || n > cap || (n && !get(data, n))) {
-        snprintf(say, sizeof say, "the record is cut short or spoilt at entry %" PRIu64 " (%s)", count + 1, name(kind));
-        stop(say);
-    }
+    *result    = ahead.result;
+    *err       = ahead.err;
+    *n         = ahead.n;
+    ahead.have = 0;
+}
+
+// The next entry, which must be of this kind, its bytes put at data (at
+// most cap of them; *len says how many), and errno as it was.
+static int64_t next(int kind, void *data, size_t cap, uint32_t *len) {
+    int64_t  result;
+    int32_t  err;
+    uint32_t n;
+    head(kind, &result, &err, &n);
+    if (n > cap || (n && !get(data, n))) spoilt(kind);
     if (len) *len = n;
+    count++;
+    errno = err;
+    return result;
+}
+
+// The same, its bytes, however many, in memory of their own (*data, to
+// free).
+static int64_t next_alloc(int kind, char **data, uint32_t *len) {
+    int64_t  result;
+    int32_t  err;
+    uint32_t n;
+    head(kind, &result, &err, &n);
+    *data = rt_must(malloc(n ? n : 1));
+    if (n && !get(*data, n)) spoilt(kind);
+    *len = n;
     count++;
     errno = err;
     return result;
@@ -197,6 +264,39 @@ static FILE *open_record(const char *path) {
     return fd >= 0 ? fdopen(fd, "wb") : NULL;
 }
 
+// Island k's record: island 0's at base, the others' beside it. Each
+// starts with what it is, and which island's.
+static void open_island(uint64_t k) {
+    char path[4096];
+    if (k) snprintf(path, sizeof path, "%s.%" PRIu64, base, k);
+    else   snprintf(path, sizeof path, "%s", base);
+    record = mode == RECORD ? open_record(path) : fopen(path, "rb");
+    if (!record) {
+        fprintf(stderr, "slight: can't %s %s: %s\n", mode == RECORD ? "record to" : "replay", path, strerror(errno));
+        exit(2);
+    }
+    fcntl(fileno(record), F_SETFD, FD_CLOEXEC);    // not a command's
+    if (mode == RECORD) {
+        put(MAGIC, strlen(MAGIC));
+        put(&k, sizeof k);
+        fflush(record);
+        return;
+    }
+    char     magic[sizeof MAGIC - 1];
+    uint64_t was;
+    if (!get(magic, sizeof magic) || memcmp(magic, MAGIC, sizeof magic) != 0) stop("that isn't a record of a run");
+    if (!get(&was, sizeof was)) stop("the record is cut short");
+    if (was != k) {
+        char say[200];
+        snprintf(say, sizeof say, "that's island %" PRIu64 "'s record: a run's islands replay together, from island 0's", was);
+        stop(say);
+    }
+}
+
+void rt_io_island(uint64_t k) {
+    if (mode) open_island(k);
+}
+
 void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *s) {
     const char *rec = rt_io_getenv("SLIGHT_RECORD"), *play = rt_io_getenv("SLIGHT_REPLAY");
     if (rec && play) {
@@ -204,30 +304,25 @@ void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *s) {
         exit(2);
     }
     if (!rec && !play) return;
-    record = rec ? open_record(rec) : fopen(play, "rb");
-    if (!record) {
-        fprintf(stderr, "slight: can't %s %s: %s\n", rec ? "record to" : "replay", rec ? rec : play, strerror(errno));
-        exit(2);
-    }
-    fcntl(fileno(record), F_SETFD, FD_CLOEXEC);    // not a command's
     mode = rec ? RECORD : REPLAY;
+    base = rec ? rec : play;
+    open_island(0);
     uint8_t  clock;
     uint32_t n = 0;
     if (mode == RECORD) {
-        put(MAGIC, strlen(MAGIC));
         clock = (uint8_t)s->virtual_clock;
         put(&clock, 1);
         put(&s->sched_seed, sizeof s->sched_seed);
         put(&s->heap_max, sizeof s->heap_max);
+        put(&s->islands, sizeof s->islands);
         put_strings((uint32_t)*argc, *argv);
         while ((*env)[n]) n++;
         put_strings(n, *env);
         fflush(record);
         return;
     }
-    char magic[sizeof MAGIC - 1];
-    if (!get(magic, sizeof magic) || memcmp(magic, MAGIC, sizeof magic) != 0) stop("that isn't a record of a run");
-    if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed) || !get(&s->heap_max, sizeof s->heap_max)) {
+    if (!get(&clock, 1) || !get(&s->sched_seed, sizeof s->sched_seed) || !get(&s->heap_max, sizeof s->heap_max)
+        || !get(&s->islands, sizeof s->islands)) {
         stop("the record is cut short");
     }
     s->virtual_clock = clock;
@@ -240,6 +335,36 @@ int rt_io_replaying(void) {
     return mode == REPLAY;
 }
 
+// --- islands (D256) -----------------------------------------------------------
+
+int rt_io_seen(int seen) {
+    if (mode == REPLAY) return (int)replayed(IO_SEEN);
+    return (int)done(IO_SEEN, seen);
+}
+
+void rt_io_took(uint64_t poll, const uint64_t *ids, uint32_t n) {
+    done_with(IO_TOOK, (int64_t)poll, ids, n * sizeof *ids);
+}
+
+int rt_io_due(uint64_t poll, uint64_t **ids, uint32_t *n) {
+    if (peek() != IO_TOOK || ahead.result != (int64_t)poll) return 0;
+    char    *data;
+    uint32_t len;
+    next_alloc(IO_TOOK, &data, &len);
+    *ids = (uint64_t *)(void *)data;
+    *n   = len / sizeof **ids;
+    return 1;
+}
+
+int rt_io_wake(int fd) {
+    if (mode == REPLAY) return (int)replayed(IO_WAKE);
+    return (int)done(IO_WAKE, fd);
+}
+
+int rt_io_logging(void) {
+    return mode != 0;
+}
+
 // --- the calls ----------------------------------------------------------------
 
 uint64_t rt_io_clock(void) {
@@ -247,6 +372,82 @@ uint64_t rt_io_clock(void) {
     struct timespec t;
     clock_gettime(CLOCK_MONOTONIC, &t);
     return (uint64_t)done(IO_CLOCK, (int64_t)((uint64_t)t.tv_sec * 1000000000 + (uint64_t)t.tv_nsec));
+}
+
+static int64_t realtime(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_REALTIME, &t);
+    return (int64_t)t.tv_sec * 1000000 + t.tv_nsec / 1000;
+}
+
+int64_t rt_io_realtime(void) {
+    if (mode == REPLAY) return replayed(IO_REALTIME);
+    return done(IO_REALTIME, realtime());
+}
+
+int64_t rt_io_epoch(const char *given) {
+    if (mode == REPLAY) return replayed(IO_REALTIME);
+    return done(IO_REALTIME, given ? strtoll(given, NULL, 10) * 1000000 : realtime());
+}
+
+// --- files (D254) -------------------------------------------------------------
+
+int64_t rt_io_list(const char *path, char **names, uint32_t *len) {
+    if (mode == REPLAY) return next_alloc(IO_LIST, names, len);
+    DIR    *d = opendir(path);
+    rt_buf_t b = { 0 };
+    int64_t n = 0;
+    if (d) {
+        struct dirent *e;
+        errno = 0;
+        while ((e = readdir(d)) != NULL) {
+            if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+            rt_buf_add(&b, e->d_name, strlen(e->d_name) + 1);
+            n++;
+        }
+        int err = errno;
+        closedir(d);
+        if (err) n = -1, errno = err;
+    } else {
+        n = -1;
+    }
+    *names = rt_must(malloc(b.len ? b.len : 1));
+    if (b.len) memcpy(*names, b.bytes, b.len);
+    *len = (uint32_t)b.len;
+    rt_buf_free(&b);
+    return done_with(IO_LIST, n, *names, *len);
+}
+
+int rt_io_stat(const char *path, int64_t got[4]) {
+    if (mode == REPLAY) return (int)next(IO_STAT, got, 4 * sizeof *got, NULL);
+    struct stat st;
+    int r = lstat(path, &st);
+    if (r == 0) {
+        got[0] = S_ISREG(st.st_mode) ? 0 : S_ISDIR(st.st_mode) ? 1 : S_ISLNK(st.st_mode) ? 2 : 3;
+        got[1] = (int64_t)st.st_size;
+#ifdef __APPLE__
+        got[2] = (int64_t)st.st_mtimespec.tv_sec * 1000000 + st.st_mtimespec.tv_nsec / 1000;
+#else
+        got[2] = (int64_t)st.st_mtim.tv_sec * 1000000 + st.st_mtim.tv_nsec / 1000;
+#endif
+        got[3] = (int64_t)(st.st_mode & 07777);
+    }
+    return (int)done_with(IO_STAT, r, got, r == 0 ? 4 * sizeof *got : 0);
+}
+
+int rt_io_remove(const char *path) {
+    if (mode == REPLAY) return (int)replayed(IO_REMOVE);
+    return (int)done(IO_REMOVE, remove(path));
+}
+
+int rt_io_rename(const char *from, const char *to) {
+    if (mode == REPLAY) return (int)replayed(IO_RENAME);
+    return (int)done(IO_RENAME, rename(from, to));
+}
+
+int rt_io_mkdir(const char *path) {
+    if (mode == REPLAY) return (int)replayed(IO_MKDIR);
+    return (int)done(IO_MKDIR, mkdir(path, 0777));
 }
 
 // The sets as select() left them, when it says something is ready.
@@ -466,6 +667,25 @@ uint32_t rt_io_seed(void) {
     uint32_t    bits;
     if (getentropy(&bits, sizeof bits) != 0) bits = (uint32_t)time(NULL) ^ (uint32_t)getpid() << 16 ^ (uint32_t)(uintptr_t)&here;
     return (uint32_t)done(IO_SEED, bits);
+}
+
+// getentropy gives 256 bytes at most a call; it doesn't fail on a system
+// that has it but for a bad buffer, which this never passes.
+void rt_io_random_bytes(void *buf, size_t len) {
+    if (mode == REPLAY) {
+        uint32_t got;
+        next(IO_RANDOM, buf, len, &got);
+        if (got != len) stop("the record's random bytes are another length than the run asks for");
+        return;
+    }
+    for (size_t at = 0; at < len; at += 256) {
+        size_t n = len - at < 256 ? len - at : 256;
+        if (getentropy((uint8_t *)buf + at, n) != 0) {
+            perror("slight: can't get random bytes");
+            exit(2);
+        }
+    }
+    done_with(IO_RANDOM, 0, buf, len);
 }
 
 uint64_t rt_io_random_seed(const char *given) {

@@ -1,0 +1,79 @@
+// stdin: 25q
+// divisions: the keys 1 to 5 divide the screen into that many coloured
+// boxes, and q quits.
+//
+// The keyboard is a receive function connected to :keypress, which
+// matches a key by its name; any other key leaves the screen as it is.
+
+let screen_rows = tty::screen::rows() - 10;
+let screen_cols = tty::screen::cols() - 1;
+
+fun draw(x, y, h, w, color) {
+    tty::write("\e[u");
+    dotimes(0, h, fun(i) {
+        tty::write(
+            "\e[", x + i, ";", y, "H",
+            "\e[37;", color, "m",
+            str::repeat(" ", w),
+            "\e[0m")
+    });
+    tty::write("\e[s")
+}
+
+fun keyboard(rows, cols) {
+    recv {
+        ["1", ..._] => {
+            tty::write("\e[1J");
+            draw(1, 1, rows, cols, 42);
+            keyboard(rows, cols)
+        }
+        ["2", ..._] => {
+            tty::write("\e[1J");
+            let mid = math::ceil(cols * 0.5);
+            draw(1, 1,       rows, mid - 1, 42);
+            draw(1, mid + 2, rows, mid,     43);
+            keyboard(rows, cols)
+        }
+        ["3", ..._] => {
+            tty::write("\e[1J");
+            let mid_w = math::ceil(cols * 0.5);
+            let mid_h = math::ceil(rows * 0.5);
+            draw(1,         1,         rows,      mid_w - 1, 42);
+            draw(1,         mid_w + 2, mid_h - 1, mid_w,     43);
+            draw(mid_h + 1, mid_w + 2, mid_h,     mid_w,     44);
+            keyboard(rows, cols)
+        }
+        ["4", ..._] => {
+            tty::write("\e[1J");
+            let mid_w = math::ceil(cols * 0.5);
+            let mid_h = math::ceil(rows * 0.5);
+            let qua_h = math::ceil(mid_h * 0.5);
+            draw(1,                 1,         rows,      mid_w - 1, 42);
+            draw(1,                 mid_w + 2, mid_h - 1, mid_w,     43);
+            draw(mid_h + 1,         mid_w + 2, qua_h - 1, mid_w,     44);
+            draw(mid_h + qua_h + 1, mid_w + 2, qua_h - 1, mid_w,     45);
+            keyboard(rows, cols)
+        }
+        ["5", ..._] => {
+            tty::write("\e[1J");
+            let mid_w = math::ceil(cols * 0.5);
+            let mid_h = math::ceil(rows * 0.5);
+            let qua_h = math::ceil(mid_h * 0.5);
+            let qua_w = math::ceil(mid_w * 0.5);
+            draw(1,                 1,                 rows,      mid_w - 1, 42);
+            draw(1,                 mid_w + 2,         mid_h - 1, mid_w,     43);
+            draw(mid_h + 1,         mid_w + 2,         qua_h - 1, mid_w,     44);
+            draw(mid_h + qua_h + 1, mid_w + 2,         qua_h - 1, qua_w - 2, 45);
+            draw(mid_h + qua_h + 1, mid_w + qua_w + 2, qua_h - 1, qua_w,     46);
+            keyboard(rows, cols)
+        }
+        ["q", ..._] => [],
+        _           => keyboard(rows, cols),
+    }
+}
+
+read(connect(:keypress) { keyboard(screen_rows, screen_cols) });
+
+tty::write("rows:", screen_rows);
+tty::write("cols:", screen_cols);
+tty::write("\e[", screen_rows + 5, ";0H")

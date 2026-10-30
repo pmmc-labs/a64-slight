@@ -36,7 +36,7 @@ export const FAULT_KINDS: readonly string[] = [
     'not-an-int', 'overflow', 'not-a-bool', 'no-clause', 'stack', 'not-a-cons', 'not-a-list', 'heap',
     'not-a-string', 'not-a-symbol', 'out-of-range', 'not-a-number', 'div-by-zero', 'not-a-function',
     'arity', 'not-a-pid', 'join-self', 'not-a-device', 'not-json', 'not-sexp', 'no-match', 'not-a-tuple',
-    'not-an-actor', 'not-a-task',
+    'not-an-actor', 'not-a-task', 'not-an-array',
 ];
 
 // The names of keys from :keypress, then the modifiers, in RT_KEY_ order.
@@ -57,6 +57,7 @@ export const ERRNO_NAMES: readonly string[] = [
     'enoent', 'eacces', 'eperm', 'eexist', 'eisdir', 'enotdir', 'enametoolong', 'eloop', 'erofs', 'enospc',
     'efbig', 'emfile', 'enfile', 'eio', 'econnrefused', 'econnreset', 'epipe', 'etimedout', 'eaddrinuse',
     'eaddrnotavail', 'ehostunreach', 'enetunreach', 'enotfound', 'too-big', 'bad-json', 'bad-sexp', 'io-error',
+    'enotempty', 'exdev', 'ebusy',
 ];
 
 // What JSON's values need beyond #true and #false, in RT_JSON_ order.
@@ -90,9 +91,28 @@ export const SOURCE_WORDS: readonly string[] = ['fs/read', 'fs/write', 'fs/appen
 // What :system says of the process table (D244), in RT_TABLE_ order.
 export const TABLE_WORDS: readonly string[] = ['records'];
 
+// What fs/stat says of a file (D254), in RT_STAT_ order.
+export const STAT_WORDS: readonly string[] = ['file', 'dir', 'link', 'other', 'size', 'modified', 'mode'];
+
+// bytes/pack's and bytes/unpack's specs, and :short (D254), in RT_PACK_ order.
+export const PACK_WORDS: readonly string[] = [
+    'u8', 'i8', 'u16be', 'u16le', 'i16be', 'i16le', 'u32be', 'u32le', 'i32be', 'i32le', 'u64be', 'u64le', 'i64be',
+    'i64le', 'f32be', 'f32le', 'f64be', 'f64le', 'bytes', 'short',
+];
+
+// log's levels below :error (D254), in RT_LOG_ order.
+export const LOG_WORDS: readonly string[] = ['debug', 'info', 'warn'];
+
+// An array's kinds (D253), in RT_ARRAY_ order; :int is EXEC_WORDS'.
+export const ARRAY_WORDS: readonly string[] = ['float'];
+
+// What :system says of islands (D256), in RT_ISLE_ order.
+export const ISLAND_WORDS: readonly string[] = ['island', 'started', 'sent', 'received', 'shared', 'islands'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
-    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS,
+    ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS, ...STAT_WORDS, ...PACK_WORDS, ...LOG_WORDS,
+    ...ARRAY_WORDS, ...ISLAND_WORDS,
 ];

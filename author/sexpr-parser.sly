@@ -1,0 +1,52 @@
+fun tokenize_atom(chars, tokens, acc) {
+    match chars {
+        []            => tokenizer(chars, [acc, ...tokens]),
+        [" ", ...rest] => tokenizer(rest, [acc, ...tokens]),
+        ["(", ..._]    => tokenizer(chars, [acc, ...tokens]),
+        [")", ..._]    => tokenizer(chars, [acc, ...tokens]),
+        [c, ...rest]   => tokenize_atom(rest, tokens, acc ++ c),
+    }
+}
+
+fun tokenizer(chars, tokens) {
+    match chars {
+        []             => reverse(tokens),
+        [" ", ...rest] => tokenizer(rest, tokens),
+        ["(", ...rest] => tokenizer(rest, [:OPEN, ...tokens]),
+        [")", ...rest] => tokenizer(rest, [:CLOSE, ...tokens]),
+        [c, ...rest]   => tokenize_atom(rest, tokens, c),
+    }
+}
+
+fun lexer(tokens, acc) {
+    match tokens {
+        [] => reverse(acc),
+        [token, ...rest] => cond {
+            sym?(token)              => lexer(rest, [token, ...acc]),
+            int?(str_to_int(token))  => lexer(rest, [:INT(str_to_int(token)), ...acc]),
+            true                     => lexer(rest, [:SYM(token), ...acc]),
+        }
+    }
+}
+
+fun close_expression(stack, acc) {
+    match stack {
+        []              => acc,
+        [:MARK, ...rest] => [acc, ...rest],
+        [next, ...rest]  => close_expression(rest, [next, ...acc]),
+    }
+}
+
+fun parser(lexed, acc) {
+    match lexed {
+        []                => acc,
+        [:OPEN, ...rest]  => parser(rest, [:MARK, ...acc]),
+        [:CLOSE, ...rest] => parser(rest, close_expression(acc, [])),
+        [next, ...rest]   => parser(rest, [next, ...acc]),
+    }
+}
+
+let chars  = str::split("(+ 10 (+ (* 2 10) 30))", "");
+let tokens = tokenizer(chars, []);
+let lexed  = lexer(tokens, []);
+pprint(parser(lexed, []));

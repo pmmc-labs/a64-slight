@@ -37,3 +37,4 @@
 (pprint (kind (fork (str/join "," "abc"))))
 (pprint (kind (fork (str/replace "a" "a" 1))))
 (kind (fork (str/repeat "ab" 4611686018427387903)))
+; warns: 36:42 37:35 38:42

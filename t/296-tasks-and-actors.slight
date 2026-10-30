@@ -42,3 +42,4 @@
 (let root $$)
 (pprint (read (connect :system (kinds (list root w z)))))
 :end
+; warns: 30:27 34:21

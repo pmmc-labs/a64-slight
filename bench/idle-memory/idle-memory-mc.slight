@@ -1,0 +1,34 @@
+; idle-memory on every island (D256): a keeper on each of (islands)
+; islands starts its share of the n processes there, all waiting for a
+; message; once every keeper says its share is waiting, so that all n wait
+; at once, each asks its own for 1 and sums the answers.
+
+(defun idle () (recv ((:ping from) (send from 1))))
+
+(defun start (n acc)
+    (if (== n 0) acc (start (- n 1) (cons (spawn (idle)) acc))))
+
+; The share's sum, to the top level's address once it's all come.
+(defun gather (to n acc)
+    (if (== n 0) (send to (list :sum acc)) (recv (i (gather to (- n 1) (+ acc i))))))
+
+(defun keeper (to n)
+    (let ps (start n ()))
+    (send to (list :waiting $$))
+    (recv
+        (:go
+            (map (lambda (p) (send p (list :ping $$))) ps)
+            (gather to n 0))))
+
+(defun waiting (from k acc)
+    (if (== k 0) acc (match (read from) ((:waiting p) (waiting from (- k 1) (cons p acc))))))
+
+(defun total (from k acc)
+    (if (== k 0) acc (match (read from) ((:sum s) (total from (- k 1) (+ acc s))))))
+
+(let n  (str->int (car @ARGV)))
+(let k  (islands))
+(let me (address))
+(dotimes 0 k (lambda (b) (spawn/on b (keeper me (- (div (* (+ b 1) n) k) (div (* b n) k))))))
+(map (lambda (p) (send p :go)) (waiting me k ()))
+(total me k 0)

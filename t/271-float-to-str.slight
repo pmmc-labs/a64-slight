@@ -39,3 +39,4 @@
 (pprint (kind (fork (float->str 1.5 -1))))
 (pprint (kind (fork (float->str 1.5 2.0))))
 (kind (fork (float->str "1.5")))
+; warns: 40:37 41:25

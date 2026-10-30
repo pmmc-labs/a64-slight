@@ -1,0 +1,20 @@
+; lib/agent.slight's header (D248): what (@include :agent) gives a
+; program, docs/LANGUAGE.md, "(@include :agent)". The rest of
+; agent.slight is its own, and the :http it includes too.
+
+; The arguments a model calls a tool with: (name value), for lookup.
+(deftype Args (list (shape str any)))
+
+; A tool: its name, its parameters as a JSON Schema, and its function.
+(deftype Tool (:tool str any (fun (Args) any)))
+
+; An agent, an actor whose state is the conversation.
+(deftype Agent (actor any))
+
+(sig tool/new (str str (list (list any)) (fun (Args) any)) Tool)
+(sig tool/name (Tool) str)
+(sig tool/call (Tool Args) any)
+
+(sig agent/new (str str str (list Tool)) Agent)
+(sig agent/say (Agent str) nil)
+(sig agent/ask (Agent str) (or (:ok str) (:error any)))

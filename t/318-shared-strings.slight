@@ -1,0 +1,23 @@
+; Strings of 4 KB or more are buffers off the heap, shared, their
+; references counted (D253): the string builtins on one; a fork's copy
+; and a join's result, which share it; twenty actors each sending it back
+; and ending before it's read, so the buffer outlives every sender (with
+; SLIGHT_POISON, as t/run.sh sets it, a buffer freed too soon reads as
+; garbage); and 100 MB of them made and dropped by a process whose heap
+; holds 64 MB, so the dropped ones must be collected.
+
+(defun big (n) (str/repeat "ab" n))
+(defun back (to i s) (send to (list i s)))
+(defun churn (i total)
+    (if (== i 0) total (churn (- i 1) (+ total (bytes/len (str/repeat "x" 100000))))))
+
+(let s (big 5000))
+(pprint (list (bytes/len s) (str/slice s 0 6) (bytes/len (str/slice s 4000 9000)) (eq? s (~ (big 4999) "ab"))
+              (eq? (hash s) (hash (~ (big 4999) "ab"))) (str/len (str/upper s)) (bytes/len (json/print s))))
+(pprint (join (fork (bytes/len (~ s "!")))))
+(pprint (bytes/len (cadr (join (fork s)))))
+(let me (address))
+(map (lambda (i) (spawn (back me i s))) (range 0 20))
+(let got (map (lambda (_) (read me)) (range 0 20)))
+(pprint (list (length got) (eq? (map car got) (range 0 20)) (length (filter (lambda (m) (eq? (cadr m) s)) got))))
+(join (fork (churn 1000 0)))

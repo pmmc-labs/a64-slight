@@ -1,0 +1,25 @@
+(255 128 255 255 2 1 128 0 255 127 255 255 255 255 4 3 2 1 128 0 0 0 254 255 255 255 63 255 255 255 255 255 255 255 1 0 0 0 0 0 0 0 192 0 0 0 0 0 0 0 255 255 255 255 255 255 255 255 61 204 204 205 0 0 32 192 126 55 228 60 136 0 117 156 0 0 0 0 0 0 0 128 97 98 99)
+(ok (255 -128 65535 258 -32768 32767 4294967295 16909060 -2147483648 -2 4611686018427387903 1 -4611686018427387904 -1 0.10000000149011612 -2.5 1e+300 -0.0 "abc") 85)
+(ok (65535 2) 5)
+(error short)
+(ok () 85)
+(63 240 0 0 0 0 0 0 0)
+(ok (-56 200) 2)
+fault in #<pid 2>: out of range: 256 (bytes/pack at t/314-bytes-pack.slight:25:21)
+out-of-range
+fault in #<pid 3>: out of range: 128 (bytes/pack at t/314-bytes-pack.slight:26:21)
+out-of-range
+fault in #<pid 4>: out of range: "abc" (bytes/pack at t/314-bytes-pack.slight:27:21)
+out-of-range
+fault in #<pid 5>: out of range: u7 (bytes/pack at t/314-bytes-pack.slight:28:21)
+out-of-range
+fault in #<pid 6>: out of range: (1) (bytes/pack at t/314-bytes-pack.slight:29:21)
+out-of-range
+fault in #<pid 7>: out of range: (1 2) (bytes/pack at t/314-bytes-pack.slight:30:21)
+out-of-range
+fault in #<pid 8>: not a number: "x" (bytes/pack at t/314-bytes-pack.slight:31:21)
+not-a-number
+fault in #<pid 9>: integer overflow (bytes/unpack at t/314-bytes-pack.slight:32:21)
+overflow
+fault in #<pid 10>: out of range: 3 (bytes/unpack at t/314-bytes-pack.slight:33:13)
+out-of-range

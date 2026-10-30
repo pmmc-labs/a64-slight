@@ -33,3 +33,4 @@
 (pprint (kind (join (fork (/ 1.5 -0.0)))))
 (pprint (kind (join (fork (+ "a" 1.5)))))
 :done
+; warns: 34:30

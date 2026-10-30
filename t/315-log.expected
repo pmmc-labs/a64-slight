@@ -1,0 +1,11 @@
+start
+{"time":"2026-01-01T00:00:00.000000Z","level":"info","pid":1,"msg":"listening","port":8080,"host":"127.0.0.1"}
+{"time":"2026-01-01T00:00:01.500000Z","level":"warn","pid":2,"msg":"late","me":"#<pid 2>","n":3}
+{"time":"2026-01-01T00:00:01.500000Z","level":"error","pid":1,"msg":"failed","why":["error",["enoent","x.txt"]],"nan":"-inf","data":{"a":[1,2],"b":null},"said":"quote \" tab\t"}
+end
+fault in #<pid 3>: out of range: fatal (log at t/315-log.slight:20:21)
+out-of-range
+fault in #<pid 4>: not a string: 3 (log at t/315-log.slight:21:21)
+not-a-string
+fault in #<pid 5>: out of range: ("a") (log at t/315-log.slight:22:13)
+out-of-range

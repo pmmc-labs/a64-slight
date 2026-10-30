@@ -1,0 +1,45 @@
+#!/bin/sh
+# A stand-in for curl, for t/309: no network, only sh's builtins (PATH is
+# this directory and the system's). It answers by the URL's path as
+# curl -i --raw --http1.1 would: the reply as it came, head and all. /args
+# gives back its arguments, a line each, then what came on its input.
+url=
+prev=
+head=no
+for a in "$@"; do
+    [ "$prev" = --url ] && url=$a
+    [ "$a" = --head ] && head=yes
+    prev=$a
+done
+input=
+while IFS= read -r line; do
+    input="$input$line
+"
+done
+input="$input$line"
+case $url in
+    */args)
+        out=$(printf '%s\n' "$@")
+        out="$out
+--
+$input"
+        printf 'HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: %d\r\n\r\n' "${#out}"
+        [ $head = yes ] || printf '%s' "$out" ;;
+    */chunked)
+        printf 'HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n4\r\none\n\r\n4\r\ntwo\n\r\n0\r\n\r\n' ;;
+    */missing)
+        printf 'HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n' ;;
+    */nohost)  exit 6 ;;
+    */refused) exit 7 ;;
+    */cert)    exit 60 ;;
+    */short)
+        printf 'HTTP/1.1 200 OK\r\nContent-Length: 10\r\n\r\nabc'
+        exit 18 ;;
+    */reset)
+        printf 'HTTP/1.1 200 OK\r\n\r\nall of it?'
+        exit 56 ;;
+    */to-eof)
+        printf 'HTTP/1.1 200 OK\r\n\r\nall of it'
+        ;;
+    *)  exit 3 ;;
+esac

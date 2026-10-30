@@ -1,0 +1,85 @@
+// The C-style syntax (D246): each kind of form, run, its output worked
+// out by hand.
+
+=doc
+A doc block, which the reader skips.
+=cut
+
+fun classify(x) {
+    match x {
+        []              => :empty,
+        [n]             => :one(n),
+        :tag(v)         => :tagged(v),
+        [a, b, ...rest] => :many(a + b, rest),
+        #(k, v)         => :pair(k, v),
+        "s"             => :string,
+        -1              => :minus-one,
+        _               => :other,
+    }
+}
+
+pprint(map(classify, [[], [7], :tag(9), [1, 2, 3, 4], #(:k, 5), "s", -1, 3.5]));
+
+fun sign(n) {
+    if n < 0 { :negative } else if n == 0 { :zero } else { :positive }
+}
+
+pprint([1, -2, 0] |> map(sign));
+
+fun grade(n) {
+    cond {
+        n >= 90 => "A",
+        n >= 80 => "B",
+        true    => "C",
+    }
+}
+
+fun name_of(d) {
+    case d { 1 => "one", 2 => "two", _ => "many" }
+}
+
+pprint([grade(95), grade(85), grade(10), name_of(2), name_of(7)]);
+
+pprint("con" ++ "cat");
+pprint(str_to_int("42") + 1);
+pprint(`str/<`("a", "b"));
+pprint(["a", 1] == ["a", 1]);
+pprint(1 == 1.0);
+pprint(1 != 2);
+pprint(-(3 * 4) + 10 % 4);
+pprint(7 / 2);
+
+fun swap(pair) {
+    let [a, b] = pair;
+    [b, a]
+}
+
+let add = fun(x, y) => x + y;
+let twice = fun(f, x) { let y = f(x); f(y) }
+pprint([swap([1, 2]), add(2, 3), twice(fun(n) => n * 10, 1)]);
+pprint({ let z = 5; z * z });
+pprint([[0, ...[1, 2]], :t(1, ...[2]), #(1, :a)]);
+
+fun counter(n) {
+    recv {
+        :inc()   => counter(n + 1),
+        :get(to) => { reply(to, n); counter(n) }
+    }
+}
+
+let c = spawn counter(0);
+send(c, :inc());
+send(c, :inc());
+pprint(ask(c, :get()));
+
+fun count_down(n) {
+    if n == 0 { :lift-off } else { yield count_down(n - 1) }
+}
+
+pprint(join(fork count_down(3)));
+pprint(join(fork parent) == :ok(self));
+pprint(@ARGV);
+
+let $n = 5;
+pprint([$n * 2, '((lambda (x) x) 1), ['a, 'b], car('(:inc))]);
+:done

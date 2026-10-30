@@ -1,0 +1,101 @@
+// ping-pong-tournament: N games of ping-pong at once, each played for D
+// milliseconds, then the volleys counted.
+//
+// How many volleys fit depends on the machine, so this example has no
+// .expected, and it can't run on the virtual clock that the golden tests
+// use: there, time moves only when nothing can run, and the players never
+// stop (D110). Run it by hand:
+//
+//     node bin/slightc.ts -o build/ping-pong-tournament examples/ping-pong-tournament.sly
+//     build/ping-pong-tournament 10 100    # games, ms; qemu-aarch64 build/... on x86
+//
+// Each game is a process that spawns its two players, waits for the
+// :START gate, serves, sleeps for D ms, stops them, and collects their
+// counts, waiting in the middle of its function each time (D167). The
+// root starts the games, is told each one's counts at an address (D243),
+// says where a game's counts differ from the one before by more than
+// one, and adds them up. N and D come from @ARGV, through str_to_int, and
+// default to 10 and 100. A game is spawned by name: a function that waits
+// isn't a value.
+
+fun player(counter) {
+    recv {
+        :Serve(reply_to) => { send(reply_to, :Ping(self)); player(counter) }
+        :Ping(reply_to)  => { send(reply_to, :Pong(self)); player(counter + 1) }
+        :Pong(reply_to)  => { send(reply_to, :Ping(self)); player(counter + 1) }
+        :EXIT(reply_to)  => send(reply_to, :Final(counter)),
+    }
+}
+
+// wait for the :START gate, serve, let them play for duration ms, stop
+// them, then collect the two finals, labelled in the order they arrive,
+// and tell to
+fun ping_pong(to, duration) {
+    let p1 = spawn player(0);
+    let p2 = spawn player(0);
+    recv;
+    send(p1, :Serve(p2));
+    sleep(duration);
+    send(p1, :EXIT(self));
+    send(p2, :EXIT(self));
+    let got = recv;
+    send(to, [[p1, got], [p2, recv]])
+}
+
+fun setup_tournament(to, n, duration) {
+    if n == 0 { [] } else { [spawn ping_pong(to, duration), ...setup_tournament(to, n - 1, duration)] }
+}
+
+fun start_tournament(pids) {
+    pids |> map(fun(pid) { send(pid, :START); pid })
+}
+
+// the n games' counts, in the order they come
+fun await_results(to, n) {
+    if n == 0 { [] } else { [read(to), ...await_results(to, n - 1)] }
+}
+
+// a game's two counts, from its result: [[p1, :Final(a)], [p2, :Final(b)]]
+fun counts(r) {
+    let [[_, :Final(a)], [_, :Final(b)]] = r;
+    [a, b]
+}
+
+fun check_results(results) {
+    fold::l(car(results), fun(acc, r) {
+        let [a1, a2] = counts(acc);
+        let [b1, b2] = counts(r);
+        if math::abs(a1 - b1) <= 1 && math::abs(a2 - b2) <= 1 {
+            acc
+        } else {
+            tty::write("... results diverged from ", acc, " to ", r, "\n");
+            r
+        }
+    }, cdr(results))
+}
+
+fun calculate_totals(results) {
+    fold::l(0, fun(acc, r) => acc + sum(counts(r)), results)
+}
+
+let num_games     = if nil?(@ARGV) { 10 } else { str_to_int(car(@ARGV)) }
+let game_duration = if nil?(@ARGV) { 100 } else { str_to_int(cadr(@ARGV)) }
+
+tty::write("Running ", num_games, " for ", game_duration, "\n");
+
+tty::write("Setting up Tournament ...\n");
+let to = address();
+let setup_pids = setup_tournament(to, num_games, game_duration);
+tty::write("...\n");
+
+tty::write("Starting Tournament ...\n");
+let running_pids = start_tournament(setup_pids);
+tty::write("...\n");
+
+tty::write("Awaiting Tournament Results ...\n");
+let results = await_results(to, num_games);
+tty::write("...\n");
+
+tty::write("Analyzing Tournament Results ...\n");
+tty::write(" Final Results : ", check_results(results), "\n");
+tty::write("Total Messages : ", calculate_totals(results), "\n")

@@ -5,3 +5,4 @@
 (pprint (join (fork (kill "p"))))
 (join $$)
 (pprint :not-reached)
+; warns: 3:27 4:30 5:27

@@ -1,0 +1,208 @@
+// A forest grown by processes, in Braille, under a crescent moon.
+//
+//     node bin/slightc.ts --target x86_64 -o forest examples/forest.sly
+//     ./forest          a new forest every time
+//     ./forest 42       the forest of 42
+//
+// Every branch is a process. It works out where it ends, turns its
+// segment into dots, sends them to the painter, and spawns its children
+// as buds: processes waiting in recv, which hold no stack, till a timer
+// (after) tells each to grow. So a tree grows as its processes do, a few
+// hundred of them alive at once, and the trees all grow together.
+//
+// The painter keeps the picture as a persistent map (lib/map.slight) from
+// a character cell of the screen to its 8 Braille dots and its colour,
+// and draws only the cells a message changes. A cell's dots are or'd
+// together, and it keeps the colour of the highest thing drawn in it,
+// and both orders are the same, so the picture doesn't depend on the
+// order the dots come in. Nor do the dots: each process draws its random
+// numbers from a generator split from its parent's when it was spawned
+// (D222), so what it draws depends on the seed and on where it is in its
+// tree, never on when it ran. Try
+//
+//     for n in 1 2 3; do SLIGHT_SCHED=$n ./forest 42 | tail -1; done
+//
+// The painter counts the branches still to come: each says how many
+// children it has, and when there are none left the painter ends with the
+// picture's hash, which the top level reads and prints.
+
+@include(:map);
+
+// --- the picture --------------------------------------------------------------
+
+// What can be drawn, lowest first: a cell keeps the highest it's had,
+// and each has its colour, from the terminal's 256.
+fun rank::star() { 1 }
+fun rank::moon() { 2 }
+fun rank::ground() { 3 }
+fun rank::branch(depth) { 4 + depth }
+fun rank::blossom() { 12 }
+fun colour(rank) { tuple::get(#(0, 250, 230, 58, 94, 130, 136, 64, 70, 34, 40, 76, 218), rank) }
+
+// The deepest a branch goes: 0 is a trunk.
+fun twigs() { 7 }
+
+// The bit for the dot at [x, y] in a Braille character, whose dots go
+// down the left column, then the right, then the bottom row (U+2800).
+fun dot(x, y) {
+    let dx = x % 2;
+    let dy = y % 4;
+    if dy < 3 { bit::shl(1, dy + 3 * dx) } else { bit::shl(64, dx) }
+}
+
+fun glyph(cx, cy, cell) {
+    str("\e[", inc(cy), ";", inc(cx), "H\e[38;5;", colour(tuple::get(cell, 1)), "m",
+        codes_to_str([10240 + tuple::get(cell, 0)]))
+}
+
+// The painter: the canvas, #(cols, rows) in characters, how many branches
+// are still to come, and how many have come. It ends, when no branch is
+// to come, with how many branches it drew, how many cells it lit, and
+// the picture's hash.
+fun paint(canvas, size, waiting, drawn) {
+    recv {
+        :dots(pts, rank) => paint(plot(canvas, size, pts, rank), size, waiting, drawn),
+        :branch(pts, rank, children) => {
+            let canvas2 = plot(canvas, size, pts, rank);
+            let left = waiting + (children - 1);
+            if left == 0 {
+                [inc(drawn), map::size(canvas2), hash(map_to_list(canvas2))]
+            } else {
+                paint(canvas2, size, left, inc(drawn))
+            }
+        }
+    }
+}
+
+// canvas with pts, each [x, y] in dots, drawn in rank; the cells that
+// change are written to the screen as they do.
+fun plot(canvas, size, pts, rank) {
+    let [canvas2, out] = plot_dots(canvas, size, pts, rank, []);
+    tty::write(str::join("", reverse(out)));
+    canvas2
+}
+
+fun plot_dots(canvas, size, pts, rank, out) {
+    match pts {
+        [] => [canvas, out],
+        [[x, y], ...rest] => {
+            let cols = tuple::get(size, 0);
+            if x < 0 || y < 0 || x >= 2 * cols || y >= 4 * tuple::get(size, 1) {
+                plot_dots(canvas, size, rest, rank, out)
+            } else {
+                let key = div(y, 4) * cols + div(x, 2);
+                let was = match map::get(canvas, key) { :not-found => #(0, 0), c => c }
+                let cell = #(bit::or(tuple::get(was, 0), dot(x, y)), math::max(tuple::get(was, 1), rank));
+                if cell == was {
+                    plot_dots(canvas, size, rest, rank, out)
+                } else {
+                    plot_dots(map::put(canvas, key, cell), size, rest, rank, [glyph(div(x, 2), div(y, 4), cell), ...out])
+                }
+            }
+        }
+    }
+}
+
+// --- shapes, in dots ----------------------------------------------------------
+
+fun line(x0, y0, x1, y1) {
+    let steps = math::max(1, math::ceil(math::max(math::abs(x1 - x0), math::abs(y1 - y0))));
+    range(0, inc(steps)) |> map(fun(i) => [math::round(x0 + (x1 - x0) * i / steps),
+                                           math::round(y0 + (y1 - y0) * i / steps)])
+}
+
+// A line w dots either side of the one from [x0, y0] to [x1, y1], across.
+fun thick(w, x0, y0, x1, y1) {
+    fold::l([], fun(acc, dx) => append(line(x0 + dx, y0, x1 + dx, y1), acc), range(-w, inc(w)))
+}
+
+fun blossom(x, y) {
+    let cx = math::round(x);
+    let cy = math::round(y);
+    [[0, 0], [1, 0], [-1, 0], [0, 1], [0, -1], [1, -1], [-1, 1]]
+        |> map(fun(d) => [cx + car(d), cy + cadr(d)])
+}
+
+// The dots of a disc of radius r at [cx, cy] that aren't in the disc a
+// little up and to the right of it: a waxing crescent.
+fun crescent(cx, cy, r) {
+    let span = range(-math::ceil(r), inc(math::ceil(r)));
+    fold::l([], fun(acc, dy) {
+        fold::l(acc, fun(acc, dx) {
+            let ox = dx - r * 0.45;
+            let oy = dy + r * 0.25;
+            if dx * dx + dy * dy <= r * r && ox * ox + oy * oy > 0.8 * (r * r) {
+                [[math::round(cx + dx), math::round(cy + dy)], ...acc]
+            } else {
+                acc
+            }
+        }, span)
+    }, span)
+}
+
+// The ground's height at x: low hills.
+fun ground(h, x) { math::round(h - (4 + 1.5 * math::sin(x / 13.0))) }
+
+// --- a tree -------------------------------------------------------------------
+
+// A bud waits, holding no stack, till it's told to grow.
+fun bud(painter, x, y, angle, len, depth, lean) {
+    recv {
+        :grow => grow(painter, x, y, angle, len, depth, lean),
+    }
+}
+
+// A branch from [x, y]: its segment, its blossom if it's a twig, and its
+// children, spawned as buds, each told to grow a little later. The draws
+// for each child (its angle, its length, when it grows) are the parent's,
+// made before the child is spawned; the child's own come from the
+// generator split off for it at the spawn.
+fun grow(painter, x, y, angle, len, depth, lean) {
+    let x1 = x + len * math::cos(angle);
+    let y1 = y - len * math::sin(angle);
+    let children = cond { depth == twigs() => 0, rand::int(3) == 0 => 3, true => 2 }
+    if children == 0 { send(painter, :dots(blossom(x1, y1), rank::blossom())) }
+    send(painter, :branch(thick(math::max(0, 2 - depth), x, y, x1, y1), rank::branch(depth), children));
+    dotimes(0, children, fun(i) {
+        let a = angle + (0.42 * (i - (children - 1) / 2.0) + (0.5 * (rand::float() - 0.5) + lean));
+        let l = len * (0.66 + 0.16 * rand::float());
+        let b = spawn bud(painter, x1, y1, a, l, inc(depth), lean);
+        after(150 + rand::int(250), b, :grow)
+    })
+}
+
+// --- the night ----------------------------------------------------------------
+
+let seed = match @ARGV { [s, ..._] => str_to_int(s), _ => false }
+if int?(seed) { rand::seed(seed) }
+let cols = tty::screen::cols();
+let rows = tty::screen::rows() - 1;
+let w = 2 * cols;
+let h = 4 * rows;
+let trees = 3 + rand::int(3);
+let painter = spawn paint(map::new(), #(cols, rows), trees, 0);
+tty::write("\e[?25l\e[2J");
+
+send(painter, :dots(range(0, div(w * h, 120)) |> map(fun(i) => [rand::int(w), rand::int(div(h, 2))]), rank::star()));
+send(painter, :dots(crescent(w * 0.78, h * 0.2, h / 9.0), rank::moon()));
+send(painter, :dots(fold::l([], fun(acc, x) => [[x, ground(h, x)], [x, 1 + ground(h, x)], ...acc], range(0, w)),
+                    rank::ground()));
+
+// The trees, along the ground, planted a little apart in time, all
+// leaning a little the same way, as if in a wind.
+let lean = 0.06 * (rand::float() - 0.5);
+dotimes(0, trees, fun(i) {
+    let x = math::round(w * (i + 0.5) / trees + w / (3.0 * trees) * (rand::float() - 0.5));
+    let len = h * (0.13 + 0.06 * rand::float());
+    let b = spawn bud(painter, x, ground(h, x), math::PI / 2 + 0.2 * (rand::float() - 0.5), len, 0, lean);
+    after(700 * i, b, :grow)
+});
+
+match read(painter) {
+    :ok([drawn, lit, picture]) => {
+        tty::write("\e[0m\e[", inc(rows), ";1H\e[?25h",
+                   drawn, " branches, ", if int?(seed) { str("from seed ", seed) } else { "from the system's seed" },
+                   ", grown in any order, the same picture:\n");
+        [:forest, seed, :branches, drawn, :cells, lit, :hash, picture]
+    }
+}

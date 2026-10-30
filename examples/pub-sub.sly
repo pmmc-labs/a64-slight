@@ -1,0 +1,68 @@
+// pub-sub: a broker passes each published item to its subscribers, and
+// on any other message stops them and ends. The broker and each
+// subscriber are receive functions; the root publishes two items, stops
+// the broker, and reads how it ended: with what its subscribers said as
+// they stopped (D243).
+
+fun notify_all(subs, item) {
+    match subs {
+        [] => [],
+        [sub, ...rest] => {
+            send(sub, :item(item));
+            notify_all(rest, item)
+        }
+    }
+}
+
+fun stop_all(subs) {
+    match subs {
+        [] => [],
+        [sub, ...rest] => {
+            send(sub, :done(self));
+            stop_all(rest)
+        }
+    }
+}
+
+fun subscriber() {
+    recv {
+        :item(x) => {
+            pprint([self, :received, x]);
+            subscriber()
+        }
+        :done(from) => {
+            send(from, :sub-done);
+            :sub-done
+        }
+    }
+}
+
+// n answers, after those in acc, newest first.
+fun gather(n, acc) {
+    if n == 0 {
+        reverse(acc)
+    } else {
+        recv { r => gather(n - 1, [r, ...acc]) }
+    }
+}
+
+fun broker(subs) {
+    recv {
+        :pub(x) => {
+            notify_all(subs, x);
+            broker(subs)
+        }
+        other => {
+            stop_all(subs);
+            gather(length(subs), [:broker-done])
+        }
+    }
+}
+
+let s1 = spawn subscriber();
+let s2 = spawn subscriber();
+let b  = spawn broker([s1, s2]);
+send(b, :pub(1));
+send(b, :pub(2));
+send(b, :stop());
+read(b)

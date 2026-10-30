@@ -1,0 +1,29 @@
+; Processes: what an actor takes is what its recvs take, the recvs of the
+; functions it can go on to included; a message none of them takes is a
+; dead letter. And a task isn't an actor.
+(defun idle (n)
+    (recv
+        ((:work job) (busy n job))
+        (:stop       n)))
+
+(defun busy (n job)
+    (recv
+        ((:done r) (idle (+ n 1)))))
+
+(defun keys (k)
+    (recv
+        (:quit ())))
+
+(let w (spawn (idle 0)))
+(send w (list :work 1))
+(send w (list :done 2))
+(send w (list :stop))
+(send w :finish)
+(fork (join w))
+(connect :keypress (keys 0))
+
+(defun asks (pid)
+    (recv
+        (m (let to (address)) (send pid (list :get to)) (read to))))
+(spawn (asks w))
+(monitor (fork 1))

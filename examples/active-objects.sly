@@ -1,0 +1,89 @@
+// active-objects: objects as closures that answer messages, matching on
+// them (as in closure-objects), and objects behind actors. PointActor
+// gives a function that answers like a Point, but sends each message to a
+// process holding the Point, and asks for the answer. Each object is
+// given a name when it's made: ts-slight used gensym, which slight
+// doesn't have (D14). Numbers are compared with slight's numeric ==,
+// which this syntax's == isn't.
+
+@include(:ds);
+
+fun Object(oid) {
+    fun(m, o) => match m {
+        :oid   => oid,
+        :class => Object,
+        :===   => oid == o(:oid, []),
+        _      => raise(:METHOD-NOT-FOUND(m)),
+    }
+}
+
+fun Point(oid, x, y) {
+    let super = Object(oid);
+    fun(m, o) => match m {
+        :class  => Point,
+        :x      => x,
+        :y      => y,
+        :xy     => [x, y],
+        :yx     => [y, x],
+        :+      => Point([oid, :+, o(:oid, [])], x + o(:x, []), y + o(:y, [])),
+        :-      => Point([oid, :-, o(:oid, [])], x - o(:x, []), y - o(:y, [])),
+        :==     => `==`(x, o(:x, [])) && `==`(y, o(:y, [])),
+        :!=     => `!=`(x, o(:x, [])) || `!=`(y, o(:y, [])),
+        :to-str => str("Point:", x, ":", y),
+        _       => super(m, o),
+    }
+}
+
+fun Point_3D(oid, x, y, z) {
+    let super = Point(oid, x, y);
+    fun(m, o) => match m {
+        :class  => Point_3D,
+        :z      => z,
+        :xyz    => [x, y, z],
+        :+      => Point_3D([oid, :+, o(:oid, [])], x + o(:x, []), y + o(:y, []), z + o(:z, [])),
+        :-      => Point_3D([oid, :-, o(:oid, [])], x - o(:x, []), y - o(:y, []), z - o(:z, [])),
+        :==     => `==`(z, o(:z, [])) && super(:==, o),
+        :!=     => `!=`(z, o(:z, [])) || super(:!=, o),
+        :to-str => str("Point-3D:", x, ":", y, ":", z),
+        _       => super(m, o),
+    }
+}
+
+// The process holding an object: [m, o, to] is a message for it, whose
+// answer goes back to the address at the end (ask's). The answer is worked
+// out in a task of its own, since o may be an actor's object too, and
+// working it out asks that actor, which an actor can't (D243).
+fun ActorRef(obj) {
+    recv {
+        :EXIT     => [],
+        [m, o, to] => { fork reply(to, obj(m, o)); ActorRef(obj) }
+    }
+}
+
+fun PointActor(oid, x, y) {
+    let ref = spawn ActorRef(Point(oid, x, y));
+    fun(m, o) => match m {
+        :EXIT => send(ref, :EXIT),
+        _     => ask(ref, [m, o]),
+    }
+}
+
+let p1 = PointActor(:p1, 10, 20);
+let p2 = PointActor(:p2, 20, 10);
+let p3 = Point(:p3, 20, 10);
+
+pprint(p1(:+, p2)(:to-str, []));
+pprint(p2(:==, p3));
+pprint(p2(:===, p3));
+pprint(p1(:==, p1(:+, p2)(:-, p3)));
+pprint(p1(:class, [])(:p4, 25, 30)(:to-str, []));
+
+let q1 = Point_3D(:q1, 1, 2, 3);
+let q2 = Point_3D(:q2, 4, 5, 6);
+pprint(q1(:+, q2)(:xyz, []));
+pprint(q1(:xy, []));
+pprint(q2(:-, q1)(:to-str, []));
+pprint(q1(:+, q2)(:oid, []));
+
+p1(:EXIT, []);
+p2(:EXIT, [])

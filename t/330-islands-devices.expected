@@ -1,0 +1,4 @@
+(ran 2 "hi" 0)
+(system 0 #true)
+(key 0 ("a"))
+()

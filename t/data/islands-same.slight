@@ -1,0 +1,57 @@
+; What t/332 and t/333 run, on four islands and on one (D256): work spread
+; with (spawn/on (% i (islands)) ...), whose answer mustn't depend on how
+; many islands there are, nor on the order they run in. Each result is
+; gathered by where it belongs, never by when it came.
+
+; Collatz's steps from n to 1.
+(defun steps (n acc)
+    (cond
+        ((== n 1)        acc)
+        ((== (% n 2) 0)  (steps (div n 2) (+ acc 1)))
+        (#true           (steps (+ (* 3 n) 1) (+ acc 1)))))
+
+; A parallel map: the ith answer to an address of its own, read in order.
+(defun pmap (f xs)
+    (let tos (map (lambda (x) (address)) xs))
+    (dotimes 0 (length xs)
+        (lambda (i) (spawn/on (% i (islands)) (send (nth i tos) (f (nth i xs))))))
+    (map read tos))
+
+; A ring of n actors, the ith on island i mod (islands), passing a count
+; round it laps times; the last says how far it went.
+(defun ring-node (next)
+    (recv
+        ((:next p)  (ring-node p))
+        ((:count c) (send next (list :count (+ c 1))) (ring-node next))))
+
+(defun ring (n laps)
+    (let me    (address))
+    (let nodes (map (lambda (i) (spawn/on (% i (islands)) (ring-node me))) (range 0 n)))
+    (dotimes 0 (- n 1) (lambda (i) (send (nth i nodes) (list :next (nth (+ i 1) nodes)))))
+    (send (car nodes) (list :count 0))
+    (laps-of me (car nodes) n (- laps 1)))
+
+; Each time round, the last node's count comes to me; it goes on to the
+; first till the laps are done.
+(defun laps-of (me first n laps)
+    (match (read me)
+        ((:count c)
+            (if (== laps 0)
+                c
+                (do (send first (list :count c))
+                    (laps-of me first n (- laps 1)))))))
+
+; An array of 2,000 integers, a shared buffer, summed a band to an island.
+(defun band-sum (a lo hi)
+    (array/sum (array/slice a lo hi)))
+
+(defun bands (a k)
+    (let n (array/len a))
+    (pmap (lambda (b) (band-sum a (div (* b n) k) (div (* (+ b 1) n) k))) (range 0 k)))
+
+(pprint (pmap (lambda (n) (steps n 0)) (range 1 31)))
+(pprint (ring 10 3))
+(let a (array/generate :int 2000 (lambda (i) (* i i))))
+(pprint (sum (bands a 8)))
+(pprint (sum (bands a 3)))
+:done

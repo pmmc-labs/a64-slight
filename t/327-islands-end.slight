@@ -1,0 +1,8 @@
+; The root ends at once, but an actor on another island is still at work:
+; the program waits for it, as for any process here, and prints the
+; root's value once no island can do more (D256). Expected output worked
+; out by hand.
+
+(defun fib (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+(spawn/on 1 (pprint (list :late (island) (fib 20))))
+:root-done

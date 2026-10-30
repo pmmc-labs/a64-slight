@@ -8,6 +8,30 @@ Start with the **[tour](tour.md)**: fifteen minutes from hello world to
 actors. Then the **[tutorial](tutorial/01-values.md)** goes over the same
 ground slowly, building one program.
 
+## What slight is for
+
+slight is for programs that talk to other programs: services, tools,
+daemons and agents, on one machine, each shipped as one static binary
+that runs in an empty container. Its programs are made of processes
+that share nothing and send each other messages, as Erlang's are, and
+nothing in it changes, so two processes can never race over a value.
+
+What makes it different is that a run can be repeated exactly. Time is
+a clock you can swap for a virtual one, so a test of a timeout takes no
+time; the order processes run in can be shuffled by a seed, to find a
+race; and everything a program takes from the world can be recorded and
+replayed, so a failure seen once can be seen again, as often as you
+like. [Time](concepts/time.md) and [finding a race](howto/races.md) show
+how.
+
+It has arrays of numbers, for simulations, but it isn't for numerical
+computing at large (no tensors, nor a GPU), for systems programming, or for a GUI, the
+browser or a phone. It's young, and its
+library is small: HTTPS goes through curl, and a server's through a proxy
+in front of it. It uses every core, but only as a program places its
+actors on them ([using every core](howto/cores.md)). [`PLAN.md`](../PLAN.md)'s "Toward general purpose" says
+what's coming, and in what order.
+
 ## What's here
 
 The guide has four parts, each for a different need:
@@ -49,6 +73,7 @@ The guide has four parts, each for a different need:
   [an HTTP server and client](howto/http.md),
   [shipping a program in a container](howto/containers.md),
   [tests](howto/testing.md),
+  [using every core](howto/cores.md),
   [finding a deadlock](howto/deadlocks.md) with `:system`, and
   [finding a race](howto/races.md) with `SLIGHT_SCHED` and a replay.
 

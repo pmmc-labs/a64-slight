@@ -1,0 +1,23 @@
+; log (D254): lines of JSON on stderr, in among stdout's, the time the
+; virtual clock's from SLIGHT_EPOCH, and the pid that logged; :debug not
+; written, :info and up the default; fields named by strings or
+; keywords; what JSON can't hold, a pid, a keyword, an infinity, written
+; as str writes it, at any depth, so an error reason logs as it is; an
+; object, a tuple and :null as JSON has them; and what faults: a level
+; that isn't one, a message that isn't a string, a field that isn't a
+; name and a value.
+
+(defun later () (sleep 1500) (log :warn "late" (list (list "me" $$) (list :n 3))) :done)
+(defun kind (pid) (car (cadr (join pid))))
+
+(pprint :start)
+(log :info "listening" (list (list "port" 8080) (list :host "127.0.0.1")))
+(log :debug "not written" ())
+(read (spawn (later)))
+(log :error "failed" (list (list "why" (list :error (list :enoent "x.txt"))) (list "nan" (- 0.0 math/INF))
+                           (list "data" (list :object (list "a" (tuple 1 2)) (list "b" :null))) (list "said" "quote \" tab\t")))
+(pprint :end)
+(pprint (kind (fork (log :fatal "x" ()))))
+(pprint (kind (fork (log :info 3 ()))))
+(kind (fork (log :info "x" (list (list "a")))))
+; warns: 20:26 21:32

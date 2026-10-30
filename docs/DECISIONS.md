@@ -1278,7 +1278,8 @@ non-blocking, made for small machines) is the proposal, to confirm in
 the Keychain). Rejected: system libraries (macOS has no OpenSSL to build
 against, versions differ between machines, and testing under qemu would
 need each target's copy); prebuilt binaries in the repository; loading
-libraries with `dlopen`; a package manager.
+libraries with `dlopen`; a package manager. *(Refined by D251: only
+code that never needs a security fix is vendored, and TLS isn't.)*
 
 **D153. The runtime looks up host names itself.** *(User, Oct 2026, after
 Odin's `core:net`.)* `getaddrinfo` blocks, and every process with it
@@ -5760,3 +5761,644 @@ an actor while the root read it).
   replies in an actor the root spawned and read; the root does it now,
   at an address it makes, reading in an ordinary loop, and each prints
   what it did before D243, but for even-odd's address where its pid was.
+
+**D246. A second syntax, C-style with ML's habits, read into the same
+s-expressions.** *(Stevan, Oct 2026: a thought experiment, "a C style
+syntax for slight, perhaps borrowing from ML a bit too", then, after two
+programs converted by hand and Claude's written grammar,
+`docs/SYNTAX.md`, "proceed with the next steps", choosing among Claude's
+options on the questions it left.)* `fn f(a, b) { ... }`, `let x = e;`,
+infix operators, `[a, ...xs]`, `:tag(a)` for a tagged list, `match`
+and `recv` with `pattern => body` arms, `spawn e` and `fork e` as
+prefix words, `self` and `parent`, `x |> f(a)`. A file ending in `.sly`
+is read by `compiler/src/sly.ts` into the forms `reader.ts` makes, with
+their positions, so the expander, the compiler and the runtime don't
+know which syntax a program was in, and the two include each other.
+slight has no macros, which is what an infix syntax usually costs a
+Lisp (Dylan's); its semantics are already ML's (expressions, immutable
+bindings, patterns, tail calls), and its tagged lists are OCaml's
+polymorphic variants. Gleam (ML's semantics, C's look, on Erlang's
+machine) and Elixir (a new syntax on Erlang's) are the nearest
+neighbours.
+
+- **Names:** an identifier's `::` is `/`, then `_to_` is `->`, then
+  `_` is `-` (`table::del_loop` is `table/del-loop`, `str_to_int` is
+  `str->int`), and a raw name in backticks is any slight name as it is
+  (`` `str/<` ``). Keywords keep slight's spelling (`:on-next`,
+  `:fs/read`), since nothing after `:` can be an operator.
+- **`==` is structural:** `eq?`, with `!=` as `ne?`, because that's what
+  a C or JavaScript programmer writes, and every comparison in the two
+  programs converted was structural; slight's numeric `==` is
+  `` `==`(a, b) ``. Rejected: `==` as slight's `==` (which makes
+  `name == "ann"` a fault), and `===` for structure beside it.
+- **The extension is `.sly`.** Rejected: `.sl`, which other tools use,
+  and `.slc`.
+- **`:tag` and `:tag()` stay different values,** as `'tag` and
+  `(list :tag)` are, and the compiler is to warn when a program uses one
+  tag in both shapes (a message sent one way and matched the other is a
+  dead letter only a run finds). Not built yet. Rejected: a bare `:tag`
+  meaning the one-element list in some positions, a change to what
+  values are; and no warning.
+- **A list of literals is a quoted constant:** `[1, :a]` is `'(1 a)`, so
+  `quote` needs no syntax, and the s-expressions' trap, `'(:inc)` being
+  `((quote inc))`, has no counterpart.
+- **A `let` that takes a value apart,** `let [a, b] = e;`, is a
+  one-clause `match` over the rest of its block.
+- **Data stays s-expressions:** what programs print, log and send, and
+  what `rpc` puts on the wire, whichever syntax wrote them.
+- **Built first, by Stevan's choice of the smallest step: the reader
+  alone,** a precedence climber over a token list, slight-shaped, so it
+  ports as `reader.ts` will (about 600 lines). Its unit tests read each
+  construct and compare it with what `reader.ts` makes of the
+  s-expressions it stands for; golden tests 303 (every form, run), 304
+  and 305 (the tutorial's store, race and supervisor, converted, to the
+  tutorial's own output, and a fault's site in the `.sly` file);
+  `t/run.sh` takes `.sly` files, and `// args:` as `; args:`. Rejected
+  for now: the converters both ways (`--to-sly`, `--to-slight`) and
+  running the guide in both syntaxes, which come next if it's kept.
+- **Left open:** `c ? a : b` (`?` ends names and `:` starts keywords),
+  Rust's `become` for a checked tail call, printing values in this
+  syntax, and what a parser in slight would cost the self-hosted
+  compiler.
+
+*(Later, D246:* two bigger programs converted, to see how the syntax
+scales: game-of-life-actors and boids, golden tests 306 and 307, each
+to its example's own output, on both targets, with nothing in the
+reader to fix. Code lines grew a sixth to two fifths, from closing
+braces and `if`'s blocks, and the characters other than spaces by 3 to
+5 per cent. The destructuring `let` took most of the nesting out of
+boids, and `|>` out of the game's grids. Found: a function named like
+an operator (boids' `v+`) has no identifier, so it was renamed
+`vec::add`; and `match recv {` reads the `{` as the `recv`'s arms, now
+said in SYNTAX.md.)*
+
+*(Later still, D246: Stevan, converting his own sketches in `author/`,
+"yes, allow $ sigils and add the ' s-expression quote", from Claude's
+list of what they showed. A `.sly` name may start with `$`, which the
+name rules leave alone (`$f` is `$f`, `$my_var` `$my-var`), since his
+programs name pids `$f` and `$to` as Perl would, and the conversion had
+to drop them, one clash (`$s` and `s`) with it; `@` stays
+`@include`'s and `@ARGV`'s. And `'datum` is a datum quoted, read by
+`reader.ts` itself (`readDatumAt`): a program as data, a meta-circular
+evaluator's say, was `[[:lambda, [:x, :y], [:+, :x, :y]], 10, 20]` and
+is `'((lambda (x y) (+ x y)) 10 20)` again. A bare atom ends where a
+keyword does, so `['a, 'b]` is `(a b)`. Rejected for now: `@` names,
+and `(+)` for an operator as a value, which needs `` `+` `` still.)*
+
+*(And: Stevan, "lets change `fn` to `fun`". The `.sly` keyword that
+defines a function, and makes a lambda, is `fun` (ML's, Erlang's and
+Kotlin's word), `fn` an ordinary name again. The D246 entry above keeps
+`fn` as it was decided. With it, the three sketches in `author/` that
+joined an actor read it instead, as their `.sly` versions do.)*
+
+*(And: Stevan, "make ; after } optional", once the examples were
+converted. An item or a statement that ends with `}` needs no `;` after
+it, as an arm that does needs no `,`, and as Rust's `if` and `match`
+need none. Since the rule looks at tokens, not lines, one hazard is
+left, JavaScript's: a `}` followed by `(` or `-` would go on as a call
+or a subtraction. So a `}` that ends a line ends the expression when the
+next line starts with either of those, which could begin a statement;
+any other operator there, `|>` say, can't, and goes on. Rejected: Go's
+newline rule, which makes a `;` of a newline after `}` and so needs
+exceptions for `else`, `,`, `)` and every arm; and Rust's, ending a
+statement that begins with a block-like form at its `}`, which would
+stop `if ... { } else { } |> f` there.)*
+
+**D247. Types: a checker that warns, by inference, with annotations
+that say more.** *(Stevan, Oct 2026: a thought experiment, "Could we add
+types to the language? And if so, how deep do we go?", then Claude's
+write-up, `docs/TYPES.md`; "enforce a space around the `:` so that
+`x: int` is a syntax error, and `x : int` is what we expect"; and "for
+everything else, your suggestions look good. Let's build it.")*
+`docs/TYPES.md` has it all; in short:
+
+- **Two depths, one checker.** By default it warns only about what will
+  go wrong if that code runs, as Dialyzer does: a value that can't be
+  what's asked of it, a message no recv of the actor can take, a match
+  none of whose arms can match, an arm nothing reaches. It never rejects
+  a program that might work, so a warning on a program that works is the
+  checker's bug. `--strict` also warns where a type is wider than the
+  one wanted, as TypeScript's checker does, and makes warnings errors.
+  Types are erased: code generation is the same with them or without,
+  so a wrong checker costs a warning, never a run. Rejected: sound
+  inference, Hindley-Milner as Gleam's (slight's tagged lists,
+  association lists and mailboxes would need declared variants and a
+  `Dynamic` type, every example would change, and a large engine would
+  have to be ported); contracts checked at run time, for now; types in
+  code generation, till the checker has been used a while.
+- **Types as slight's values are:** structural, with unions, a keyword
+  as a type of its own, a list as `()` or a cons (`[A, B]`, `:tag(A)`,
+  `list<T>`), tuples, functions, `task<T>`, `actor<M>`, `address<M>`,
+  `pid`, and `any`, which fits everything both ways, so where nothing is
+  known nothing is said. Aliases may refer to themselves (`Json`).
+- **Inferred:** literals, the builtins' types (`builtins.ts`), the
+  prelude's sigs, each function's result (worked out from `never` up,
+  all at once, till nothing changes), narrowing by patterns and by the
+  tests it knows, and an actor's mailbox: the union of the patterns of
+  every recv it can be in, its own function's and those it can go on to,
+  since there's no selective receive. A parameter without a type is
+  `any`; inferring it from its use is left for later.
+- **Annotations, three new forms that compile to nothing:** `(deftype
+  Name T)`, `(sig f (T ...) R)` beside a `defun` (Typed Racket's way,
+  so `defun` is as it was), with `(recv M)` for what its actor takes and
+  `(sig (f A B) ...)` for a generic one, and `(the T e)`. In `.sly`:
+  `type Name<A> = T;`, `fun f<A>(x : T, y) : R recv M { }`, `let x :
+  T = e;`, and `fun(x : T) => e`. The `:` has a space on each side,
+  Stevan's rule: one touching a name on its right begins a keyword, and
+  `x: int` is an error that says what to write. Rejected: `x: int`
+  (TypeScript's), `x :: int` (`::` is in names) and C's `int x`; types
+  in comments, which leave `.sly` nowhere to put them.
+- **Built:** `compiler/src/types.ts`, `check.ts` and `builtins.ts`,
+  about 2,100 lines with the reader's part. It runs on the expanded
+  forms with `match` kept, before `split.ts`; `slightc` checks every
+  program, warnings to stderr, `--check` only checks, `--strict` as
+  above. The prelude has sigs, and `Result` and `Json`. `make types`
+  (`t/types.ts`) checks every test, example and the guide's code clean,
+  but for the warnings a program lists (`; warns: L:C`, which the tests
+  of faults have); `t/types/` is the checker's own golden tests, and
+  `compiler/tests/check.test.ts` its unit tests, the prelude checked
+  against its own sigs among them.
+- **Found while building it:** `author/boids.slight` joined its display
+  actor, which D243 had made a fault; it reads it now. In `.sly`, a
+  keyword no longer ends in `>`, so that `actor<:ok>` closes, and `type`
+  is a declaration only where a top-level item is `type Name =` or
+  `type Name<`; `->` and `|` are tokens. `send` to a task is a warning
+  only with `--strict`, since a task that has ended takes it.
+- **Not built yet:** typed devices beyond the keyboard (a file's or a
+  socket's messages), parameters' types from their use, contracts, and
+  the warning for one tag in both shapes beyond what a send to a known
+  actor shows (D246).
+
+**D248. A file with a header is a module.** *(Stevan, Oct 2026: the
+types looked strange among the defuns in s-expressions, and he'd rather
+have them together; "something like .h files, where the header has the
+types and defines what names are exposed": "the simplest route", and
+one that "would also remove all the library helpers from being callable
+outside of the libraries", worth having "even if types end up being
+removed"; and whether that's enough or a proper module system is better
+is left till he's used the types and `.sly` more. Then "go ahead and
+build it", on Claude's proposal.)* A file `X.slight` (or `X.sly`) with a
+file `X.sli` (or `X.slyi`) beside it is a module: the header holds
+`deftype`s, `sig`s and `@include`s of other modules; whoever includes
+the module sees the functions its header has a `sig` for, and its
+types, and the rest is its own; what a header includes, its includers
+see too, as with C's. A file without a header is spliced in, as before
+(D141), so programs split into files are as they were.
+
+- **Linking by renaming.** `compiler/src/modules.ts` makes the units (the
+  prelude, the program, each module) one program again: a module's
+  functions, and its types outside its header, get names with the file
+  in them (`map/bit (in lib/map.slight)`), which no program can write,
+  as `split.ts`'s generated functions do; and each name a unit's code
+  mentions becomes what it means there. So the checker, `split.ts`,
+  `classify.ts` and code generation see one program, as before, and
+  barely changed. People see names without the file: faults, `:system`,
+  printed functions, warnings.
+- **A module's code calls the prelude's functions as the prelude's**
+  (`inc (prelude)`), so a program's own `inc` (D80) doesn't take their
+  place, as it could when libraries were spliced in.
+- **A name another unit keeps, or one in a module not included, is a
+  compile error that says whose it is**: `map/bit is private to
+  lib/map.slight: its header doesn't declare it`, `http/get is
+  lib/http.slight's: include it to use it`.
+- **The prelude and every library have headers,** of what LANGUAGE.md
+  documents: their helpers (`map-loop`, `map/walk`, `http/...`'s
+  parsers) are their own now. Three functions tests used, undocumented,
+  were kept and documented (`http/parse-url`, `tools/read`,
+  `tools/save`). `tools.sli` includes the five libraries `tools` says
+  it includes itself; three tests that used `:http` through `:agent` or
+  `:tools` include it. The prelude's types and sigs moved into
+  `lib/prelude.sli`; the libraries' sigs are typed where their docs make
+  it certain (`fs`, `exec`, `calc`, `map`, `test`) and `any` elsewhere.
+  *(Later, D248: Stevan, "let's type the remaining headers". `ds`,
+  `http`, `rpc`, `agent` and `tools` are typed too, with types for what
+  their docs name (`Request`, `Response`, `Headers`, `Method`,
+  `Handler`, `Conn`, `Where`, `Tool`, `Args`, `Agent`, `Approve`,
+  `Notes`, and a `Cell`, `Dict`, `Queue` and `Channel` that are each an
+  `actor`, so joining one is found). Every library checks clean against
+  its header, and every program against them. Two function types no
+  longer overlap when their results don't, so a handler that gives a
+  string where a response is wanted is found; one that always raises,
+  whose result is `never`, still goes anywhere. Golden test
+  `t/types/010`.)*
+
+  *(And: Stevan, "fix the libraries' strict warnings too". Every library
+  checks clean under `--strict` on its own now, and `make types` holds
+  them to it. Most of the 30 warnings were the checker's: `(join (fork
+  e))` and `(read (spawn e))` can't give `:ended`, since the value is kept
+  for the parent, which this is (D244, D245); `^$$` in a function that
+  waits is a pid, since an actor is never the root; `str/split` with no
+  limit gives a piece at least; and a function's result is widened to a
+  list only while it's still changing, so `(list x y)` stays a list of
+  two. The rest were the libraries', fixed by saying what they meant:
+  a calc token's position by a pattern (`calc/at`), the parts of an rpc
+  handler that `help` gives by a pattern, a fetched page's trailer by
+  line with a default, a last empty line dropped by a match, a URL's
+  directory up to its last `/`; `exec`'s answer for a caller that has
+  ended, which no one can get, raised rather than given; and
+  `rpc/next` and `rpc/peer` from a process with no parent, the root,
+  raise `:not-in-a-call`, where they faulted on `()`.)*
+- **In `.sly`, a prototype** (`fun f(x : int) : str;`) is a `sig` alone,
+  as a `.slyi` header declares a function.
+- **`--strict` leaves a module's insides to its own check:** checking a
+  program reports what might go wrong in its own files, and a module is
+  checked strictly as a program of its own, which reads its header.
+- **Rejected:** an `(export ...)` form in the module's own file, as
+  Erlang's `-export` (one file, but the interface can't be shared
+  without the implementation); for now, a richer module system, with
+  imports under other names or of some names only, which prefixes
+  (`http/`, `map::`) already stand in for, and which headers don't rule
+  out: any module system needs interfaces. **Not built:** compiling a
+  module apart from its program (whole-program compiling, D141, still
+  holds), and private names for headerless files.
+
+**D249. Toward a general-purpose language: what's missing, and in what
+order.** *(Stevan, Oct 2026, asked "what is missing to make this a
+general purpose language?", and agreed the answer as the way to go.)*
+The order is PLAN.md's "Toward general purpose": the small things the
+runtime lacks (the time of day, files beyond reading and writing,
+binary data, a log device); TLS on mbedTLS, which brings hashing,
+base64 and random bytes for keys with it; a standard library, in slight
+where that's practical; supervisors and a registry on `monitor`;
+tooling (a formatter that's also the converters, a language server on
+the checker, a debugger over recorded runs); packages; and more than
+one core last, since it's a ceiling on servers and not a bar to being
+general purpose. Each builtin or device among them is still proposed
+before it's built. **Open:** whether C libraries are only vendored
+(D151, D152) or an FFI comes too (recommended: vendored only, till they
+show what an FFI would need to keep replay whole); and regular
+expressions, a small linear engine or none, with a parser library as
+the answer. **Asked:** whether vendored libraries would take code out
+of the runtime. Little: its C is tied to the heap, `select()` and
+`replay.c`; `json.c` and `sexp.c` build values as bytes come, which the
+usual libraries don't; `dns.c` is small beside c-ares. `unicode.c`'s
+generated tables might shrink to SpecialCasing's if utf8proc comes for
+display width and graphemes, to be checked then. What vendoring saves is
+code not yet written. *(Its open points settled by D252: no FFI, and
+regular expressions from a small engine of our own; and its order
+amended by D253: numbers in bulk after step 1, and more than one core
+after them.)*
+
+**D250. What slight is for, and isn't.** *(Stevan, Oct 2026, asked where
+D249's plan would place slight, and to put the answer in DESIGN.md and
+the guide.)* A small language for networked services and tools on one
+machine, which can be tested deterministically: its draw is that every
+run can be replayed, on a virtual clock and under seeded orders, with
+actors made safe by immutability, and Go's way of shipping (a static
+binary) rather than a VM's. The rule that follows: nothing goes in that
+a run can't be replayed through, which is why C libraries are vendored
+and an FFI is held back (D249). Not for: numbers and data in bulk,
+systems programming, GUIs, the browser or phones, and (till more than
+one core) servers bound by throughput. DESIGN.md, "What slight is for,
+and isn't"; the guide's README, "What slight is for". *(Amended by D253:
+services, tools and simulations; of numbers in bulk, only numerical
+computing at large stays out.)*
+
+**D251. Vendor only what never needs a security fix; leave the rest to
+programs the system keeps up to date, run as processes.** *(Stevan, Oct
+2026: "I am nervous about vendoring a library like this where I would
+need to track security issues", and "instead of a GPU device, what about
+using llama.cpp somehow?", so that slight could run models without an
+ollama server. Agreed as fitting "aggressively simple".)* Refines D151
+and D152, and withdraws TLS from 12c.
+- **Vendored:** code that's pinned once and left, with no security
+  fixes to follow: math (CORE-MATH, if "Numbers in bulk" is agreed), and
+  Unicode's tables. SHA-2, HMAC and base64 are small and fixed, and
+  ours, in C.
+- **Left to processes:** what needs security fixes. A server sits behind
+  a proxy that ends TLS (nginx, Caddy, a cluster's ingress), on plain
+  HTTP or a Unix socket (D231); FastCGI and uwsgi were considered and
+  aren't needed, plain HTTP behind a proxy being the simpler. A client's
+  `https://` goes through curl, run by `lib/http.slight` with `:exec`,
+  with the system's certificates (the Keychain on macOS) and proxies;
+  the same responses as plain HTTP, and streamed as `http/stream`
+  streams. Between machines, ssh
+  (`rpc/exec`, D225). Each is updated by the system's package manager,
+  a crash in one ends only it, and what crosses comes through `:exec`,
+  so a run still replays (D250's rule).
+- **Models:** llama.cpp's `llama-server`, started by the program with
+  `:exec`, watched by a monitor, on localhost; `lib/agent.slight` to
+  speak its OpenAI-compatible protocol beside ollama's, which reaches
+  vLLM, LM Studio and the hosted APIs too. What a model gives back is
+  tokens, small, so recording them costs little.
+- **Costs accepted:** curl must be installed (copied into a `FROM
+  scratch` image, a line in the containers how-to), a process for each
+  HTTPS request (milliseconds: fine for fetching and models, not for a
+  client calling at a high rate), errors read from curl's exit codes;
+  `llama-server` must be installed, and loads its model once at start.
+- **Rejected:** TLS on mbedTLS, vendored (D152's proposal), for the
+  security fixes it would need for ever; the system's TLS linked
+  dynamically (breaks static binaries on Linux, D227, and differs by
+  system); llama.cpp linked in (C++, the runtime's first thread, no GPU
+  in a static Linux binary, a crash ending every actor, and a project
+  that changes daily); a GPU device of our own (parked already).
+- **Left open:** SQLite (its risk is small enough to vendor, but it
+  needs D151's thread; its command-line tool through `:exec` would do,
+  more clumsily).
+
+  *(Built, Oct 2026, Stevan: "lets build that one": curl is asked for
+  the reply as it came, `-i --raw --http1.1`, its head included but not
+  a proxy's tunnel's (`--suppress-connect-headers`), no `Expect`, so no
+  100 Continue, and nothing on stderr (`-s`), which `:exec` mixes with
+  stdout; so the code that reads a socket's reply reads it, chunks and
+  all. It sends what `http://` does: no User-Agent or Accept of curl's,
+  no Content-Type unless one's given; `--proto =https`, and no redirect
+  followed. Its exit code is the error, in the device's words where
+  there are some (6 `:enotfound`, 7 `:econnrefused`, 28 `:etimedout`, 55
+  `:epipe`, 56 `:econnreset`), `(:curl code "host:port")` for the rest;
+  and a reply counts only once curl has ended with 0, since one read to
+  the end of its output may have been cut short. `http/parse-url` takes
+  `https://`, port 443. It found a compiler bug: `connect` in tail
+  position compiled its source, when that was a call, as the function's
+  tail call. Golden tests 309, 310, 211 and 220, and `t/live.py`'s
+  https.)*
+
+**D252. No FFI; regular expressions from a small engine of our own.**
+*(Stevan, Oct 2026, reviewing D249's open points after D251, both as
+Claude recommended.)*
+- **No FFI.** C libraries are vendored (D151, D152), and only code that
+  never needs a security fix (D251); what can't be is run as a process.
+  An FFI call could block, keep C pointers, and read the world without
+  going through `replay.c`, so a run could no longer be replayed whole
+  (D250's rule). Rejected: an FFI now; an FFI parked as the likely way
+  in once the vendored libraries had shown what it must do.
+- **Regular expressions** from an engine of our own, in C: a subset of
+  RE2's syntax, run in time linear in its input (no backtracking), so
+  no pattern can stall a process (each builtin call runs to its end,
+  D151) and there's nothing to patch for one. A builtin, as D151 allows
+  a pure function bounded by its input. Its syntax and builtins are to
+  be proposed with the standard library (PLAN.md, "Toward general
+  purpose", 3). Rejected: none, with a parser library in `lib/` as the
+  answer (wordier for a quick match); vendoring an existing engine
+  (ours is small, and has no release to follow).
+
+**D253. Numbers in bulk, for simulation.** *(Stevan, Oct 2026: "If we
+added numerical features (vectors, matrices, tensors), fixed the float
+handling, and added a GPU device, how would that change things?";
+Claude proposed the three pieces in PLAN.md, "Numbers in bulk", and
+Stevan agreed all three, every point to settle as recommended.)*
+- **What for:** simulation, which slight half has already: actors as
+  agents, the virtual clock as simulated time, seeded orders as Monte
+  Carlo over schedules, replay as reproducibility. D250 becomes
+  "services, tools and simulations"; numerical computing at large
+  (tensors, autodiff, a GPU) stays out.
+- **Order:** after D249's step 1: a libm that gives the same bits
+  everywhere, then shared buffers, then arrays; more than one core
+  (D249's step 7) moves up to follow them.
+- **The libm:** CORE-MATH, vendored, correctly rounded, so expected
+  values come from `mpmath` and D76's 12 places are retired for
+  `math/`; musl's version of any function it lacks; linked into every
+  program; the runtime compiled with `-ffp-contract=off`.
+- **Shared buffers:** strings and arrays of 4 KB or more off the heap,
+  counted references, a handle on the heap (Erlang's binaries); 4 KB to
+  start, tuned by a benchmark; a handle counts its whole buffer toward
+  its process's cap; a slice shared only at the threshold, copied
+  below. *(Built for strings, Oct 2026, before the libm, whose source
+  this environment couldn't fetch, Stevan agreeing: a flag in the
+  string's header, `RT_BOX_SHARED`, which took a bit from the box type,
+  now `0x3f`; the young handles' bytes past 1 MB make the next call
+  collect; and slices copied for now, so every buffer's bytes end in
+  their NUL, as a string's do. The 64 KB strings that went straight to
+  the old generation (D200) are shared ones now.)*
+- **Arrays:** one-dimensional, immutable, unboxed, `:float` and `:int`
+  (63-bit, so an element always reads back); printed `#float(...)` and
+  `#int(...)`, with no literal in source; never mixing kinds element by
+  element; reductions left to right. Matrices a library on them, their
+  multiplication our own loop, not BLAS, whose order and so whose bits
+  vary.
+- **Rejected:** a GPU device (results differing by card and driver,
+  kernels needing a language, and the most machinery slight would have
+  had), llama.cpp in its place (D251), musl's libm alone (the same bits
+  everywhere, but not the right ones, so no independent model for
+  tests), `:float` arrays alone to start, SRFI 4's `#f64(...)`, and
+  pairwise summation (more accurate, but needing a model of its
+  blocking).
+- *(The libm built, Oct 2026, once Stevan had opened `gitlab.inria.fr`
+  to the environment: CORE-MATH at b5a3f7ff, its 21 binary64 functions
+  that `math/` needs, every one of them there, so none from musl,
+  vendored unmodified in `vendor/core-math/` with its licence and a
+  `VENDOR` file, the first vendored code (D152), compiled with the
+  runtime, its files in the runtime cache's hash. Golden test 319
+  compares each exactly with mpmath, at 300 bits, rounded to the
+  nearest double (`t/models/math.py`, which writes the test's program
+  too, so their inputs agree). D76 is retired for `math/`. Not yet:
+  `forest`, `coral` and `waves` as golden tests, which need a model of
+  each picture worked out independently.)*
+- *(Arrays built, Oct 2026, as agreed, the details settled in building
+  them: `RT_BOX_FLOATS` and `RT_BOX_INTS`, shared at 4 KB, as strings
+  are; the builtins in `runtime/arrays.c`, named as `tuple/`'s, with
+  `array/kind`, `array?` and `array/concat`; element by element, an
+  operand a number or an array, the operands all their arrays' kind (an
+  `:int` array's integers, a `:float` array's any numbers, as `+` takes
+  them), so a result's kind is the arrays', but `array/div`'s, always
+  `:float` as `/` is; `array/min` and `array/max` as `math/min` and
+  `math/max` taken left to right, so a NaN wins only first, and an
+  empty array faults `:out-of-range`. `:int` is the symbol `:exec`
+  already had, SIGINT's, since a symbol is its name. The prelude's
+  `array/generate` goes through lists, rather than a builtin that fills
+  a fresh array that only `lib/` may call, as the proposal had it: no
+  array is ever seen half made, and no builtin needs a rule about who
+  calls it; a builtin can come if a benchmark says the lists cost too
+  much. (After `spectral-norm` with arrays, a list of 512 at a time,
+  the chunks joined in a tree, so no list is as long as the array:
+  building its two million-element matrices went from 0.27 s to 0.16 s,
+  and its peak from 87 MB down.) `sexp/parse`
+  reads `#float(...)` and `#int(...)`, numbers only, an `#int`'s in 63
+  bits, into the heap whatever their size. `lib/matrix.slight`, a
+  module, `#(rows cols a)`, raising `(:bad-shape ...)`. The types
+  `(array float)`, `(array int)` and `array`. Golden tests 320 to 323,
+  321's from `t/models/arrays.py`, Python's floats and integers; and
+  the checker's 011 and 012.)*
+
+**D254. D249's step 1: the time of day, files, binary data and a log,
+as builtins.** *(Stevan, Oct 2026, each as Claude recommended, from the
+options in PLAN.md, "Step 1, proposed".)* Each takes from the world only
+through `replay.c`, so a run still replays.
+- **`(clock/now)`:** the microseconds since 1970-01-01T00:00:00Z, POSIX
+  time, an integer as `clock/us` is; the system's real time, recorded,
+  or on the virtual clock its start plus the virtual time, the start
+  `SLIGHT_EPOCH`'s (seconds) or the real time of day when the program
+  starts, recorded either way; `t/run.sh` sets `SLIGHT_EPOCH`. Timers
+  stay on `clock/us`, which never jumps. And `lib/time.slight`, a
+  module in slight: `time/utc` and `time/from-utc` (days-from-civil),
+  `time/iso` and `time/parse-iso`, `time/http`, fixed offsets; no time
+  zones by name. Rejected: milliseconds, as JavaScript's `Date.now()`
+  (a second unit beside `clock/us`); float seconds (a microsecond lost
+  after 2255).
+- **Files:** `fs/list` (sorted by bytes, without `.` and `..`),
+  `fs/stat` (a keyed list: `:kind`, `:size`, `:modified`, `:mode`,
+  following links), `fs/delete` (a file or an empty directory),
+  `fs/rename`, `fs/mkdir` (one level), each a Result, errors as a
+  device's, `(name path)`; each a system call made where it's called,
+  as opening a file is, recorded, and not made in a replay. Trees are
+  `lib/fs.slight`'s, in slight. *(Built: `fs/stat` doesn't follow a
+  link, `lstat`, its `:kind` then `:link`, so a walk or a delete can't
+  be led out of its tree, where the proposal had it follow one; and the
+  trees are `fs/mkdir-all`, `fs/delete-all` and `fs/walk`. Three errno
+  names came with it, `:enotempty`, `:exdev` and `:ebusy`.)* Refines D151: a one-shot call whose wait
+  is the disk's may be a builtin, since a device, with no thread, would
+  block the same way. Rejected: an `:fs` device of requests and
+  replies; `:exec`, as now.
+- **Binary data:** `(bytes/pack specs values)` and `(bytes/unpack specs
+  s at)`, specs a list of keywords (`:u8`, `:i8`, `:u16be` ... `:i64le`,
+  `:f32be` ... `:f64le`) and `(:bytes n)`; `unpack` gives `(:ok values
+  next)` or `(:error :short)`; out of range faults `:out-of-range` in
+  `pack`, a `u64` past 63 bits `:overflow` in `unpack`. Strings are built
+  from pieces with `str/join` or `~`, one copy. Rejected: Perl's
+  template strings, a builtin for each width and order, Erlang's bit
+  syntax in patterns.
+- **A log:** `(log level msg fields)`, `:debug`, `:info`, `:warn` or
+  `:error`, a line of JSON on stderr, `time` (ISO 8601, from
+  `clock/now`), `level`, `pid`, `msg` and the fields; below
+  `SLIGHT_LOG`'s level (`info` by default) not written; written again in
+  a replay, as stdout is. The runtime's own messages stay as they are.
+  Rejected: s-expression lines, a `:log` device, `eprint` alone.
+- *(All four built, Oct 2026, golden tests 311 to 316. And in `log`, a
+  field's value that JSON can't hold, a pid, a function, a keyword, an
+  infinity, is written as `str` writes it, at any depth, where
+  `json/print` would fault: an error reason, `(:error (:enoent "x"))`,
+  is what a log most often holds. A level that isn't one faults
+  `:out-of-range`, which the checker now says of any keyword outside a
+  union of them, where it said `:not-a-bool`.)*
+
+**D255. D249's step 2: hashes, MACs, random bytes, and bytes as text.**
+*(Stevan, Oct 2026, as Claude proposed: "As proposed". HTTPS, the rest
+of the step, was D251's.)*
+- **`crypto/`**, for what's about secrets, in `runtime/crypto.c`, our
+  own C, since a hash is a fixed algorithm with no protocol around it,
+  nothing to patch (D251): `crypto/sha256` and `crypto/sha512` (FIPS
+  180-4), `crypto/hmac-sha256` and `crypto/hmac-sha512` (RFC 2104), each
+  giving raw bytes; `crypto/equal?`, in a time that depends on the
+  strings' length alone; and `crypto/random-bytes`, up to 1 MB from the
+  system's entropy (`getentropy`), recorded for a replay, never
+  `rand/`'s, which a seed makes the same every run (D222).
+- **Bytes as text**, as `a->b` (D219): `bytes->base64` and
+  `base64->bytes` (padded), `bytes->base64url` and `base64url->bytes`
+  (unpadded, as JWTs have it, read with its padding too), `bytes->hex`
+  and `hex->bytes`; what can't be read back is `#false`, as `str->int`
+  has it.
+- **Percent-encoding** in slight, `lib/http.slight`'s `http/url-encode`
+  and `http/url-decode` (RFC 3986: `+` is `+`).
+- **Rejected:** SHA-256 and HMAC-SHA256 alone, with SHA-512 and
+  base64url when wanted; `hash/` and `rand/secure-bytes` as names.
+- *(Built, Oct 2026: golden test 317, from `t/models/crypto.py` on
+  Python's hashlib, hmac and base64, where Python takes `+` and `/` in
+  base64url, which RFC 4648 §5 doesn't, and slight doesn't either; and
+  `t/replay/world.slight` draws random bytes, which its replay has.)*
+
+**D256. More than one core: islands.** *(Stevan, Oct 2026. Claude
+proposed a scheduler thread per core over shared run queues, with
+stealing, replay kept to one core; Stevan agreed to limit replay to
+one core ("nothing stops someone from executing a bunch at once"), but
+asked instead whether each core couldn't be isolated, as `rpc` keeps
+programs apart, "one way in and one way out, or multiple, but
+explicit"; then whether actors could be declared shared; and settled
+on placement, each point as below.)*
+- **Islands:** each core runs today's single-threaded runtime, on a
+  thread of its own, with nothing shared but an inbox per island and
+  the shared buffers, which never change. The scheduler, the collector,
+  mailboxes, watches and compiled code stay single-threaded; the
+  cross-thread code is the inboxes, a count for the end, and atomic
+  buffer counts. Prior art: Seastar's shard per core, Dart's isolates.
+- **A fixed set, by placement:** `(islands)` of them, one per core
+  unless `SLIGHT_ISLANDS` says, island 0 the main one, each started the
+  first time something's placed on it; `(spawn/on k expr)` places an
+  actor, `(island)` says where a process is; nothing moves on its own,
+  and `fork` stays on its parent's island. Stevan: "I like the more
+  explicit control."
+- **Pids carry their island, and a send goes where its pid says:**
+  across islands through the target's inbox, in order between any two
+  processes. Each island numbers its own pids. Printed `#<pid 5@2>`
+  (Stevan's thought too), island 0's as now, so single-island programs
+  and the tests print as they did; an address `#<address 3.1@2>`. 8
+  bits of island below the address bit: a pid's number 52 bits, an
+  address's task 32 and its number 20, wrapping past a million and
+  skipping numbers still open.
+- **Shared buffers cross without a copy,** their counts atomic: "I
+  think it is important", for frames of simulations, among others.
+- **`:system` counts what crosses islands,** each actor's and each
+  island's.
+- **Island 0 owns signals, the terminal and `:system`,** so a TUI
+  there stays responsive while other islands compute, for pictures of a
+  simulation as it runs (Stevan's point).
+- **Replay per island:** an island's inbox is input from the world to
+  it, recorded; each island replays on its own or with the rest. (This
+  goes past "replay on one core", which Stevan had accepted.)
+- **Rejected:** one scheduler over every core, with stealing (atomics
+  in every send, a run on N cores not replayable); channels between
+  islands as devices (every message wrapped, where routed pids keep
+  `send` as it is); actors declared shared, reachable from other
+  islands alone (a reply's asker would have to be shared too, or
+  addresses an exception); an island made per call (a thread per
+  branch of a simulation); and, for printing, `#<pid 2.5>` (taken by
+  addresses), `#<pid 2:5>`, `#<pid 5 on 2>`, and the island always
+  shown (every pid a test prints changing).
+- *(Steps 1 and 2 built, Oct 2026, the details settled in building them:
+  `spawn/on` a round trip, the spawner waiting while the island makes
+  the actor, so no island's pids are numbered by another and none
+  exists before its island knows of it; a `kill` across islands not
+  waited for; a `join` of another island's pid faulting `:not-a-task`,
+  since a task is always on its parent's island; a send to a task there
+  a dead letter, which only its island can tell; an actor's end sent to
+  its parent, a task elsewhere, kept apart from its mail, as a record
+  keeps one (D245); `:keypress` and `:system` from another island
+  placed on island 0; and an island watching its inbox for 50 µs
+  before it sleeps.)*
+- *(Step 5 agreed and built, Oct 2026. Claude proposed, Stevan took
+  each recommendation: `(:processes)` tells every island's processes,
+  island by island, each island's snapshot one moment of its own, and
+  `(:processes k)` one island's (rather than island 0's alone, or only
+  per island); a question about another island is answered when that
+  island replies, and the device answers in the order asked, a waiting
+  question holding up those after it (rather than answering local ones
+  at once, out of order); each process's `(:island k)`, `(:sent (n
+  bytes))` and `(:received (n bytes))`, kept in its side record so a
+  process that never crosses pays nothing, which spawn's cost had just
+  shown matters; and `(:runtime)` the whole program's counts, added up,
+  with each island's in `(:islands infos)` (rather than island 0's,
+  with `(:runtime k)` for another's). Settled in building it: a timer's
+  message counts to its island, not the process that set it; a task's
+  `open :system` is its own island's device and asks the others as
+  island 0's does; `log` writes `"island":k` after the pid for an island
+  other than 0, as a pid prints; and PID 1's reaping on island 0 checks
+  a list of every island's commands, kept under the lock they're
+  started under.)*
+- *(Step 6 changed and built, Oct 2026. Claude proposed cutting "any
+  island replays on its own": it needs every message's contents in the
+  record, so a serializer for any value, closures' code and static data
+  relocated (macOS loads a program at a different address each run),
+  shared buffers written out and sharing kept, and a mode where the main
+  thread runs as island k. Offered (a) the islands replaying together,
+  each record naming the items its inbox took and when, by the count of
+  the scheduler's looks, not keeping them, since the senders replay
+  too; (b) as agreed; (c) (a) now and (b) if it's wanted. Stevan took
+  (c). Settled in building it: what an island sees of another's doings
+  outside a take (whether its inbox has something, whether an island
+  has started) is a recorded value; the wake pipe's number is recorded,
+  since select()'s recorded sets name it; the island count is in the
+  record's settings; an island's record given alone stops, saying
+  so.)*
+- *(Step 7 built, Oct 2026, and with it the islands: the same program's
+  output on one island and four (golden tests 332, 333); ThreadSanitizer
+  (`make tsan`), clean; the collector stressed and verified on every
+  island test; `slight-mc` in the benchmarks, work spreading 2.7 to 3.3
+  times on 4 cores, and many senders to one mailbox across islands 7.4
+  times slower, as Go's and Rust's are, its two allocations a crossing
+  left for when a program needs it; `examples/reaction.slight`; the
+  guide's "Use every core".)*
+
+**D257. Simulation before servers.** *(Stevan, Oct 2026.)* With islands
+built, a back-of-the-napkin capacity for a 64-core machine with 2 TB:
+about 2.5 to 3 billion waiting actors (600 bytes each), 250 million
+holding a little state, a few hundred million messages a second within
+islands, and about 40 times one core's computation; but no more than
+about 1,000 open sockets, files and commands in the whole program, since
+the runtime waits with `select()`, which refuses a descriptor of 1024 or
+more (D113). For a server that's the ceiling, long before cores or
+memory. Stevan: "We can wait till we need epoll etc. the simulation
+angle is more appealing than the server. Everyone makes a server." So
+`epoll` and `kqueue` wait in PLAN.md's later work till a program needs
+them, and what slight builds next for scale is for simulations: many
+actors, numbers in bulk, more than one core, the same answer on any
+machine. Not rejected: servers stay possible, at the size `select()`
+holds.

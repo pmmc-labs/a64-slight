@@ -1,0 +1,108 @@
+; Matrices of numbers (D253): not part of the prelude, so a program that
+; wants them says (@include :matrix).
+;
+;     (let m (matrix/from-rows :float (list (list 1 2) (list 3 4))))
+;     (matrix/mul m m)                       #(2 2 #float(7.0 10.0 15.0 22.0))
+;     (matrix/->rows (matrix/transpose m))   ((1.0 3.0) (2.0 4.0))
+;
+; A matrix is #(rows cols a), a its elements row by row, an array of
+; numbers, :float or :int. It's a value, as an array is: a change gives
+; a new matrix. Multiplying is array/matmul, the one operation too slow
+; in slight, each element summed in order; the rest are the array
+; builtins on the whole array, or loops here. A matrix of the wrong shape
+; for what it's given to raises (:bad-shape what).
+
+(defun matrix/new (rows cols a)
+    (if (and (>= rows 0) (>= cols 0) (== (array/len a) (* rows cols)))
+        (tuple rows cols a)
+        (raise (list :bad-shape (list rows cols (array/len a))))))
+
+; rows by cols, each element x.
+(defun matrix/make (kind rows cols x) (matrix/new rows cols (array/make kind (* rows cols) x)))
+
+; n by n, ones down the diagonal and zeros elsewhere.
+(defun matrix/identity (kind n)
+    (matrix/new n n (array/generate kind (* n n) (lambda (k) (if (== (div k n) (% k n)) 1 0)))))
+
+; From a list of rows, each a list of numbers, all as long.
+(defun matrix/from-rows (kind rows)
+    (let cols (if (nil? rows) 0 (length (car rows))))
+    (if (matrix/all? (lambda (r) (== (length r) cols)) rows)
+        (tuple (length rows) cols (list->array kind (fold/r () append rows)))
+        (raise (list :bad-shape (map length rows)))))
+
+(defun matrix/all? (f xs) (nil? (find (lambda (x) (not (f x))) xs)))
+
+(defun matrix/rows (m) (match m (#(r _ _) r)))
+(defun matrix/cols (m) (match m (#(_ c _) c)))
+(defun matrix/data (m) (match m (#(_ _ a) a)))
+
+; The index in the array of row i, column j, each from 0; out of the
+; matrix, it raises (:out-of-range (i j)).
+(defun matrix/index (m i j)
+    (match m
+        (#(r c _)
+            (if (and (>= i 0) (< i r) (>= j 0) (< j c))
+                (+ (* i c) j)
+                (raise (list :out-of-range (list i j)))))))
+
+(defun matrix/get (m i j) (array/get (matrix/data m) (matrix/index m i j)))
+
+(defun matrix/set (m i j x)
+    (match m
+        (#(r c a) (tuple r c (array/set a (matrix/index m i j) x)))))
+
+; Row i, and column j, as arrays; one that isn't there raises
+; (:out-of-range (i)), or (:out-of-range (j)).
+(defun matrix/row (m i)
+    (match m
+        (#(r c a)
+            (if (and (>= i 0) (< i r))
+                (array/slice a (* i c) (+ (* i c) c))
+                (raise (list :out-of-range (list i)))))))
+
+(defun matrix/col (m j)
+    (match m
+        (#(r c a)
+            (if (and (>= j 0) (< j c))
+                (array/generate (array/kind a) r (lambda (i) (array/get a (+ (* i c) j))))
+                (raise (list :out-of-range (list j)))))))
+
+; The rows as lists, as a matrix is read.
+(defun matrix/->rows (m) (map (lambda (i) (array->list (matrix/row m i))) (range 0 (matrix/rows m))))
+
+(defun matrix/transpose (m)
+    (match m
+        (#(r c a) (tuple c r (array/generate (array/kind a) (* r c) (lambda (k) (array/get a (+ (* (% k r) c) (div k r)))))))))
+
+; a and b element by element, of one shape; and every element times x.
+(defun matrix/add (a b) (matrix/zip array/add a b))
+(defun matrix/sub (a b) (matrix/zip array/sub a b))
+
+(defun matrix/zip (f a b)
+    (match (list a b)
+        ((#(r c x) #(r2 c2 y))
+            (if (and (== r r2) (== c c2))
+                (tuple r c (f x y))
+                (raise (list :bad-shape (list (list r c) (list r2 c2))))))))
+
+(defun matrix/scale (m x)
+    (match m
+        (#(r c a) (tuple r c (array/mul a x)))))
+
+; a times b, a's columns as many as b's rows.
+(defun matrix/mul (a b)
+    (match (list a b)
+        ((#(n k x) #(k2 m y))
+            (if (== k k2)
+                (tuple n m (array/matmul x y n k m))
+                (raise (list :bad-shape (list (list n k) (list k2 m))))))))
+
+; m times a column v, an array as long as m has columns: an array as long
+; as m has rows.
+(defun matrix/apply (m v)
+    (match m
+        (#(r c a)
+            (if (== (array/len v) c)
+                (array/matmul a v r c 1)
+                (raise (list :bad-shape (list (list r c) (array/len v))))))))

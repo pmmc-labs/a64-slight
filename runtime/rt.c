@@ -37,7 +37,7 @@ _Static_assert(RT_FALSE == (0 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_FALSE is 
 _Static_assert(RT_TRUE  == (1 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_TRUE is symbol 1");
 _Static_assert(RT_SYM_KEYS == RT_SYM_FAULTS + RT_FAULT_COUNT, "the keys follow the fault kinds");
 
-rt_proc_t *rt_current;
+RT_ISLAND rt_proc_t *rt_current;
 
 void *rt_must(void *p) {
     if (!p) {
@@ -123,7 +123,7 @@ int64_t rt_symbol_find(const char *bytes, size_t len) {
 // The shortest text that reads back as the same double, laid out as
 // JavaScript lays out numbers, except that it always has a "." or an
 // exponent, so it can't be mistaken for an integer: 3.0, 0.1, 1e+21.
-static void render_float(rt_buf_t *b, double d) {
+void rt_render_float(rt_buf_t *b, double d) {
     const char *special = isnan(d) ? "nan" : isinf(d) ? (d < 0 ? "-inf" : "inf")
                         : d == 0 ? (signbit(d) ? "-0.0" : "0.0") : NULL;
     if (special) {
@@ -171,6 +171,14 @@ static void render_float(rt_buf_t *b, double d) {
     }
 }
 
+void rt_pid_text(char *buf, size_t size, rt_value_t v) {
+    char     at[8] = "";
+    uint64_t island = rt_pid_island(v);
+    if (island) snprintf(at, sizeof at, "@%" PRIu64, island);
+    if (rt_is_address(v)) snprintf(buf, size, "#<address %" PRIu64 ".%" PRIu64 "%s>", rt_address_task(v), rt_address_number(v), at);
+    else                  snprintf(buf, size, "#<pid %" PRIu64 "%s>", rt_pid_number(v), at);
+}
+
 // Anything but a cons.
 static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
     char num[48];
@@ -184,16 +192,26 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
         return;
     }
     if (rt_is_float(v)) {
-        render_float(b, rt_float_value(v));
+        rt_render_float(b, rt_float_value(v));
         return;
     }
-    if (rt_is_address(v)) {
-        snprintf(num, sizeof num, "#<address %" PRIu64 ".%" PRIu64 ">", rt_address_task(v), rt_address_number(v));
-        buf_str(b, num);
+    if (rt_is_array(v)) {                       // #float(1.0 2.5), #int(1 2)
+        int ints = rt_is_box(v, RT_BOX_INTS);
+        buf_str(b, ints ? "#int(" : "#float(");
+        for (uint64_t i = 0; i < rt_array_len(v); i++) {
+            if (i) buf_str(b, " ");
+            if (ints) {
+                snprintf(num, sizeof num, "%" PRId64, (int64_t)rt_array_data(v)[i]);
+                buf_str(b, num);
+            } else {
+                rt_render_float(b, rt_array_float(v, i));
+            }
+        }
+        buf_str(b, ")");
         return;
     }
     if ((v & RT_TAG_MASK) == RT_TAG_PID) {
-        snprintf(num, sizeof num, "#<pid %" PRIu64 ">", v >> RT_PID_SHIFT);
+        rt_pid_text(num, sizeof num, v);
         buf_str(b, num);
         return;
     }
@@ -287,16 +305,14 @@ void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
     else           render_atom(b, v, raw);
 }
 
-static void print_value(FILE *out, rt_value_t v) {
+// In one write, so a line from another island can't come between the
+// value and its newline (D256).
+rt_value_t rt_pprint(rt_value_t v) {
     rt_buf_t b = { 0 };
     rt_render(&b, v, 0);
-    fwrite(b.bytes, 1, b.len, out);
+    rt_buf_add(&b, "\n", 1);
+    fwrite(b.bytes, 1, b.len, stdout);
     rt_buf_free(&b);
-}
-
-rt_value_t rt_pprint(rt_value_t v) {
-    print_value(stdout, v);
-    putchar('\n');
     return RT_NIL;
 }
 
@@ -309,6 +325,13 @@ static int equal_atoms(rt_value_t a, rt_value_t b) {
     if (rt_is_string(a) && rt_is_string(b)) {
         return rt_string_len(a) == rt_string_len(b)
             && memcmp(rt_string_bytes(a), rt_string_bytes(b), rt_string_len(a)) == 0;
+    }
+    if (rt_is_array(a) && rt_is_array(b)) {     // of one kind and length, an element as eq? has it
+        uint64_t n = rt_array_len(a);
+        if ((rt_box(a)[0] & RT_BOX_TYPE_MASK) != (rt_box(b)[0] & RT_BOX_TYPE_MASK) || rt_array_len(b) != n) return 0;
+        if (rt_is_box(a, RT_BOX_INTS)) return memcmp(rt_array_data(a), rt_array_data(b), 8 * n) == 0;
+        for (uint64_t i = 0; i < n; i++) if (rt_array_float(a, i) != rt_array_float(b, i)) return 0;
+        return 1;
     }
     return 0;
 }
@@ -370,7 +393,7 @@ rt_value_t rt_equal(rt_value_t a, rt_value_t b) {
 // aren't eq? share, functions of one name aside, so two of them hash
 // alike only by chance, about once in 2^62. It isn't seeded, so it's for digests, not for a table whose
 // keys come from someone who'd want them to collide (D209).
-enum { H_INT = 1, H_FLOAT, H_STRING, H_SYMBOL, H_PID, H_FUNCTION, H_LIST, H_END, H_TUPLE, H_OTHER };
+enum { H_INT = 1, H_FLOAT, H_STRING, H_SYMBOL, H_PID, H_FUNCTION, H_LIST, H_END, H_TUPLE, H_OTHER, H_FLOATS, H_INTS };
 
 static uint64_t mix(uint64_t h, uint64_t w) {
     uint64_t x = (h ^ w) + 0x9e3779b97f4a7c15;
@@ -392,15 +415,24 @@ static uint64_t mix_bytes(uint64_t h, const char *bytes, uint64_t len) {
     return h;
 }
 
+// A float's bits, as eq? sees it.
+static uint64_t float_bits(double d) {
+    uint64_t bits = 0x7ff8000000000000;         // every NaN alike
+    if (d == 0) d = 0;                          // -0.0 is eq? to 0.0
+    if (d == d) memcpy(&bits, &d, sizeof bits);
+    return bits;
+}
+
 static uint64_t hash_atom(uint64_t h, rt_value_t v) {
     if (!(v & RT_TAG_INT_MASK)) return mix(mix(h, H_INT), (uint64_t)rt_int_value(v));
     if (v == RT_NIL)            return mix(mix(h, H_LIST), H_END);
-    if (rt_is_float(v)) {
-        double   d = rt_float_value(v);
-        uint64_t bits = 0x7ff8000000000000;     // every NaN alike
-        if (d == 0) d = 0;                      // -0.0 is eq? to 0.0
-        if (d == d) memcpy(&bits, &d, sizeof bits);
-        return mix(mix(h, H_FLOAT), bits);
+    if (rt_is_float(v))         return mix(mix(h, H_FLOAT), float_bits(rt_float_value(v)));
+    if (rt_is_array(v)) {                       // its kind, its length and its elements
+        int      ints = rt_is_box(v, RT_BOX_INTS);
+        uint64_t n    = rt_array_len(v);
+        h = mix(mix(h, ints ? H_INTS : H_FLOATS), n);
+        for (uint64_t i = 0; i < n; i++) h = mix(h, ints ? rt_array_data(v)[i] : float_bits(rt_array_float(v, i)));
+        return h;
     }
     if (rt_is_string(v)) return mix_bytes(mix(h, H_STRING), rt_string_bytes(v), rt_string_len(v));
     if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
@@ -482,6 +514,7 @@ static const struct {
     [RT_FAULT_NOT_TUPLE]  = { "not a tuple: ", 1 },
     [RT_FAULT_NOT_ACTOR]  = { "not an actor: ", 1 },
     [RT_FAULT_NOT_TASK]   = { "not a task: ", 1 },
+    [RT_FAULT_NOT_ARRAY]  = { "not an array: ", 1 },
 };
 
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
@@ -491,10 +524,11 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
     rt_buf_t b = { 0 };
     buf_str(&b, faults[fault].what);
     if (faults[fault].shows) rt_render(&b, value, 0);
-    uint64_t id = rt_current->pid >> RT_PID_SHIFT;
+    char who[64];
+    rt_pid_text(who, sizeof who, rt_current->pid);
     fflush(stdout);                             // so a fault lands after the output before it
-    if (id == 1) fprintf(stderr, "fault: %.*s (%s)\n", (int)b.len, b.bytes, site);
-    else         fprintf(stderr, "fault in #<pid %" PRIu64 ">: %.*s (%s)\n", id, (int)b.len, b.bytes, site);
+    if (rt_current->pid == RT_ROOT) fprintf(stderr, "fault: %.*s (%s)\n", (int)b.len, b.bytes, site);
+    else                            fprintf(stderr, "fault in %s: %.*s (%s)\n", who, (int)b.len, b.bytes, site);
     rt_buf_free(&b);
 
     // The reason, (kind value site), goes on this stack: rt_end copies it
@@ -532,12 +566,11 @@ void *rt_heap_alloc(void *site, size_t bytes) {
     return rt_alloc(bytes, site);
 }
 
-// A string this long goes straight into the old generation, so no minor
-// collection copies it (D200).
-#define BIG_STRING (64 << 10)
-
+// A string this long is a buffer of its own, off the heap, which no
+// collection copies and a send shares (D253).
 rt_value_t rt_new_string(const char *bytes, size_t len, const char *site) {
-    uint64_t *box = len >= BIG_STRING ? rt_alloc_old(8 + len + 1, site) : rt_alloc(8 + len + 1, site);
+    if (len >= RT_SHARED_MIN) return rt_new_shared_string(bytes, len, site);
+    uint64_t *box = rt_alloc(8 + len + 1, site);
     box[0] = bytes ? rt_string_header(bytes, len) : (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING;
     if (len && bytes) memcpy(box + 1, bytes, len);
     ((char *)(box + 1))[len] = '\0';
@@ -562,7 +595,7 @@ uint64_t rt_string_header(const char *bytes, size_t len) {
 
 void rt_string_mark(rt_value_t s) {
     uint64_t *box = (uint64_t *)rt_box(s);
-    box[0] = rt_string_header(rt_string_bytes(s), rt_string_len(s));
+    box[0] = rt_string_header(rt_string_bytes(s), rt_string_len(s)) | (box[0] & RT_BOX_SHARED);
 }
 
 // The control characters (Unicode's: C0, DEL and C1) as escapes, as the

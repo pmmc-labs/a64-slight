@@ -1,0 +1,23 @@
+// docs/guide/code/tut-4-race.slight in the C-style syntax (D246), on the
+// tutorial's store in it too: the output is the tutorial's.
+@include("data/sly/tut-store.sly");
+
+// Adds one to a key's value, in two steps: get it, then put it back.
+fun bump(s, key) {
+    match call(s, :get(key)) {
+        :ok(n) => call(s, :put(key, n + 1)),
+    }
+}
+
+let s = spawn store([]);
+call(s, :put("hits", 0));
+
+let a = fork bump(s, "hits");
+let b = fork bump(s, "hits");
+pprint([join(a), join(b)]);
+pprint(call(s, :get("hits")));
+
+let c = fork call(s, :incr("views"));
+let d = fork call(s, :incr("views"));
+pprint([join(c), join(d)]);
+call(s, :get("views"))

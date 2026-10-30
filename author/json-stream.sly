@@ -1,0 +1,47 @@
+fun char_buffer($s) {
+    recv {
+        :open(f) => {
+            send($s, :SOD);
+            char_buffer($s)
+        }
+        :line(f, s) => {
+            str::split(s, "") |> map(fun(c) => send($s, c));
+            char_buffer($s)
+        }
+        :eof(f) => send($s, :EOD),
+    }
+}
+
+fun flush_buffer($s, buffer) {
+    if bytes::len(buffer) > 0 { send($s, :ATOM(buffer)) }
+    ""
+}
+
+fun tokenize($s, buffer) {
+    recv {
+        :SOD  => { send($s, :SOD); tokenize($s, "") }
+        :EOD  => send($s, :EOD),
+        "{"   => { send($s, :OBJECT/OPEN);  tokenize($s, flush_buffer($s, buffer)) }
+        "}"   => { send($s, :OBJECT/CLOSE); tokenize($s, flush_buffer($s, buffer)) }
+        "["   => { send($s, :ARRAY/OPEN);   tokenize($s, flush_buffer($s, buffer)) }
+        "]"   => { send($s, :ARRAY/CLOSE);  tokenize($s, flush_buffer($s, buffer)) }
+        ":"   => { send($s, :COLON);        tokenize($s, flush_buffer($s, buffer)) }
+        ","   => { send($s, :COMMA);        tokenize($s, flush_buffer($s, buffer)) }
+        "\""  => tokenize($s, flush_buffer($s, buffer)),
+        " "   => tokenize($s, flush_buffer($s, buffer)),
+        char  => tokenize($s, buffer ++ char),
+    }
+}
+
+fun DEBUG() {
+    recv {
+        :EOD => pprint(:EOD),
+        msg  => { pprint(msg); DEBUG() }
+    }
+}
+
+let debugger = spawn DEBUG();
+let tokens   = spawn tokenize(debugger, "");
+let chars    = connect(:fs/read, "tsconfig.json") { char_buffer(tokens) }
+
+pprint(read(debugger));

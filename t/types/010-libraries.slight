@@ -1,0 +1,14 @@
+; The libraries' headers have types (D247, D248): a call that can never
+; be what a library takes is found before it runs, as a builtin's is; and
+; what comes back has its type, so a misuse of it is found too.
+(@include :tools)
+(@include :http)
+(@include :rpc)
+(fork (http/get 5))
+(fork (join (dict/new)))
+(fork (tool/new "x" "d" () 5))
+(fork (str/len (dict/size (dict/new))))
+(fork (rpc/connect "localhost:1" (list 1)))
+(fork (http/serve 0 (lambda (req) "just a string")))
+(fork (match (http/get "http://x/") ((:ok (status headers body)) (str/len status)) (_ 0)))
+(fork (agent/ask (agent/new "u" "m" "" ()) 42))

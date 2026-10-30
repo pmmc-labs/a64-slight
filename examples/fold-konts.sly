@@ -1,0 +1,33 @@
+// fold-konts: four ways to map over a 1,440-element list, which must
+// agree: a foldr written by hand, a recursive map, the prelude's map,
+// and fold/r. The first two aren't tail-recursive, so they take as much
+// stack as the list is long.
+
+fun hand_written_foldr(init, f, seq) {
+    match seq {
+        []           => init,
+        [x, ...rest] => f(x, hand_written_foldr(init, f, rest)),
+    }
+}
+
+fun old_map(f, lst) {
+    match lst {
+        []           => [],
+        [x, ...rest] => [f(x), ...old_map(f, rest)],
+    }
+}
+
+// 0 to 9, 144 times
+let the_big_list = fold::l([], fun(acc, i) => append(range(0, 10), acc), range(0, 144));
+
+let by_foldr  = hand_written_foldr([], fun(x, acc) => [inc(x), ...acc], the_big_list);
+let by_map    = old_map(inc, the_big_list);
+let by_new    = map(inc, the_big_list);
+let by_fold_r = fold::r([], fun(x, acc) => [inc(x), ...acc], the_big_list);
+
+pprint(length(the_big_list));
+pprint(sum(by_foldr));
+pprint(by_foldr == by_map);
+pprint(by_map == by_new);
+pprint(by_new == by_fold_r);
+the_big_list == reverse(reverse(the_big_list))

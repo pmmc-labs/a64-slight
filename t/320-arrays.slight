@@ -1,0 +1,49 @@
+; Arrays of numbers (D253): making them, reading them, and printing them
+; as pprint, str, sexp/print and json/print have them; sexp/parse reading
+; them back, and what it turns down; eq? and hash; and what faults.
+; Expected output worked out by hand.
+
+(defun try (pid)
+    (match (join pid)
+        ((:ok v)          v)
+        ((:error (k & _)) (list :error k))))
+
+(let f (list->array :float (list 1 2.5 -0.0)))
+(let i (list->array :int (list 3 -1 4611686018427387903)))
+(let nan (- math/INF math/INF))
+(pprint (list f i (array/make :float 2 7) (array/make :int 0 1) (list->array :float ())))
+(pprint (list (array? f) (array? i) (array? (tuple 1)) (array? (list 1)) (array/kind f) (array/kind i)))
+(pprint (list (array/len f) (array/get f 1) (array/get i 2) (array->list f) (array->list (array/make :int 0 0))))
+(pprint (list (array/slice i 1 10) (array/slice i -5 1) (array/slice i 2 1) (array/set f 0 9) (array/set i 1 0)))
+(pprint (list (array/concat i i) f (str f) (str "x" i)))
+
+(let g (list->array :float (list 1.0 2.5 0.0)))
+(pprint (list (eq? f g) (== (hash f) (hash g)) (eq? i (list->array :int (list 3 -1 4611686018427387903))) (eq? (list f) (list g))))
+(pprint (list (eq? (array/make :int 1 1) (array/make :float 1 1)) (eq? (array/make :int 1 1) (list 1)) (eq? (array/make :int 1 1) (tuple 1))))
+(pprint (list (eq? (array/make :float 1 nan) (array/make :float 1 nan)) (== (hash (array/make :float 1 nan)) (hash (array/make :float 1 nan)))))
+(pprint (list (eq? f (array/slice f 0 2)) (eq? (array/make :int 2 0) (array/make :int 3 0))))
+
+(pprint (sexp/print (list f i)))
+(pprint (sexp/parse "(#float(1 -2.5e1 0.125) #int() #int(-4611686018427387904) #false)"))
+(pprint (eq? (sexp/parse (sexp/print (list f i))) (list :ok (list f i))))
+(pprint (map sexp/parse (list "#int(4611686018427387904)" "#int(1.5)" "#float(x)" "#float 1" "#floa(1)" "#float('1)")))
+(pprint (json/print (list f i (array/make :int 0 0))))
+
+(pprint (try (fork (array/get f 3))))
+(pprint (try (fork (array/get f 1.0))))
+(pprint (try (fork (array/len (tuple 1)))))
+(pprint (try (fork (array/make :double 1 1))))
+(pprint (try (fork (array/make :float -1 0))))
+(pprint (try (fork (list->array :int (list 1 2.0)))))
+(pprint (try (fork (list->array :float (list 1 "a")))))
+(pprint (try (fork (list->array :int 5))))
+(pprint (try (fork (array/set i 0 0.5))))
+(pprint (try (fork (array/concat f i))))
+(pprint (try (fork (array/add f (array/slice f 0 2)))))
+(pprint (try (fork (array/add 1 2))))
+(pprint (try (fork (array/min (array/make :int 0 0)))))
+(pprint (try (fork (array/matmul f f 2 2 2))))
+(pprint (try (fork (json/print (array/make :float 1 math/INF)))))
+(pprint (try (fork (sexp/print (list->array :float (list nan))))))
+:done
+; warns: 33:33 34:31 35:32 38:40 39:38

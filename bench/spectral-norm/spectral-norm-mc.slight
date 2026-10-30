@@ -1,0 +1,45 @@
+; spectral-norm on every island (D256), with arrays of numbers (D253): A
+; and its transpose cut into bands of rows, a band on each island, made
+; there; each product sends the vector to every band, which multiplies
+; its rows by it and sends its share back, the shares joined in order.
+; Each row's sum is the one array/matmul makes in spectral-norm-arrays,
+; so the norm is the same to the last digit. A vector of 512 floats or
+; more is a shared buffer, which crosses islands as a handle.
+
+(defun a (i j)
+    (let ij (+ i j))
+    (/ 1.0 (+ (+ (div (* ij (+ ij 1)) 2) i) 1)))
+
+; Rows lo to hi of A and of its transpose, then their products.
+(defun band (lo hi n)
+    (let rows (- hi lo))
+    (let m    (array/generate :float (* rows n) (lambda (k) (a (+ lo (div k n)) (% k n)))))
+    (let mt   (array/generate :float (* rows n) (lambda (k) (a (% k n) (+ lo (div k n))))))
+    (serve m mt rows n))
+
+(defun serve (m mt rows n)
+    (recv
+        ((to :m u)  (send to (array/matmul m u rows n 1)) (serve m mt rows n))
+        ((to :mt u) (send to (array/matmul mt u rows n 1)) (serve m mt rows n))))
+
+; Each band an actor and an address its shares come to.
+(defun bands (n k)
+    (map (lambda (b) (list (spawn/on b (band (div (* b n) k) (div (* (+ b 1) n) k) n)) (address)))
+        (range 0 k)))
+
+(defun product (bs which u)
+    (map (lambda (b) (send (car b) (list (cadr b) which u))) bs)
+    (fold/l (array/make :float 0 0.0) (lambda (acc b) (array/concat acc (read (cadr b)))) bs))
+
+(defun times-ata (bs u)
+    (product bs :mt (product bs :m u)))
+
+(defun power (bs u k)
+    (let v  (times-ata bs u))
+    (let u2 (times-ata bs v))
+    (if (== k 1) (list u2 v) (power bs u2 (- k 1))))
+
+(let n  (str->int (car @ARGV)))
+(let bs (bands n (islands)))
+(match (power bs (array/make :float n 1.0) 10)
+    ((u v) (math/floor (+ (* (math/sqrt (/ (array/dot u v) (array/dot v v))) 1000000000.0) 0.5))))

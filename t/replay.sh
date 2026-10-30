@@ -23,6 +23,16 @@
 # (D222): with SLIGHT_SEED it must print the same under five SLIGHT_SCHED
 # orders as first in, first out; without it, a recorded run must replay
 # the same, and two runs must differ.
+#
+# t/replay/islands.slight runs on four islands (D256), workers on three of
+# them sending to a collector in an order that varies from run to run: a
+# recorded run writes a record for each island, and replaying them, with
+# SLIGHT_ISLANDS other than it was, or under SLIGHT_SCHED, prints what
+# the run did; an island's record replayed alone stops, saying so.
+#
+# t/replay/now.slight reads the time of day on the virtual clock (D254):
+# without SLIGHT_EPOCH, from the real time of day, so a recorded run must
+# replay the same, its start after 2026; with it, from there.
 cd "$(dirname "$0")/.." || exit 2
 TARGET=${TARGET-aarch64}
 case "$TARGET-$(uname -m)" in
@@ -30,7 +40,7 @@ case "$TARGET-$(uname -m)" in
     x86_64-arm64)                                RUN=${RUN-} ;;
     *)                                           RUN=${RUN-qemu-$TARGET} ;;
 esac
-unset SLIGHT_CLOCK SLIGHT_SCHED SLIGHT_RECORD SLIGHT_REPLAY SLIGHT_SEED
+unset SLIGHT_CLOCK SLIGHT_SCHED SLIGHT_RECORD SLIGHT_REPLAY SLIGHT_SEED SLIGHT_EPOCH
 dir=build/t/$TARGET/replay
 rm -rf "$dir"
 mkdir -p "$dir"
@@ -45,7 +55,7 @@ check() {                               # check what ok-or-not
     fi
 }
 
-for name in world net exec order rand; do
+for name in world net exec order rand now islands; do
     if ! node bin/slightc.ts --target "$TARGET" -o "$dir/$name" "t/replay/$name.slight" >"$dir/$name.compile" 2>&1; then
         cat "$dir/$name.compile"
         check "$name (compile)" no
@@ -81,17 +91,19 @@ run() {
 # replayed with none of them.
 printf 'line one\nline two\n' >"$dir/in.txt"
 printf 'abq' | run SLIGHT_REPLAY_TEST=recorded SLIGHT_RECORD="$dir/world.record" world "$dir/in.txt" "$dir/out.txt" >"$dir/world.recorded"
-rm -f "$dir/in.txt" "$dir/out.txt"
+rm -rf "$dir/in.txt" "$dir/out.txt" "$dir/out.txt.d"
 run SLIGHT_REPLAY="$dir/world.record" world other args </dev/null >"$dir/world.replayed"
 if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(ok ("line one" "line two"))$' "$dir/world.recorded" \
+   && grep -q '^(ok ((kind file) (size 18) (modified [0-9]*) (mode [0-9]*)))$' "$dir/world.recorded" \
+   && grep -q '^(random "[0-9a-f]\{32\}")$' "$dir/world.recorded" \
    && grep -q '^(env "recorded")$' "$dir/world.recorded" \
-   && grep -q '^(clock #true [0-9]*)$' "$dir/world.recorded"; then
+   && grep -q '^(clock #true [0-9]*)$' "$dir/world.recorded" && grep -q '^(now #true [0-9]*)$' "$dir/world.recorded"; then
     check "world replays as recorded" ok
 else
     diff -u "$dir/world.recorded" "$dir/world.replayed"
     check "world replays as recorded" no
 fi
-if [ -e "$dir/out.txt" ]; then check "world's replay writes no file" no; else check "world's replay writes no file" ok; fi
+if [ -e "$dir/out.txt" ] || [ -e "$dir/out.txt.d" ]; then check "world's replay writes no file, nor makes a directory" no; else check "world's replay writes no file, nor makes a directory" ok; fi
 
 # net: a server and a client, the client finding it in a hosts file; and
 # the same over a Unix socket, whose path the recorded run removes as its
@@ -126,6 +138,34 @@ else
     check "exec replays as recorded" no
 fi
 if [ -e "$dir/exec.out" ]; then check "exec's replay runs no command" no; else check "exec's replay runs no command" ok; fi
+
+# islands: each island's record, replayed together.
+run SLIGHT_ISLANDS=4 SLIGHT_RECORD="$dir/islands.record" islands </dev/null >"$dir/islands.recorded"
+run SLIGHT_ISLANDS=1 SLIGHT_REPLAY="$dir/islands.record" islands </dev/null >"$dir/islands.replayed"
+if cmp -s "$dir/islands.recorded" "$dir/islands.replayed" && grep -q '^(runs [0-9]* -*[0-9]*)$' "$dir/islands.recorded" \
+   && grep -q '^((0 #true) (1 #true) (2 #true) (3 #true))$' "$dir/islands.recorded" \
+   && [ -s "$dir/islands.record.1" ] && [ -s "$dir/islands.record.3" ] && [ ! -e "$dir/islands.record.4" ]; then
+    check "islands replay as recorded, each from its own record" ok
+else
+    diff -u "$dir/islands.recorded" "$dir/islands.replayed"
+    check "islands replay as recorded, each from its own record" no
+fi
+run SLIGHT_ISLANDS=4 SLIGHT_SCHED=7 SLIGHT_RECORD="$dir/islands.sched" islands </dev/null >"$dir/islands.sched.recorded"
+run SLIGHT_REPLAY="$dir/islands.sched" islands </dev/null >"$dir/islands.sched.replayed"
+if cmp -s "$dir/islands.sched.recorded" "$dir/islands.sched.replayed" && grep -q '^exit: 0$' "$dir/islands.sched.recorded"; then
+    check "islands under SLIGHT_SCHED replay as recorded" ok
+else
+    diff -u "$dir/islands.sched.recorded" "$dir/islands.sched.replayed"
+    check "islands under SLIGHT_SCHED replay as recorded" no
+fi
+run SLIGHT_REPLAY="$dir/islands.record.2" islands </dev/null >"$dir/islands.alone"
+if grep -q "^replay: that's island 2's record: a run's islands replay together, from island 0's$" "$dir/islands.alone" \
+   && grep -q '^exit: 2$' "$dir/islands.alone"; then
+    check "an island's record alone doesn't replay" ok
+else
+    cat "$dir/islands.alone"
+    check "an island's record alone doesn't replay" no
+fi
 
 # A record of one program, replayed by another, stops where they part.
 run SLIGHT_REPLAY="$dir/world.record" net </dev/null >"$dir/net.wrong"
@@ -217,6 +257,25 @@ if cmp -s "$dir/rand.recorded" "$dir/rand.again"; then
     check "random numbers without a seed differ from run to run" no
 else
     check "random numbers without a seed differ from run to run" ok
+fi
+
+# The time of day on the virtual clock: from the real one, recorded and
+# replayed; and from SLIGHT_EPOCH, whatever the real one is.
+run SLIGHT_CLOCK=virtual SLIGHT_RECORD="$dir/now.record" now >"$dir/now.recorded"
+run SLIGHT_REPLAY="$dir/now.record" now >"$dir/now.replayed"
+start=$(sed -n 's/^(\([0-9]*\) 1500000)$/\1/p' "$dir/now.recorded")
+if cmp -s "$dir/now.recorded" "$dir/now.replayed" && [ -n "$start" ] && [ "$start" -gt 1767225600000000 ]; then
+    check "the virtual clock's time of day starts at the real one, and replays" ok
+else
+    diff -u "$dir/now.recorded" "$dir/now.replayed"
+    check "the virtual clock's time of day starts at the real one, and replays" no
+fi
+run SLIGHT_CLOCK=virtual SLIGHT_EPOCH=86400 now >"$dir/now.epoch"
+if [ "$(cat "$dir/now.epoch")" = "$(printf '(86400000000 1500000)\nexit: 0')" ]; then
+    check "the virtual clock's time of day starts at SLIGHT_EPOCH" ok
+else
+    cat "$dir/now.epoch"
+    check "the virtual clock's time of day starts at SLIGHT_EPOCH" no
 fi
 
 echo "replay: $fail failed"

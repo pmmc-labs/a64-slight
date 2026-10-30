@@ -24,6 +24,14 @@ simulation, is slight's on the virtual clock against SimPy's and an
 event list in C (D241); Python is left out of it if SimPy can't be
 imported (pip install simpy).
 
+slight-arrays is slight with arrays of numbers (D253), in the benchmarks
+written for them too (spectral-norm), its program NAME-arrays.slight.
+slight-mc is slight on every island (D256), its program NAME-mc.slight
+placing its actors across (islands), one per core: parallel-fib, fan-in
+and spectral-norm (on arrays, so compared with slight-arrays), and
+spawn, idle-memory and ping-pong, each island doing its share locally.
+It's in the every-core table, beside Go's, Erlang's and Rust's.
+
 The results go to bench/results/, as JSON and as a Markdown summary, named
 for the date and the machine.
 """
@@ -143,14 +151,14 @@ BENCHMARKS = {
     'nqueens':       Benchmark(ALL,    '8',     '13',       lambda n: [QUEENS[n]]),
     'deriv':         Benchmark(ALL,    '1000',  '2000000',  deriv),
     'n-body':        Benchmark(ALL,    '1000',  '1000000',  None),
-    'spectral-norm': Benchmark(ALL,    '100',   '1000',     None),
-    'ping-pong':     Benchmark(ACTORS, '10000', '2000000',  lambda n: [n]),
+    'spectral-norm': Benchmark(ALL + ('slight-arrays', 'slight-mc'), '100', '1000', None),
+    'ping-pong':     Benchmark(ACTORS + ('slight-mc',), '10000', '2000000', lambda n: [n]),
     'payload':       Benchmark(ACTORS, '10000', '1000000',  lambda n: [n, 5050]),
     'thread-ring':   Benchmark(ACTORS, '10000', '10000000', lambda n: [n % 503 + 1]),
-    'fan-in':        Benchmark(ACTORS, '10000', '10000000', lambda n: [n // 100 * 5050]),
-    'spawn':         Benchmark(ACTORS, '10000', '1000000',  lambda n: [n * (n - 1) // 2]),
-    'idle-memory':   Benchmark(ACTORS, '10000', '1000000',  lambda n: [n]),
-    'parallel-fib':  Benchmark(ACTORS, '15',    '30',       lambda k: [64 * fib(k)]),
+    'fan-in':        Benchmark(ACTORS + ('slight-mc',), '10000', '10000000', lambda n: [n // 100 * 5050]),
+    'spawn':         Benchmark(ACTORS + ('slight-mc',), '10000', '1000000', lambda n: [n * (n - 1) // 2]),
+    'idle-memory':   Benchmark(ACTORS + ('slight-mc',), '10000', '1000000', lambda n: [n]),
+    'parallel-fib':  Benchmark(ACTORS + ('slight-mc',), '15', '30', lambda k: [64 * fib(k)]),
     'latency':       Benchmark(ACTORS, '1',     '10',       latency),
     'bank':          Benchmark(('slight', 'c', 'python'), '10000', '1000000', bank),
 }
@@ -159,6 +167,8 @@ Impl = collections.namedtuple('Impl', 'lang env flags')
 
 IMPLS = {
     'slight':    Impl('slight', {}, []),
+    'slight-arrays': Impl('slight-arrays', {}, []),
+    'slight-mc': Impl('slight-mc', {}, []),
     'c':         Impl('c', {}, []),
     'go':        Impl('go', {'GOMAXPROCS': '1'}, []),
     'go-mc':     Impl('go', {}, []),
@@ -193,6 +203,8 @@ CHEZ = chez()
 # The commands each language needs, and the one that says its version.
 TOOLS = {
     'slight': (['node', 'clang'], ['clang', '--version']),
+    'slight-arrays': (['node', 'clang'], ['clang', '--version']),
+    'slight-mc': (['node', 'clang'], ['clang', '--version']),
     'c':      (['cc'], ['cc', '--version']),
     'go':     (['go'], ['go', 'version']),
     'erlang': (['erl', 'erlc'], ['erl', '-noshell', '-eval',
@@ -204,7 +216,7 @@ TOOLS = {
     'rust':   (['cargo', 'rustc'], ['rustc', '--version']),
 }
 
-EXT = {'slight': 'slight', 'c': 'c', 'go': 'go', 'erlang': 'erl', 'node': 'js', 'perl': 'pl', 'python': 'py', 'chez': 'ss',
+EXT = {'slight': 'slight', 'slight-arrays': 'slight', 'slight-mc': 'slight', 'c': 'c', 'go': 'go', 'erlang': 'erl', 'node': 'js', 'perl': 'pl', 'python': 'py', 'chez': 'ss',
        'rust': 'rs'}
 
 
@@ -219,7 +231,8 @@ def slight_target():
 
 
 def source(bench, lang):
-    name = bench.replace('-', '_') if lang == 'erlang' else bench
+    name = (bench.replace('-', '_') if lang == 'erlang' else bench + '-arrays' if lang == 'slight-arrays'
+            else bench + '-mc' if lang == 'slight-mc' else bench)
     return os.path.join(ROOT, 'bench', bench, name + '.' + EXT[lang])
 
 
@@ -230,7 +243,7 @@ def output_of(bench, lang):
 # The command that builds bench in lang, or None if it runs from source.
 def build_command(bench, lang):
     src, out = source(bench, lang), output_of(bench, lang)
-    if lang == 'slight':
+    if lang in ('slight', 'slight-arrays', 'slight-mc'):
         return ['node', os.path.join(ROOT, 'bin', 'slightc.ts'), '--target', slight_target(), '-o', out, src]
     if lang == 'c':
         return ['cc', '-O2', '-o', out, src, '-lm']
@@ -271,7 +284,7 @@ def process_limit(n):
 
 def run_command(bench, name, arg):
     impl = IMPLS[name]
-    if impl.lang in ('slight', 'c', 'go', 'rust'):
+    if impl.lang in ('slight', 'slight-arrays', 'slight-mc', 'c', 'go', 'rust'):
         return [output_of(bench, impl.lang), arg]
     if impl.lang == 'chez':
         return [CHEZ, '--program', output_of(bench, 'chez'), arg]
@@ -528,7 +541,13 @@ def megabytes(b):
 
 # Each implementation on every core, and the one-core one it's compared
 # with: one core is the comparison, every core a table of its own (D237).
-MC = {'go-mc': 'go', 'erlang-mc': 'erlang', 'rust-mc': 'rust'}
+MC = {'slight-mc': 'slight', 'go-mc': 'go', 'erlang-mc': 'erlang', 'rust-mc': 'rust'}
+
+
+# The one-core implementation n is compared with in bench: slight-mc's
+# spectral-norm is on arrays, so slight-arrays.
+def one_core(bench, n, impls):
+    return 'slight-arrays' if n == 'slight-mc' and 'slight-arrays' in impls else MC[n]
 
 
 def median(r, key='wall'):
@@ -615,8 +634,8 @@ def latency_tables(b, entry):
     return out
 
 
-# What every core gains or costs Go, Erlang and Rust: each one's time on
-# every core, over its time on one core and over slight's.
+# What every core gains or costs slight, Go, Erlang and Rust: each one's
+# time on every core, over its time on one core and over slight's.
 def every_core(report):
     rows = []
     for b, entry in report['results'].items():
@@ -624,10 +643,11 @@ def every_core(report):
         if any(x.get('latency') for r in impls.values() for x in r['runs']):
             continue
         first = True
-        for n, one in MC.items():
+        for n in MC:
             if n not in impls:
                 continue
-            r = impls[n]
+            one = one_core(b, n, impls)
+            r   = impls[n]
             if not r['ok'] or not r['runs']:
                 rows.append('| %s | %s | wrong output or failed | | | | |' % (b if first else '', n))
             else:
@@ -639,8 +659,9 @@ def every_core(report):
     if not rows:
         return []
     return (['## Every core', '',
-             'Go, Erlang and Rust with their defaults, every core. "÷ one core" is the median over the same '
-             'language\'s on one core, so under 1 is what every core gains, over 1 what it costs; "÷ slight" is '
+             'slight on every island, one per core (D256), and Go, Erlang and Rust with their defaults, every '
+             'core. "÷ one core" is the median over the same language\'s on one core (slight-arrays\' for '
+             'slight-mc\'s spectral-norm), so under 1 is what every core gains, over 1 what it costs; "÷ slight" is '
              'the median over slight\'s, on its one core.', '',
              '| | | time | CPU | memory | ÷ one core | ÷ slight |', '|---|---|---:|---:|---:|---:|---:|']
             + rows + [''])

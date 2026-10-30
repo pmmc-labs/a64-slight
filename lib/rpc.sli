@@ -1,0 +1,27 @@
+; lib/rpc.slight's header (D248): what (@include :rpc) gives a program,
+; docs/LANGUAGE.md, "(@include :rpc)". The rest of rpc.slight is its own.
+
+; Something the other end can call: rpc/handler makes one.
+(deftype Handler (:rpc/handler str str (list any) fun))
+
+; A connection, or a keeper: a process that owns the socket.
+(deftype Conn pid)
+
+; Where to listen or connect: a port, "host:port", or a Unix socket's
+; path, a string with a / in it (D231).
+(deftype Where (or int str))
+
+(sig rpc/handler (str str (list (list any)) fun) Handler)
+(sig rpc/next (any) nil)
+(sig rpc/peer () any)
+(sig rpc/system () Handler)
+
+(sig rpc/call (Conn (or str sym) (list any)) (Result any any))
+(sig rpc/stream (Conn (or str sym) (list any)) pid)
+
+(sig rpc/connect (Where (list Handler)) (Result Conn any))
+(sig rpc/exec ((list str) (list Handler)) (Result Conn any))
+(sig rpc/serve (Where (list Handler)) pid)
+(sig rpc/listen (Where (list Handler)) (Result (shape pid any) any))
+(sig rpc/close (Conn) nil)
+(sig rpc/keep (Where (list Handler) (fun (Conn) any)) Conn)

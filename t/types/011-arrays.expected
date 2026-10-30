@@ -1,0 +1,8 @@
+t/types/011-arrays.slight:13:19: warning: mean's argument is (array int), not (array float)
+t/types/011-arrays.slight:14:22: warning: str/len's argument is float, not str: it faults :not-a-string
+t/types/011-arrays.slight:15:22: warning: str/len's argument is int, not str: it faults :not-a-string
+t/types/011-arrays.slight:16:24: warning: array/len's argument is (shape int int), not array: it faults :not-an-array
+t/types/011-arrays.slight:17:26: warning: list->array's first argument is :double, not (or :float :int): it faults :out-of-range
+t/types/011-arrays.slight:18:25: warning: array/kind's argument is str, not array: it faults :not-an-array
+t/types/011-arrays.slight:19:30: warning: this is (list int), not (array int)
+t/types/011-arrays.slight:20:30: warning: this is (array float), not (array int)

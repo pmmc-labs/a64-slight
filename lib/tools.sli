@@ -1,0 +1,38 @@
+; lib/tools.slight's header (D248): what (@include :tools) gives a program,
+; docs/LANGUAGE.md, "(@include :tools)". The rest of tools.slight is its own.
+
+; what tools.slight includes, and whoever includes it gets too, as its
+; comment says: the agents the tools are for, and the libraries they use
+(@include :agent)
+(@include :calc)
+(@include :ds)
+(@include :exec)
+(@include :fs)
+
+; What a tool that changes something asks first: what it's about to do,
+; as text for a person, and #true to go ahead.
+(deftype Approve (fun (str) bool))
+
+; A store of notes, an actor: notes/open starts one.
+(deftype Notes (actor any))
+
+(sig tools/read-file () Tool)
+(sig tools/list-files () Tool)
+(sig tools/search () Tool)
+(sig tools/write-file (Approve) Tool)
+(sig tools/edit-file (Approve) Tool)
+(sig tools/run (Approve) Tool)
+(sig tools/run-within (int Approve) Tool)
+(sig tools/calc () Tool)
+(sig tools/remember (Notes) Tool)
+(sig tools/recall (Notes) Tool)
+(sig tools/ask-agent (str str Agent) Tool)
+(sig tools/fetch (Approve) Tool)
+(sig tools/printable (str) str)
+(sig tools/html->text (str str) str)
+(sig notes/open (str) Notes)
+(sig notes/get (Notes any) any)
+(sig notes/keys (Notes) (list any))
+(sig notes/put (Notes any str) nil)
+(sig tools/read (str) str)
+(sig tools/save (str str) nil)
