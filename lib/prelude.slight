@@ -206,16 +206,28 @@
 
 ; --- arrays of numbers (D253) -------------------------------------------------
 
-; An array of kind (:float or :int) of (f i) for each i from 0 to n - 1.
-; Through a list, since C can't call back into slight, whose frames the
-; collector walks (D166).
-(defun array/generate (kind n f) (list->array kind (map f (range 0 n))))
+; An array of kind (:float or :int) of (f i) for each i from 0 to n - 1,
+; f called in that order. Through lists, since C can't call back into
+; slight, whose frames the collector walks (D166): a list of up to 512 at
+; a time, which dies young, the chunks joined in a tree, so a big array
+; is made without a list as long as it is.
+(defun array/generate (kind n f) (array/generate-from kind 0 n f))
+
+(defun array/generate-from (kind from to f)
+    (let chunks (div (+ (- to from) 511) 512))
+    (let mid    (+ from (* 512 (div chunks 2))))
+    (if (<= chunks 1)
+        (list->array kind (map f (range from to)))
+        (array/concat (array/generate-from kind from mid f) (array/generate-from kind mid to f))))
 
 ; (f x) for each element, an array of a's kind.
-(defun array/map (f a) (list->array (array/kind a) (map f (array->list a))))
+(defun array/map (f a) (array/generate (array/kind a) (array/len a) (lambda (i) (f (array/get a i)))))
 
 ; (f acc x) for each element, from the left, as fold/l.
-(defun array/fold (acc f a) (fold/l acc f (array->list a)))
+(defun array/fold (acc f a) (array/fold-from acc f a 0 (array/len a)))
+
+(defun array/fold-from (acc f a i n)
+    (if (== i n) acc (array/fold-from (f acc (array/get a i)) f a (+ i 1) n)))
 
 ; --- waiting for processes ----------------------------------------------------
 

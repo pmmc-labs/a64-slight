@@ -24,6 +24,9 @@ simulation, is slight's on the virtual clock against SimPy's and an
 event list in C (D241); Python is left out of it if SimPy can't be
 imported (pip install simpy).
 
+slight-arrays is slight with arrays of numbers (D253), in the benchmarks
+written for them too (spectral-norm), its program NAME-arrays.slight.
+
 The results go to bench/results/, as JSON and as a Markdown summary, named
 for the date and the machine.
 """
@@ -143,7 +146,7 @@ BENCHMARKS = {
     'nqueens':       Benchmark(ALL,    '8',     '13',       lambda n: [QUEENS[n]]),
     'deriv':         Benchmark(ALL,    '1000',  '2000000',  deriv),
     'n-body':        Benchmark(ALL,    '1000',  '1000000',  None),
-    'spectral-norm': Benchmark(ALL,    '100',   '1000',     None),
+    'spectral-norm': Benchmark(ALL + ('slight-arrays',), '100', '1000', None),
     'ping-pong':     Benchmark(ACTORS, '10000', '2000000',  lambda n: [n]),
     'payload':       Benchmark(ACTORS, '10000', '1000000',  lambda n: [n, 5050]),
     'thread-ring':   Benchmark(ACTORS, '10000', '10000000', lambda n: [n % 503 + 1]),
@@ -159,6 +162,7 @@ Impl = collections.namedtuple('Impl', 'lang env flags')
 
 IMPLS = {
     'slight':    Impl('slight', {}, []),
+    'slight-arrays': Impl('slight-arrays', {}, []),
     'c':         Impl('c', {}, []),
     'go':        Impl('go', {'GOMAXPROCS': '1'}, []),
     'go-mc':     Impl('go', {}, []),
@@ -193,6 +197,7 @@ CHEZ = chez()
 # The commands each language needs, and the one that says its version.
 TOOLS = {
     'slight': (['node', 'clang'], ['clang', '--version']),
+    'slight-arrays': (['node', 'clang'], ['clang', '--version']),
     'c':      (['cc'], ['cc', '--version']),
     'go':     (['go'], ['go', 'version']),
     'erlang': (['erl', 'erlc'], ['erl', '-noshell', '-eval',
@@ -204,7 +209,7 @@ TOOLS = {
     'rust':   (['cargo', 'rustc'], ['rustc', '--version']),
 }
 
-EXT = {'slight': 'slight', 'c': 'c', 'go': 'go', 'erlang': 'erl', 'node': 'js', 'perl': 'pl', 'python': 'py', 'chez': 'ss',
+EXT = {'slight': 'slight', 'slight-arrays': 'slight', 'c': 'c', 'go': 'go', 'erlang': 'erl', 'node': 'js', 'perl': 'pl', 'python': 'py', 'chez': 'ss',
        'rust': 'rs'}
 
 
@@ -219,7 +224,7 @@ def slight_target():
 
 
 def source(bench, lang):
-    name = bench.replace('-', '_') if lang == 'erlang' else bench
+    name = bench.replace('-', '_') if lang == 'erlang' else bench + '-arrays' if lang == 'slight-arrays' else bench
     return os.path.join(ROOT, 'bench', bench, name + '.' + EXT[lang])
 
 
@@ -230,7 +235,7 @@ def output_of(bench, lang):
 # The command that builds bench in lang, or None if it runs from source.
 def build_command(bench, lang):
     src, out = source(bench, lang), output_of(bench, lang)
-    if lang == 'slight':
+    if lang in ('slight', 'slight-arrays'):
         return ['node', os.path.join(ROOT, 'bin', 'slightc.ts'), '--target', slight_target(), '-o', out, src]
     if lang == 'c':
         return ['cc', '-O2', '-o', out, src, '-lm']
@@ -271,7 +276,7 @@ def process_limit(n):
 
 def run_command(bench, name, arg):
     impl = IMPLS[name]
-    if impl.lang in ('slight', 'c', 'go', 'rust'):
+    if impl.lang in ('slight', 'slight-arrays', 'c', 'go', 'rust'):
         return [output_of(bench, impl.lang), arg]
     if impl.lang == 'chez':
         return [CHEZ, '--program', output_of(bench, 'chez'), arg]

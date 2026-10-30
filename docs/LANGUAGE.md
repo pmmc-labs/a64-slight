@@ -2113,8 +2113,10 @@ Arrays of numbers (D253):
 - `(array/fold acc f a)`: `(f acc x)` for each element, from the left,
   as `fold/l`.
 
-Each goes through a list, since a builtin in C can't call back into
-slight; the arithmetic under Arrays doesn't.
+`array/generate` calls `f` in order, from 0 up, and goes through a list
+of up to 512 elements at a time, since a builtin in C can't call back
+into slight: about a sixth of a microsecond an element. The arithmetic
+under Arrays is C's.
 
 Processes: `join/any` and `join/all`, under Waiting for a process.
 

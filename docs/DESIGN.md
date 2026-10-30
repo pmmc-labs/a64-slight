@@ -973,8 +973,9 @@ order, left to right, each product and sum rounded apart
 (`t/models/arrays.py`); `array/matmul` goes a row of the result at a
 time, adding a row of `b` times an element of `a`, which reads `b` along
 its rows and keeps each element's order. `array/generate`, `array/map`
-and `array/fold` are the prelude's, through lists, since C can't call
-back into slight while the collector walks its frames (D166).
+and `array/fold` are the prelude's, `array/generate` through lists of up
+to 512 at a time, joined in a tree, since C can't call back into slight
+while the collector walks its frames (D166).
 `lib/matrix.slight` is matrices on arrays, a module. The type is
 `(array float)`, `(array int)`, or `array` for either (`types.ts`).
 `:int` is the same symbol as `:exec`'s SIGINT, `RT_SYM_EXEC +

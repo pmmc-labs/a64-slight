@@ -327,15 +327,29 @@ rt_value_t rt_array_matmul(rt_value_t a, rt_value_t b, rt_value_t rows, rt_value
     if (__builtin_mul_overflow(n, m, &nm)) rt_fault(RT_FAULT_HEAP, RT_NIL, site);
     rt_value_t c = rt_new_array(type_of(a), (uint64_t)nm, site);
     memset(ints(c), 0, 8 * (uint64_t)nm);       // 0 and 0.0 alike
+    if (type_of(a) == RT_BOX_INTS) {
+        const int64_t *x = ints(a), *y = ints(b);
+        int64_t       *z = ints(c);
+        for (int64_t i = 0; i < n; i++) {
+            for (int64_t p = 0; p < k; p++) {
+                for (int64_t j = 0; j < m; j++) z[i * m + j] = mul_add(z[i * m + j], x[i * k + p], y[p * m + j], site);
+            }
+        }
+        return c;
+    }
+    const double *x = floats(a), *y = floats(b);
+    double       *z = floats(c);
+    if (m == 1) {                               // a vector: each row's dot product, in one register
+        for (int64_t i = 0; i < n; i++) {
+            double s = 0.0;
+            for (int64_t p = 0; p < k; p++) s += x[i * k + p] * y[p];
+            z[i] = s;
+        }
+        return c;
+    }
     for (int64_t i = 0; i < n; i++) {
         for (int64_t p = 0; p < k; p++) {
-            if (type_of(a) == RT_BOX_INTS) {
-                int64_t *r = ints(c) + i * m, x = ints(a)[i * k + p];
-                for (int64_t j = 0; j < m; j++) r[j] = mul_add(r[j], x, ints(b)[p * m + j], site);
-            } else {
-                double *r = floats(c) + i * m, x = floats(a)[i * k + p];
-                for (int64_t j = 0; j < m; j++) r[j] += x * floats(b)[p * m + j];
-            }
+            for (int64_t j = 0; j < m; j++) z[i * m + j] += x[i * k + p] * y[p * m + j];
         }
     }
     return c;

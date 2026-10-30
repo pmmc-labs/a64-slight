@@ -6195,11 +6195,14 @@ Stevan agreed all three, every point to settle as recommended.)*
   `math/max` taken left to right, so a NaN wins only first, and an
   empty array faults `:out-of-range`. `:int` is the symbol `:exec`
   already had, SIGINT's, since a symbol is its name. The prelude's
-  `array/generate` goes through a list, `(list->array kind (map f
-  (range 0 n)))`, rather than a builtin that fills a fresh array that
-  only `lib/` may call, as the proposal had it: no array is ever seen
-  half made, and no builtin needs a rule about who calls it; a builtin
-  can come if a benchmark says the list costs too much. `sexp/parse`
+  `array/generate` goes through lists, rather than a builtin that fills
+  a fresh array that only `lib/` may call, as the proposal had it: no
+  array is ever seen half made, and no builtin needs a rule about who
+  calls it; a builtin can come if a benchmark says the lists cost too
+  much. (After `spectral-norm` with arrays, a list of 512 at a time,
+  the chunks joined in a tree, so no list is as long as the array:
+  building its two million-element matrices went from 0.27 s to 0.16 s,
+  and its peak from 87 MB down.) `sexp/parse`
   reads `#float(...)` and `#int(...)`, numbers only, an `#int`'s in 63
   bits, into the heap whatever their size. `lib/matrix.slight`, a
   module, `#(rows cols a)`, raising `(:bad-shape ...)`. The types

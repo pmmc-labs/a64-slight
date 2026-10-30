@@ -1,0 +1,24 @@
+; spectral-norm, the Benchmarks Game's, with arrays of numbers (D253): A
+; and its transpose made once, as n by n arrays, and each product
+; array/matmul, which sums in the C program's order, so the norm agrees
+; to the last digit. Prints the norm times 10^9, rounded.
+
+(defun a (i j)
+    (let ij (+ i j))
+    (/ 1.0 (+ (+ (div (* ij (+ ij 1)) 2) i) 1)))
+
+(defun times-ata (m mt u n)
+    (array/matmul mt (array/matmul m u n n 1) n n 1))
+
+; Ten times, v from u and then u from v, as the C program does; the last
+; of each.
+(defun power (m mt u n k)
+    (let v  (times-ata m mt u n))
+    (let u2 (times-ata m mt v n))
+    (if (== k 1) (list u2 v) (power m mt u2 n (- k 1))))
+
+(let n  (str->int (car @ARGV)))
+(let m  (array/generate :float (* n n) (lambda (k) (a (div k n) (% k n)))))
+(let mt (array/generate :float (* n n) (lambda (k) (a (% k n) (div k n)))))
+(match (power m mt (array/make :float n 1.0) n 10)
+    ((u v) (math/floor (+ (* (math/sqrt (/ (array/dot u v) (array/dot v v))) 1000000000.0) 0.5))))

@@ -77,7 +77,10 @@ itself (or, for `n-body`, against C's).
   slight's and Erlang's vectors are lists, made again each step; the
   others' arrays, changed in place. Each sum in the C version's order
   (Python's in loops, since its `sum` of floats rounds differently from
-  3.12 on); the norm printed times 10^9.
+  3.12 on); the norm printed times 10^9. And `slight-arrays`, slight
+  with arrays of numbers (D253), `spectral-norm-arrays.slight`: the
+  matrix and its transpose made once, a million floats each, and each
+  product `array/matmul`, summing in C's order, so the norm agrees.
 - **`ping-pong 2000000`:** round trips between two processes.
 - **`payload 1000000`:** `ping-pong` with each message carrying the same
   list of 100 integers there and back (D237): what copying a message's
@@ -174,6 +177,39 @@ change, hash tables, bignums, regular expressions) aren't here.
 ## Results
 
 Each run's full tables are in `bench/results/`. What they say:
+
+### The cloud machine, 30 Oct: `spectral-norm` with arrays (D253)
+
+x86-64, n = 1000, the median of five, not saved (the cloud machine's
+numbers are for ratios):
+
+| | time | memory |
+|---|---:|---:|
+| C | 0.064 s | 2.1 MB |
+| Go, one core | 0.094 s | 1.8 MB |
+| Node | 0.188 s | 54 MB |
+| slight, arrays | 0.200 s | 41 MB |
+| slight, lists | 0.721 s | 3.8 MB |
+
+- **Arrays against lists:** 3.6 times faster. The forty products, in
+  `array/matmul`, take about 0.03 s, less than C's whole run, since C
+  works out each of A's elements as it goes and this program makes A
+  and its transpose once; the rest is making them, through
+  `array/generate`, two million calls of a slight function.
+- **Making them:** through one list as long as the array at first,
+  0.27 s and 87 MB at its peak; a list of 512 at a time since, which
+  dies young, the chunks joined in a tree, 0.16 s and 41 MB. A builtin
+  that filled a fresh array would take the lists out (D253 turned it
+  down until a benchmark asked); what's left is calling the function,
+  a float box for each result.
+- **`array/matmul` on a vector:** the kind's test hoisted out of its
+  loops, and a vector (one column) summed in a register: the products
+  went from about 0.12 s to 0.03.
+- **`n-body`:** not written with arrays. Its five bodies are scalar
+  arithmetic on each pair, with nothing to do element by element across
+  an array; arrays would be `array/get` in place of a tuple's pattern,
+  each element a float box all the same. What it needs is floats
+  unboxed in compiled code (TYPES.md's step 5), not arrays.
 
 ### The cloud machine, 23 Oct: `bank`, a simulation (D241, D242)
 

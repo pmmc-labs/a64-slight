@@ -1,6 +1,8 @@
 ; Arrays of 4 KB or more, 512 elements, are buffers off the heap, shared,
-; as big strings are (D253): made by the prelude's array/generate, mapped,
-; folded, sliced and joined; a fork's copy and a join's result, which
+; as big strings are (D253): made by the prelude's array/generate (512 at
+; a time, so at the edges of its chunks, and f called in order, as map
+; calls it, the same random numbers coming), mapped, folded, sliced and
+; joined; a fork's copy and a join's result, which
 ; share them; twenty actors each sending one back, changed, and ending
 ; before it's read, so the buffers outlive their senders (with
 ; SLIGHT_POISON, as t/run.sh sets it, one freed too soon reads as
@@ -20,6 +22,12 @@
 (pprint (list (eq? a (array/div (array/mul a 2) 2)) (eq? (hash b) (hash (array/generate :int 2000 (lambda (i) i))))))
 (pprint (join (fork (array/sum (array/add a 1)))))
 (pprint (eq? (cadr (join (fork b))) b))
+(pprint (map (lambda (n) (eq? (array/generate :int n (lambda (i) i)) (list->array :int (range 0 n))))
+             (list 0 1 511 512 513 1024 1025 1537 -3)))
+(rand/seed 7)
+(let r1 (array/generate :int 1100 (lambda (i) (rand/int 1000000))))
+(rand/seed 7)
+(pprint (eq? r1 (list->array :int (map (lambda (i) (rand/int 1000000)) (range 0 1100)))))
 (let me (address))
 (map (lambda (i) (spawn (back me i a))) (range 0 20))
 (let got (map (lambda (_) (read me)) (range 0 20)))
