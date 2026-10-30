@@ -1843,6 +1843,54 @@ costs a few microseconds a round trip on the cloud machine's 4 vCPUs,
 worse with more islands, which the M2 Max should measure before more
 work goes into crossing latency (`docs/BENCHMARKS.md`, 31 Oct).
 
+### Branching a replay (idea, open, Oct 2026)
+
+Stevan, after the simulation proposal: "we should also look at
+branching in the replay, we did it in the airlines, but that seems like
+it would be a powerful feature." Not yet proposed; first thoughts, to
+work into a proposal.
+
+`airline` branches its own simulated day, by hand: a what-if from a
+checkpoint, run till it rejoins the run it came from (D207, D212). D212
+noted that replay (D170) couldn't do that: a replay runs the program
+again, doing all its work, with what it read the first time, and can
+only go the same way. Branching in the runtime would give any program
+a version of it: run as recorded up to a point, then go another way
+from there.
+
+- **Where a branch starts:** at an entry of the record (`replay: ...
+  at entry N` already names them), or at a moment on the virtual clock,
+  for a simulation; say `SLIGHT_REPLAY_UNTIL`.
+- **What changes there:** the world, from then on (the replay going
+  live, and recording to a new file whose start is the old one's); or,
+  better for simulations and for hunting races, something the runtime
+  decides itself: `SLIGHT_SCHED` seeded from that point, so a hundred
+  orders can be tried after a suspicious moment rather than from the
+  start; the random numbers reseeded; or a message put in, read from a
+  file of s-expressions, as an agent's what-if.
+- **What it can't do:** a replay opens no real socket, file or command,
+  so a branch that goes live finds none of those the recorded part
+  opened; branching fits runs whose world is the clock, the random
+  numbers, keys and files read whole, which is a simulation's.
+- **Cost:** each branch replays its whole start, all the work of it,
+  as D212 found. Many branches from one point could share the start: the
+  run replayed once to the point, then a Unix `fork()` of the whole
+  program for each branch, copy-on-write, each going its own way. Simple
+  on one island; with islands, `fork()` copies only its own thread, so
+  every island would have to stop at the point first and start again in
+  each child.
+- **Islands:** each island's record is its own (step 6), so a point in
+  island 0's isn't a point in the others'. A branch across islands needs
+  a consistent cut: the moment named on the virtual clock, every island
+  stopped where its clock reaches it, with what's in flight between them
+  carried over. One island first, then islands.
+
+Likely shape, for the proposal: branching at an entry or a virtual
+moment, with a new `SLIGHT_SCHED` seed, new random numbers, or messages
+put in, on one island, each branch replaying its start; then `fork()` to
+share the start; then islands. It would sit well with the simulation
+library above, a what-if being a branch of a recorded run.
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written
