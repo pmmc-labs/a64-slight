@@ -645,7 +645,7 @@ rt_value_t rt_log_line(rt_value_t level, rt_value_t msg, rt_value_t fields, cons
     put_time(&b, rt_int_value(rt_clock_now(site)));
     put(&b, "\",\"level\":\"");
     put(&b, level_names[l]);
-    snprintf(pid, sizeof pid, "\",\"pid\":%" PRIu64 ",\"msg\":", (uint64_t)(rt_current->pid >> RT_PID_SHIFT));
+    snprintf(pid, sizeof pid, "\",\"pid\":%" PRIu64 ",\"msg\":", rt_pid_number(rt_current->pid));
     put(&b, pid);
     put_string(&b, msg);
     for (rt_value_t f = fields; f != RT_NIL; f = rt_cdr(f)) {

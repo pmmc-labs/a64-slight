@@ -336,7 +336,9 @@ one core (D249's step 7, moved up by D253), agreed as islands (D256,
 today's runtime, sharing nothing but an inbox each and the shared
 buffers; actors placed with `(spawn/on k expr)`, pids printed `#<pid
 5@2>`, island 0 owning signals, the terminal and `:system`, and replay
-per island; to be built in seven steps. 12c (C libraries vendored as source, D151, D152) waits; its
+per island; to be built in seven steps, of which step 1, the runtime's
+state an island's (`RT_ISLAND`, thread-local) and pids with their
+island's bits, is done (golden test 324). 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan

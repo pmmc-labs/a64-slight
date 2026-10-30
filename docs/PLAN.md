@@ -1699,7 +1699,14 @@ pid a test prints.
    timers and devices, and `replay.c`'s, `dns.c`'s and `tty.c`'s) made
    an island's, thread-local, still on one thread; pids with their
    island's bits, always 0 yet, masked where a pid is looked up, and
-   address numbers skipping open ones as they wrap.
+   address numbers skipping open ones as they wrap. *(Done, Oct 2026:
+   `RT_ISLAND`, C's `_Thread_local`, on what's an island's, the
+   settings, the terminal's state and what signal handlers touch left
+   global; `rt_pid_number`, `rt_pid_island` and `rt_pid_text`; golden
+   test 324, an address number wrapping past one still open. Under
+   callgrind, `ping-pong` runs 2.2 per cent more instructions and
+   `fan-in` 0.16; on macOS, where a thread-local is reached through a
+   call, the M2 Max says.)*
 2. **Islands as threads:** `SLIGHT_ISLANDS`, `(islands)`, `(island)`,
    `(spawn/on k expr)`, the inboxes, sends, monitors, kills and ends
    across them, and `#<pid 5@2>`; `t/run.sh` sets `SLIGHT_ISLANDS=4`, so

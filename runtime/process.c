@@ -1,9 +1,11 @@
 // process.c -- processes: the table, the run queue, stacks, heaps,
 // messages, how processes end, and the scheduler.
 //
-// One core. The scheduler runs on the C stack and switches to a process
-// with rt_switch; the process switches back when it pauses (preempted, or
-// yield), waits in recv, or ends. A process holds a stack only while it
+// One core to each island (D256): a thread with its own table, run
+// queue, timers and devices, what's marked RT_ISLAND, which no other
+// island's thread touches. The scheduler runs on the C stack and switches
+// to a process with rt_switch; the process switches back when it pauses
+// (preempted, or yield), waits in recv, or ends. A process holds a stack only while it
 // needs one: waiting in recv, it's just (code, args, mailbox), and it gives
 // its stack back to the pool. A message arriving puts it back in the run
 // queue, and it starts again at code, on a stack from the pool.
@@ -81,10 +83,11 @@ typedef struct {
     entry_t  e[PAGE_SIZE];
 } page_t;
 
-static page_t    **pages;               // by pid number >> PAGE_BITS; the root is 1
-static uint64_t    nprocs, pages_cap;   // pids made; and room in pages
-static uint64_t    nrecords;            // entries made and not yet dead, for :system
-static entry_t     gone = { .ended = 1, .dead = 1 };
+static RT_ISLAND uint64_t  island;       // which island this thread is (D256), 0 the main one
+static RT_ISLAND page_t  **pages;        // by pid number >> PAGE_BITS; the root is 1
+static RT_ISLAND uint64_t  nprocs, pages_cap;   // pids made; and room in pages
+static RT_ISLAND uint64_t  nrecords;     // entries made and not yet dead, for :system
+static entry_t             gone = { .ended = 1, .dead = 1 };
 
 // The entry of pid number id.
 static entry_t *at(uint64_t id) {
@@ -93,18 +96,20 @@ static entry_t *at(uint64_t id) {
 }
 
 static entry_t *slot(rt_value_t pid) {
-    return at(pid >> RT_PID_SHIFT);
+    return at(rt_pid_number(pid));
 }
-static rt_proc_t  *ready_head, *ready_tail;
-static rt_ctx_t    scheduler;
-static void       *free_stacks;         // a list through each stack's first word
-static size_t      page;
-static int         poison;              // SLIGHT_POISON: fill what the collector frees
-static int64_t     gc_stress;           // SLIGHT_GC_STRESS=n: collect at every nth call (n <= QUOTA), and every recv
-static uint64_t    stressed;            // the collections SLIGHT_GC_STRESS has made, every eighth a major one
-static int         gc_verify;           // SLIGHT_GC_VERIFY: check that nothing old points at anything young
-static size_t      heap_max;            // the most a process's chunks can hold (D202)
-static uint64_t    sched;               // SLIGHT_SCHED's generator, or 0: first in, first out
+static RT_ISLAND rt_proc_t *ready_head, *ready_tail;
+static RT_ISLAND rt_ctx_t   scheduler;
+static RT_ISLAND void      *free_stacks;        // a list through each stack's first word
+static RT_ISLAND uint64_t   stressed;           // the collections SLIGHT_GC_STRESS has made, every eighth a major one
+static RT_ISLAND uint64_t   sched;              // SLIGHT_SCHED's generator, or 0: first in, first out
+
+// The program's settings, the same for every island.
+static size_t  page;
+static int     poison;                          // SLIGHT_POISON: fill what the collector frees
+static int64_t gc_stress;                       // SLIGHT_GC_STRESS=n: collect at every nth call (n <= QUOTA), and every recv
+static int     gc_verify;                       // SLIGHT_GC_VERIFY: check that nothing old points at anything young
+static size_t  heap_max;                        // the most a process's chunks can hold (D202)
 
 // --- the run queue ------------------------------------------------------------
 //
@@ -525,9 +530,9 @@ static rt_value_t *stack_grow(rt_value_t *todo, size_t cap, rt_value_t *local) {
 // is, for after. So a flat list never touches the stack. Sharing isn't
 // kept: a DAG is copied as a tree.
 
-static char   *scratch;                 // the copy being made, kept from one copy to the next
-static size_t *slots;                   // the offsets in scratch of words that point into it
-static size_t  scratch_cap;             // in bytes; slots has room for one for each word
+static RT_ISLAND char   *scratch;        // the copy being made, kept from one copy to the next
+static RT_ISLAND size_t *slots;          // the offsets in scratch of words that point into it
+static RT_ISLAND size_t  scratch_cap;    // in bytes; slots has room for one for each word
 
 #define SCRATCH_KEPT (1 << 20)          // scratch bigger than this is let go after a copy
 
@@ -1080,8 +1085,9 @@ static void check(const rt_proc_t *p, const rt_value_t *roots, uint64_t n, const
         for (uint64_t i = 0; i < count; i++) {
             if (old && is_pointer(field[i]) && is_young(p, field[i])) {
                 fflush(stdout);
-                fprintf(stderr, "slight: SLIGHT_GC_VERIFY: an old object in #<pid %llu> points at a young one\n",
-                        (unsigned long long)(p->pid >> RT_PID_SHIFT));
+                char who[64];
+                rt_pid_text(who, sizeof who, p->pid);
+                fprintf(stderr, "slight: SLIGHT_GC_VERIFY: an old object in %s points at a young one\n", who);
                 abort();
             }
             rt_work_push(&todo, field[i]);
@@ -1126,7 +1132,7 @@ static rt_value_t new_entry(entry_t e) {
     pages[n]->live++;
     pages[n]->e[id & (PAGE_SIZE - 1)] = e;
     nrecords++;
-    return id << RT_PID_SHIFT | RT_TAG_PID;
+    return island << RT_ISLAND_SHIFT | id << RT_PID_SHIFT | RT_TAG_PID;
 }
 
 // Whether nothing more can come of pid number id's entry: no process, no
@@ -1254,7 +1260,7 @@ static struct rt_device *devices_of(const rt_proc_t *p) {
     return p->side ? p->side->devices : NULL;
 }
 
-#define ADDRESS_NUMBERS (1ULL << (63 - RT_ADDRESS_SHIFT))
+#define ADDRESS_NUMBERS (1ULL << (RT_ISLAND_SHIFT - RT_ADDRESS_SHIFT))
 
 static int address_open(const rt_proc_t *p, rt_value_t a) {
     const rt_addresses_t *s = p->side ? &p->side->addresses : NULL;
@@ -1283,9 +1289,8 @@ static void to_address(rt_value_t a, rt_msg_t *m) {
     deliver(p, m);
 }
 
-// A new address of the calling task's. Its number wraps past 2^28, and
-// could then name an address still open since; reading one that long
-// isn't expected.
+// A new address of the calling task's. Its number wraps past 2^20 (a
+// million), skipping any still open, of which a task has few.
 rt_value_t rt_address(const char *site) {
     rt_proc_t *p = rt_current;
     if (p->actor) rt_fault(RT_FAULT_NOT_TASK, p->pid, site);   // an actor takes its answers as messages
@@ -1294,7 +1299,9 @@ rt_value_t rt_address(const char *site) {
         s->cap  = s->cap ? s->cap * 2 : 4;
         s->open = rt_must(realloc(s->open, s->cap * sizeof *s->open));
     }
-    uint64_t num = s->next++ % ADDRESS_NUMBERS;
+    uint64_t num;
+    do num = s->next++ % ADDRESS_NUMBERS;
+    while (address_open(p, RT_ADDRESS_BIT | num << RT_ADDRESS_SHIFT | p->pid));
     s->open[s->n++] = num;
     return RT_ADDRESS_BIT | num << RT_ADDRESS_SHIFT | p->pid;
 }
@@ -1488,7 +1495,7 @@ static void release(uint64_t id) {
 // of p's, its value was kept for p, and now goes.
 static void taken(rt_proc_t *p, rt_value_t pid) {
     rt_kept_t *k  = p->side ? &p->side->kept : NULL;
-    uint64_t   id = pid >> RT_PID_SHIFT;
+    uint64_t   id = rt_pid_number(pid);
     for (uint64_t i = k ? k->n : 0; i-- > 0; ) {
         if (k->ids[i] != id) continue;
         k->ids[i] = k->ids[--k->n];
@@ -1522,7 +1529,7 @@ static rt_value_t take_given(rt_proc_t *p) {
 }
 
 static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
-    uint64_t id = p->pid >> RT_PID_SHIFT;
+    uint64_t id = rt_pid_number(p->pid);
     entry_t *e  = at(id);
     int      had = 0;                          // whether the parent is told now, as those waiting are
     e->ok    = ok;
@@ -1591,13 +1598,13 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     p->state = RT_DONE;
 }
 
-static uint64_t retired_calls;          // the calls of the processes that have ended
+static RT_ISLAND uint64_t retired_calls;    // the calls of the processes that have ended
 
 static void retire(rt_proc_t *p) {
     retired_calls += calls_of(p);
     if (p->stack) release_stack(p);
     slot(p->pid)->proc = NULL;
-    settle(p->pid >> RT_PID_SHIFT);
+    settle(rt_pid_number(p->pid));
     free(p);
 }
 
@@ -1719,7 +1726,7 @@ static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char 
         if (!rt_is_cons(xs)) rt_fault(RT_FAULT_NOT_LIST, srcs, site);
         rt_value_t src = rt_car(xs);
         if (rt_is_address(src)) {
-            if (rt_address_task(src) != p->pid >> RT_PID_SHIFT || !address_open(p, src)) rt_fault(RT_FAULT_NOT_PID, src, site);
+            if (rt_address_task(src) != rt_pid_number(p->pid) || !address_open(p, src)) rt_fault(RT_FAULT_NOT_PID, src, site);
         } else {
             entry(src, site);
             if (src == p->pid) rt_fault(RT_FAULT_JOIN_SELF, src, site);
@@ -1867,20 +1874,20 @@ typedef struct {                        // (timer_t is POSIX's)
     rt_msg_t   *msg;                    // after's message, or NULL: sleep
 } alarm_t;
 
-static alarm_t  *alarms;                // alarms[0] is the next due
-static uint64_t  nalarms, alarms_cap, alarms_set;
-static uint64_t  afters;                // after's timers numbered so far
+static RT_ISLAND alarm_t  *alarms;      // alarms[0] is the next due
+static RT_ISLAND uint64_t  nalarms, alarms_cap, alarms_set;
+static RT_ISLAND uint64_t  afters;      // after's timers numbered so far
 
 // Where each of after's pending timers is in alarms, by its number:
 // open addressing, a slot of number 0 empty, and a slot emptied by
 // moving back the ones after it that belong before it, so none is ever
 // marked deleted. Updated as the heap moves them.
-static uint64_t *ids, *places;
-static uint64_t  ids_cap, nids;         // ids_cap a power of two, or 0
-static int       virtual_clock;
-static uint64_t  virtual_now;
-static uint64_t  started;               // when the program started, for :system
-static int64_t   epoch;                 // the time of day then, on the virtual clock (D254)
+static RT_ISLAND uint64_t *ids, *places;
+static RT_ISLAND uint64_t  ids_cap, nids;   // ids_cap a power of two, or 0
+static RT_ISLAND uint64_t  virtual_now;     // each island's clock, if virtual, its own (D256)
+static int                 virtual_clock;
+static uint64_t            started;         // when the program started, for :system
+static int64_t             epoch;           // the time of day then, on the virtual clock (D254)
 
 static uint64_t now(void) {
     return virtual_clock ? virtual_now : rt_io_clock();
@@ -2091,6 +2098,8 @@ rt_value_t rt_clock_now(const char *site) {
 
 #define INPUT_EVERY 10000000            // ns between looks at stdin while busy
 
+// The terminal is island 0's (D256), so what's here is too: no other
+// island's thread touches it.
 static rt_proc_t     **connected;
 static uint64_t        nconnected, connected_cap;
 static unsigned char   input[4096];     // read from stdin...
@@ -2123,9 +2132,9 @@ static int listening(void) {
     return nconnected && !input_ended;
 }
 
-static uint64_t nsockets;
-static int      sockets_waiting(void);
-static int      working(void);
+static RT_ISLAND uint64_t nsockets;
+static int sockets_waiting(void);
+static int working(void);
 static void     socket_fds(fd_set *in, fd_set *out, int *max);
 static int      socket_events(fd_set *in, fd_set *out);
 
@@ -2363,9 +2372,9 @@ static int owns(const rt_proc_t *p, const rt_device_t *d) {
     return d && d->owner == p->pid;
 }
 
-static rt_device_t *sockets;            // open sockets and commands, and closing sockets (nsockets counts them)
-static uint64_t     ndevices;           // open devices
-static rt_device_t *graveyard;          // closed sockets
+static RT_ISLAND rt_device_t *sockets;      // open sockets and commands, and closing sockets (nsockets counts them)
+static RT_ISLAND uint64_t     ndevices;     // open devices
+static RT_ISLAND rt_device_t *graveyard;    // closed sockets
 
 uint64_t rt_errno_name(int err) {
     switch (err) {
@@ -2500,7 +2509,7 @@ static void bury(void) {
 // written. The owner's list is the caller's to fix.
 static void shut(rt_device_t *d) {
     slot(d->pid)->device = NULL;
-    settle(d->pid >> RT_PID_SHIFT);
+    settle(rt_pid_number(d->pid));
     ndevices--;
     if (d->mode == DEV_TCP && d->out_len > d->out_at && !d->lookup) d->closing = 1;
     else                                                            close_now(d);   // (a host still looked up never connected)
@@ -3267,9 +3276,9 @@ static int sockets_waiting(void) {
     return 0;
 }
 
-static int      child_pipe[2] = { -1, -1 };     // SIGCHLD writes a byte to it
-static uint64_t nchildren;                      // commands not yet waited for
-static int      is_init;                        // PID 1, as in a container: orphans are its (D229)
+static int                child_pipe[2] = { -1, -1 };    // SIGCHLD writes a byte to it
+static RT_ISLAND uint64_t nchildren;                     // commands not yet waited for
+static int                is_init;                       // PID 1, as in a container: orphans are its (D229)
 
 // Whether SIGCHLD's pipe is waited on: while a command runs; and as PID 1,
 // once one has, since what a command left running is PID 1's to wait for
@@ -3366,8 +3375,8 @@ static void reap(void);
 // the list of them is kept for the next time, not freed, and the sockets
 // closed meanwhile are buried then.
 static int socket_events(fd_set *in, fd_set *out) {
-    static ready_t  *ready;
-    static uint64_t  ready_cap;
+    static RT_ISLAND ready_t *ready;
+    static RT_ISLAND uint64_t ready_cap;
     if (ready_cap < nsockets + 1) {
         ready_cap = nsockets + 1;
         ready     = rt_must(realloc(ready, ready_cap * sizeof *ready));
@@ -4012,6 +4021,12 @@ static size_t memory_limit(void) {
 // end, and then where that one waits, and so on, since the root is a task
 // that joins the actors doing the work (D243). Processes that join each
 // other make a cycle, so the chain is cut short after a few.
+static void tell_pid(const char *before, rt_value_t v, const char *after) {
+    char text[64];
+    rt_pid_text(text, sizeof text, v);
+    fprintf(stderr, "%s%s%s", before, text, after);
+}
+
 static void tell_waiting(const rt_proc_t *p) {
     for (int hops = 0;; hops++) {
         if (hops == 8) {
@@ -4025,7 +4040,7 @@ static void tell_waiting(const rt_proc_t *p) {
             const char *sep = " ";
             for (const rt_watch_t *w = race_last(p); w; w = w->prev_held) {
                 if (w->wakes != WATCH_RACE) continue;
-                fprintf(stderr, "%s#<pid %" PRIu64 ">", sep, w->watched->pid >> RT_PID_SHIFT);
+                tell_pid(sep, w->watched->pid, "");
                 sep = ", ";
             }
             fprintf(stderr, " to end");
@@ -4037,12 +4052,11 @@ static void tell_waiting(const rt_proc_t *p) {
                 fprintf(stderr, rt_cdr(xs) == RT_NIL ? "a message to" : "the first of");
                 for (const char *sep = " "; xs != RT_NIL; xs = rt_cdr(xs), sep = ", ") {
                     rt_value_t v = rt_car(xs);
-                    if (rt_is_address(v)) fprintf(stderr, "%s#<address %" PRIu64 ".%" PRIu64 ">", sep, rt_address_task(v), rt_address_number(v));
-                    else                  fprintf(stderr, "%s#<pid %" PRIu64 ">", sep, v >> RT_PID_SHIFT);
+                    tell_pid(sep, v, "");
                 }
                 return;
             }
-            fprintf(stderr, "#<pid %" PRIu64 "> to end", rt_car(xs) >> RT_PID_SHIFT);   // read of one pid: as join
+            tell_pid("", rt_car(xs), " to end");    // read of one pid: as join
             p = slot(rt_car(xs))->proc;
             if (!p) return;
             continue;
@@ -4051,7 +4065,7 @@ static void tell_waiting(const rt_proc_t *p) {
             fprintf(stderr, "a message");
             return;
         }
-        fprintf(stderr, "#<pid %" PRIu64 "> to end", p->joining >> RT_PID_SHIFT);
+        tell_pid("", p->joining, " to end");
         p = slot(p->joining)->proc;
         if (!p) return;
     }

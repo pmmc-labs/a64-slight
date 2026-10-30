@@ -37,7 +37,7 @@ _Static_assert(RT_FALSE == (0 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_FALSE is 
 _Static_assert(RT_TRUE  == (1 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_TRUE is symbol 1");
 _Static_assert(RT_SYM_KEYS == RT_SYM_FAULTS + RT_FAULT_COUNT, "the keys follow the fault kinds");
 
-rt_proc_t *rt_current;
+RT_ISLAND rt_proc_t *rt_current;
 
 void *rt_must(void *p) {
     if (!p) {
@@ -171,6 +171,14 @@ void rt_render_float(rt_buf_t *b, double d) {
     }
 }
 
+void rt_pid_text(char *buf, size_t size, rt_value_t v) {
+    char     at[8] = "";
+    uint64_t island = rt_pid_island(v);
+    if (island) snprintf(at, sizeof at, "@%" PRIu64, island);
+    if (rt_is_address(v)) snprintf(buf, size, "#<address %" PRIu64 ".%" PRIu64 "%s>", rt_address_task(v), rt_address_number(v), at);
+    else                  snprintf(buf, size, "#<pid %" PRIu64 "%s>", rt_pid_number(v), at);
+}
+
 // Anything but a cons.
 static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
     char num[48];
@@ -202,13 +210,8 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
         buf_str(b, ")");
         return;
     }
-    if (rt_is_address(v)) {
-        snprintf(num, sizeof num, "#<address %" PRIu64 ".%" PRIu64 ">", rt_address_task(v), rt_address_number(v));
-        buf_str(b, num);
-        return;
-    }
     if ((v & RT_TAG_MASK) == RT_TAG_PID) {
-        snprintf(num, sizeof num, "#<pid %" PRIu64 ">", v >> RT_PID_SHIFT);
+        rt_pid_text(num, sizeof num, v);
         buf_str(b, num);
         return;
     }
@@ -523,10 +526,11 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
     rt_buf_t b = { 0 };
     buf_str(&b, faults[fault].what);
     if (faults[fault].shows) rt_render(&b, value, 0);
-    uint64_t id = rt_current->pid >> RT_PID_SHIFT;
+    char who[64];
+    rt_pid_text(who, sizeof who, rt_current->pid);
     fflush(stdout);                             // so a fault lands after the output before it
-    if (id == 1) fprintf(stderr, "fault: %.*s (%s)\n", (int)b.len, b.bytes, site);
-    else         fprintf(stderr, "fault in #<pid %" PRIu64 ">: %.*s (%s)\n", id, (int)b.len, b.bytes, site);
+    if (rt_current->pid == RT_ROOT) fprintf(stderr, "fault: %.*s (%s)\n", (int)b.len, b.bytes, site);
+    else                            fprintf(stderr, "fault in %s: %.*s (%s)\n", who, (int)b.len, b.bytes, site);
     rt_buf_free(&b);
 
     // The reason, (kind value site), goes on this stack: rt_end copies it

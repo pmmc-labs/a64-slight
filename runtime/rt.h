@@ -18,6 +18,9 @@
 #define RT_TAG_SYMBOL        5    // 101    compile-time id
 #define RT_TAG_PID           7    // 111    process id << 3
 #define RT_PID_SHIFT         3
+#define RT_ISLAND_SHIFT     55    // a pid's island (D256), in the 8 bits below an address's bit
+#define RT_ISLANDS_MAX     256
+#define RT_ROOT       (1 << RT_PID_SHIFT | RT_TAG_PID)   // the root's pid: 1, on island 0
 #define RT_SYMBOL_SHIFT      3    // a symbol is id << 3 | RT_TAG_SYMBOL
 
 // A boxed value points at a header word: the box's type in the low seven
@@ -402,6 +405,11 @@
 // (where C names would otherwise get a leading underscore).
 #define RT_ASM(name) __asm__(#name)
 
+// An island's own (D256): each island, a thread running the scheduler
+// on its processes, has its own copy of what's marked so, and nothing of
+// another's but its inbox.
+#define RT_ISLAND _Thread_local
+
 typedef uint64_t rt_value_t;
 
 // Compiled code, as the runtime holds it: the trampoline calls it with its
@@ -519,15 +527,22 @@ static inline rt_value_t rt_car(rt_value_t v) { return ((const rt_value_t *)(v -
 static inline rt_value_t rt_cdr(rt_value_t v) { return ((const rt_value_t *)(v - RT_TAG_LIST))[1]; }
 static inline int        rt_is_cons(rt_value_t v) { return (v & RT_TAG_MASK) == RT_TAG_LIST && v != RT_NIL; }
 
+// A pid: its number in its island's table, from RT_PID_SHIFT, in 52 bits,
+// and its island above that (D256), each island numbering its own.
+static inline uint64_t rt_pid_number(rt_value_t v) { return (v >> RT_PID_SHIFT) & ((1ULL << 52) - 1); }
+static inline uint64_t rt_pid_island(rt_value_t v) { return (v >> RT_ISLAND_SHIFT) & (RT_ISLANDS_MAX - 1); }
+
 // An address (D243): a place a task makes to be sent to. An immediate under
-// the pid tag, with the top bit set: the task's index in its low 32 bits
-// (as a pid's, from RT_PID_SHIFT), and its number among the task's
-// addresses above them, so it can't be taken for a pid.
+// the pid tag, with the top bit set: the task's number in its low 32 bits
+// (as a pid's, from RT_PID_SHIFT), its number among the task's addresses
+// in the 20 above them, and its island above those, as a pid's.
 #define RT_ADDRESS_BIT    (1ULL << 63)
 #define RT_ADDRESS_SHIFT  35
 static inline int      rt_is_address(rt_value_t v)   { return (v & RT_TAG_MASK) == RT_TAG_PID && (v & RT_ADDRESS_BIT); }
 static inline uint64_t rt_address_task(rt_value_t v) { return (v >> RT_PID_SHIFT) & 0xffffffffu; }
-static inline uint64_t rt_address_number(rt_value_t v) { return (v & ~RT_ADDRESS_BIT) >> RT_ADDRESS_SHIFT; }
+static inline uint64_t rt_address_number(rt_value_t v) {
+    return (v >> RT_ADDRESS_SHIFT) & ((1ULL << (RT_ISLAND_SHIFT - RT_ADDRESS_SHIFT)) - 1);
+}
 
 static inline const uint64_t *rt_box(rt_value_t v) { return (const uint64_t *)(v - RT_TAG_BOXED); }
 static inline int rt_is_box(rt_value_t v, uint64_t type) {
@@ -930,7 +945,7 @@ void rt_preempt(rt_proc_t *proc, rt_value_t *frame, uint64_t n, const uintptr_t 
 // --- the runtime itself -------------------------------------------------------
 
 // The process that is running.
-extern rt_proc_t *rt_current;
+extern RT_ISLAND rt_proc_t *rt_current;
 
 // Allocates from the current process's heap, in 16-byte units; faults at
 // `site` when the heap is full.
@@ -998,6 +1013,10 @@ static inline void rt_work_push(rt_work_t *w, rt_value_t v) {
 static inline rt_value_t rt_work_pop(rt_work_t *w) {
     return w->items[--w->n];
 }
+
+// A pid or an address as pprint shows it, into buf (of at least 64): #<pid
+// 5>, and #<pid 5@2> on island 2 (D256); #<address 3.1>, #<address 3.1@2>.
+void rt_pid_text(char *buf, size_t size, rt_value_t v);
 
 // Appends v as pprint shows it. With raw, a string is its bytes, without
 // quotes (str and tty/write); strings inside lists are always quoted, and

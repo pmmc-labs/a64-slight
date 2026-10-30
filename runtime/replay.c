@@ -64,10 +64,10 @@ static const char *const names[] = {
     [IO_RENAME] = "a rename", [IO_MKDIR] = "a mkdir", [IO_RANDOM] = "random bytes",
 };
 
-static int      mode;
-static FILE    *record;
-static uint64_t count;                  // entries written or read so far
-static char     token;                  // what rt_io_fopen gives when replaying: a FILE * never used as one
+static int                mode;
+static RT_ISLAND FILE    *record;        // each island's own (D256)
+static RT_ISLAND uint64_t count;         // entries written or read so far
+static char               token;         // what rt_io_fopen gives when replaying: a FILE * never used as one
 
 static const char *name(int kind) {
     return kind > 0 && kind < (int)(sizeof names / sizeof *names) ? names[kind] : "something unknown";

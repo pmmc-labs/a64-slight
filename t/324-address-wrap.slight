@@ -1,0 +1,11 @@
+; A task's address numbers (D243) wrap past 2^20, a million, now that a
+; pid carries its island (D256), skipping any still open: the root keeps
+; its first, 0, open, makes and closes 1,048,575 more, and the next wraps
+; to 0, which is taken, so it's 1. Expected output worked out by hand.
+
+(defun churn (n)
+    (if (== n 0) () (do (disconnect (address)) (churn (- n 1)))))
+
+(let first (address))
+(churn 1048575)
+(list first (address) (address))
