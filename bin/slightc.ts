@@ -73,7 +73,7 @@ const MATH = ['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'sinh', 'cos
 const vendorSources = (): readonly string[] => MATH.map((f) => join(VENDOR_DIR, 'core-math', 'src', 'binary64', f, `${f}.c`));
 
 const runtimeSources = (arch: Arch): readonly string[] => [
-    ...['rt.c', 'process.c', 'strings.c', 'numbers.c', 'tuples.c', 'tty.c', 'json.c', 'sexp.c', 'dns.c', 'files.c', 'crypto.c', 'replay.c', 'unicode.c', arch.asm].map((f) => join(RUNTIME_DIR, f)),
+    ...['rt.c', 'process.c', 'strings.c', 'numbers.c', 'tuples.c', 'arrays.c', 'tty.c', 'json.c', 'sexp.c', 'dns.c', 'files.c', 'crypto.c', 'replay.c', 'unicode.c', arch.asm].map((f) => join(RUNTIME_DIR, f)),
     ...vendorSources(),
 ];
 

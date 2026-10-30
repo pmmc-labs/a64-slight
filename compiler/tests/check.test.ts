@@ -57,6 +57,9 @@ test('meet is what two types have in common', () => {
     assert.equal(meet(taskOf(INT), actorOf(ANY), null).k, 'never');
     assert.equal(meet(PID, actorOf(ANY), null).k, 'actor');
     assert.ok(overlaps(ANY, INT, null) && overlaps(INT, ANY, null));
+    assert.equal(showType(meet(ty('array'), ty('(array int)'), null), false), '(array int)');
+    assert.equal(meet(ty('(array int)'), ty('(array float)'), null).k, 'never');      // an array is of one kind
+    assert.equal(meet(ty('(array int)'), listOf(INT), null).k, 'never');
 });
 
 test('fits: every value of one is the other', () => {
@@ -68,6 +71,8 @@ test('fits: every value of one is the other', () => {
     assert.ok(fits(actorOf(ANY), actorOf(INT), null));     // takes more: stands in for one that takes less
     assert.ok(!fits(actorOf(INT), actorOf(STR), null));
     assert.ok(fits(INT, ANY, null) && fits(ANY, INT, null));
+    assert.ok(fits(ty('(array float)'), ty('array'), null));
+    assert.ok(!fits(ty('array'), ty('(array float)'), null));
 });
 
 test('members tell a union apart, a list as () or a cons', () => {
@@ -81,6 +86,8 @@ test('types read from their s-expressions, and show in either syntax', () => {
     assert.equal(showType(ty('(fun (int (tuple str int)) (task #true))'), true), 'fun(int, #(str, int)) -> task<true>');
     assert.equal(showType(ty('(:write & (list str))'), true), ':write(...list<str>)');
     assert.equal(showType(ty('()'), false), '()');
+    assert.equal(showType(ty('(array float)'), true), 'array<float>');
+    assert.equal(showType(ty('(array num)'), false), 'array');
     assert.throws(() => ty('Nope'), /Nope isn't a type/);
     assert.throws(() => ty('(list int str)'), /takes one type/);
     assert.throws(() => ty('5'), /a type is a name or a form/);

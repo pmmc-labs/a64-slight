@@ -8,7 +8,8 @@
 // without positions: lists, integers and floats, strings with the reader's
 // escapes, symbols and keywords, #true and #false, 'x as (quote x), and
 // comments; and #(...), which the compiler takes only as a pattern, as a
-// tuple (D176). Unlike the compiler, :a reads as the symbol a, as a does
+// tuple (D176); and #float(...) and #int(...), arrays of numbers (D253),
+// which aren't in source at all, an #int's each in 63 bits. Unlike the compiler, :a reads as the symbol a, as a does
 // (D52). A symbol the program mentions reads as itself, and any other as
 // (:symbol "name"), so no symbol is made at run time (D14). Numbers read as
 // JSON's do: an integer past 63 bits is the nearest float, and a float too
@@ -16,7 +17,9 @@
 
 #include "rt.h"
 
+#include <inttypes.h>
 #include <math.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -77,25 +80,40 @@ void rt_sexp_free(rt_sexp_t *s) {
     *s = (rt_sexp_t){ 0 };
 }
 
-// A list or a tuple opens a level, with no ' waiting in it yet.
-static void open_level(rt_sexp_t *s) {
+// What a level's quoted[] says: a ' waits there; and it's an array's,
+// #float( or #int(, which holds only numbers, an #int's integers.
+enum { Q_WAIT = 1, Q_FLOATS = 2, Q_INTS = 4 };
+
+// A list, a tuple or an array opens a level, with no ' waiting in it yet.
+static void open_level(rt_sexp_t *s, int array) {
     if (s->depth + 1 == s->cap) {
         s->cap   *= 2;
         s->quoted = rt_must(realloc(s->quoted, s->cap));
     }
-    s->quoted[++s->depth] = 0;
+    s->quoted[++s->depth] = (unsigned char)array;
 }
 
 // A datum has just ended at the current level, which takes any ' waiting
 // there: 1 if that was the top level.
 static int ended(rt_sexp_t *s) {
-    s->quoted[s->depth] = 0;
+    s->quoted[s->depth] &= ~Q_WAIT;
     return s->depth == 0;
 }
 
-// Whether the token being read is one, now that it's over.
+static const char ALSE[] = "alse";
+
+// Whether the token being read is one, now that it's over: in an array,
+// a number, and in an #int, an integer in 63 bits.
 static int token_ok(const rt_sexp_t *s) {
-    return s->state == S_ATOM || (s->state == S_HASH && s->word && !*s->word) || (s->state == S_KEYWORD && !is_number(s->num));
+    int in = s->quoted[s->depth];
+    if (in & Q_INTS)   return s->state == S_ATOM && s->num == N_INT && s->mag <= ((uint64_t)1 << 62) - !s->neg;
+    if (in & Q_FLOATS) return s->state == S_ATOM && is_number(s->num);
+    return s->state == S_ATOM || (s->state == S_HASH && s->word && !*s->word && !s->array) || (s->state == S_KEYWORD && !is_number(s->num));
+}
+
+// A number's digits, up to just past 63 bits, which is all token_ok needs.
+static void count_digit(rt_sexp_t *s, int c) {
+    if (c >= '0' && c <= '9' && s->mag <= (uint64_t)1 << 62) s->mag = s->mag * 10 + (uint64_t)(c - '0');
 }
 
 static int is_blank(int c)  { return c == ' ' || c == '\t' || c == '\r'; }
@@ -133,21 +151,33 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
         case S_KEYWORD:
             if (!is_delimiter(c)) {
                 if (s->state == S_DOT)          s->state = S_ATOM;
+                else if (s->state == S_ATOM) {
+                    s->num = number_step(s->num, c);
+                    count_digit(s, c);
+                }
                 else if (s->state == S_KEYWORD) s->num = number_step(s->num, c);
                 else if (s->state == S_COLON) {
                     if (c == '#' || c == ':')   goto bad;
                     s->state = S_KEYWORD;
                     s->num   = number_step(N_START, c);
                 } else if (s->state == S_HASH) {
-                    if (!s->word)               s->word = c == 't' ? "rue" : c == 'f' ? "alse" : NULL;
-                    else if (*s->word && c == *s->word) s->word++;
-                    else                        goto bad;
+                    if (!s->word) {
+                        s->word  = c == 't' ? "rue" : c == 'f' ? ALSE : c == 'i' ? "nt" : NULL;
+                        s->array = c == 'i' ? Q_INTS : 0;
+                    } else if (s->word == ALSE && c == 'l') {
+                        s->word  = "oat";
+                        s->array = Q_FLOATS;
+                    } else if (*s->word && c == *s->word) {
+                        s->word++;
+                    } else {
+                        goto bad;
+                    }
                     if (!s->word)               goto bad;
                 }
                 break;
             }
-            if (s->state == S_HASH && !s->word && c == '(') {
-                open_level(s);                  // #( : a tuple
+            if (s->state == S_HASH && (!s->word || (s->array && !*s->word)) && c == '(') {
+                open_level(s, s->word ? s->array : 0);  // #( : a tuple; #float( or #int( : an array
                 s->state = S_SPACE;
                 break;
             }
@@ -173,22 +203,27 @@ int rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *u
                 break;
             }
             if (s->closed || c == '`' || c == ',') goto bad;
+            if ((s->quoted[s->depth] & (Q_FLOATS | Q_INTS)) && c != ')' && c != '-' && !(c >= '0' && c <= '9')) goto bad;
             if (s->depth == 0 && !s->quoted[0]) {   // a top-level datum begins
                 s->from       = at;
                 s->first_line = s->lines;
             }
-            if (c == '\'')                      s->quoted[s->depth] = 1;
+            if (c == '\'')                      s->quoted[s->depth] |= Q_WAIT;
             else if (c == '"')                  s->state = S_STRING;
-            else if (c == '#')                  s->state = S_HASH, s->word = NULL;
+            else if (c == '#')                  s->state = S_HASH, s->word = NULL, s->array = 0;
             else if (c == ':')                  s->state = S_COLON;
             else if (c == '.')                  s->state = S_DOT;
-            else if (c == '(')                  open_level(s);
+            else if (c == '(')                  open_level(s, 0);
             else if (c == ')') {
-                if (s->depth == 0 || s->quoted[s->depth]) goto bad;
+                if (s->depth == 0 || (s->quoted[s->depth] & Q_WAIT)) goto bad;
                 s->depth--;
                 end = ended(s);
             } else {
                 s->state = S_ATOM;
+                s->num   = number_step(N_START, c);
+                s->mag   = 0;
+                s->neg   = c == '-';
+                count_digit(s, c);
             }
             break;
         case S_STRING:
@@ -402,14 +437,16 @@ static int token(const char *p, size_t len, rt_build_alloc_t alloc, void *cx, rt
 
 // A list being built: its cells so far, the quotes waiting inside it for a
 // datum, the quotes around the list itself, and whether it's a tuple's
-// elements, to be made a tuple at its ). The frames are allocated as the
+// elements, or an array's, to be made one at its ). The frames are allocated as the
 // datum is, so they count against the same limit, as JSON's do (D205).
 typedef struct {
     rt_value_t  head;
     rt_value_t *last;
     size_t      quotes, wrap;
-    int         tuple;
+    int         made;           // F_LIST, or what it's made at its )
 } frame_t;
+
+enum { F_LIST, F_TUPLE, F_FLOATS, F_INTS };
 
 static rt_value_t new_tuple(rt_value_t xs, rt_build_alloc_t alloc, void *cx) {
     uint64_t n = 0;
@@ -418,6 +455,23 @@ static rt_value_t new_tuple(rt_value_t xs, rt_build_alloc_t alloc, void *cx) {
     if (!box) return 0;
     box[0] = n << RT_BOX_SIZE_SHIFT | RT_BOX_TUPLE;
     for (uint64_t i = 1; xs != RT_NIL; xs = rt_cdr(xs)) box[i++] = rt_car(xs);
+    return (rt_value_t)box | RT_TAG_BOXED;
+}
+
+// An array of the numbers in xs, which the validator has said are all
+// numbers, and an #int's all integers.
+static rt_value_t new_array(rt_value_t xs, uint64_t type, rt_build_alloc_t alloc, void *cx) {
+    uint64_t n = 0;
+    for (rt_value_t v = xs; v != RT_NIL; v = rt_cdr(v)) n++;
+    uint64_t *box = alloc(cx, 8 + 8 * n);
+    if (!box) return 0;
+    box[0] = n << RT_BOX_SIZE_SHIFT | type;
+    for (uint64_t i = 1; xs != RT_NIL; xs = rt_cdr(xs), i++) {
+        rt_value_t x = rt_car(xs);
+        double     d = (x & RT_TAG_INT_MASK) == 0 ? (double)rt_int_value(x) : rt_float_value(x);
+        if (type == RT_BOX_INTS) box[i] = (uint64_t)rt_int_value(x);
+        else                     memcpy(box + i, &d, sizeof d);
+    }
     return (rt_value_t)box | RT_TAG_BOXED;
 }
 
@@ -437,7 +491,9 @@ int rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
             p++;
             continue;
         }
-        if (*p == '(' || (*p == '#' && p[1] == '(')) {
+        int made = *p == '(' ? F_LIST : *p != '#' ? -1 : p[1] == '(' ? F_TUPLE
+                 : strncmp(p, "#float(", 7) == 0 ? F_FLOATS : strncmp(p, "#int(", 5) == 0 ? F_INTS : -1;
+        if (made >= 0) {
             if (depth == cap) {
                 frame_t *more = alloc(cx, (cap ? cap * 2 : 16) * sizeof *frames);
                 if (!more) goto too_big;
@@ -446,14 +502,16 @@ int rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
                 cap    = cap ? cap * 2 : 16;
                 quotes = depth ? &frames[depth - 1].quotes : &top_quotes;
             }
-            frames[depth++] = (frame_t){ .head = RT_NIL, .last = NULL, .quotes = 0, .wrap = *quotes, .tuple = *p == '#' };
+            frames[depth++] = (frame_t){ .head = RT_NIL, .last = NULL, .quotes = 0, .wrap = *quotes, .made = made };
             *quotes = 0;
-            p += *p == '#' ? 2 : 1;
+            p += made == F_LIST ? 1 : made == F_TUPLE ? 2 : made == F_FLOATS ? 7 : 5;
             continue;
         }
         if (*p == ')') {
             frame_t *f = &frames[--depth];
-            v    = f->tuple ? new_tuple(f->head, alloc, cx) : f->head;
+            v    = f->made == F_TUPLE ? new_tuple(f->head, alloc, cx)
+                 : f->made == F_FLOATS ? new_array(f->head, RT_BOX_FLOATS, alloc, cx)
+                 : f->made == F_INTS ? new_array(f->head, RT_BOX_INTS, alloc, cx) : f->head;
             wrap = f->wrap;
             if (!v) goto too_big;
             p++;
@@ -560,6 +618,20 @@ static void not_sexp(rt_buf_t *b, rt_work_t *w, rt_value_t v, const char *site) 
     rt_fault(RT_FAULT_NOT_SEXP, v, site);
 }
 
+// A float as pprint has it, but with digits after a point before an
+// exponent, as the reader wants: 1.0e+21, not 1e+21.
+static void put_float(rt_buf_t *b, double d) {
+    size_t from = b->len;
+    rt_render_float(b, d);
+    if (!memchr(b->bytes + from, '.', b->len - from)) {
+        char  *e = memchr(b->bytes + from, 'e', b->len - from);
+        size_t k = (size_t)(e - b->bytes), rest = b->len - k;
+        rt_buf_add(b, "..", 2);
+        memmove(b->bytes + k + 2, b->bytes + k, rest);
+        memcpy(b->bytes + k, ".0", 2);
+    }
+}
+
 // Data as the reader reads it back, on one line (D155). The printer walks
 // with a work stack (D147): for each list it's in, the rest of it, and
 // whether anything has been written in it yet; for each tuple, the tuple,
@@ -589,17 +661,23 @@ rt_value_t rt_sexp_print(rt_value_t v, const char *site) {
         } else if (!(v & RT_TAG_INT_MASK)) {
             rt_render(&b, v, 0);
         } else if (rt_is_float(v) && isfinite(rt_float_value(v))) {
-            // as pprint has it, but with digits after a point before an
-            // exponent, as the reader wants: 1.0e+21, not 1e+21
-            size_t from = b.len;
-            rt_render(&b, v, 0);
-            if (!memchr(b.bytes + from, '.', b.len - from)) {
-                char  *e = memchr(b.bytes + from, 'e', b.len - from);
-                size_t k = (size_t)(e - b.bytes), rest = b.len - k;
-                rt_buf_add(&b, "..", 2);
-                memmove(b.bytes + k + 2, b.bytes + k, rest);
-                memcpy(b.bytes + k, ".0", 2);
+            put_float(&b, rt_float_value(v));
+        } else if (rt_is_array(v)) {
+            int ints = rt_is_box(v, RT_BOX_INTS);
+            put(&b, ints ? "#int(" : "#float(");
+            for (uint64_t i = 0; i < rt_array_len(v); i++) {
+                if (i) put(&b, " ");
+                if (ints) {
+                    char num[24];
+                    snprintf(num, sizeof num, "%" PRId64, (int64_t)rt_array_data(v)[i]);
+                    put(&b, num);
+                } else if (isfinite(rt_array_float(v, i))) {
+                    put_float(&b, rt_array_float(v, i));
+                } else {
+                    not_sexp(&b, &w, v, site);
+                }
             }
+            put(&b, ")");
         } else {
             not_sexp(&b, &w, v, site);
         }

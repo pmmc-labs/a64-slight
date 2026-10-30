@@ -762,6 +762,10 @@ REPL and line editing are slight code over key events.
   type), then the elements, a word each. Closures and tuples are the
   boxes that hold values, which copying and the collector go into
   (`rt_box_holds_values`, `rt_box_first_value` in `rt.h`).
+- **Arrays of numbers** (D253): header (how many elements, and
+  `RT_BOX_FLOATS` or `RT_BOX_INTS`), then the elements, a double or an
+  int64 each, unboxed; or, at 4 KB or more, a shared buffer's handle
+  (below). They hold no values, so nothing walks them.
 - **Every heap object is a multiple of 16 bytes**, padded at the end: a
   closure with an odd number of captured values, and most strings. Copying
   and the collector copy whole 16-byte units.
@@ -938,10 +942,11 @@ computes with floats replays on any machine.
 
 ### Shared buffers (D253)
 
-A string of 4 KB or more (`RT_SHARED_MIN`) is an `rt_buffer_t` off the
-heap, its references counted, and a handle in the heap: a box of the
-string's header with `RT_BOX_SHARED`, the bytes' address and the
-buffer's. `rt_string_bytes` reads through it, so nothing else knows. A
+A string or an array of numbers of 4 KB or more (`RT_SHARED_MIN`) is an
+`rt_buffer_t` off the heap, its references counted, and a handle in the
+heap: a box of its header with `RT_BOX_SHARED`, the data's address and
+the buffer's. `rt_string_bytes` and `rt_array_data` read through it, so
+nothing else knows. A
 copy (a message, a fork's values, a kept result) copies the handle,
 counts a reference, and lists the handle in its chunk, for whoever adopts
 the chunk; a chunk freed unadopted lets its handles go. Each process
@@ -951,9 +956,29 @@ goes; at a process's end, all of them. It's safe because what's shared
 never changes and holds no pointers, so no buffer points into a heap, as
 nothing old points at anything young (D200). A process's young handles'
 bytes past 1 MB make its next call collect, and all its handles' bytes
-count toward its cap. Not yet: a slice that shares its string's buffer
-(one is copied, as any slice is), and a device's read made a buffer as
-it comes.
+count toward its cap. Not yet: a slice that shares its string's or
+array's buffer (one is copied, as any slice is), and a device's read made
+a buffer as it comes; and an array `sexp/parse` reads is in the heap,
+whatever its size, as the reader builds into whatever it's given.
+
+### Arrays of numbers (D253)
+
+`runtime/arrays.c`: `rt_new_array` makes one, in the heap or, at 4 KB or
+more, shared, for the builtin to fill before anything else runs. Element
+by element, an operation's operands are all its arrays' kind, so its
+result's kind is the arrays' (`array/div`'s always `:float`); an `:int`
+result is checked against 63 bits. Reductions and `array/matmul` sum in
+order, left to right, each product and sum rounded apart
+(`-ffp-contract=off`), so a Python loop is their model
+(`t/models/arrays.py`); `array/matmul` goes a row of the result at a
+time, adding a row of `b` times an element of `a`, which reads `b` along
+its rows and keeps each element's order. `array/generate`, `array/map`
+and `array/fold` are the prelude's, through lists, since C can't call
+back into slight while the collector walks its frames (D166).
+`lib/matrix.slight` is matrices on arrays, a module. The type is
+`(array float)`, `(array int)`, or `array` for either (`types.ts`).
+`:int` is the same symbol as `:exec`'s SIGINT, `RT_SYM_EXEC +
+RT_EXEC_INT`, since a symbol is its name.
 
 ### Messages
 

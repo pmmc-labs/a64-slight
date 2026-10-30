@@ -355,9 +355,10 @@ void rt_heap_grow(uint64_t bytes, const char *site) {
 
 // --- shared buffers (D253) -----------------------------------------------------
 //
-// A string of RT_SHARED_MIN bytes or more is a buffer off the heap, its
-// references counted, and a handle on the heap: a box of the string's
-// header with RT_BOX_SHARED, where the bytes are, and the buffer. A send
+// A string, or an array of numbers, of RT_SHARED_MIN bytes or more is a
+// buffer off the heap, its references counted, and a handle on the heap:
+// a box of its header with RT_BOX_SHARED, where the data is, and the
+// buffer. A send
 // copies the handle and counts a reference; nothing copies the bytes. It's
 // safe for the reason the collector needs no write barrier (D200): what's
 // shared never changes, and holds no pointers, so no buffer points into a
@@ -403,26 +404,38 @@ static void free_msg(rt_msg_t *m) {
     free_chunk(m->chunk);
 }
 
-// A string of len bytes (RT_SHARED_MIN or more), its bytes copied from
-// bytes, or left for the caller to fill and mark (rt_string_mark). The
-// handle first, so that a heap at its cap faults before the buffer's made.
-rt_value_t rt_new_shared_string(const char *bytes, size_t len, const char *site) {
+// A shared box of header for len bytes (RT_SHARED_MIN or more), for the
+// caller to fill through *data. The handle first, so that a heap at its
+// cap faults before the buffer's made.
+rt_value_t rt_new_shared(uint64_t header, size_t len, char **data, const char *site) {
     rt_proc_t *p = rt_current;
     if (held(p) + len > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
     uint64_t    *box = rt_alloc(32, site);
     rt_buffer_t *b   = rt_must(malloc(sizeof *b + len + 1));
-    b->refs = 1;
-    b->len  = len;
-    if (bytes) memcpy(b->bytes, bytes, len);
+    b->refs       = 1;
+    b->len        = len;
     b->bytes[len] = '\0';
-    box[0] = (bytes ? rt_string_header(b->bytes, len) : (uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING) | RT_BOX_SHARED;
+    box[0] = header | RT_BOX_SHARED;
     box[1] = (uint64_t)(uintptr_t)b->bytes;
     box[2] = (uint64_t)(uintptr_t)b;
     box[3] = 0;
     handles_t *young = handles_of(p, 0);
     handles_add(young, box);
     if (young->bytes > SHARED_YOUNG_MAX) cut_slice(p);
+    *data = b->bytes;
     return (rt_value_t)box | RT_TAG_BOXED;
+}
+
+// A string of len bytes, copied from bytes, or left for the caller to
+// fill and mark (rt_string_mark).
+rt_value_t rt_new_shared_string(const char *bytes, size_t len, const char *site) {
+    char      *data;
+    rt_value_t s = rt_new_shared((uint64_t)len << RT_BOX_SIZE_SHIFT | RT_BOX_STRING, len, &data, site);
+    if (bytes) {
+        memcpy(data, bytes, len);
+        rt_string_mark(s);
+    }
+    return s;
 }
 
 static void free_heap(rt_proc_t *p) {
@@ -470,6 +483,8 @@ static size_t box_bytes(rt_value_t v) {
         case RT_BOX_FLOAT:   return 16;
         case RT_BOX_CLOSURE: return (32 + 8 * size + 15) & ~(size_t)15;
         case RT_BOX_TUPLE:   return (8 + 8 * size + 15) & ~(size_t)15;
+        case RT_BOX_FLOATS:
+        case RT_BOX_INTS:    return header & RT_BOX_SHARED ? 32 : (8 + 8 * size + 15) & ~(size_t)15;
         default:             return 0;
     }
 }
@@ -601,7 +616,7 @@ WALK void copy_word(copying_t *c, rt_value_t v, size_t at) {
         }
         scratch_link(c, at, (rt_value_t)box | RT_TAG_BOXED);
         if (rt_box_holds_values(from[0])) copy_push(c, box, v);
-        else if ((from[0] & (RT_BOX_TYPE_MASK | RT_BOX_SHARED)) == (RT_BOX_STRING | RT_BOX_SHARED)) copy_handle(c, box, from);
+        else if (from[0] & RT_BOX_SHARED) copy_handle(c, box, from);
     }
 }
 

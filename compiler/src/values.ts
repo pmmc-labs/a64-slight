@@ -36,7 +36,7 @@ export const FAULT_KINDS: readonly string[] = [
     'not-an-int', 'overflow', 'not-a-bool', 'no-clause', 'stack', 'not-a-cons', 'not-a-list', 'heap',
     'not-a-string', 'not-a-symbol', 'out-of-range', 'not-a-number', 'div-by-zero', 'not-a-function',
     'arity', 'not-a-pid', 'join-self', 'not-a-device', 'not-json', 'not-sexp', 'no-match', 'not-a-tuple',
-    'not-an-actor', 'not-a-task',
+    'not-an-actor', 'not-a-task', 'not-an-array',
 ];
 
 // The names of keys from :keypress, then the modifiers, in RT_KEY_ order.
@@ -103,9 +103,13 @@ export const PACK_WORDS: readonly string[] = [
 // log's levels below :error (D254), in RT_LOG_ order.
 export const LOG_WORDS: readonly string[] = ['debug', 'info', 'warn'];
 
+// An array's kinds (D253), in RT_ARRAY_ order; :int is EXEC_WORDS'.
+export const ARRAY_WORDS: readonly string[] = ['float'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
     ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS, ...STAT_WORDS, ...PACK_WORDS, ...LOG_WORDS,
+    ...ARRAY_WORDS,
 ];

@@ -12,7 +12,7 @@
 
 import {
     ANY, BOOL, CONS_ANY, FLOAT, FUN_ANY, INT, LIST_ANY, NEVER, NIL_T, NUM, PID, STR, SYM, TUPLE_ANY,
-    addressOf, consOf, fits, headOf, lit, listOf, meet, shape, tagged, tailOf, tupleElement, tupleOf, union,
+    addressOf, arrayOf, consOf, fits, headOf, lit, listOf, meet, shape, tagged, tailOf, tupleElement, tupleOf, union,
     type Defs, type Ty,
 } from './types.ts';
 
@@ -46,6 +46,26 @@ const keepNum = (args: readonly Ty[], defs: Defs): Ty => {
 const either = (args: readonly Ty[], defs: Defs): Ty => union(...args.map((a) => (a.k === 'any' ? ANY : meet(a, NUM, defs))));
 
 const okOr = (ok: Ty, error: Ty): Ty => union(tagged('ok', ok), tagged('error', error));
+
+// Arrays of numbers (D253): any array; an argument's array type, from
+// what it's given; its elements; and the array a kind names.
+const ARRAY: Ty = arrayOf(NUM);
+const arrayArg = (t: Ty | undefined, defs: Defs): Ty => {
+    const a = meet(t ?? ANY, ARRAY, defs);
+    return a.k === 'never' ? ARRAY : a;
+};
+const elementsOf = (t: Ty): Ty => (t.k === 'array' ? t.of : t.k === 'or' ? union(...t.of.map(elementsOf)) : NUM);
+const KIND: Ty = union(lit('float'), lit('int'));
+const ofKind = (args: readonly Ty[]): Ty => {
+    const k = args[0];
+    return k?.k === 'lit' && k.name === 'float' ? arrayOf(FLOAT) : k?.k === 'lit' && k.name === 'int' ? arrayOf(INT) : ARRAY;
+};
+// Element by element: the arrays among the operands.
+const operands = (args: readonly Ty[], defs: Defs): Ty => {
+    const as = args.map((a) => meet(a, ARRAY, defs)).filter((a) => a.k !== 'never');
+    return as.length === 0 ? ARRAY : union(...as);
+};
+const ARRAY_OR_NUM: Ty = union(ARRAY, NUM);
 
 // The prelude's Json (lib/prelude.slight).
 const JSON: Ty = { k: 'alias', name: 'Json', args: [] };
@@ -151,6 +171,25 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'list->tuple': fn([LIST_ANY], TUPLE_ANY),
     'tuple->list': fn([TUPLE_ANY], (args, defs) => listOf(tupleElement(args[0] ?? ANY, null, defs))),
 
+    'array/make': fn([KIND, INT, NUM], ofKind),
+    'list->array': fn([KIND, listOf(NUM)], ofKind),
+    'array->list': fn([ARRAY], (args, defs) => listOf(elementsOf(arrayArg(args[0], defs)))),
+    'array/kind': fn([ARRAY], KIND),
+    'array/len': fn([ARRAY], INT),
+    'array/get': fn([ARRAY, INT], (args, defs) => elementsOf(arrayArg(args[0], defs))),
+    'array/set': fn([ARRAY, INT, NUM], (args, defs) => arrayArg(args[0], defs)),
+    'array/slice': fn([ARRAY, INT, INT], (args, defs) => arrayArg(args[0], defs)),
+    'array/concat': fn([ARRAY, ARRAY], (args, defs) => arrayArg(args[0], defs)),
+    'array/add': fn([ARRAY_OR_NUM, ARRAY_OR_NUM], operands),
+    'array/sub': fn([ARRAY_OR_NUM, ARRAY_OR_NUM], operands),
+    'array/mul': fn([ARRAY_OR_NUM, ARRAY_OR_NUM], operands),
+    'array/div': fn([ARRAY_OR_NUM, ARRAY_OR_NUM], arrayOf(FLOAT)),
+    'array/sum': fn([ARRAY], (args, defs) => elementsOf(arrayArg(args[0], defs))),
+    'array/min': fn([ARRAY], (args, defs) => elementsOf(arrayArg(args[0], defs))),
+    'array/max': fn([ARRAY], (args, defs) => elementsOf(arrayArg(args[0], defs))),
+    'array/dot': fn([ARRAY, ARRAY], (args, defs) => elementsOf(arrayArg(args[0], defs))),
+    'array/matmul': fn([ARRAY, ARRAY, INT, INT, INT], (args, defs) => arrayArg(args[0], defs)),
+
     'send': fn([PID, ANY], NIL_T),
     'join': fn([PID], RESULT_ANY),
     'join/race': fn([listOf(PID)], shape([PID, RESULT_ANY])),
@@ -193,7 +232,7 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
 // The type predicates, and what each says yes to: in a test, they narrow.
 export const PREDICATES: Readonly<Record<string, Ty>> = {
     'int?': INT, 'float?': FLOAT, 'num?': NUM, 'str?': STR, 'nil?': NIL_T, 'cons?': CONS_ANY,
-    'sym?': SYM, 'bool?': BOOL, 'tuple?': TUPLE_ANY, 'pid?': PID, 'lambda?': FUN_ANY,
+    'sym?': SYM, 'bool?': BOOL, 'tuple?': TUPLE_ANY, 'pid?': PID, 'lambda?': FUN_ANY, 'array?': ARRAY,
 };
 
 // Names for constants (codegen.ts's CONSTANTS).
@@ -246,6 +285,7 @@ export function faultFor(t: Ty): string | null {
         case 'str':     return 'not-a-string';
         case 'sym': case 'lit': return 'not-a-symbol';
         case 'tuple':   return 'not-a-tuple';
+        case 'array':   return 'not-an-array';
         case 'list': case 'nil': return 'not-a-list';
         case 'cons':    return 'not-a-cons';
         case 'fun':     return 'not-a-function';

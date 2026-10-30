@@ -1,0 +1,2 @@
+t/types/012-arrays.sly:7:18: warning: mean's argument is array<int>, not array<float>
+t/types/012-arrays.sly:8:24: warning: str::len's argument is int, not str: it faults :not-a-string

@@ -460,6 +460,31 @@ static void put_rendered(rt_buf_t *b, rt_value_t v) {
     rt_buf_free(&r);
 }
 
+// An array of numbers as a JSON array (D253); a float JSON can't hold,
+// NaN or infinite, as a string if lenient, and otherwise 0, for a fault.
+static int put_array(rt_buf_t *b, rt_value_t v, int lenient) {
+    put(b, "[");
+    for (uint64_t i = 0; i < rt_array_len(v); i++) {
+        if (i) put(b, ",");
+        if (rt_is_box(v, RT_BOX_INTS)) {
+            char num[24];
+            snprintf(num, sizeof num, "%" PRId64, (int64_t)rt_array_data(v)[i]);
+            put(b, num);
+            continue;
+        }
+        double d = rt_array_float(v, i);
+        if (isfinite(d)) {
+            rt_render_float(b, d);
+        } else if (lenient) {
+            put(b, isnan(d) ? "\"nan\"" : d < 0 ? "\"-inf\"" : "\"inf\"");
+        } else {
+            return 0;
+        }
+    }
+    put(b, "]");
+    return 1;
+}
+
 // Compact JSON, on one line (D161). What JSON can't hold faults; or, if
 // lenient, as log has it (D254), is written as a string, as str writes it.
 static rt_value_t print_json(rt_value_t v, int lenient, const char *site) {
@@ -486,6 +511,8 @@ static rt_value_t print_json(rt_value_t v, int lenient, const char *site) {
             put_string(&b, v);
         } else if (!(v & RT_TAG_INT_MASK) || (rt_is_float(v) && isfinite(rt_float_value(v)))) {
             rt_render(&b, v, 0);
+        } else if (rt_is_array(v)) {
+            if (!put_array(&b, v, lenient)) not_json(&b, &w, v, site);
         } else if (lenient) {
             put_rendered(&b, v);
         } else {

@@ -1,0 +1,59 @@
+; Arrays of numbers (D253) element by element, reduced, and multiplied as
+; matrices: each the obvious loop's answer, left to right (so 1.0 is lost
+; against 1e16 and comes back), every product and sum rounded on its own;
+; a NaN only the least or greatest when it's first, as math/min has it;
+; and the faults, an integer past 63 bits, at once or in a running total,
+; and division by zero. This program and its expected output are from
+; t/models/arrays.py, on Python's floats and integers.
+
+(defun try (pid)
+    (match (join pid)
+        ((:ok v)          v)
+        ((:error (k & _)) (list :error k))))
+
+(let nan (- math/INF math/INF))
+(let BIG 3037000499)
+(let fa (list->array :float (list -0.0449081 -2510.85 -0.317761 8687.67 -151.087 -0.0000919475 5.26999 0.000934121)))
+(let fb (list->array :float (list -2236.63 -0.00609975 -55.7728 43.5397 -8423.62 0.458176 438.499 -0.00522265)))
+(let ia (list->array :int (list 907 -236 582 -615 -45 -428 83 154)))
+(let ib (list->array :int (list -776 -292 621 424 857 848 598 -272)))
+(let m1 (list->array :float (list -0.4832 -4.198 -7.216 -6.922 8.375 -1.557 -8.466 9.664 -6.348 5.42 -9.384 -8.249)))
+(let m2 (list->array :float (list 0.9426 7.445 -0.8021 7.19 9.764 0.404 8.705 -0.3827)))
+(let n1 (list->array :int (list -10 36 25 -6 3 -19)))
+(let n2 (list->array :int (list -14 18 6 -50 23 -30)))
+
+(pprint (try (fork (array/add fa fb))))
+(pprint (try (fork (array/sub fa fb))))
+(pprint (try (fork (array/mul fa fb))))
+(pprint (try (fork (array/div fa fb))))
+(pprint (try (fork (array/add fa 1))))
+(pprint (try (fork (array/sub 0.5 fa))))
+(pprint (try (fork (array/mul fa 3.25))))
+(pprint (try (fork (array/div 1 fa))))
+(pprint (try (fork (array/add ia ib))))
+(pprint (try (fork (array/sub ia ib))))
+(pprint (try (fork (array/mul ia ib))))
+(pprint (try (fork (array/div ia 4))))
+(pprint (try (fork (array/mul ia -7))))
+(pprint (try (fork (list (array/sum fa) (array/sum fb) (array/sum ia) (array/sum ib)))))
+(pprint (try (fork (list (array/min fa) (array/max fa) (array/min ib) (array/max ib)))))
+(pprint (try (fork (list (array/dot fa fb) (array/dot ia ib)))))
+(pprint (try (fork (array/sum (list->array :float (list 10000000000000000.0 1.0 -10000000000000000.0 1.0))))))
+(pprint (try (fork (array/dot (list->array :float (list 0.1 0.2 0.3)) (list->array :float (list 0.3 0.2 0.1))))))
+(pprint (try (fork (array/min (list->array :float (list nan 1.0))))))
+(pprint (try (fork (array/max (list->array :float (list 1.0 nan 2.0))))))
+(pprint (try (fork (array/matmul m1 m2 3 4 2))))
+(pprint (try (fork (array/matmul n1 n2 2 3 2))))
+(pprint (try (fork (array/matmul n2 n1 3 2 3))))
+(pprint (try (fork (array/matmul m1 (array/make :float 4 1) 3 4 1))))
+(pprint (try (fork (array/matmul (array/make :int 0 0) (array/make :int 6 1) 0 2 3))))
+(pprint (try (fork (array/sum (array/make :int 2 4611686018427387903)))))
+(pprint (try (fork (array/add (array/make :int 1 4611686018427387903) 1))))
+(pprint (try (fork (array/sub (array/make :int 1 -4611686018427387904) 1))))
+(pprint (try (fork (array/mul (array/make :int 1 BIG) BIG))))
+(pprint (try (fork (array/dot (array/make :int 2 2147483648) (array/make :int 2 1073741824)))))
+(pprint (try (fork (array/dot (array/make :int 1 BIG) (array/make :int 1 BIG)))))
+(pprint (try (fork (array/matmul (array/make :int 4 2147483648) (array/make :int 4 1073741824) 2 2 2))))
+(pprint (try (fork (array/div fa (array/set fb 3 0)))))
+(pprint (try (fork (array/div ia 0))))
+:done

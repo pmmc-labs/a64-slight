@@ -259,7 +259,7 @@ function readDeftypes(pforms: readonly Sexp[], uforms: readonly Sexp[]): Defs {
             throw new CompileError(`a type's name is a name, or (Name A B) for one with parameters, not ${show(head)}`, posOf(head) ?? posOf(f));
         }
         const [name, ...params] = parts.map((p) => (p as { name: string }).name);
-        if (BASE_TYPES.includes(name!) || ['list', 'shape', 'or', 'task', 'actor', 'address'].includes(name!)) {
+        if (BASE_TYPES.includes(name!) || ['list', 'shape', 'or', 'task', 'actor', 'address', 'array'].includes(name!)) {
             throw new CompileError(`${name} is a type already`, posOf(head) ?? posOf(f));
         }
         return { name: name!, params, body: items[2]!, module, pos: posOf(f) };
@@ -679,6 +679,7 @@ function unify(p: Ty, t: Ty, names: readonly string[], vars: readonly (readonly 
             return t.result.k === 'any' ? vs : unify(p.result, t.result, names, vs, defs, depth + 1);
         }
         case 'task':    return t.k === 'task' ? unify(p.of, t.of, names, vars, defs, depth + 1) : vars;
+        case 'array':   return t.k === 'array' ? unify(p.of, t.of, names, vars, defs, depth + 1) : vars;
         case 'actor':   return t.k === 'actor' ? unify(p.msg, t.msg, names, vars, defs, depth + 1) : vars;
         case 'address': return t.k === 'address' ? unify(p.msg, t.msg, names, vars, defs, depth + 1) : vars;
         case 'or': {
@@ -701,7 +702,7 @@ function hasAny(t: Ty): boolean {
         case 'cons': return hasAny(t.head) || hasAny(t.tail);
         case 'tuple': return t.of === null || t.of.some(hasAny);
         case 'or': return t.of.some(hasAny);
-        case 'task': return hasAny(t.of);
+        case 'task': case 'array': return hasAny(t.of);
         case 'actor': case 'address': return hasAny(t.msg);
         case 'fun': return true;
         case 'alias': return true;

@@ -123,7 +123,7 @@ int64_t rt_symbol_find(const char *bytes, size_t len) {
 // The shortest text that reads back as the same double, laid out as
 // JavaScript lays out numbers, except that it always has a "." or an
 // exponent, so it can't be mistaken for an integer: 3.0, 0.1, 1e+21.
-static void render_float(rt_buf_t *b, double d) {
+void rt_render_float(rt_buf_t *b, double d) {
     const char *special = isnan(d) ? "nan" : isinf(d) ? (d < 0 ? "-inf" : "inf")
                         : d == 0 ? (signbit(d) ? "-0.0" : "0.0") : NULL;
     if (special) {
@@ -184,7 +184,22 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
         return;
     }
     if (rt_is_float(v)) {
-        render_float(b, rt_float_value(v));
+        rt_render_float(b, rt_float_value(v));
+        return;
+    }
+    if (rt_is_array(v)) {                       // #float(1.0 2.5), #int(1 2)
+        int ints = rt_is_box(v, RT_BOX_INTS);
+        buf_str(b, ints ? "#int(" : "#float(");
+        for (uint64_t i = 0; i < rt_array_len(v); i++) {
+            if (i) buf_str(b, " ");
+            if (ints) {
+                snprintf(num, sizeof num, "%" PRId64, (int64_t)rt_array_data(v)[i]);
+                buf_str(b, num);
+            } else {
+                rt_render_float(b, rt_array_float(v, i));
+            }
+        }
+        buf_str(b, ")");
         return;
     }
     if (rt_is_address(v)) {
@@ -310,6 +325,13 @@ static int equal_atoms(rt_value_t a, rt_value_t b) {
         return rt_string_len(a) == rt_string_len(b)
             && memcmp(rt_string_bytes(a), rt_string_bytes(b), rt_string_len(a)) == 0;
     }
+    if (rt_is_array(a) && rt_is_array(b)) {     // of one kind and length, an element as eq? has it
+        uint64_t n = rt_array_len(a);
+        if ((rt_box(a)[0] & RT_BOX_TYPE_MASK) != (rt_box(b)[0] & RT_BOX_TYPE_MASK) || rt_array_len(b) != n) return 0;
+        if (rt_is_box(a, RT_BOX_INTS)) return memcmp(rt_array_data(a), rt_array_data(b), 8 * n) == 0;
+        for (uint64_t i = 0; i < n; i++) if (rt_array_float(a, i) != rt_array_float(b, i)) return 0;
+        return 1;
+    }
     return 0;
 }
 
@@ -370,7 +392,7 @@ rt_value_t rt_equal(rt_value_t a, rt_value_t b) {
 // aren't eq? share, functions of one name aside, so two of them hash
 // alike only by chance, about once in 2^62. It isn't seeded, so it's for digests, not for a table whose
 // keys come from someone who'd want them to collide (D209).
-enum { H_INT = 1, H_FLOAT, H_STRING, H_SYMBOL, H_PID, H_FUNCTION, H_LIST, H_END, H_TUPLE, H_OTHER };
+enum { H_INT = 1, H_FLOAT, H_STRING, H_SYMBOL, H_PID, H_FUNCTION, H_LIST, H_END, H_TUPLE, H_OTHER, H_FLOATS, H_INTS };
 
 static uint64_t mix(uint64_t h, uint64_t w) {
     uint64_t x = (h ^ w) + 0x9e3779b97f4a7c15;
@@ -392,15 +414,24 @@ static uint64_t mix_bytes(uint64_t h, const char *bytes, uint64_t len) {
     return h;
 }
 
+// A float's bits, as eq? sees it.
+static uint64_t float_bits(double d) {
+    uint64_t bits = 0x7ff8000000000000;         // every NaN alike
+    if (d == 0) d = 0;                          // -0.0 is eq? to 0.0
+    if (d == d) memcpy(&bits, &d, sizeof bits);
+    return bits;
+}
+
 static uint64_t hash_atom(uint64_t h, rt_value_t v) {
     if (!(v & RT_TAG_INT_MASK)) return mix(mix(h, H_INT), (uint64_t)rt_int_value(v));
     if (v == RT_NIL)            return mix(mix(h, H_LIST), H_END);
-    if (rt_is_float(v)) {
-        double   d = rt_float_value(v);
-        uint64_t bits = 0x7ff8000000000000;     // every NaN alike
-        if (d == 0) d = 0;                      // -0.0 is eq? to 0.0
-        if (d == d) memcpy(&bits, &d, sizeof bits);
-        return mix(mix(h, H_FLOAT), bits);
+    if (rt_is_float(v))         return mix(mix(h, H_FLOAT), float_bits(rt_float_value(v)));
+    if (rt_is_array(v)) {                       // its kind, its length and its elements
+        int      ints = rt_is_box(v, RT_BOX_INTS);
+        uint64_t n    = rt_array_len(v);
+        h = mix(mix(h, ints ? H_INTS : H_FLOATS), n);
+        for (uint64_t i = 0; i < n; i++) h = mix(h, ints ? rt_array_data(v)[i] : float_bits(rt_array_float(v, i)));
+        return h;
     }
     if (rt_is_string(v)) return mix_bytes(mix(h, H_STRING), rt_string_bytes(v), rt_string_len(v));
     if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
@@ -482,6 +513,7 @@ static const struct {
     [RT_FAULT_NOT_TUPLE]  = { "not a tuple: ", 1 },
     [RT_FAULT_NOT_ACTOR]  = { "not an actor: ", 1 },
     [RT_FAULT_NOT_TASK]   = { "not a task: ", 1 },
+    [RT_FAULT_NOT_ARRAY]  = { "not an array: ", 1 },
 };
 
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {

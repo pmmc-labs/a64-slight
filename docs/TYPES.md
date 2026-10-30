@@ -74,12 +74,13 @@ when the code runs.
 | `[A, ...T]` | `(shape A & T)` | an `A`, then a list of type `T` |
 | `:tag(A, B)` | `(:tag A B)` | a tagged list: `[:tag, A, B]` |
 | `#(A, B)` | `(tuple A B)` | a tuple of two |
+| `array<float>`, `array<int>` | `(array float)`, `(array int)` | an array of numbers of one kind (D253) |
 | `fun(A, B) -> C` | `(fun (A B) C)` | a function of two arguments |
 | `task<T>` | `(task T)` | a task's pid; its value is a `T` |
 | `actor<M>` | `(actor M)` | an actor's pid; it takes messages of type `M` |
 | `address<M>` | `(address M)` | an address; what's sent to it is an `M` |
 | `pid` | `pid` | any process or device |
-| `tuple`, `fun` | `tuple`, `fun` | any tuple; any function |
+| `tuple`, `fun`, `array` | `tuple`, `fun`, `array` | any tuple; any function; any array of numbers |
 | `A \| B` | `(or A B)` | either |
 | `any` | `any` | anything: not checked |
 | `never` | `never` | nothing: what `raise` gives, or a loop that never returns |

@@ -333,6 +333,10 @@ forms in order (Files).
   step, where a list takes a step per element (D169). They print as
   `#(1 "a" b)`. `(tuple 1 "a" :b)` makes one, and a pattern such as
   `#(n s k)` takes one apart.
+- **Arrays**: numbers of one kind, unboxed, side by side: `:float`, IEEE
+  doubles, or `:int`, integers (D253). They print as `#float(1.0 2.5)`
+  and `#int(1 2)`. There's no literal: `(list->array :float (list 1
+  2.5))` makes one (Arrays, under Builtins).
 - **Functions**: a `defun` used as a value, a `lambda`, or a builtin used
   as a value. They print as `#<function name>` or
   `#<function lambda at prog.slight:3:9>`.
@@ -570,11 +574,13 @@ nothing, it says nothing. Types say nothing to the code: a program runs
 the same with them or without.
 
 A type is a name, `int`, `float`, `num` (either), `str`, `sym`, `bool`,
-`nil`, `pid`, `tuple`, `fun`, `any` or `never`; a keyword, `#true` or
+`nil`, `pid`, `tuple`, `fun`, `array` (of either kind), `any` or
+`never`; a keyword, `#true` or
 `#false`, that value alone; or a form: `(list T)`, a list of `T`s;
 `(shape A B)`, a list of an `A` and a `B`, and `(shape A & T)`, an `A`
 then a list of type `T`; `(:tag A B)`, a list headed by `:tag`, with `&`
-for the rest as in patterns; `(tuple A B)`; `(fun (A B) C)`; `(or A B)`;
+for the rest as in patterns; `(tuple A B)`; `(array int)` and `(array
+float)`; `(fun (A B) C)`; `(or A B)`;
 `(task T)`, a task whose value is a `T`; `(actor M)`, an actor that takes
 messages of type `M`; `(address M)`; or a name `deftype` gave, with its
 parameters: `(Result int str)`.
@@ -1028,10 +1034,11 @@ What's live is what the process can still reach, and that includes
 whatever a function that hasn't returned has bound with `let`, until it
 returns: a `let` at the top level keeps its value till the program ends.
 
-A string of 4 KB or more isn't in the heap but in a buffer of its own,
-which processes share (D253): sending it, forking with it, or a task's
-result holding it, copies a handle and not the bytes, so a big string
-sent to a thousand processes is in memory once. It's freed when the last
+A string of 4 KB or more, or an array of numbers of 4 KB or more (512
+elements), isn't in the heap but in a buffer of its own, which
+processes share (D253): sending it, forking with it, or a task's result
+holding it, copies a handle and not the bytes, so a big string sent to
+a thousand processes is in memory once. It's freed when the last
 process holding it has collected it, or ended. Each process counts the
 whole of every such string it holds toward its cap, since that's what
 it keeps alive, and one that makes them and drops them collects as
@@ -1614,6 +1621,7 @@ Each takes one value of any type, and gives `#true` or `#false`.
 - `int?`, `float?`, and `num?` for either.
 - `str?`: a string.
 - `tuple?`: a tuple.
+- `array?`: an array of numbers, of either kind.
 - `lambda?`: a function, of any kind.
 - `pid?`: a pid, a device's included.
 
@@ -1665,6 +1673,85 @@ element by element, and a tuple is never `eq?` to a list.
     (tuple/get p 1)                      4
     (tuple/set p 0 5)                    #(5 4)
     (match p (#(x y) (+ x y)))           7
+
+### Arrays
+
+An array holds numbers of one kind, side by side, unboxed (D253):
+`:float`, IEEE doubles, or `:int`, integers, each in 63 bits as any
+integer is, so an element always reads back. It suits a vector, a
+field over a grid or a series, where a list takes a cell and a box for
+each float. An element is one step away, as a tuple's is, and an array
+never changes: `array/set` makes a new one, copying the rest, so it's
+not for a loop that changes an element at a time; `array/generate`,
+`array/map` and the arithmetic below make a whole one at once.
+
+- `(array/make kind n x)`: `n` elements, each `x`; `kind` is `:float`
+  or `:int`, and anything else faults (`:out-of-range`), as does a
+  negative `n`.
+- `(list->array kind xs)`, `(array->list a)`. A `:float` array takes
+  any numbers, an integer made the nearest float, as `int->float` makes
+  it; an `:int` one takes only integers (`:not-an-int`). To make an
+  `:int` array a `:float` one: `(list->array :float (array->list a))`.
+- `(array/kind a)`: `:float` or `:int`. `(array/len a)`: how many.
+- `(array/get a i)`: the element at index `i`, from 0, checked as
+  `tuple/get` checks it.
+- `(array/set a i x)`: a new array, `a` with `x` at index `i`.
+- `(array/slice a start end)`: a new array of the elements from `start`
+  up to but not including `end`, each clamped, as `tuple/slice`.
+- `(array/concat a b)`: `a`'s elements, then `b`'s.
+
+Element by element, each operand an array or a number, the arrays of
+one kind and length (a length that differs faults `:out-of-range`,
+showing it), and at least one of them an array:
+
+- `(array/add a b)`, `(array/sub a b)`, `(array/mul a b)`: as `+`, `-`
+  and `*` on each pair, so `(array/mul a 2)` doubles every element and
+  `(array/sub 1 a)` takes each from 1. On `:int` arrays a result past 63
+  bits faults (`:overflow`).
+- `(array/div a b)`: as `/`, always a `:float` array; a zero anywhere
+  in `b` faults (`:div-by-zero`), before any element is worked out.
+
+The operands of a call are all of its arrays' kind: an `:int` array's
+are integers (`:not-an-int` otherwise, a `:float` array among them), and
+a `:float` array's any numbers (`:not-a-number` otherwise, an `:int`
+array among them), an integer taken as a float, as `+` takes one. An
+`:int` array never mixes with a float, so a result's kind is never a
+surprise.
+
+Reductions, in order, from the first element to the last, so the answer
+is the obvious loop's, each sum and product rounded on its own (a sum
+in another order, or with a product and a sum fused, can differ in the
+last bits):
+
+- `(array/sum a)`: from 0 (or `0.0`), so an empty array's is that.
+  `(array/sum (list->array :float (list 1.0e16 1.0 -1.0e16 1.0)))` is `1.0`:
+  the first 1.0 is lost against 1e16.
+- `(array/dot a b)`: the sum of the products of each pair, of two
+  arrays of one kind and length.
+- `(array/min a)`, `(array/max a)`: the least or greatest element, the
+  first on a tie, as `math/min` and `math/max` take them two at a time;
+  so a `nan` is the answer only if it's first. An empty array faults
+  (`:out-of-range`).
+- `(array/matmul a b n k m)`: `a` as `n` rows of `k` elements times `b`
+  as `k` rows of `m`, an array of `n` rows of `m`, row by row: each
+  element the `array/dot` of a row of `a` and a column of `b`, summed in
+  the same order. Arrays of other lengths fault (`:out-of-range`).
+  `lib/matrix.slight` (`(@include :matrix)`) is matrices on it.
+
+Anything but an array where one goes faults (`:not-an-array`). `eq?`
+compares arrays element by element, an element as `eq?` compares
+numbers, so `-0.0` and `0.0` are alike and a `nan` is like nothing; an
+`:int` array is never `eq?` to a `:float` one, nor to a list or a tuple.
+An array of 4 KB or more (512 elements) is shared, as a big string is
+(The heap). `json/print` writes an array as a JSON array, and
+`sexp/print` as `#float(...)` or `#int(...)`, which `sexp/parse` reads
+back. The prelude has `array/generate`, `array/map` and `array/fold`.
+
+    (let a (list->array :float (list 1 2 3)))
+    (array/mul a 2)                      #float(2.0 4.0 6.0)
+    (array/dot a a)                      14.0
+    (array/generate :int 4 (lambda (i) (* i i)))
+                                         #int(0 1 4 9)
 
 ### Strings
 
@@ -1870,10 +1957,11 @@ order, duplicates kept. `{"a": [1, 2.5], "b": null}` is
   pass through.
 - `(json/print v)`: `v` as compact JSON, on one line, so what it gives
   is NDJSON as it is: `(json/print (list 1 "a" :null))` is
-  `"[1,\"a\",null]"`. A tuple is an array too. A float keeps its point or exponent, and a string
+  `"[1,\"a\",null]"`. A tuple is an array too, and so is an array of
+  numbers (D253). A float keeps its point or exponent, and a string
   escapes `"`, `\` and the control characters. Anything JSON can't
   hold faults (`:not-json`): any other symbol, a pid, a function, `nan`
-  or `inf`, or an object's member that isn't `(key value)` with a string
+  or `inf` (in an array of floats too), or an object's member that isn't `(key value)` with a string
   key.
 
 A file or socket can be read as JSON too: `(:read :json)`, under Files.
@@ -1888,7 +1976,9 @@ forms, and a program can read slight's own source:
   `json/parse`. The text is what the compiler reads: lists, integers and
   floats, strings with the same escapes, symbols and keywords, `#true`
   and `#false`, `'x` as `(quote x)`, `#(...)` as a tuple (which in a
-  program is a pattern, D176), comments, and doc blocks, which it
+  program is a pattern, D176), `#float(...)` and `#int(...)` as arrays
+  of numbers (D253), which hold only numbers, an `#int`'s integers in 63
+  bits (and which a program can't have in its source), comments, and doc blocks, which it
   skips. So, as in a file, a line that starts with `=` and a letter is a
   doc block's, or an error: `(sexp/parse "=x")` is `(:error (:bad-sexp
   1))`, but `" =x"` and `"(=x)"` read `=x` as a name. And `:a` reads as
@@ -1905,8 +1995,9 @@ forms, and a program can read slight's own source:
   A string escapes `"`, `\` and the control characters; a float always
   has digits on both sides of its point (`1.0e+21`); a symbol is its
   name, without a colon; `(:symbol "name")` is `name`; a tuple is
-  `#(...)`. Anything that isn't data faults (`:not-sexp`): a pid, a
-  function, `nan` or `inf`. `pprint` quotes a string the same way.
+  `#(...)`, and an array `#float(...)` or `#int(...)`. Anything that
+  isn't data faults (`:not-sexp`): a pid, a function, `nan` or `inf`
+  (in an array of floats too). `pprint` quotes a string the same way.
 
 A file or socket can be read as s-expressions too: `(:read :sexp)`,
 under Files.
@@ -2013,6 +2104,17 @@ Random numbers (D222):
   there are none.
 - `(rand/shuffle xs)`: the elements of `xs` in an order each of whose
   arrangements is as likely.
+
+Arrays of numbers (D253):
+
+- `(array/generate kind n f)`: an array of kind `:float` or `:int` of
+  `(f i)` for each `i` from 0 to `n - 1`.
+- `(array/map f a)`: `(f x)` for each element, an array of `a`'s kind.
+- `(array/fold acc f a)`: `(f acc x)` for each element, from the left,
+  as `fold/l`.
+
+Each goes through a list, since a builtin in C can't call back into
+slight; the arithmetic under Arrays doesn't.
 
 Processes: `join/any` and `join/all`, under Waiting for a process.
 
@@ -2162,6 +2264,38 @@ Its header (`lib/map.sli`, D248) also gives `map/get-hashed`,
 `map/put-hashed` and `map/delete-hashed`, which take the key's hash, for
 tests; the rest of its functions (`map/bit`, `map/slot`, `map/walk`, ...)
 are its own.
+
+### (@include :matrix)
+
+`lib/matrix.slight`: matrices of numbers on arrays (D253). A matrix is
+`#(rows cols a)`, `a` its elements row by row, an array of either kind;
+a value, as an array is, so a change gives a new matrix.
+
+    (@include :matrix)
+
+    (let m (matrix/from-rows :float (list (list 1 2) (list 3 4))))
+    (matrix/mul m m)                       #(2 2 #float(7.0 10.0 15.0 22.0))
+    (matrix/->rows (matrix/transpose m))   ((1.0 3.0) (2.0 4.0))
+
+- `(matrix/new rows cols a)`: of an array as long as `rows` times
+  `cols`. `(matrix/make kind rows cols x)`: each element `x`.
+  `(matrix/identity kind n)`: `n` by `n`, ones down the diagonal.
+  `(matrix/from-rows kind rows)`: of a list of rows, each a list of
+  numbers, all as long.
+- `(matrix/rows m)`, `(matrix/cols m)`, `(matrix/data m)`: its parts.
+- `(matrix/get m i j)`, `(matrix/set m i j x)`: row `i`, column `j`,
+  from 0. `(matrix/row m i)`, `(matrix/col m j)`: as arrays.
+  `(matrix/->rows m)`: its rows as lists.
+- `(matrix/transpose m)`; `(matrix/add a b)`, `(matrix/sub a b)`, of one
+  shape; `(matrix/scale m x)`, every element times `x`.
+- `(matrix/mul a b)`: `a` times `b`, `a`'s columns as many as `b`'s
+  rows, through `array/matmul`, each element summed in order.
+  `(matrix/apply m v)`: `m` times a column, an array as long as `m` has
+  columns, giving an array as long as it has rows.
+
+A shape that doesn't fit what it's given to raises `(:bad-shape what)`,
+and an index outside the matrix `(:out-of-range (i j))`. Its header,
+`lib/matrix.sli`, has the type `(Matrix N)`.
 
 ### (@include :ds)
 

@@ -6184,6 +6184,28 @@ Stevan agreed all three, every point to settle as recommended.)*
   too, so their inputs agree). D76 is retired for `math/`. Not yet:
   `forest`, `coral` and `waves` as golden tests, which need a model of
   each picture worked out independently.)*
+- *(Arrays built, Oct 2026, as agreed, the details settled in building
+  them: `RT_BOX_FLOATS` and `RT_BOX_INTS`, shared at 4 KB, as strings
+  are; the builtins in `runtime/arrays.c`, named as `tuple/`'s, with
+  `array/kind`, `array?` and `array/concat`; element by element, an
+  operand a number or an array, the operands all their arrays' kind (an
+  `:int` array's integers, a `:float` array's any numbers, as `+` takes
+  them), so a result's kind is the arrays', but `array/div`'s, always
+  `:float` as `/` is; `array/min` and `array/max` as `math/min` and
+  `math/max` taken left to right, so a NaN wins only first, and an
+  empty array faults `:out-of-range`. `:int` is the symbol `:exec`
+  already had, SIGINT's, since a symbol is its name. The prelude's
+  `array/generate` goes through a list, `(list->array kind (map f
+  (range 0 n)))`, rather than a builtin that fills a fresh array that
+  only `lib/` may call, as the proposal had it: no array is ever seen
+  half made, and no builtin needs a rule about who calls it; a builtin
+  can come if a benchmark says the list costs too much. `sexp/parse`
+  reads `#float(...)` and `#int(...)`, numbers only, an `#int`'s in 63
+  bits, into the heap whatever their size. `lib/matrix.slight`, a
+  module, `#(rows cols a)`, raising `(:bad-shape ...)`. The types
+  `(array float)`, `(array int)` and `array`. Golden tests 320 to 323,
+  321's from `t/models/arrays.py`, Python's floats and integers; and
+  the checker's 011 and 012.)*
 
 **D254. D249's step 1: the time of day, files, binary data and a log,
 as builtins.** *(Stevan, Oct 2026, each as Claude recommended, from the

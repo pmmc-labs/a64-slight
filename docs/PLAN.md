@@ -1607,6 +1607,14 @@ float (convert it first, through `array->list`, or a builtin for it if
 that's too slow); and reductions left to right, the obvious loop's
 answer, which a Python loop models for the tests.
 
+**Built** (Oct 2026, golden tests 320 to 323, `t/models/arrays.py`):
+as proposed, but for `array/generate`, which goes through a list rather
+than a builtin only `lib/` may call (D253 says why); with `array/kind`,
+`array?` and `array/concat`, and `array/div` always `:float`. Not yet: a
+builtin to make an `:int` array a `:float` one (through `array->list`
+and `list->array` for now), and unboxed floats in compiled code
+(TYPES.md's step 5), each for when a benchmark asks.
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written

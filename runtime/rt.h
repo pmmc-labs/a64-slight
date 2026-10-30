@@ -27,14 +27,16 @@
 // 0x80, so a character is a byte and the str/ builtins index in one step
 // (D219); one made without it is only slower.
 #define RT_BOX_TYPE_MASK  0x3f
-#define RT_BOX_SHARED     0x40    // a string whose bytes are a shared buffer's, off the heap (D253): the box
-                                  // holds where they are and the buffer, rt_buffer_t
+#define RT_BOX_SHARED     0x40    // a string or array whose data is a shared buffer's, off the heap (D253): the
+                                  // box holds where it is and the buffer, rt_buffer_t
 #define RT_BOX_ASCII      0x80
 #define RT_BOX_SIZE_SHIFT    8
 #define RT_BOX_STRING        1
 #define RT_BOX_FLOAT         2    // size 8: an IEEE double
 #define RT_BOX_CLOSURE       3    // size: how many captured values
 #define RT_BOX_TUPLE         4    // size: how many elements, which follow the header (D169)
+#define RT_BOX_FLOATS        5    // an array of :float (D253): size, how many doubles, which follow it
+#define RT_BOX_INTS          6    // an array of :int: size, how many int64s (each in 63 bits), which follow it
 
 // A closure's words after the header: the code, its arity, its name (a C
 // string, for printing), then the captured values. Offsets are from a
@@ -75,7 +77,8 @@
 #define RT_FAULT_NOT_TUPLE  22    // :not-a-tuple     a tuple operation was given something else
 #define RT_FAULT_NOT_ACTOR  23    // :not-an-actor    a task was sent to, or asked to recv (D243)
 #define RT_FAULT_NOT_TASK   24    // :not-a-task      an actor was joined (D243)
-#define RT_FAULT_COUNT      24
+#define RT_FAULT_NOT_ARRAY  25    // :not-an-array    an array operation was given something else (D253)
+#define RT_FAULT_COUNT      25
 
 // Symbols the runtime makes: every program has them, after #false and
 // #true, in this order (values.ts, RUNTIME_SYMBOLS). The fault kinds
@@ -91,7 +94,7 @@
 // in the order :ctrl :alt :shift. Their symbols follow the fault kinds:
 // RT_KEY_x is symbol RT_SYM_KEYS + x. compiler/tests/values.test.ts reads
 // the names from here.
-#define RT_SYM_KEYS         30    // RT_SYM_FAULTS + RT_FAULT_COUNT
+#define RT_SYM_KEYS         31    // RT_SYM_FAULTS + RT_FAULT_COUNT
 #define RT_KEY_UP            0    // :ArrowUp       the arrows are in the order of
 #define RT_KEY_DOWN          1    // :ArrowDown     their escape sequences, ESC [ A
 #define RT_KEY_RIGHT         2    // :ArrowRight    to ESC [ D
@@ -133,7 +136,7 @@
 // (:sexp f v), and of source (:form f form line) and (:doc f text line). A
 // command also takes (:eof), which closes its input. RT_DEV_x is symbol
 // RT_SYM_DEVICE + x.
-#define RT_SYM_DEVICE       60    // RT_SYM_KEYS + RT_KEY_COUNT
+#define RT_SYM_DEVICE       61    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
 #define RT_DEV_LINE          1    // :line
 #define RT_DEV_EOF           2    // :eof
@@ -154,7 +157,7 @@
 // Why a device failed, from errno: a device's owner ends with
 // (:error (name path)), path being the file's, or the socket's "host:port"
 // (a listener's port). RT_ERR_x is symbol RT_SYM_ERRS + x.
-#define RT_SYM_ERRS         75    // RT_SYM_DEVICE + RT_DEV_COUNT
+#define RT_SYM_ERRS         76    // RT_SYM_DEVICE + RT_DEV_COUNT
 #define RT_ERR_ENOENT        0    // :enoent        no such file or directory
 #define RT_ERR_EACCES        1    // :eacces        permission denied
 #define RT_ERR_EPERM         2    // :eperm         operation not permitted
@@ -189,14 +192,14 @@
 
 // The symbols JSON's values need beyond #true and #false (json.c):
 // RT_JSON_x is symbol RT_SYM_JSON + x.
-#define RT_SYM_JSON        105    // RT_SYM_ERRS + RT_ERR_COUNT
+#define RT_SYM_JSON        106    // RT_SYM_ERRS + RT_ERR_COUNT
 #define RT_JSON_NULL         0    // :null
 #define RT_JSON_OBJECT       1    // :object        (:object (key value) ...)
 #define RT_JSON_COUNT        2
 
 // And those the s-expression reader makes (sexp.c): RT_SEXP_x is symbol
 // RT_SYM_SEXP + x.
-#define RT_SYM_SEXP        107    // RT_SYM_JSON + RT_JSON_COUNT
+#define RT_SYM_SEXP        108    // RT_SYM_JSON + RT_JSON_COUNT
 #define RT_SEXP_SYMBOL       0    // :symbol        (:symbol "name"), a name the program doesn't mention
 #define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
 #define RT_SEXP_COUNT        2
@@ -204,7 +207,7 @@
 // What :system (process.c, D171) is asked and answers with: RT_SYS_x is
 // symbol RT_SYM_SYSTEM + x. A process's :heap and :stack are the fault
 // kinds' symbols, which have those names already.
-#define RT_SYM_SYSTEM      109    // RT_SYM_SEXP + RT_SEXP_COUNT
+#define RT_SYM_SYSTEM      110    // RT_SYM_SEXP + RT_SEXP_COUNT
 #define RT_SYS_PROCESSES     0    // :processes     asked for every process; and how many there are
 #define RT_SYS_PROCESS       1    // :process       asked for one; and (:process s info) for each
 #define RT_SYS_RUNTIME       2    // :runtime       asked for the runtime's counts, and (:runtime s info)
@@ -235,7 +238,7 @@
 // it, name being one of these (the same on macOS and Linux, where some of
 // their numbers aren't), or the number of any other. RT_EXEC_x is symbol
 // RT_SYM_EXEC + x.
-#define RT_SYM_EXEC        132    // RT_SYM_SYSTEM + RT_SYS_COUNT
+#define RT_SYM_EXEC        133    // RT_SYM_SYSTEM + RT_SYS_COUNT
 #define RT_EXEC_EXITED       0    // :exited
 #define RT_EXEC_SIGNAL       1    // :signal
 #define RT_EXEC_HUP          2    // :hup           the signals' names, without SIG
@@ -258,14 +261,14 @@
 // Who's at the other end of a Unix connection (socket/peer, process.c,
 // D235): ((:uid u) (:gid g) (:pid p)), :pid being RT_SYS_PID's. RT_PEER_x
 // is symbol RT_SYM_PEER + x.
-#define RT_SYM_PEER        149    // RT_SYM_EXEC + RT_EXEC_COUNT
+#define RT_SYM_PEER        150    // RT_SYM_EXEC + RT_EXEC_COUNT
 #define RT_PEER_UID          0    // :uid
 #define RT_PEER_GID          1    // :gid
 #define RT_PEER_COUNT        2
 
 // What kind a process is (D243), in :system's info as (:kind k): RT_KIND_x
 // is symbol RT_SYM_KIND + x.
-#define RT_SYM_KIND        151    // RT_SYM_PEER + RT_PEER_COUNT
+#define RT_SYM_KIND        152    // RT_SYM_PEER + RT_PEER_COUNT
 #define RT_KIND_KIND         0    // :kind
 #define RT_KIND_TASK         1    // :task          started with fork, or the root
 #define RT_KIND_ACTOR        2    // :actor         started with spawn or connect
@@ -273,7 +276,7 @@
 
 // What open (process.c, D243) opens for a task: RT_SOURCE_x is symbol
 // RT_SYM_SOURCE + x.
-#define RT_SYM_SOURCE      154    // RT_SYM_KIND + RT_KIND_COUNT
+#define RT_SYM_SOURCE      155    // RT_SYM_KIND + RT_KIND_COUNT
 #define RT_SOURCE_FS_READ    0    // :fs/read
 #define RT_SOURCE_FS_WRITE   1    // :fs/write
 #define RT_SOURCE_FS_APPEND  2    // :fs/append
@@ -285,13 +288,13 @@
 
 // What :system's (:runtime s info) says of the process table (D244):
 // RT_TABLE_x is symbol RT_SYM_TABLE + x.
-#define RT_SYM_TABLE       161    // RT_SYM_SOURCE + RT_SOURCE_COUNT
+#define RT_SYM_TABLE       162    // RT_SYM_SOURCE + RT_SOURCE_COUNT
 #define RT_TABLE_RECORDS     0    // :records       entries in use: running, open, or keeping a value
 #define RT_TABLE_COUNT       1
 
 // What fs/stat (files.c, D254) says of a file, (:kind k) among them:
 // RT_STAT_x is symbol RT_SYM_STAT + x.
-#define RT_SYM_STAT        162    // RT_SYM_TABLE + RT_TABLE_COUNT
+#define RT_SYM_STAT        163    // RT_SYM_TABLE + RT_TABLE_COUNT
 #define RT_STAT_FILE         0    // :file
 #define RT_STAT_DIR          1    // :dir
 #define RT_STAT_LINK         2    // :link          a symbolic link, not followed
@@ -304,7 +307,7 @@
 // bytes/pack's and bytes/unpack's specs (strings.c, D254), and :short, an
 // unpack that hasn't the bytes yet: RT_PACK_x is symbol RT_SYM_PACK + x.
 // The first 18 are numbers, a width and an order each.
-#define RT_SYM_PACK        169    // RT_SYM_STAT + RT_STAT_COUNT
+#define RT_SYM_PACK        170    // RT_SYM_STAT + RT_STAT_COUNT
 #define RT_PACK_U8            0    // :u8
 #define RT_PACK_I8            1    // :i8
 #define RT_PACK_U16BE         2    // :u16be
@@ -329,11 +332,17 @@
 
 // log's levels (json.c, D254), below :error, which is RT_SYM_ERROR:
 // RT_LOG_x is symbol RT_SYM_LOG + x.
-#define RT_SYM_LOG         189    // RT_SYM_PACK + RT_PACK_COUNT
+#define RT_SYM_LOG         190    // RT_SYM_PACK + RT_PACK_COUNT
 #define RT_LOG_DEBUG         0    // :debug
 #define RT_LOG_INFO          1    // :info
 #define RT_LOG_WARN          2    // :warn
 #define RT_LOG_COUNT         3
+
+// An array's kinds (arrays.c, D253): :float is symbol RT_SYM_ARRAY +
+// RT_ARRAY_FLOAT, and :int is SIGINT's name, RT_SYM_EXEC + RT_EXEC_INT.
+#define RT_SYM_ARRAY       193    // RT_SYM_LOG + RT_LOG_COUNT
+#define RT_ARRAY_FLOAT       0    // :float
+#define RT_ARRAY_COUNT       1
 
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
@@ -540,6 +549,21 @@ static inline const char *rt_string_bytes(rt_value_t v) {
     return box[0] & RT_BOX_SHARED ? (const char *)box[1] : (const char *)(box + 1);
 }
 static inline uint64_t    rt_tuple_len(rt_value_t v)    { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
+
+// Arrays of numbers (arrays.c, D253): their elements follow the header,
+// or, at RT_SHARED_MIN bytes or more, are a shared buffer's, as a big
+// string's bytes are.
+static inline int rt_is_array(rt_value_t v) { return rt_is_box(v, RT_BOX_FLOATS) || rt_is_box(v, RT_BOX_INTS); }
+static inline uint64_t rt_array_len(rt_value_t v) { return rt_box(v)[0] >> RT_BOX_SIZE_SHIFT; }
+static inline const uint64_t *rt_array_data(rt_value_t v) {
+    const uint64_t *box = rt_box(v);
+    return box[0] & RT_BOX_SHARED ? (const uint64_t *)box[1] : box + 1;
+}
+static inline double rt_array_float(rt_value_t v, uint64_t i) {
+    double d;
+    __builtin_memcpy(&d, rt_array_data(v) + i, sizeof d);
+    return d;
+}
 static inline rt_value_t  rt_tuple_get(rt_value_t v, uint64_t i) { return rt_box(v)[1 + i]; }
 
 // The values a box holds, which copying and the collector go into: a
@@ -890,6 +914,12 @@ extern rt_proc_t *rt_current;
 // `site` when the heap is full.
 void *rt_alloc(size_t bytes, const char *site);
 rt_value_t rt_new_shared_string(const char *bytes, size_t len, const char *site);   // process.c (D253)
+// A shared box of header (the box's type and size, without RT_BOX_SHARED)
+// for len bytes, its data's address in *data (process.c, D253).
+rt_value_t rt_new_shared(uint64_t header, size_t len, char **data, const char *site);
+// A fresh array of type (RT_BOX_FLOATS or RT_BOX_INTS) of n elements, to
+// be filled through rt_array_data (arrays.c).
+rt_value_t rt_new_array(uint64_t type, uint64_t n, const char *site);
 
 // p, from malloc, calloc or realloc; if it's NULL, the program ends, with
 // exit status 2, since the runtime can't go on without memory.
@@ -951,6 +981,9 @@ static inline rt_value_t rt_work_pop(rt_work_t *w) {
 // quotes (str and tty/write); strings inside lists are always quoted, and
 // escaped as rt_quote does.
 void rt_render(rt_buf_t *b, rt_value_t v, int raw);
+
+// Appends d as pprint shows a float: the shortest that reads back as it.
+void rt_render_float(rt_buf_t *b, double d);
 
 // Appends len bytes as a string the reader takes back: in double quotes,
 // with ", \ and the control characters escaped, so it stays on one line
@@ -1047,11 +1080,15 @@ int  rt_json_build(const char *text, size_t len, rt_build_alloc_t alloc, void *c
 // sexp/parse reads). rt_sexp_reset keeps those two, and where it is in a
 // line.
 typedef struct rt_sexp {
-    unsigned char *quoted;      // for each list open, and the top level: whether a ' waits there
+    unsigned char *quoted;      // for each list open, and the top level: whether a ' waits there, and
+                                // whether it's an array's, of numbers only (sexp.c's Q_)
     size_t         depth, cap;
     int            state, num, hex, k;
     uint32_t       code;        // a \u{...} escape's, so far
-    const char    *word;        // what's left of #true or #false
+    const char    *word;        // what's left of #true, #false, #float or #int
+    int            array;       // which of the last two it is, or 0
+    uint64_t       mag;         // a number's digits so far, for an #int's 63 bits
+    int            neg;
     int            docs, closed;
     int            mid_line;    // the last byte taken wasn't a newline
     size_t         seen, lines; // bytes and newlines taken since the reset

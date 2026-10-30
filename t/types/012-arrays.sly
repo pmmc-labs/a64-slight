@@ -1,0 +1,8 @@
+// Arrays of numbers (D253) in the C-style syntax: array<float> in a
+// signature, and the warnings saying it the same way.
+fun mean(a : array<float>) : float { array::sum(a) / array::len(a) }
+
+fun ints() { array::make(:int, 3, 0) }
+
+fun bad() { mean(ints()) }
+fun worse() { str::len(array::get(ints(), 0)) }

@@ -35,6 +35,7 @@ export type Ty =
     | { readonly k: 'list'; readonly of: Ty }
     | { readonly k: 'cons'; readonly head: Ty; readonly tail: Ty }
     | { readonly k: 'tuple'; readonly of: readonly Ty[] | null }      // null: any tuple
+    | { readonly k: 'array'; readonly of: Ty }                       // of numbers (D253): int, float, or num for either kind
     | { readonly k: 'fun'; readonly params: readonly Ty[] | null; readonly result: Ty }
     | { readonly k: 'task'; readonly of: Ty }
     | { readonly k: 'actor'; readonly msg: Ty }
@@ -59,6 +60,7 @@ export const listOf    = (of: Ty): Ty => (of.k === 'never' ? NIL_T : { k: 'list'
 export const consOf    = (head: Ty, tail: Ty): Ty =>
     (head.k === 'never' || tail.k === 'never' || tail.k === 'nil' && false) ? NEVER : { k: 'cons', head, tail };
 export const tupleOf   = (of: readonly Ty[] | null): Ty => (of !== null && of.some((t) => t.k === 'never') ? NEVER : { k: 'tuple', of });
+export const arrayOf   = (of: Ty): Ty => (of.k === 'never' ? NEVER : { k: 'array', of });
 export const funOf     = (params: readonly Ty[] | null, result: Ty): Ty => ({ k: 'fun', params, result });
 export const taskOf    = (of: Ty): Ty => ({ k: 'task', of });
 export const actorOf   = (msg: Ty): Ty => ({ k: 'actor', msg });
@@ -103,6 +105,7 @@ export function subst(t: Ty, vars: readonly (readonly [string, Ty])[]): Ty {
         case 'list':    return listOf(subst(t.of, vars));
         case 'cons':    return consOf(subst(t.head, vars), subst(t.tail, vars));
         case 'tuple':   return tupleOf(t.of === null ? null : t.of.map((x) => subst(x, vars)));
+        case 'array':   return arrayOf(subst(t.of, vars));
         case 'fun':     return funOf(t.params === null ? null : t.params.map((x) => subst(x, vars)), subst(t.result, vars));
         case 'task':    return taskOf(subst(t.of, vars));
         case 'actor':   return actorOf(subst(t.msg, vars));
@@ -121,6 +124,7 @@ export function same(a: Ty, b: Ty): boolean {
         case 'lit':     return a.name === (b as typeof a).name;
         case 'var':     return a.name === (b as typeof a).name;
         case 'list':    return same(a.of, (b as typeof a).of);
+        case 'array':   return same(a.of, (b as typeof a).of);
         case 'cons':    return same(a.head, (b as typeof a).head) && same(a.tail, (b as typeof a).tail);
         case 'task':    return same(a.of, (b as typeof a).of);
         case 'actor':   return same(a.msg, (b as typeof a).msg);
@@ -208,6 +212,8 @@ export function meet(a: Ty, b: Ty, defs: Defs, depth = 0): Ty {
             if (b.of === null) return a;
             if (a.of.length !== b.of.length) return NEVER;
             return tupleOf(a.of.map((x, i) => meet(x, b.of![i]!, defs, depth + 1)));
+        case 'array':
+            return b.k === 'array' ? arrayOf(meet(a.of, b.of, defs, depth + 1)) : NEVER;
         case 'fun':
             if (b.k !== 'fun') return NEVER;
             if (a.params !== null && b.params !== null && a.params.length !== b.params.length) return NEVER;
@@ -262,6 +268,8 @@ export function fits(a: Ty, b: Ty, defs: Defs, depth = 0): boolean {
             if (b.k !== 'tuple') return false;
             if (b.of === null) return true;
             return a.of !== null && a.of.length === b.of.length && a.of.every((x, i) => fits(x, b.of![i]!, defs, depth + 1));
+        case 'array':
+            return b.k === 'array' && fits(a.of, b.of, defs, depth + 1);
         case 'fun':
             if (b.k !== 'fun') return false;
             if (b.params !== null && a.params !== null) {
@@ -424,7 +432,7 @@ export function datumType(d: Sexp): Ty {
 // The names a type can be, other than an alias's or a type variable's.
 const BASE: Readonly<Record<string, Ty>> = {
     any: ANY, never: NEVER, int: INT, float: FLOAT, num: NUM, str: STR, sym: SYM, bool: BOOL,
-    nil: NIL_T, pid: PID, tuple: TUPLE_ANY, fun: FUN_ANY,
+    nil: NIL_T, pid: PID, tuple: TUPLE_ANY, fun: FUN_ANY, array: arrayOf(NUM),
 };
 
 export const BASE_TYPES: readonly string[] = Object.keys(BASE);
@@ -433,6 +441,7 @@ export const BASE_TYPES: readonly string[] = Object.keys(BASE);
 //   int float num str sym bool nil any never pid tuple fun
 //   :ok #true #false ()             one value
 //   (list T) (shape A B & T) (tuple A B) (fun (A B) C) (or A B)
+//   array (array int) (array float)  an array of numbers, of either kind or one
 //   (task T) (actor M) (address M)
 //   (:tag A B & T)                  a tagged list
 //   Name (Name T ...)               an alias
@@ -467,6 +476,7 @@ export function readType(x: Sexp, vars: readonly string[], defs: Defs): Ty {
             };
             switch (head!.name) {
                 case 'list':    return listOf(one());
+                case 'array':   return arrayOf(one());
                 case 'task':    return taskOf(one());
                 case 'actor':   return actorOf(one());
                 case 'address': return addressOf(one());
@@ -533,6 +543,9 @@ export function showType(t: Ty, sly: boolean): string {
         case 'task':    return sly ? `task<${s(t.of)}>` : `(task ${s(t.of)})`;
         case 'actor':   return sly ? `actor<${s(t.msg)}>` : `(actor ${s(t.msg)})`;
         case 'address': return sly ? `address<${s(t.msg)}>` : `(address ${s(t.msg)})`;
+        case 'array':
+            if (same(t.of, NUM)) return 'array';
+            return sly ? `array<${s(t.of)}>` : `(array ${s(t.of)})`;
         case 'tuple':
             if (t.of === null) return 'tuple';
             return sly ? `#(${t.of.map(s).join(', ')})` : `(tuple ${t.of.map(s).join(' ')})`;
