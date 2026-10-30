@@ -2007,9 +2007,9 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
 
 
 // Takes p, which has ended, out of its island; its caller frees it. Not
-// here: from a function that makes no call of its own, a tail jump into
-// free costs the M2 a pipeline flush a process, 12 ns of spawn's (D256,
-// results/2026-10-30-spawn-profile-m2-max.md).
+// here: as this function's last act, with no call before it, a tail jump
+// into free cost the M2 a pipeline flush a process, 10 ns of spawn's
+// (bench/results/2026-10-30-spawn-profile-m2-max.md).
 static void retire(rt_proc_t *p) {
     island_state_t *s = p->isle;
     s->retired_calls += calls_of(p);

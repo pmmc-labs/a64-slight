@@ -210,9 +210,18 @@ Each run's full tables are in `bench/results/`. What they say:
   `retire` and spreads over everything else. So it's a latency that
   surfaces wherever there's room, not one load. Finding it needs the
   core's counters (L1D misses, load and memory-ordering stalls, under
-  `sudo`), or `20d78b3` taken apart change by change. Left there for
-  now: 11 per cent on one benchmark, with ping-pong, thread-ring and
-  payload as they were.
+  `sudo`), or `20d78b3` taken apart change by change.
+- **Found, with the core's counters** (the same report, kperf through
+  an injected dylib, as root): no more cache misses, but 0.95 pipeline
+  flushes a process where 24 Oct had 0.08, of the M2's "other" kind,
+  neither a mispredict nor a memory-order violation, and map stalls
+  around them. Counted at each commit, they came with `ebb2312`, which
+  left `retire` a function that makes no call and ends in a tail jump
+  into `free`; any call in it took the flush away. `39af1e5` has
+  `retire`'s callers free the process, an ordinary call: 0.18 flushes,
+  and `spawn` 129.8 ms (hyperfine, n = 1M) where it was 140.1, against
+  24 Oct's 126.0, 1 per cent a process. Which mechanism in the core
+  flushes is still unknown.
 
 ### The M2 Max, 30 Oct, 17:10: no thread-locals, and a chunk's header
 
