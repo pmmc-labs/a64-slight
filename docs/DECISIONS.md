@@ -6173,6 +6173,17 @@ Stevan agreed all three, every point to settle as recommended.)*
   tests), `:float` arrays alone to start, SRFI 4's `#f64(...)`, and
   pairwise summation (more accurate, but needing a model of its
   blocking).
+- *(The libm built, Oct 2026, once Stevan had opened `gitlab.inria.fr`
+  to the environment: CORE-MATH at b5a3f7ff, its 21 binary64 functions
+  that `math/` needs, every one of them there, so none from musl,
+  vendored unmodified in `vendor/core-math/` with its licence and a
+  `VENDOR` file, the first vendored code (D152), compiled with the
+  runtime, its files in the runtime cache's hash. Golden test 319
+  compares each exactly with mpmath, at 300 bits, rounded to the
+  nearest double (`t/models/math.py`, which writes the test's program
+  too, so their inputs agree). D76 is retired for `math/`. Not yet:
+  `forest`, `coral` and `waves` as golden tests, which need a model of
+  each picture worked out independently.)*
 
 **D254. D249's step 1: the time of day, files, binary data and a log,
 as builtins.** *(Stevan, Oct 2026, each as Claude recommended, from the

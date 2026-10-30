@@ -1,0 +1,29 @@
+; math/ through CORE-MATH (D253): each function on inputs across its
+; domain, D76's tan 1.0 among them, and sin of 1e22, whose argument
+; reduction is hard, compared exactly: what's printed is the double
+; nearest the exact result, the same on every machine. Expected output,
+; and this program, from t/models/math.py, on mpmath.
+
+(pprint (list :sin (math/sin 0.5) (math/sin 1.0) (math/sin 3.0) (math/sin 100.0) (math/sin 1.0e22) (math/sin -2.5) (math/sin 1.0e-8)))
+(pprint (list :cos (math/cos 0.5) (math/cos 1.0) (math/cos 3.0) (math/cos 100.0) (math/cos 1.0e22) (math/cos -2.5) (math/cos 1.0e-8)))
+(pprint (list :tan (math/tan 0.5) (math/tan 1.0) (math/tan 3.0) (math/tan 100.0) (math/tan 1.0e22) (math/tan -2.5) (math/tan 1.0e-8)))
+(pprint (list :asin (math/asin 0.5) (math/asin -0.3) (math/asin 0.99) (math/asin 1.0e-9)))
+(pprint (list :acos (math/acos 0.5) (math/acos -0.3) (math/acos 0.99) (math/acos 1.0e-9)))
+(pprint (list :atan (math/atan 0.5) (math/atan -3.0) (math/atan 1.0e10) (math/atan 1.0e-9)))
+(pprint (list :sinh (math/sinh 0.5) (math/sinh -2.0) (math/sinh 20.0) (math/sinh 1.0e-9)))
+(pprint (list :cosh (math/cosh 0.5) (math/cosh -2.0) (math/cosh 20.0) (math/cosh 1.0e-9)))
+(pprint (list :tanh (math/tanh 0.5) (math/tanh -2.0) (math/tanh 20.0) (math/tanh 1.0e-9)))
+(pprint (list :asinh (math/asinh 0.5) (math/asinh -2.0) (math/asinh 1.0e10)))
+(pprint (list :acosh (math/acosh 1.5) (math/acosh 2.0) (math/acosh 1.0e10)))
+(pprint (list :atanh (math/atanh 0.5) (math/atanh -0.9) (math/atanh 1.0e-9)))
+(pprint (list :exp (math/exp 1.0) (math/exp -1.0) (math/exp 0.5) (math/exp 700.0) (math/exp -708.0) (math/exp 1.0e-10)))
+(pprint (list :expm1 (math/expm1 1.0e-10) (math/expm1 -0.5) (math/expm1 2.0)))
+(pprint (list :log (math/log 10.0) (math/log 0.5) (math/log 2.0) (math/log 1.0000000000000002) (math/log 1.0e300)))
+(pprint (list :log2 (math/log2 10.0) (math/log2 3.0) (math/log2 0.1)))
+(pprint (list :log10 (math/log10 2.0) (math/log10 3.0) (math/log10 1.0e-5)))
+(pprint (list :log1p (math/log1p 1.0e-10) (math/log1p 0.5) (math/log1p -0.5)))
+(pprint (list :cbrt (math/cbrt -27.0) (math/cbrt 2.0) (math/cbrt 1.0e-300)))
+(pprint (list :pow (math/pow 2.0 0.5) (math/pow 1.0000001 10000000.0) (math/pow 10.0 -3.0) (math/pow 0.5 100.5) (math/pow 3.0 0.333)))
+(pprint (list :atan2 (math/atan2 1.0 2.0) (math/atan2 -1.0 -2.0) (math/atan2 1.0 -2.0) (math/atan2 1.0e-10 1.0)))
+(pprint (list :hypot (math/hypot 3.0 4.0) (math/hypot 1.0e300 1.0e300) (math/hypot 1.0e-300 1.0e-300) (math/hypot 1.0 1.0e-10)))
+:done

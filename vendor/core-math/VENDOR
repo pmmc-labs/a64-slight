@@ -1,0 +1,23 @@
+CORE-MATH: correctly rounded mathematical functions (D253)
+
+Upstream:  https://gitlab.inria.fr/core-math/core-math
+Commit:    b5a3f7ffb9315afae57a309623c3c5c226ec8bec (2026-10-30)
+Fetched:   2026-10-30
+Licence:   MIT (LICENSE, beside this file)
+
+Taken, unmodified, at their upstream paths: the binary64 functions that
+math/ needs from a libm, each src/binary64/NAME/NAME.c and the headers it
+includes, and what those include (atan2's tint.h, log's and log10's dint.h, pow's pow.h, dint.h and qint.h): sin cos
+tan asin acos atan atan2 sinh cosh tanh asinh acosh atanh exp expm1 log
+log2 log10 log1p pow cbrt hypot. Each gives cr_NAME, the double nearest
+the exact result, on every machine (sqrt, floor, ceil, round and trunc are
+exact already, and stay the C library's).
+
+What it needs of the C library is exact too: fma, sqrt, floor, round,
+roundeven, fmin, fmax, and the fenv functions, with which it leaves the
+rounding mode and exception flags as IEEE says. pow's printf and exit are
+its assertion for a case its proofs rule out.
+
+To update: clone upstream, copy the same files over these, put the commit
+here, and run make test, whose golden tests compare math/ exactly with
+mpmath (t/models/math.py). A function needs no security fix (D251).

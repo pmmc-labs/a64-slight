@@ -1510,10 +1510,12 @@ keeps it in `Math` (D221).
   domain they give `nan` or `inf` rather than faulting: `(math/sqrt -1)`
   is `nan`, and `(math/log 0)` is `-inf`. `math/expm1` and
   `math/log1p` keep their precision near 0, where `(math/exp x)` less
-  one, or `(math/log (+ 1 x))`, lose it. Beside `math/sqrt`, which is
-  exact everywhere, each is only as good as the platform's C library,
-  which can be a bit off in the last place, and so differ between
-  machines (D76).
+  one, or `(math/log (+ 1 x))`, lose it. Each is correctly rounded, the
+  float nearest the exact result, so the same on every machine: they're
+  CORE-MATH's (`vendor/core-math`, D253), not the C library's, which
+  can be a bit off in the last place and differ between machines (D76).
+  So a run that computes with them replays on any machine, not only
+  the one that recorded it, and `math/pow` on two floats too.
 - `(math/nan? x)`: whether `x` is the float `nan`; anything else is
   `#false`. `nan` is the one value that isn't `==` to itself.
 - `math/PI`, `math/E`: 3.141592653589793 and 2.718281828459045.

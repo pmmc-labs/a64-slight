@@ -1456,11 +1456,13 @@ language changes.
 it lacks; linked into every program, as the system's libm is now, since
 it's small and the runtime's own C calls it.
 
-**Begun** (Oct 2026): the runtime is compiled with `-ffp-contract=off`
-(`bin/slightc.ts`'s `CFLAGS`). CORE-MATH itself waits: its source is at
-`gitlab.inria.fr`, which this cloud environment's network policy
-refuses, and it has no mirror on GitHub; the host is to be allowed in
-the environment's settings, or the source vendored from the Mac.
+**Built** (Oct 2026): the runtime compiled with `-ffp-contract=off`
+(`bin/slightc.ts`'s `CFLAGS`), and CORE-MATH's 21 functions vendored in
+`vendor/core-math/` (its `VENDOR` file says from where and how to
+update them), `runtime/numbers.c` calling them; golden test 319, each
+compared exactly with mpmath (`t/models/math.py`). Still to do: `forest`,
+`coral` and `waves` as golden tests, each needing a model of its
+picture.
 
 #### 2. Shared buffers: big immutable data off the heap
 

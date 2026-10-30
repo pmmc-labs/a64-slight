@@ -927,6 +927,15 @@ generation (copying it is the code there was); and a pool of nurseries
 that waiting processes give back, as they do their stacks (later, if
 processes that allocate and then wait turn out to hold too much).
 
+### The libm (D253)
+
+`math/`'s functions are CORE-MATH's, vendored (`vendor/core-math/`, the
+first vendored code, D152) and compiled with the runtime: each result is
+the double nearest the exact one, so the same on every machine, and the
+runtime is compiled with `-ffp-contract=off`, so clang fuses no `a * b +
+c` into one rounding on AArch64 that x86-64 would round twice. A run that
+computes with floats replays on any machine.
+
 ### Shared buffers (D253)
 
 A string of 4 KB or more (`RT_SHARED_MIN`) is an `rt_buffer_t` off the

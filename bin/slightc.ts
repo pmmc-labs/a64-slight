@@ -36,7 +36,7 @@
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { accessSync, constants, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, realpathSync,
-         renameSync, rmSync, writeFileSync } from 'node:fs';
+         renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { basename, join } from 'node:path';
 
@@ -50,6 +50,7 @@ import type { Target } from '../compiler/src/target.ts';
 import { X86_64 } from '../compiler/src/x86_64.ts';
 
 const RUNTIME_DIR = fileURLToPath(new URL('../runtime/', import.meta.url));
+const VENDOR_DIR  = fileURLToPath(new URL('../vendor/', import.meta.url));
 const LIB_DIR     = fileURLToPath(new URL('../lib', import.meta.url));
 const CACHE_DIR   = fileURLToPath(new URL('../build/runtime/', import.meta.url));
 // -ffp-contract=off: clang may otherwise fuse a * b + c into one rounding
@@ -65,8 +66,16 @@ const ARCHES: Readonly<Record<string, Arch>> = {
     x86_64:  { target: X86_64, asm: 'rt_asm_x86_64.S', node: 'x64', clang: 'x86_64' },
 };
 
-const runtimeSources = (arch: Arch): readonly string[] =>
-    ['rt.c', 'process.c', 'strings.c', 'numbers.c', 'tuples.c', 'tty.c', 'json.c', 'sexp.c', 'dns.c', 'files.c', 'crypto.c', 'replay.c', 'unicode.c', arch.asm].map((f) => join(RUNTIME_DIR, f));
+// What's vendored (D152, D251), compiled with the runtime and linked into
+// every program: CORE-MATH's functions that math/ calls (D253).
+const MATH = ['sin', 'cos', 'tan', 'asin', 'acos', 'atan', 'atan2', 'sinh', 'cosh', 'tanh', 'asinh', 'acosh', 'atanh',
+              'exp', 'expm1', 'log', 'log2', 'log10', 'log1p', 'pow', 'cbrt', 'hypot'];
+const vendorSources = (): readonly string[] => MATH.map((f) => join(VENDOR_DIR, 'core-math', 'src', 'binary64', f, `${f}.c`));
+
+const runtimeSources = (arch: Arch): readonly string[] => [
+    ...['rt.c', 'process.c', 'strings.c', 'numbers.c', 'tuples.c', 'tty.c', 'json.c', 'sexp.c', 'dns.c', 'files.c', 'crypto.c', 'replay.c', 'unicode.c', arch.asm].map((f) => join(RUNTIME_DIR, f)),
+    ...vendorSources(),
+];
 
 function usage(message: string): never {
     process.stderr.write(`slightc: ${message}\nusage: node bin/slightc.ts [-o out] [-S] [--target aarch64|x86_64] [--strict] file.slight ...\n`
@@ -142,7 +151,7 @@ function run(command: readonly string[], cwd?: string): boolean {
 
 // The runtime's object files, compiled once and kept in build/runtime/, in
 // a directory named for a hash of the compiler command, the flags and
-// every file in runtime/: an edit to any of them, or another compiler,
+// every file in runtime/ and vendor/: an edit to any of them, or another compiler,
 // gets a build of its own, so nothing goes stale (D150). Compiles that
 // start at once (the golden tests run in parallel) may each build it: each
 // builds in a directory of its own and renames it into place, and the
@@ -150,6 +159,10 @@ function run(command: readonly string[], cwd?: string): boolean {
 function runtimeObjects(arch: Arch, compiler: Compiler): readonly string[] {
     const hash = createHash('sha256').update(JSON.stringify([compiler.cc, CFLAGS]));
     for (const f of readdirSync(RUNTIME_DIR).sort()) hash.update(f).update(readFileSync(join(RUNTIME_DIR, f)));
+    for (const f of readdirSync(VENDOR_DIR, { recursive: true }).map(String).sort()) {
+        const path = join(VENDOR_DIR, f);
+        if (statSync(path).isFile()) hash.update(f).update(readFileSync(path));
+    }
     const dir     = join(CACHE_DIR, `${arch.clang}-${hash.digest('hex').slice(0, 16)}`);
     const sources = runtimeSources(arch);
     const objects = sources.map((src) => join(dir, basename(src).replace(/\.[cS]$/, '.o')));
