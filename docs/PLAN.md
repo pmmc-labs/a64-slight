@@ -656,7 +656,8 @@ them:
   (D113), with `poll`, `kqueue` or `epoll`: `kqueue` on macOS and
   `epoll` on Linux, as tokio waits (D224), for everything `select()`
   waits on now, sockets, files, commands and the terminal; an HTTP
-  server meets the limit first.
+  server meets the limit first. Waits till a program needs it: slight
+  leans to simulation, not servers (D257).
 - Dropping exit records, and bounded mailboxes (D88).
 - Optimizations, when profiling asks for them: the heap pointer in a
   register (D57), captured values read from the closure (D79), denser

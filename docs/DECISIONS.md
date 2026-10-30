@@ -6386,3 +6386,19 @@ on placement, each point as below.)*
   times slower, as Go's and Rust's are, its two allocations a crossing
   left for when a program needs it; `examples/reaction.slight`; the
   guide's "Use every core".)*
+
+**D257. Simulation before servers.** *(Stevan, Oct 2026.)* With islands
+built, a back-of-the-napkin capacity for a 64-core machine with 2 TB:
+about 2.5 to 3 billion waiting actors (600 bytes each), 250 million
+holding a little state, a few hundred million messages a second within
+islands, and about 40 times one core's computation; but no more than
+about 1,000 open sockets, files and commands in the whole program, since
+the runtime waits with `select()`, which refuses a descriptor of 1024 or
+more (D113). For a server that's the ceiling, long before cores or
+memory. Stevan: "We can wait till we need epoll etc. the simulation
+angle is more appealing than the server. Everyone makes a server." So
+`epoll` and `kqueue` wait in PLAN.md's later work till a program needs
+them, and what slight builds next for scale is for simulations: many
+actors, numbers in bulk, more than one core, the same answer on any
+machine. Not rejected: servers stay possible, at the size `select()`
+holds.
