@@ -1836,6 +1836,28 @@ slight as the coordinator of real tools' runs, many short trajectories
 run as commands and chosen adaptively, as Folding@home's Markov state
 models are.
 
+**A second example: a town's talk, after Talk of the Town.** Also from
+Stevan's friend. James Ryan and colleagues' Talk of the Town (UC Santa
+Cruz, about 2016) simulates a small town over a century: characters
+born, married, employed, befriended and estranged, each holding beliefs
+about the others that spread in conversation, get distorted, fade from
+memory, and can be simply wrong; its player solves a mystery from what
+the townsfolk believe, not from what's true. In slight a character is
+an actor, its beliefs its own state (a persistent map, `lib/map.slight`);
+a conversation is messages, and a message is a copy, which is just what
+a belief told needs: the hearer's copy is theirs to misremember, the
+teller's untouched. Days and years pass on the virtual clock, `after`
+saying who meets whom; a town's history replays exactly, and a branched
+replay (below) asks what if a rumour never started. Neighbourhoods on
+islands, most talk local and travel between them crossing, the time a
+journey takes being (b)'s lookahead; at some 600 bytes an idle actor,
+millions of townsfolk, not hundreds. Its interest is in a run's
+history, not a final number, and its messages carry structured data, so
+it tests what lattice folding doesn't. A cousin: Stanford's Generative
+Agents (Smallville, 2023), whose characters talk through a language
+model, as a few could here through `lib/agent.slight`, on a town run by
+rules.
+
 Measured alongside, for whoever picks this up: a message crossing
 islands is one allocation now, and `fan-in-mc` four times faster on the
 cloud machine; a ping-pong whose halves are on neighbouring islands
