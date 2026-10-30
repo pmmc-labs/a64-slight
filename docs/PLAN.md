@@ -1615,6 +1615,173 @@ builtin to make an `:int` array a `:float` one (through `array->list`
 and `list->array` for now), and unboxed floats in compiled code
 (TYPES.md's step 5), each for when a benchmark asks.
 
+### More than one core (proposed, D249's step 7, Oct 2026)
+
+**The problem.** One OS thread runs every process, so a server or a
+simulation uses one core of the M2 Max's twelve. The airline's
+what-ifs get more by running copies of the program, a share each
+(`--shard k/n`, D218), which is the workaround this would make
+unnecessary. `bench/` says what's at stake: Go and Erlang on every core
+against one (D237's table), and `parallel-fib`, `fan-in` and `spawn`,
+which slight runs on one.
+
+The design suits it unusually well (BACKGROUND.md, "Multiple cores"): a
+heap per process, nothing shared that changes, messages copied, and a
+collector that only ever touches its own process's heap, so there's no
+stop-the-world pause to arrange. Compiled code holds its process in
+`x28` (`r15`) and preempts itself by counting reductions, so it never
+touches shared state, and needs no change. Everything to synchronize is
+in `process.c`.
+
+**What has to hold.** What a program means doesn't change: messages
+from one process to another arrive in the order they were sent, and
+nothing else is promised about order, as now. What changes is that a
+run on N cores isn't one fixed order any more, so the question is
+what becomes of replay, `SLIGHT_SCHED` and the golden tests.
+
+#### Point 1: determinism
+
+- **(a) One core when a run must repeat; N otherwise.** Recording,
+  replaying and `SLIGHT_SCHED` run on one core, exactly as now, the
+  same code; a run on N cores isn't recorded and can't be replayed. A
+  program whose result doesn't depend on the order of its messages
+  (tasks forked and joined: `parallel-fib`, the airline's what-ifs, a
+  map over a list in tasks) gives the same result on any number of
+  cores, and the tests check that; one that races finds its race on one
+  core with `SLIGHT_SCHED`, as now. The virtual clock works on N cores
+  (time moves when every core is idle and no device is ready), the
+  order of what happens at one instant being the cores'.
+- **(b) Deterministic rounds** (bulk-synchronous, as Kendo and DThreads
+  make threads repeatable): each core runs its own processes for a
+  round of reductions; a message to another core's process waits for
+  the round's end, when all are delivered in a fixed order (by sender,
+  then send); placement is a function of the pid. A run is then the
+  same on N cores every time, and replays, for the same N. The costs: a
+  barrier every round, which every core waits at for the slowest; a
+  message across cores waiting up to a round, which a server's latency
+  feels (D238 measures it); no stealing, since that depends on timing;
+  and devices and timers let in only at barriers. Research, more than
+  engineering.
+- **(c) Record the interleaving:** every mailbox's order of arrival, and
+  the pids in the order they were made, and in a replay make each core
+  wait for the next recorded event. The record grows with the traffic,
+  and a replay runs at the speed of its slowest wait.
+
+**Recommendation: (a).** It keeps today's deterministic modes exactly
+as they are, adds a mode that isn't, and says so; most of what numbers
+in bulk wants on N cores, independent work forked and joined, is
+deterministic by construction anyway. (b) is the one that would make
+"replayable on N cores" true, and could come after (a) if it's wanted:
+(a)'s locks and queues are what it would build on.
+
+#### Point 2: the scheduler
+
+- **(a) A thread per core, each with its own run queue, an idle one
+  taking half of another's** (the BEAM's and Go's design). A fork or a
+  spawn goes on its parent's core's queue, near what it was copied
+  from; stealing spreads them. An idle thread sleeps on a condition
+  variable, woken by an enqueue on a core with none awake.
+- **(b) One shared run queue, under a lock:** simplest, but every
+  enqueue and dequeue contends, which `ping-pong` and `fan-in` would
+  feel at once.
+- **(c) A fixed share of pids per core, no stealing:** simple, and
+  balances badly when the work isn't even.
+
+**Recommendation: (a).** One core is (a) with nothing to steal from.
+
+#### Point 3: devices and timers
+
+- **(a) A thread of their own:** today's `events()` and `idle()`, the
+  `select()` over sockets, commands, keys and signals, and the timers,
+  move to an I/O thread, nearly unchanged, which makes processes ready
+  on the schedulers' queues. A process that opens a device or sets a
+  timer hands it over under a lock, and a pipe wakes the I/O thread
+  from its `select()`.
+- **(b) Whichever scheduler is idle polls** (the BEAM's check-io): no
+  extra thread, but every scheduler can be in `select()`, which needs
+  more care than it saves.
+
+**Recommendation: (a).**
+
+#### Point 4: what's shared, and how
+
+- **Mailboxes:** a queue many can push to and one pops (Vyukov's, a
+  compare-and-swap a send), and the process's state changed by
+  compare-and-swap, so a message arriving as its receiver decides to
+  wait wakes it exactly once.
+- **The process table:** its page array allocated once, big enough
+  never to move (its pages already don't), the pid counter atomic, and
+  an entry's fields (an exit record, a page's count of live entries)
+  under a lock per page.
+- **Watches** (join, read, monitor, `join/race`): a lock per process,
+  taken by whoever adds a watch and by the process as it ends, so an
+  end is never missed or told twice.
+- **`kill`:** of a process running on another core, a flag it sees the
+  next time it's back in its scheduler, within a quantum (1,000
+  reductions); no signal between cores.
+- **Shared buffers' counts** (D253): atomic.
+- **Per core:** the stack pool, `rt_current` (thread-local), the copy's
+  scratch, `SLIGHT_GC_STRESS`'s count.
+- **Output:** `pprint`, `tty/write` and `log` each write a whole line
+  or value at once, under a lock, so lines from two cores don't mix.
+- **The end:** the program ends, or is deadlocked, when every core is
+  idle with nothing queued and the I/O thread has nothing that could
+  make a process ready: today's test, counted across cores.
+- **`:system`:** each process's state as of when it was looked at, no
+  longer one instant's picture of all of them.
+
+On AArch64 every one of these needs the right ordering (acquire and
+release, C11's atomics; compiled code needs none); x86-64's stronger
+ordering hides mistakes that the M2 Max would show, so the Mac is where
+it's proven.
+
+#### Point 5: how many cores by default
+
+- **(a) One, unless `SLIGHT_CORES` says** (a number, or `all`): a
+  program behaves as it does today until it asks; repeatable runs stay
+  the default.
+- **(b) Every core, as Go and Erlang:** faster by default, and a
+  program whose output depends on order prints differently from run to
+  run until someone sets `SLIGHT_CORES=1`.
+
+**Recommendation: (a),** to revisit when there's a release to make a
+default for.
+
+#### What it costs, and how it's checked
+
+Every send pays a compare-and-swap or two, and every end a lock: on one
+core, `ping-pong` and `payload` say how much, and if it's more than a
+few per cent, one core could take the plain path (point 1's (a) makes
+that easy, one core being a mode). The work, in order, each a step with
+`make test` passing:
+
+1. Per-core scheduler state and a thread-local `rt_current`, still on
+   one thread (a refactor, nothing to see).
+2. The I/O thread (point 3), still one scheduler.
+3. The locks and atomics of point 4, and N schedulers, a fork going
+   to its parent's core, without stealing.
+4. Stealing, idle cores sleeping, and the end counted across cores.
+5. Checks: the golden tests on one core (`t/run.sh` sets
+   `SLIGHT_CORES=1`, as it sets the virtual clock); a set whose output
+   doesn't depend on order run on 4 cores too, the VM3 sketch's test,
+   the same results on one core or N; ThreadSanitizer (`clang
+   -fsanitize=thread`) over that set; `SLIGHT_GC_STRESS` on N cores;
+   and `bench/` with `slight-mc`, beside `go-mc`, `erlang-mc` and
+   `rust-mc` in D237's every-core table.
+
+qemu runs threads, but on this x86-64 machine the memory model isn't
+AArch64's, so ordering bugs show only on the Mac. Several sessions,
+most of it in `process.c`, whose 4,100 lines assume one thread
+throughout.
+
+**Rejected, unless Stevan wants them:** many OS processes talking over
+`rpc` as a cluster on one machine (no runtime change at all, and what
+the airline does already, but messages through sockets and nothing
+shared); a GIL-style lock around the runtime (every send and every
+allocation contending); and dirty schedulers for long builtins (no FFI,
+D252, and `array/matmul` on a big array holds one core of N, not the
+program).
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written

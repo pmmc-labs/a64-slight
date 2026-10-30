@@ -329,8 +329,10 @@ the libm: CORE-MATH's 21 functions vendored in `vendor/core-math/`, so
 reductions left to right, `array/matmul`), `array/generate`,
 `array/map` and `array/fold` in the prelude, `lib/matrix.slight`, and
 the types `(array float)` and `(array int)` (golden tests 320 to 323,
-`t/models/arrays.py`; the checker's 011 and 012). **Next:** more than
-one core (D249's step 7, moved up by D253), to be proposed first. 12c (C libraries vendored as source, D151, D152) waits; its
+`t/models/arrays.py`; the checker's 011 and 012). `bench/`'s `slight-arrays`,
+`spectral-norm` with arrays (`docs/BENCHMARKS.md`). **Next:** more than
+one core (D249's step 7, moved up by D253), proposed in `docs/PLAN.md`,
+"More than one core", with five points for Stevan to settle. 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan
