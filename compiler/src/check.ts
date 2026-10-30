@@ -212,7 +212,7 @@ function waits(x: Sexp): boolean {
     if (x.car.t === 'sym') {
         switch (x.car.name) {
             case 'recv': return true;
-            case 'quote': case 'lambda': case 'fork': case 'spawn': case 'connect': return false;
+            case 'quote': case 'lambda': case 'fork': case 'spawn': case 'spawn/on': case 'connect': return false;
         }
     }
     for (let xs: Sexp = x; xs.t === 'pair'; xs = xs.cdr) if (waits(xs.car)) return true;
@@ -342,7 +342,7 @@ function recvsTake(x: Sexp): Ty {
     if (x.t !== 'pair') return NEVER;
     if (x.car.t === 'sym') {
         switch (x.car.name) {
-            case 'quote': case 'lambda': case 'fork': case 'spawn': case 'connect': return NEVER;
+            case 'quote': case 'lambda': case 'fork': case 'spawn': case 'spawn/on': case 'connect': return NEVER;
             case 'recv': {
                 const clauses = toArray(x.cdr) ?? [];
                 if (clauses.length === 0) return ANY;
@@ -360,7 +360,7 @@ function recvsTake(x: Sexp): Ty {
 // state function can only be tail-called (the recv rule).
 function tailCallsIn(x: Sexp): readonly string[] {
     if (x.t !== 'pair') return [];
-    if (x.car.t === 'sym' && ['quote', 'lambda', 'fork', 'spawn', 'connect'].includes(x.car.name)) return [];
+    if (x.car.t === 'sym' && ['quote', 'lambda', 'fork', 'spawn', 'spawn/on', 'connect'].includes(x.car.name)) return [];
     const out: string[] = x.car.t === 'sym' ? [x.car.name] : [];
     for (let xs: Sexp = x; xs.t === 'pair'; xs = xs.cdr) out.push(...tailCallsIn(xs.car));
     return out;
@@ -493,6 +493,10 @@ function formType(x: Pair, cx: Cx, expected: Ty | null): Ty {
             case 'fork':    return forkType(args, cx);
             case 'spawn':   return spawnType(x, [], args[0], cx);
             case 'connect': return spawnType(x, args.slice(0, -1), args[args.length - 1], cx);
+            case 'spawn/on': {                  // (spawn/on k expr): k an island's number (D256)
+                if (args.length === 2) want(cx, typeOf(args[0]!, cx), INT, posOf(args[0]!) ?? x.pos, (v) => `spawn/on's island ${v}`, 'not-an-int');
+                return spawnType(x, [], args[args.length - 1], cx);
+            }
             case 'the':     return theType(x, args, cx);
             case 'defun': case 'deftype': case 'sig': return NIL_T;
         }
@@ -1158,7 +1162,7 @@ const tagged = (tag: string, ...items: readonly Ty[]): Ty => shape([lit(tag), ..
 function ended(p: Ty, e: Sexp): Ty {
     const value = p.k === 'task' ? p.of : ANY;
     const result = union(tagged('ok', value), tagged('error', ANY));
-    const fresh = isForm(e, 'fork') || isForm(e, 'spawn') || isForm(e, 'connect');
+    const fresh = isForm(e, 'fork') || isForm(e, 'spawn') || isForm(e, 'spawn/on') || isForm(e, 'connect');
     return fresh ? result : union(result, lit('ended'));
 }
 

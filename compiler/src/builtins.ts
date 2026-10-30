@@ -158,6 +158,8 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'sexp/parse': fn([STR], okOr(ANY, tagged('bad-sexp', INT))),
     'sexp/print': fn([ANY], STR),
 
+    'island': fn([], INT),
+    'islands': fn([], INT),
     'tuple/len': fn([TUPLE_ANY], INT),
     'tuple/get': fn([TUPLE_ANY, INT], (args, defs) => tupleElement(args[0] ?? ANY, null, defs)),
     'tuple/set': fn([TUPLE_ANY, INT, ANY], (args, defs) => {

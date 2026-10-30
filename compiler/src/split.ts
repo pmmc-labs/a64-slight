@@ -134,7 +134,7 @@ function children(x: Sexp, env: readonly string[], fn: string, st: St): [Sexp, S
             const [b, st1] = childrenBody(body, [...env, ...params], fn, st);
             return [form(x.pos, ...items.slice(0, 2), ...b), st1];
         }
-        case 'fork': case 'spawn': case 'connect': {
+        case 'fork': case 'spawn': case 'spawn/on': case 'connect': {
             if (items.length < 2) return [x, st];
             const [args, st1] = mapSt(items.slice(1, -1), st, (a, s) => children(a, env, fn, s));
             const [body, st2] = splitFunction([items[items.length - 1]!], env, fn, false, st1);
@@ -270,7 +270,7 @@ function lift(x: Sexp, st: St): [readonly Sexp[], Sexp, St] {
     // constants or lambdas, which come out the same whenever they're
     // evaluated.
     const from = head === null ? 0 : 1;
-    const k    = items.findIndex((a, i) => i >= from && ownRecv(a) && !(head === 'connect' && i === items.length - 1));
+    const k    = items.findIndex((a, i) => i >= from && ownRecv(a) && !((head === 'connect' || head === 'spawn/on') && i === items.length - 1));
     const pre: Sexp[] = [];
     const parts = items.map((a, i) => {
         if (i < from || i >= k || settled(a)) return a;
@@ -482,7 +482,7 @@ function ownRecv(x: Sexp): boolean {
     if (head === 'recv') return true;
     if (head === 'quote' || head === 'lambda' || head === 'defun' || head === 'fork' || head === 'spawn') return false;
     const items = toArray(x) ?? [];
-    return (head === 'connect' ? items.slice(1, -1) : items).some(ownRecv);
+    return (head === 'connect' || head === 'spawn/on' ? items.slice(1, -1) : items).some(ownRecv);
 }
 
 // Where x's first recv is, if it has one of its own (as ownRecv, but
@@ -492,7 +492,7 @@ function firstRecv(x: Sexp): Pos | null | undefined {
     if (isForm(x, 'recv')) return x.pos;
     if (isForm(x, 'quote') || isForm(x, 'fork') || isForm(x, 'spawn')) return undefined;
     const items = toArray(x) ?? [];
-    for (const i of isForm(x, 'connect') ? items.slice(1, -1) : items) {
+    for (const i of isForm(x, 'connect') || isForm(x, 'spawn/on') ? items.slice(1, -1) : items) {
         const p = firstRecv(i);
         if (p !== undefined) return p;
     }

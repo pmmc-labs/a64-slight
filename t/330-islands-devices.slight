@@ -1,0 +1,25 @@
+; Devices from other islands (D256): a command run by an actor on island
+; 2, whose SIGCHLD comes to island 0's thread and is passed on, so island
+; 2 reaps its own command; and :system and :keypress, connected from
+; islands 3 and 1, whose actors are placed on island 0, which owns the
+; terminal and :system. Expected output worked out by hand.
+; stdin: a
+
+(defun run (to)
+    (connect :exec (list "echo" "hi") (out to "")))
+(defun out (to acc)
+    (recv ((:open _) (out to acc))
+          ((:line _ l) (out to (~ acc l)))
+          ((:eof _) (out to acc))
+          ((:exited _ st) (send to (list :ran (island) acc st)))))
+(defun sys (to)
+    (connect :system (recv ((:open s) (send to (list :system (island) (pid? s)))))))
+(defun keys (to)
+    (connect :keypress (recv (k (send to (list :key (island) k))))))
+(let me (address))
+(spawn/on 2 (run me))
+(pprint (read me))
+(spawn/on 3 (sys me))
+(pprint (read me))
+(spawn/on 1 (keys me))
+(pprint (read me))

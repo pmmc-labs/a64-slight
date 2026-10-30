@@ -38,6 +38,7 @@ typedef struct {
 
 void rt_io_start(int *argc, char ***argv, char ***env, rt_io_settings_t *settings);
 int  rt_io_replaying(void);
+int  rt_io_logging(void);               // recording or replaying
 
 // getenv, for the variables that say where the runtime reads and writes
 // (SLIGHT_RECORD, SLIGHT_REPLAY, SLIGHT_HOSTS, SLIGHT_RESOLV_CONF): NULL

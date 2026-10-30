@@ -270,6 +270,10 @@ int rt_io_replaying(void) {
     return mode == REPLAY;
 }
 
+int rt_io_logging(void) {
+    return mode != 0;
+}
+
 // --- the calls ----------------------------------------------------------------
 
 uint64_t rt_io_clock(void) {

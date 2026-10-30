@@ -305,16 +305,14 @@ void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
     else           render_atom(b, v, raw);
 }
 
-static void print_value(FILE *out, rt_value_t v) {
+// In one write, so a line from another island can't come between the
+// value and its newline (D256).
+rt_value_t rt_pprint(rt_value_t v) {
     rt_buf_t b = { 0 };
     rt_render(&b, v, 0);
-    fwrite(b.bytes, 1, b.len, out);
+    rt_buf_add(&b, "\n", 1);
+    fwrite(b.bytes, 1, b.len, stdout);
     rt_buf_free(&b);
-}
-
-rt_value_t rt_pprint(rt_value_t v) {
-    print_value(stdout, v);
-    putchar('\n');
     return RT_NIL;
 }
 

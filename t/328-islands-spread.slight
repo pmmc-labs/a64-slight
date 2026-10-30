@@ -1,0 +1,16 @@
+; Work spread over every island there is, (% i (islands)), and the
+; answers gathered by the task that placed it: the same on four islands,
+; as t/run.sh has them, as on one (329, the same program). Expected
+; output worked out in Python: the Fibonacci numbers of 15 to 34, and
+; their sum.
+
+(defun fib (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+(defun work (to n) (send to (list n (fib n))))
+(defun place (to i n) (if (== i n) () (do (spawn/on (% i (islands)) (work to (+ i 15))) (place to (+ i 1) n))))
+(defun gather (to n acc) (if (== n 0) acc (gather to (- n 1) (cons (read to) acc))))
+
+(let me (address))
+(place me 0 20)
+(let got (sort-by car (gather me 20 ())))
+(pprint got)
+(sum (map cadr got))

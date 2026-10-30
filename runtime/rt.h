@@ -446,7 +446,7 @@ typedef struct rt_chunk {
 // The bytes end in a NUL that len doesn't count, as a string's do.
 #define RT_SHARED_MIN 4096
 typedef struct rt_buffer {
-    uint64_t refs;
+    _Atomic uint64_t refs;      // atomic, since islands share it (D256)
     uint64_t len;
     char     bytes[];
 } rt_buffer_t;
@@ -466,7 +466,7 @@ typedef struct rt_msg {
 // READING: a task in read or read/any, keeping its stack, woken by a
 // message to one of its sources or by a watch on a pid among them (D243).
 // DONE: ended, about to be freed.
-typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_RACING, RT_SLEEPING, RT_READING, RT_DONE } rt_state_t;
+typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_RACING, RT_SLEEPING, RT_READING, RT_PLACING, RT_DONE } rt_state_t;
 
 // One monitor: someone to tell when a process ends. It's on the watched
 // process's list, in the order they asked, and on the watcher's, so that
@@ -495,6 +495,7 @@ typedef struct rt_proc {
     rt_state_t      state;
     uint8_t         keypress;   // connected to :keypress
     uint8_t         actor;      // started with spawn or connect, so it can recv and be sent to (D243)
+    uint8_t         parent_task;    // its parent, on another island, is a task, which can read its end (D256)
     void           *stack;      // the bottom of its stack (above the guard page), or NULL
     rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c)
     rt_chunk_t     *chunks;     // the old generation, newest first, the messages it's taken among them
@@ -632,6 +633,9 @@ extern const uintptr_t slight_functions[]    RT_ASM(slight_functions);
 // gives the new process a :system device (D171).
 rt_value_t rt_fork(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
 rt_value_t rt_spawn(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_spawn);
+rt_value_t rt_spawn_on(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) RT_ASM(rt_spawn_on);
+rt_value_t rt_island_of(const char *site) RT_ASM(rt_island_of);
+rt_value_t rt_islands(const char *site) RT_ASM(rt_islands);
 rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect);
 rt_value_t rt_connect_system(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect_system);
 

@@ -338,7 +338,10 @@ buffers; actors placed with `(spawn/on k expr)`, pids printed `#<pid
 5@2>`, island 0 owning signals, the terminal and `:system`, and replay
 per island; to be built in seven steps, of which step 1, the runtime's
 state an island's (`RT_ISLAND`, thread-local) and pids with their
-island's bits, is done (golden test 324). 12c (C libraries vendored as source, D151, D152) waits; its
+island's bits, is done (golden test 324), and step 2, islands as
+threads: `spawn/on`, `(island)`, `(islands)`, `SLIGHT_ISLANDS` (which
+`t/run.sh` sets to 4), inboxes, and sends, monitors, kills, reads and
+the end across islands (golden tests 325 to 330). 12c (C libraries vendored as source, D151, D152) waits; its
 TLS is withdrawn (D251): `https://` goes through curl in
 `lib/http.slight`, its raw reply read as a socket's, its exit code the
 error (golden tests 309 and 310, t/live.py's https). Each has points to settle with Stevan
@@ -557,6 +560,8 @@ over real TLS, to a server with a certificate made for the run);
   sets `1767225600`, 2026-01-01T00:00:00Z.
 - `SLIGHT_LOG=level` (`debug`, `info`, `warn` or `error`) is the least
   level `log` writes; `info` without it (D254).
+- `SLIGHT_ISLANDS=n` says how many islands there are (D256), 1 to 256;
+  one for each core without it. `t/run.sh` sets `4`.
 - `SLIGHT_SEED=n` seeds the random numbers (`rand/`); without it they
   come from the system's entropy, different every run, and are recorded
   for a replay either way (D222). `t/run.sh` sets `1`.

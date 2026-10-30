@@ -1,0 +1,8 @@
+; A root waiting for what an actor on another island will never send:
+; every island has nothing it can do, and no item is on its way to one,
+; so the program is deadlocked, and says so (D256). Expected output
+; worked out by hand.
+
+(defun forever () (recv (_ (forever))))
+(spawn/on 2 (forever))
+(read (address))

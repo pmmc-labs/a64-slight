@@ -140,7 +140,7 @@ never changes the code.
 | `(cond (test body...) ...)` | The conditional the others become (below). Each test must be `#true` or `#false`, or the process faults; so does running out of clauses. |
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
-| `(fork expr)` | Runs `expr` in a new process and returns its pid. |
+| `(fork expr)` | Runs `expr` in a new process and returns its pid: a task. `(spawn expr)` starts an actor (D243), and `(spawn/on k expr)` one on island `k` (D256). |
 | `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`, or a Unix socket, `(connect :unix path expr)` or `(connect :unix/listen path expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
 | `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
 | `(deftype ...)`, `(sig ...)`, `(the type expr)` | Types (D247): a type's name and a function's types, at the top level, and an expression's. The checker reads them; code generation leaves them out (`(the T e)` is `e`). Not counted among the 10, since none does anything when the program runs. |
@@ -1041,7 +1041,7 @@ RT_EXEC_INT`, since a symbol is its name.
   page's 40 KB; there's no `detach`, since the children nobody takes
   are few and small, and go when their parent ends.
 
-### Islands: more than one core (D256, agreed, not yet built)
+### Islands: more than one core (D256; steps 1 and 2 built)
 
 Each island is today's runtime, single-threaded, on a thread of its
 own, with its own process table, run queue, timers, devices, stack pool
@@ -1060,6 +1060,22 @@ single-threaded. Big strings and arrays cross as handles, their counts
 atomic. Each island records its own run, its inbox's deliveries among
 its inputs, and replays on its own. `docs/PLAN.md`, "More than one
 core: islands", has the steps.
+
+As built (`process.c`, "islands"): an inbox is a list under a mutex,
+taken whole at each of the island's scheduler's decisions (`events`),
+and a pipe that wakes the island only when it's blocked in `select()`;
+an island with nothing to do watches its inbox for 50 µs first, so a
+reply that comes back quickly needs no wake (two islands' round trip,
+3.4 µs on the cloud machine, where a wake through the pipe took 50).
+What crosses is an item: a message, already copied into its chunk by
+the sender; a start, for `spawn/on`, which the island makes and answers
+with its pid, the spawner waiting, so each island numbers only its own;
+and kills, watches and ends. A pid not on this island reads as ended
+(`slot`), except where send, kill, monitor and read see to it. An
+actor's end goes to its parent, a task on another island, and is kept
+there apart from its mail, as a record keeps one here (D245). The
+program ends when `busy`, the islands that may still do something and
+the items not yet handled, comes to 0.
 
 ### Scheduler
 

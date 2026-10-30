@@ -6333,3 +6333,14 @@ on placement, each point as below.)*
   branch of a simulation); and, for printing, `#<pid 2.5>` (taken by
   addresses), `#<pid 2:5>`, `#<pid 5 on 2>`, and the island always
   shown (every pid a test prints changing).
+- *(Steps 1 and 2 built, Oct 2026, the details settled in building them:
+  `spawn/on` a round trip, the spawner waiting while the island makes
+  the actor, so no island's pids are numbered by another and none
+  exists before its island knows of it; a `kill` across islands not
+  waited for; a `join` of another island's pid faulting `:not-a-task`,
+  since a task is always on its parent's island; a send to a task there
+  a dead letter, which only its island can tell; an actor's end sent to
+  its parent, a task elsewhere, kept apart from its mail, as a record
+  keeps one (D245); `:keypress` and `:system` from another island
+  placed on island 0; and an island watching its inbox for 50 µs
+  before it sleeps.)*

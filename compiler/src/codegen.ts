@@ -102,7 +102,7 @@ type St = {
 // The special forms, and those the expander turns into others (expand.ts),
 // which it leaves none of: neither kind can be a name.
 const SPECIAL_FORMS: readonly string[] = [
-    'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'spawn', 'connect', 'recv', 'yield',
+    'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'spawn', 'spawn/on', 'connect', 'recv', 'yield',
     'if', 'when', 'case', 'and', 'or', 'match', '@include', 'deftype', 'sig', 'the',
 ];
 
@@ -489,6 +489,9 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
         case 'fork': case 'spawn':
             checkArity(x, head.name, args, 1);
             return compileFork(x, head.name, args[0]!, head.name === 'fork' ? 'rt_fork' : 'rt_spawn', cx, st);
+        case 'spawn/on':                        // (spawn/on k expr): an actor on island k (D256)
+            checkArity(x, 'spawn/on', args, 2);
+            return compileFork(x, 'spawn/on', args[1]!, 'rt_spawn_on', cx, st, [args[0]!]);
         case 'connect':
             return compileConnect(x, args, cx, st);
         case 'yield': {
@@ -679,7 +682,7 @@ function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: 
     }, [[], st]);
     const si = cx.si + extra.length;
     const where = x.pos === null ? form : `${form} at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
-    const [entry, st1] = label(st0, form);
+    const [entry, st1] = label(st0, form.replace('/', '_'));
     const d: Defun = { name: sym(where, x.pos), params: free.map((n) => sym(n, x.pos)), body: list(expr), pos: x.pos };
     const [code, st2]  = compileFunction(entry, d, [], cx.fns, form === 'fork' ? 'task' : 'actor', st1, null);
     const st3: St = { ...st2, slots: st0.slots, lambdas: [st2.lambdas, code] };
@@ -1043,6 +1046,8 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'json/print':         fixed('rt_json_print', 1),
     'sexp/parse':         fixed('rt_sexp_parse', 1),
     'sexp/print':         fixed('rt_sexp_print', 1),
+    'island':             fixed('rt_island_of', 0),
+    'islands':            fixed('rt_islands', 0),
     'tuple?':             fixed('rt_is_tuple_p', 1),
     'tuple/len':          fixed('rt_tuple_len_of', 1),
     'tuple/get':          fixed('rt_tuple_ref', 2),

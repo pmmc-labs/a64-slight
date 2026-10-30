@@ -108,7 +108,9 @@ every `recv`.
 starts, `clock/now`'s (D254), so a test's dates are the same every run.
 `SLIGHT_LOG=level` is the least `log` writes (Output, under Builtins).
 `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` are in "Sockets", and
-`SLIGHT_SEED` in "Random numbers", under Builtins.
+`SLIGHT_SEED` in "Random numbers", under Builtins. `SLIGHT_ISLANDS=n`
+says how many islands there are, from 1 to 256, one for each core
+without it (Islands, under Processes).
 
 ### Replaying a run, and other orders
 
@@ -149,6 +151,10 @@ than time. So (D170):
   A record keeps its run's seed and its clock (real or virtual), so a
   replay uses them, and the seed its random numbers started from,
   whether `SLIGHT_SEED` gave it or the system did.
+
+  A run that's recorded or replayed stays on its first island, so far: a
+  `spawn/on` to another island ends it, with exit status 2, till each
+  island records its own (D256).
 
 ### @ARGV
 
@@ -340,7 +346,8 @@ forms in order (Files).
 - **Functions**: a `defun` used as a value, a `lambda`, or a builtin used
   as a value. They print as `#<function name>` or
   `#<function lambda at prog.slight:3:9>`.
-- **Pids**: a process, or a device. They print as `#<pid 2>`.
+- **Pids**: a process, or a device. They print as `#<pid 2>`, and one on
+  another island than the main one with its island, `#<pid 5@2>` (D256).
 
 Nothing can be changed once it's made, and nothing has a cycle.
 
@@ -450,6 +457,19 @@ waits, which is the usual way to start one:
 An actor can't be joined: a task that wants its value reads the actor's
 pid. Its value is kept for its parent if that's a task, till the parent
 has read it, and otherwise isn't kept (Processes, D243, D245).
+
+### spawn/on
+
+    (spawn/on k expr)
+
+As `spawn`, but the actor is on island `k`, from 0 below `(islands)`
+(Islands, under Processes, D256). `k` is worked out first, by the
+caller; an island that isn't one faults (`:out-of-range`), as does
+anything but an integer (`:not-an-int`). On the caller's own island it's
+`spawn`; on another, the caller waits while that island makes the actor,
+and gets its pid, `#<pid 1@2>`.
+
+    (spawn/on (% i (islands)) (work me i))
 
 ### connect
 
@@ -657,9 +677,10 @@ compile error.
 
 ## Processes
 
-Everything runs in processes, on one core. Each has its own heap and a
-mailbox. Processes share nothing; they talk by sending messages, which
-are copied.
+Everything runs in processes, each on an island, a core of its own
+(Islands, below), the main one unless the program places it elsewhere.
+Each has its own heap and a mailbox. Processes share nothing; they talk
+by sending messages, which are copied.
 
 There are two kinds (D243). A **task**, started with `(fork expr)`,
 computes a value: it can't wait in `recv`, nor be sent to, and `join`
@@ -1007,6 +1028,57 @@ if another is ready. Every loop is a tail call, so no process can hold
 up the rest.
 `SLIGHT_SCHED` changes the order, for testing (under "Replaying a run,
 and other orders").
+
+### Islands
+
+Each core runs an **island** (D256): the runtime, as one core has it,
+on a thread of its own, with its own processes, run queue, timers and
+devices. Islands share nothing but the messages that cross between them
+and the big strings and arrays that go without a copy (The heap). There
+are `(islands)` of them, one for each core unless `SLIGHT_ISLANDS` says
+how many (1 to 256); island 0 is the main one, where the root runs, and
+`(island)` is the number of the one the caller is on. An island's thread
+starts the first time something's placed on it, so a program that never
+places anything runs on one, as it would without islands.
+
+Nothing moves from island to island on its own: a process runs where
+it's started. `fork` starts a task on its parent's island, as `spawn`
+does an actor, and `(spawn/on k expr)` starts an actor on island `k`.
+A program spreads its work with `(spawn/on (% i (islands)) ...)`, and
+runs the same, if slower, on one island.
+
+A pid says its island: `#<pid 5@2>` is the fifth process made on island
+2, each island numbering its own, and island 0's print as before,
+`#<pid 5>`. A pid works the same wherever it's used:
+
+- `send` and `after` to another island's process copy the message
+  there, in order: messages from one process to another arrive in the
+  order they were sent, wherever each is. A message sent to a task
+  there goes nowhere, said as a dead letter.
+- `monitor` of another island's process, and `read` of one from a task,
+  tell its end as they would of one here; an actor's end comes to its
+  parent if that's a task, wherever it is, to be read.
+- `kill` of another island's process ends it when its island takes the
+  word, a moment later; `kill` doesn't wait for that.
+- `join` and `join/race` take a task, which is always on its parent's
+  island, so another island's pid faults (`:not-a-task`).
+
+The terminal and `:system` are island 0's: `connect :keypress` or
+`connect :system` from another island starts its actor on island 0.
+Commands (`:exec`), files and sockets are the island's that opens them.
+Each island's virtual clock (`SLIGHT_CLOCK=virtual`) is its own, moving
+when nothing can run on that island. The program ends once no island can
+do anything more, and no message is on its way to one; the root's value
+is printed then, and a deadlock is told as before, across islands.
+
+A computation on one island doesn't slow another: a terminal program on
+island 0 answers keys while islands 1 to 7 work, say, and a big array
+or string, a frame of a simulation, goes to island 0 as a handle.
+
+    (defun work (to n) (send to (list n (fib n))))
+    (let me (address))
+    (dotimes 0 20 (lambda (i) (spawn/on (% i (islands)) (work me (+ i 15)))))
+    (sort-by car (map (lambda (_) (read me)) (range 0 20)))
 
 ### The heap
 

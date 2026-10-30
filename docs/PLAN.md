@@ -1710,7 +1710,17 @@ pid a test prints.
 2. **Islands as threads:** `SLIGHT_ISLANDS`, `(islands)`, `(island)`,
    `(spawn/on k expr)`, the inboxes, sends, monitors, kills and ends
    across them, and `#<pid 5@2>`; `t/run.sh` sets `SLIGHT_ISLANDS=4`, so
-   `(islands)` is the same on every machine.
+   `(islands)` is the same on every machine. *(Done, Oct 2026, golden
+   tests 325 to 330, with step 4's end and deadlock, which it couldn't
+   do without, and some of 3's and 5's: shared buffers' counts atomic;
+   `:keypress` and `:system` placed on island 0 from any island, keys
+   read only there, and `SIGCHLD` passed to every island's pipe, each
+   reaping its own commands; `pprint` in one write. A spinning wait
+   before an island sleeps, which took 200,000 round trips from 10 s to
+   0.68. Still to do there: PID 1's orphans with commands on more than
+   one island, since island 0 can't tell another's command from an
+   orphan; `:system` telling of other islands; and a run recorded or
+   replayed is on one island, a `spawn/on` elsewhere ending it.)*
 3. **Shared buffers across islands:** atomic counts.
 4. **The end and deadlock** counted across islands.
 5. **Island 0's:** signals, `:keypress`, `:system` and its counts of

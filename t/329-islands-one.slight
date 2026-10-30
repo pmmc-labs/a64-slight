@@ -1,0 +1,16 @@
+; 328's program on one island, SLIGHT_ISLANDS=1, where every spawn/on
+; is a spawn here: the same answers, the VM3 sketch's test, the same
+; results on one island or four (D256). Expected output worked out in
+; Python, as 328's.
+; env: SLIGHT_ISLANDS=1
+
+(defun fib (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
+(defun work (to n) (send to (list n (fib n))))
+(defun place (to i n) (if (== i n) () (do (spawn/on (% i (islands)) (work to (+ i 15))) (place to (+ i 1) n))))
+(defun gather (to n acc) (if (== n 0) acc (gather to (- n 1) (cons (read to) acc))))
+
+(let me (address))
+(place me 0 20)
+(let got (sort-by car (gather me 20 ())))
+(pprint got)
+(sum (map cadr got))

@@ -37,6 +37,9 @@ export SLIGHT_HEAP_MAX=64M
 export SLIGHT_CLOCK=virtual
 # And the random numbers start from the same seed every run (D222).
 export SLIGHT_SEED=1
+# And there are four islands (D256), so (islands) is the same on every
+# machine, whatever its cores.
+export SLIGHT_ISLANDS=4
 # And the time of day starts at 2026-01-01T00:00:00Z (D254).
 export SLIGHT_EPOCH=1767225600
 

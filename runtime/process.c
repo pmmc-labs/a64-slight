@@ -31,7 +31,9 @@
 #include <fcntl.h>
 #include <inttypes.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <signal.h>
+#include <stdatomic.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -95,8 +97,11 @@ static entry_t *at(uint64_t id) {
     return g ? &g->e[id & (PAGE_SIZE - 1)] : &gone;
 }
 
+// Another island's pid reads as one that has ended, keeping nothing, but
+// where what reaches across islands (send, kill, monitor, read) sees to
+// it (D256).
 static entry_t *slot(rt_value_t pid) {
-    return at(rt_pid_number(pid));
+    return rt_pid_island(pid) == island ? at(rt_pid_number(pid)) : &gone;
 }
 static RT_ISLAND rt_proc_t *ready_head, *ready_tail;
 static RT_ISLAND rt_ctx_t   scheduler;
@@ -1117,6 +1122,260 @@ static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t
     restart(p);
 }
 
+// --- islands (D256) -----------------------------------------------------------
+//
+// Each island is a thread running the scheduler on its own processes,
+// with its own table, run queue, timers and devices, what's marked
+// RT_ISLAND. A process reaches another island's only through that
+// island's inbox: a list under a lock, which the island takes whole at
+// each of its scheduler's decisions (events), and a pipe that wakes it
+// when it's waiting in select() for nothing else. What crosses is a
+// message's chunk, copied as a send copies it, and the few requests
+// below; the island it's for does the rest, as if it had been asked
+// there. The islands are a fixed set, (islands) of them, and each's
+// thread starts the first time something's placed on it.
+//
+// The program ends when no island can do anything more and nothing's on
+// its way to one: busy counts the islands that may still do something,
+// island 0 from the start, and the items not yet handled. An item is
+// counted before it's pushed and uncounted once it's handled, and an
+// island that wakes to items counts itself before it handles them, so
+// busy never comes back from 0.
+
+enum {
+    ITEM_MSG,                           // a message: to a process, an address or a device
+    ITEM_START,                         // spawn/on: start an actor here, and say its pid
+    ITEM_PLACED,                        // the pid of the actor started for the spawner
+    ITEM_KILL,
+    ITEM_WATCH,                         // a monitor's, or a read's: tell from of to's end
+    ITEM_UNWATCH,                       // from has ended: its watches on to go
+    ITEM_ENDED,                         // from's end, for a task reading it, or its parent
+};
+
+typedef struct item {
+    struct item *next;
+    int          kind;
+    int          wakes;                 // a watch's: WATCH_TELLS or WATCH_READ
+    rt_value_t   to;                    // the pid (or address) it's for
+    rt_value_t   from;                  // the pid it's from, or about
+    rt_msg_t    *msg;                   // a message, or a result
+    rt_code_t    code;                  // a start's: the actor's code...
+    rt_chunk_t  *chunk;                 // ...the copy of its values...
+    uint64_t     n;
+    rt_value_t   args[RT_MAX_ARGS];
+    uint64_t     rand_seed, rand_gamma; // ...its random numbers, split from the spawner's...
+    uint8_t      parent_task;           // ...whether the spawner is a task, which can read its end...
+    uint8_t      source;                // ...and SOURCE_KEYS or SOURCE_SYSTEM, for connect's, or 0
+    const char  *site;
+} item_t;
+
+enum { SOURCE_KEYS = 1, SOURCE_SYSTEM };       // island 0's (D256)
+
+typedef struct {
+    pthread_mutex_t  lock;
+    item_t          *first, *last;      // the inbox, oldest first
+    _Atomic uint64_t waiting;           // how many, looked at without the lock
+    int              asleep;            // waiting in select(), to be woken by a byte on wake
+    int              wake[2];
+    _Atomic int      started;
+} island_t;
+
+static island_t         isles[RT_ISLANDS_MAX];
+static uint64_t         nislands = 1;   // (islands): SLIGHT_ISLANDS, or one per core
+static _Atomic uint64_t busy     = 1;   // islands that may do something more, and items not yet handled
+static _Atomic int      many;           // whether an island beside 0 has started
+static pthread_mutex_t  starting = PTHREAD_MUTEX_INITIALIZER;
+static uint64_t         sched_seed;     // SLIGHT_SCHED, from which each island's generator starts
+
+// Whether pid (or an address) is this island's; and whether v is a pid,
+// or an address, of another's.
+static int here(rt_value_t pid) {
+    return rt_pid_island(pid) == island;
+}
+
+static int far(rt_value_t v) {
+    return (v & RT_TAG_MASK) == RT_TAG_PID && !here(v);
+}
+
+static void *island_main(void *arg);
+static void  share_tables(void);
+
+static void open_island(uint64_t k) {
+    island_t *s = &isles[k];
+    pthread_mutex_init(&s->lock, NULL);
+    if (pipe(s->wake) < 0) {
+        perror("slight: can't start an island");
+        exit(2);
+    }
+    for (int i = 0; i < 2; i++) {
+        fcntl(s->wake[i], F_SETFL, O_NONBLOCK);
+        fcntl(s->wake[i], F_SETFD, FD_CLOEXEC);
+    }
+}
+
+// Island k's thread, started if it hasn't been. Island 0's is the
+// program's own, and its inbox is opened with the first other's.
+static void start_island(uint64_t k) {
+    if (k == 0 || atomic_load(&isles[k].started)) return;
+    pthread_mutex_lock(&starting);
+    if (!atomic_load(&isles[k].started)) {
+        if (!atomic_load(&many)) {
+            share_tables();
+            open_island(0);
+            atomic_store(&isles[0].started, 1);
+        }
+        open_island(k);
+        pthread_attr_t attr;
+        pthread_t      thread;
+        pthread_attr_init(&attr);
+        pthread_attr_setstacksize(&attr, STACK_BYTES);  // as the program's own, for the scheduler and the collector's walks
+        pthread_attr_setdetachstate(&attr, PTHREAD_CREATE_DETACHED);
+        if (pthread_create(&thread, &attr, island_main, (void *)(uintptr_t)k) != 0) {
+            fputs("slight: can't start an island's thread\n", stderr);
+            exit(2);
+        }
+        pthread_attr_destroy(&attr);
+        atomic_store(&isles[k].started, 1);
+        atomic_store(&many, 1);
+    }
+    pthread_mutex_unlock(&starting);
+}
+
+static void poke(uint64_t k) {
+    char    b = 0;
+    ssize_t r = write(isles[k].wake[1], &b, 1);
+    (void)r;                                    // full: it's woken already
+}
+
+// Into island k's inbox, waking it if it's waiting.
+static void push(uint64_t k, item_t *it) {
+    island_t *s = &isles[k];
+    start_island(k);
+    it->next = NULL;
+    atomic_fetch_add(&busy, 1);
+    pthread_mutex_lock(&s->lock);
+    if (s->last) s->last->next = it;
+    else         s->first      = it;
+    s->last = it;
+    atomic_fetch_add(&s->waiting, 1);
+    int asleep = s->asleep;
+    s->asleep = 0;
+    pthread_mutex_unlock(&s->lock);
+    if (asleep) poke(k);
+}
+
+static item_t *new_item(int kind, rt_value_t to, rt_value_t from) {
+    item_t *it = rt_must(calloc(1, sizeof *it));
+    it->kind = kind;
+    it->to   = to;
+    it->from = from;
+    return it;
+}
+
+// To the island of to.
+static void cross(int kind, rt_value_t to, rt_value_t from, rt_msg_t *msg) {
+    item_t *it = new_item(kind, to, from);
+    it->msg = msg;
+    push(rt_pid_island(to), it);
+}
+
+// Before it sleeps, an island watches its inbox for a while: an item that
+// comes within it, as a reply to what the island has just sent does, saves
+// the wake through the pipe, a system call each side and a thread woken,
+// which is most of what a round trip between islands costs (as Go's and
+// the BEAM's schedulers spin before they sleep).
+#define SPIN_NS 50000
+
+static void relax(void) {
+#if defined(__x86_64__)
+    __builtin_ia32_pause();
+#else
+    __asm__ volatile("yield");
+#endif
+}
+
+static uint64_t spin_clock(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);         // not the program's clock, which a replay reads from its record
+    return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
+}
+
+// Whether an item came, or the program ended, while it watched.
+static int spin(void) {
+    uint64_t until = spin_clock() + SPIN_NS;
+    for (;;) {
+        for (int i = 0; i < 64; i++) {
+            if (atomic_load_explicit(&isles[island].waiting, memory_order_relaxed) || atomic_load(&busy) == 0) return 1;
+            relax();
+        }
+        if (spin_clock() > until) return 0;
+    }
+}
+
+static void drain_wake(void) {
+    char buf[64];
+    while (read(isles[island].wake[0], buf, sizeof buf) > 0) {}
+}
+
+// This island has nothing it can do but what an item brings: it waits for
+// one, and counts itself busy again once there is one; or, if every
+// island is done first, says so, 0.
+static int awake(void) {
+    island_t *s = &isles[island];
+    for (;;) {
+        spin();                                 // asleep only after, so no item pokes it as it watches
+        pthread_mutex_lock(&s->lock);
+        int any = s->first != NULL;
+        s->asleep = !any;
+        pthread_mutex_unlock(&s->lock);
+        if (any) {
+            atomic_fetch_add(&busy, 1);         // its items count, so busy isn't 0
+            return 1;
+        }
+        if (atomic_load(&busy) == 0) return 0;
+        fd_set in;
+        FD_ZERO(&in);
+        FD_SET(s->wake[0], &in);
+        select(s->wake[0] + 1, &in, NULL, NULL, NULL);
+        drain_wake();
+        pthread_mutex_lock(&s->lock);
+        s->asleep = 0;
+        pthread_mutex_unlock(&s->lock);
+    }
+}
+
+// Nothing more can come on this island but by its inbox: 0 if that's so
+// of every island, and the program is over. Alone, at once, as before
+// there were islands.
+static int quiesce(void) {
+    if (!atomic_load(&many)) return 0;
+    if (atomic_fetch_sub(&busy, 1) == 1) {      // the last: wake the rest to end
+        for (uint64_t k = 0; k < RT_ISLANDS_MAX; k++) if (atomic_load(&isles[k].started)) poke(k);
+        return 0;
+    }
+    return awake();
+}
+
+static void *island_main(void *arg) {
+    sigset_t all;
+    sigfillset(&all);
+    pthread_sigmask(SIG_BLOCK, &all, NULL);     // signals are island 0's
+    island = (uint64_t)(uintptr_t)arg;
+    sched  = sched_seed ? sched_seed + island * 0x9e3779b97f4a7c15u : 0;
+    if (awake()) rt_run();
+    return NULL;
+}
+
+rt_value_t rt_island_of(const char *site) {
+    (void)site;
+    return rt_int((int64_t)island);
+}
+
+rt_value_t rt_islands(const char *site) {
+    (void)site;
+    return rt_int((int64_t)nislands);
+}
+
 // --- processes ----------------------------------------------------------------
 
 // A new pid, for e. Pids start at 1: the root.
@@ -1233,12 +1492,28 @@ typedef struct rt_kept {
 
 // What only some processes need, apart, so that one waiting in recv, of
 // which there may be a million, costs a pointer for them all.
+// Watches across islands (D256): a process on another island, and how
+// its end is told, WATCH_TELLS, WATCH_READ or WATCH_CHILD.
+typedef struct {
+    rt_value_t pid;
+    int        wakes;
+} far_t;
+
+typedef struct {
+    uint64_t n, cap;
+    far_t   *at;
+} fars_t;
+
 typedef struct rt_side {
     struct rt_device *devices;          // the devices it owns, newest first
     rt_addresses_t addresses;           // a task's (D243)
     rt_kept_t      kept;                // a parent's (D244)
     rt_msg_t      *given;               // the result a join or race was woken with, till it runs (D244)
     handles_t      young_handles, old_handles;   // to shared buffers (D253)
+    fars_t         watched_by;          // other islands' processes watching it (D256)...
+    fars_t         watches;             // ...and those it watches, or whose end comes to it, its children there
+    rt_msg_t      *far_ends;            // the ends of those that have come, kept apart from its mail, as a
+                                        // record here keeps one, till it reads them (D245)
 } rt_side_t;
 
 static rt_side_t *side_of(rt_proc_t *p) {
@@ -1270,6 +1545,7 @@ static int address_open(const rt_proc_t *p, rt_value_t a) {
 
 // The task a is for, while it runs and has a open; or NULL.
 static rt_proc_t *address_owner(rt_value_t a) {
+    if (!here(a)) return NULL;
     uint64_t   i = rt_address_task(a);
     rt_proc_t *p = i >= 1 && i <= nprocs ? at(i)->proc : NULL;
     return p && address_open(p, a) ? p : NULL;
@@ -1365,6 +1641,10 @@ static void read_on(rt_proc_t *p, rt_value_t pid);
 // To a process that has ended, a message just disappears, as in Erlang. A
 // device takes it at once.
 rt_value_t rt_send(rt_value_t pid, rt_value_t msg, const char *site) {
+    if (far(pid)) {                             // its island checks it, when it takes it (D256)
+        cross(ITEM_MSG, pid, rt_current->pid, new_msg(msg));
+        return RT_NIL;
+    }
     if (rt_is_address(pid)) {
         to_address(pid, new_msg(msg));
         return RT_NIL;
@@ -1429,13 +1709,17 @@ static rt_value_t result_at(rt_value_t *cells, const entry_t *e) {
     return rt_cons_at(cells, rt_symbol(e->ok ? RT_SYM_OK : RT_SYM_ERROR), rt_cons_at(cells + 2, e->value, RT_NIL));
 }
 
-// Sends (:exit pid result) to `to`, about the process that ended at e.
-static void notify(rt_value_t to, rt_value_t pid, const entry_t *e) {
-    rt_proc_t *w = slot(to)->proc;
-    if (!w) return;
+// (:exit pid result), about the process that ended at e.
+static rt_msg_t *exit_msg(rt_value_t pid, const entry_t *e) {
     _Alignas(16) rt_value_t cells[10];
     rt_value_t result = result_at(cells, e);
-    deliver(w, new_msg(rt_cons_at(cells + 4, rt_symbol(RT_SYM_EXIT), rt_cons_at(cells + 6, pid, rt_cons_at(cells + 8, result, RT_NIL)))));
+    return new_msg(rt_cons_at(cells + 4, rt_symbol(RT_SYM_EXIT), rt_cons_at(cells + 6, pid, rt_cons_at(cells + 8, result, RT_NIL))));
+}
+
+// Sends it to `to`.
+static void notify(rt_value_t to, rt_value_t pid, const entry_t *e) {
+    rt_proc_t *w = slot(to)->proc;
+    if (w) deliver(w, exit_msg(pid, e));
 }
 
 // Takes w off both its lists, and frees it.
@@ -1454,8 +1738,37 @@ static void disconnect(rt_proc_t *p);
 static void close_all(rt_proc_t *p);
 
 // What a watch does when its process ends: tell the watcher, as a
-// monitor; wake a race; or, a read's, wake or tell a reader (D243).
-enum { WATCH_TELLS, WATCH_RACE, WATCH_READ };
+// monitor; wake a race; or, a read's, wake or tell a reader (D243); or,
+// across islands only, tell a parent that's a task, as its record would
+// keep it for one here (D245, D256).
+enum { WATCH_TELLS, WATCH_RACE, WATCH_READ, WATCH_CHILD };
+
+static void far_add(fars_t *f, rt_value_t pid, int wakes) {
+    if (f->n == f->cap) {
+        f->cap = f->cap ? f->cap * 2 : 4;
+        f->at  = rt_must(realloc(f->at, f->cap * sizeof *f->at));
+    }
+    f->at[f->n++] = (far_t){ pid, wakes };
+}
+
+static int far_has(const fars_t *f, rt_value_t pid) {
+    for (uint64_t i = 0; f && i < f->n; i++) if (f->at[i].pid == pid) return 1;
+    return 0;
+}
+
+// Takes pid's watches out of f.
+static void far_drop(fars_t *f, rt_value_t pid) {
+    for (uint64_t i = f->n; i-- > 0; ) if (f->at[i].pid == pid) f->at[i] = f->at[--f->n];
+}
+
+// pid's end, told to `to` on its island, as a watch of the kind wakes
+// tells it.
+static void tell_far(rt_value_t to, rt_value_t pid, int wakes, rt_msg_t *m) {
+    item_t *it = new_item(ITEM_ENDED, to, pid);
+    it->wakes = wakes;
+    it->msg   = m;
+    push(rt_pid_island(to), it);
+}
 
 // A copy of the result in e, for a joiner or racer that ends waits for it
 // with: it runs later, when the value may have gone (D244).
@@ -1513,6 +1826,12 @@ static void free_side(rt_proc_t *p) {
     for (uint64_t i = 0; i < s->kept.n; i++) release(s->kept.ids[i]);
     if (s->given) free_msg(s->given);
     free(s->kept.ids);
+    free(s->watched_by.at);
+    free(s->watches.at);
+    for (rt_msg_t *m = s->far_ends, *next; m; m = next) {
+        next = m->next;
+        free_msg(m);
+    }
     free(s->addresses.open);
     free(s);
     p->side = NULL;
@@ -1534,7 +1853,7 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     int      had = 0;                          // whether the parent is told now, as those waiting are
     e->ok    = ok;
     e->value = value;                          // in p's heap till it's told to whoever waits, below
-    if (id == 1 && !ok && !logged) {
+    if (p->pid == RT_ROOT && !ok && !logged) {
         rt_buf_t b = { 0 };
         rt_render(&b, e->value, 0);
         fflush(stdout);
@@ -1572,6 +1891,19 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
         }
         unwatch(w);
     }
+    // Those on other islands watching p are told as those here are, and a
+    // parent there that's a task is sent p's end, as it would be kept
+    // for one here (D245, D256); p's watches there go.
+    rt_side_t *s = p->side;
+    for (uint64_t i = 0; s && i < s->watched_by.n; i++) {
+        far_t w = s->watched_by.at[i];
+        tell_far(w.pid, p->pid, w.wakes, w.wakes == WATCH_TELLS ? exit_msg(p->pid, e) : result_msg(e));
+    }
+    for (uint64_t i = 0; s && i < s->watches.n; i++) {
+        if (s->watches.at[i].wakes != WATCH_CHILD) cross(ITEM_UNWATCH, s->watches.at[i].pid, p->pid, NULL);
+    }
+    if (p->parent != RT_NIL && !here(p->parent) && p->parent_task) tell_far(p->parent, p->pid, WATCH_CHILD, result_msg(e));
+
     // A task's value is kept for its parent till it has it: the root's
     // for the program to print, and one that ended before its parent
     // joined, read or was told of it (D244). So is an actor's whose
@@ -1627,6 +1959,7 @@ rt_value_t rt_raise(rt_value_t reason, const char *site) {
 
 rt_value_t rt_join(rt_value_t pid, const char *site) {
     rt_proc_t *p = rt_current;
+    if (far(pid) && !rt_is_address(pid)) rt_fault(RT_FAULT_NOT_TASK, pid, site);   // a task stays on its parent's island (D256)
     entry_t   *e = entry(pid, site);
     rt_proc_t *t = e->proc;
     if (e->actor && (t || !e->ended)) rt_fault(RT_FAULT_NOT_TASK, pid, site);   // read, not joined, even once kept (D243, D245)
@@ -1679,6 +2012,7 @@ rt_value_t rt_join_race(rt_value_t pids, const char *site) {
     for (rt_value_t xs = pids; xs != RT_NIL; xs = rt_cdr(xs)) {
         if (!rt_is_cons(xs)) rt_fault(RT_FAULT_NOT_LIST, pids, site);
         rt_value_t pid = rt_car(xs);
+        if (far(pid) && !rt_is_address(pid)) rt_fault(RT_FAULT_NOT_TASK, pid, site);
         entry_t   *e   = entry(pid, site);
         if (pid == p->pid) rt_fault(RT_FAULT_JOIN_SELF, pid, site);
         if (e->actor && (e->proc || !e->ended)) rt_fault(RT_FAULT_NOT_TASK, pid, site);
@@ -1727,7 +2061,7 @@ static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char 
         rt_value_t src = rt_car(xs);
         if (rt_is_address(src)) {
             if (rt_address_task(src) != rt_pid_number(p->pid) || !address_open(p, src)) rt_fault(RT_FAULT_NOT_PID, src, site);
-        } else {
+        } else if (!far(src)) {
             entry(src, site);
             if (src == p->pid) rt_fault(RT_FAULT_JOIN_SELF, src, site);
         }
@@ -1744,18 +2078,19 @@ static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char 
     for (;;) {
         for (rt_value_t xs = srcs; xs != RT_NIL; xs = rt_cdr(xs)) {
             rt_value_t     src = rt_car(xs);
-            const entry_t *e   = rt_is_address(src) ? NULL : slot(src);
-            rt_msg_t      *last = NULL;             // what waits for an address, or from a device, closed since or not
-            for (rt_msg_t **link = &p->mail; *link; link = &(*link)->next) {
+            int            other = far(src);    // another island's: its end is kept apart, as it came (D256)
+            const entry_t *e     = rt_is_address(src) || other ? NULL : slot(src);
+            rt_msg_t      *last  = NULL;            // what waits for an address, or from a device, closed since or not
+            for (rt_msg_t **link = other ? &side_of(p)->far_ends : &p->mail; *link; link = &(*link)->next) {
                 rt_msg_t *m = *link;
                 if (m->device != src) {
                     last = m;
                     continue;
                 }
                 *link = m->next;
-                if (p->mail_last == m) p->mail_last = last;
+                if (!other && p->mail_last == m) p->mail_last = last;
                 rt_value_t v = m->value;
-                if (!rt_is_address(src)) p->reading = src;
+                if (!rt_is_address(src) && !other) p->reading = src;
                 if (m->chunk->size == sizeof *m) free_msg(m);
                 else                             adopt(p, m->chunk);
                 if (!pair) return v;
@@ -1771,7 +2106,17 @@ static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char 
             }
         }
         for (rt_value_t xs = srcs; xs != RT_NIL; xs = rt_cdr(xs)) {
-            rt_proc_t *t = rt_is_address(rt_car(xs)) ? NULL : slot(rt_car(xs))->proc;
+            rt_value_t src = rt_car(xs);
+            if (far(src)) {                     // a watch on its island, once: its end comes as a message
+                if (!far_has(&side_of(p)->watches, src)) {
+                    item_t *it = new_item(ITEM_WATCH, src, p->pid);
+                    it->wakes = WATCH_READ;
+                    push(rt_pid_island(src), it);
+                    far_add(&side_of(p)->watches, src, WATCH_READ);
+                }
+                continue;
+            }
+            rt_proc_t *t = rt_is_address(src) ? NULL : slot(src)->proc;
             if (t && !reads(p, t)) watch(t, p, WATCH_READ);
         }
         p->joining = srcs;
@@ -1791,6 +2136,14 @@ rt_value_t rt_read_any(rt_value_t srcs, const char *site) {
 }
 
 rt_value_t rt_monitor(rt_value_t pid, const char *site) {
+    if (far(pid) && !rt_is_address(pid)) {
+        if (!rt_current->actor) rt_fault(RT_FAULT_NOT_ACTOR, rt_current->pid, site);
+        item_t *it = new_item(ITEM_WATCH, pid, rt_current->pid);
+        it->wakes = WATCH_TELLS;
+        push(rt_pid_island(pid), it);
+        far_add(&side_of(rt_current)->watches, pid, WATCH_TELLS);
+        return RT_NIL;
+    }
     entry_t *e = entry(pid, site);
     if (!rt_current->actor) rt_fault(RT_FAULT_NOT_ACTOR, rt_current->pid, site);   // the notice would go nowhere
     if (e->proc) {
@@ -1817,11 +2170,147 @@ static void end_other(rt_proc_t *p, rt_value_t reason) {
 }
 
 rt_value_t rt_kill(rt_value_t pid, const char *site) {
+    if (far(pid) && !rt_is_address(pid)) {      // it ends when its island takes this
+        cross(ITEM_KILL, pid, rt_current->pid, NULL);
+        return RT_NIL;
+    }
     rt_proc_t *p = entry(pid, site)->proc;
     if (!p) return RT_NIL;
     if (p == rt_current) rt_end(0, rt_symbol(RT_SYM_KILLED), 0);
     end_other(p, rt_symbol(RT_SYM_KILLED));
     return RT_NIL;
+}
+
+// --- what comes from other islands (D256) ------------------------------------
+
+static RT_ISLAND int killed;            // the running process, killed by an item as it ran
+
+static void keys_for(rt_proc_t *p);
+static void system_for(rt_proc_t *p, const char *site);
+
+// A start: the actor, made here as spawn makes one, its pid told to the
+// spawner, which waits for it.
+static void start_here(item_t *it) {
+    rt_proc_t *c = rt_new_process(it->code, it->from);
+    c->actor       = 1;
+    c->parent_task = it->parent_task;
+    c->rand_seed   = it->rand_seed;
+    c->rand_gamma  = it->rand_gamma;
+    slot(c->pid)->actor = 1;
+    memcpy(c->args, it->args, it->n * sizeof *it->args);
+    if (it->chunk) adopt(c, it->chunk);
+    if (it->source == SOURCE_KEYS)   keys_for(c);
+    if (it->source == SOURCE_SYSTEM) system_for(c, it->site);
+    cross(ITEM_PLACED, it->from, c->pid, NULL);
+}
+
+static void take_item(item_t *it) {
+    entry_t   *e = rt_is_address(it->to) ? NULL : slot(it->to);
+    rt_proc_t *t = e ? e->proc : NULL;
+    switch (it->kind) {
+        case ITEM_MSG:
+            if (!e)               to_address(it->to, it->msg);
+            else if (t && t->actor) deliver(t, it->msg);
+            else if (t) {                       // a task, which only another island's send could reach
+                rt_dead_letter(it->msg->value, "send to a task");
+                free_msg(it->msg);
+            } else if (e->device) {
+                command(e->device, it->msg->value);
+                free_msg(it->msg);
+            } else {
+                free_msg(it->msg);              // ended: it disappears, as here
+            }
+            break;
+        case ITEM_START:
+            start_here(it);
+            break;
+        case ITEM_PLACED:
+            if (t && t->state == RT_PLACING) {
+                t->joining = it->from;
+                enqueue(t);
+            }
+            break;
+        case ITEM_KILL:
+            if (t && t == rt_current) killed = 1;
+            else if (t)               end_other(t, rt_symbol(RT_SYM_KILLED));
+            break;
+        case ITEM_WATCH:
+            if (t) far_add(&side_of(t)->watched_by, it->from, it->wakes);
+            else   tell_far(it->from, it->to, it->wakes, it->wakes == WATCH_TELLS ? exit_msg(it->to, e) : result_msg(e));
+            break;
+        case ITEM_UNWATCH:
+            if (t && t->side) far_drop(&t->side->watched_by, it->from);
+            break;
+        case ITEM_ENDED:
+            if (!t) {
+                free_msg(it->msg);
+                break;
+            }
+            if (t->side) far_drop(&t->side->watches, it->from);
+            if (it->wakes == WATCH_TELLS) {
+                deliver(t, it->msg);
+                break;
+            }
+            it->msg->device = it->from;         // kept for a read, as a record here keeps an end
+            it->msg->next   = side_of(t)->far_ends;
+            t->side->far_ends = it->msg;
+            if (t->state == RT_READING && among(t->joining, it->from)) enqueue(t);
+            break;
+    }
+}
+
+// Takes what's in this island's inbox, in the order it came.
+static void take_inbox(void) {
+    island_t *s = &isles[island];
+    pthread_mutex_lock(&s->lock);
+    item_t *it = s->first;
+    s->first = s->last = NULL;
+    atomic_store(&s->waiting, 0);
+    pthread_mutex_unlock(&s->lock);
+    for (item_t *next; it; it = next) {
+        next = it->next;
+        take_item(it);
+        free(it);
+        atomic_fetch_sub(&busy, 1);
+    }
+}
+
+// An actor on island k, another, made there, which numbers it itself;
+// the caller waits for its pid, keeping its stack, as join does.
+static rt_value_t place(uint64_t k, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, int source) {
+    if (rt_io_logging()) {
+        fflush(stdout);
+        fputs("slight: a run that's recorded or replayed is on one island, so far (D256)\n", stderr);
+        exit(2);
+    }
+    rt_proc_t *p  = rt_current;
+    item_t    *it = new_item(ITEM_START, 0, p->pid);
+    rt_proc_t  child;
+    rt_rand_split(p, &child);
+    it->code        = code;
+    it->n           = n;
+    it->chunk       = copy_values(values, it->args, n);
+    it->rand_seed   = child.rand_seed;
+    it->rand_gamma  = child.rand_gamma;
+    it->parent_task = !p->actor;
+    it->source      = (uint8_t)source;
+    it->site        = site;
+    push(k, it);
+    p->state   = RT_PLACING;
+    p->joining = rt_int((int64_t)k);
+    p->at      = (uintptr_t)__builtin_return_address(0);
+    to_scheduler(p);                            // till ITEM_PLACED says the pid
+    if (!p->actor) far_add(&side_of(p)->watches, p->joining, WATCH_CHILD);   // its end comes here: a read waits for it
+    return p->joining;
+}
+
+// (spawn/on k expr): an actor on island k (D256); on the caller's own,
+// spawn's.
+rt_value_t rt_spawn_on(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) {
+    int64_t k = rt_need_int(where, site);
+    if (k < 0 || (uint64_t)k >= nislands) rt_fault(RT_FAULT_RANGE, where, site);
+    if ((uint64_t)k == island) return rt_spawn(code, n, values, site);
+    return place((uint64_t)k, code, n, values, site, 0);
 }
 
 static void events(void);
@@ -1836,6 +2325,10 @@ void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp
     }
     refill(p);
     events();                                   // so a busy process can't hold up a timer or a key
+    if (killed) {                               // from another island, as it ran (D256)
+        killed = 0;
+        rt_end(0, rt_symbol(RT_SYM_KILLED), 0);
+    }
     if (ready_head) {
         enqueue(p);
         to_scheduler(p);
@@ -2006,6 +2499,10 @@ static void lookup_timed_out(struct rt_device *d, uint64_t seq);
 static void ring(void) {
     for (uint64_t t = nalarms ? now() : 0; nalarms && alarms[0].due <= t; ) {
         alarm_t    a = next_alarm();
+        if (far(a.pid)) {
+            cross(ITEM_MSG, a.pid, 0, a.msg);
+            continue;
+        }
         if (rt_is_address(a.pid)) {
             to_address(a.pid, a.msg);
             continue;
@@ -2026,7 +2523,7 @@ static void ring(void) {
 
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) {
     uint64_t due = due_in(ms, site);
-    if (!rt_is_address(pid)) need_actor(entry(pid, site), pid, site);
+    if (!rt_is_address(pid) && !far(pid)) need_actor(entry(pid, site), pid, site);
     set_alarm(due, pid, new_msg(msg), ++afters);
     return rt_int((int64_t)afters);
 }
@@ -2044,6 +2541,7 @@ rt_value_t rt_timer_cancel(rt_value_t t, const char *site) {
 // Whether nothing can come of a: its process has ended, or its device
 // closed (D232).
 static int orphaned(const alarm_t *a) {
+    if (far(a->pid)) return 0;                  // its island would know
     if (rt_is_address(a->pid)) return !address_owner(a->pid);
     const entry_t *e = slot(a->pid);
     return !e->proc && !e->device;
@@ -2107,17 +2605,23 @@ static size_t          input_at, input_len; // ...and decoded up to input_at
 static int             input_ended;
 static uint64_t        input_seen;      // when stdin was last looked at while busy
 
+// The terminal is island 0's (D256): from another, the actor is placed
+// there.
 rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
+    if (island) return place(0, code, n, values, site, SOURCE_KEYS);
     rt_value_t pid = rt_spawn(code, n, values, site);
+    keys_for(slot(pid)->proc);
+    return pid;
+}
+
+static void keys_for(rt_proc_t *p) {
     if (nconnected == connected_cap) {
         connected_cap = connected_cap ? connected_cap * 2 : 8;
         connected     = rt_must(realloc(connected, connected_cap * sizeof *connected));
     }
-    rt_proc_t *p = slot(pid)->proc;
-    p->keypress  = 1;
+    p->keypress = 1;
     connected[nconnected++] = p;
     rt_tty_raw(1);
-    return pid;
 }
 
 static void disconnect(rt_proc_t *p) {
@@ -2128,8 +2632,10 @@ static void disconnect(rt_proc_t *p) {
     if (!nconnected) rt_tty_raw(0);
 }
 
+// Only island 0 reads the terminal (D256): a key it delivers goes on its
+// own run queue, where the process it's for is.
 static int listening(void) {
-    return nconnected && !input_ended;
+    return island == 0 && nconnected && !input_ended;
 }
 
 static RT_ISLAND uint64_t nsockets;
@@ -2140,6 +2646,7 @@ static int      socket_events(fd_set *in, fd_set *out);
 
 #define IO_KEYS    1                    // what wait_for saw: stdin has something to read...
 #define IO_SOCKETS 2                    // ...or a socket did something
+#define IO_INBOX   4                    // ...or another island has put something in the inbox (D256)
 #define SETTLE_US  200000               // how long the virtual clock waits for a lookup's answer, for real
 
 // Waits up to us microseconds (forever, if negative) for stdin to have
@@ -2156,14 +2663,37 @@ static int wait_for(int64_t us) {
     // Nothing to look at and no time to wait: the virtual clock asks at
     // every step it takes, which in a simulation is every event (D242).
     if (max < 0 && us == 0) return 0;
+    // An island that may wait is woken by an item for it (D256).
+    island_t *s     = &isles[island];
+    int       inbox = us != 0 && atomic_load(&many);
+    if (inbox && spin()) return IO_INBOX;
+    if (inbox) {
+        pthread_mutex_lock(&s->lock);
+        int any = s->first != NULL;
+        s->asleep = !any;
+        pthread_mutex_unlock(&s->lock);
+        if (any) return IO_INBOX;
+        FD_SET(s->wake[0], &in);
+        if (s->wake[0] > max) max = s->wake[0];
+    }
     struct timeval tv, *timeout = NULL;
     if (us >= 0) {
         if (us > 3600000000) us = 3600000000;  // macOS's select refuses more than 10^8 s
         tv      = (struct timeval){ .tv_sec = (time_t)(us / 1000000), .tv_usec = (suseconds_t)(us % 1000000) };
         timeout = &tv;
     }
-    if (rt_io_select(max + 1, &in, &out, timeout) <= 0) return 0;
-    int saw = keys && FD_ISSET(STDIN_FILENO, &in) ? IO_KEYS : 0;
+    int got = rt_io_select(max + 1, &in, &out, timeout);
+    if (inbox) {
+        pthread_mutex_lock(&s->lock);
+        s->asleep = 0;
+        pthread_mutex_unlock(&s->lock);
+        if (got > 0 && FD_ISSET(s->wake[0], &in)) {
+            drain_wake();
+            FD_CLR(s->wake[0], &in);
+        }
+    }
+    if (got <= 0) return 0;
+    int saw = (keys && FD_ISSET(STDIN_FILENO, &in) ? IO_KEYS : 0) | (atomic_load(&s->waiting) ? IO_INBOX : 0);
     return saw | (socket_events(&in, &out) ? IO_SOCKETS : 0);
 }
 
@@ -2191,6 +2721,7 @@ static int next_key(void) {
 // fires the timers that are due, and on the real clock, every 10 ms, takes
 // the keys typed since and sees to the sockets.
 static void events(void) {
+    if (atomic_load_explicit(&isles[island].waiting, memory_order_relaxed)) take_inbox();
     ring();
     if (virtual_clock || (!listening() && !nsockets)) return;
     uint64_t t = now();
@@ -2212,6 +2743,7 @@ static void events(void) {
 // real, keys and time standing still meanwhile (D185); then a key, then
 // the clock moves; only when nothing else can happen does it wait for real.
 static int idle(void) {
+    if (atomic_load(&isles[island].waiting)) return 1;    // what's come from another island first (D256)
     fflush(stdout);                             // so a program stopped as it waits has lost none of it (D229)
     drop_orphans();
     if (!listening() && !nalarms && !sockets_waiting()) return 0;
@@ -3111,8 +3643,8 @@ static void forget_path(int fd) {
 }
 
 static int unix_listen(rt_proc_t *p, const char *site, const char *path, size_t len) {
-    static int ends;
-    int        fd = rt_io_socket(AF_UNIX, SOCK_STREAM), err;
+    static _Atomic int ends;                    // any island may be first (D256)
+    int                fd = rt_io_socket(AF_UNIX, SOCK_STREAM), err;
     if (fd < 0) return errno;
     if ((err = rt_io_setup(fd, 0)) != 0 || (err = rt_io_listen_unix(fd, path)) != 0) {
         rt_io_close(fd);
@@ -3120,7 +3652,7 @@ static int unix_listen(rt_proc_t *p, const char *site, const char *path, size_t 
     }
     if (!rt_io_replaying()) {
         paths[fd] = rt_must(strdup(path));
-        if (!ends++) atexit(unlink_paths);
+        if (!atomic_fetch_add(&ends, 1)) atexit(unlink_paths);
     }
     rt_device_t *d = new_device(p, DEV_LISTEN, fd, site, path, len);
     d->unix_sock = 1;
@@ -3276,7 +3808,10 @@ static int sockets_waiting(void) {
     return 0;
 }
 
-static int                child_pipe[2] = { -1, -1 };    // SIGCHLD writes a byte to it
+// SIGCHLD writes a byte to each island's pipe, which its select() waits
+// on while it has commands, each island reaping its own (D256): the
+// handler runs on island 0's thread, since the others block signals.
+static int                child_pipes[RT_ISLANDS_MAX][2] = { [0 ... RT_ISLANDS_MAX - 1] = { -1, -1 } };
 static RT_ISLAND uint64_t nchildren;                     // commands not yet waited for
 static int                is_init;                       // PID 1, as in a container: orphans are its (D229)
 
@@ -3284,7 +3819,7 @@ static int                is_init;                       // PID 1, as in a conta
 // once one has, since what a command left running is PID 1's to wait for
 // when it ends.
 static int watching_children(void) {
-    return child_pipe[0] >= 0 && (nchildren || is_init);
+    return child_pipes[island][0] >= 0 && (nchildren || (is_init && island == 0));
 }
 
 // The file descriptors select() waits on for d: to read, and to write (a
@@ -3310,8 +3845,8 @@ static void socket_fds(fd_set *in, fd_set *out, int *max) {
         if (w && wfd > *max) *max = wfd;
     }
     if (watching_children()) {
-        FD_SET(child_pipe[0], in);
-        if (child_pipe[0] > *max) *max = child_pipe[0];
+        FD_SET(child_pipes[island][0], in);
+        if (child_pipes[island][0] > *max) *max = child_pipes[island][0];
     }
 }
 
@@ -3382,7 +3917,7 @@ static int socket_events(fd_set *in, fd_set *out) {
         ready     = rt_must(realloc(ready, ready_cap * sizeof *ready));
     }
     uint64_t n = 0;
-    int      ended = watching_children() && FD_ISSET(child_pipe[0], in);
+    int      ended = watching_children() && FD_ISSET(child_pipes[island][0], in);
     for (rt_device_t *d = sockets; d; d = d->next_socket) {
         int rfd, wfd;
         fds_of(d, &rfd, &wfd);
@@ -3407,7 +3942,9 @@ static volatile sig_atomic_t groups[FD_SETSIZE];   // the groups of commands run
 static void on_child(int sig) {
     int err = errno;
     (void)sig;
-    if (write(child_pipe[1], "", 1) < 0) {}    // full: it has a byte already
+    for (int k = 0; k < RT_ISLANDS_MAX; k++) {
+        if (child_pipes[k][1] >= 0 && write(child_pipes[k][1], "", 1) < 0) {}   // full: it has a byte already
+    }
     errno = err;
 }
 
@@ -3457,10 +3994,11 @@ static void catch_ends(void) {
 // Before the first command: SIGCHLD's pipe and handler. 0, or an errno. A
 // replay runs no command, so no signal comes.
 static int start_commands(void) {
-    struct sigaction sa = { 0 };
-    if (child_pipe[0] >= 0) return 0;
-    if (rt_io_pipe(child_pipe) < 0) return errno;
-    if (rt_io_replaying()) return 0;
+    static _Atomic int handled;
+    struct sigaction   sa = { 0 };
+    if (child_pipes[island][0] >= 0) return 0;
+    if (rt_io_pipe(child_pipes[island]) < 0) return errno;
+    if (rt_io_replaying() || atomic_exchange(&handled, 1)) return 0;
     sigemptyset(&sa.sa_mask);
     sa.sa_handler = on_child;
     sa.sa_flags   = SA_RESTART | SA_NOCLDSTOP | SA_ONSTACK;
@@ -3545,7 +4083,7 @@ static void reap_orphans(void);
 // sends its last message.
 static void reap(void) {
     char bytes[64];
-    while (rt_io_read(child_pipe[0], bytes, sizeof bytes) > 0) {}
+    while (rt_io_read(child_pipes[island][0], bytes, sizeof bytes) > 0) {}
     for (rt_device_t *d = sockets, *next; d; d = next) {
         int status;
         next = d->next_socket;
@@ -3555,7 +4093,7 @@ static void reap(void) {
         nchildren--;
         if (d->eof_sent && !d->sent) exited(d);
     }
-    if (is_init) reap_orphans();
+    if (is_init && island == 0) reap_orphans();
 }
 
 // As PID 1, what a command started and left running is this program's
@@ -3680,6 +4218,13 @@ static const char *function_name(uintptr_t pc) {
     return lo ? functions[lo - 1].name : NULL;
 }
 
+// The tables made the first time they're wanted, made before a second
+// island starts, so no two make them at once (D256).
+static void share_tables(void) {
+    function_name(0);
+    rt_symbol_name(0);
+}
+
 // Where p is (see above), or 0.
 static uintptr_t where(const rt_proc_t *p) {
     return p->stack ? p->at : (uintptr_t)p->code;
@@ -3699,7 +4244,7 @@ static snapshot_t take(rt_device_t *d, const rt_proc_t *p) {
     static const int states[] = {
         [RT_READY] = RT_SYS_READY, [RT_RUNNING] = RT_SYS_RUNNING, [RT_WAITING] = RT_SYS_RECV,
         [RT_JOINING] = RT_SYS_JOINING, [RT_RACING] = RT_SYS_JOINING, [RT_SLEEPING] = RT_SYS_SLEEPING,
-        [RT_READING] = RT_SYS_READING,
+        [RT_READING] = RT_SYS_READING, [RT_PLACING] = RT_SYS_JOINING,
     };
     snapshot_t r = {
         .pid   = p->pid, .parent = p->parent, .joining = p->state == RT_JOINING ? p->joining : RT_NIL,
@@ -3839,10 +4384,16 @@ static void system_command(rt_device_t *d, rt_value_t msg) {
     }
 }
 
+// :system is island 0's too (D256).
 rt_value_t rt_connect_system(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
+    if (island) return place(0, code, n, values, site, SOURCE_SYSTEM);
     rt_value_t pid = rt_spawn(code, n, values, site);
-    tell_open(new_device(slot(pid)->proc, DEV_SYSTEM, -1, site, NULL, 0));
+    system_for(slot(pid)->proc, site);
     return pid;
+}
+
+static void system_for(rt_proc_t *p, const char *site) {
+    tell_open(new_device(p, DEV_SYSTEM, -1, site, NULL, 0));
 }
 
 // (open source arg): a device the calling task owns, with no process to
@@ -3890,7 +4441,7 @@ void rt_run(void) {
         events();
         rt_proc_t *p = dequeue();
         if (!p) {
-            if (!idle()) return;
+            if (!idle() && !quiesce()) return;   // nothing more can come, here or anywhere (D256)
             continue;
         }
         if (!p->stack) start(p);
@@ -3960,6 +4511,18 @@ static size_t bytes_of(const char *s) {
     if (digits == 0 || digits > 18 || shift < 0) return 0;     // 18 digits fit strtoull
     unsigned long long n = strtoull(s, NULL, 10);
     return n > (SIZE_MAX >> shift) ? 0 : (size_t)n << shift;
+}
+
+// SLIGHT_ISLANDS: how many islands (D256), from 1 to 256; without it, one
+// for each core. 0 if it isn't that.
+static uint64_t islands_wanted(const char *s) {
+    if (!s) {
+        long n = sysconf(_SC_NPROCESSORS_ONLN);
+        return n < 1 ? 1 : n > RT_ISLANDS_MAX ? RT_ISLANDS_MAX : (uint64_t)n;
+    }
+    if (!*s || strlen(s) > 3 || strspn(s, "0123456789") != strlen(s)) return 0;
+    uint64_t n = strtoull(s, NULL, 10);
+    return n >= 1 && n <= RT_ISLANDS_MAX ? n : 0;
 }
 
 // A cgroup limit's bytes, read from file: v2's "max", v1's figure for no
@@ -4061,6 +4624,10 @@ static void tell_waiting(const rt_proc_t *p) {
             if (!p) return;
             continue;
         }
+        if (p->state == RT_PLACING) {
+            fprintf(stderr, "island %" PRId64 " to start an actor", rt_int_value(p->joining));
+            return;
+        }
         if (p->state != RT_JOINING) {
             fprintf(stderr, "a message");
             return;
@@ -4122,6 +4689,12 @@ int main(int argc, char **argv) {
     rt_io_start(&argc, &argv, &env, &settings); // replaying, the record's settings, arguments and environment
     virtual_clock = settings.virtual_clock;
     sched         = settings.sched_seed;
+    sched_seed    = settings.sched_seed;
+    nislands      = islands_wanted(getenv("SLIGHT_ISLANDS"));
+    if (!nislands) {
+        fputs("slight: SLIGHT_ISLANDS is how many islands, from 1 to 256\n", stderr);
+        return 2;
+    }
     heap_max      = settings.heap_max;
     started       = now();
     if (virtual_clock) epoch = rt_io_epoch(epoch_at);
