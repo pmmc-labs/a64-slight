@@ -185,6 +185,31 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 30 Oct, 21:51: slight on every island (D256)
+
+`2026-10-30-2151-macos-apple-m2-max`, 12 cores, so 12 islands; each
+every-core time beside its one-core one, and over it:
+
+| | slight | slight-mc | Go | Go, every core | Rust | Rust, every core | Erlang | Erlang, every core |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| `parallel-fib 30` | 0.283 s | 0.036 s (0.13) | 0.167 | 0.021 (0.13) | 0.147 | 0.018 (0.12) | 0.915 | 0.138 (0.15) |
+| `spectral-norm 1000` | 0.084 s, arrays | 0.018 s (0.21) | 0.047 | 0.047 (1.0) | | | 0.701 | 0.486 (0.69) |
+| `fan-in 10000000` | 0.362 s | 1.296 s (3.6) | 0.287 | 3.528 (12.3) | 0.266 | 4.155 (15.6) | 1.838 | 1.099 (0.60) |
+
+- **Work spreads as far as Go's and Rust's:** `parallel-fib` is 7.9
+  times as fast on 12 islands, as theirs are 8.0 and 8.2 times, and
+  still about 1.7 times their time, as on one core.
+- **`spectral-norm` on 12 islands, 0.018 s, is the fastest of all:**
+  4.7 times `slight-arrays`, and 2.6 times faster than C, Go and Go on
+  every core (whose program, the Benchmarks Game's, doesn't spread its
+  work), the bands' products sharing the vector as a handle.
+- **`fan-in` to one mailbox costs slight least, but Erlang:** 3.6 times
+  its one core's, where Go's is 12 and Rust's 16; Erlang's every core
+  is faster than its one. slight's CPU, 13 s in 1.3, is the islands
+  that wait spinning before they sleep, and the senders; and its memory
+  77 MB where one core holds 484, since the mailbox is emptied as fast
+  as the other islands fill it.
+
 ### The cloud machine, 30 Oct: slight on every island (D256)
 
 The best of three on the cloud machine's 4 cores, `SLIGHT_ISLANDS=4`,
