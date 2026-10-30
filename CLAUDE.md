@@ -333,7 +333,14 @@ reductions left to right, `array/matmul`), `array/generate`,
 `array/map` and `array/fold` in the prelude, `lib/matrix.slight`, and
 the types `(array float)` and `(array int)` (golden tests 320 to 323,
 `t/models/arrays.py`; the checker's 011 and 012). `bench/`'s `slight-arrays`,
-`spectral-norm` with arrays (`docs/BENCHMARKS.md`). **Next:** more than
+`spectral-norm` with arrays (`docs/BENCHMARKS.md`). **Next:** nothing
+is under way. Candidates, none agreed: a simulation library across
+islands (`docs/PLAN.md`, "Simulation across islands", proposed and
+open: time-stepped regions in `lib/sim.slight`, then discrete events in
+conservative windows on a `clock/hold` builtin; Stevan leans to
+simulation over servers, D257), and D249's step 3, the standard library
+(`format`, CSV, `@ARGV` parsing, sets, sorted maps, regular
+expressions), each to be proposed first. Done before that: more than
 one core (D249's step 7, moved up by D253), agreed as islands (D256,
 `docs/PLAN.md`, "More than one core: islands"): a thread per core, each
 today's runtime, sharing nothing but an inbox each and the shared

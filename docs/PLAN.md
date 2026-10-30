@@ -1759,6 +1759,67 @@ qemu runs threads, but on this x86-64 machine the memory model isn't
 AArch64's, so ordering bugs show only on the Mac, where each step is
 proven.
 
+### Simulation across islands (proposed, open, Oct 2026)
+
+Proposed by Claude after islands (D256) and D257 (simulation before
+servers); Stevan asked for it written down, to pick up later. Not yet
+agreed: the options and the recommendation stand as offered.
+
+**The problem.** On one island slight simulates well: agents are
+actors, time is the virtual clock, `after` and `sleep` are events, and
+`bank` comes to SimPy's waits (D241). Across islands each island's
+virtual clock is its own, so an agent on island 2 can't safely send
+another one a message timed for an island whose clock may be past it.
+`examples/reaction.slight` steps everything in lockstep by hand. The
+library should give that a shape, and the same answer on any number of
+islands.
+
+- **(a) Time-stepped, a library alone (`lib/sim.slight`).** The world
+  cut into regions, an actor each, placed across the islands; each step
+  the library hands every region its neighbours' edges, the region's
+  step function gives its new state and the edges to send on, a barrier
+  gathers them, and every kth step an observer gets their outputs:
+  `(sim/grid regions init step edges)`, `(sim/run g n every observe)`.
+  Cellular automata, diffusion, agents in synchronous ticks; the same on
+  any number of islands, as `reaction` is. No runtime change.
+- **(b) Discrete events, in conservative windows (one new builtin).**
+  Agents stay actors with `after`, `sleep` and `recv`, with one rule: an
+  interaction takes at least a lookahead L of simulated time. Every
+  island runs to the window's end T+L, exchanges what crossed, meets the
+  rest at a barrier, and goes on. The runtime would need
+  `(clock/hold t)`: the island's virtual clock held at t, and once
+  nothing there can happen before t (every actor waiting, the next timer
+  at t or later, the inbox empty), moved to t and `(:held t)` sent to
+  the caller. The library: `(sim/after delay pid msg)` for a timed
+  message, delay at least L; a keeper per island that takes them and
+  sets them as local timers; and a barrier that counts what each island
+  sent, so no window starts before every keeper has its own. For the
+  same answer on any number of islands, events due together fire in an
+  order that doesn't depend on placement: every `sim/after` goes through
+  a keeper, the same island's too, sorted by time, the agent's own sim
+  id (not its pid, which says its island) and its sequence. Its
+  `clock/hold`, and how a held clock records and replays, would be a
+  proposal of their own.
+- **(c) Both,** (a) first, sharing its regions and barrier with (b).
+
+Rejected as offered: optimistic simulation (Time Warp: running ahead
+and rolling back), which immutable state makes cheap to save but whose
+anti-messages and global virtual time are a lot of machinery; and one
+virtual clock for every island, which would make every timer a
+conversation between islands.
+
+**Recommendation: (c).** (a) is small, needs no runtime change, and
+makes `reaction` shorter; (b) is what makes slight a simulation
+language: SimPy's style, agents as actors, on every core, the same
+results on 1 island or 64.
+
+Measured alongside, for whoever picks this up: a message crossing
+islands is one allocation now, and `fan-in-mc` four times faster on the
+cloud machine; a ping-pong whose halves are on neighbouring islands
+costs a few microseconds a round trip on the cloud machine's 4 vCPUs,
+worse with more islands, which the M2 Max should measure before more
+work goes into crossing latency (`docs/BENCHMARKS.md`, 31 Oct).
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written
