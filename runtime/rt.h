@@ -827,6 +827,28 @@ rt_value_t rt_tuple_remove(rt_value_t t, rt_value_t i, const char *site) RT_ASM(
 rt_value_t rt_tuple_slice(rt_value_t t, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_tuple_slice);
 rt_value_t rt_tuple_to_list(rt_value_t t, const char *site) RT_ASM(rt_tuple_to_list);
 
+// Arrays of numbers (arrays.c, D253): :float and :int, unboxed.
+rt_value_t rt_is_array_p(rt_value_t v) RT_ASM(rt_is_array_p);
+rt_value_t rt_array_make(rt_value_t kind, rt_value_t n, rt_value_t x, const char *site) RT_ASM(rt_array_make);
+rt_value_t rt_list_to_array(rt_value_t kind, rt_value_t xs, const char *site) RT_ASM(rt_list_to_array);
+rt_value_t rt_array_to_list(rt_value_t a, const char *site) RT_ASM(rt_array_to_list);
+rt_value_t rt_array_kind(rt_value_t a, const char *site) RT_ASM(rt_array_kind);
+rt_value_t rt_array_len_of(rt_value_t a, const char *site) RT_ASM(rt_array_len_of);
+rt_value_t rt_array_ref(rt_value_t a, rt_value_t i, const char *site) RT_ASM(rt_array_ref);
+rt_value_t rt_array_set(rt_value_t a, rt_value_t i, rt_value_t x, const char *site) RT_ASM(rt_array_set);
+rt_value_t rt_array_slice(rt_value_t a, rt_value_t start, rt_value_t end, const char *site) RT_ASM(rt_array_slice);
+rt_value_t rt_array_concat(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_concat);
+rt_value_t rt_array_add(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_add);
+rt_value_t rt_array_sub(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_sub);
+rt_value_t rt_array_mul(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_mul);
+rt_value_t rt_array_div(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_div);
+rt_value_t rt_array_sum(rt_value_t a, const char *site) RT_ASM(rt_array_sum);
+rt_value_t rt_array_min(rt_value_t a, const char *site) RT_ASM(rt_array_min);
+rt_value_t rt_array_max(rt_value_t a, const char *site) RT_ASM(rt_array_max);
+rt_value_t rt_array_dot(rt_value_t a, rt_value_t b, const char *site) RT_ASM(rt_array_dot);
+rt_value_t rt_array_matmul(rt_value_t a, rt_value_t b, rt_value_t rows, rt_value_t inner, rt_value_t cols,
+                           const char *site) RT_ASM(rt_array_matmul);
+
 // S-expressions as data (sexp.c, D155).
 rt_value_t rt_sexp_parse(rt_value_t s, const char *site) RT_ASM(rt_sexp_parse);
 rt_value_t rt_sexp_print(rt_value_t v, const char *site) RT_ASM(rt_sexp_print);

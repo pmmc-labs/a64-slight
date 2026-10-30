@@ -3,7 +3,7 @@
 
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { readdirSync, readFileSync } from 'node:fs';
 
 import { ARRAY_WORDS, DEVICE_WORDS, ERRNO_NAMES, EXEC_WORDS, FAULT_KINDS, FLOAT_HEADER, FLOAT_VALUE, intWord, JSON_WORDS, KEY_NAMES, KIND_WORDS, MAX_ARGS, PEER_WORDS, SOURCE_WORDS, RESERVED_SYMBOLS, LOG_WORDS, PACK_WORDS, STAT_WORDS, TABLE_WORDS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS, TAG_BOXED, tupleElement, tupleHeader } from '../src/values.ts';
 
@@ -108,4 +108,17 @@ test('nil is the list tag on a null pointer', () => {
 
 test('a call passes as many arguments as a waiting process keeps', () => {
     assert.equal(BigInt(MAX_ARGS), define('RT_MAX_ARGS'));
+});
+
+// On macOS a C name gets a leading underscore unless rt.h gives it the
+// assembly's own with RT_ASM, so a builtin without one links on Linux
+// and nowhere else: every runtime function the compiler can call (in a
+// string in its source, as the builtin tables have them) must have one.
+test('every runtime function the compiler calls is declared with RT_ASM', () => {
+    const declared = new Set([...RT_H.matchAll(/RT_ASM\((rt_[a-z0-9_]+)\)/g)].map((m) => m[1]!));
+    const src = new URL('../src/', import.meta.url);
+    const called = new Set(readdirSync(src).filter((f) => f.endsWith('.ts'))
+        .flatMap((f) => [...readFileSync(new URL(f, src), 'utf8').matchAll(/'(rt_[a-z0-9_]+)'/g)].map((m) => m[1]!)));
+    assert.ok(called.has('rt_tuple_ref') && called.has('rt_array_kind'));
+    assert.deepEqual([...called].filter((name) => !declared.has(name)), []);
 });
