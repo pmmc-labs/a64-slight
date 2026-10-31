@@ -1,37 +1,46 @@
 ; args: 30 4 8
-; boids: Craig Reynolds's flocking birds, in the terminal, with a process
-; for each bird. A bird steers by three rules, from the birds it can see:
-; toward the middle of them (cohesion), the way they're going
-; (alignment), and away from any too close (separation). The sky wraps
-; around at its edges. q quits. Its arguments, each optional: how many
-; birds (30); a number of frames, to draw them one under another and stop
-; rather than redraw the screen till q; and a seed for the random numbers:
+; boids: Craig Reynolds's flocking birds, in the terminal, on every core.
+; A bird steers by three rules, from the birds it can see: toward the
+; middle of them (cohesion), the way they're going (alignment), and away
+; from any too close (separation). The sky wraps around at its edges.
+; Its arguments, each optional: how many birds (300); a number of
+; frames, to draw them one under another and stop rather than redraw the
+; screen till q; a seed for the random numbers; and how many ms a tick
+; takes at least (50; 0 to go as fast as it can):
 ;
 ;     node bin/slightc.ts -o boids examples/boids.slight
 ;     ./boids                                      (q quits)
-;     ./boids 60                                   (60 birds)
+;     ./boids 2000 0 1 0                           (2000 birds, flat out)
+;     SLIGHT_ISLANDS=1 ./boids 2000 0 1 0          (the same, on one core)
 ;     SLIGHT_CLOCK=virtual ./boids 12 4 </dev/null (four frames, at once)
+;     ./boids --time 2000 100                      (no terminal: how long
+;                                                   100 ticks of 2000 take)
 ;
-; There's no one place where the flock is. Each tick, every bird tells
-; the display and every other bird where it is and how it's going; works
-; out its next move from what it heard; sleeps a tick; and tells them
-; again. A bird that has heard all of a tick can be on the next while
-; another is still waiting for part of it, from a bird that hasn't
-; finished telling everyone. The sleep makes that rare, but not
-; impossible (with no sleep, and SLIGHT_SCHED, it happens all the time).
-; So a bird keeps what comes early for the next tick. Nothing comes from
-; two ticks on, which would need this bird's next tick. Once it has the
-; whole tick, it sorts the birds it can see by id, and sums over them in
-; that order, so where they go doesn't depend on the order the messages
-; came in: any SLIGHT_SCHED gives the same flight.
+; The flock is data, four arrays of floats (D253): where each bird is,
+; and how it's going, bird i at index i. It's cut into shares, a range of
+; birds each, one on each island (D256). Each tick an actor on island 0
+; hands every share the whole flock, and each works out where its own
+; birds go next, from all the others; while they work it draws the tick
+; before, and then it puts their answers together, in order of share,
+; into the next tick's flock. A share needs the whole sky, but from 512
+; birds up the arrays cross between islands as handles, not copies, so a
+; tick is two messages a share however big the flock is, and the work,
+; each bird looking round it for the birds it can see, is spread over
+; the cores.
 ;
-; The display draws a tick once it has heard from every bird. It never
-; hears of the next tick before it has all of this one: every bird tells
-; the display first, so the last of a tick's messages to it is sent before
-; any bird can have heard all of that tick. Below the sky it says how long
-; a tick takes, from the :system device's clock (slight has no other way
-; to read one): on the virtual clock, the 100 ms the birds sleep; on a
-; real one, that and the flock's work.
+; An earlier version had a process for each bird, each telling every
+; other where it was, each tick: n² messages, each a copy, all of them
+; work for one core, since a bird's message is too small to be worth
+; another's. Birds as data on islands is what parallel physics codes do;
+; docs/BACKGROUND.md has what it costs.
+;
+; A bird sums over those it sees in order of id, whichever share it's
+; in, so the flight is the same on one island or twelve, and every float
+; in it comes out to the last bit on every machine: math/hypot, sin, cos
+; and atan2 are correctly rounded (D253). Below the sky it says how long
+; a tick takes, from clock/us: on the virtual clock, the 50 ms a tick is
+; held to; on a real one, that, or more if the work and the drawing take
+; longer. Live, the birds are coloured by the island that moves them.
 ;
 ; Space is in columns: a column is 1 wide and a row 2 high, about as a
 ; terminal's cells are, so the flock isn't stretched. The expected output
@@ -46,7 +55,6 @@
 (defun separation-rate () 0.1)
 (defun max-speed () 1.0)
 (defun min-speed () 0.5)
-(defun tick-ms () 100)
 
 ; --- vectors, as (x y) --------------------------------------------------------
 
@@ -54,219 +62,351 @@
 (defun v- (a b) (match (list a b) (((ax ay) (bx by)) (list (- ax bx) (- ay by)))))
 (defun v* (a k) (match a ((x y) (list (* x k) (* y k)))))
 (defun v/ (a k) (match a ((x y) (list (/ x k) (/ y k)))))
-(defun dot (a b) (match (list a b) (((ax ay) (bx by)) (+ (* ax bx) (* ay by)))))
 (defun vsum (vs) (fold/l (list 0 0) v+ vs))
 
 ; The shortest way from a to b, on a circle size round (half is half of
-; it, worked out once a tick rather than at every call).
+; it, worked out once a bird rather than at every call).
 (defun across (a b size half)
     (let d (- b a))
     (cond
-        ((> d half)         (- d size))
-        ((< d (- 0 half))   (+ d size))
-        (#true              d)))
+        ((> d half)            (- d size))
+        ((< d (- 0.0 half))    (+ d size))
+        (#true                 d)))
 
 (defun around (x size)
     (cond
-        ((< x 0)     (+ x size))
+        ((< x 0.0)   (+ x size))
         ((>= x size) (- x size))
         (#true       x)))
 
+; --- the grid -----------------------------------------------------------------
+
+; A flock is #(xs ys vxs vys), each a :float array, bird i at index i;
+; the sky is #(w h).
+;
+; Looking at every bird for the few in sight is n² of work, so a share
+; puts the flock in a grid first, of cells at least a sight and one
+; across (the one so that rounding can't put two birds in sight two cells
+; apart), and a bird looks only in the cells round its own. The grid is
+; #(gw gh cw ch order starts): gw by gh cells, each cw by ch; the birds'
+; ids in order of cell, an :int array; and where each cell's ids start in
+; it, and the end, another.
+(defun grid (flock sky)
+    (match (list flock sky)
+        ((#(xs ys _ _) #(w h))
+            (let gw (math/max 1 (math/floor (/ w (+ (sight) 1.0)))))
+            (let gh (math/max 1 (math/floor (/ h (+ (sight) 1.0)))))
+            (let cw (/ w gw))
+            (let ch (/ h gh))
+            (let n (array/len xs))
+            (let keys (sort (lambda (a b) (< a b))
+                (map (lambda (i) (+ (* n (cell gw gh cw ch (array/get xs i) (array/get ys i))) i))
+                     (range 0 n))))
+            (tuple gw gh cw ch
+                (list->array :int (map (lambda (key) (% key n)) keys))
+                (list->array :int (starts keys n 0 0 (* gw gh) ()))))))
+
+(defun cell (gw gh cw ch x y)
+    (+ (* (math/mod (math/floor (/ y ch)) gh) gw) (math/mod (math/floor (/ x cw)) gw)))
+
+; Where cells c to last start among keys, each a cell's n·cell + id, in
+; order, i being how many come before c's; and the end.
+(defun starts (keys n c i last acc)
+    (cond
+        ((> c last)                                       (reverse acc))
+        ((and (not (nil? keys)) (< (div (car keys) n) c)) (starts (cdr keys) n c (+ i 1) last acc))
+        (#true                                            (starts keys n (+ c 1) i last (cons i acc)))))
+
+; The cells round the one x, y is in, its own included, each once: with
+; fewer than three cells across, every column, and so with rows.
+(defun round-cells (g x y)
+    (match g
+        (#(gw gh cw ch _ _)
+            (let cx (math/mod (math/floor (/ x cw)) gw))
+            (let cy (math/mod (math/floor (/ y ch)) gh))
+            (let ring (lambda (c k) (if (< k 3) (range 0 k) (list (math/mod (- c 1) k) c (math/mod (+ c 1) k)))))
+            (fold/l () (lambda (acc r) (append acc (map (lambda (c) (+ (* r gw) c)) (ring cx gw))))
+                    (ring cy gh)))))
+
 ; --- steering -----------------------------------------------------------------
 
-; A bird is #(id x y vx vy): which it is, where it is, and its velocity.
-; A tuple, so a message with one in it is a box and four floats to copy.
+; The birds bird i sees, as #(id dx dy vx vy d2): each's offset (the
+; shortest way to it round the sky), velocity, and offset's length
+; squared. me is #(x y i w h hw hh), bird i's place and the sky. It
+; looks through order from p up to end, then the cells left in cells.
+; 100.0 is (sight) squared, as a literal, since this is the inner loop.
+(defun look (flock g me cells p end seen)
+    (cond
+        ((== p end)
+            (match cells
+                (()         seen)
+                ((c & rest)
+                    (match g
+                        (#(_ _ _ _ _ starts)
+                            (look flock g me rest (array/get starts c) (array/get starts (+ c 1)) seen))))))
+        (#true
+            (match flock (#(xs ys vxs vys)
+            (match g (#(_ _ _ _ order _)
+            (match me (#(x y i w h hw hh)
+                (let j (array/get order p))
+                (let dx (across x (array/get xs j) w hw))
+                (let dy (across y (array/get ys j) h hh))
+                (let d2 (+ (* dx dx) (* dy dy)))
+                (look flock g me cells (+ p 1) end
+                    (if (or (== j i) (>= d2 100.0))
+                        seen
+                        (cons (tuple j dx dy (array/get vxs j) (array/get vys j) d2) seen))))))))))))
 
-; The others a bird at state sees, from what the rest of the flock said,
-; their states in any order: each as (id offset velocity distance²),
-; the offset being the shortest way to it round the sky. Only those in
-; sight are kept, and they're sorted by id, the order the rules sum in,
-; so a bird sorts the few it sees rather than the whole flock.
-(defun in-sight (state heard sky)
-    (match (list state sky)
-        ((#(_ x y _ _) (w h))
-            (let hw (/ w 2))
-            (let hh (/ h 2))
-            (sort-by car (fold/l ()
-                (lambda (seen said)
-                    (match said
-                        (#(id px py vx vy)
-                            (let dx (across x px w hw))
-                            (let dy (across y py h hh))
-                            (let d2 (+ (* dx dx) (* dy dy)))
-                            (if (< d2 (* (sight) (sight)))
-                                (cons (list id (list dx dy) (list vx vy) d2) seen)
-                                seen))))
-                heard)))))
+(defun offset (o) (match o (#(_ dx dy _ _ _) (list dx dy))))
+(defun velocity (o) (match o (#(_ _ _ vx vy _) (list vx vy))))
+(defun close? (o) (match o (#(_ _ _ _ _ d2) (< d2 (* (room) (room))))))
 
 (defun cohesion (others)
-    (v* (v/ (vsum (map cadr others)) (length others)) (cohesion-rate)))
+    (v* (v/ (vsum (map offset others)) (length others)) (cohesion-rate)))
 
 (defun alignment (others v)
-    (v* (v- (v/ (vsum (map caddr others)) (length others)) v) (alignment-rate)))
+    (v* (v- (v/ (vsum (map velocity others)) (length others)) v) (alignment-rate)))
 
 (defun separation (others)
-    (let close (filter (lambda (o) (< (cadddr o) (* (room) (room)))) others))
-    (v* (vsum (map cadr close)) (- 0 (separation-rate))))
+    (v* (vsum (map offset (filter close? others))) (- 0 (separation-rate))))
 
 ; Not faster than max-speed, nor slower than min-speed unless still.
 (defun limit (v)
-    (let speed (math/sqrt (dot v v)))
+    (let speed (math/hypot (car v) (cadr v)))
     (cond
-        ((> speed (max-speed))                    (v* v (/ (max-speed) speed)))
-        ((and (< speed (min-speed)) (> speed 0))  (v* v (/ (min-speed) speed)))
-        (#true                                    v)))
+        ((> speed (max-speed))                      (v* v (/ (max-speed) speed)))
+        ((and (< speed (min-speed)) (> speed 0.0))  (v* v (/ (min-speed) speed)))
+        (#true                                      v)))
 
-; Where a bird at state goes next, from what the rest of the flock said.
-(defun steer (state heard sky)
-    (let others (in-sight state heard sky))
-    (match (list state sky)
-        ((#(id x y vx vy) (w h))
-            (let v (list vx vy))
+; Where bird i goes next, as (x y vx vy). The rules sum over the birds it
+; sees in order of id, whichever cells they're in, so where a bird goes
+; doesn't depend on the grid, and nor do the floats.
+(defun steer (flock g sky i)
+    (match (list flock sky)
+        ((#(xs ys vxs vys) #(w h))
+            (let x (array/get xs i))
+            (let y (array/get ys i))
+            (let others (sort-by (lambda (o) (tuple/get o 0))
+                (look flock g (tuple x y i w h (/ w 2) (/ h 2)) (round-cells g x y) 0 0 ())))
+            (let v (list (array/get vxs i) (array/get vys i)))
             (let v2 (limit (if (nil? others)
                 v
                 (v+ v (v+ (cohesion others) (v+ (alignment others v) (separation others)))))))
             (match v2
-                ((nvx nvy) (tuple id (around (+ x nvx) w) (around (+ y nvy) h) nvx nvy))))))
+                ((vx vy) (list (around (+ x vx) w) (around (+ y vy) h) vx vy))))))
 
-; --- a bird -------------------------------------------------------------------
+; --- a share ------------------------------------------------------------------
 
-; It waits to hear who's in the flock (every bird's pid, its own
-; included), then flies, knowing #(me others shown sky n): its id, the
-; other birds, the display, the sky, and how many birds there are. The
-; root may not have told every bird before the first it told has told it
-; where it is, so it keeps that for tick 0. (None can be on tick 1 yet:
-; that needs this bird's tick 0.)
-(defun bird (me state sky shown early)
+; Birds lo to hi - 1, on an island: told the whole flock, it answers
+; with where its birds go next, as a flock of their own.
+(defun share (sky lo hi)
     (recv
-        ((:flock flock)
-            (let others (remove (lambda (b) (eq? b $$)) flock))
-            (fly (tuple me others shown sky (length flock)) 0 state early))
-        ((:at 0 said)
-            (bird me state sky shown (cons said early)))))
+        ((:step to flock)
+            (send to (list :moved lo (move flock (grid flock sky) sky lo hi)))
+            (share sky lo hi))))
 
-; Tells the display and the rest of the flock where it is on this tick,
-; and listens for the n - 1 others, of whom those in early have spoken.
-(defun fly (ctx tick state early)
-    (match ctx
-        (#(me others shown sky n)
-            (let msg (list :at tick state))
-            (send shown msg)
-            (tell others msg)
-            (listen ctx tick state early (- n (+ 1 (length early))) ()))))
+(defun move (flock g sky lo hi)
+    (let next (map (lambda (i) (steer flock g sky i)) (range lo hi)))
+    (tuple
+        (list->array :float (map car next))
+        (list->array :float (map cadr next))
+        (list->array :float (map caddr next))
+        (list->array :float (map cadddr next))))
 
-(defun tell (pids msg)
-    (match pids
-        (()         ())
-        ((p & rest) (send p msg) (tell rest msg))))
+; One share for each island (or bird, if there are fewer), the birds
+; split as evenly as they go: share s has birds n·s/k up to n·(s + 1)/k.
+(defun shares (n sky)
+    (let k (math/min n (islands)))
+    (map (lambda (s) (spawn/on s (share sky (div (* n s) k) (div (* n (+ s 1)) k))))
+         (range 0 k)))
 
-; Listens till it has heard from every other bird on this tick, left
-; being how many it hasn't, and keeping what comes from the next; then
-; steers, sleeps a tick, and flies on. What it heard is the states the
-; messages carried, as they came.
-(defun listen (ctx tick state heard left early)
-    (cond
-        ((== left 0)
+; Every share told the flock, to answer me.
+(defun step (shares flock)
+    (map (lambda (s) (send s (list :step $$ flock))) shares))
+
+; The shares' answers, put together in order of share: the next tick's
+; flock, or :quit if q comes first, which goes on in go-on, with k,
+; what asked for it. Keys meanwhile.
+(defun gather (left parts k)
+    (if (== left 0)
+        (go-on k (join-parts (map cadr (sort-by car parts))))
+        (recv
+            ((:moved lo part)  (gather (- left 1) (cons (list lo part) parts) k))
+            ((:key ("q" & _))  (go-on k :quit))
+            ((:key _)          (gather left parts k)))))
+
+(defun join-parts (parts)
+    (let part (lambda (k) (fold/l (array/make :float 0 0.0) array/concat (map (lambda (p) (tuple/get p k)) parts))))
+    (tuple (part 0) (part 1) (part 2) (part 3)))
+
+(defun go-on (k next)
+    (match (list k next)
+        (((:live ctx tick _) :quit)
+            (land ctx tick))
+        (((:live ctx tick started) _)
             (match ctx
-                (#(me others shown sky n)
-                    (let next (steer state heard sky))
-                    (sleep (tick-ms))
-                    (fly ctx (inc tick) next early))))
-        (#true
-            (recv
-                ((:at at said)
-                    (cond
-                        ((== at tick)       (listen ctx tick state (cons said heard) (dec left) early))
-                        ((== at (inc tick)) (listen ctx tick state heard left (cons said early)))))))))
+                (#(_ _ _ ms _ _)
+                    (let wait (- (+ started (* ms 1000)) (clock/us)))
+                    (when (> wait 0) (sleep (div (+ wait 999) 1000)))
+                    (let now (clock/us))
+                    (fly ctx (+ tick 1) next now (- now started)))))
+        (((:timed ctx left) _)
+            (time-ticks ctx next left))))
 
-; --- the display --------------------------------------------------------------
+; --- the flock ----------------------------------------------------------------
 
-; It's connected to the :system device, s, and knows #(n sky frames s).
-(defun display-on (n sky frames)
-    (recv
-        ((:open s) (display (tuple n sky frames s) 0 () 0 () ()))))
-
-; Draws each tick once it has heard from all n birds, till it has drawn
-; frames of them, or forever if frames isn't above 0, or till q. Gives
-; how many it drew. After each it asks the clock: last is the time it
-; said after the tick before, and took how long that tick took (() till
-; there are two).
-(defun display (ctx tick heard count last took)
+; It knows #(shares sky frames ms n keyboard): its shares, the sky, how
+; many frames to draw (0 for ever), the least a tick takes, how many
+; birds, and the keyboard's actor, live. Each tick it starts the shares
+; on the next, then draws this one while they work, then waits for them,
+; and for the rest of the tick's ms. started is when this tick began, by
+; clock/us, and took how long the tick before took (() for the first).
+(defun fly (ctx tick flock started took)
     (match ctx
-        (#(n sky frames s)
-            (cond
-                ((== count n)
-                    (draw sky frames tick took (sort-by (lambda (b) (match b (#(id _ _ _ _) id))) heard))
-                    (send s (list :runtime))
-                    (if (== (inc tick) frames)
-                        frames
-                        (display ctx (inc tick) () 0 last took)))
-                (#true
-                    (recv
-                        ((:at at said)
-                            (cond ((== at tick) (display ctx tick (cons said heard) (inc count) last took))))
-                        ((:runtime _ info)
-                            (let now (lookup :clock info))
-                            (display ctx tick heard count now (if (nil? last) () (- now last))))
-                        (:quit tick)))))))
+        (#(shares sky frames ms n keyboard)
+            (let last (== (+ tick 1) frames))
+            (when (not last) (step shares flock))
+            (draw sky frames tick n took flock)
+            (if last
+                (land ctx frames)
+                (gather (length shares) () (list :live ctx tick started))))))
 
-; Which way it's going: one of eight arrows. 0.41421356 is tan 22.5°,
-; halfway between an axis and a diagonal.
+; The shares go, and so does the keyboard's actor: while one's
+; connected, the program waits for keys rather than ending.
+(defun land (ctx drawn)
+    (match ctx
+        (#(shares sky frames ms n keyboard)
+            (map kill shares)
+            (when (< frames 1)
+                (kill keyboard)
+                (tty/write \e "[0m" \e "[?25h\n"))
+            (str drawn " frames"))))
+
+; --- drawing ------------------------------------------------------------------
+
+; Which way it's going: one of eight arrows, by the eighth of a turn its
+; heading is nearest. y grows downward, so a quarter turn is ↓.
 (defun arrow (vx vy)
-    (cond
-        ((<= (math/abs vy) (* (math/abs vx) 0.41421356)) (if (< vx 0) "←" "→"))
-        ((<= (math/abs vx) (* (math/abs vy) 0.41421356)) (if (< vy 0) "↑" "↓"))
-        ((< vx 0)                              (if (< vy 0) "↖" "↙"))
-        (#true                                 (if (< vy 0) "↗" "↘"))))
+    (let eighth (math/mod (math/round (/ (* 4 (math/atan2 vy vx)) math/PI)) 8))
+    (tuple/get (tuple "→" "↘" "↓" "↙" "←" "↖" "↑" "↗") eighth))
 
-; The sky as a tuple of rows, each a tuple of one-character strings, with
-; a bird put in it. A bird on the far edge, which rounding can leave
-; exactly there, is put back on the near one.
-(defun put (grid bird)
-    (match bird
-        (#(_ x y vx vy)
-            (let row (% (math/floor (/ y 2)) (tuple/len grid)))
-            (let col (% (math/floor x) (tuple/len (tuple/get grid 0))))
-            (tuple/set grid row (tuple/set (tuple/get grid row) col (arrow vx vy))))))
+; A colour for each island, for the live sky.
+(defun colour (s) (tuple/get (tuple 51 213 226 118 208 39 199 46) (% s 8)))
+
+; Each bird as (key arrow share), in order of key, which is its cell,
+; then its id: a cell's last is the one that shows. A bird on the far
+; edge, which rounding can leave exactly there, is put back on the near
+; one. Bird i's share is the last s whose first bird, n·s/k rounded down,
+; is i or before.
+(defun cells (flock w rows n k)
+    (match flock
+        (#(xs ys vxs vys)
+            (sort-by car (map (lambda (i)
+                    (let row (math/mod (math/floor (/ (array/get ys i) 2)) rows))
+                    (let col (math/mod (math/floor (array/get xs i)) w))
+                    (list (+ (* (+ (* row w) col) n) i)
+                          (arrow (array/get vxs i) (array/get vys i))
+                          (div (+ (* i k) (- k 1)) n)))
+                (range 0 n))))))
+
+; A row of the sky, its birds from the front of birds, in order of
+; cell; as (text birds-left). col is how far the text has come, and
+; pieces it, backwards.
+(defun paint (birds row col w n live pieces)
+    (let next (match birds (((key _ _) & _) (div key n)) (_ -1)))
+    (cond
+        ((and (>= next (* row w)) (< next (* (+ row 1) w)))
+            (match birds
+                (((key a s) & rest)
+                    (let here (- next (* row w)))
+                    (cond
+                        ((match rest (((key2 _ _) & _) (== (div key2 n) next)) (_ #false))
+                            (paint rest row col w n live pieces))
+                        (#true
+                            (paint rest row (+ here 1) w n live
+                                (cons (if live (str \e "[38;5;" (colour s) "m" a \e "[0m") a)
+                                      (cons (str/repeat " " (- here col)) pieces))))))))
+        (#true
+            (list (str/join "" (reverse (cons (str/repeat " " (- w col)) pieces))) birds))))
+
+(defun paint-rows (birds row rows w n live lines)
+    (if (== row rows)
+        (reverse lines)
+        (match (paint birds row 0 w n live ())
+            ((text left) (paint-rows left (+ row 1) rows w n live (cons (str "|" text "|\n") lines))))))
 
 ; Each frame redraws the whole screen from the top left, or, when there's
 ; a number of frames, goes under the one before.
-(defun draw (sky frames tick took birds)
+(defun draw (sky frames tick n took flock)
     (match sky
-        ((w h)
+        (#(w h)
             (let live (< frames 1))
-            (let grid (fold/l (tuple/make (div h 2) (tuple/make w " ")) put birds))
+            (let rows (div h 2))
+            (let k (math/min n (islands)))
             (let edge (str "+" (str/repeat "-" w) "+\n"))
             (tty/write
                 (if live (str \e "[H") "")
                 edge
-                (str/join "" (map (lambda (row) (str "|" (str/join "" (tuple->list row)) "|\n")) (tuple->list grid)))
+                (str/join "" (paint-rows (cells flock w rows n k) 0 rows w n live ()))
                 edge
-                "tick " tick ", " (length birds) " birds"
-                (if (nil? took) "" (str ", " took " ms a tick"))
-                (if live ", q quits" "\n")))))
+                "tick " tick ", " n " birds"
+                (if live (str " on " (islands-said k)) "")
+                (if (nil? took) "" (str ", " (float->str (/ took 1000.0) 1) " ms a tick"))
+                (if live ", q quits  " "\n")))))
 
-(defun keys (shown)
-    (recv
-        (("q" & _) (send shown :quit))
-        (_         (keys shown))))
+(defun islands-said (k) (str k (if (== k 1) " island" " islands")))
 
-; --- the flock ----------------------------------------------------------------
+; --- hatching -----------------------------------------------------------------
 
-; n birds anywhere in the sky, going any way, from the root's random
-; numbers (D222), four a bird, in this order.
-(defun hatch (n sky birds)
-    (cond
-        ((== n 0) (reverse birds))
-        (#true
-            (let a (rand/float))
-            (let b (rand/float))
-            (let c (rand/float))
-            (let d (rand/float))
-            (match sky
-                ((w h)
-                    (let bird (tuple (* a w) (* b h) (* (- (* c 2) 1) (max-speed)) (* (- (* d 2) 1) (max-speed))))
-                    (hatch (dec n) sky (cons bird birds)))))))
+; n birds anywhere in the sky, going any way at a speed they may fly,
+; from the root's random numbers (D222), four a bird, in this order.
+(defun hatch (n sky)
+    (match sky
+        (#(w h)
+            (let birds (map (lambda (_)
+                    (let a (rand/float))
+                    (let b (rand/float))
+                    (let c (rand/float))
+                    (let d (rand/float))
+                    (let heading (* c (* 2 math/PI)))
+                    (let speed (+ (min-speed) (* d (- (max-speed) (min-speed)))))
+                    (list (* a w) (* b h) (* speed (math/cos heading)) (* speed (math/sin heading))))
+                (range 0 n)))
+            (tuple
+                (list->array :float (map car birds))
+                (list->array :float (map cadr birds))
+                (list->array :float (map caddr birds))
+                (list->array :float (map cadddr birds))))))
+
+; --- the program --------------------------------------------------------------
+
+(defun keys (to)
+    (recv (k (send to (list :key k)) (keys to))))
+
+; Draws frames of n birds (or till q, live), a tick at least ms long.
+(defun live (n frames ms sky flock)
+    (let me $$)
+    (let keyboard (if (< frames 1) (connect :keypress (keys me)) ()))
+    (when (< frames 1) (tty/write \e "[?25l" \e "[2J"))
+    (fly (tuple (shares n sky) sky frames ms n keyboard) 0 flock (clock/us) ()))
+
+; No terminal: ticks of n birds as fast as they go, and how long a tick
+; took. ctx is #(shares n ticks t0).
+(defun timed (n ticks sky flock)
+    (time-ticks (tuple (shares n sky) n ticks (clock/us)) flock ticks))
+
+(defun time-ticks (ctx flock left)
+    (match ctx
+        (#(shares n ticks t0)
+            (cond
+                ((== left 0)
+                    (let us (- (clock/us) t0))
+                    (map kill shares)
+                    (str n " birds, " ticks " ticks on " (islands-said (length shares)) ": "
+                         (float->str (/ us (* 1000.0 ticks)) 2) " ms a tick"))
+                (#true
+                    (step shares flock)
+                    (gather (length shares) () (list :timed ctx (- left 1))))))))
 
 ; The i'th argument as a number, or default if there isn't one.
 (defun arg (i args default)
@@ -275,25 +415,15 @@
         (#false default)
         (k      k)))
 
-; --- the program --------------------------------------------------------------
-
-(let args (map str->int @ARGV))
-(let n (arg 0 args 30))
-(let frames (arg 1 args 0))
-(let sky (list (- (tty/screen/cols) 2) (* 2 (- (tty/screen/rows) 3))))
-(rand/seed (arg 2 args 2026))
-(let states (hatch n sky ()))
-
-(when (< frames 1) (tty/write \e "[?25l" \e "[2J"))
-(let shown (connect :system (display-on n sky frames)))
-(let birds (map
-    (lambda (b) (match b ((i #(x y vx vy)) (spawn (bird i (tuple i x y vx vy) sky shown ())))))
-    (zip (range 0 n) states)))
-(map (lambda (b) (send b (list :flock birds))) birds)
-(let keyboard (connect :keypress (keys shown)))
-
-(let drawn (read shown))
-(map kill (cons keyboard birds))
-(when (< frames 1) (tty/write \e "[?25h\n"))
-(match drawn
-    ((:ok k) (str k " frames")))
+(let sky (tuple (- (tty/screen/cols) 2) (* 2 (- (tty/screen/rows) 3))))
+(match @ARGV
+    (("--time" n ticks)
+        (rand/seed 2026)
+        (let flock (hatch (str->int n) sky))
+        (cadr (read (spawn (timed (str->int n) (str->int ticks) sky flock)))))
+    (_
+        (let args (map str->int @ARGV))
+        (let n (arg 0 args 300))
+        (rand/seed (arg 2 args 2026))
+        (let flock (hatch n sky))
+        (cadr (read (spawn (live n (arg 1 args 0) (arg 3 args 50) sky flock))))))

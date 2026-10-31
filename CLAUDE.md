@@ -97,7 +97,11 @@ Ulam's spiral in half blocks, writes its pixels in the order its
 messages come), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149): `reaction`,
 Gray-Scott in bands of rows across islands, drawn live on island 0, the
 same picture on one island or twelve, a golden test in its quiet mode
-(`--steps`, from `t/models/reaction.py`, D256); and
+(`--steps`, from `t/models/reaction.py`, D256); and `boids`, rewritten
+for islands: the flock as arrays of floats, a share of it on each
+island, a grid in each so a bird looks only near it, the same flight on
+any number of islands, about three times as fast on four cores, and
+`--time n ticks` to time it (D258); and
 `airline`, a simulated day branched with what-ifs, each run till it
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it

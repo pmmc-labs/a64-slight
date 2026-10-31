@@ -6402,3 +6402,51 @@ them, and what slight builds next for scale is for simulations: many
 actors, numbers in bulk, more than one core, the same answer on any
 machine. Not rejected: servers stay possible, at the size `select()`
 holds.
+
+**D258. Boids on every core.** *(Stevan, Oct 2026: "re-write the boids
+example to use the new math functions, arrays and multicore islands";
+the shape is Claude's.)* `examples/boids.slight` (and `.sly`) had a
+process for each bird, each telling every other where it was each tick:
+n² messages, each a copy, on one island, and slow past a few hundred
+birds (on the cloud machine, 163 ms a tick at 250, 780 at 500, with the
+sleep taken out). Now:
+- **The flock is data:** four `:float` arrays, x, y and the velocity,
+  bird i at index i, cut into shares, a range of birds each, one share
+  an actor on each island. Each tick an actor on island 0 sends every
+  share the whole flock, each share answers with its own birds' next
+  places as arrays, and the actor joins them in order of share; it
+  draws the tick before while the shares work. From 512 birds the
+  arrays cross islands as handles, so a tick is two messages a share.
+- **A grid within a share:** each share sorts the flock into cells at
+  least a sight and one across (an `:int` array of ids by cell, and
+  one of where each cell starts), and a bird looks in the nine cells
+  round it, then sorts what it sees by id. Summing in order of id keeps
+  the flight independent of the grid and of the number of islands, to
+  the last bit: 400 birds for 60 ticks on 1, 3 and 4 islands, and under
+  `SLIGHT_SCHED`, match `t/models/boids.py` byte for byte.
+- **The new pieces:** `math/hypot` for a speed, `math/sin` and `cos` to
+  hatch a bird at a heading, `math/atan2` for its arrow, `math/mod` for
+  wrapping a cell, `clock/us` for the time a tick took (in place of
+  asking `:system`), `float->str`, `spawn/on` and `(islands)`. The model
+  takes those four from mpmath, rounded once. Live, a bird is coloured
+  by its share's island. A fourth argument is the least a tick takes
+  (50 ms; 0 for flat out), and `--time n ticks` times the flock with no
+  terminal.
+- **Measured** on the cloud machine (4 cores, noisy; the M2 Max is the
+  reference), x86-64: on the 80 by 24 sky, drawing included, 500 birds
+  take 25 ms a tick on one island and 8.2 on four, where the old program
+  took 780. On a 240 by 70 sky, the flock alone (`--time`), 1, 2 and 4
+  islands: 1,000 birds 12.3, 7.1 and 7.2 ms; 2,000 47.5, 31.6 and 21.0;
+  4,000 154, 87 and 53; 8,000 549, 311 and 181, about three times on
+  four cores once there's enough to do. Live, flat out, over 5 s from
+  the start (the flock clumps as it goes, so later ticks see more):
+  300 birds 1,171 frames on four islands to 624 on one, 1,000 birds 346
+  to 176, 4,000 83 to 33.
+- **Rejected:** birds as processes spread over the islands, n² messages
+  between islands each tick, the worst case the guide's "Use every
+  core" names; and leaving island 0 to draw alone, with shares on the
+  others, which measured no better at 300 to 2,000 birds.
+- **Given up:** a process for each bird, the example's point since step
+  14 (D179). docs/BACKGROUND.md's "Actor simulations and locality" said
+  this was the way that scales; the old program is in git, and so
+  D179's and D198's timings of boids were of a different program.
