@@ -2020,6 +2020,24 @@ operations, boxed only where they leave, in steps, each measured:
    double in a frame slot the collector doesn't see (the frame split
    into its values and its doubles), so `dx` crosses from its `let` to
    its uses unboxed; boxed only where it's passed, stored or returned.
+   **Found, before building (Oct 2026):** the frame needn't change (a
+   double can sit in two slots as two integers, its bits but the lowest
+   and the lowest, which the collector passes over), but `dx` can't be
+   kept raw: `(- x ox)` is an integer when `x` and `ox` are, and in
+   `n-body` they come out of tuples, so when the tree's check fails and
+   the `let` goes the old way, what follows can't know which `dx` is.
+   Only a `let` that's a float whatever its leaves are (`/`,
+   `math/sqrt`, a float literal or a raw local in it) can be raw:
+   `n-body`'s `dist` and `mag`, not `dx`, `dy` or `dz`. Counted in
+   `pull` (about 800 instructions a call, after D261): all five `let`s
+   boxed and checked at their 16 uses cost about 150, so step 2 could
+   save at most 14 per cent of `n-body` if all five were raw, and about
+   6 per cent with only `dist` and `mag`; boids nothing (its `d2` is
+   compared and stored, which box it anyway). Keeping `dx` raw needs
+   knowing `x` is a float: types (step 3's `sig`s, for a tuple's
+   elements too), or compiling the function twice and leaving the fast
+   copy for the slow one, its raw locals boxed, where a check fails
+   (deoptimizing, as JITs do), which is machinery. Open for Stevan.
 3. **Float parameters.** A function whose parameters are used as
    floats compiled a second time for floats, entered when its
    arguments check at the entry, so a loop's state stays unboxed from
