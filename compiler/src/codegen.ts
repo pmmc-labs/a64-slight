@@ -72,6 +72,7 @@ type Cx = {
     readonly inLambda: boolean;
     readonly task: boolean;          // a fork's body, or the top level: it can't wait (D243)
     readonly receive: { readonly entry: string; readonly params: number } | null;
+    readonly noFloatTrees?: true;    // compiling a float expression's way back (D261)
 };
 
 // The symbols seen so far, newest first: an association list from name to
@@ -527,6 +528,12 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (!hidden && lookup(cx.env, name) !== null) return compileClosureCall(x, head, args, cx, st);
     if (name === 'apply') return compileApply(x, args, cx, st);
     const operand: Cx = { ...cx, tail: false };
+    if (cx.noFloatTrees === undefined && (TREE_OPS[name] !== undefined || TREE_UNARY[name] !== undefined)) {
+        const tree = floatTree(x, cx);
+        if (tree !== null && treeOps(tree) >= 2 && treeRegs(tree) <= st.t.floatRegs && !treeLooksInt(tree)) {
+            return compileFloatTree(x, tree, operand, st);
+        }
+    }
     if (name === 'pprint') {
         checkArity(x, 'pprint', args, 1);
         const [code, st1] = compileExpr(args[0]!, operand, st);
@@ -1226,6 +1233,116 @@ function floatPath(x: Pair, op: FloatOp, notFloats: string, done: string, n: big
         n === undefined ? t.floatArith(op) : t.floatArithInt(op, n),
         t.jump(done),
     ], st1];
+}
+
+// --- float expressions (D261) --------------------------------------------------
+
+// A tree of float operations, worked out as doubles in float registers
+// and boxed once, where each operation would otherwise check its operands,
+// box its result, and have the next take the box apart again. Its leaves
+// are locals and literals, which need no code to work out and do nothing
+// but give their value, so if a local isn't a float, the tree goes the
+// way it would have gone before, from the start, faults and all: each
+// leaf read again, nothing done twice. An integer literal is a leaf beside
+// something that's a float, as C's (double) makes it, which is what the
+// float paths and rt_add and the rest do; a local must be a float's box.
+// Every operation is the same IEEE one on the same doubles as before, so
+// every float comes out to the bit as it did.
+type FTree =
+    | { readonly t: 'local'; readonly si: number }
+    | { readonly t: 'float'; readonly v: number }
+    | { readonly t: 'int'; readonly v: bigint }
+    | { readonly t: 'op'; readonly op: FloatOp; readonly l: FTree; readonly r: FTree }
+    | { readonly t: 'unary'; readonly op: 'sqrt' | 'abs'; readonly a: FTree };
+
+const TREE_OPS: Readonly<Record<string, FloatOp>> = { '+': '+', '-': '-', '*': '*', '/': '/' };
+// exact, so the same bits as C's sqrt and fabs
+const TREE_UNARY: Readonly<Record<string, 'sqrt' | 'abs'>> = { 'math/sqrt': 'sqrt', 'math/abs': 'abs' };
+
+// x as a float expression, or null if it isn't one.
+function floatTree(x: Sexp, cx: Cx): FTree | null {
+    if (x.t === 'float') return { t: 'float', v: x.v };
+    if (x.t === 'int')   return { t: 'int', v: x.v };
+    if (x.t === 'sym') {
+        const si = x.name === '$$' || x.name === '^$$' ? null : lookup(cx.env, x.name);
+        return si === null ? null : { t: 'local', si };
+    }
+    if (x.t !== 'pair' || x.car.t !== 'sym') return null;
+    const head = x.car.name;
+    const name = head.endsWith(BUILTIN) ? head.slice(0, -BUILTIN.length) : lookup(cx.env, head) === null ? head : null;
+    const args = toArray(x.cdr);
+    if (name === null || args === null) return null;
+    const op = TREE_OPS[name];
+    if (op !== undefined && args.length === 2) {
+        const l = floatTree(args[0]!, cx);
+        const r = floatTree(args[1]!, cx);
+        return l === null || r === null || (l.t === 'int' && r.t === 'int') ? null : { t: 'op', op, l, r };
+    }
+    const u = TREE_UNARY[name];
+    if (u !== undefined && args.length === 1) {
+        const a = floatTree(args[0]!, cx);
+        return a === null || a.t === 'int' ? null : { t: 'unary', op: u, a };
+    }
+    return null;
+}
+
+const treeOps = (x: FTree): number =>
+    x.t === 'op' ? 1 + treeOps(x.l) + treeOps(x.r) : x.t === 'unary' ? 1 + treeOps(x.a) : 0;
+
+// The registers x needs, its left side's kept while its right's are worked out.
+const treeRegs = (x: FTree): number =>
+    x.t === 'op' ? Math.max(treeRegs(x.l), treeRegs(x.r) + 1) : x.t === 'unary' ? treeRegs(x.a) : 1;
+
+// Whether x is more likely integer arithmetic: an integer literal in it,
+// and nothing that's only ever a float (a float literal, /, math/sqrt).
+// Such a tree would check its first local, find an integer and go back,
+// costing integer code a few instructions each time; a tree of locals
+// alone is taken to be floats.
+const treeHas = (x: FTree, f: (y: FTree) => boolean): boolean =>
+    f(x) || (x.t === 'op' ? treeHas(x.l, f) || treeHas(x.r, f) : x.t === 'unary' ? treeHas(x.a, f) : false);
+const treeLooksInt = (x: FTree): boolean =>
+    treeHas(x, (y) => y.t === 'int')
+    && !treeHas(x, (y) => y.t === 'float' || (y.t === 'op' && y.op === '/') || (y.t === 'unary' && y.op === 'sqrt'));
+
+const treeLocals = (x: FTree): readonly number[] =>
+    x.t === 'local' ? [x.si] : x.t === 'op' ? [...treeLocals(x.l), ...treeLocals(x.r)] : x.t === 'unary' ? treeLocals(x.a) : [];
+
+// Each local checked to be a float's box, the box allocated (its slow
+// path may call C, so before any double is in a register), the tree
+// worked out, and its double boxed. A local that isn't a float, or a
+// divisor that's ±0 (which faults), goes back to x compiled as before,
+// out of line.
+function compileFloatTree(x: Pair, tree: FTree, cx: Cx, st: St): [Code, St] {
+    const t = st.t;
+    const [back, st1]  = label(st, 'tree_back');
+    const [done, st2]  = label(st1, 'tree_done');
+    const locals = treeLocals(tree);
+    const checks = locals.filter((si, i) => locals.indexOf(si) === i).map((si) => [t.load('acc', inSlot(si)), t.branchUnlessFloat(back)]);
+    const [allocate, st3] = alloc(16, show(x.car), x.pos, st2);
+    const [work, st4]     = workTree(tree, 0, back, st3);
+    const [before, st5]   = compileExpr(x, { ...cx, noFloatTrees: true }, st4);
+    return [[checks, allocate, work, t.boxFloat, `${done}:`], { ...st5, stubs: [st5.stubs, `${back}:`, before, t.jump(done)] }];
+}
+
+function workTree(x: FTree, k: number, back: string, st: St): [Code, St] {
+    const t = st.t;
+    switch (x.t) {
+        case 'local': return [[t.load('acc', inSlot(x.si)), t.floatFromAcc(k)], st];
+        case 'int':   return [t.floatFromInt(x.v, k), st];
+        case 'float': {
+            const [name, st1] = staticFloat(x.v, st);
+            return [[t.loadTagged(name, 'RT_TAG_BOXED'), t.floatFromAcc(k)], st1];
+        }
+        case 'unary': {
+            const [a, st1] = workTree(x.a, k, back, st);
+            return [[a, t.floatUnary(x.op, k)], st1];
+        }
+        case 'op': {
+            const [l, st1] = workTree(x.l, k, back, st);
+            const [r, st2] = workTree(x.r, k + 1, back, st1);
+            return [[l, r, x.op === '/' ? t.branchIfFloatZero(k + 1, back) : [], t.floatOp(x.op, k)], st2];
+        }
+    }
 }
 
 // (/ a b), always a float: two floats, or a float and a literal integer

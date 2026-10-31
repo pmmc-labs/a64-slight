@@ -6506,3 +6506,42 @@ planned now.)*
   both", to reverting step 1, which buys nothing without (a), and to
   (c)'s first step.)* Step 1 is reverted: symbols are `101` and pids
   `111` again, with their bits.
+
+**D261. Float expressions in registers.** *(Stevan, Oct 2026: "Yes for
+both", to D260's revert and to PLAN.md's "Floats without boxes" (c),
+step 1.)* A tree of two or more float operations, `+`, `-`, `*`, `/`,
+`math/sqrt` and `math/abs` (exact, so the same bits as C's `sqrt` and
+`fabs`), whose leaves are locals and literals, is compiled twice: once
+as before, out of line, and once with each local checked to be a
+float's box, the box for the result allocated (whose slow path may call
+C, so before any double is in a register), the tree worked as doubles
+in float registers, and the result boxed. A local that isn't a float,
+or a divisor that's ±0, goes to the first, which reads the leaves again
+(they do nothing but give their value) and faults where it did. An
+integer literal is a leaf beside a float, made a double as C's
+`(double)` makes it, as the float paths and `rt_add` do.
+- **Not taken:** a single operation (D198's path is as good); a tree with
+  a call or any other expression in it (its evaluation would move
+  before the arithmetic's faults); one that needs more registers than
+  the target has (16 on x86-64, 24 on AArch64, leaving `d8` to `d15`,
+  which C keeps), whose subtrees can be trees of their own; and one with
+  an integer literal and nothing only a float can be (a float literal,
+  `/`, `math/sqrt`), which is likely integer arithmetic, as
+  `spectral-norm`'s `(* ij (+ ij 1))`: it would check its first local,
+  find an integer and go back every time, 2.7 per cent more
+  instructions there before this rule.
+- **Measured** on x86-64 (the cloud machine): `n-body 1000000` 1.89 s to
+  1.35 (1.40 times; 310 million instructions to 219 at 20,000); boids,
+  1,000 birds, 2.37 to 2.15 s; `spectral-norm`, `bank`, `fib`, `tak`,
+  `binary-trees`, `nqueens`, `deriv` and `ping-pong` within a few
+  thousand instructions of before. PLAN.md had estimated 1.5 to 1.8 for
+  `n-body`.
+- **Tests:** golden test 335, from `t/models/float-trees.py`: trees
+  called with floats, integers, a string, a keyword, NaN, ±0 through
+  `sqrt` and `abs`, an infinite divisor and a zero one, a lambda's
+  captured local, and chains of 21 and 31 registers (the first whole on
+  AArch64, in `d16` and up, and in parts on x86-64); it passes with the
+  compiler before this too. Unit tests for what is and isn't a tree.
+  `SLIGHT_GC_STRESS` and `SLIGHT_GC_VERIFY` on boids and `n-body`.
+- **Next** (PLAN.md): float locals, a `let`'s double kept in a frame slot
+  the collector doesn't see; then float parameters.

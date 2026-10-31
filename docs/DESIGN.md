@@ -1327,6 +1327,13 @@ float or faults. Comparisons of two floats, or of a float and a literal
 integer, are inline too, out of line from the integers' compare, with
 no box to make (D259): a NaN makes every one false but `!=`, as
 `rt_compare` has it, which on x86-64 means looking at the parity flag.
+A tree of two or more float operations (`+`, `-`, `*`, `/`,
+`math/sqrt`, `math/abs`) on locals and literals is worked as doubles in
+float registers and boxed once (D261), its locals each checked to be a
+float first; if one isn't, or a divisor is ±0, it's worked out as
+before, out of line, so faults and results are what they were. One
+with an integer literal and nothing only a float can be (a float
+literal, `/`, `math/sqrt`) is taken to be integers and left alone.
 
 A builtin written in C is an ordinary C function (AAPCS64, or System V
 on x86-64). The compiler

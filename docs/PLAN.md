@@ -1916,7 +1916,7 @@ costs a few microseconds a round trip on the cloud machine's 4 vCPUs,
 worse with more islands, which the M2 Max should measure before more
 work goes into crossing latency (`docs/BENCHMARKS.md`, 31 Oct).
 
-### Floats without boxes (Oct 2026: (a) agreed, measured slower, stopped; (c) agreed, step 1 under way)
+### Floats without boxes (Oct 2026: (a) agreed, measured slower, stopped; (c) agreed, step 1 done, D261)
 
 Proposed by Claude after D258 and D259, when Stevan asked to "fix the
 floats". Stevan agreed to (a), symbols giving up the bit, a prototype
@@ -2013,7 +2013,9 @@ operations, boxed only where they leave, in steps, each measured:
    representation. Estimated, from that count: `pull`'s float work
    about 2.5 times fewer instructions, `n-body` 1.5 to 1.8 times
    faster; boids less (its arithmetic is shallow, and the rest is
-   lists and sorting).
+   lists and sorting). **Done (D261):** `n-body` 1.40 times faster
+   (29 per cent fewer instructions), boids 9 per cent; nothing else
+   slower.
 2. **Float locals.** A `let` bound to a float expression kept as a raw
    double in a frame slot the collector doesn't see (the frame split
    into its values and its doubles), so `dx` crosses from its `let` to

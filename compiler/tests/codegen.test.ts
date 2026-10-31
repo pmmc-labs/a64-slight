@@ -803,3 +803,20 @@ test('a function with more locals than its frame can hold is a compile error', (
     assert.match(compile(`${lets(500)} x0`), /sub {2}sp, sp, #4016\n/);
     assert.throws(() => compile(`${lets(600)} x0`), /the top level needs too many frame slots \(602\)/);
 });
+
+test('a tree of float operations on locals is worked in registers and boxed once (D261)', () => {
+    const asm = compile('(defun f (a b c) (+ (* a b) c)) (f 1.0 2.0 3.0)');
+    assert.match(asm, /fmul d0, d0, d1\n {4}ldr {2}x0, .*\n {4}ldur d1, \[x0, #5\]\n {4}fadd d0, d0, d1\n/);
+    assert.match(asm, /Ltree_back_\d+:/);
+    // a divisor that's ±0 goes back, to fault as before
+    assert.match(compile('(defun q (a b c) (/ a (- b c))) (q 1.0 2.0 3.0)'), /fcmp d1, #0.0\n {4}b\.eq Ltree_back/);
+});
+
+test('a single operation, or what looks like integers, is no float tree (D261)', () => {
+    assert.doesNotMatch(compile('(defun f (a b) (+ a b)) (f 1.0 2.0)'), /Ltree_back/);
+    assert.doesNotMatch(compile('(defun g (i) (* i (+ i 1))) (g 2)'), /Ltree_back/);
+    assert.match(compile('(defun h (i) (/ (* i (+ i 1)) 2)) (h 2)'), /Ltree_back/);
+    // a call isn't a leaf, nor is a name that isn't a local
+    assert.doesNotMatch(compile('(defun k (a) (+ (* a a) (car (list a)))) (k 1.0)'), /Ltree_back/);
+    assert.doesNotMatch(compile('(defun m (a) (* (* a a) math/PI)) (m 1.0)'), /Ltree_back/);
+});

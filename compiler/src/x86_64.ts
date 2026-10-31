@@ -310,6 +310,16 @@ export const X86_64: Target = {
         BOX_XMM0,
     ],
     floatCompareBool: (cond, n) => [ucomisd(cond, n), FLOAT_BOOL[cond]],
+    floatRegs: 16,
+    floatFromAcc: (k) => `    movsd xmm${k}, qword ptr [rax + ${FLOAT_VALUE}]`,
+    floatFromInt: (n, k) => [loadWord('rsi', n), `    cvtsi2sd xmm${k}, rsi`],
+    floatOp: (op, k) => `    ${FLOAT_OPS[op]} xmm${k}, xmm${k + 1}`,
+    // abs clears the sign, as C's fabs does, a NaN's included
+    floatUnary: (op, k) => op === 'sqrt' ? `    sqrtsd xmm${k}, xmm${k}`
+        : [`    movq rsi, xmm${k}`, '    btr  rsi, 63', `    movq xmm${k}, rsi`],
+    // ±0 are the doubles whose bits but the sign's are all 0
+    branchIfFloatZero: (k, label) => [`    movq rsi, xmm${k}`, '    shl  rsi, 1', `    jz   ${label}`],
+    boxFloat: BOX_XMM0,
     branchUnlessFloatCompare: (cond, label, n) => [ucomisd(cond, n), floatUnless(cond, label)],
 
     arith: (op, overflow) => ARITH[op](overflow),
