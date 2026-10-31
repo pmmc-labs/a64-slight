@@ -634,7 +634,7 @@ rt_value_t rt_log_line(rt_value_t level, rt_value_t msg, rt_value_t fields, cons
         if (!rt_is_cons(f)) rt_fault(RT_FAULT_NOT_LIST, fields, site);
         rt_value_t x = rt_car(f);
         if (!rt_is_cons(x) || !rt_is_cons(rt_cdr(x)) || rt_cdr(rt_cdr(x)) != RT_NIL
-            || !(rt_is_string(rt_car(x)) || (rt_car(x) & RT_TAG_MASK) == RT_TAG_SYMBOL)) {
+            || !(rt_is_string(rt_car(x)) || rt_is_symbol(rt_car(x)))) {
             rt_fault(RT_FAULT_RANGE, x, site);
         }
     }

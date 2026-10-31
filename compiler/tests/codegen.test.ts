@@ -12,7 +12,7 @@ import { expand } from '../src/expand.ts';
 import { read } from '../src/reader.ts';
 import { TUPLE_OF } from '../src/pattern.ts';
 import { int, list, sym } from '../src/sexp.ts';
-import { RESERVED_SYMBOLS, RUNTIME_SYMBOLS } from '../src/values.ts';
+import { RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord } from '../src/values.ts';
 
 // Runs a movz/movn/movk sequence and returns the register's value.
 function simulate(lines: readonly string[]): bigint {
@@ -296,7 +296,7 @@ const symbolTable = (asm: string): string[] => {
 
 // Every program has these, in order; its own symbols come after.
 const BUILT_IN = [...RESERVED_SYMBOLS, ...RUNTIME_SYMBOLS];
-const firstWord = ((BUILT_IN.length << 3) | 5).toString(16);    // the first program symbol's id, shifted and tagged
+const firstWord = symbolWord(BUILT_IN.length).toString(16);    // the first program symbol's id, shifted and tagged
 
 test('symbols get ids in order of first mention, after #false, #true and the runtime\'s', () => {
     assert.deepEqual(BUILT_IN.slice(0, 4), ['#false', '#true', 'ok', 'error']);

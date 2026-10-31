@@ -15,13 +15,16 @@
 #define RT_TAG_MASK          7
 #define RT_TAG_LIST          1    // 001    pointer to a cons cell; nil is this tag on a null pointer
 #define RT_TAG_BOXED         3    // 011    pointer to a header word and payload
-#define RT_TAG_SYMBOL        5    // 101    compile-time id
-#define RT_TAG_PID           7    // 111    process id << 3
-#define RT_PID_SHIFT         3
+#define RT_TAG_NAME          5    // 101    a symbol or a pid, told apart by bit 3 (D260)
+#define RT_TAG_FLOAT         7    // 111    a float, immediate (D260)
+#define RT_NAME_MASK        15    // a name's tag and bit 3
+#define RT_TAG_SYMBOL        5    // 0101   compile-time id << 4
+#define RT_TAG_PID          13    // 1101   process id << 4
+#define RT_PID_SHIFT         4
 #define RT_ISLAND_SHIFT     55    // a pid's island (D256), in the 8 bits below an address's bit
 #define RT_ISLANDS_MAX     256
 #define RT_ROOT       (1 << RT_PID_SHIFT | RT_TAG_PID)   // the root's pid: 1, on island 0
-#define RT_SYMBOL_SHIFT      3    // a symbol is id << 3 | RT_TAG_SYMBOL
+#define RT_SYMBOL_SHIFT      4    // a symbol is id << 4 | RT_TAG_SYMBOL
 
 // A boxed value points at a header word: the box's type in the low seven
 // bits, its size above the low byte. A string's size is its length in
@@ -51,7 +54,7 @@
 
 #define RT_NIL               1    // the list tag on a null pointer
 #define RT_FALSE             5    // symbol 0
-#define RT_TRUE             13    // symbol 1
+#define RT_TRUE             21    // symbol 1
 
 // What rt_fault is told went wrong, and the keyword that names it in the
 // process's (:error (kind value site)). compiler/tests/values.test.ts
@@ -544,18 +547,20 @@ static inline rt_value_t rt_car(rt_value_t v) { return ((const rt_value_t *)(v -
 static inline rt_value_t rt_cdr(rt_value_t v) { return ((const rt_value_t *)(v - RT_TAG_LIST))[1]; }
 static inline int        rt_is_cons(rt_value_t v) { return (v & RT_TAG_MASK) == RT_TAG_LIST && v != RT_NIL; }
 
-// A pid: its number in its island's table, from RT_PID_SHIFT, in 52 bits,
+// A pid: its number in its island's table, from RT_PID_SHIFT, in 51 bits,
 // and its island above that (D256), each island numbering its own.
-static inline uint64_t rt_pid_number(rt_value_t v) { return (v >> RT_PID_SHIFT) & ((1ULL << 52) - 1); }
+static inline int      rt_is_pid_word(rt_value_t v) { return (v & RT_NAME_MASK) == RT_TAG_PID; }
+static inline int      rt_is_symbol(rt_value_t v)   { return (v & RT_NAME_MASK) == RT_TAG_SYMBOL; }
+static inline uint64_t rt_pid_number(rt_value_t v) { return (v >> RT_PID_SHIFT) & ((1ULL << 51) - 1); }
 static inline uint64_t rt_pid_island(rt_value_t v) { return (v >> RT_ISLAND_SHIFT) & (RT_ISLANDS_MAX - 1); }
 
 // An address (D243): a place a task makes to be sent to. An immediate under
 // the pid tag, with the top bit set: the task's number in its low 32 bits
 // (as a pid's, from RT_PID_SHIFT), its number among the task's addresses
-// in the 20 above them, and its island above those, as a pid's.
+// in the 19 above them, and its island above those, as a pid's.
 #define RT_ADDRESS_BIT    (1ULL << 63)
-#define RT_ADDRESS_SHIFT  35
-static inline int      rt_is_address(rt_value_t v)   { return (v & RT_TAG_MASK) == RT_TAG_PID && (v & RT_ADDRESS_BIT); }
+#define RT_ADDRESS_SHIFT  36
+static inline int      rt_is_address(rt_value_t v)   { return rt_is_pid_word(v) && (v & RT_ADDRESS_BIT); }
 static inline uint64_t rt_address_task(rt_value_t v) { return (v >> RT_PID_SHIFT) & 0xffffffffu; }
 static inline uint64_t rt_address_number(rt_value_t v) {
     return (v >> RT_ADDRESS_SHIFT) & ((1ULL << (RT_ISLAND_SHIFT - RT_ADDRESS_SHIFT)) - 1);

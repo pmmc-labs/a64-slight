@@ -210,7 +210,7 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
         buf_str(b, ")");
         return;
     }
-    if ((v & RT_TAG_MASK) == RT_TAG_PID) {
+    if (rt_is_pid_word(v)) {
         rt_pid_text(num, sizeof num, v);
         buf_str(b, num);
         return;
@@ -226,7 +226,7 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
         else     rt_quote(b, rt_string_bytes(v), rt_string_len(v));
         return;
     }
-    if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
+    if (rt_is_symbol(v)) {
         const char *name = rt_symbol_name(v >> RT_SYMBOL_SHIFT);
         if (name) {
             buf_str(b, name);
@@ -435,11 +435,11 @@ static uint64_t hash_atom(uint64_t h, rt_value_t v) {
         return h;
     }
     if (rt_is_string(v)) return mix_bytes(mix(h, H_STRING), rt_string_bytes(v), rt_string_len(v));
-    if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
+    if (rt_is_symbol(v)) {
         const char *name = rt_symbol_name(v >> RT_SYMBOL_SHIFT);
         return name ? mix_bytes(mix(h, H_SYMBOL), name, strlen(name)) : mix(mix(h, H_SYMBOL), v);
     }
-    if ((v & RT_TAG_MASK) == RT_TAG_PID) return mix(mix(h, H_PID), v >> RT_PID_SHIFT);
+    if (rt_is_pid_word(v)) return mix(mix(h, H_PID), v >> RT_PID_SHIFT);
     if (rt_is_closure(v)) {                     // eq? only to itself, so its name will do
         const char *name = (const char *)rt_box(v)[3];
         return mix_bytes(mix(h, H_FUNCTION), name, strlen(name));

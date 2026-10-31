@@ -32,8 +32,8 @@ const PREDICATES: Readonly<Record<string, readonly [Code, string]>> = {
     'int?':  [['    tst  x0, #1'], 'eq'],
     'nil?':  [['    cmp  x0, #RT_NIL'], 'eq'],
     'cons?': [IS_CONS, 'ne'],
-    'pid?':  [['    and  x1, x0, #RT_TAG_MASK', '    cmp  x1, #RT_TAG_PID'], 'eq'],
-    'sym?':  [['    and  x1, x0, #RT_TAG_MASK', '    cmp  x1, #RT_TAG_SYMBOL'], 'eq'],
+    'pid?':  [['    and  x1, x0, #RT_NAME_MASK', '    cmp  x1, #RT_TAG_PID'], 'eq'],
+    'sym?':  [['    and  x1, x0, #RT_NAME_MASK', '    cmp  x1, #RT_TAG_SYMBOL'], 'eq'],
     // when x0 is #true, ccmp skips the second compare and sets Z (#4) itself
     'bool?': [['    cmp  x0, #RT_TRUE', '    ccmp x0, #RT_FALSE, #4, ne'], 'eq'],
 };

@@ -84,8 +84,9 @@ const BOX_XMM0: Code = [
     '    lea  rax, [rdx + RT_TAG_BOXED]',
 ];
 
-// The tag of rax, in edx.
+// The tag of rax, in edx; and a name's (D260), told apart by bit 3.
 const TAG: Code = ['    mov  edx, eax', '    and  edx, RT_TAG_MASK'];
+const NAME_TAG: Code = ['    mov  edx, eax', '    and  edx, RT_NAME_MASK'];
 
 // Type predicates: a test of rax that sets the flags, and the condition
 // (cmovcc's suffix) that means yes. With no ccmp, a test with two parts
@@ -95,8 +96,8 @@ const PREDICATES: Readonly<Record<string, readonly [Code, string]>> = {
     'nil?':  [['    cmp  rax, RT_NIL'], 'e'],
     // a cons when neither "not the list tag" nor "()" holds
     'cons?': [[TAG, '    cmp  edx, RT_TAG_LIST', '    setne dl', '    cmp  rax, RT_NIL', '    sete al', '    or   al, dl'], 'e'],
-    'pid?':  [[TAG, '    cmp  edx, RT_TAG_PID'], 'e'],
-    'sym?':  [[TAG, '    cmp  edx, RT_TAG_SYMBOL'], 'e'],
+    'pid?':  [[NAME_TAG, '    cmp  edx, RT_TAG_PID'], 'e'],
+    'sym?':  [[NAME_TAG, '    cmp  edx, RT_TAG_SYMBOL'], 'e'],
     // a boolean when either "#true" or "#false" holds
     'bool?': [['    cmp  rax, RT_TRUE', '    sete dl', '    cmp  rax, RT_FALSE', '    sete al', '    or   al, dl'], 'ne'],
 };

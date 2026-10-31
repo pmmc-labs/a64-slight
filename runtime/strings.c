@@ -715,7 +715,7 @@ rt_value_t rt_str_to_float(rt_value_t s, const char *site) {
 }
 
 rt_value_t rt_sym_to_str(rt_value_t sym, const char *site) {
-    if ((sym & RT_TAG_MASK) != RT_TAG_SYMBOL) rt_fault(RT_FAULT_NOT_SYMBOL, sym, site);
+    if (!rt_is_symbol(sym)) rt_fault(RT_FAULT_NOT_SYMBOL, sym, site);
     const char *name = rt_symbol_name(sym >> RT_SYMBOL_SHIFT);
     return rt_new_string(name, strlen(name), site);
 }
