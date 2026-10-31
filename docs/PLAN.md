@@ -1962,6 +1962,65 @@ put in, on one island, each branch replaying its start; then `fork()` to
 share the start; then islands. It would sit well with the simulation
 library above, a what-if being a branch of a recorded run.
 
+### Seeing a simulation: a viewer (idea, open, Oct 2026)
+
+Stevan: terminal drawing is crude and bound to the terminal's speed;
+Sixel and kitty's graphics protocol suit pictures that change seldom;
+would raylib fit slight, and draw what we'd want? Not yet proposed;
+first thoughts, to work into a proposal.
+
+**What raylib would draw.** A small zlib-licensed C library (a handful
+of files and its own window layer, not one file) for windows, 2D,
+textures, text, simple 3D, shaders, keys and the mouse; raygui, a header
+beside it, for sliders and buttons. What we'd want, given data in bulk
+rather than a call a shape: a grid (`reaction`'s, heat maps) as a
+texture each frame, coloured on the GPU, millions of cells at 60 frames
+a second; agents on a map as arrays of positions and colours, drawn in
+batches, hundreds of thousands smoothly; charts of the collectors'
+summaries; networks of who talks to whom; a lattice protein in 3D with
+a camera. Not charts for publication: those are data exported to a
+plotting tool.
+
+**Why not in the runtime.** macOS wants windows and OpenGL on the main
+thread, which is island 0's scheduler, whose `select()` can't wait on a
+window's events; OpenGL comes from the driver, loaded dynamically, so
+not the static binary every Linux build is (D227); hundreds of
+functions would each be a builtin, there being no FFI (D252), and a
+window's events would have to go through `replay.c`; and a golden test
+can't open a window.
+
+**A viewer, as a process** (as curl and `llama-server` are, D251): a
+small C program, `tools/slight-view`, with raylib vendored in it, that a
+program starts as a command (`:exec`) or reaches on a Unix socket. To
+it go frames, arrays of numbers (a grid; positions and colours) and
+s-expressions for the few draw commands; from it come keys, clicks and
+sliders, as messages through a device, which a run already records, so
+replay holds. The runtime stays free of graphics, a viewer that
+crashes doesn't take the simulation with it, and a test uses a stand-in
+viewer, as `t/data/curl/curl` stands in for curl. With islands, frames
+go to island 0, a big array as a handle, and on to the viewer. raylib
+loads image and font formats, so it isn't entirely free of what D251
+warns of, but the viewer reads only what its program sends it.
+
+**And beside it:**
+
+- **The browser, the same protocol:** a page with a canvas, served by
+  `lib/http.slight`, for a simulation on a headless machine watched
+  from a laptop; frames going to it live wants WebSockets, which slight
+  hasn't, so later.
+- **Files:** frames written as PNG or PPM, and `ffmpeg`, as a command,
+  making a film of a long run.
+- **The terminal:** Sixel or kitty's graphics protocol, for a picture
+  now and then.
+
+Likely order, for the proposal: the protocol first (what a frame and a
+draw command are, and how input comes back), then the raylib viewer,
+tried on `reaction`, whose drawing on island 0 is its limit (125 steps a
+second on one island, 181 on four, on the cloud machine), then the
+browser when watching from afar matters. It would sit with the
+simulation library above: the flagship's dashboard is this viewer, fed
+by the root.
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written
