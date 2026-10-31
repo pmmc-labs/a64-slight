@@ -1858,6 +1858,55 @@ Agents (Smallville, 2023), whose characters talk through a language
 model, as a few could here through `lib/agent.slight`, on a town run by
 rules.
 
+**The flagship: a country of towns, with collectors.** Stevan's, the
+two examples above together. Most of what happens in a town stays in
+it: people meet neighbours and workmates thousands of times a day, and
+few go between towns, fewer between regions. So the computing grows with
+the people, inside each town, which islands spread, and the talking
+between places with what crosses (travellers, trade, news), which is
+little: a simulation shaped so scales where a flat one of a country
+doesn't. Done elsewhere as metapopulation models (GLEaM: cities as
+patches joined by real journeys), federated simulation (HLA, IEEE 1516),
+and a game's level of detail.
+
+- **A tree.** Towns are actors (a few for a big city), over islands;
+  county collectors above them, then states, then a root. Each step two
+  waves: down, `(:step t signals)`, what the level above decides or
+  knows (prices, policies, news, the season); up, `(:done t summary)`,
+  each town's counts for the step.
+- **The tree is the barrier.** A collector waits for every child's step
+  t, merges their summaries, reports up; the root, having them all,
+  starts the next step down: a tree barrier, synchronization and
+  aggregation in the same messages.
+- **Summaries that merge:** counts, sums, histograms, minima and maxima;
+  sketches where those can't serve (HyperLogLog for distinct counts,
+  t-digest for quantiles). Children merged in a fixed order, by their
+  ids, not as they come, so float sums, and the run, are the same to the
+  bit every time.
+- **Travellers are messages,** a person's state (who, what they
+  believe, whether infected) sent to the town they reach, straight to
+  its pid, or up and down the tree between machines. The shortest
+  journey is the lookahead: each town runs that far on its own between
+  barriers, coarse windows and little waiting.
+- **Fidelity where it matters:** the towns of interest with Talk of the
+  Town's minds, the rest lean rules, or a compartment model's equations.
+  Zooming a town in mid-run, statistics made into people consistent
+  with them, is a research problem; out is easy.
+- **More than one machine without slight spanning machines:** only the
+  top of the tree crosses, with summaries and the few travellers between
+  regions. A machine runs one program for a region, its towns on its
+  islands and its own collectors, and region roots meet each step over
+  `lib/rpc.slight`, which exists. Each machine records and replays its
+  own; a branched replay asks what if a region closed its borders on
+  day 30, from a checkpoint.
+- **What to watch:** what the collectors keep is all that can be asked
+  later (keep counts, and one person's path is gone), so choose, or log
+  each town's events to files; effects between levels (national news
+  changing every town) go down the tree explicitly; and validating it,
+  calibration against data and ensembles of runs, is the real work.
+
+A dashboard on island 0, fed by the root, shows it running.
+
 Measured alongside, for whoever picks this up: a message crossing
 islands is one allocation now, and `fan-in-mc` four times faster on the
 cloud machine; a ping-pong whose halves are on neighbouring islands

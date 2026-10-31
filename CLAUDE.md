@@ -340,7 +340,9 @@ open: time-stepped regions in `lib/sim.slight`, then discrete events in
 conservative windows on a `clock/hold` builtin, with an HP-lattice
 protein folding by replica exchange across islands as the example to
 build it around, and a town's talk after Talk of the Town, characters
-as actors whose beliefs spread in conversation, as a second; and branching a replay, a recorded run going another
+as actors whose beliefs spread in conversation, as a second, and the
+flagship, a country of towns under a tree of regional collectors, the
+tree its barrier and its aggregation; and branching a replay, a recorded run going another
 way from a point, as `airline` does by hand (`docs/PLAN.md`, "Branching
 a replay", an idea to propose); Stevan leans to
 simulation over servers, D257), and D249's step 3, the standard library
