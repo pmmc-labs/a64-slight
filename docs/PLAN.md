@@ -1916,11 +1916,12 @@ costs a few microseconds a round trip on the cloud machine's 4 vCPUs,
 worse with more islands, which the M2 Max should measure before more
 work goes into crossing latency (`docs/BENCHMARKS.md`, 31 Oct).
 
-### Floats without boxes (proposed, open, Oct 2026)
+### Floats without boxes (open, Oct 2026: (a) agreed, then measured slower; (c) planned)
 
 Proposed by Claude after D258 and D259, when Stevan asked to "fix the
-floats". Not yet agreed: the options and the recommendation stand as
-offered.
+floats". Stevan agreed to (a), symbols giving up the bit, a prototype
+first, and (c) planned now (D260). The prototype made things slower, so
+(a) has stopped; see "Measured", below.
 
 **The problem.** A float is a 16-byte box. D198 made `+`, `-`, `*` and
 `/` on two floats inline, and D259 comparisons, but each result is
@@ -1970,38 +1971,67 @@ be, and copied as such.
   and `math/abs` inline, allocating as `+` does. About a tenth of
   boids, a per cent or two of `n-body`.
 
-**Recommendation: (a), then (c) if the benchmarks still ask.** (a) is
-an afternoon's thinking and a few days' care, mostly in `rt.h`,
-`values.ts` and the two targets' float paths, and it helps every
-program that has floats, in time and in memory: no allocation for a
-float result in the common range, a tuple of n floats n words, a
-message of them a copy of its words. Estimated, not measured: 15 to 30
-per cent on float-heavy code (the instructions per operation fall
-less than that, about 30 to 22; the gain is the allocation, the
-memory traffic and the collections it causes). (c) is what makes
-slight's floats approach C's, a project of its own on top of (a)'s
-representation, which it needs at the edges anyway. (d) is subsumed by
-(a) where it matters (an `array/get` then costs a call and no box).
+**Recommended, and agreed: (a), then (c) if the benchmarks still ask**,
+on an estimate of 15 to 30 per cent for (a), which the prototype didn't
+bear out.
 
-**How (a) would go.** First a prototype on x86-64 alone, the float
-paths and `rt_new_float`, measured on `n-body`, `spectral-norm`, boids
-and `bank`, to check the estimate before the pids move. Then: the pid
-tag moved (every `RT_TAG_PID`, about fifty places, and the pid and
-address layouts, one bit narrower); `rt_is_float`, `rt_float_value`
-and `rt_new_float` taught the immediate (the runtime already goes
-through those three everywhere, 46 calls); both targets' D198 and D259
-paths on immediates, boxed floats going to C; float literals emitted
-as immediates; `values.ts` and its unit tests. Golden tests at the
-edges: the largest and smallest immediates and their neighbours, ±0,
-subnormals, infinities and NaN, through arithmetic, comparisons,
-`eq?`, `hash`, printing, messages across islands, arrays and JSON.
+**Measured (D260).** Step 1, symbols and pids sharing the tag `101` so
+floats could have `111`, is built (every test passing as before). Step
+2, the prototype: `rt_new_float`, `rt_float_value` and `rt_is_float` on
+immediates (all 362 golden tests passing on both targets with C alone
+making them), and x86-64's inline float paths (D198's arithmetic,
+D259's comparisons, literals as words). On x86-64, against D259, in
+instructions: `n-body` 24 per cent more, `spectral-norm` 10 per cent
+more, boids 7 per cent more; in time, `n-body 1000000` 1.88 s to 2.36,
+`spectral-norm 1000` 1.28 to 1.53 (the best of five, one island). No
+result went to C but `sqrt`'s. The decode, shift, add the offset unless
+it's ±0 (a `cmova`), rotate, move to `xmm`, is 8 instructions an
+operand, and the encode, rotate, ±0 by a branch, the exponent's range
+checked, the offset taken off, shifted and tagged, 13; the box it
+replaced was a bump of the nursery's pointer and two stores, about 5,
+in memory the cache already holds, and its collections cost next to
+nothing. A leaner encoding (±0 boxed, no special case) would come to
+about what a box costs, not less. So immediates don't pay for
+themselves here: the cost of a float operation is going through the
+generic word at all, checked, taken apart and put back, between one
+operation and the next, whatever the word is. (a) has stopped; whether
+step 1 is kept or reverted is Stevan's (it costs a pid's bit and buys
+nothing without (a)).
 
-**Questions.** Whether the range is right for simulations (Spur's, a
-float's: anything beyond it is boxed, slower but correct); whether
-pids should lose the bit (51 bits of process number, and an address's
-count of addresses a bit fewer) or symbols should (they're
-compile-time ids, so a bit there costs nothing); and whether (c)
-should be planned now, since (a) settles what its edges box into.
+**(c), planned.** Floats kept as doubles in registers between
+operations, boxed only where they leave, in steps, each measured:
+
+1. **Float expressions.** A tree of float operations (`+`, `-`, `*`,
+   `/`, comparisons, and `math/sqrt` and `math/abs`, which are exact),
+   its leaves locals, literals and other expressions, compiled twice:
+   once as now, and once with every leaf checked to be a float at the
+   start (a box's header, or an integer made a double where it may be
+   one, as today's float path does), the tree worked in `xmm` or `d`
+   registers, and the result boxed once. The checks failing goes the
+   way it goes now. `n-body`'s `pull` has 30 float operations in 11
+   such trees: 11 boxes in place of 30, and each leaf checked once in
+   place of at each use. No types, no new frame layout, no change of
+   representation. Estimated, from that count: `pull`'s float work
+   about 2.5 times fewer instructions, `n-body` 1.5 to 1.8 times
+   faster; boids less (its arithmetic is shallow, and the rest is
+   lists and sorting).
+2. **Float locals.** A `let` bound to a float expression kept as a raw
+   double in a frame slot the collector doesn't see (the frame split
+   into its values and its doubles), so `dx` crosses from its `let` to
+   its uses unboxed; boxed only where it's passed, stored or returned.
+3. **Float parameters.** A function whose parameters are used as
+   floats compiled a second time for floats, entered when its
+   arguments check at the entry, so a loop's state stays unboxed from
+   one call to the next; with `sig`s, that check is what the
+   signature says (TYPES.md's step 5, types in code generation).
+
+Each step keeps every float the bits it has now, the same IEEE
+operation on the same doubles, so every golden test stands as it is;
+each adds golden tests at its edges (a leaf that's an integer, a
+string, a boxed NaN; a tree too deep for the registers, spilled).
+
+**Questions.** Whether to keep step 1's tag move for a later try at
+immediates, or revert it; and whether (c)'s step 1 goes ahead.
 
 ### Branching a replay (idea, open, Oct 2026)
 

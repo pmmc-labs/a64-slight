@@ -743,8 +743,12 @@ REPL and line editing are slight code over key events.
 | `…0`  | integer | 63-bit, immediate. Add is `adds` + `b.vs`. |
 | `001` | list    | pointer to a 2-word cons cell, no header. `nil` is this tag with a null pointer. |
 | `011` | boxed   | pointer to a header word (type, size) and payload: string, float, closure, tuple |
-| `101` | symbol  | compile-time id, immediate |
-| `111` | pid     | immediate: the process's index in the process table, `id << 3 \| 7` |
+| `0101` | symbol | compile-time id, immediate: `id << 4 \| 5` |
+| `1101` | pid    | immediate: the process's index in its island's table, `id << 4 \| 13` (D260) |
+| `111` | (free)  | kept for floats as immediates, which measured slower (D260) |
+
+Symbols and pids share the tag `101`, told apart by bit 3 (D260), so a
+symbol test and a pid test mask four bits (`RT_NAME_MASK`).
 
 - **Cons cells** are 16 bytes. The tag folds into the load offset:
   `car` is `ldur x0, [x1, #-1]` and `cdr` is `ldur x0, [x1, #7]`.

@@ -6474,3 +6474,33 @@ remains is the boxes, a float result's 16 bytes and `array/get`'s call
 into C to make one, proposed in PLAN.md, "Floats without boxes".
 Not done here: `math/sqrt` and `math/abs` inline (a per cent or two of
 `n-body`).
+
+**D260. Floats as immediates: agreed, built in part, measured slower,
+stopped.** *(Stevan, Oct 2026: "Yes to all of them", to PLAN.md's
+"Floats without boxes": (a), floats as immediates in the common range,
+Pharo's SmallFloat64; symbols rather than pids giving up a bit; a
+prototype on x86-64 first; and (c), floats unboxed within a function,
+planned now.)*
+- **Step 1, built:** symbols and pids share the tag `101`, told apart by
+  bit 3 (`RT_NAME_MASK`, `rt_is_pid_word`, `rt_is_symbol`), freeing
+  `111`. A symbol is `id << 4 | 5` and a pid `n << 4 | 13`; `RT_TRUE` is
+  21. The bit comes from both: a symbol's id loses nothing that matters,
+  a pid's number is 51 bits, and a task's addresses wrap at 2^19 (golden
+  test 324 changed to match). Every test passed as before.
+- **Step 2, the prototype, not kept:** a float whose exponent is -126 to
+  128, or ±0, as its bits rotated left one, less `896 << 53`, shifted up
+  three under `111`; any other boxed. In C, the three accessors and
+  `json.c`'s and `sexp.c`'s parsers (all golden tests passing on both
+  targets with C alone making immediates); and x86-64's inline float
+  paths, D198's and D259's, and literals. Slower: `n-body 1000000` 1.88
+  s to 2.36, `spectral-norm 1000` 1.28 to 1.53; 24 and 10 per cent more
+  instructions, boids 7 per cent more. The decode is 8 instructions an
+  operand and the encode 13, where the box was about 5 and two stores
+  into a nursery in the cache. PLAN.md's "Floats without boxes" has the
+  reckoning: the cost is the trip through the generic word between one
+  operation and the next, which no encoding removes.
+- **So:** (a) stops, the estimate it was agreed on (15 to 30 per cent
+  faster) having been wrong. Open, for Stevan: step 1 kept, `111` free
+  for a later try, or reverted. (c) is planned in PLAN.md in three
+  steps, the first, float expressions worked in registers and boxed
+  once, needing no types and no change of representation.
