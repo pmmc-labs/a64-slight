@@ -1916,7 +1916,7 @@ costs a few microseconds a round trip on the cloud machine's 4 vCPUs,
 worse with more islands, which the M2 Max should measure before more
 work goes into crossing latency (`docs/BENCHMARKS.md`, 31 Oct).
 
-### Floats without boxes (open, Oct 2026: (a) agreed, then measured slower; (c) planned)
+### Floats without boxes (Oct 2026: (a) agreed, measured slower, stopped; (c) agreed, step 1 under way)
 
 Proposed by Claude after D258 and D259, when Stevan asked to "fix the
 floats". Stevan agreed to (a), symbols giving up the bit, a prototype
@@ -1994,9 +1994,8 @@ nothing. A leaner encoding (±0 boxed, no special case) would come to
 about what a box costs, not less. So immediates don't pay for
 themselves here: the cost of a float operation is going through the
 generic word at all, checked, taken apart and put back, between one
-operation and the next, whatever the word is. (a) has stopped; whether
-step 1 is kept or reverted is Stevan's (it costs a pid's bit and buys
-nothing without (a)).
+operation and the next, whatever the word is. (a) has stopped, and step
+1 is reverted, since it bought nothing without (a).
 
 **(c), planned.** Floats kept as doubles in registers between
 operations, boxed only where they leave, in steps, each measured:
@@ -2030,8 +2029,7 @@ operation on the same doubles, so every golden test stands as it is;
 each adds golden tests at its edges (a leaf that's an integer, a
 string, a boxed NaN; a tree too deep for the registers, spilled).
 
-**Questions.** Whether to keep step 1's tag move for a later try at
-immediates, or revert it; and whether (c)'s step 1 goes ahead.
+**Agreed** (D260): (c)'s step 1 goes ahead.
 
 ### Branching a replay (idea, open, Oct 2026)
 

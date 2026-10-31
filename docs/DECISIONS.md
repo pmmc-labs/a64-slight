@@ -6500,7 +6500,9 @@ planned now.)*
   reckoning: the cost is the trip through the generic word between one
   operation and the next, which no encoding removes.
 - **So:** (a) stops, the estimate it was agreed on (15 to 30 per cent
-  faster) having been wrong. Open, for Stevan: step 1 kept, `111` free
-  for a later try, or reverted. (c) is planned in PLAN.md in three
-  steps, the first, float expressions worked in registers and boxed
-  once, needing no types and no change of representation.
+  faster) having been wrong. (c) is planned in PLAN.md in three steps,
+  the first, float expressions worked in registers and boxed once,
+  needing no types and no change of representation. *(Stevan: "Yes for
+  both", to reverting step 1, which buys nothing without (a), and to
+  (c)'s first step.)* Step 1 is reverted: symbols are `101` and pids
+  `111` again, with their bits.

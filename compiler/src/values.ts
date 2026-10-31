@@ -13,7 +13,7 @@ export const MAX_ARGS = 8;
 export const TOP_PARAMS: readonly string[] = ['@ARGV', '%ENV'];
 
 export const intWord    = (n: bigint): bigint => n << 1n;
-export const symbolWord = (id: number): bigint => (BigInt(id) << 4n) | 5n;
+export const symbolWord = (id: number): bigint => (BigInt(id) << 3n) | 5n;
 
 // A box's tag; a tuple's header word, for n elements, which a tuple
 // pattern compares with (D178); and where element i is, from a tagged

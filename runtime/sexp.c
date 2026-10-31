@@ -656,7 +656,7 @@ rt_value_t rt_sexp_print(rt_value_t v, const char *site) {
             put(&b, "()");
         } else if (rt_is_string(v)) {
             rt_quote(&b, rt_string_bytes(v), rt_string_len(v));
-        } else if (rt_is_symbol(v)) {
+        } else if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
             put(&b, rt_symbol_name(v >> RT_SYMBOL_SHIFT));
         } else if (!(v & RT_TAG_INT_MASK)) {
             rt_render(&b, v, 0);

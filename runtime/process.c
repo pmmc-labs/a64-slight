@@ -1277,7 +1277,7 @@ static int here(rt_value_t pid) {
 }
 
 static int far(rt_value_t v) {
-    return rt_is_pid_word(v) && !here(v);
+    return (v & RT_TAG_MASK) == RT_TAG_PID && !here(v);
 }
 
 static void *island_main(void *arg);
@@ -1524,7 +1524,7 @@ rt_proc_t *rt_new_process(rt_code_t code, rt_value_t parent) {
 // pid's entry. Every pid came from fork, so it has one. Don't hold on to
 // it across a switch: a fork can move the table.
 static entry_t *entry(rt_value_t pid, const char *site) {
-    if (!rt_is_pid_word(pid) || rt_is_address(pid)) rt_fault(RT_FAULT_NOT_PID, pid, site);
+    if ((pid & RT_TAG_MASK) != RT_TAG_PID || rt_is_address(pid)) rt_fault(RT_FAULT_NOT_PID, pid, site);
     return slot(pid);
 }
 
@@ -1769,7 +1769,7 @@ static void read_on(rt_proc_t *p, rt_value_t pid);
 // To a process that has ended, a message just disappears, as in Erlang. A
 // device takes it at once.
 rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *site) {
-    if (!rt_is_pid_word(pid)) rt_fault(RT_FAULT_NOT_PID, pid, site);
+    if ((pid & RT_TAG_MASK) != RT_TAG_PID) rt_fault(RT_FAULT_NOT_PID, pid, site);
     if (rt_pid_island(pid) != rt_pid_island(p->pid)) {     // its island checks it, when it takes it (D256)
         rt_msg_t *m  = new_msg_reserving(p->isle, msg, ITEM_HEAD);
         item_t   *it = (item_t *)(void *)(m + 1);
@@ -4882,7 +4882,7 @@ static void system_command(rt_device_t *d, rt_value_t msg) {
     int        ok   = (word == rt_symbol(SYS(PROCESSES)) && args == RT_NIL)
                    || (word == rt_symbol(SYS(PROCESSES)) && one && (arg & 1) == 0
                        && rt_int_value(arg) >= 0 && (uint64_t)rt_int_value(arg) < nislands)
-                   || (word == rt_symbol(SYS(PROCESS)) && one && rt_is_pid_word(arg) && !rt_is_address(arg))
+                   || (word == rt_symbol(SYS(PROCESS)) && one && (arg & RT_TAG_MASK) == RT_TAG_PID && !rt_is_address(arg))
                    || (word == rt_symbol(SYS(RUNTIME)) && args == RT_NIL);
     if (!ok) {
         rt_dead_letter(msg, d->site);
@@ -4970,7 +4970,7 @@ static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char 
 rt_value_t rt_open(rt_value_t source, rt_value_t arg, const char *site) {
     rt_proc_t *p = rt_current;
     if (p->actor) rt_fault(RT_FAULT_NOT_TASK, p->pid, site);   // an actor connects, and takes (:open f) with recv
-    uint64_t which = rt_is_symbol(source) ? (source >> RT_SYMBOL_SHIFT) - RT_SYM_SOURCE : RT_SOURCE_COUNT;
+    uint64_t which = (source & RT_TAG_MASK) == RT_TAG_SYMBOL ? (source >> RT_SYMBOL_SHIFT) - RT_SYM_SOURCE : RT_SOURCE_COUNT;
     if (which >= RT_SOURCE_COUNT) rt_fault(RT_FAULT_NOT_DEVICE, source, site);
     if (which == RT_SOURCE_EXEC) {
         need_command(arg, site);

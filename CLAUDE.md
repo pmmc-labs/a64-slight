@@ -104,9 +104,9 @@ any number of islands, about three times as fast on four cores, and
 `--time n ticks` to time it (D258), and comparisons of floats inline,
 from D198's not-done list (D259, golden test 334, from
 `t/models/float-compare.py`), and floats as immediates agreed,
-prototyped and measured slower, so stopped, with symbols and pids
-sharing a tag from it (D260), and floats kept unboxed between
-operations planned (`docs/PLAN.md`, "Floats without boxes", open); and
+prototyped and measured slower, so stopped (D260), and floats kept
+unboxed between operations agreed, in three steps, the first under way
+(`docs/PLAN.md`, "Floats without boxes"); and
 `airline`, a simulated day branched with what-ifs, each run till it
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it
