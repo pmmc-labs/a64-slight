@@ -564,7 +564,10 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     const cmp = COMPARE[name];
     if (cmp !== undefined) {
         const [cond, op] = cmp;
-        return compileNumeric(x, name, args, operand, st, 'rt_compare', [imm(op)], (s) => [s.t.compareBool(cond), s]);
+        // two floats inline too (D259), with no box to make
+        const float = (s: St, notFloats: string, done: string): [Code, St] =>
+            [[s.t.branchUnlessFloats(notFloats), s.t.floatCompareBool(cond), s.t.jump(done)], s];
+        return compileNumeric(x, name, args, operand, st, 'rt_compare', [imm(op)], (s) => [s.t.compareBool(cond), s], undefined, float);
     }
     const bit = BITS[name];
     if (bit !== undefined) {
@@ -1537,8 +1540,9 @@ function compileTest(test: Sexp, ifFalse: string, cx: Cx, st: St, site: Pos | nu
 const MIRROR: Readonly<Record<string, string>> = { '==': '==', '!=': '!=', '<': '>', '<=': '>=', '>': '<', '>=': '<=' };
 
 // A comparison as a test: for two integers, a compare and a branch to
-// ifFalse unless it holds, with no boolean made; anything else asks
-// rt_compare out of line, which gives one (or faults), and branches on it.
+// ifFalse unless it holds, with no boolean made; out of line, two floats
+// (or a float and the integer literal) the same way (D259); anything else
+// asks rt_compare, which gives a boolean (or faults), and branches on it.
 // An integer literal is a word, on the right: (< 0 x) is (> x 0).
 function compileCompareTest(name: string, args: readonly Sexp[], ifFalse: string, cx: Cx, st: St, pos: Pos | null): [Code, St] {
     const [a, b]  = args as [Sexp, Sexp];
@@ -1553,12 +1557,14 @@ function compileCompareTest(name: string, args: readonly Sexp[], ifFalse: string
     if (r.t === 'int') {
         const w = intWord(r.v);
         const [left, st3] = compileExpr(l, cx, st2);
-        const stub = [`${slow}:`, t.call('rt_compare', [ACC, word(w), imm(rtOp), addr(site)], false), done];
+        const stub = [`${slow}:`, t.branchUnlessFloat(`${slow}_c`), t.branchUnlessFloatCompare(cond, ifFalse, r.v), t.jump(`${slow}_done`),
+                      `${slow}_c:`, t.call('rt_compare', [ACC, word(w), imm(rtOp), addr(site)], false), done];
         return [[left, t.branchUnlessInt(slow), t.branchUnlessCompareWord(cond, w, ifFalse), `${slow}_done:`],
                 { ...st3, stubs: [st3.stubs, stub] }];
     }
     const [both, st3] = operands(l, r, cx, st2);
-    const stub = [`${slow}:`, t.call('rt_compare', [LEFT, ACC, imm(rtOp), addr(site)], false), done];
+    const stub = [`${slow}:`, t.branchUnlessFloats(`${slow}_c`), t.branchUnlessFloatCompare(cond, ifFalse), t.jump(`${slow}_done`),
+                  `${slow}_c:`, t.call('rt_compare', [LEFT, ACC, imm(rtOp), addr(site)], false), done];
     return [[both, t.branchUnlessInts(slow), t.branchUnlessCompare(cond, ifFalse), `${slow}_done:`],
             { ...st3, stubs: [st3.stubs, stub] }];
 }

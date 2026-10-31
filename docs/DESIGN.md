@@ -1323,7 +1323,10 @@ Arithmetic and comparisons on two integers are inline: one `orr` and one
 done inline too, the result's box allocated inline (D198), and so is `/`
 (whose divisor is checked for zero first); anything else goes to the
 runtime (`rt_add`, `rt_divide`, `rt_compare`, ...), which promotes to
-float or faults. Comparisons on floats are the runtime's.
+float or faults. Comparisons of two floats, or of a float and a literal
+integer, are inline too, out of line from the integers' compare, with
+no box to make (D259): a NaN makes every one false but `!=`, as
+`rt_compare` has it, which on x86-64 means looking at the parity flag.
 
 A builtin written in C is an ordinary C function (AAPCS64, or System V
 on x86-64). The compiler

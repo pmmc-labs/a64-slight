@@ -164,6 +164,14 @@ export type Target = {
     readonly branchIfZeroFloat: (label: string) => Code;
     readonly floatArith: (op: FloatOp) => Code;
     readonly floatArithInt: (op: FloatOp, n: bigint) => Code;
+    // Comparisons of floats (D259), both operands known to be floats' boxes:
+    // the left operand's float with the accumulator's, or, given n, the
+    // accumulator's with the integer n made a double as C's (double) makes
+    // it, which is what rt_compare does. A boolean into the accumulator, or
+    // a branch to label unless it holds. With a NaN only ne holds, as in
+    // rt_compare.
+    readonly floatCompareBool: (cond: Cond, n?: bigint) => Code;
+    readonly branchUnlessFloatCompare: (cond: Cond, label: string, n?: bigint) => Code;
     readonly divide: (op: 'div' | '%', zero: string, overflow: string) => Code;
     // Bit operations on integers (D221), as tagged words: of the left
     // operand and the accumulator, into the accumulator, a shift's count

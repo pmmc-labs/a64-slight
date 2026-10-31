@@ -101,7 +101,10 @@ same picture on one island or twelve, a golden test in its quiet mode
 for islands: the flock as arrays of floats, a share of it on each
 island, a grid in each so a bird looks only near it, the same flight on
 any number of islands, about three times as fast on four cores, and
-`--time n ticks` to time it (D258); and
+`--time n ticks` to time it (D258), and comparisons of floats inline,
+from D198's not-done list (D259, golden test 334, from
+`t/models/float-compare.py`), with floats without boxes proposed
+(`docs/PLAN.md`, "Floats without boxes", open); and
 `airline`, a simulated day branched with what-ifs, each run till it
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it

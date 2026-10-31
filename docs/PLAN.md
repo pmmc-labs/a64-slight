@@ -849,7 +849,9 @@ with Stevan first.
   likely first one.
 - **Faster floats.** Boids spends about a sixth of its time on float
   arithmetic in C and the boxes it makes. (The arithmetic is inline now,
-  D198, and the boxes allocated inline; the boxes themselves remain.) The fix that helps every
+  D198, and the boxes allocated inline, and comparisons, D259; the boxes
+  themselves remain: "Floats without boxes", below, proposes what's
+  next.) The fix that helps every
   program is in the representation: floats that need no box (NaN-boxing,
   or a tagged short float), or a compiler that keeps a float unboxed
   within a function. Either is a proposal of its own; boids is the
@@ -1913,6 +1915,93 @@ cloud machine; a ping-pong whose halves are on neighbouring islands
 costs a few microseconds a round trip on the cloud machine's 4 vCPUs,
 worse with more islands, which the M2 Max should measure before more
 work goes into crossing latency (`docs/BENCHMARKS.md`, 31 Oct).
+
+### Floats without boxes (proposed, open, Oct 2026)
+
+Proposed by Claude after D258 and D259, when Stevan asked to "fix the
+floats". Not yet agreed: the options and the recommendation stand as
+offered.
+
+**The problem.** A float is a 16-byte box. D198 made `+`, `-`, `*` and
+`/` on two floats inline, and D259 comparisons, but each result is
+still allocated, and everything that makes a float in C does it through
+`rt_new_float`: `array/get` on a `:float` array is a call into C and a
+box each time (13 per cent of boids, D258), as is every `math/`
+function. In `n-body`'s inner loop a float subtraction is about 30
+instructions on x86-64: the integers' check, a tag-and-header check on
+each operand, an allocation, the operation, the box's two stores, the
+result to its slot. And a tuple or a message of floats is a word and a
+box for each, so a simulation's state is three times the size it need
+be, and copied as such.
+
+**The options.**
+
+- **(a) Floats as immediates, most of them** (Pharo's Spur VM has done
+  this since 2014, "SmallFloat64"). A float whose exponent fits in 8
+  bits, |x| from about 1.2e-38 to 3.4e38 (single precision's range,
+  with all 52 bits of the fraction), and ±0, is the word itself: its
+  bits rotated so the sign is lowest, the exponent offset taken off,
+  shifted up three, under a tag of its own. The rest, infinities, NaN,
+  subnormals and the very large and very small, stay boxed, so every
+  double is still a float, to the bit; a value has one form, so `eq?`,
+  `hash` and printing don't change. Decoding is a shift, an add and a
+  rotate; encoding the reverse, with a branch to the box when it
+  doesn't fit. The tag has to come from somewhere: all four odd ones are
+  taken, so pids would move under the symbols' tag, `101`, a bit above
+  it saying which (symbols `0101`, pids and addresses `1101`), and
+  floats would take `111`. Nothing a program can see changes. The
+  collector and the message copy don't change either: an immediate
+  isn't a pointer, as a pid isn't now.
+- **(b) NaN-boxing**, every value inside a double's NaN space, as
+  JavaScript engines do. Rejected: integers would drop to 48 or 51
+  bits, a change to the language (63-bit integers, D37), and every
+  pointer would need masking.
+- **(c) Unboxed within a function**, kept in floating-point registers
+  where the compiler knows a value is a float, boxed only where it
+  leaves (a call, a tuple, a message, the result). This is TYPES.md's
+  step 5. It's the one that could close most of `n-body`'s gap (10 to
+  36 times C), but it's the most machinery: types in code generation,
+  a second register class on both targets, boxing at the edges, and
+  knowing: in `n-body` the floats come out of tuples, typed `any`, so
+  it needs `sig`s the code generator trusts, checked once at the
+  function's entry, or a float check per value then kept.
+- **(d) Smaller inlines, with no change of representation**:
+  `array/get` on a `:float` array (its shared form too) and `math/sqrt`
+  and `math/abs` inline, allocating as `+` does. About a tenth of
+  boids, a per cent or two of `n-body`.
+
+**Recommendation: (a), then (c) if the benchmarks still ask.** (a) is
+an afternoon's thinking and a few days' care, mostly in `rt.h`,
+`values.ts` and the two targets' float paths, and it helps every
+program that has floats, in time and in memory: no allocation for a
+float result in the common range, a tuple of n floats n words, a
+message of them a copy of its words. Estimated, not measured: 15 to 30
+per cent on float-heavy code (the instructions per operation fall
+less than that, about 30 to 22; the gain is the allocation, the
+memory traffic and the collections it causes). (c) is what makes
+slight's floats approach C's, a project of its own on top of (a)'s
+representation, which it needs at the edges anyway. (d) is subsumed by
+(a) where it matters (an `array/get` then costs a call and no box).
+
+**How (a) would go.** First a prototype on x86-64 alone, the float
+paths and `rt_new_float`, measured on `n-body`, `spectral-norm`, boids
+and `bank`, to check the estimate before the pids move. Then: the pid
+tag moved (every `RT_TAG_PID`, about fifty places, and the pid and
+address layouts, one bit narrower); `rt_is_float`, `rt_float_value`
+and `rt_new_float` taught the immediate (the runtime already goes
+through those three everywhere, 46 calls); both targets' D198 and D259
+paths on immediates, boxed floats going to C; float literals emitted
+as immediates; `values.ts` and its unit tests. Golden tests at the
+edges: the largest and smallest immediates and their neighbours, ±0,
+subnormals, infinities and NaN, through arithmetic, comparisons,
+`eq?`, `hash`, printing, messages across islands, arrays and JSON.
+
+**Questions.** Whether the range is right for simulations (Spur's, a
+float's: anything beyond it is boxed, slower but correct); whether
+pids should lose the bit (51 bits of process number, and an address's
+count of addresses a bit fewer) or symbols should (they're
+compile-time ids, so a bit there costs nothing); and whether (c)
+should be planned now, since (a) settles what its edges box into.
 
 ### Branching a replay (idea, open, Oct 2026)
 

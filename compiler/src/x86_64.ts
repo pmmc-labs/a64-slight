@@ -55,6 +55,29 @@ const isFloat = (reg: string, reg32: string, label: string): Code => [
     `    jne  ${label}`,
 ];
 
+// The floats to compare, the left operand's (or, given n, the
+// accumulator's) in xmm0 and the accumulator's (or n, made a double as C's
+// (double) makes it) in xmm1; then ucomisd, the operands turned round for
+// lt and le, so that each comparison is above or above-or-equal: false
+// when either is a NaN, which sets CF, ZF and PF. eq and ne look at PF.
+const ucomisd = (cond: Cond, n?: bigint): Code => [
+    n === undefined
+        ? [`    movsd xmm0, qword ptr [rcx + ${FLOAT_VALUE}]`, `    movsd xmm1, qword ptr [rax + ${FLOAT_VALUE}]`]
+        : [`    movsd xmm0, qword ptr [rax + ${FLOAT_VALUE}]`,
+           n === 0n ? '    xorpd xmm1, xmm1' : [loadWord('rsi', n), '    cvtsi2sd xmm1, rsi']],
+    cond === 'lt' || cond === 'le' ? '    ucomisd xmm1, xmm0' : '    ucomisd xmm0, xmm1',
+];
+const FLOAT_BOOL: Readonly<Record<Cond, Code>> = {
+    gt: boolIf('a'), ge: boolIf('ae'), lt: boolIf('a'), le: boolIf('ae'),
+    eq: ['    mov  rax, RT_FALSE', '    mov  edx, RT_TRUE', '    cmove rax, rdx', '    mov  edx, RT_FALSE', '    cmovp rax, rdx'],
+    ne: ['    mov  rax, RT_TRUE', '    mov  edx, RT_FALSE', '    cmove rax, rdx', '    mov  edx, RT_TRUE', '    cmovp rax, rdx'],
+};
+const floatUnless = (cond: Cond, label: string): Code =>
+    cond === 'gt' || cond === 'lt' ? `    jbe  ${label}`
+    : cond === 'ge' || cond === 'le' ? `    jb   ${label}`
+    : cond === 'eq' ? [`    jne  ${label}`, `    jp   ${label}`]
+    : [FLOAT_BOOL.ne, '    cmp  rax, RT_FALSE', `    je   ${label}`];
+
 const BOX_XMM0: Code = [
     `    mov  qword ptr [rdx], ${FLOAT_HEADER}`,
     '    movsd qword ptr [rdx + 8], xmm0',
@@ -286,6 +309,8 @@ export const X86_64: Target = {
         `    ${FLOAT_OPS[op]} xmm0, xmm1`,
         BOX_XMM0,
     ],
+    floatCompareBool: (cond, n) => [ucomisd(cond, n), FLOAT_BOOL[cond]],
+    branchUnlessFloatCompare: (cond, label, n) => [ucomisd(cond, n), floatUnless(cond, label)],
 
     arith: (op, overflow) => ARITH[op](overflow),
     arithWord: (op, word, overflow) => [

@@ -6450,3 +6450,27 @@ sleep taken out). Now:
   14 (D179). docs/BACKGROUND.md's "Actor simulations and locality" said
   this was the way that scales; the old program is in git, and so
   D179's and D198's timings of boids were of a different program.
+
+**D259. Comparisons of floats inline.** *(Stevan, Oct 2026: "let's fix
+the floats then", after D258's profile; this is the part that changes
+no value's representation, D198's "not done".)* `==`, `!=`, `<`, `<=`,
+`>` and `>=` on two floats' boxes, or a float's and an integer literal,
+the literal made a double as C's `(double)` makes it, which is what
+`rt_compare` does: out of line from the integers' compare, where
+`rt_compare` was called, as a test (a branch, no boolean) and as a value
+(two floats only; with a literal, still C). With a NaN only `!=` holds:
+AArch64's conditions after `fcmp` are `mi`, `ls`, `gt` and `ge`, false on
+unordered, and x86-64's `ucomisd` has `<` and `<=` turned round to be
+above and above-or-equal, with `==` and `!=` reading the parity flag.
+Golden test 334, every comparison of twelve numbers (NaN, both zeros,
+both infinities, 2^53, integers) as a test and as a value, and against
+literals either side (2^53 + 1 among them), from
+`t/models/float-compare.py`; it passes with the compiler before this
+change too. **Measured** (instructions, under callgrind): boids, 1,000
+birds, 11 per cent fewer; `n-body`, `spectral-norm` and `bank` the same,
+since their loops don't compare floats. In wall time on the cloud
+machine, within the noise at 80 by 24 and 8 per cent at 240 by 70. What
+remains is the boxes, a float result's 16 bytes and `array/get`'s call
+into C to make one, proposed in PLAN.md, "Floats without boxes".
+Not done here: `math/sqrt` and `math/abs` inline (a per cent or two of
+`n-body`).
