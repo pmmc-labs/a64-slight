@@ -1916,7 +1916,7 @@ costs a few microseconds a round trip on the cloud machine's 4 vCPUs,
 worse with more islands, which the M2 Max should measure before more
 work goes into crossing latency (`docs/BENCHMARKS.md`, 31 Oct).
 
-### Floats without boxes (Oct 2026: (a) agreed, measured slower, stopped; (c) agreed, step 1 done, D261)
+### Floats without boxes (Oct 2026: (a) measured slower, stopped, D260; (c)'s step 1 done, D261, and there it rests, D262)
 
 Proposed by Claude after D258 and D259, when Stevan asked to "fix the
 floats". Stevan agreed to (a), symbols giving up the bit, a prototype
@@ -2037,7 +2037,10 @@ operations, boxed only where they leave, in steps, each measured:
    knowing `x` is a float: types (step 3's `sig`s, for a tuple's
    elements too), or compiling the function twice and leaving the fast
    copy for the slow one, its raw locals boxed, where a check fails
-   (deoptimizing, as JITs do), which is machinery. Open for Stevan.
+   (deoptimizing, as JITs do), which is machinery. **Not built
+   (D262):** step 1 is good enough for now; if floats need to be
+   faster again, the way is types in code generation (TYPES.md's step
+   5), proposed on its own, not this step or deoptimizing.
 3. **Float parameters.** A function whose parameters are used as
    floats compiled a second time for floats, entered when its
    arguments check at the entry, so a loop's state stays unboxed from

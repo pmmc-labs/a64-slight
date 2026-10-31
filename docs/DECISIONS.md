@@ -6545,3 +6545,18 @@ integer literal is a leaf beside a float, made a double as C's
   `SLIGHT_GC_STRESS` and `SLIGHT_GC_VERIFY` on boids and `n-body`.
 - **Next** (PLAN.md): float locals, a `let`'s double kept in a frame slot
   the collector doesn't see; then float parameters.
+
+**D262. Unboxed floats stop at expressions.** *(Stevan, Oct 2026: "I
+agree this is good enough for now.")* PLAN.md's "Floats without boxes"
+(c) step 2, a `let`'s float kept raw in its frame, was looked at before
+building: only a `let` that's a float whatever its leaves are can stay
+raw (`n-body`'s `dist` and `mag`; not `dx`, which is an integer when
+the tuple's fields are), about 6 per cent of `n-body` by count, nothing
+in boids, for a second kind of local throughout the code generator.
+Every `let` raw would be at most 14 per cent, and needs knowing the
+leaves are floats. Not built, nor step 3. Rejected: compiling a
+function twice and leaving the fast copy for the slow one where a
+check fails (deoptimizing), as too much machinery. If floats need to
+be faster again, the way is types in code generation (TYPES.md's step
+5): `sig`s and `deftype`s saying a parameter or a tuple's field is a
+float, checked once where it comes in, proposed on its own.

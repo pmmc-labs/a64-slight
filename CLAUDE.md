@@ -108,8 +108,10 @@ prototyped and measured slower, so stopped (D260), and floats kept
 unboxed between operations agreed, in three steps (`docs/PLAN.md`,
 "Floats without boxes"), the first done: a tree of float operations on
 locals and literals worked in float registers and boxed once, `n-body`
-1.4 times faster (D261, golden test 335, from `t/models/float-trees.py`);
-and
+1.4 times faster (D261, golden test 335, from `t/models/float-trees.py`),
+where it rests: the next step, raw float locals, was worth about 6 per
+cent, and types in code generation are the way on, to propose when
+floats need it (D262); and
 `airline`, a simulated day branched with what-ifs, each run till it
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it
