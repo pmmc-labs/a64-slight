@@ -344,7 +344,10 @@ as actors whose beliefs spread in conversation, as a second, and the
 flagship, a country of towns under a tree of regional collectors, the
 tree its barrier and its aggregation; and branching a replay, a recorded run going another
 way from a point, as `airline` does by hand (`docs/PLAN.md`, "Branching
-a replay", an idea to propose); Stevan leans to
+a replay", an idea to propose); and a viewer for simulations, a
+separate program with raylib vendored in it, fed frames as arrays, and
+later a browser page on the same protocol (`docs/PLAN.md`, "Seeing a
+simulation", an idea to propose); Stevan leans to
 simulation over servers, D257), and D249's step 3, the standard library
 (`format`, CSV, `@ARGV` parsing, sets, sorted maps, regular
 expressions), each to be proposed first. Done before that: more than
