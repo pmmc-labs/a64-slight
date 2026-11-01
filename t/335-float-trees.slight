@@ -1,0 +1,38 @@
+; Float expressions worked in registers and boxed once (D261): each
+; function is a tree of float operations on locals and literals. Called
+; with floats, every value is as it was, to the bit; with an integer or
+; a string, or a divisor of zero, it goes the way it went before, faults
+; included. chain-20 needs 21 registers, more than x86-64 has for it, and
+; chain-30 more than either target, so those two are worked as before
+; where they don't fit. Expected output from t/models/float-trees.py.
+
+(defun dist (dx dy dz) (math/sqrt (+ (+ (* dx dx) (* dy dy)) (* dz dz))))
+(defun pull (v d m mag) (- v (* (* d m) mag)))
+(defun mixed (x) (+ (* x 2) (/ 1 x)))
+(defun quot (a b c) (/ a (- b c)))
+(defun signs (x) (math/abs (- (math/sqrt x) (* x 0.5))))
+(defun scaled (xs k) (map (lambda (y) (* (+ y k) k)) xs))
+(defun chain-20 (x) (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (* x x))))))))))))))))))))))
+(defun chain-30 (x) (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (* x x))))))))))))))))))))))))))))))))
+(defun failing (thunk) (pprint (join (fork (thunk)))))
+
+(pprint (dist 1.0 2.0 2.0))
+(pprint (dist 0.1 0.2 0.3))
+(pprint (dist (math/sqrt -1) 1.0 1.0))
+(pprint (pull 1.5 0.25 3.0 0.125))
+(pprint (pull 10 1.0 2.0 3.0))
+(pprint (mixed 0.5))
+(pprint (mixed 3.0))
+(pprint (mixed 4))
+(pprint (quot 1.0 3.0 0.5))
+(pprint (quot 1.0 math/INF 0.0))
+(pprint (signs 2.0))
+(pprint (signs -0.0))
+(pprint (signs -4.0))
+(pprint (scaled (list 1.0 2.5 -3.0) 1.5))
+(pprint (chain-20 1.5))
+(pprint (chain-30 0.1))
+(failing (lambda () (quot 1.0 2.0 2.0)))
+(failing (lambda () (pull "a" 1.0 2.0 3.0)))
+(failing (lambda () (dist 1.0 :two 2.0)))
+:done

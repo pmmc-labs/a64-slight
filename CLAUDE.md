@@ -97,7 +97,21 @@ Ulam's spiral in half blocks, writes its pixels in the order its
 messages come), and `airline-services.slight`, which `airline` includes; new ones are written when they're wanted (D149): `reaction`,
 Gray-Scott in bands of rows across islands, drawn live on island 0, the
 same picture on one island or twelve, a golden test in its quiet mode
-(`--steps`, from `t/models/reaction.py`, D256); and
+(`--steps`, from `t/models/reaction.py`, D256); and `boids`, rewritten
+for islands: the flock as arrays of floats, a share of it on each
+island, a grid in each so a bird looks only near it, the same flight on
+any number of islands, about three times as fast on four cores, and
+`--time n ticks` to time it (D258), and comparisons of floats inline,
+from D198's not-done list (D259, golden test 334, from
+`t/models/float-compare.py`), and floats as immediates agreed,
+prototyped and measured slower, so stopped (D260), and floats kept
+unboxed between operations agreed, in three steps (`docs/PLAN.md`,
+"Floats without boxes"), the first done: a tree of float operations on
+locals and literals worked in float registers and boxed once, `n-body`
+1.4 times faster (D261, golden test 335, from `t/models/float-trees.py`),
+where it rests: the next step, raw float locals, was worth about 6 per
+cent, and types in code generation are the way on, to propose when
+floats need it (D262); and
 `airline`, a simulated day branched with what-ifs, each run till it
 rejoins the run it came from (D207), and `airline-gen`, a day for it
 the size of a small airline's, 300 aircraft and 1,500 legs, which it
@@ -339,8 +353,10 @@ islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in
 conservative windows on a `clock/hold` builtin, with an HP-lattice
 protein folding by replica exchange across islands as the example to
-build it around, and a town's talk after Talk of the Town, characters
-as actors whose beliefs spread in conversation, as a second, and the
+build it around, and a living town, an epidemic watched and poked as it runs, an actor
+for each person, place and infection, on a paced virtual clock, 10,000
+people on one island first, then scaled (`docs/PLAN.md`, "A living
+town", D263, which takes in a town's talk after Talk of the Town), and the
 flagship, a country of towns under a tree of regional collectors, the
 tree its barrier and its aggregation; and branching a replay, a recorded run going another
 way from a point, as `airline` does by hand (`docs/PLAN.md`, "Branching

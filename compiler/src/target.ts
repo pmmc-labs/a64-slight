@@ -164,6 +164,28 @@ export type Target = {
     readonly branchIfZeroFloat: (label: string) => Code;
     readonly floatArith: (op: FloatOp) => Code;
     readonly floatArithInt: (op: FloatOp, n: bigint) => Code;
+    // Comparisons of floats (D259), both operands known to be floats' boxes:
+    // the left operand's float with the accumulator's, or, given n, the
+    // accumulator's with the integer n made a double as C's (double) makes
+    // it, which is what rt_compare does. A boolean into the accumulator, or
+    // a branch to label unless it holds. With a NaN only ne holds, as in
+    // rt_compare.
+    readonly floatCompareBool: (cond: Cond, n?: bigint) => Code;
+    // Float expressions (D261): doubles in float registers numbered from
+    // 0, floatRegs of them, none kept by a C call, which the expression
+    // never makes. The accumulator's float box's double into register k;
+    // an integer n into k as C's (double) makes it; k op k + 1 into k;
+    // sqrt or abs of k into k; a branch to label if k is ±0; and register
+    // 0 into the box just allocated, which goes to the accumulator. None
+    // touches what the allocation left (the box's address), nor LEFT.
+    readonly floatRegs: number;
+    readonly floatFromAcc: (k: number) => Code;
+    readonly floatFromInt: (n: bigint, k: number) => Code;
+    readonly floatOp: (op: FloatOp, k: number) => Code;
+    readonly floatUnary: (op: 'sqrt' | 'abs', k: number) => Code;
+    readonly branchIfFloatZero: (k: number, label: string) => Code;
+    readonly boxFloat: Code;
+    readonly branchUnlessFloatCompare: (cond: Cond, label: string, n?: bigint) => Code;
     readonly divide: (op: 'div' | '%', zero: string, overflow: string) => Code;
     // Bit operations on integers (D221), as tagged words: of the left
     // operand and the accumulator, into the accumulator, a shift's count

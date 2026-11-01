@@ -66,7 +66,10 @@ Island 0 owns the terminal, the signals and `:system`. A `connect
 computes on islands 1 to 11 still answers keys at once on island 0.
 `examples/reaction.slight` is one: a reaction-diffusion simulation cut
 into bands of rows, one per island, drawn live on island 0, and the same
-picture on one island or twelve.
+picture on one island or twelve. `examples/boids.slight` is another: a
+flock as arrays of floats, a share of the birds on each island, each
+share handed the whole flock every tick and answering for its own,
+while island 0 draws the tick before.
 
 `:system` tells of every island: `(:processes)` lists them all, and
 each process says how many messages it sent to and received from other

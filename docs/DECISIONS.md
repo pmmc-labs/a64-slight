@@ -6402,3 +6402,175 @@ them, and what slight builds next for scale is for simulations: many
 actors, numbers in bulk, more than one core, the same answer on any
 machine. Not rejected: servers stay possible, at the size `select()`
 holds.
+
+**D258. Boids on every core.** *(Stevan, Oct 2026: "re-write the boids
+example to use the new math functions, arrays and multicore islands";
+the shape is Claude's.)* `examples/boids.slight` (and `.sly`) had a
+process for each bird, each telling every other where it was each tick:
+n² messages, each a copy, on one island, and slow past a few hundred
+birds (on the cloud machine, 163 ms a tick at 250, 780 at 500, with the
+sleep taken out). Now:
+- **The flock is data:** four `:float` arrays, x, y and the velocity,
+  bird i at index i, cut into shares, a range of birds each, one share
+  an actor on each island. Each tick an actor on island 0 sends every
+  share the whole flock, each share answers with its own birds' next
+  places as arrays, and the actor joins them in order of share; it
+  draws the tick before while the shares work. From 512 birds the
+  arrays cross islands as handles, so a tick is two messages a share.
+- **A grid within a share:** each share sorts the flock into cells at
+  least a sight and one across (an `:int` array of ids by cell, and
+  one of where each cell starts), and a bird looks in the nine cells
+  round it, then sorts what it sees by id. Summing in order of id keeps
+  the flight independent of the grid and of the number of islands, to
+  the last bit: 400 birds for 60 ticks on 1, 3 and 4 islands, and under
+  `SLIGHT_SCHED`, match `t/models/boids.py` byte for byte.
+- **The new pieces:** `math/hypot` for a speed, `math/sin` and `cos` to
+  hatch a bird at a heading, `math/atan2` for its arrow, `math/mod` for
+  wrapping a cell, `clock/us` for the time a tick took (in place of
+  asking `:system`), `float->str`, `spawn/on` and `(islands)`. The model
+  takes those four from mpmath, rounded once. Live, a bird is coloured
+  by its share's island. A fourth argument is the least a tick takes
+  (50 ms; 0 for flat out), and `--time n ticks` times the flock with no
+  terminal.
+- **Measured** on the cloud machine (4 cores, noisy; the M2 Max is the
+  reference), x86-64: on the 80 by 24 sky, drawing included, 500 birds
+  take 25 ms a tick on one island and 8.2 on four, where the old program
+  took 780. On a 240 by 70 sky, the flock alone (`--time`), 1, 2 and 4
+  islands: 1,000 birds 12.3, 7.1 and 7.2 ms; 2,000 47.5, 31.6 and 21.0;
+  4,000 154, 87 and 53; 8,000 549, 311 and 181, about three times on
+  four cores once there's enough to do. Live, flat out, over 5 s from
+  the start (the flock clumps as it goes, so later ticks see more):
+  300 birds 1,171 frames on four islands to 624 on one, 1,000 birds 346
+  to 176, 4,000 83 to 33.
+- **Rejected:** birds as processes spread over the islands, n² messages
+  between islands each tick, the worst case the guide's "Use every
+  core" names; and leaving island 0 to draw alone, with shares on the
+  others, which measured no better at 300 to 2,000 birds.
+- **Given up:** a process for each bird, the example's point since step
+  14 (D179). docs/BACKGROUND.md's "Actor simulations and locality" said
+  this was the way that scales; the old program is in git, and so
+  D179's and D198's timings of boids were of a different program.
+
+**D259. Comparisons of floats inline.** *(Stevan, Oct 2026: "let's fix
+the floats then", after D258's profile; this is the part that changes
+no value's representation, D198's "not done".)* `==`, `!=`, `<`, `<=`,
+`>` and `>=` on two floats' boxes, or a float's and an integer literal,
+the literal made a double as C's `(double)` makes it, which is what
+`rt_compare` does: out of line from the integers' compare, where
+`rt_compare` was called, as a test (a branch, no boolean) and as a value
+(two floats only; with a literal, still C). With a NaN only `!=` holds:
+AArch64's conditions after `fcmp` are `mi`, `ls`, `gt` and `ge`, false on
+unordered, and x86-64's `ucomisd` has `<` and `<=` turned round to be
+above and above-or-equal, with `==` and `!=` reading the parity flag.
+Golden test 334, every comparison of twelve numbers (NaN, both zeros,
+both infinities, 2^53, integers) as a test and as a value, and against
+literals either side (2^53 + 1 among them), from
+`t/models/float-compare.py`; it passes with the compiler before this
+change too. **Measured** (instructions, under callgrind): boids, 1,000
+birds, 11 per cent fewer; `n-body`, `spectral-norm` and `bank` the same,
+since their loops don't compare floats. In wall time on the cloud
+machine, within the noise at 80 by 24 and 8 per cent at 240 by 70. What
+remains is the boxes, a float result's 16 bytes and `array/get`'s call
+into C to make one, proposed in PLAN.md, "Floats without boxes".
+Not done here: `math/sqrt` and `math/abs` inline (a per cent or two of
+`n-body`).
+
+**D260. Floats as immediates: agreed, built in part, measured slower,
+stopped.** *(Stevan, Oct 2026: "Yes to all of them", to PLAN.md's
+"Floats without boxes": (a), floats as immediates in the common range,
+Pharo's SmallFloat64; symbols rather than pids giving up a bit; a
+prototype on x86-64 first; and (c), floats unboxed within a function,
+planned now.)*
+- **Step 1, built:** symbols and pids share the tag `101`, told apart by
+  bit 3 (`RT_NAME_MASK`, `rt_is_pid_word`, `rt_is_symbol`), freeing
+  `111`. A symbol is `id << 4 | 5` and a pid `n << 4 | 13`; `RT_TRUE` is
+  21. The bit comes from both: a symbol's id loses nothing that matters,
+  a pid's number is 51 bits, and a task's addresses wrap at 2^19 (golden
+  test 324 changed to match). Every test passed as before.
+- **Step 2, the prototype, not kept:** a float whose exponent is -126 to
+  128, or ±0, as its bits rotated left one, less `896 << 53`, shifted up
+  three under `111`; any other boxed. In C, the three accessors and
+  `json.c`'s and `sexp.c`'s parsers (all golden tests passing on both
+  targets with C alone making immediates); and x86-64's inline float
+  paths, D198's and D259's, and literals. Slower: `n-body 1000000` 1.88
+  s to 2.36, `spectral-norm 1000` 1.28 to 1.53; 24 and 10 per cent more
+  instructions, boids 7 per cent more. The decode is 8 instructions an
+  operand and the encode 13, where the box was about 5 and two stores
+  into a nursery in the cache. PLAN.md's "Floats without boxes" has the
+  reckoning: the cost is the trip through the generic word between one
+  operation and the next, which no encoding removes.
+- **So:** (a) stops, the estimate it was agreed on (15 to 30 per cent
+  faster) having been wrong. (c) is planned in PLAN.md in three steps,
+  the first, float expressions worked in registers and boxed once,
+  needing no types and no change of representation. *(Stevan: "Yes for
+  both", to reverting step 1, which buys nothing without (a), and to
+  (c)'s first step.)* Step 1 is reverted: symbols are `101` and pids
+  `111` again, with their bits.
+
+**D261. Float expressions in registers.** *(Stevan, Oct 2026: "Yes for
+both", to D260's revert and to PLAN.md's "Floats without boxes" (c),
+step 1.)* A tree of two or more float operations, `+`, `-`, `*`, `/`,
+`math/sqrt` and `math/abs` (exact, so the same bits as C's `sqrt` and
+`fabs`), whose leaves are locals and literals, is compiled twice: once
+as before, out of line, and once with each local checked to be a
+float's box, the box for the result allocated (whose slow path may call
+C, so before any double is in a register), the tree worked as doubles
+in float registers, and the result boxed. A local that isn't a float,
+or a divisor that's ±0, goes to the first, which reads the leaves again
+(they do nothing but give their value) and faults where it did. An
+integer literal is a leaf beside a float, made a double as C's
+`(double)` makes it, as the float paths and `rt_add` do.
+- **Not taken:** a single operation (D198's path is as good); a tree with
+  a call or any other expression in it (its evaluation would move
+  before the arithmetic's faults); one that needs more registers than
+  the target has (16 on x86-64, 24 on AArch64, leaving `d8` to `d15`,
+  which C keeps), whose subtrees can be trees of their own; and one with
+  an integer literal and nothing only a float can be (a float literal,
+  `/`, `math/sqrt`), which is likely integer arithmetic, as
+  `spectral-norm`'s `(* ij (+ ij 1))`: it would check its first local,
+  find an integer and go back every time, 2.7 per cent more
+  instructions there before this rule.
+- **Measured** on x86-64 (the cloud machine): `n-body 1000000` 1.89 s to
+  1.35 (1.40 times; 310 million instructions to 219 at 20,000); boids,
+  1,000 birds, 2.37 to 2.15 s; `spectral-norm`, `bank`, `fib`, `tak`,
+  `binary-trees`, `nqueens`, `deriv` and `ping-pong` within a few
+  thousand instructions of before. PLAN.md had estimated 1.5 to 1.8 for
+  `n-body`.
+- **Tests:** golden test 335, from `t/models/float-trees.py`: trees
+  called with floats, integers, a string, a keyword, NaN, ±0 through
+  `sqrt` and `abs`, an infinite divisor and a zero one, a lambda's
+  captured local, and chains of 21 and 31 registers (the first whole on
+  AArch64, in `d16` and up, and in parts on x86-64); it passes with the
+  compiler before this too. Unit tests for what is and isn't a tree.
+  `SLIGHT_GC_STRESS` and `SLIGHT_GC_VERIFY` on boids and `n-body`.
+- **Next** (PLAN.md): float locals, a `let`'s double kept in a frame slot
+  the collector doesn't see; then float parameters.
+
+**D262. Unboxed floats stop at expressions.** *(Stevan, Oct 2026: "I
+agree this is good enough for now.")* PLAN.md's "Floats without boxes"
+(c) step 2, a `let`'s float kept raw in its frame, was looked at before
+building: only a `let` that's a float whatever its leaves are can stay
+raw (`n-body`'s `dist` and `mag`; not `dx`, which is an integer when
+the tuple's fields are), about 6 per cent of `n-body` by count, nothing
+in boids, for a second kind of local throughout the code generator.
+Every `let` raw would be at most 14 per cent, and needs knowing the
+leaves are floats. Not built, nor step 3. Rejected: compiling a
+function twice and leaving the fast copy for the slow one where a
+check fails (deoptimizing), as too much machinery. If floats need to
+be faster again, the way is types in code generation (TYPES.md's step
+5): `sig`s and `deftype`s saying a parameter or a tuple's field is a
+float, checked once where it comes in, proposed on its own.
+
+**D263. A living town, not a CovidSim.** *(Stevan, Nov 2026.)* After
+looking at rebuilding Imperial's CovidSim (Report 9) in slight: a batch
+model of millions of people, its strength C++ and OpenMP throughput,
+is a contest slight would lose (D250, D253). Wanted instead: "The Sims:
+Covid edition", a town that runs continuously, an actor for each
+person, place and infection, beliefs spreading with the virus, watched
+and changed while it runs. Agreed: a virtual clock held to a pace (so
+the same seed and keys give the same town, and it's a golden test),
+over the real clock scaled; a start of 10,000 people on one island; and
+measuring how far it scales on one island and across several. Written
+up in PLAN.md, "A living town"; not built, and the paced clock is to be
+proposed on its own first. Turned down: a CovidSim port (GPL-3.0, and
+speed), and slight as a harness around CovidSim, for now.

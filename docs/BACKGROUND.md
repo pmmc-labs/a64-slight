@@ -551,6 +551,13 @@ all-to-all tick, from which each bird lists those within sight plus 2k
 waits for just its list: a known count, the same flight, and about half
 as many messages at 250 birds once the flock has formed.
 
+The example took the other way when islands came (D258): birds as data,
+four arrays, in a share on each island, every share given the whole
+flock each tick and answering for its own birds, and a grid within a
+share so a bird looks only near it. Two messages a share a tick, a
+known count, and lockstep by construction; what's given up is a bird
+being an actor.
+
 ## C libraries (looked at Oct 2026)
 
 What led to D151–D155, for when it comes up again.

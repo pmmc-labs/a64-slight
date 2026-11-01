@@ -849,7 +849,9 @@ with Stevan first.
   likely first one.
 - **Faster floats.** Boids spends about a sixth of its time on float
   arithmetic in C and the boxes it makes. (The arithmetic is inline now,
-  D198, and the boxes allocated inline; the boxes themselves remain.) The fix that helps every
+  D198, and the boxes allocated inline, and comparisons, D259; the boxes
+  themselves remain: "Floats without boxes", below, proposes what's
+  next.) The fix that helps every
   program is in the representation: floats that need no box (NaN-boxing,
   or a tagged short float), or a compiler that keeps a float unboxed
   within a function. Either is a proposal of its own; boids is the
@@ -1836,7 +1838,8 @@ slight as the coordinator of real tools' runs, many short trajectories
 run as commands and chosen adaptively, as Folding@home's Markov state
 models are.
 
-**A second example: a town's talk, after Talk of the Town.** Also from
+**A second example: a town's talk, after Talk of the Town** (now taken
+into "A living town", below, D263). Also from
 Stevan's friend. James Ryan and colleagues' Talk of the Town (UC Santa
 Cruz, about 2016) simulates a small town over a century: characters
 born, married, employed, befriended and estranged, each holding beliefs
@@ -1913,6 +1916,204 @@ cloud machine; a ping-pong whose halves are on neighbouring islands
 costs a few microseconds a round trip on the cloud machine's 4 vCPUs,
 worse with more islands, which the M2 Max should measure before more
 work goes into crossing latency (`docs/BENCHMARKS.md`, 31 Oct).
+
+### A living town: an epidemic you watch and poke (proposed, Nov 2026)
+
+Stevan's, after looking at Imperial's CovidSim (Report 9) and deciding
+not to compete with C++ and OpenMP at batch runs over a country: "The
+Sims: Covid edition", a world that runs continuously, actors for
+people, watched and changed while it runs. It takes in "a town's talk"
+above. Agreed so far (D263): the clock below, (b); a start of 10,000
+people on one island; and measuring how far it scales on one island and
+across several. Nothing built yet.
+
+- **People are actors:** a home, a job or school, habits, a health state
+  and beliefs (a persistent map). Most of the time a person waits on a
+  timer for the next thing in their day (the runtime's timers are a
+  binary heap, so a million waiting is fine; an idle actor is about 600
+  bytes, D257).
+- **Places are actors:** homes, a school, workplaces, shops. People send
+  `(:arrive ...)` and `(:leave ...)`; every few simulated minutes a place
+  works out who was near whom, for how long, and whether the virus
+  passed, from seeded draws.
+- **An infection is an actor:** born when someone catches it, it lives
+  through the illness (latent, infectious, symptoms, recovery), and the
+  infections it causes are its children, so the transmission tree is a
+  tree of processes and contact tracing walks it.
+- **Behaviour spreads too:** people talk where they meet, so fear,
+  rumours and willingness to isolate travel the same contacts as the
+  virus, and change it.
+- **Watched and poked:** in the terminal (a map coloured by health state,
+  live counts, following one person, speed and pause) with controls
+  (close the school, test and isolate, start a rumour); a browser view
+  later ("Seeing a simulation", below). Every input is recorded, so a
+  session replays exactly; with "Branching a replay", what if the café
+  had shut on Tuesday.
+
+**The clock (agreed: (b)).** (a) The real clock, scaled: no runtime
+change, replayable from a record, but the same seed doesn't give the
+same town. (b) A virtual clock with a pace: the virtual clock, which
+today jumps straight to the next timer, held to no more than the wall
+clock times a rate the program sets (and changes, for pause and speed),
+so the same seed and the same keys give the same town, and a run is a
+golden test (its keys from `; stdin:`, its pace unlimited there). A
+runtime change, to be proposed on its own: a builtin or a setting for
+the rate, how keys are stamped with the virtual time they arrive at,
+and how it records and replays; close to `clock/hold` above, which
+crossing islands would need anyway.
+
+**Phases.** 1: one island, 10,000 people, homes, a school, workplaces
+and shops, disease only, watched in the terminal, with a Python model
+of a small town for its golden test. 2: beliefs and behaviour, and the
+controls. 3: scale, measured: how many people one island holds and at
+what pace, then neighbourhoods across islands, people travelling between
+them, on "Simulation across islands" (b)'s windows, and how far that
+goes. 4: branching what-ifs, and a browser view.
+
+**Questions.** Each phase's model (contact rates, the illness's
+periods) from published values (Report 9's, Ferguson et al. 2005 and
+2006), rebuilt rather than ported (CovidSim is GPL-3.0; this
+repository is MIT-0); how many people the terminal can show (a map of
+places rather than people, past a few thousand); and the rate's
+proposal before phase 1.
+
+### Floats without boxes (Oct 2026: (a) measured slower, stopped, D260; (c)'s step 1 done, D261, and there it rests, D262)
+
+Proposed by Claude after D258 and D259, when Stevan asked to "fix the
+floats". Stevan agreed to (a), symbols giving up the bit, a prototype
+first, and (c) planned now (D260). The prototype made things slower, so
+(a) has stopped; see "Measured", below.
+
+**The problem.** A float is a 16-byte box. D198 made `+`, `-`, `*` and
+`/` on two floats inline, and D259 comparisons, but each result is
+still allocated, and everything that makes a float in C does it through
+`rt_new_float`: `array/get` on a `:float` array is a call into C and a
+box each time (13 per cent of boids, D258), as is every `math/`
+function. In `n-body`'s inner loop a float subtraction is about 30
+instructions on x86-64: the integers' check, a tag-and-header check on
+each operand, an allocation, the operation, the box's two stores, the
+result to its slot. And a tuple or a message of floats is a word and a
+box for each, so a simulation's state is three times the size it need
+be, and copied as such.
+
+**The options.**
+
+- **(a) Floats as immediates, most of them** (Pharo's Spur VM has done
+  this since 2014, "SmallFloat64"). A float whose exponent fits in 8
+  bits, |x| from about 1.2e-38 to 3.4e38 (single precision's range,
+  with all 52 bits of the fraction), and ±0, is the word itself: its
+  bits rotated so the sign is lowest, the exponent offset taken off,
+  shifted up three, under a tag of its own. The rest, infinities, NaN,
+  subnormals and the very large and very small, stay boxed, so every
+  double is still a float, to the bit; a value has one form, so `eq?`,
+  `hash` and printing don't change. Decoding is a shift, an add and a
+  rotate; encoding the reverse, with a branch to the box when it
+  doesn't fit. The tag has to come from somewhere: all four odd ones are
+  taken, so pids would move under the symbols' tag, `101`, a bit above
+  it saying which (symbols `0101`, pids and addresses `1101`), and
+  floats would take `111`. Nothing a program can see changes. The
+  collector and the message copy don't change either: an immediate
+  isn't a pointer, as a pid isn't now.
+- **(b) NaN-boxing**, every value inside a double's NaN space, as
+  JavaScript engines do. Rejected: integers would drop to 48 or 51
+  bits, a change to the language (63-bit integers, D37), and every
+  pointer would need masking.
+- **(c) Unboxed within a function**, kept in floating-point registers
+  where the compiler knows a value is a float, boxed only where it
+  leaves (a call, a tuple, a message, the result). This is TYPES.md's
+  step 5. It's the one that could close most of `n-body`'s gap (10 to
+  36 times C), but it's the most machinery: types in code generation,
+  a second register class on both targets, boxing at the edges, and
+  knowing: in `n-body` the floats come out of tuples, typed `any`, so
+  it needs `sig`s the code generator trusts, checked once at the
+  function's entry, or a float check per value then kept.
+- **(d) Smaller inlines, with no change of representation**:
+  `array/get` on a `:float` array (its shared form too) and `math/sqrt`
+  and `math/abs` inline, allocating as `+` does. About a tenth of
+  boids, a per cent or two of `n-body`.
+
+**Recommended, and agreed: (a), then (c) if the benchmarks still ask**,
+on an estimate of 15 to 30 per cent for (a), which the prototype didn't
+bear out.
+
+**Measured (D260).** Step 1, symbols and pids sharing the tag `101` so
+floats could have `111`, is built (every test passing as before). Step
+2, the prototype: `rt_new_float`, `rt_float_value` and `rt_is_float` on
+immediates (all 362 golden tests passing on both targets with C alone
+making them), and x86-64's inline float paths (D198's arithmetic,
+D259's comparisons, literals as words). On x86-64, against D259, in
+instructions: `n-body` 24 per cent more, `spectral-norm` 10 per cent
+more, boids 7 per cent more; in time, `n-body 1000000` 1.88 s to 2.36,
+`spectral-norm 1000` 1.28 to 1.53 (the best of five, one island). No
+result went to C but `sqrt`'s. The decode, shift, add the offset unless
+it's ±0 (a `cmova`), rotate, move to `xmm`, is 8 instructions an
+operand, and the encode, rotate, ±0 by a branch, the exponent's range
+checked, the offset taken off, shifted and tagged, 13; the box it
+replaced was a bump of the nursery's pointer and two stores, about 5,
+in memory the cache already holds, and its collections cost next to
+nothing. A leaner encoding (±0 boxed, no special case) would come to
+about what a box costs, not less. So immediates don't pay for
+themselves here: the cost of a float operation is going through the
+generic word at all, checked, taken apart and put back, between one
+operation and the next, whatever the word is. (a) has stopped, and step
+1 is reverted, since it bought nothing without (a).
+
+**(c), planned.** Floats kept as doubles in registers between
+operations, boxed only where they leave, in steps, each measured:
+
+1. **Float expressions.** A tree of float operations (`+`, `-`, `*`,
+   `/`, comparisons, and `math/sqrt` and `math/abs`, which are exact),
+   its leaves locals, literals and other expressions, compiled twice:
+   once as now, and once with every leaf checked to be a float at the
+   start (a box's header, or an integer made a double where it may be
+   one, as today's float path does), the tree worked in `xmm` or `d`
+   registers, and the result boxed once. The checks failing goes the
+   way it goes now. `n-body`'s `pull` has 30 float operations in 11
+   such trees: 11 boxes in place of 30, and each leaf checked once in
+   place of at each use. No types, no new frame layout, no change of
+   representation. Estimated, from that count: `pull`'s float work
+   about 2.5 times fewer instructions, `n-body` 1.5 to 1.8 times
+   faster; boids less (its arithmetic is shallow, and the rest is
+   lists and sorting). **Done (D261):** `n-body` 1.40 times faster
+   (29 per cent fewer instructions), boids 9 per cent; nothing else
+   slower.
+2. **Float locals.** A `let` bound to a float expression kept as a raw
+   double in a frame slot the collector doesn't see (the frame split
+   into its values and its doubles), so `dx` crosses from its `let` to
+   its uses unboxed; boxed only where it's passed, stored or returned.
+   **Found, before building (Oct 2026):** the frame needn't change (a
+   double can sit in two slots as two integers, its bits but the lowest
+   and the lowest, which the collector passes over), but `dx` can't be
+   kept raw: `(- x ox)` is an integer when `x` and `ox` are, and in
+   `n-body` they come out of tuples, so when the tree's check fails and
+   the `let` goes the old way, what follows can't know which `dx` is.
+   Only a `let` that's a float whatever its leaves are (`/`,
+   `math/sqrt`, a float literal or a raw local in it) can be raw:
+   `n-body`'s `dist` and `mag`, not `dx`, `dy` or `dz`. Counted in
+   `pull` (about 800 instructions a call, after D261): all five `let`s
+   boxed and checked at their 16 uses cost about 150, so step 2 could
+   save at most 14 per cent of `n-body` if all five were raw, and about
+   6 per cent with only `dist` and `mag`; boids nothing (its `d2` is
+   compared and stored, which box it anyway). Keeping `dx` raw needs
+   knowing `x` is a float: types (step 3's `sig`s, for a tuple's
+   elements too), or compiling the function twice and leaving the fast
+   copy for the slow one, its raw locals boxed, where a check fails
+   (deoptimizing, as JITs do), which is machinery. **Not built
+   (D262):** step 1 is good enough for now; if floats need to be
+   faster again, the way is types in code generation (TYPES.md's step
+   5), proposed on its own, not this step or deoptimizing.
+3. **Float parameters.** A function whose parameters are used as
+   floats compiled a second time for floats, entered when its
+   arguments check at the entry, so a loop's state stays unboxed from
+   one call to the next; with `sig`s, that check is what the
+   signature says (TYPES.md's step 5, types in code generation).
+
+Each step keeps every float the bits it has now, the same IEEE
+operation on the same doubles, so every golden test stands as it is;
+each adds golden tests at its edges (a leaf that's an integer, a
+string, a boxed NaN; a tree too deep for the registers, spilled).
+
+**Agreed** (D260): (c)'s step 1 goes ahead.
 
 ### Branching a replay (idea, open, Oct 2026)
 

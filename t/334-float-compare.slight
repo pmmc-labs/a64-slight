@@ -1,0 +1,50 @@
+; Comparisons of floats, inline since D259, as a test and as a value,
+; for every pair of the numbers below (t: holds, f: doesn't; lower case
+; the test's, upper the value's); then a float against integer literals,
+; to the right and to the left. Expected output and this program from
+; t/models/float-compare.py.
+
+(defun numbers () (list 0.0 -0.0 1.5 -2.5 math/INF (- 0 math/INF) (math/sqrt -1) 3 2.0 9007199254740992.0 1.0e300 -7))
+
+(defun eq (a b)
+    (let v (== a b))
+    (str (if (== a b) "t" "f") (if v "T" "F")))
+(defun ne (a b)
+    (let v (!= a b))
+    (str (if (!= a b) "t" "f") (if v "T" "F")))
+(defun lt (a b)
+    (let v (< a b))
+    (str (if (< a b) "t" "f") (if v "T" "F")))
+(defun le (a b)
+    (let v (<= a b))
+    (str (if (<= a b) "t" "f") (if v "T" "F")))
+(defun gt (a b)
+    (let v (> a b))
+    (str (if (> a b) "t" "f") (if v "T" "F")))
+(defun ge (a b)
+    (let v (>= a b))
+    (str (if (>= a b) "t" "f") (if v "T" "F")))
+
+(defun eq-literals (a) (str (if (== a 0) "t" "f") (if (== a -3) "t" "f") (if (== a 9007199254740993) "t" "f") (if (== 0 a) "t" "f") (if (== 2 a) "t" "f")))
+(defun ne-literals (a) (str (if (!= a 0) "t" "f") (if (!= a -3) "t" "f") (if (!= a 9007199254740993) "t" "f") (if (!= 0 a) "t" "f") (if (!= 2 a) "t" "f")))
+(defun lt-literals (a) (str (if (< a 0) "t" "f") (if (< a -3) "t" "f") (if (< a 9007199254740993) "t" "f") (if (< 0 a) "t" "f") (if (< 2 a) "t" "f")))
+(defun le-literals (a) (str (if (<= a 0) "t" "f") (if (<= a -3) "t" "f") (if (<= a 9007199254740993) "t" "f") (if (<= 0 a) "t" "f") (if (<= 2 a) "t" "f")))
+(defun gt-literals (a) (str (if (> a 0) "t" "f") (if (> a -3) "t" "f") (if (> a 9007199254740993) "t" "f") (if (> 0 a) "t" "f") (if (> 2 a) "t" "f")))
+(defun ge-literals (a) (str (if (>= a 0) "t" "f") (if (>= a -3) "t" "f") (if (>= a 9007199254740993) "t" "f") (if (>= 0 a) "t" "f") (if (>= 2 a) "t" "f")))
+
+(defun row (f) (str/join " " (map (lambda (a) (str/join "" (map (lambda (b) (f a b)) (numbers)))) (numbers))))
+(defun literal-row (f) (str/join " " (map f (numbers))))
+
+(tty/write "== " (row eq) "\n")
+(tty/write "!= " (row ne) "\n")
+(tty/write "< " (row lt) "\n")
+(tty/write "<= " (row le) "\n")
+(tty/write "> " (row gt) "\n")
+(tty/write ">= " (row ge) "\n")
+(tty/write "== literals " (literal-row eq-literals) "\n")
+(tty/write "!= literals " (literal-row ne-literals) "\n")
+(tty/write "< literals " (literal-row lt-literals) "\n")
+(tty/write "<= literals " (literal-row le-literals) "\n")
+(tty/write "> literals " (literal-row gt-literals) "\n")
+(tty/write ">= literals " (literal-row ge-literals) "\n")
+:done

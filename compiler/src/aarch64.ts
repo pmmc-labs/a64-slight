@@ -138,6 +138,22 @@ const isFloat = (reg: string, label: string): Code => [
     `    b.ne ${label}`,
 ];
 
+// After fcmp, the condition for each comparison, false when either is a
+// NaN (unordered sets C and V), and its negation, true then.
+const FCC: Readonly<Record<Cond, string>>  = { eq: 'eq', ne: 'ne', lt: 'mi', le: 'ls', gt: 'gt', ge: 'ge' };
+const FNOT: Readonly<Record<Cond, string>> = { eq: 'ne', ne: 'eq', lt: 'pl', le: 'hi', gt: 'le', ge: 'lt' };
+
+// fcmp of the left operand's float with the accumulator's, or of the
+// accumulator's with the integer n.
+const fcmp = (n?: bigint): Code =>
+    n === undefined ? [`    ldur d0, [x1, #${FLOAT_VALUE}]`, `    ldur d1, [x0, #${FLOAT_VALUE}]`, '    fcmp d0, d1']
+    : n === 0n      ? [`    ldur d0, [x0, #${FLOAT_VALUE}]`, '    fcmp d0, #0.0']
+    :                 [`    ldur d0, [x0, #${FLOAT_VALUE}]`, loadWord('x16', n), '    scvtf d1, x16', '    fcmp d0, d1'];
+
+// A float expression's register k (D261): d0 to d7, then d16 to d31,
+// leaving d8 to d15, whose low halves C keeps across a call.
+const dreg = (k: number): string => `d${k < 8 ? k : k + 8}`;
+
 const BOX_D0: Code = [
     `    mov  x3, #${FLOAT_HEADER}`,
     '    str  x3, [x2]',
@@ -299,6 +315,16 @@ export const AARCH64: Target = {
         `    ${FLOAT_OPS[op]} d0, d0, d1`,
         BOX_D0,
     ],
+    floatCompareBool: (cond, n) => [fcmp(n), boolIf(FCC[cond])],
+    floatRegs: 24,
+    floatFromAcc: (k) => `    ldur ${dreg(k)}, [x0, #${FLOAT_VALUE}]`,
+    floatFromInt: (n, k) => [loadWord('x16', n), `    scvtf ${dreg(k)}, x16`],
+    floatOp: (op, k) => `    ${FLOAT_OPS[op]} ${dreg(k)}, ${dreg(k)}, ${dreg(k + 1)}`,
+    floatUnary: (op, k) => `    ${op === 'sqrt' ? 'fsqrt' : 'fabs'} ${dreg(k)}, ${dreg(k)}`,
+    // fcmp says unordered for a NaN, which isn't eq
+    branchIfFloatZero: (k, label) => [`    fcmp ${dreg(k)}, #0.0`, `    b.eq ${label}`],
+    boxFloat: BOX_D0,
+    branchUnlessFloatCompare: (cond, label, n) => [fcmp(n), `    b.${FNOT[cond]} ${label}`],
 
     arith: (op, overflow) => ARITH[op](overflow),
     // adds or subs with the word as an immediate when it fits twelve bits,
