@@ -353,8 +353,10 @@ islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in
 conservative windows on a `clock/hold` builtin, with an HP-lattice
 protein folding by replica exchange across islands as the example to
-build it around, and a town's talk after Talk of the Town, characters
-as actors whose beliefs spread in conversation, as a second, and the
+build it around, and a living town, an epidemic watched and poked as it runs, an actor
+for each person, place and infection, on a paced virtual clock, 10,000
+people on one island first, then scaled (`docs/PLAN.md`, "A living
+town", D263, which takes in a town's talk after Talk of the Town), and the
 flagship, a country of towns under a tree of regional collectors, the
 tree its barrier and its aggregation; and branching a replay, a recorded run going another
 way from a point, as `airline` does by hand (`docs/PLAN.md`, "Branching

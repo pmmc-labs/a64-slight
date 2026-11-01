@@ -6560,3 +6560,17 @@ check fails (deoptimizing), as too much machinery. If floats need to
 be faster again, the way is types in code generation (TYPES.md's step
 5): `sig`s and `deftype`s saying a parameter or a tuple's field is a
 float, checked once where it comes in, proposed on its own.
+
+**D263. A living town, not a CovidSim.** *(Stevan, Nov 2026.)* After
+looking at rebuilding Imperial's CovidSim (Report 9) in slight: a batch
+model of millions of people, its strength C++ and OpenMP throughput,
+is a contest slight would lose (D250, D253). Wanted instead: "The Sims:
+Covid edition", a town that runs continuously, an actor for each
+person, place and infection, beliefs spreading with the virus, watched
+and changed while it runs. Agreed: a virtual clock held to a pace (so
+the same seed and keys give the same town, and it's a golden test),
+over the real clock scaled; a start of 10,000 people on one island; and
+measuring how far it scales on one island and across several. Written
+up in PLAN.md, "A living town"; not built, and the paced clock is to be
+proposed on its own first. Turned down: a CovidSim port (GPL-3.0, and
+speed), and slight as a harness around CovidSim, for now.

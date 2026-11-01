@@ -1838,7 +1838,8 @@ slight as the coordinator of real tools' runs, many short trajectories
 run as commands and chosen adaptively, as Folding@home's Markov state
 models are.
 
-**A second example: a town's talk, after Talk of the Town.** Also from
+**A second example: a town's talk, after Talk of the Town** (now taken
+into "A living town", below, D263). Also from
 Stevan's friend. James Ryan and colleagues' Talk of the Town (UC Santa
 Cruz, about 2016) simulates a small town over a century: characters
 born, married, employed, befriended and estranged, each holding beliefs
@@ -1915,6 +1916,66 @@ cloud machine; a ping-pong whose halves are on neighbouring islands
 costs a few microseconds a round trip on the cloud machine's 4 vCPUs,
 worse with more islands, which the M2 Max should measure before more
 work goes into crossing latency (`docs/BENCHMARKS.md`, 31 Oct).
+
+### A living town: an epidemic you watch and poke (proposed, Nov 2026)
+
+Stevan's, after looking at Imperial's CovidSim (Report 9) and deciding
+not to compete with C++ and OpenMP at batch runs over a country: "The
+Sims: Covid edition", a world that runs continuously, actors for
+people, watched and changed while it runs. It takes in "a town's talk"
+above. Agreed so far (D263): the clock below, (b); a start of 10,000
+people on one island; and measuring how far it scales on one island and
+across several. Nothing built yet.
+
+- **People are actors:** a home, a job or school, habits, a health state
+  and beliefs (a persistent map). Most of the time a person waits on a
+  timer for the next thing in their day (the runtime's timers are a
+  binary heap, so a million waiting is fine; an idle actor is about 600
+  bytes, D257).
+- **Places are actors:** homes, a school, workplaces, shops. People send
+  `(:arrive ...)` and `(:leave ...)`; every few simulated minutes a place
+  works out who was near whom, for how long, and whether the virus
+  passed, from seeded draws.
+- **An infection is an actor:** born when someone catches it, it lives
+  through the illness (latent, infectious, symptoms, recovery), and the
+  infections it causes are its children, so the transmission tree is a
+  tree of processes and contact tracing walks it.
+- **Behaviour spreads too:** people talk where they meet, so fear,
+  rumours and willingness to isolate travel the same contacts as the
+  virus, and change it.
+- **Watched and poked:** in the terminal (a map coloured by health state,
+  live counts, following one person, speed and pause) with controls
+  (close the school, test and isolate, start a rumour); a browser view
+  later ("Seeing a simulation", below). Every input is recorded, so a
+  session replays exactly; with "Branching a replay", what if the café
+  had shut on Tuesday.
+
+**The clock (agreed: (b)).** (a) The real clock, scaled: no runtime
+change, replayable from a record, but the same seed doesn't give the
+same town. (b) A virtual clock with a pace: the virtual clock, which
+today jumps straight to the next timer, held to no more than the wall
+clock times a rate the program sets (and changes, for pause and speed),
+so the same seed and the same keys give the same town, and a run is a
+golden test (its keys from `; stdin:`, its pace unlimited there). A
+runtime change, to be proposed on its own: a builtin or a setting for
+the rate, how keys are stamped with the virtual time they arrive at,
+and how it records and replays; close to `clock/hold` above, which
+crossing islands would need anyway.
+
+**Phases.** 1: one island, 10,000 people, homes, a school, workplaces
+and shops, disease only, watched in the terminal, with a Python model
+of a small town for its golden test. 2: beliefs and behaviour, and the
+controls. 3: scale, measured: how many people one island holds and at
+what pace, then neighbourhoods across islands, people travelling between
+them, on "Simulation across islands" (b)'s windows, and how far that
+goes. 4: branching what-ifs, and a browser view.
+
+**Questions.** Each phase's model (contact rates, the illness's
+periods) from published values (Report 9's, Ferguson et al. 2005 and
+2006), rebuilt rather than ported (CovidSim is GPL-3.0; this
+repository is MIT-0); how many people the terminal can show (a map of
+places rather than people, past a few thousand); and the rate's
+proposal before phase 1.
 
 ### Floats without boxes (Oct 2026: (a) measured slower, stopped, D260; (c)'s step 1 done, D261, and there it rests, D262)
 
