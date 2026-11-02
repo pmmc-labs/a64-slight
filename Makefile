@@ -20,9 +20,11 @@ ARCH := $(shell uname -m)
 
 ifneq ($(filter arm64 aarch64,$(ARCH)),)
   CC ?= cc
+  TARGET ?= aarch64
   TARGETS ?= aarch64
 else
   CC := clang --target=aarch64-linux-gnu
+  TARGET ?= x86_64
   TARGETS ?= aarch64 x86_64
 endif
 
@@ -36,7 +38,7 @@ else
 endif
 
 sketch:
-	node bin/slightc.ts -o "./sketch" "author/sketch.slight"
+	node bin/slightc.ts --target $(TARGET) -o "./sketch" "author/sketch.slight"
 
 test: unit headers guide types golden replay live
 
@@ -91,4 +93,4 @@ clean:
 		rm -rf "./sketch.dSYM"; \
     fi
 
-.PHONY: test unit guide types golden replay live tsan headers check bench clean
+.PHONY: sketch test unit guide types golden replay live tsan headers check bench clean

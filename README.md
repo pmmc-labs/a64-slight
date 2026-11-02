@@ -54,12 +54,16 @@ qemu-user`), and binaries run under `qemu-aarch64`.
 
 ```
 npm install       # once: typescript, for make check
+make              # build author/sketch.slight for this machine as ./sketch
+./sketch
 make test         # unit tests, header check, golden tests
 node bin/slightc.ts -o counter counter.slight
 ./counter         # qemu-aarch64 ./counter on x86-64
 ```
 
 `slightc` compiles for AArch64 unless given `--target x86_64`.
+`make` builds the sketch for the host architecture; use
+`make TARGET=aarch64` or `make TARGET=x86_64` to choose explicitly.
 `make test` runs the golden tests (`t/` and `examples/`) for every
 target the machine can run. [`CLAUDE.md`](CLAUDE.md) has the details:
 the toolchain, the layout of the source, and the commands.
