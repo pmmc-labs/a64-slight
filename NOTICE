@@ -1,0 +1,23 @@
+slight
+Copyright 2026 Stevan Little
+
+Licensed under the Apache License, Version 2.0, with LLVM Exceptions
+(SPDX: Apache-2.0 WITH LLVM-exception); the text is in LICENSE.
+Versions before this licence was adopted were released under the MIT
+No Attribution License (MIT-0), and those versions remain so.
+
+This product includes software from others, under their own licences:
+
+- vendor/core-math/: CORE-MATH, correctly rounded mathematical
+  functions (https://gitlab.inria.fr/core-math/core-math), under the
+  MIT License; its copyright and permission notice is in
+  vendor/core-math/LICENSE. It is compiled with the runtime into every
+  program slightc builds.
+
+- runtime/unicode.c: generated from the Unicode Character Database,
+  version 15.1.0, under the Unicode License v3
+  (https://www.unicode.org/license.txt).
+
+- t/data/json-suite/: JSONTestSuite's parsing tests, by Nicolas Seriot,
+  under the MIT License; its LICENSE is beside them. Used by the tests
+  only, and not part of any program slightc builds.

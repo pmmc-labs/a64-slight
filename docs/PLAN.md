@@ -1973,9 +1973,9 @@ goes. 4: branching what-ifs, and a browser view.
 **Questions.** Each phase's model (contact rates, the illness's
 periods) from published values (Report 9's, Ferguson et al. 2005 and
 2006), rebuilt rather than ported (CovidSim is GPL-3.0; this
-repository is MIT-0); how many people the terminal can show (a map of
-places rather than people, past a few thousand); and the rate's
-proposal before phase 1.
+repository is Apache-2.0, D264); how many people the terminal can
+show (a map of places rather than people, past a few thousand); and
+the rate's proposal before phase 1.
 
 ### Floats without boxes (Oct 2026: (a) measured slower, stopped, D260; (c)'s step 1 done, D261, and there it rests, D262)
 

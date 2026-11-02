@@ -113,12 +113,23 @@ settles.
 
 ## License
 
-Copyright (c) 2026 Stevan Little. Released under the MIT No Attribution
-License (MIT-0), so neither copies of it nor the programs it compiles
-need carry the notice; the text is in [`LICENSE`](LICENSE).
+Copyright (c) 2026 Stevan Little. Released under the Apache License,
+Version 2.0, with LLVM Exceptions (`Apache-2.0 WITH LLVM-exception`);
+the text is in [`LICENSE`](LICENSE), and [`NOTICE`](NOTICE) says what
+comes from elsewhere. The licence grants the patents its contributors
+hold on their contributions, and asks that copies of slight's source
+keep its notices. The exception is for what slightc builds: the runtime
+is compiled into every program, and a program needn't carry slight's
+licence or notice for that (D264). Versions before D264 were released
+under the MIT No Attribution License (MIT-0), and remain so.
 
-Two parts come from elsewhere, under their own licences:
-`t/data/json-suite/` is JSONTestSuite's parsing tests (MIT, Nicolas
-Seriot; its `LICENSE` is beside them), and `runtime/unicode.c` is made
-from the Unicode Character Database, under the Unicode License v3
-(<https://www.unicode.org/license.txt>).
+Three parts come from elsewhere, under their own licences:
+`vendor/core-math/` is CORE-MATH's correctly rounded functions (MIT;
+its `LICENSE` is beside them), `t/data/json-suite/` is JSONTestSuite's
+parsing tests (MIT, Nicolas Seriot; its `LICENSE` is beside them), and
+`runtime/unicode.c` is made from the Unicode Character Database, under
+the Unicode License v3 (<https://www.unicode.org/license.txt>).
+CORE-MATH and `runtime/unicode.c` are compiled into every program too,
+and their licences ask that their notices go with copies, so a program
+you distribute should take `vendor/core-math/LICENSE` and the Unicode
+License with it, in its documentation, say.

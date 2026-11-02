@@ -6574,3 +6574,33 @@ measuring how far it scales on one island and across several. Written
 up in PLAN.md, "A living town"; not built, and the paced clock is to be
 proposed on its own first. Turned down: a CovidSim port (GPL-3.0, and
 speed), and slight as a harness around CovidSim, for now.
+
+**D264. Apache 2.0 with LLVM's exceptions, in place of MIT-0.** *(Stevan,
+Nov 2026, toward building a company around slight; the choice is
+Claude's recommendation.)* MIT-0 asked nothing of anyone, which kept
+programs slightc builds free of notices, but gave no patent grant and
+no credit. Now `Apache-2.0 WITH LLVM-exception`, LLVM's own licence:
+- **What Apache 2.0 adds:** a grant of the patents each contributor
+  holds on their contribution, ended for anyone who sues over them; a
+  copy of the licence and `NOTICE` kept with copies of the source; and
+  no right to the name (section 6). Widely accepted where companies
+  check licences.
+- **What the exception keeps:** the runtime is compiled into every
+  program (D152), so without it each program would owe Apache's notices.
+  With it, portions of slight embedded in a program by compiling it
+  needn't carry them, as with MIT-0.
+- **`NOTICE`** lists what comes from elsewhere: CORE-MATH (MIT) and the
+  Unicode data (Unicode License v3), both compiled into every program,
+  so their notices should go with programs that are distributed (MIT-0
+  never covered that), and JSONTestSuite (MIT, tests only).
+- **Earlier versions** stay MIT-0; this applies from here on. Every
+  commit so far is Stevan's or made with Claude but one, Yves Orton's
+  build change (PR #20), which came under MIT-0, and Yves agreed to its
+  relicensing.
+- **Rejected:** keeping MIT-0 (no patent grant, no attribution); MIT
+  (a notice in every program); plain Apache 2.0 (the same); GPL or AGPL
+  with commercial licences sold beside them (a runtime linked into
+  users' programs makes copyleft their problem, which is why Erlang/OTP
+  moved to Apache 2.0); a source-available licence for the core (it
+  stops being open source). Proprietary work, such as a customer's
+  product, lives in repositories of its own, not here.
