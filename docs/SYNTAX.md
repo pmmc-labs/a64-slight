@@ -67,7 +67,10 @@ anything (`Consumer` for a function an actor runs, say).
 
 A **raw name**, between backticks, is any slight name as it is:
 `` `str/<` ``, `` `go-to-x` ``. It's for the names the mapping below
-can't carry, and the converter writes one wherever it must.
+can't carry, and the converter writes one wherever it must. It's on one
+line, and has nothing in it that would end a name in slight: no space,
+and none of `( ) ' ; " ,`. The names the compiler makes for itself have
+those in them, so a program can't write one.
 
 **Name mapping.** An identifier means the slight name made by these
 rewrites, in order:

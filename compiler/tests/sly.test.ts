@@ -36,6 +36,17 @@ test('names map to slight names', () => {
     same('table::del_loop; str_to_int; Consumer; `str/<`; `go-to-x`;', 'table/del-loop str->int Consumer str/< go-to-x');
 });
 
+// A raw name is a slight name as it is, and no more (D246): the names the
+// compiler makes for itself can't be written, so they can't be reached.
+test('a raw name is only what slight can write', () => {
+    same('`#true`; `a.b`; `@ARGV`; `%ENV`;', '#true a.b @ARGV %ENV');
+    fails('`car (on conses)`(5);', /a raw name is a slight name/, 1, 1);
+    fails('`map/bit (in lib/map.slight)`(37, 0);', /a raw name is a slight name/, 1, 1);
+    fails('`eq? (builtin)`(1, 1);', /a raw name is a slight name/);
+    for (const name of ['a b', 'a\tb', 'f(x)', "a'b", 'a;b', 'a"b', 'a,b']) fails(`\`${name}\`;`, /a raw name is a slight name/);
+    fails('`a\nb`;', /on one line/);
+});
+
 test('keywords keep their spelling', () => {
     same(':on-next; :fs/read; :RECV;', ':on-next :fs/read :RECV');
     fails(':12;', /invalid keyword/);

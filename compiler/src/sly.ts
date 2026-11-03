@@ -49,7 +49,7 @@
 import { CompileError } from './errors.ts';
 import { atEnd, isDigit, isLetter, numberKind, parseAtom, peek, posOf as cursorPos, readDatumAt, readString,
          skipDoc, skipWhile, step, type Cursor } from './reader.ts';
-import { NIL, TUPLE, cons, fitsInt, float, form, int, isForm, isSpace, isSym, list, posOf, str, sym, INT_MAX, INT_MIN,
+import { NIL, TUPLE, cons, fitsInt, float, form, int, isForm, isSpace, isSym, list, posOf, str, sym, writable, INT_MAX, INT_MIN,
          type Pos, type Sexp } from './sexp.ts';
 
 // ---------------------------------------------------------------------------
@@ -137,6 +137,9 @@ function nextToken(c: Cursor): [Token | null, Cursor] {
         const end = skipWhile(step(c), (x) => x !== '`' && x !== '\n');
         const text = s.slice(c.i + 1, end.i);
         if (peek(end) !== '`' || text === '') throw new CompileError('a raw name is a name between backticks, on one line', pos);
+        // a slight name as it is (D246), and no more: a name the reader
+        // can't make is one of the compiler's own (sexp.ts)
+        if (!writable(text)) throw new CompileError(`a raw name is a slight name, with no space or ( ) ' ; " , in it, not \`${text}\``, pos);
         return [{ kind: 'name', text, plain: true, pos }, step(end)];
     }
     if (ch === "'") return readQuoted(c, pos);
