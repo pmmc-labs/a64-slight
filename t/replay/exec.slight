@@ -3,7 +3,9 @@
 ; record, and none of them runs: the file the first writes, which @ARGV
 ; names, isn't written then. The pid it prints differs from run to run,
 ; but not from its record. The last is stopped before it ends, which
-; kills it, and waits for it.
+; kills it, and waits for it. And a command's environment has neither
+; SLIGHT_RECORD nor SLIGHT_REPLAY (L5), so a slight program it ran
+; wouldn't write over the record.
 
 (defun run (out)
     (recv
@@ -21,3 +23,4 @@
 (pprint (read (connect :exec (list "sh" "-c" "kill -TERM $$") (run ()))))
 (pprint (read (connect :exec (list "no-such-command") (run ()))))
 (pprint (read (connect :exec (list "sh" "-c" "echo first; exec cat") (first-line))))
+(pprint (read (connect :exec (list "sh" "-c" "echo rec=${SLIGHT_RECORD-unset} play=${SLIGHT_REPLAY-unset}") (run ()))))

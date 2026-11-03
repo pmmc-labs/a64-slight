@@ -125,7 +125,9 @@ than time. So (D170):
   its owner's alone (0600, even if it was there), and isn't written
   through a symbolic link (D205). A program that's set-user-ID or
   set-group-ID ignores `SLIGHT_RECORD` and `SLIGHT_REPLAY`, and
-  `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` too.
+  `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` too. A command the program
+  runs has neither in its environment, so a slight program it runs
+  doesn't record over the record, or replay it.
 - `SLIGHT_REPLAY=file` runs the program again from that record: the
   arguments, environment, keys, times, file contents and network traffic
   are the record's, and the run goes exactly as the recorded one did,

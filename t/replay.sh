@@ -125,13 +125,14 @@ fi
 if [ "$(cat "$dir/net.sock" 2>/dev/null)" = kept ]; then check "net's replay leaves its socket's path alone" ok; else check "net's replay leaves its socket's path alone" no; fi
 
 # exec: commands, recorded; replayed without running them, so the file
-# the first wrote isn't written again.
+# the first wrote isn't written again. The last sees no SLIGHT_RECORD.
 run SLIGHT_RECORD="$dir/exec.record" exec "$dir/exec.out" </dev/null >"$dir/exec.recorded"
 written=$(cat "$dir/exec.out" 2>/dev/null)
 rm -f "$dir/exec.out"
 run SLIGHT_REPLAY="$dir/exec.record" exec other args </dev/null >"$dir/exec.replayed"
 if cmp -s "$dir/exec.recorded" "$dir/exec.replayed" && [ "$written" = written ] \
-   && grep -q '^(ok (3 ("fed in" "[0-9]*")))$' "$dir/exec.recorded" && grep -q '^(ok "first")$' "$dir/exec.recorded"; then
+   && grep -q '^(ok (3 ("fed in" "[0-9]*")))$' "$dir/exec.recorded" && grep -q '^(ok "first")$' "$dir/exec.recorded" \
+   && grep -q '^(ok (0 ("rec=unset play=unset")))$' "$dir/exec.recorded"; then
     check "exec replays as recorded" ok
 else
     diff -u "$dir/exec.recorded" "$dir/exec.replayed"

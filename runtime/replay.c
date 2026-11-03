@@ -782,6 +782,20 @@ static int runtime_end(int fd) {
     return flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 ? errno : 0;
 }
 
+// The program's environment for a command, but for what records or
+// replays a run: a slight program it ran would record over this one's
+// record, or replay it (L5).
+static char **command_env(void) {
+    size_t n = 0, k = 0;
+    while (environ[n]) n++;
+    char **env = rt_must(malloc((n + 1) * sizeof *env));
+    for (size_t i = 0; i < n; i++) {
+        if (strncmp(environ[i], "SLIGHT_RECORD=", 14) != 0 && strncmp(environ[i], "SLIGHT_REPLAY=", 14) != 0) env[k++] = environ[i];
+    }
+    env[k] = NULL;
+    return env;
+}
+
 static int spawn(char *const argv[], int *child, int *in, int *out) {
     char path[4096];
     int  err = find(argv[0], path, sizeof path), ip[2], op[2];
@@ -819,7 +833,9 @@ static int spawn(char *const argv[], int *child, int *in, int *out) {
         posix_spawnattr_setsigdefault(&at, &def);
         posix_spawnattr_setpgroup(&at, 0);
         posix_spawnattr_setflags(&at, flags);
-        err = posix_spawn(&pid, path, &fa, &at, argv, environ);
+        char **env = command_env();
+        err = posix_spawn(&pid, path, &fa, &at, argv, env);
+        free(env);
         posix_spawnattr_destroy(&at);
         posix_spawn_file_actions_destroy(&fa);
         *child = (int)pid;
