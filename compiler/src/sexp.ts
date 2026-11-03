@@ -33,10 +33,33 @@ export const fitsInt = (n: bigint): boolean => n >= INT_MIN && n <= INT_MAX;
 
 export const isSym = (x: Sexp, name: string): boolean => x.t === 'sym' && x.name === name;
 
-// The reader reads a tuple pattern, #(p ...), as (TUPLE p ...) (D176): a
-// head with a space in it, which no program can write, so a list pattern
-// can't be taken for one.
-export const TUPLE = '#( (tuple pattern)';
+// --- hidden names -----------------------------------------------------------
+//
+// The compiler makes names of its own: a builtin no local can hide, a
+// recv's receive function, a local carried across a recv, a module's
+// private function. Each has a space or a parenthesis in it, which ends a
+// name in the reader, and sly.ts holds a raw name to the same rule, so no
+// program can write one, hide one, or reach one.
+
+export const isSpace     = (ch: string): boolean => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+export const isDelimiter = (ch: string): boolean => isSpace(ch) || '()\';"`,'.includes(ch);
+
+// Whether a program can write name: whether a reader can make it.
+export const writable = (name: string): boolean => name !== '' && ![...name].some(isDelimiter);
+
+// A name no program can write: base with a note after it, in parentheses.
+// With base '', a suffix that hides whatever it's put after.
+export const hidden = (base: string, note: string): string => `${base} (${note})`;
+
+// A builtin by a name no local can hide: the code generator takes it for
+// the builtin whatever locals there are.
+export const BUILTIN    = hidden('', 'builtin');
+export const builtinSym = (name: string, pos: Pos | null = null): Sym => sym(`${name}${BUILTIN}`, pos);
+export const builtinOf  = (name: string): string | null => (name.endsWith(BUILTIN) ? name.slice(0, -BUILTIN.length) : null);
+
+// The reader reads a tuple pattern, #(p ...), as (TUPLE p ...) (D176), so
+// a list pattern can't be taken for one.
+export const TUPLE = hidden('#(', 'tuple pattern');
 
 // Whether x is a form headed by the symbol name: (name ...).
 export const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;

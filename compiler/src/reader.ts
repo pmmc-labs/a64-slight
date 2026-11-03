@@ -18,7 +18,7 @@
 // now; any other `=word` is kept for later kinds, and is an error.
 
 import { CompileError } from './errors.ts';
-import { NIL, cons, float, fitsInt, int, reverse, str, sym, INT_MAX, INT_MIN, TUPLE, type Pos, type Sexp } from './sexp.ts';
+import { NIL, cons, float, fitsInt, int, isDelimiter, isSpace, reverse, str, sym, INT_MAX, INT_MIN, TUPLE, type Pos, type Sexp } from './sexp.ts';
 
 // ---------------------------------------------------------------------------
 // Tokens
@@ -37,8 +37,6 @@ export const step  = (c: Cursor): Cursor => peek(c) === '\n'
     ? { ...c, i: c.i + 1, line: c.line + 1, col: 1 }
     : { ...c, i: c.i + 1, col: c.col + 1 };
 
-export const isSpace     = (ch: string): boolean => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
-const isDelimiter = (ch: string): boolean => isSpace(ch) || '()\';"`,'.includes(ch);
 export const isDigit     = (ch: string): boolean => ch >= '0' && ch <= '9';
 
 export function skipWhile(c: Cursor, pred: (ch: string) => boolean): Cursor {

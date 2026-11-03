@@ -300,7 +300,8 @@ function expandWhen(x: Pair): Sexp {
 }
 
 // A case's or a match's topic is bound under a name no program can write,
-// which says which of them it was.
+// since it has a space in it (sexp.ts's hidden names), which says which of
+// them it was.
 function topicName(of: 'case' | 'match', x: Pair): Sym {
     const where = x.pos === null ? '' : ` ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
     return sym(`${of} topic${where}`, x.pos);

@@ -24,8 +24,10 @@
 // So the code generator, and the recv rule (classify.ts), still see only
 // receive functions: a function whose whole body is one recv. A function
 // with a recv in it tail-calls one, so it waits too, and it can only be
-// tail-called. A generated name has spaces in it, so no program can
-// write it, and says where the recv is.
+// tail-called. A generated name is hidden (sexp.ts), so no program can
+// write it, and says where the recv is; the temporaries that hold a
+// test's or an argument's value are wholly in parentheses, which hides
+// them as well.
 //
 // The locals come across under names with the recv's site in them, so
 // that neither a pattern nor a let in a clause's body can hide the value
@@ -46,7 +48,7 @@
 import { CompileError } from './errors.ts';
 import { madeFrom } from './expand.ts';
 import { patternNames } from './pattern.ts';
-import { NIL, cons, form, isForm, list, posOf, show, sym, toArray, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { NIL, cons, form, hidden, isForm, list, posOf, show, sym, toArray, writable, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { MAX_ARGS, TOP_PARAMS } from './values.ts';
 
 // The functions generated so far, newest last, and a count for names
@@ -296,7 +298,7 @@ function waitFor(r: Pair, t: Sym | null, rest: readonly Sexp[], env: readonly st
     const st1   = { ...st0, n: st0.n + 1 };
     // The top level's parameters can't be named in a function of its own,
     // so they come across under other names.
-    const carried = (v: string): string => `${v} (carried across ${site})`;
+    const carried = (v: string): string => hidden(v, `carried across ${site}`);
     const carry   = (xs: readonly Sexp[]): readonly Sexp[] =>
         TOP_PARAMS.filter((v) => env.includes(v)).reduce((ys, v) => ys.map((x) => rename(x, v, sym(carried(v), r.pos))), xs);
     const clauses = clauses0.map((c) => form(clauseOf(c), ...carry(toArray(c) ?? [])));
@@ -312,15 +314,15 @@ function waitFor(r: Pair, t: Sym | null, rest: readonly Sexp[], env: readonly st
     // Each local comes across under a name with the recv's site in it,
     // which no program can write, so neither a pattern nor a let in a
     // clause's body can hide what the rest of the function needs; it's
-    // bound again under its own name where it's wanted. A name with a
-    // space in it is one of ours already (@ARGV's or %ENV's, a call's
+    // bound again under its own name where it's wanted. A name no program
+    // can write is one of ours already (@ARGV's or %ENV's, a call's
     // argument, an earlier recv's), which nothing can hide, so it comes as
     // it is.
-    const alias  = (v: string): string => (v.includes(' ') ? v : `${v} (before ${site})`);
+    const alias  = (v: string): string => (writable(v) ? hidden(v, `before ${site}`) : v);
     const rebind = (vs: readonly string[]): readonly Sexp[] =>
         vs.filter((v) => alias(v) !== v).map((v) => letForm(sym(v, r.pos), sym(alias(v), r.pos)));
     const args   = live.map((v) => sym(TOP_PARAMS.find((p) => carried(p) === v) ?? v, r.pos));
-    const name   = sym(`${fn} (${site})`, r.pos);
+    const name   = sym(hidden(fn, site), r.pos);
 
     // At the start of a clause's body: the locals in used that its pattern
     // doesn't bind.
@@ -344,7 +346,7 @@ function waitFor(r: Pair, t: Sym | null, rest: readonly Sexp[], env: readonly st
         // its value: around the body's last form, after the others, so
         // a recv there is still in tail position (a do around the body
         // would hide it, and the lets before it)
-        const kname = sym(`${fn} (after ${site})`, r.pos);
+        const kname = sym(hidden(fn, `after ${site}`), r.pos);
         const kLive = live.filter((v) => restUses.has(v));
         const kArgs = kLive.map((v) => sym(alias(v), r.pos));
         const [k, s] = makeFunction(kname, [...kLive, ...(t === null ? [] : [t.name])], null, after, env, fn, st2);
@@ -373,7 +375,7 @@ function makeFunction(name: Sym, params: readonly string[], patterns: readonly S
                       bodies: readonly Sexp[] | readonly (readonly Sexp[])[], env: readonly string[], fn: string, st: St): [Sexp, St] {
     const pos      = name.pos;
     const bundled  = params.length > MAX_ARGS;
-    const list_    = sym(`locals (${name.name})`, pos);
+    const list_    = sym(hidden('locals', name.name), pos);
     const formals  = bundled ? [list_] : params.map((p) => sym(p, pos));
     const unpack   = bundled ? params.map((p, i) => letForm(sym(p, pos), nth(list_, i))) : [];
     const bodyEnv  = [...params, ...(bundled ? [list_.name] : [])];
@@ -415,7 +417,7 @@ function recvClauses(r: Pair, st: St): [readonly Sexp[], St] {
         if (c.t !== 'pair' || c.cdr.t !== 'pair') throw new CompileError(`a recv clause is (pattern body...), not ${show(c)}`, posOf(c) ?? r.pos);
     });
     if (clauses.length > 0) return [clauses, st];
-    const m = sym(`message (${where(r.pos, st.n)})`, r.pos);
+    const m = sym(hidden('message', where(r.pos, st.n)), r.pos);
     return [[list(m, m)], st];
 }
 

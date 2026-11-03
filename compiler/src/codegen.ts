@@ -39,10 +39,10 @@
 // prelude keeps using the prelude's (D80).
 
 import { CompileError } from './errors.ts';
-import { float, form, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { builtinOf, builtinSym, float, form, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
 import { isReceiveBody, stateFunctions } from './classify.ts';
-import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
+import { lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
 import { eraseTypes } from './check.ts';
 import { displayName, PRELUDE_SUFFIX } from './modules.ts';
@@ -513,7 +513,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             return [[code, st.t.tupleRef(Number((args[1] as Int).v))], st1];
         }
         case TUPLE_OF: {
-            const prim = (name: string): Sexp => sym(`${name}${BUILTIN}`, x.pos);
+            const prim = (name: string): Sexp => builtinSym(name, x.pos);
             const [v, n] = args as [Sexp, Sexp];
             return compileExpr(form(x.pos, sym('cond', x.pos),
                 list(list(prim('tuple?'), v), list(prim('eq?'), list(prim('tuple/len'), v), n)),
@@ -523,8 +523,9 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (SPECIAL_FORMS.includes(head.name)) throw notYet(x);
     // A builtin by a name no local can hide (pattern.ts), or by its own.
     const known  = head.name.endsWith(ON_CONSES);
-    const hidden = known || head.name.endsWith(BUILTIN);
-    const name   = hidden ? head.name.slice(0, -(known ? ON_CONSES : BUILTIN).length) : head.name;
+    const prim   = known ? head.name.slice(0, -ON_CONSES.length) : builtinOf(head.name);
+    const hidden = prim !== null;
+    const name   = prim ?? head.name;
     if (!hidden && lookup(cx.env, name) !== null) return compileClosureCall(x, head, args, cx, st);
     if (name === 'apply') return compileApply(x, args, cx, st);
     const operand: Cx = { ...cx, tail: false };
@@ -1269,7 +1270,7 @@ function floatTree(x: Sexp, cx: Cx): FTree | null {
     }
     if (x.t !== 'pair' || x.car.t !== 'sym') return null;
     const head = x.car.name;
-    const name = head.endsWith(BUILTIN) ? head.slice(0, -BUILTIN.length) : lookup(cx.env, head) === null ? head : null;
+    const name = builtinOf(head) ?? (lookup(cx.env, head) === null ? head : null);
     const args = toArray(x.cdr);
     if (name === null || args === null) return null;
     const op = TREE_OPS[name];
@@ -1700,7 +1701,8 @@ function isPreludeNot(x: Sexp, cx: Cx): boolean {
 // The builtin a call's head names, if it names one: by a name no local can
 // hide, or by its own when no local hides it.
 function builtinName(head: Sym, cx: Cx): string | null {
-    if (head.name.endsWith(BUILTIN)) return head.name.slice(0, -BUILTIN.length);
+    const prim = builtinOf(head.name);
+    if (prim !== null) return prim;
     return lookup(cx.env, head.name) === null && isBuiltin(head.name) ? head.name : null;
 }
 

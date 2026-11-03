@@ -6,9 +6,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CompileError } from '../src/errors.ts';
-import { BUILTIN, lowerPattern, ON_CONSES, patternNames } from '../src/pattern.ts';
+import { lowerPattern, ON_CONSES, patternNames } from '../src/pattern.ts';
 import { read } from '../src/reader.ts';
-import { show, sym, type Pair, type Sexp } from '../src/sexp.ts';
+import { BUILTIN, show, sym, type Pair, type Sexp } from '../src/sexp.ts';
 
 const pattern = (src: string): Sexp => (read(src, 't.slight') as Pair).car;
 

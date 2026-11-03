@@ -47,9 +47,9 @@
 // reads s-expressions: '((lambda (x) x) 1).
 
 import { CompileError } from './errors.ts';
-import { atEnd, isDigit, isLetter, isSpace, numberKind, parseAtom, peek, posOf as cursorPos, readDatumAt, readString,
+import { atEnd, isDigit, isLetter, numberKind, parseAtom, peek, posOf as cursorPos, readDatumAt, readString,
          skipDoc, skipWhile, step, type Cursor } from './reader.ts';
-import { NIL, TUPLE, cons, fitsInt, float, form, int, isForm, isSym, list, posOf, str, sym, INT_MAX, INT_MIN,
+import { NIL, TUPLE, cons, fitsInt, float, form, int, isForm, isSpace, isSym, list, posOf, str, sym, INT_MAX, INT_MIN,
          type Pos, type Sexp } from './sexp.ts';
 
 // ---------------------------------------------------------------------------
