@@ -124,6 +124,7 @@ typedef struct rt_isle {
     uint64_t          *ids, *places;    // where after's timers are in alarms, by number
     uint64_t           ids_cap, nids;   // ids_cap a power of two, or 0
     uint64_t           virtual_now;     // the virtual clock, each island's its own
+    uint64_t           input_seen;      // when stdin and the sockets were last looked at while busy (events)
     uint64_t           nsockets;
     struct rt_device  *sockets;         // open sockets and commands, and closing sockets (nsockets counts them)
     uint64_t           ndevices;        // open devices
@@ -2860,7 +2861,6 @@ static uint64_t        nconnected, connected_cap;
 static unsigned char   input[4096];     // read from stdin...
 static size_t          input_at, input_len; // ...and decoded up to input_at
 static int             input_ended;
-static uint64_t        input_seen;      // when stdin was last looked at while busy
 
 // The terminal is island 0's (D256): from another, the actor is placed
 // there.
@@ -2985,8 +2985,8 @@ static inline void events(void) {
     if (my.nalarms) ring();                     // tested here, where the island's state is to hand
     if (virtual_clock || (!listening() && !my.nsockets)) return;
     uint64_t t = now();
-    if (t - input_seen < INPUT_EVERY) return;
-    input_seen = t;
+    if (t - my.input_seen < INPUT_EVERY) return;
+    my.input_seen = t;
     if (wait_for(0) & IO_KEYS) {
         read_input();
         while (next_key()) {}
