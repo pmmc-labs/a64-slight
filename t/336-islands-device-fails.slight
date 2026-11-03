@@ -1,0 +1,39 @@
+; A device that fails as an item from another island's inbox is taken,
+; while the device's owner runs (M1): the owner ends once the rest of
+; the batch is taken, and the program ends. Before, the owner ended in
+; the middle of the batch, which was lost, and the program never ended.
+; The owner, on island 1, spins once it has said so; the watcher, on
+; island 2, then asks its connection for a count of bytes past 64 MB,
+; which fails (:too-big) as the owner's island takes the ask. Expected
+; output worked out by hand.
+
+(defun spin (n) (if (== n 0) :spun (spin (- n 1))))
+
+(defun owner (to)
+    (recv ((:open c) (send to (list $$ c)) (owner-go))))
+(defun owner-go ()
+    (recv ((:go w) (send w :spinning) (spin 1000000000))))
+
+(defun watcher (to o c)
+    (monitor o)
+    (send o (list :go $$))
+    (recv (:spinning
+        (send c (list :read 100000000))
+        (recv ((:exit _ (:error (why _))) (send to (list :owner-ended why)))))))
+
+(defun listener (to)
+    (recv ((:open l port) (send to port) (listening l))))
+(defun listening (l)
+    (recv
+        ((:accept _ c) (listening l))
+        (:done         (disconnect l))))
+
+(let me (address))
+(let l (connect :tcp/listen 0 (listener me)))
+(let port (read me))
+(spawn/on 1 (connect :tcp (str "127.0.0.1:" port) (owner me)))
+(let got (read me))
+(spawn/on 2 (watcher me (car got) (car (cdr got))))
+(pprint (read me))
+(send l :done)
+:end

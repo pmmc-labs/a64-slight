@@ -112,7 +112,12 @@ typedef struct rt_isle {
     size_t            *slots;           // the offsets in scratch of words that point into it
     size_t             scratch_cap;     // in bytes; slots has room for one for each word
     uint64_t           retired_calls;   // the calls of the processes that have ended
-    int                killed;          // the running process, killed by an item as it ran
+    int                taking;          // taking a batch from the inbox, or a timer: the running process can't end yet (M1)
+    int                ending;          // and how an item has ended it meanwhile: ENDING_KILLED, or ENDING_FAILED with
+    int                ending_err;      // its device's error, and the device's path (a copy) or port
+    char              *ending_path;
+    size_t             ending_len;
+    rt_value_t         ending_port;
     struct alarm      *alarms;          // the timers, alarms[0] the next due
     uint64_t           nalarms, alarms_cap, alarms_set;
     uint64_t           afters;          // after's timers numbered so far
@@ -2372,6 +2377,10 @@ static void start_here(item_t *it) {
 
 static void system_asked(const item_t *it);
 static void system_told(item_t *it);
+static void end_taken(void);
+
+#define ENDING_KILLED 1
+#define ENDING_FAILED 2
 
 static void take_item(item_t *it) {
     entry_t   *e = rt_is_address(it->to) ? NULL : slot(it->to);
@@ -2408,7 +2417,7 @@ static void take_item(item_t *it) {
             }
             break;
         case ITEM_KILL:
-            if (t && t == rt_current) my.killed = 1;
+            if (t && t == rt_current) my.ending = my.ending ? my.ending : ENDING_KILLED;
             else if (t)               end_other(t, rt_symbol(RT_SYM_KILLED));
             break;
         case ITEM_WATCH:
@@ -2443,7 +2452,10 @@ static void take_item(item_t *it) {
 }
 
 // Takes what's in this island's inbox, in the order it came; recording,
-// it says which, at its poll'th look.
+// it says which, at its poll'th look. An item may end the process
+// running (a kill, or a device of its failing), whose island this is: it
+// ends once every item is taken, since the rest would be lost, and busy
+// never come back to 0, if it ended in the middle (M1).
 static void take_inbox(uint64_t poll) {
     island_t *s = &isles[my.island];
     pthread_mutex_lock(&s->lock);
@@ -2461,6 +2473,7 @@ static void take_inbox(uint64_t poll) {
         free(ids);
     }
     uint64_t n = 0;
+    my.taking = 1;
     for (item_t *next; it; it = next, n++) {
         next = it->next;
         int own = !it->in_msg;                  // else it's in its message, which may be gone after
@@ -2468,6 +2481,7 @@ static void take_inbox(uint64_t poll) {
         if (own) free(it);
     }
     atomic_fetch_sub(&busy, n);                 // once, after: busy is never 0 too soon
+    end_taken();
 }
 
 // Replaying, the items the record says, in its order, each waited for
@@ -2475,6 +2489,7 @@ static void take_inbox(uint64_t poll) {
 // wait for their turn.
 static void take_these(const uint64_t *ids, uint32_t n) {
     island_t *s = &isles[my.island];
+    my.taking = 1;                              // as take_inbox, its caller ending the process after
     for (uint32_t i = 0; i < n; i++) {
         item_t *it;
         for (;;) {
@@ -2512,6 +2527,7 @@ static void poll_logged(void) {
         if (rt_io_due(poll, &ids, &n)) {
             take_these(ids, n);
             free(ids);
+            end_taken();
         }
     } else if (atomic_load(&isles[my.island].waiting)) {
         take_inbox(poll);
@@ -2573,10 +2589,6 @@ void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp
     }
     refill(p);
     events();                                   // so a busy process can't hold up a timer or a key
-    if (p->isle->killed) {                      // from another island, as it ran (D256)
-        p->isle->killed = 0;
-        rt_end(0, rt_symbol(RT_SYM_KILLED), 0);
-    }
     if (p->isle->ready_head) {
         enqueue(p);
         to_scheduler(p);
@@ -2753,9 +2765,11 @@ static void ring(void) {
         rt_proc_t *p = slot(a.pid)->proc;
         if (!p) {
             struct rt_device *d = slot(a.pid)->device;
+            my.taking = 1;                      // as take_inbox: its message is freed first
             if (d && a.msg)  command(d, a.msg->value);
             else if (d)      lookup_timed_out(d, a.seq);
             if (a.msg) free_msg(a.msg);
+            end_taken();
         } else if (a.msg) {
             deliver(p, a.msg);
         } else {
@@ -3347,8 +3361,38 @@ static void fail(rt_device_t *d, int err) {
         close_device(d);
         return;
     }
+    if (owner == rt_current && my.taking) {     // ended once the batch is taken (end_taken); d's closed then
+        if (my.ending) return;
+        my.ending      = ENDING_FAILED;
+        my.ending_err  = err;
+        my.ending_port = rt_int(d->port);
+        if (d->path) {
+            my.ending_len  = rt_string_len(d->path);
+            my.ending_path = rt_must(malloc(my.ending_len));
+            memcpy(my.ending_path, rt_string_bytes(d->path), my.ending_len);
+        }
+        return;
+    }
     if (owner == rt_current) rt_end(0, reason, 0);
     end_other(owner, reason);
+}
+
+// Ends the process running, if an item taken from the inbox (or a timer)
+// has said to: the reason's on this stack, as rt_fault's is, since rt_end
+// copies it out.
+static void end_taken(void) {
+    my.taking = 0;
+    if (!my.ending) return;
+    int how = my.ending;
+    my.ending = 0;
+    if (how == ENDING_KILLED) rt_end(0, rt_symbol(RT_SYM_KILLED), 0);
+    _Alignas(16) rt_value_t cells[4];
+    uint64_t   space[my.ending_len / 8 + 6];
+    rt_value_t path = my.ending_path ? string_in(space, my.ending_path, my.ending_len) : my.ending_port;
+    free(my.ending_path);
+    my.ending_path = NULL;
+    my.ending_len  = 0;
+    rt_end(0, io_reason(cells, my.ending_err, path), 0);
 }
 
 // Sends d's owner (sym f rest...); taking it reads on, if more says so.
