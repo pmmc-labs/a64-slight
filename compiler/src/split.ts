@@ -48,7 +48,7 @@
 import { CompileError } from './errors.ts';
 import { madeFrom } from './expand.ts';
 import { patternNames } from './pattern.ts';
-import { NIL, cons, form, hidden, isForm, list, posOf, show, sym, toArray, writable, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { NIL, builtinSym, cons, form, hidden, isForm, list, posOf, show, sym, toArray, writable, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { MAX_ARGS, TOP_PARAMS } from './values.ts';
 
 // The functions generated so far, newest last, and a count for names
@@ -355,16 +355,15 @@ function waitFor(r: Pair, t: Sym | null, rest: readonly Sexp[], env: readonly st
             const body  = bodyOf(c);
             const last  = body[body.length - 1]!;
             const value = letParts(last)?.[1] ?? last;      // a trailing let's value is the body's (D42)
-            const scope = [...live.map(alias), ...patternNames(patOf(c))];
             const call  = (...extra: readonly Sexp[]): Sexp => {
                 const all = [...kArgs, ...extra];
-                return form(r.pos, kname, ...(all.length > MAX_ARGS ? [bundle(all, scope, r.pos)] : all));
+                return form(r.pos, kname, ...(all.length > MAX_ARGS ? [bundle(all, r.pos)] : all));
             };
             return [...again(c, uses(body, [])), ...body.slice(0, -1), ...(t === null ? [value, call()] : [call(value)])];
         });
     }
     const [g, st3] = makeFunction(name, live.map(alias), clauses.map(patOf), bodies, env, fn, st2);
-    return [form(r.pos, name, ...(live.length > MAX_ARGS ? [bundle(args, env, r.pos)] : args)), { ...st3, gen: [...st3.gen, g] }];
+    return [form(r.pos, name, ...(live.length > MAX_ARGS ? [bundle(args, r.pos)] : args)), { ...st3, gen: [...st3.gen, g] }];
 }
 
 // (defun name (params...) body...), or with patterns, a receive function
@@ -379,10 +378,6 @@ function makeFunction(name: Sym, params: readonly string[], patterns: readonly S
     const formals  = bundled ? [list_] : params.map((p) => sym(p, pos));
     const unpack   = bundled ? params.map((p, i) => letForm(sym(p, pos), nth(list_, i))) : [];
     const bodyEnv  = [...params, ...(bundled ? [list_.name] : [])];
-    if (bundled) {
-        const clash = [...params, ...(patterns ?? []).flatMap(patternNames)].find((v) => v === 'car' || v === 'cdr');
-        if (clash !== undefined) throw tooMany(clash, pos);
-    }
     if (patterns === null) {
         const [body, st1] = splitBody([...unpack, ...(bodies as readonly Sexp[])], bodyEnv, fn, st);
         return [form(pos, sym('defun', pos), name, list(...formals), ...body), st1];
@@ -394,21 +389,19 @@ function makeFunction(name: Sym, params: readonly string[], patterns: readonly S
     return [form(pos, sym('defun', pos), name, list(...formals), form(pos, sym('recv', pos), ...clauses)), st1];
 }
 
-// (cons a (cons b ... ())), for more than 8 locals.
-function bundle(args: readonly Sexp[], env: readonly string[], pos: Pos | null): Sexp {
-    if (env.includes('cons')) throw tooMany('cons', pos);
-    return args.reduceRight<Sexp>((tail, a) => form(pos, sym('cons', pos), a, tail), NIL);
+// (cons a (cons b ... ())), for more than 8 locals: the builtin by a
+// name no local can hide, since a let in a clause's body could be named
+// cons.
+function bundle(args: readonly Sexp[], pos: Pos | null): Sexp {
+    return args.reduceRight<Sexp>((tail, a) => form(pos, builtinSym('cons', pos), a, tail), NIL);
 }
 
-// (car (cdr (cdr ... xs))): element i.
+// (car (cdr (cdr ... xs))): element i, by the builtins' hidden names too.
 function nth(xs: Sym, i: number): Sexp {
     let x: Sexp = xs;
-    for (let n = 0; n < i; n++) x = form(xs.pos, sym('cdr', xs.pos), x);
-    return form(xs.pos, sym('car', xs.pos), x);
+    for (let n = 0; n < i; n++) x = form(xs.pos, builtinSym('cdr', xs.pos), x);
+    return form(xs.pos, builtinSym('car', xs.pos), x);
 }
-
-const tooMany = (name: string, pos: Pos | null): CompileError =>
-    new CompileError(`more than ${MAX_ARGS} locals go across this recv, as a list taken apart with car, cdr and cons, but a local is named ${name}`, pos);
 
 // recv's clauses; (recv) has one that takes any message.
 function recvClauses(r: Pair, st: St): [readonly Sexp[], St] {

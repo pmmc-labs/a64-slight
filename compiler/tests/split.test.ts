@@ -69,13 +69,18 @@ test('more than 8 locals come across as one list', () => {
     // the top level is a task (D243), so it compiles in an actor
     const actor = (s: string): string => `(defun a () ${s}) (spawn (a))`;
     assert.doesNotThrow(() => compileProgram(read(actor(src), 't')));
-    // a local named car is fine where it comes across under another name,
-    // but not into the function for the rest, whose parameters are the
-    // names themselves
+    // the list is made and taken apart by the builtins' hidden names, so a
+    // local may be named car, cdr or cons, into the function for the rest
+    // too, whose parameters are the names themselves, and so may a let in
+    // a clause's body
     const car = src.replace('(let i 9)', '(let car 9)').replace(' i m', ' car m');
     assert.doesNotThrow(() => compileProgram(read(actor(car), 't')));
-    assert.throws(() => compileProgram(read(actor(car).replace('(recv (m (list', '(let m (recv ((:x x) x) ((:y y) y))) (pprint (list').replace(' m)))', ' m))'), 't')),
-        (e: unknown) => e instanceof CompileError && /a local is named car/.test(e.message));
+    assert.doesNotThrow(() => compileProgram(read(actor(car).replace('(recv (m (list', '(let m (recv ((:x x) x) ((:y y) y))) (pprint (list').replace(' m)))', ' m))'), 't')));
+    const cons = actor(src.replace('(recv (m (list a b c d e f g h i m)))', '(let m (recv ((:x x) (let cons 0) x) ((:y y) y))) (pprint (list a b c d e f g h i m))'));
+    assert.doesNotThrow(() => compileProgram(read(cons, 't')));
+    const clauses = show(defun(cons, `a (recv at t:1:${cons.indexOf('(recv') + 1})`)[3]!);
+    assert.ok(clauses.includes('(let cons 0) (a (after recv at t:1:'), clauses);
+    assert.ok(clauses.includes('(cons (builtin) a (before recv at t:1:'), clauses);
 });
 
 test('a recv after a let in a clause body, with a rest, stays in tail position', () => {

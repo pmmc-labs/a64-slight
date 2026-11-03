@@ -1,0 +1,16 @@
+; More than 8 locals go across a recv as one list, made with cons and
+; taken apart with car and cdr by names no local can hide (review L13):
+; a let named cons in a clause's body, before the rest of the function is
+; called with the list, and locals named car and cdr, change nothing.
+
+(defun w (a b c d e f g car)
+    (let cdr 9)
+    (let v (recv
+        ((:x n) (let cons (lambda (p q) :hijacked)) (cons n n))
+        ((:y n) n)))
+    (pprint (list a b c d e f g car cdr v))
+    (w a b c d e f g car))
+
+(let p (spawn (w 1 2 3 4 5 6 7 8)))
+(send p (list :x 10))
+(send p (list :y 20))

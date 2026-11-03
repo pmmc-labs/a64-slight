@@ -30,12 +30,13 @@ test('when becomes cond, giving () when its test is #false', () => {
 });
 
 test('case binds its topic once, compares with eq?, and gives () if nothing matches', () => {
+    // eq? by a name no local can hide, as a match's patterns have it
     assert.deepEqual(ex('(case (f) (:a 1) (2 (g) 3))'), [
-        '(do (let case topic test.slight:1:1 (f)) (cond ((eq? case topic test.slight:1:1 (quote a)) 1) ((eq? case topic test.slight:1:1 2) (g) 3) (#true ())))',
+        '(do (let case topic test.slight:1:1 (f)) (cond ((eq? (builtin) case topic test.slight:1:1 (quote a)) 1) ((eq? (builtin) case topic test.slight:1:1 2) (g) 3) (#true ())))',
     ]);
     // a #true clause is the default, and then there's no need for another
     assert.deepEqual(ex('(case x (:a 1) (#true 2))'), [
-        '(do (let case topic test.slight:1:1 x) (cond ((eq? case topic test.slight:1:1 (quote a)) 1) (#true 2)))',
+        '(do (let case topic test.slight:1:1 x) (cond ((eq? (builtin) case topic test.slight:1:1 (quote a)) 1) (#true 2)))',
     ]);
     fails(() => ex('(case)'), 'test.slight:1:1: case takes a topic and clauses, not (case)');
     fails(() => ex('(case x (:a))'), 'test.slight:1:1: a case clause is (value body...), not ((quote a))');

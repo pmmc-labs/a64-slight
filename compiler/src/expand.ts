@@ -49,7 +49,7 @@ import { link, type Unit, type UnitKind } from './modules.ts';
 import { lowerPattern, NO_MATCH } from './pattern.ts';
 import { read } from './reader.ts';
 import { readSly } from './sly.ts';
-import { NIL, cons, form, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { NIL, builtinSym, cons, form, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 
 // The outside world: a key for the file at path that's the same however
 // it's named (its real path), or null if there's no such file; and the
@@ -322,7 +322,8 @@ function expandCase(x: Pair): Sexp {
         const items = toArray(c);
         if (items === null || items.length < 2) throw new CompileError(`a case clause is (value body...), not ${show(c)}`, x.pos);
         const [value, ...body] = items;
-        const test = value!.t === 'sym' && (value!.name === '#true' || value!.name === '#false') ? value! : form(x.pos, sym('eq?'), t, value!);
+        // eq? by a name no local can hide, as a match's patterns have it
+        const test = value!.t === 'sym' && (value!.name === '#true' || value!.name === '#false') ? value! : form(x.pos, builtinSym('eq?'), t, value!);
         return list(test, ...body);
     });
     const last     = clauses.length > 0 ? toArray(clauses[clauses.length - 1]!)![0]! : null;

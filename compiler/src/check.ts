@@ -32,7 +32,7 @@ import { CompileError } from './errors.ts';
 import { expand } from './expand.ts';
 import { displayName, PRELUDE_SUFFIX } from './modules.ts';
 import { REST } from './pattern.ts';
-import { NIL, cons, isForm, isSym, list, posOf, show, toArray, TUPLE, type Pair, type Pos, type Sexp } from './sexp.ts';
+import { NIL, builtinOf, cons, isForm, isSym, list, posOf, show, toArray, TUPLE, type Pair, type Pos, type Sexp } from './sexp.ts';
 import { BUILTINS, CONSTANTS, PREDICATES, RESULT_ANY, cxr, cxrSteps, faultOf, resultOf } from './builtins.ts';
 import {
     ANY, BOOL, FALSE_T, FLOAT, FUN_ANY, INT, LIST_ANY, NEVER, NIL_T, PID, STR, SYM, TRUE_T, TUPLE_ANY,
@@ -480,6 +480,8 @@ function funOfFn(f: Fn, g: G): Ty {
 function formType(x: Pair, cx: Cx, expected: Ty | null): Ty {
     const head = x.car;
     const args = toArray(x.cdr) ?? [];
+    const prim = head.t === 'sym' ? builtinOf(head.name) : null;
+    if (prim !== null) return builtinType(x, prim, args, cx);
     if (head.t === 'sym' && lookup(cx.env, head.name) === null) {
         switch (head.name) {
             case 'quote':   return args.length === 1 ? datumType(args[0]!) : ANY;
@@ -502,15 +504,19 @@ function formType(x: Pair, cx: Cx, expected: Ty | null): Ty {
         }
         const f = fnNamed(cx, head.name);
         if (f !== undefined) return callFn(x, f, args, cx);
-        const b = BUILTINS[head.name];
-        if (b !== undefined) return callBuiltin(x, head.name, args, cx);
-        const p = PREDICATES[head.name];
-        if (p !== undefined) return argsThen(args, cx, BOOL);
-        const steps = cxrSteps(head.name);
-        if (steps !== null) return callCxr(x, head.name, steps, args, cx);
-        return argsThen(args, cx, ANY);
+        return builtinType(x, head.name, args, cx);
     }
     return callValue(x, head, args, cx);
+}
+
+// A call of the builtin n, if it's one; a name nothing knows is the code
+// generator's to report.
+function builtinType(x: Pair, n: string, args: readonly Sexp[], cx: Cx): Ty {
+    if (BUILTINS[n] !== undefined) return callBuiltin(x, n, args, cx);
+    if (PREDICATES[n] !== undefined) return argsThen(args, cx, BOOL);
+    const steps = cxrSteps(n);
+    if (steps !== null) return callCxr(x, n, steps, args, cx);
+    return argsThen(args, cx, ANY);
 }
 
 // The arguments' types, for what's in them, then t; never if one never
@@ -773,9 +779,13 @@ function refine(test: Sexp, cx: Cx, truth: boolean): Facts | null {
     if (isSym(test, '#true')) return truth ? [] : null;
     if (isSym(test, '#false')) return truth ? null : [];
     if (test.t === 'sym') return refineName(test, cx, truth);
-    if (test.t !== 'pair' || test.car.t !== 'sym' || lookup(cx.env, test.car.name) !== null) return [];
+    if (test.t !== 'pair' || test.car.t !== 'sym') return [];
+    // a builtin by its hidden name (a case's eq?) is the builtin whatever
+    // the locals; by its own, only if no local has the name
+    const prim = builtinOf(test.car.name);
+    if (prim === null && lookup(cx.env, test.car.name) !== null) return [];
     const args = toArray(test.cdr) ?? [];
-    const head = test.car.name;
+    const head = prim ?? test.car.name;
     const defs = cx.g.defs;
     if ((head === 'not' || head === `not${PRELUDE_SUFFIX}`) && args.length === 1 && fnNamed(cx, head)?.module === 'prelude') return refine(args[0]!, cx, !truth);
     const pred = PREDICATES[head];
