@@ -1315,7 +1315,9 @@ TCP, IPv4 only, and about 1,000 sockets at once (the limit of
 `select()`). The port is a number. Neither connecting nor looking up the
 host holds up the other processes: the runtime reads `/etc/hosts`, and
 asks the name servers in `/etc/resolv.conf` about any other name itself
-(D153, D165). `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` name other files
+(D153, D165). An answer counts only if its question is the one asked,
+and the address is the A record for the name, or for the end of the
+CNAMEs from it. `SLIGHT_HOSTS` and `SLIGHT_RESOLV_CONF` name other files
 for it to read, and there a `nameserver` line may give a port
 (`nameserver 127.0.0.1:5353`), so a test can serve its own names.
 

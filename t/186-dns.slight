@@ -10,8 +10,12 @@
 ; it is first. The first server listed refuses every connection, so each
 ; query goes there first, and then to the next. Names that aren't there
 ; are :enotfound; names no server answers for are :etimedout, after
-; "timeout:1 attempts:3", on the virtual clock. Then a query over UDP, to
-; a port nothing listens on.
+; "timeout:1 attempts:3", on the virtual clock. An answer counts only
+; if its question is the one asked, but for case, and an A record only if
+; it's for the name asked, or for the end of the CNAMEs from it: an
+; answer about another name is a broken server's, and an A record for
+; another name leaves the name without an address. Then a query over
+; UDP, to a port nothing listens on.
 
 ; --- the name server -------------------------------------------------------
 
@@ -31,7 +35,11 @@
 
 (defun a-record (name-bytes) (~ name-bytes (bytes (list 0 1 0 1 0 0 0 60 0 4 127 0 0 1))))
 
-; The answer to query q about name: (rcode answer-records count), or
+(defun cname (name-bytes target)
+    (~ (~ name-bytes (bytes (list 0 5 0 1 0 0 0 60))) (~ (u16 (bytes/len (encode target))) (encode target))))
+
+; The answer to query q about name: (rcode answer-records count), or with
+; a fourth, the name its question gives in place of the one asked; or
 ; :silence for a name the server never answers about.
 (defun zone (name)
     (cond
@@ -41,6 +49,18 @@
             (list 0 (~ (~ (bytes (list 192 12 0 5 0 1 0 0 0 60)) (~ (u16 (bytes/len (encode "one.test"))) (encode "one.test")))
                        (a-record (encode "one.test")))
                   2))
+        ((eq? name "wrong.test")
+            (list 0 (a-record (bytes (list 192 12))) 1 "one.test"))
+        ((eq? name "other-a.test")
+            (list 0 (a-record (encode "one.test")) 1))
+        ((eq? name "cname-off.test")
+            (list 0 (~ (cname (bytes (list 192 12)) "one.test") (a-record (encode "two.test"))) 2))
+        ((eq? name "chain.test")
+            (list 0 (str (cname (bytes (list 192 12)) "mid.test") (a-record (encode "two.test"))
+                         (cname (encode "mid.test") "one.test") (a-record (encode "one.test")))
+                  4))
+        ((eq? name "mixed.test")
+            (list 0 (a-record (encode "Mixed.Test")) 1 "MIXED.TEST"))
         ((eq? name "empty.test") (list 0 "" 0))
         ((eq? name "fail.test")  (list 2 "" 0))
         ((eq? name "slow.test")  :silence)
@@ -48,7 +68,9 @@
 
 (defun response (q name)
     (let z (zone name))
-    (let question (bytes/slice q 12 (+ (+ 12 (bytes/len (encode name))) 4)))
+    (let question (match z
+        ((_ _ _ asked) (~ (encode asked) (bytes (list 0 1 0 1))))
+        (_             (bytes/slice q 12 (+ (+ 12 (bytes/len (encode name))) 4)))))
     (cond
         ((eq? z :silence) "")
         (#true
@@ -143,7 +165,8 @@
 
 (map (lambda (name) (try echo-port name))
      (list "alias.test" "other.test" "Other.Test" "localhost" "one.test" "cname.test" "short" "abs.test."
-           "empty.test" "none.test" "ip6only.test" "fail.test" "slow.test"))
+           "empty.test" "none.test" "ip6only.test" "fail.test" "slow.test"
+           "wrong.test" "other-a.test" "cname-off.test" "chain.test" "mixed.test"))
 
 (resolv-conf "nameserver 127.0.0.1:1\noptions timeout:1 attempts:1\n")
 (try echo-port "udp.test")

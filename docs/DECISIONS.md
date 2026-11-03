@@ -1585,7 +1585,10 @@ agreed.)* `runtime/dns.c`, about 350 lines.
   ID; an answer with another ID is ignored. It goes over UDP, then over
   TCP to the same server if the answer was cut short, or only over TCP
   with `use-vc`. The address is the first A record in the answer, after
-  any CNAMEs the server followed.
+  any CNAMEs the server followed. *(Since the review of 2026-11-02 (L7):
+  an answer whose question isn't the one asked, but for case, is a stray
+  one, and an A record counts only for the name asked or the end of its
+  chain of CNAMEs, read in order, as glibc reads them.)*
 - **Waiting:** the query's socket is waited for in `select()`, as the
   connection's own will be, and its timeout is a timer the device sets
   itself and unsets when the answer comes, so a lookup keeps the program
