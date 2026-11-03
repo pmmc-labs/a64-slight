@@ -802,6 +802,15 @@ static int spawn(char *const argv[], int *child, int *in, int *out) {
         posix_spawn_file_actions_adddup2(&fa, ip[0], STDIN_FILENO);
         posix_spawn_file_actions_adddup2(&fa, op[1], STDOUT_FILENO);
         posix_spawn_file_actions_adddup2(&fa, op[1], STDERR_FILENO);
+        // Nothing else of the program's: a descriptor made on another
+        // island, a moment before its close-on-exec was set, would be the
+        // command's too, a socket held open or a pipe never closed (M7).
+        short flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK;
+#if defined(POSIX_SPAWN_CLOEXEC_DEFAULT)
+        flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;   // macOS: what no action names is closed
+#elif defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+        posix_spawn_file_actions_addclosefrom_np(&fa, STDERR_FILENO + 1);
+#endif
         sigemptyset(&none);
         sigemptyset(&def);
         sigaddset(&def, SIGPIPE);               // ignored here, and an ignored signal stays so across exec
@@ -809,7 +818,7 @@ static int spawn(char *const argv[], int *child, int *in, int *out) {
         posix_spawnattr_setsigmask(&at, &none);
         posix_spawnattr_setsigdefault(&at, &def);
         posix_spawnattr_setpgroup(&at, 0);
-        posix_spawnattr_setflags(&at, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
+        posix_spawnattr_setflags(&at, flags);
         err = posix_spawn(&pid, path, &fa, &at, argv, environ);
         posix_spawnattr_destroy(&at);
         posix_spawn_file_actions_destroy(&fa);

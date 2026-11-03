@@ -56,6 +56,11 @@ program, or the system to measure the run.
   opened after the first, island 3's pipe, opened with island 1's, is
   below it, and island 3 answers. It takes a limit on descriptors of
   4,096 or more, which is set for it; without one, it's skipped.
+- inherit: 300 commands, each listing its shell's descriptors while
+  other islands run commands and open sockets, list 0, 1 and 2 alone:
+  the rest are closed in the command (M7), where before, one made on
+  another island a moment before its close-on-exec was set could be the
+  command's too. It reads /proc, so it's Linux's alone.
 - https: http/request on an https:// URL runs curl (D251), over real TLS
   to a server here with a certificate made for the run: a whole reply
   and a chunked one come as over http, and without the certificate to
@@ -535,6 +540,19 @@ def wakes():
             check(what, False, f'still running after {DEADLINE} s')
 
 
+def inherit():
+    if not sys.platform.startswith('linux'):
+        print('skip inherit: no /proc here')
+        return
+    prog = build('inherit', 't/live/inherit.slight')
+    what = "300 commands, while other islands make descriptors, have none of the program's"
+    try:
+        r = subprocess.run(RUN + [prog, '300'], capture_output=True, env=ENV, timeout=DEADLINE)
+        check(what, r.returncode == 0 and r.stdout == b'(0 "0\\n1\\n2\\n")\n()\n', f'exit {r.returncode}, said {r.stdout!r}')
+    except subprocess.TimeoutExpired:
+        check(what, False, f'still running after {DEADLINE} s')
+
+
 # What a connection to the socket at path says first, or None.
 def hello(path):
     try:
@@ -651,6 +669,7 @@ timers()
 run_limit()
 sockets()
 wakes()
+inherit()
 https()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

@@ -1,0 +1,47 @@
+; For t/live.py (Linux): a command has none of the program's descriptors
+; but the stdin, stdout and stderr it's given (M7), though other islands
+; make descriptors all the while, each made close-on-exec a moment after
+; it's made: island 1 runs commands (a pair of pipes each), and island 2
+; connects to a listener on island 3 and hangs up. Each of n commands
+; here lists its shell's descriptors; this says how many listed more
+; than 0, 1 and 2, and what the last listed.
+
+(@include :exec)
+
+(defun listing ()
+    (match (exec/run (list "sh" "-c" "ls /proc/$$/fd"))
+        ((:ok (_ out)) out)
+        (other         other)))
+
+(defun listings (n acc)
+    (if (== n 0) acc (listings (- n 1) (cons (listing) acc))))
+
+(defun commands ()
+    (exec/run (list "true"))
+    (commands))
+
+(defun connect-once (addr)
+    (match (open :tcp addr)
+        ((:ok c) (disconnect c))
+        (_       ())))
+
+(defun connecting (addr)
+    (join (fork (connect-once addr)))
+    (connecting addr))
+
+(defun listener (to)
+    (recv ((:open l port) (send to (list $$ port)) (accepting))))
+(defun accepting ()
+    (recv ((:accept _ c) (disconnect c) (accepting))))
+
+(defun run (n)
+    (let me (address))
+    (spawn/on 3 (connect :tcp/listen 0 (listener me)))
+    (let l (read me))
+    (let a (spawn/on 1 (commands)))
+    (let b (spawn/on 2 (connecting (str "127.0.0.1:" (car (cdr l))))))
+    (let outs (listings n ()))
+    (map kill (list a b (car l)))
+    (list (fold/l 0 (lambda (k o) (if (eq? o "0\n1\n2\n") k (+ k 1))) outs) (car outs)))
+
+(pprint (run (str->int (car @ARGV))))
