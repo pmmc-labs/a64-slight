@@ -1,0 +1,30 @@
+; A reply's framing, as a client reads it (RFC 9112, 6.3), from a raw
+; server: a Transfer-Encoding whose last coding isn't chunked is read to
+; the end of the connection, a Content-Length beside it notwithstanding;
+; Content-Lengths that differ, and a chunk whose bytes aren't followed by
+; an empty line, are errors; a reply to HEAD has no body, though its head
+; says chunked; and a chunked reply that comes in pieces cut anywhere,
+; between a \r and its \n among them, is read as one that comes at once.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+(defun replies ()
+    (list
+        (list "/gzip"  "HTTP/1.1 200 OK\r\nTransfer-Encoding: gzip\r\nContent-Length: 2\r\n\r\nabcdef")
+        (list "/twice" "HTTP/1.1 200 OK\r\nContent-Length: 3\r\nContent-Length: 4\r\n\r\nabcd")
+        (list "/end"   "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n3\r\nabcXY\r\n0\r\n\r\n")
+        (list "/head"  "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n")
+        (list "/cut"   (list "HTTP/1.1 200 OK\r\nTransfer-Enc" "oding: chunked\r" "\n\r\n5\r" "\nhel" "lo\r" "\n0\r\n" "X: y\r" "\n\r\n"))))
+
+; The top level is a task (D243), which starts the raw server.
+(let up   (raw-up (replies)))
+(let base (str "http://127.0.0.1:" (cadr up)))
+(map pprint (list
+    (http/get (str base "/gzip"))
+    (http/get (str base "/twice"))
+    (http/get (str base "/end"))
+    (http/request :head (str base "/head") () "")
+    (http/get (str base "/cut"))))
+(kill (car up))
+:done

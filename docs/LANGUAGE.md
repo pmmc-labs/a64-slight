@@ -2516,8 +2516,15 @@ it, such as nginx or Caddy.
   over 64 KB a 431, and a body over 8 MB a 413, which is answered before
   the body is read. Chunked bodies are read both ways. A reply with no
   length is read to the end of the connection, except for HEAD, 1xx, 204
-  and 304, which have no body. `Expect: 100-continue` gets its 100 at
-  once.
+  and 304, which have no body whatever their head says. A body is framed
+  as RFC 9112 (6.3) has it: `chunked` counts only as the last coding of
+  `Transfer-Encoding`, as a word; a request whose last coding is another,
+  or that has a `Content-Length` too, is a 400, and a reply whose last
+  coding is another is read to the end of the connection. A
+  `Content-Length` is digits; the same one twice is one, and ones that
+  differ are a 400, or `(:error (:bad-http "content-length"))` in a
+  reply. The line after a chunk's bytes must be empty. `Expect:
+  100-continue` gets its 100 at once.
 - `(http/parse-url url)`: `(:ok host port target)` for
   `http://host[:port][/path[?query]]` and `https://...`, the port 80, or
   443 for `https`, and the target `"/"` when none is given; and `(:error
