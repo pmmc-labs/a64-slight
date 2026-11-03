@@ -45,5 +45,6 @@
 (pprint (try (fork (array/matmul f f 2 2 2))))
 (pprint (try (fork (json/print (array/make :float 1 math/INF)))))
 (pprint (try (fork (sexp/print (list->array :float (list nan))))))
+(pprint (map sexp/parse (list "#int(18446744073709551616)" "#int(20000000000000000000)" "#int(100000000000000000000)")))
 :done
 ; warns: 33:33 34:31 35:32 38:40 39:38

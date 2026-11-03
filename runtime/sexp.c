@@ -111,9 +111,12 @@ static int token_ok(const rt_sexp_t *s) {
     return s->state == S_ATOM || (s->state == S_HASH && s->word && !*s->word && !s->array) || (s->state == S_KEYWORD && !is_number(s->num));
 }
 
-// A number's digits, up to just past 63 bits, which is all token_ok needs.
+// A number's digits, up to just past 63 bits, which is all token_ok needs:
+// past that it stays at UINT64_MAX, since another digit could wrap it to
+// a number that fits (H6).
 static void count_digit(rt_sexp_t *s, int c) {
-    if (c >= '0' && c <= '9' && s->mag <= (uint64_t)1 << 62) s->mag = s->mag * 10 + (uint64_t)(c - '0');
+    if (c < '0' || c > '9') return;
+    s->mag = s->mag <= ((uint64_t)1 << 62) / 10 ? s->mag * 10 + (uint64_t)(c - '0') : UINT64_MAX;
 }
 
 static int is_blank(int c)  { return c == ' ' || c == '\t' || c == '\r'; }
@@ -459,7 +462,8 @@ static rt_value_t new_tuple(rt_value_t xs, rt_build_alloc_t alloc, void *cx) {
 }
 
 // An array of the numbers in xs, which the validator has said are all
-// numbers, and an #int's all integers.
+// numbers, and an #int's all integers. If it's wrong about an #int, the
+// program stops, rather than store a float's address as a number (H6).
 static rt_value_t new_array(rt_value_t xs, uint64_t type, rt_build_alloc_t alloc, void *cx) {
     uint64_t n = 0;
     for (rt_value_t v = xs; v != RT_NIL; v = rt_cdr(v)) n++;
@@ -468,6 +472,7 @@ static rt_value_t new_array(rt_value_t xs, uint64_t type, rt_build_alloc_t alloc
     box[0] = n << RT_BOX_SIZE_SHIFT | type;
     for (uint64_t i = 1; xs != RT_NIL; xs = rt_cdr(xs), i++) {
         rt_value_t x = rt_car(xs);
+        if (type == RT_BOX_INTS && (x & RT_TAG_INT_MASK)) abort();
         double     d = (x & RT_TAG_INT_MASK) == 0 ? (double)rt_int_value(x) : rt_float_value(x);
         if (type == RT_BOX_INTS) box[i] = (uint64_t)rt_int_value(x);
         else                     memcpy(box + i, &d, sizeof d);

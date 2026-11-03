@@ -44,4 +44,5 @@ fault in #<pid 16>: not JSON: #float(inf) (json/print at t/320-arrays.slight:46:
 (error not-json)
 fault in #<pid 17>: not data: #float(nan) (sexp/print at t/320-arrays.slight:47:20)
 (error not-sexp)
+((error (bad-sexp 25)) (error (bad-sexp 25)) (error (bad-sexp 26)))
 done
