@@ -2744,8 +2744,9 @@ argument it needs, or with one that isn't a string.
 - `(tools/printable text)`: `text` with what a terminal would take as a
   command, or would show in another order, written as an escape a person
   can read (D205): control characters but newline and tab, DEL and the
-  C1 controls as `\u{1b}`, Unicode's bidirectional embeddings,
-  overrides and isolates (U+202A to U+202E, U+2066 to U+2069) the same,
+  C1 controls as `\u{1b}`, Unicode's bidirectional controls, its
+  embeddings, overrides, isolates and marks (U+202A to U+202E, U+2066
+  to U+2069, U+200E, U+200F and U+061C) the same,
   and a byte that isn't UTF-8 as `\x9b`. So `(tools/printable "a\e[8mb")`
   is `"a\u{1b}[8mb"`. What it gives is printable already. The chat
   writes everything that comes from the model through it.

@@ -221,8 +221,10 @@
 ; text, with what a terminal would take as a command, or would show in
 ; another order, written as an escape a person can read: control
 ; characters but newline and tab, DEL and the C1 controls (U+0080 to
-; U+009F) as \u{1b}, Unicode's bidirectional embeddings, overrides and
-; isolates (U+202A to U+202E, U+2066 to U+2069) the same, and a byte
+; U+009F) as \u{1b}, Unicode's bidirectional controls, its embeddings,
+; overrides and isolates and its marks (U+202A to U+202E, U+2066 to
+; U+2069, U+200E, U+200F and U+061C, all that are Bidi_Control) the
+; same, and a byte
 ; that isn't UTF-8 as \x9b. What it gives is printable already, so it
 ; can be given again.
 (defun tools/printable (text)
@@ -234,6 +236,7 @@
         ((and (== (bytes/len c) 1) (>= (bytes/at c 0) 128)) (str "\\x" (tools/hex-of (bytes/at c 0))))
         ((or (== code 10) (== code 9))                       c)
         ((or (< code 32) (== code 127) (and (>= code 128) (<= code 159))
+             (== code 1564) (== code 8206) (== code 8207)
              (and (>= code 8234) (<= code 8238)) (and (>= code 8294) (<= code 8297)))
             (str "\\u{" (tools/hex-of code) "}"))
         (#true                                              c)))
