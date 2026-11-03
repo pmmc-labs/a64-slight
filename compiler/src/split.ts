@@ -324,6 +324,13 @@ function waitFor(r: Pair, t: Sym | null, rest: readonly Sexp[], env: readonly st
     const args   = live.map((v) => sym(TOP_PARAMS.find((p) => carried(p) === v) ?? v, r.pos));
     const name   = sym(hidden(fn, site), r.pos);
 
+    // Whether the rest uses a name the clause's pattern binds that nothing
+    // binds again after the body: a function's, a builtin's, or none. In
+    // the clause, where the rest would go, the pattern's would be the one
+    // it meant, though a pattern's names are its body's only.
+    const leaks = (c: Sexp): boolean =>
+        patternNames(patOf(c)).some((v) => restUses.has(v) && v !== t?.name && !live.includes(v));
+
     // At the start of a clause's body: the locals in used that its pattern
     // doesn't bind.
     const again = (c: Sexp, used: ReadonlySet<string>): readonly Sexp[] =>
@@ -333,7 +340,7 @@ function waitFor(r: Pair, t: Sym | null, rest: readonly Sexp[], env: readonly st
     let st2: St = st1;
     if (after.length === 0) {
         bodies = clauses.map((c) => [...again(c, uses(bodyOf(c), [])), ...bodyOf(c)]);
-    } else if (clauses.length === 1 && !bodyOf(clauses[0]!).some(ownRecv)) {
+    } else if (clauses.length === 1 && !bodyOf(clauses[0]!).some(ownRecv) && !leaks(clauses[0]!)) {
         // the rest comes after the clause's body, which a do keeps to
         // itself; a name its pattern hid is bound again after it
         const c     = clauses[0]!;

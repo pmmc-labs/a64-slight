@@ -62,6 +62,25 @@ test('a name a pattern binds comes across under another name if the rest needs t
     assert.doesNotThrow(() => compileProgram(read('(defun f (x) (let y (recv ((:a x) x) ((:b z) z))) (list x y)) (spawn (f 1))', 't')));
 });
 
+test("a pattern's names don't reach past a one-clause recv's body", () => {
+    // the rest calls length, the prelude's, which the pattern binds too: it
+    // gets a function of its own, where the pattern's length isn't
+    const src = '(defun w (xs) (let k (recv ((:scale length) length))) (pprint (* k (length xs))))';
+    assert.deepEqual(defun(src, 'w (after recv at t:1:22)').map(show).slice(2), ['(xs k)', '(pprint (* k (length xs)))']);
+    assert.deepEqual(defun(src, 'w (recv at t:1:22)').map(show).slice(2), [
+        '(xs (before recv at t:1:22))',
+        '(recv (((quote scale) length) (w (after recv at t:1:22) xs (before recv at t:1:22) length)))',
+    ]);
+    // so a name only the pattern binds is unknown after it, as a let's in
+    // a do would be, with the let or without
+    fails('(defun w () (let v (recv ((:a x) x))) (pprint x)) (spawn (w))', /unknown name 'x'/);
+    fails('(defun w () (recv ((:a x) x)) (pprint x)) (spawn (w))', /unknown name 'x'/);
+    // where the rest means a local from before, or the let's own name,
+    // the clause still takes the rest, binding the name again after it
+    assert.deepEqual(split('(defun w (x) (let v (recv ((:a x) x))) (list x v))').length, 2);
+    assert.deepEqual(split('(defun w () (let x (recv ((:a x) x))) (pprint x))').length, 2);
+});
+
 test('more than 8 locals come across as one list', () => {
     const src = '(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (recv (m (list a b c d e f g h i m)))';
     const g = defun(src, 'the top level (recv at t:1:91)');

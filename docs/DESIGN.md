@@ -271,8 +271,9 @@ evaluated, so what comes before the `recv` still happens first; or a
 message. Not in a lambda, and not in a `cond`, `do` (with `let`s) or
 `yield` that isn't in tail position. A `recv` with several clauses and
 something after it gets a generated function for what's after, rather
-than a copy of it in each clause; more than 8 locals go across as one
-list. Generated names have spaces in them, which a program can't write,
+than a copy of it in each clause, and so does one whose pattern binds a
+name that what's after it uses as a function's or a builtin's; more than
+8 locals go across as one list. Generated names have spaces in them, which a program can't write,
 and say where the `recv` is (`ask (recv at f.slight:3:12)`).
 
 A function that waits still can't give a value back to a function that
