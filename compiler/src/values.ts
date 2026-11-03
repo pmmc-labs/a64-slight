@@ -31,6 +31,13 @@ export const FLOAT_VALUE  = 8 - TAG_BOXED;
 // The symbols every program has, in id order (RT_FALSE is symbol 0, RT_TRUE symbol 1).
 export const RESERVED_SYMBOLS: readonly string[] = ['#false', '#true'];
 
+// The special forms, and those the expander turns into others (expand.ts),
+// which it leaves none of: neither kind can be a name.
+export const SPECIAL_FORMS: readonly string[] = [
+    'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'spawn', 'spawn/on', 'connect', 'recv', 'yield',
+    'if', 'when', 'case', 'and', 'or', 'match', '@include', 'deftype', 'sig', 'the',
+];
+
 // The fault kinds, in RT_FAULT_ order (from 1).
 export const FAULT_KINDS: readonly string[] = [
     'not-an-int', 'overflow', 'not-a-bool', 'no-clause', 'stack', 'not-a-cons', 'not-a-list', 'heap',

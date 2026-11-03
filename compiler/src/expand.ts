@@ -50,6 +50,7 @@ import { lowerPattern, NO_MATCH } from './pattern.ts';
 import { read } from './reader.ts';
 import { readSly } from './sly.ts';
 import { NIL, builtinSym, cons, form, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { MAX_ARGS, RESERVED_SYMBOLS, SPECIAL_FORMS, TOP_PARAMS } from './values.ts';
 
 // The outside world: a key for the file at path that's the same however
 // it's named (its real path), or null if there's no such file; and the
@@ -243,6 +244,51 @@ function after(xs: Sexp, n: number, keep: boolean): Sexp {
     return n > 0 ? cons(xs.car, after(xs.cdr, n - 1, keep), xs.pos) : mapList(xs, (y) => expand(y, keep));
 }
 
+// --- functions' shapes ------------------------------------------------------
+//
+// The expander sees every defun first, so it checks their shapes: then
+// neither the checker nor the code generator meets a malformed one.
+
+// A defun's name, parameters and body.
+export function checkDefunShape(x: Pair): { readonly name: Sym; readonly params: readonly Sym[]; readonly body: Sexp } {
+    const items = toArray(x) ?? [];
+    const [, name, params] = items;
+    if (items.length < 4 || name === undefined || params === undefined) {
+        throw new CompileError('defun is (defun name (params...) body...)', x.pos);
+    }
+    if (name.t !== 'sym') throw new CompileError(`defun needs a name, not ${show(name)}`, posOf(name) ?? x.pos);
+    checkBindable(name);
+    return { name, params: checkParams(name.name, params, x, name.pos), body: list(...items.slice(3)) };
+}
+
+// A defun's or a lambda's parameters: names, each once, at most MAX_ARGS.
+export function checkParams(owner: string, params: Sexp, x: Pair, ownerPos: Pos | null): readonly Sym[] {
+    const ps = toArray(params);
+    if (ps === null) throw new CompileError(`${owner}'s parameters must be a list, not ${show(params)}`, posOf(params) ?? x.pos);
+    const syms = ps.map((p) => {
+        if (p.t !== 'sym') throw new CompileError(`a parameter must be a name, not ${show(p)}`, posOf(p) ?? x.pos);
+        checkBindable(p);
+        return p;
+    });
+    syms.forEach((p, i) => {
+        if (syms.findIndex((q) => q.name === p.name) !== i) throw new CompileError(`${p.name} is a parameter twice`, p.pos);
+    });
+    if (syms.length > MAX_ARGS) {
+        throw new CompileError(`${owner} has ${syms.length} parameters; the most is ${MAX_ARGS}`, ownerPos ?? x.pos);
+    }
+    return syms;
+}
+
+// Names that can't be bound or defined: #true, #false, $$, ^$$, @ARGV,
+// %ENV and the special forms.
+export function checkBindable(name: Sym): void {
+    if (RESERVED_SYMBOLS.includes(name.name) || SPECIAL_FORMS.includes(name.name) || ['$$', '^$$', ...TOP_PARAMS].includes(name.name)) {
+        throw new CompileError(`can't bind ${name.name}`, name.pos);
+    }
+}
+
+// --- expanding --------------------------------------------------------------
+
 // keepMatch: everything but match, which the checker wants as it is
 // (D247); expanding the result again lowers it.
 export function expand(x: Sexp, keepMatch = false): Sexp {
@@ -262,7 +308,7 @@ export function expand(x: Sexp, keepMatch = false): Sexp {
         case 'and':      return ex(expandAnd(x));
         case 'or':       return ex(expandOr(x));
         case 'match':    return keepMatch ? matchKept(x) : ex(expandMatch(x));
-        case 'defun':    return after(x, 3, keepMatch);    // (defun name params body...)
+        case 'defun':    checkDefunShape(x); return after(x, 3, keepMatch);    // (defun name params body...)
         case 'lambda':   return after(x, 2, keepMatch);    // (lambda params body...)
         case 'cond':     return cons(x.car, mapList(x.cdr, (c) => mapList(c, ex)), x.pos);
         case 'recv':     return cons(x.car, mapList(x.cdr, (c) => after(c, 1, keepMatch)), x.pos);

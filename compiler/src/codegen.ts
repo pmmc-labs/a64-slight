@@ -40,10 +40,11 @@
 
 import { CompileError } from './errors.ts';
 import { builtinOf, builtinSym, float, form, own, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
-import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
+import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SPECIAL_FORMS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
 import { isReceiveBody, stateFunctions } from './classify.ts';
 import { lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { splitProgram } from './split.ts';
+import { checkBindable, checkDefunShape, checkParams } from './expand.ts';
 import { eraseTypes } from './check.ts';
 import { displayName, PRELUDE_SUFFIX } from './modules.ts';
 import { AARCH64 } from './aarch64.ts';
@@ -99,13 +100,6 @@ type St = {
     readonly closures: readonly string[];   // functions whose static closure has been emitted
     readonly functions: Code;               // every function's entry and name, for the runtime (D171)
 };
-
-// The special forms, and those the expander turns into others (expand.ts),
-// which it leaves none of: neither kind can be a name.
-const SPECIAL_FORMS: readonly string[] = [
-    'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'spawn', 'spawn/on', 'connect', 'recv', 'yield',
-    'if', 'when', 'case', 'and', 'or', 'match', '@include', 'deftype', 'sig', 'the',
-];
 
 // --- the program ------------------------------------------------------------
 
@@ -199,33 +193,13 @@ function symbolTable(symbols: Syms): Code {
 
 type Defun = { readonly name: Sym; readonly params: readonly Sym[]; readonly body: Sexp; readonly pos: Pos | null };
 
+// A defun's shape, as the expander checked it (it checks again here, for
+// what's compiled straight from the reader), and that it doesn't define a
+// builtin, which only the code generator knows.
 function checkDefun(x: Pair): Defun {
-    const items = toArray(x)!;
-    const [, name, params] = items;
-    if (items.length < 4 || name === undefined || params === undefined) {
-        throw new CompileError('defun is (defun name (params...) body...)', x.pos);
-    }
-    if (name.t !== 'sym') throw new CompileError(`defun needs a name, not ${show(name)}`, posOf(name) ?? x.pos);
-    checkBindable(name);
+    const { name, params, body } = checkDefunShape(x);
     if (isBuiltin(name.name)) throw new CompileError(`can't define ${name.name}: it's a builtin`, name.pos);
-    return { name, params: checkParams(name.name, params, x, name.pos), body: list(...items.slice(3)), pos: x.pos };
-}
-
-function checkParams(owner: string, params: Sexp, x: Pair, ownerPos: Pos | null): readonly Sym[] {
-    const ps = toArray(params);
-    if (ps === null) throw new CompileError(`${owner}'s parameters must be a list, not ${show(params)}`, posOf(params) ?? x.pos);
-    const syms = ps.map((p) => {
-        if (p.t !== 'sym') throw new CompileError(`a parameter must be a name, not ${show(p)}`, posOf(p) ?? x.pos);
-        checkBindable(p);
-        return p;
-    });
-    syms.forEach((p, i) => {
-        if (syms.findIndex((q) => q.name === p.name) !== i) throw new CompileError(`${p.name} is a parameter twice`, p.pos);
-    });
-    if (syms.length > MAX_ARGS) {
-        throw new CompileError(`${owner} has ${syms.length} parameters; the most is ${MAX_ARGS}`, ownerPos ?? x.pos);
-    }
-    return syms;
+    return { name, params, body, pos: x.pos };
 }
 
 // A program's functions are declared on top of the prelude's, so they
@@ -384,14 +358,6 @@ function checkLet(form: Pair): [Sym, Sexp] {
     if (name.t !== 'sym') throw new CompileError(`let needs a name, not ${show(name)}`, posOf(name) ?? form.pos);
     checkBindable(name);
     return [name, expr];
-}
-
-// Names that can't be bound or defined: #true, #false, $$, ^$$, @ARGV,
-// %ENV and the special forms.
-function checkBindable(name: Sym): void {
-    if (RESERVED_SYMBOLS.includes(name.name) || SPECIAL_FORMS.includes(name.name) || ['$$', '^$$', ...TOP_PARAMS].includes(name.name)) {
-        throw new CompileError(`can't bind ${name.name}`, name.pos);
-    }
 }
 
 function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
