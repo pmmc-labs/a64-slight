@@ -347,8 +347,13 @@ reductions left to right, `array/matmul`), `array/generate`,
 `array/map` and `array/fold` in the prelude, `lib/matrix.slight`, and
 the types `(array float)` and `(array int)` (golden tests 320 to 323,
 `t/models/arrays.py`; the checker's 011 and 012). `bench/`'s `slight-arrays`,
-`spectral-norm` with arrays (`docs/BENCHMARKS.md`). **Next:** nothing
-is under way. Candidates, none agreed: a simulation library across
+`spectral-norm` with arrays (`docs/BENCHMARKS.md`). The review of
+2026-11-02 (`docs/a64-slight-review-2026-11-02.md`), checked again and
+planned in `docs/review-2026-11-02-plan.md`: its steps 1 to 3, the bugs
+that need no decision, are done (golden tests 336 to 338 and 350 to
+353, 365 and 366, `t/types/` 013 and 014, and `t/live.py`'s wakes,
+inherit and accept); its step 4, what needs Stevan, waits for him.
+**Next:** nothing is under way. Candidates, none agreed: a simulation library across
 islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in
 conservative windows on a `clock/hold` builtin, with an HP-lattice
@@ -521,8 +526,12 @@ process in a cgroup of 256 MB, faulting at its cap; a command killed at
 its time limit; timers that
 nothing can come of, which don't hold up the end; a Unix socket left by
 SIGKILL, replaced, and removed by SIGTERM; https through real curl,
-over real TLS, to a server with a certificate made for the run);
-`tsan.sh` (`make tsan`); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers, `timer-ids.py`, a model of `timer/cancel`'s index, and `time.py`, of `lib/time.slight`, on Python's datetime, `pack.py`, of `bytes/pack` and `bytes/unpack`, on Python's struct, and `crypto.py`, of the hashes, MACs and encodings, on Python's hashlib, hmac and base64, and `math.py`, of `math/` on mpmath, which writes test 319's program too, and `arrays.py`, of the `array/` builtins on Python's floats, which writes test 321's, and `reaction.py`, of `examples/reaction.slight`'s simulation); `data/` (files the tests read or include, JSONTestSuite's among them, `sly/`, the tutorial's store in the C-style syntax, and `http-raw.slight`, a raw server and client for the HTTP tests, and `curl/curl`, a stand-in for curl, for `https://` without a network; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment (`//` in place of `;` in a `.sly` test). |
+over real TLS, to a server with a certificate made for the run; an
+island's wake pipe with a thousand files open; a command that gets
+none of the program's descriptors while other islands open them; a
+listener out of descriptors that rests rather than spins; and builtins
+that fault past the heap leaving nothing behind);
+`tsan.sh` (`make tsan`, with `data/tsan-sockets.slight`, sockets on two islands on the real clock); `headers.c`; `models/` (Python models that produced expected output, and a Java one, for the random numbers, `timer-ids.py`, a model of `timer/cancel`'s index, and `time.py`, of `lib/time.slight`, on Python's datetime, `pack.py`, of `bytes/pack` and `bytes/unpack`, on Python's struct, and `crypto.py`, of the hashes, MACs and encodings, on Python's hashlib, hmac and base64, and `math.py`, of `math/` on mpmath, which writes test 319's program too, and `arrays.py`, of the `array/` builtins on Python's floats, which writes test 321's, and `reaction.py`, of `examples/reaction.slight`'s simulation); `data/` (files the tests read or include, JSONTestSuite's among them, `sly/`, the tutorial's store in the C-style syntax, and `http-raw.slight`, a raw server and client for the HTTP tests, and `curl/curl`, a stand-in for curl, for `https://` without a network; tests write under `build/t/`). A line `; stdin: bytes` (printf `%b` escapes; `\033` is ESC) is the test's stdin, `; args: words` its arguments, and `; env: NAME=value ...` its environment (`//` in place of `;` in a `.sly` test). |
 | `build/` | Output (ignored): `runtime/`, the compiled runtime, kept by `slightc` (D150); `t/`, the golden tests' binaries and files |
 
 ## Commands

@@ -1,5 +1,52 @@
 # Fixing the review of 2026-11-02: the plan
 
+**Status (2026-11-03):** steps 1 to 3 are done. Step 4 waits for Stevan,
+and step 5 is begun: CLAUDE.md's status says what's done.
+
+- **Step 1**, `b0b69d1` to `8e4a0be`, a commit an item. Golden tests 336
+  to 338, t/320 extended, and `t/live.py`'s wakes, inherit, accept and
+  faults. `t/replay.sh` checks a command's environment, and `make tsan`
+  runs `t/data/tsan-sockets.slight` on the real clock. Where it went
+  past the plan:
+  - `bytes->base64`, `bytes->hex` and their inverses make their string
+    first and fill it, so they use no malloc at all.
+  - `new_array` aborts on a non-integer in an `#int`, a backstop the
+    validator no longer reaches, since `sexp/parse` ignores the build's
+    failure.
+  - Timers' device commands (`ring()`) wait for the end too, which ends
+    the leak of the timer's message.
+  - A program with more than about 1,000 descriptors open before its
+    first `spawn/on` now exits 2 with a message, where it overran the
+    stack before. 4E would lift that.
+- **Step 2**, `ba17904` to `7413117`. Golden tests 350 to 353,
+  `t/types/` 013 and 014, and `compiler/tests/driver.test.ts`.
+  - The refactor's assembly is byte-identical for all 388 programs.
+  - The `case` and `match` topic names, and `split.ts`'s temporaries
+    that are wholly in parentheses, keep their own shapes, which are
+    hidden as well.
+  - `|>` refuses a `lambda` form too, as in `x |> (fun(y) => ...)`.
+  - The driver also refuses a directory as input, says `couldn't write`
+    for a missing output directory, and can now be unit-tested.
+  - A local may now be named `car`, `cdr` or `cons` with more than 8
+    locals across a `recv`, which was an error.
+- **Step 3**, `333718e` to `ceddbe0`. Golden tests 365 and 366, with
+  207, 210, 186, 251 and 309 extended.
+  - The head and chunk readers keep an offset into the last chunk.
+  - A reply to HEAD, or a 1xx, 204 or 304, has no body whatever its head
+    says (RFC 9112, 6.3, rule 1). Before, one marked chunked waited for
+    a body.
+  - Content-Length must be digits alone.
+  - A reply with both Content-Length and Transfer-Encoding isn't
+    refused: TE wins, as the RFC says. Only a request gets the 400.
+
+Found on the way, for later:
+- A body streamed as `:lines` (`http/take`) still joins its chunks, up to
+  its 64 KB line.
+- The reader recurses, so about 100,000 nested parentheses run Node out
+  of stack. That's now `slightc: internal error`, not a crash.
+- `rt_io_fopen` (the hosts file and `resolv.conf`) opens without
+  close-on-exec. M7's fix covers commands either way.
+
 The review is [`a64-slight-review-2026-11-02.md`](a64-slight-review-2026-11-02.md).
 Every finding in it was checked again on 2026-11-03, against the code at
 `d62f792` (the review's `5699be7` plus the review). The checks were in

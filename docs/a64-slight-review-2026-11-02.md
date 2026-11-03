@@ -1,5 +1,16 @@
 # a64-slight: code review, every issue found
 
+**Status:** every finding was checked again, and a plan made, in
+[`review-2026-11-02-plan.md`](review-2026-11-02-plan.md), which says
+what's done. Its corrections, among them:
+
+- H6 is Medium: the binaries aren't PIE, so there's no ASLR to defeat.
+- The no-redirect rule in M6 is D205's.
+- H4(b), L7's first A record, and L15's default target were decided
+  (D113 and D257, D165, D146).
+
+The text below is the review as it was written.
+
 Reviewed at commit `5699be7` (2026-11-02, "License under Apache 2.0 with
 LLVM's exceptions"). Line numbers are the code's at that commit.
 
