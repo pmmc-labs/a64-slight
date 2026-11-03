@@ -570,14 +570,18 @@ over real TLS, to a server with a certificate made for the run);
   compiles for x86-64 (the default is `aarch64`). On x86, run an AArch64
   result with `qemu-aarch64 ./out`, and an x86-64 one directly. The
   runtime is compiled the first time it's needed, for each target, and
-  kept in `build/runtime/` until a runtime file changes (D150);
-  `--runtime` only builds it. The types are checked first, warnings to
+  kept in `build/runtime/` until a runtime file, or the C compiler or
+  its version (`cc --version`), changes (D150); `--runtime` only builds
+  it. `--` ends the options, before a file whose name starts with `-`;
+  `-o` refuses a name that starts with `-` (write `./-x`). The types are checked first, warnings to
   stderr (D247); `--check` only checks, and `--strict` warns of what
   might go wrong too (in the program's own files: a module it includes
   is checked strictly on its own, `--check --strict lib/map.slight`,
   D248), and makes a warning an error.
 - Exit codes from `slightc`: 0 ok, 1 compile error (or a warning, with
-  `--strict`), 2 usage or toolchain error. `SLIGHT_CC` overrides the C compiler command.
+  `--strict`), 2 usage or toolchain error, a file it can't read or write,
+  or a fault in the compiler itself, which it reports as `slightc:
+  internal error: ...` with Node's stack. `SLIGHT_CC` overrides the C compiler command.
 - `SLIGHT_POISON=1` when running a compiled program makes the collector
   fill what it frees (a nursery started again included) with garbage, so
   a pointer it missed fails at once. `t/run.sh` sets it.
