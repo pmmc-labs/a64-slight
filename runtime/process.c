@@ -1289,32 +1289,41 @@ static int far(rt_value_t v) {
 static void *island_main(void *arg);
 static void  share_tables(void);
 
-static void open_island(uint64_t k) {
-    island_t *s = &isles[k];
-    pthread_mutex_init(&s->lock, NULL);
-    if (pipe(s->wake) < 0) {
-        perror("slight: can't start an island");
-        exit(2);
-    }
-    for (int i = 0; i < 2; i++) {
-        fcntl(s->wake[i], F_SETFL, O_NONBLOCK);
-        fcntl(s->wake[i], F_SETFD, FD_CLOEXEC);
+// Every island's inbox, at once, while the descriptors open are as few
+// as they'll be: a wake pipe is in each of its island's select()s, which
+// would write past the fd_set with one at FD_SETSIZE or more (M2), so
+// that ends the program instead.
+static void open_islands(void) {
+    for (uint64_t k = 0; k < nislands; k++) {
+        island_t *s = &isles[k];
+        pthread_mutex_init(&s->lock, NULL);
+        if (pipe(s->wake) < 0) {
+            perror("slight: can't start an island");
+            exit(2);
+        }
+        if (s->wake[0] >= FD_SETSIZE) {
+            fprintf(stderr, "slight: can't start an island: %d descriptors are open, and select() takes %d\n", s->wake[0], FD_SETSIZE);
+            exit(2);
+        }
+        for (int i = 0; i < 2; i++) {
+            fcntl(s->wake[i], F_SETFL, O_NONBLOCK);
+            fcntl(s->wake[i], F_SETFD, FD_CLOEXEC);
+        }
     }
 }
 
 // Island k's thread, started if it hasn't been. Island 0's is the
-// program's own, and its inbox is opened with the first other's.
+// program's own, and the inboxes are opened with the first other's.
 static void start_island(uint64_t k) {
     if (k == 0 || atomic_load(&isles[k].started)) return;
     pthread_mutex_lock(&starting);
     if (!atomic_load(&isles[k].started)) {
         if (!atomic_load(&many)) {              // on island 0, the only one so far
             share_tables();
-            open_island(0);
+            open_islands();
             my.wake_fd = rt_io_wake(isles[0].wake[0]);
             atomic_store(&isles[0].started, 1);
         }
-        open_island(k);
         pthread_attr_t attr;
         pthread_t      thread;
         pthread_attr_init(&attr);
@@ -1409,6 +1418,17 @@ static void drain_wake(void) {
     while (read(isles[my.island].wake[0], buf, sizeof buf) > 0) {}
 }
 
+// Waits for a poke, and takes it. The pipe is below FD_SETSIZE
+// (open_islands).
+static void wait_wake(void) {
+    int    fd = isles[my.island].wake[0];
+    fd_set in;
+    FD_ZERO(&in);
+    FD_SET(fd, &in);
+    select(fd + 1, &in, NULL, NULL, NULL);
+    drain_wake();
+}
+
 // This island has nothing it can do but what an item brings: it waits for
 // one, and counts itself busy again once there is one; or, if every
 // island is done first, says so, 0.
@@ -1425,11 +1445,7 @@ static int awake(void) {
             return 1;
         }
         if (atomic_load(&busy) == 0) return 0;
-        fd_set in;
-        FD_ZERO(&in);
-        FD_SET(s->wake[0], &in);
-        select(s->wake[0] + 1, &in, NULL, NULL, NULL);
-        drain_wake();
+        wait_wake();
         pthread_mutex_lock(&s->lock);
         s->asleep = 0;
         pthread_mutex_unlock(&s->lock);
@@ -2477,11 +2493,7 @@ static void take_these(const uint64_t *ids, uint32_t n) {
             s->asleep = !it;
             pthread_mutex_unlock(&s->lock);
             if (it) break;
-            fd_set in;
-            FD_ZERO(&in);
-            FD_SET(s->wake[0], &in);
-            select(s->wake[0] + 1, &in, NULL, NULL, NULL);
-            drain_wake();
+            wait_wake();
         }
         int own = !it->in_msg;
         take_item(it);

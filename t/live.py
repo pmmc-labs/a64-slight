@@ -50,6 +50,12 @@ program, or the system to measure the run.
   second program can't take the path from it; killed with SIGKILL, it
   leaves the socket behind, which the next to listen there replaces; and
   ended by SIGTERM, it removes it.
+- wakes: with 1,100 files open before the first island starts, every
+  island's wake pipe would be past FD_SETSIZE, so the program says so
+  and ends, where it overran select()'s fd_set before (M2); with them
+  opened after the first, island 3's pipe, opened with island 1's, is
+  below it, and island 3 answers. It takes a limit on descriptors of
+  4,096 or more, which is set for it; without one, it's skipped.
 - https: http/request on an https:// URL runs curl (D251), over real TLS
   to a server here with a certificate made for the run: a whole reply
   and a chunked one come as over http, and without the certificate to
@@ -68,6 +74,7 @@ import os
 import platform
 import pty
 import re
+import resource
 import select
 import shlex
 import shutil
@@ -506,6 +513,28 @@ def run_limit():
         check(what, False, f'still running after {DEADLINE} s')
 
 
+def wakes():
+    hard = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
+    if hard != resource.RLIM_INFINITY and hard < 4096:
+        print(f'skip wakes: descriptors are limited to {hard}')
+        return
+    prog = build('wakes', 't/live/wakes.slight')
+    more = lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (4096, hard))
+    cases = [
+        ('before', 2, rb'^slight: can\'t start an island: \d+ descriptors are open, and select\(\) takes \d+\n$', b'',
+         '1,100 files open before an island starts: the program says the wake pipes are past FD_SETSIZE'),
+        ('after', 0, rb'^$', b'(echo 3 ping)\n()\n',
+         '1,100 files opened after an island starts: a later island\'s wake pipe was opened with the first'),
+    ]
+    for how, status, err, out, what in cases:
+        try:
+            r = subprocess.run(RUN + [prog, how, '1100'], capture_output=True, env=ENV, timeout=DEADLINE, preexec_fn=more)
+            ok = r.returncode == status and re.match(err, r.stderr) and r.stdout.endswith(out)
+            check(what, ok, f'exit {r.returncode}, said {r.stdout!r} and {r.stderr!r}')
+        except subprocess.TimeoutExpired:
+            check(what, False, f'still running after {DEADLINE} s')
+
+
 # What a connection to the socket at path says first, or None.
 def hello(path):
     try:
@@ -621,6 +650,7 @@ memory_limit()
 timers()
 run_limit()
 sockets()
+wakes()
 https()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)
