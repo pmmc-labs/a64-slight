@@ -1,0 +1,12 @@
+; For t/live.py: a listener whose connections can't be accepted for want
+; of a descriptor (EMFILE, under a low limit) rests a while before it
+; tries again, rather than have select() come back to it at once, again
+; and again, at 100% of a core (H4). It says its port, then keeps every
+; connection it's given, never handing one on, till it's killed.
+
+(defun server ()
+    (recv
+        ((:open l port) (pprint (list :port port)) (server))
+        ((:accept l c)  (server))))
+
+(connect :tcp/listen 0 (server))

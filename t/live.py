@@ -61,6 +61,10 @@ program, or the system to measure the run.
   the rest are closed in the command (M7), where before, one made on
   another island a moment before its close-on-exec was set could be the
   command's too. It reads /proc, so it's Linux's alone.
+- accept: a listener under a limit of 32 descriptors, with 40
+  connections waiting, takes what it can, and then, with no descriptor
+  for the next (EMFILE), rests a while each time, using under a quarter
+  of the CPU over two seconds, where it used all of it before (H4).
 - https: http/request on an https:// URL runs curl (D251), over real TLS
   to a server here with a certificate made for the run: a whole reply
   and a chunked one come as over http, and without the certificate to
@@ -92,6 +96,7 @@ import ssl
 import sys
 import termios
 import threading
+import time
 
 TARGET   = os.environ.get('TARGET', 'aarch64')
 DEADLINE = 120
@@ -553,6 +558,32 @@ def inherit():
         check(what, False, f'still running after {DEADLINE} s')
 
 
+def accept():
+    prog = build('accept', 't/live/accept.slight')
+    what = "a listener out of descriptors rests, rather than spin"
+    few = lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (32, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
+    p = subprocess.Popen(RUN + [prog], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=ENV, preexec_fn=few)
+    clients = []
+    try:
+        ready, _, _ = select.select([p.stdout], [], [], DEADLINE)
+        line = p.stdout.readline() if ready else b''
+        m = re.match(rb'\(port (\d+)\)', line)
+        if not m:
+            check(what, False, f'said {line!r}')
+            return
+        for _ in range(40):
+            clients.append(socket.create_connection(('127.0.0.1', int(m.group(1))), timeout=DEADLINE))
+        time.sleep(2)                           # a span to measure over, not a wait for anything
+    finally:
+        p.send_signal(signal.SIGTERM)
+        _, status, rusage = os.wait4(p.pid, 0)
+        p.returncode = os.waitstatus_to_exitcode(status)
+        for c in clients:
+            c.close()
+    cpu = rusage.ru_utime + rusage.ru_stime
+    check(f'{what}: {cpu:.2f} s of CPU in 2 s', cpu < 0.5, f'exit {p.returncode}')
+
+
 # What a connection to the socket at path says first, or None.
 def hello(path):
     try:
@@ -670,6 +701,7 @@ run_limit()
 sockets()
 wakes()
 inherit()
+accept()
 https()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

@@ -2747,7 +2747,7 @@ static void unset_alarm(uint64_t *alarm) {
     *alarm = 0;
 }
 
-static void lookup_timed_out(struct rt_device *d, uint64_t seq);
+static void device_alarm(struct rt_device *d, uint64_t seq);
 
 // Fires every timer that's due.
 static void ring(void) {
@@ -2767,7 +2767,7 @@ static void ring(void) {
             struct rt_device *d = slot(a.pid)->device;
             my.taking = 1;                      // as take_inbox: its message is freed first
             if (d && a.msg)  command(d, a.msg->value);
-            else if (d)      lookup_timed_out(d, a.seq);
+            else if (d)      device_alarm(d, a.seq);
             if (a.msg) free_msg(a.msg);
             end_taken();
         } else if (a.msg) {
@@ -3138,7 +3138,7 @@ typedef struct rt_device {
     int64_t           port;             // a listener's, or the port a connection is to be made to
     int               unix_sock;        // a Unix socket's, at path (D231)
     rt_lookup_t      *lookup;           // while a connection's host is looked up...
-    uint64_t          alarm;            // ...the timer for its query (own_alarm)
+    uint64_t          alarm;            // ...the timer for its query (own_alarm); a listener's, for its rest
     char             *buf;              // what's been read, but not yet sent...
     size_t            at, len, cap;     // ...from at to len
     uint64_t          how;              // how it cuts: RT_DEV_LINES, _CHUNKS, _JSON, _JSON_ITEMS or _SEXP
@@ -3265,8 +3265,8 @@ static void close_now(rt_device_t *d) {
     if (d->mode == DEV_EXEC) end_command(d);
     if (d->mode == DEV_LISTEN && d->unix_sock) forget_path(d->fd);
     if (d->fd >= 0) rt_io_close(d->fd);
+    unset_alarm(&d->alarm);
     if (d->lookup) {
-        unset_alarm(&d->alarm);
         rt_lookup_free(d->lookup);
         d->lookup = NULL;
     }
@@ -3915,6 +3915,13 @@ static void lookup_timed_out(rt_device_t *d, uint64_t seq) {
     lookup_step(d, rt_lookup_ready(d->lookup, 1, &addr), addr);
 }
 
+// A device's own timer has rung: a lookup's query has had its time, or a
+// listener its rest (accept_all).
+static void device_alarm(rt_device_t *d, uint64_t seq) {
+    if (d->mode != DEV_LISTEN)    lookup_timed_out(d, seq);
+    else if (d->alarm == seq + 1) d->alarm = 0;
+}
+
 // Unix sockets (D231): a connection reads and writes as a TCP one does,
 // and a listener at a path makes the socket there, replacing only one
 // that nothing accepts on, left by a program that has ended (replay.c).
@@ -4048,13 +4055,18 @@ rt_value_t rt_socket_peer(rt_value_t c, const char *site) {
 }
 
 // A listener has connections to accept: each becomes a device of the
-// listener's owner, which hears (:accept l conn).
+// listener's owner, which hears (:accept l conn). With no descriptor to
+// be had for one, the listener rests a while, since it stays ready, and
+// select() would otherwise come back to it at once, again and again (H4).
+#define ACCEPT_REST 100000000           // ns
+
 static void accept_all(rt_device_t *l) {
     rt_proc_t *owner = slot(l->owner)->proc;
     for (;;) {
         char where[INET_ADDRSTRLEN + 8];
         int  fd = rt_io_accept(l->fd, where, sizeof where);
         if (fd < 0 && errno == EINTR) continue;
+        if (fd < 0 && (errno == EMFILE || errno == ENFILE)) l->alarm = own_alarm(now() + ACCEPT_REST, l->pid);
         if (fd < 0) return;                     // none left, or none to be had for now
         if (rt_io_setup(fd, !l->unix_sock) != 0) {
             rt_io_close(fd);
@@ -4092,7 +4104,8 @@ static int wants(const rt_device_t *d, int *r, int *w) {
         *w = write;
         return 1;
     }
-    *r = d->mode == DEV_LISTEN || (!d->connecting && !d->waiting && !d->sent && !d->eof && !d->closing);
+    *r = d->mode == DEV_LISTEN ? !d->alarm      // not while it rests (accept_all)
+                               : !d->connecting && !d->waiting && !d->sent && !d->eof && !d->closing;
     *w = d->connecting || d->out_len > d->out_at;
     return *r || *w;
 }
