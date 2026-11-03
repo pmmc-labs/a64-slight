@@ -12,7 +12,9 @@ program, or the system to measure the run.
   before D244 every pid's entry was kept, 40 MB of them. And a 32 MB
   string held by 40 actors at once, which shares one buffer (D253), and
   600 strings of 1 MB made and dropped, whose buffers are freed: each
-  under PEAK, where copies, or a leak, would be over it.
+  under PEAK, where copies, or a leak, would be over it. And 8 faults of
+  str/replace-all past a heap of 64 MB peak within FLAT of 1: before
+  H3 and L8, each built its 100 MB outside the heap and left it there.
 - chat: examples/chat.slight in a terminal, with t/live/model.slight as
   its model: what the model sends with terminal escapes in it is shown
   escaped, approvals included; a refused command isn't run; and a fetch
@@ -83,6 +85,7 @@ TARGET   = os.environ.get('TARGET', 'aarch64')
 DEADLINE = 120
 PEAK     = 400 << 20
 CHURN    = 16 << 20
+FLAT     = 32 << 20
 DIR      = os.path.join('build', 't', TARGET, 'live')
 PROMPT   = '❯ '.encode()
 
@@ -137,7 +140,7 @@ def keys():
 # A run's stdout, exit status and peak resident set, from wait4, which
 # subprocess would take for itself. An alarm, which exec keeps, ends a run
 # that takes past the deadline.
-def peak_run(prog, args):
+def peak_run(prog, args, env=ENV):
     pid = os.fork()
     if pid == 0:
         signal.alarm(DEADLINE)
@@ -147,7 +150,7 @@ def peak_run(prog, args):
         os.dup2(out, 1)
         os.dup2(devnull, 2)
         try:
-            os.execvpe((RUN + [prog])[0], RUN + [prog] + args, ENV)
+            os.execvpe((RUN + [prog])[0], RUN + [prog] + args, env)
         finally:
             os._exit(127)
     _, status, rusage = os.wait4(pid, 0)
@@ -170,6 +173,12 @@ def memory():
         ok_out = out == expected if expected else out.startswith('(error (heap () "str/pad-start at ')
         check(f'{what}: {out.splitlines()[0] if out else "nothing"}, at most {peak >> 20} MB',
               status == 0 and ok_out and peak < most, f'exit {status}, printed {out!r}')
+    capped = ENV | {'SLIGHT_HEAP_MAX': '64M'}
+    out1, status1, peak1 = peak_run(prog, ['faults', '1'], capped)
+    out8, status8, peak8 = peak_run(prog, ['faults', '8'], capped)
+    check(f'8 faults past the heap in str/replace-all, at most {peak8 >> 20} MB, and 1 at most {peak1 >> 20} MB',
+          (status1, out1, status8, out8) == (0, '1\n()\n', 0, '8\n()\n') and peak8 < peak1 + FLAT,
+          f'exit {status1} and {status8}, printed {out1!r} and {out8!r}')
 
 
 # A terminal, read as it's written to: see waits for text after what's

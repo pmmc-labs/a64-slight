@@ -49,21 +49,44 @@ void *rt_must(void *p) {
 
 // --- text ---------------------------------------------------------------------
 
+static RT_ISLAND rt_buf_t *held_bufs;           // the builtins' buffers with bytes, freed by rt_fault
+
+// Room for len more bytes. A builtin's buffer can't pass what the heap has
+// room for, nor take more than that from malloc while it doubles.
+__attribute__((noinline))
+static void buf_grow(rt_buf_t *b, size_t len) {
+    size_t cap = (b->len + len) * 2 + 64;
+    if (b->site) {
+        size_t room = rt_heap_room();
+        if (len > room || b->len > room - len) rt_fault(RT_FAULT_HEAP, 0, b->site);
+        if (cap > room) cap = room;
+        if (!b->bytes) {
+            b->next_held = held_bufs;
+            held_bufs    = b;
+        }
+    }
+    b->cap   = cap;
+    b->bytes = rt_must(realloc(b->bytes, cap));
+}
+
 void rt_buf_add(rt_buf_t *b, const char *bytes, size_t len) {
     if (!len) return;                           // so an empty buffer's NULL is never copied to
-    if (b->len + len > b->cap) {
-        b->cap   = (b->len + len) * 2 + 64;
-        b->bytes = rt_must(realloc(b->bytes, b->cap));
-    }
+    if (b->len + len > b->cap) buf_grow(b, len);
     memcpy(b->bytes + b->len, bytes, len);
     b->len += len;
 }
 
 static void buf_str(rt_buf_t *b, const char *s) { rt_buf_add(b, s, strlen(s)); }
 
+// Keeps the site, so a buffer used again is held to the heap again.
 void rt_buf_free(rt_buf_t *b) {
+    if (b->site && b->bytes) {
+        rt_buf_t **link = &held_bufs;
+        while (*link != b) link = &(*link)->next_held;
+        *link = b->next_held;
+    }
     free(b->bytes);
-    *b = (rt_buf_t){ 0 };
+    *b = (rt_buf_t){ .site = b->site };
 }
 
 void rt_work_grow(rt_work_t *w) {
@@ -520,6 +543,8 @@ static const struct {
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
     if (fault < 1 || fault > RT_FAULT_COUNT) abort();
     if (!faults[fault].shows) value = RT_NIL;   // whatever the caller had in the register
+    for (rt_buf_t *h = held_bufs; h; h = h->next_held) free(h->bytes);   // their frames are below, never to return
+    held_bufs = NULL;
 
     rt_buf_t b = { 0 };
     buf_str(&b, faults[fault].what);

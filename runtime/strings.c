@@ -191,14 +191,14 @@ rt_value_t rt_is_str(rt_value_t v) {
 
 // Strings as their bytes, anything else as pprint shows it.
 rt_value_t rt_str(rt_value_t args, const char *site) {
-    rt_buf_t b = { 0 };
+    rt_buf_t b = { .site = site };
     for (; rt_is_cons(args); args = rt_cdr(args)) rt_render(&b, rt_car(args), 1);
     return buf_to_string(&b, site);
 }
 
 // `~`: strings, and only strings.
 rt_value_t rt_cat(rt_value_t args, const char *site) {
-    rt_buf_t b = { 0 };
+    rt_buf_t b = { .site = site };
     for (; rt_is_cons(args); args = rt_cdr(args)) {
         rt_value_t s = rt_car(args);
         if (!rt_is_string(s)) {
@@ -214,7 +214,7 @@ rt_value_t rt_cat(rt_value_t args, const char *site) {
 rt_value_t rt_str_join(rt_value_t sep, rt_value_t xs, const char *site) {
     need_string(sep, site);
     need_list(xs, site);
-    rt_buf_t b = { 0 };
+    rt_buf_t b = { .site = site };
     for (; rt_is_cons(xs); xs = rt_cdr(xs)) {
         rt_render(&b, rt_car(xs), 1);
         if (rt_cdr(xs) != RT_NIL) rt_buf_add(&b, bytes_of(sep), len_of(sep));
@@ -473,7 +473,7 @@ static rt_value_t change_case(rt_value_t s, int upper, const char *site) {
         rt_string_mark(out);
         return out;
     }
-    rt_buf_t b      = { 0 };
+    rt_buf_t b      = { .site = site };
     uint32_t before = 0;                        // whether the last character not case-ignorable was cased
     for (size_t at = 0; at < len;) {
         uint32_t code, to[3];
@@ -505,7 +505,7 @@ static rt_value_t replace(rt_value_t s, rt_value_t m, rt_value_t r, int all, con
     need_string(r, site);
     const char *p   = bytes_of(s), *q = bytes_of(m);
     size_t      len = len_of(s), mlen = len_of(m), at = 0;
-    rt_buf_t    b   = { 0 };
+    rt_buf_t    b   = { .site = site };
     for (;;) {
         int64_t found = find(p, len, q, mlen, at);
         if (found < 0) break;
@@ -588,7 +588,7 @@ rt_value_t rt_str_codes(rt_value_t s, const char *site) {
 // has no UTF-8.
 rt_value_t rt_codes_to_str(rt_value_t xs, const char *site) {
     need_list(xs, site);
-    rt_buf_t b = { 0 };
+    rt_buf_t b = { .site = site };
     for (; rt_is_cons(xs); xs = rt_cdr(xs)) {
         int64_t c = rt_need_int(rt_car(xs), site);
         if (!is_scalar(c)) {
@@ -621,7 +621,7 @@ rt_value_t rt_str_to_well_formed(rt_value_t s, const char *site) {
     if (rt_str_well_formed(s, site) == RT_TRUE) return s;
     const char *p   = bytes_of(s);
     size_t      len = len_of(s);
-    rt_buf_t    b   = { 0 };
+    rt_buf_t    b   = { .site = site };
     for (size_t at = 0; at < len;) {
         uint32_t code;
         int      stray;
@@ -741,7 +741,7 @@ rt_value_t rt_str_to_bytes(rt_value_t s, const char *site) {
 
 rt_value_t rt_bytes_to_str(rt_value_t xs, const char *site) {
     need_list(xs, site);
-    rt_buf_t b = { 0 };
+    rt_buf_t b = { .site = site };
     for (; rt_is_cons(xs); xs = rt_cdr(xs)) {
         int64_t byte = rt_need_int(rt_car(xs), site);
         if (byte < 0 || byte > 255) {
@@ -798,8 +798,7 @@ rt_value_t rt_bytes_index_of(rt_value_t s, rt_value_t m, rt_value_t from, const 
 
 // Writes its arguments, rendered as str does, straight to the terminal.
 rt_value_t rt_tty_write(rt_value_t args, const char *site) {
-    (void)site;
-    rt_buf_t b = { 0 };
+    rt_buf_t b = { .site = site };
     for (; rt_is_cons(args); args = rt_cdr(args)) rt_render(&b, rt_car(args), 1);
     fwrite(b.bytes, 1, b.len, stdout);
     fflush(stdout);
@@ -841,7 +840,7 @@ static int spec_of(rt_value_t x, int64_t *n, const char *site) {
 rt_value_t rt_bytes_pack(rt_value_t specs_, rt_value_t values, const char *site) {
     need_list(specs_, site);
     need_list(values, site);
-    rt_buf_t   out = { 0 };
+    rt_buf_t   out = { .site = site };
     rt_value_t vs  = values;
     for (rt_value_t ss = specs_; ss != RT_NIL; ss = rt_cdr(ss)) {
         need_list(rt_cdr(ss), site);
@@ -970,11 +969,15 @@ rt_value_t rt_bytes_unpack(rt_value_t specs_, rt_value_t s, rt_value_t at, const
 static const char B64[]    = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 static const char B64URL[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
 
+// Each of these makes its string whole first and fills it, so that one
+// too big for the heap faults before any work, and nothing is left in
+// malloc if it does (L8).
 static rt_value_t to_base64(rt_value_t s, const char *alphabet, int pad, const char *site) {
     need_string(s, site);
+    size_t         len = len_of(s), n = 0, rest = len % 3;
+    rt_value_t     r   = blank(len / 3 * 4 + (!rest ? 0 : pad ? 4 : rest + 1), site);
     const uint8_t *p   = (const uint8_t *)bytes_of(s);
-    size_t         len = len_of(s), n = 0;
-    char          *out = rt_must(malloc(len / 3 * 4 + 5));
+    char          *out = (char *)bytes_of(r);
     for (size_t i = 0; i < len; i += 3) {
         uint32_t v    = (uint32_t)p[i] << 16 | (i + 1 < len ? (uint32_t)p[i + 1] << 8 : 0) | (i + 2 < len ? p[i + 2] : 0);
         size_t   have = len - i < 3 ? len - i : 3;      // bytes in this group, so have + 1 characters
@@ -983,8 +986,7 @@ static rt_value_t to_base64(rt_value_t s, const char *alphabet, int pad, const c
             else if (pad)   out[n++] = '=';
         }
     }
-    rt_value_t r = rt_new_string(out, n, site);
-    free(out);
+    rt_string_mark(r);
     return r;
 }
 
@@ -1002,23 +1004,17 @@ static rt_value_t from_base64(rt_value_t s, const char *alphabet, int pad_needed
     while (pads < len && p[len - 1 - pads] == '=') pads++;
     size_t data = len - pads, r = data % 4;
     if (pads > 2 || r == 1 || ((pads || pad_needed) && len % 4 != 0) || (pads && pads != 4 - r)) return RT_FALSE;
-    char  *out = rt_must(malloc(data / 4 * 3 + 3));
-    size_t n   = 0;
+    for (size_t i = 0; i < data; i++) if (b64_digit(p[i], alphabet) < 0) return RT_FALSE;
+    rt_value_t result = blank(data / 4 * 3 + (r ? r - 1 : 0), site);
+    char      *out    = (char *)bytes_of(result);
+    size_t     n      = 0;
     for (size_t i = 0; i < data; i += 4) {
         size_t   have = data - i < 4 ? data - i : 4;
         uint32_t v    = 0;
-        for (size_t j = 0; j < 4; j++) {
-            int d = j < have ? b64_digit(p[i + j], alphabet) : 0;
-            if (d < 0) {
-                free(out);
-                return RT_FALSE;
-            }
-            v = v << 6 | (uint32_t)d;
-        }
+        for (size_t j = 0; j < 4; j++) v = v << 6 | (uint32_t)(j < have ? b64_digit(p[i + j], alphabet) : 0);
         for (size_t j = 0; j + 1 < have; j++) out[n++] = (char)(v >> (16 - 8 * j));
     }
-    rt_value_t result = rt_new_string(out, n, site);
-    free(out);
+    rt_string_mark(result);
     return result;
 }
 
@@ -1030,15 +1026,15 @@ rt_value_t rt_base64url_to_bytes(rt_value_t s, const char *site) { return from_b
 rt_value_t rt_bytes_to_hex(rt_value_t s, const char *site) {
     static const char digits[] = "0123456789abcdef";
     need_string(s, site);
-    const uint8_t *p   = (const uint8_t *)bytes_of(s);
     size_t         len = len_of(s);
-    char          *out = rt_must(malloc(2 * len + 1));
+    rt_value_t     r   = blank(size_times(len, 2, site), site);
+    const uint8_t *p   = (const uint8_t *)bytes_of(s);
+    char          *out = (char *)bytes_of(r);
     for (size_t i = 0; i < len; i++) {
         out[2 * i]     = digits[p[i] >> 4];
         out[2 * i + 1] = digits[p[i] & 15];
     }
-    rt_value_t r = rt_new_string(out, 2 * len, site);
-    free(out);
+    rt_string_mark(r);
     return r;
 }
 
@@ -1051,16 +1047,10 @@ rt_value_t rt_hex_to_bytes(rt_value_t s, const char *site) {
     const uint8_t *p   = (const uint8_t *)bytes_of(s);
     size_t         len = len_of(s);
     if (len % 2) return RT_FALSE;
-    char *out = rt_must(malloc(len / 2 + 1));
-    for (size_t i = 0; i < len; i += 2) {
-        int hi = hex_digit(p[i]), lo = hex_digit(p[i + 1]);
-        if (hi < 0 || lo < 0) {
-            free(out);
-            return RT_FALSE;
-        }
-        out[i / 2] = (char)(hi << 4 | lo);
-    }
-    rt_value_t r = rt_new_string(out, len / 2, site);
-    free(out);
+    for (size_t i = 0; i < len; i++) if (hex_digit(p[i]) < 0) return RT_FALSE;
+    rt_value_t r   = blank(len / 2, site);
+    char      *out = (char *)bytes_of(r);
+    for (size_t i = 0; i < len; i += 2) out[i / 2] = (char)(hex_digit(p[i]) << 4 | hex_digit(p[i + 1]));
+    rt_string_mark(r);
     return r;
 }

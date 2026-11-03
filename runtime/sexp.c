@@ -637,7 +637,7 @@ static void put_float(rt_buf_t *b, double d) {
 // whether anything has been written in it yet; for each tuple, the tuple,
 // and the index of its next element.
 rt_value_t rt_sexp_print(rt_value_t v, const char *site) {
-    rt_buf_t  b = { 0 };
+    rt_buf_t  b = { .site = site };
     rt_work_t w;
     rt_work_init(&w);
     for (;;) {

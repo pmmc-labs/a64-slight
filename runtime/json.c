@@ -488,7 +488,7 @@ static int put_array(rt_buf_t *b, rt_value_t v, int lenient) {
 // Compact JSON, on one line (D161). What JSON can't hold faults; or, if
 // lenient, as log has it (D254), is written as a string, as str writes it.
 static rt_value_t print_json(rt_value_t v, int lenient, const char *site) {
-    rt_buf_t  b = { 0 };
+    rt_buf_t  b = { .site = site };
     rt_work_t w;
     rt_work_init(&w);
     for (;;) {
@@ -639,7 +639,7 @@ rt_value_t rt_log_line(rt_value_t level, rt_value_t msg, rt_value_t fields, cons
         }
     }
     if (l < rt_log_level) return RT_NIL;
-    rt_buf_t b = { 0 };
+    rt_buf_t b = { .site = site };
     char     pid[64];
     put(&b, "{\"time\":\"");
     put_time(&b, rt_int_value(rt_clock_now(site)));

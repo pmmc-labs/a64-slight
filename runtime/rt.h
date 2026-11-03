@@ -775,6 +775,9 @@ rt_value_t rt_clock_now(const char *site) RT_ASM(rt_clock_now);
 // Faults at `site` when the heap would pass its limit.
 void rt_heap_grow(uint64_t bytes, const char *site) RT_ASM(rt_heap_grow);
 
+// How many more bytes the current process's heap can hold before its cap.
+size_t rt_heap_room(void);
+
 // Something went wrong at `site` (a description and a source position);
 // `value` is the offending value, where there is one. Logs a line to
 // stderr and ends the current process with (:error (kind value site)).
@@ -998,10 +1001,17 @@ uint64_t rt_string_header(const char *bytes, size_t len);
 // A new float.
 rt_value_t rt_new_float(double d, const char *site);
 
-// Text, for printing values and building strings: a growable buffer.
+// Text, for printing values and building strings: a growable buffer. One
+// a builtin builds has its site (`{ .site = site }`): it's held to the
+// room the process's heap has, faulting :heap past it, since the string
+// it becomes must fit there; and while it has bytes it's on the island's
+// list that rt_fault frees, so a builtin that faults leaks nothing (H3,
+// L8). Others, a fault's own text, say, are neither.
 typedef struct rt_buf {
-    char  *bytes;
-    size_t len, cap;
+    char           *bytes;
+    size_t          len, cap;
+    const char     *site;
+    struct rt_buf  *next_held;
 } rt_buf_t;
 
 void rt_buf_add(rt_buf_t *b, const char *bytes, size_t len);

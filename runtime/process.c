@@ -308,6 +308,11 @@ static size_t held(const rt_proc_t *p) {
     return p->heap_bytes + shared_bytes(p, 0) + shared_bytes(p, 1);
 }
 
+size_t rt_heap_room(void) {
+    size_t h = held(rt_current);
+    return h < heap_max ? heap_max - h : 0;
+}
+
 static void handles_add(handles_t *h, uint64_t *box) {
     if (h->n == h->cap) {
         h->cap = h->cap ? 2 * h->cap : 16;
