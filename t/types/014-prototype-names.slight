@@ -1,0 +1,19 @@
+; Names that JavaScript's objects have are a program's own (review M3):
+; each is checked as the function the program defines, an actor's tail
+; call of one included, and the warnings are about those.
+(sig toString (int) str)
+(defun toString (n) (str "#" n))
+
+(defun valueOf (x) (* x 2))
+
+(defun constructor (n)
+    (recv
+        ((:add k) (constructor (+ n k)))
+        ((:show)  (toString n))))
+
+(toString "five")
+(map valueOf (list 1 2))
+(let a (spawn (constructor 0)))
+(send a (list :add 2))
+(send a (list :show))
+(send a :hasOwnProperty)

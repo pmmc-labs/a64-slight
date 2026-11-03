@@ -39,7 +39,7 @@
 // prelude keeps using the prelude's (D80).
 
 import { CompileError } from './errors.ts';
-import { builtinOf, builtinSym, float, form, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { builtinOf, builtinSym, float, form, own, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
 import { isReceiveBody, stateFunctions } from './classify.ts';
 import { lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
@@ -428,7 +428,7 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     const si = lookup(cx.env, x.name);
     if (si !== null) return [st.t.loadSlot(si, x.name), st];
     if (TOP_PARAMS.includes(x.name)) throw new CompileError(`${x.name} is only seen at the top level: pass it to the functions that need it`, x.pos);
-    const constant = CONSTANTS[x.name];
+    const constant = own(CONSTANTS, x.name);
     if (constant !== undefined) return compileExpr(constant, cx, st);
     const fn = lookupFn(cx.fns, x.name);
     if (fn !== null && fn.state) throw new CompileError(`${fn.name} waits for messages, so it can't be used as a value`, x.pos);
@@ -529,7 +529,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (!hidden && lookup(cx.env, name) !== null) return compileClosureCall(x, head, args, cx, st);
     if (name === 'apply') return compileApply(x, args, cx, st);
     const operand: Cx = { ...cx, tail: false };
-    if (cx.noFloatTrees === undefined && (TREE_OPS[name] !== undefined || TREE_UNARY[name] !== undefined)) {
+    if (cx.noFloatTrees === undefined && (own(TREE_OPS, name) !== undefined || own(TREE_UNARY, name) !== undefined)) {
         const tree = floatTree(x, cx);
         if (tree !== null && treeOps(tree) >= 2 && treeRegs(tree) <= st.t.floatRegs && !treeLooksInt(tree)) {
             return compileFloatTree(x, tree, operand, st);
@@ -545,7 +545,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
         const [code, st1] = compileExpr(args[0]!, operand, st);
         return [[code, st.t.predicate(name)], st1];
     }
-    const builtin = C_BUILTINS[name];
+    const builtin = own(C_BUILTINS, name);
     if (builtin !== undefined) return compileCBuiltin(x, name, builtin, args, operand, st);
     if (name === 'eq?' || name === 'ne?') return compileEquality(x, name, args, operand, st);
     if (name === 'cons') return compileCons(x, args, operand, st);
@@ -554,7 +554,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (name === '/') return compileDivide(x, args, operand, st);
     const path = cxrPath(name);
     if (path !== null) return compileCxr(x, name, path, args, operand, st, !known);
-    const arith = ARITH[name];
+    const arith = own(ARITH, name);
     if (arith !== undefined) {
         const op = name as '+' | '-' | '*';
         const float = (s: St, notFloats: string, done: string, n?: bigint): [Code, St] => floatPath(x, op, notFloats, done, n, s);
@@ -569,7 +569,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             return [s.t.arith(op, overflow), s1];
         }, withWord, float);
     }
-    const cmp = COMPARE[name];
+    const cmp = own(COMPARE, name);
     if (cmp !== undefined) {
         const [cond, op] = cmp;
         // two floats inline too (D259), with no box to make
@@ -577,7 +577,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             [[s.t.branchUnlessFloats(notFloats), s.t.floatCompareBool(cond), s.t.jump(done)], s];
         return compileNumeric(x, name, args, operand, st, 'rt_compare', [imm(op)], (s) => [s.t.compareBool(cond), s], undefined, float);
     }
-    const bit = BITS[name];
+    const bit = own(BITS, name);
     if (bit !== undefined) {
         return compileBinary(x, name, args, operand, st, (s) => {
             if (bit !== 'shl' && bit !== 'shr') return [s.t.bits(bit, ''), s];
@@ -738,9 +738,10 @@ function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, 
         checkArity(x, 'connect', args, 2);
         return compileFork(x, 'connect', args[1]!, name === 'keypress' ? 'rt_connect' : 'rt_connect_system', cx, st);
     }
-    if (name !== null && name in SOURCES) {
+    const opener = name === null ? undefined : own(SOURCES, name);
+    if (opener !== undefined) {
         checkArity(x, 'connect', args, 3);
-        const [fn, ...mode] = SOURCES[name]!;
+        const [fn, ...mode] = opener;
         return compileFork(x, 'connect', args[2]!, fn, cx, st, [args[1]!], mode);
     }
     if (quoted) {
@@ -901,10 +902,10 @@ function builtinWrapper(x: Sym, st: St): [string, St] {
 }
 
 function builtinArity(name: string): number | null {
-    if (name in ARITH || name in COMPARE || name in BITS || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply', '/'].includes(name)) return 2;
+    if ([ARITH, COMPARE, BITS].some((t) => Object.hasOwn(t, name)) || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply', '/'].includes(name)) return 2;
     if (PREDICATES.includes(name) || name === 'pprint' || name === 'bit/not' || cxrPath(name) !== null) return 1;
     // with optional arguments, as a value it takes just the ones it needs (D219)
-    const c = C_BUILTINS[name];
+    const c = own(C_BUILTINS, name);
     return c !== undefined && !c.variadic ? c.min : null;
 }
 
@@ -1273,13 +1274,13 @@ function floatTree(x: Sexp, cx: Cx): FTree | null {
     const name = builtinOf(head) ?? (lookup(cx.env, head) === null ? head : null);
     const args = toArray(x.cdr);
     if (name === null || args === null) return null;
-    const op = TREE_OPS[name];
+    const op = own(TREE_OPS, name);
     if (op !== undefined && args.length === 2) {
         const l = floatTree(args[0]!, cx);
         const r = floatTree(args[1]!, cx);
         return l === null || r === null || (l.t === 'int' && r.t === 'int') ? null : { t: 'op', op, l, r };
     }
-    const u = TREE_UNARY[name];
+    const u = own(TREE_UNARY, name);
     if (u !== undefined && args.length === 1) {
         const a = floatTree(args[0]!, cx);
         return a === null || a.t === 'int' ? null : { t: 'unary', op: u, a };

@@ -1,0 +1,26 @@
+; Names that JavaScript's objects have, as a program's own (review M3):
+; the compiler's tables are looked up by their own entries only, so a
+; function named toString, valueOf, constructor or hasOwnProperty is the
+; program's, called, passed as a value, and tail-called from an actor
+; whose recv waits; and a local named isPrototypeOf is a local.
+
+(defun toString (n) (str "#" n))
+(defun valueOf (x) (* x 2))
+(defun hasOwnProperty (k) (eq? k :yes))
+(defun constructor (n)
+    (pprint (list :made n))
+    (wait))
+(defun wait ()
+    (recv
+        ((:make n) (constructor n))
+        ((:stop)   :stopped)))
+
+(pprint (toString 5))
+(pprint (map valueOf (list 1 2 3)))
+(pprint (filter hasOwnProperty (list :yes :no :yes)))
+(let isPrototypeOf 3)
+(pprint (+ isPrototypeOf 1))
+(let a (spawn (wait)))
+(send a (list :make 1))
+(send a (list :make 2))
+(send a (list :stop))

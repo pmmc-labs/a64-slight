@@ -32,7 +32,7 @@ import { CompileError } from './errors.ts';
 import { expand } from './expand.ts';
 import { displayName, PRELUDE_SUFFIX } from './modules.ts';
 import { REST } from './pattern.ts';
-import { NIL, builtinOf, cons, isForm, isSym, list, posOf, show, toArray, TUPLE, type Pair, type Pos, type Sexp } from './sexp.ts';
+import { NIL, builtinOf, cons, isForm, isSym, list, own, posOf, show, toArray, TUPLE, type Pair, type Pos, type Sexp } from './sexp.ts';
 import { BUILTINS, CONSTANTS, PREDICATES, RESULT_ANY, cxr, cxrSteps, faultOf, resultOf } from './builtins.ts';
 import {
     ANY, BOOL, FALSE_T, FLOAT, FUN_ANY, INT, LIST_ANY, NEVER, NIL_T, PID, STR, SYM, TRUE_T, TUPLE_ANY,
@@ -327,13 +327,13 @@ function readSig(x: Pair, defs: Defs): { readonly name: string; readonly sig: Si
 // no selective receive, so a message none of them takes is a dead letter.
 function mailboxesOf(fns: readonly Fn[]): Readonly<Record<string, Ty>> {
     const states = fns.filter((f) => f.state);
-    const own: Record<string, Ty> = Object.fromEntries(states.map((f) => [f.name, f.sig?.recv ?? recvsTake(f.body)]));
+    const takes: Record<string, Ty> = Object.fromEntries(states.map((f) => [f.name, f.sig?.recv ?? recvsTake(f.body)]));
     const calls: Record<string, readonly string[]> = Object.fromEntries(states.map((f) =>
-        [f.name, tailCallsIn(f.body).filter((n) => own[n] !== undefined)]));
+        [f.name, tailCallsIn(f.body).filter((n) => own(takes, n) !== undefined)]));
     return Object.fromEntries(states.map((f) => {
         const seen = [f.name];
-        for (let i = 0; i < seen.length; i++) for (const c of calls[seen[i]!] ?? []) if (!seen.includes(c)) seen.push(c);
-        return [f.name, union(...seen.map((n) => own[n]!))];
+        for (let i = 0; i < seen.length; i++) for (const c of own(calls, seen[i]!) ?? []) if (!seen.includes(c)) seen.push(c);
+        return [f.name, union(...seen.map((n) => own(takes, n)!))];
     }));
 }
 
@@ -372,7 +372,7 @@ function tailCallsIn(x: Sexp): readonly string[] {
 function checkFn(f: Fn, g: G, fns: Fns): Ty {
     const ptypes = f.sig?.params ?? f.params.map(() => ANY);
     const env = f.params.reduce<Env>((e, p, i) => bind(e, p, ptypes[i]!), null);
-    const mailbox = f.state ? (g.mailboxes[f.name] ?? ANY) : ANY;
+    const mailbox = f.state ? (own(g.mailboxes, f.name) ?? ANY) : ANY;
     const cx: Cx = {
         g, fns, module: f.module, env, vars: f.sig?.vars ?? [],
         kind: f.state ? 'actor' : 'unknown',
@@ -398,7 +398,7 @@ const name = (n: string, sly: boolean): string => (sly ? slyName(displayName(n))
 // A function by the name code calls it: `f (prelude)` is the prelude's
 // f, as a library's code names it (modules.ts, D248).
 const fnNamed = (cx: Cx, n: string): Fn | undefined =>
-    n.endsWith(PRELUDE_SUFFIX) ? cx.g.prelude[n.slice(0, -PRELUDE_SUFFIX.length)] : cx.fns[n];
+    n.endsWith(PRELUDE_SUFFIX) ? own(cx.g.prelude, n.slice(0, -PRELUDE_SUFFIX.length)) : own(cx.fns, n);
 
 function warn(cx: Cx, pos: Pos | null, message: string, certain: boolean): void {
     cx.g.report?.({ pos, message, certain });
@@ -456,15 +456,15 @@ function nameType(n: string, cx: Cx): Ty {
     }
     const local = lookup(cx.env, n);
     if (local !== null) return local.ty;
-    const c = CONSTANTS[n];
+    const c = own(CONSTANTS, n);
     if (c !== undefined) return c;
     const f = fnNamed(cx, n);
     if (f !== undefined) return funOfFn(f, cx.g);
     // a builtin as a value takes the arguments it's called with, its
     // optional ones among them (D219): no arity is fixed
-    const b = BUILTINS[n];
+    const b = own(BUILTINS, n);
     if (b !== undefined) return { k: 'fun', params: null, result: typeof b.result === 'function' ? ANY : b.result };
-    if (PREDICATES[n] !== undefined) return { k: 'fun', params: [ANY], result: BOOL };
+    if (own(PREDICATES, n) !== undefined) return { k: 'fun', params: [ANY], result: BOOL };
     if (cxrSteps(n) !== null) return { k: 'fun', params: [ANY], result: ANY };
     return ANY;
 }
@@ -512,8 +512,8 @@ function formType(x: Pair, cx: Cx, expected: Ty | null): Ty {
 // A call of the builtin n, if it's one; a name nothing knows is the code
 // generator's to report.
 function builtinType(x: Pair, n: string, args: readonly Sexp[], cx: Cx): Ty {
-    if (BUILTINS[n] !== undefined) return callBuiltin(x, n, args, cx);
-    if (PREDICATES[n] !== undefined) return argsThen(args, cx, BOOL);
+    if (own(BUILTINS, n) !== undefined) return callBuiltin(x, n, args, cx);
+    if (own(PREDICATES, n) !== undefined) return argsThen(args, cx, BOOL);
     const steps = cxrSteps(n);
     if (steps !== null) return callCxr(x, n, steps, args, cx);
     return argsThen(args, cx, ANY);
@@ -788,7 +788,7 @@ function refine(test: Sexp, cx: Cx, truth: boolean): Facts | null {
     const head = prim ?? test.car.name;
     const defs = cx.g.defs;
     if ((head === 'not' || head === `not${PRELUDE_SUFFIX}`) && args.length === 1 && fnNamed(cx, head)?.module === 'prelude') return refine(args[0]!, cx, !truth);
-    const pred = PREDICATES[head];
+    const pred = own(PREDICATES, head);
     if (pred !== undefined && args.length === 1) return narrow(args[0]!, cx, (t) => (truth ? meet(t, pred, defs) : minus(t, pred, defs)));
     if ((head === 'eq?' || head === 'ne?') && args.length === 2) {
         const yes = head === 'eq?' ? truth : !truth;
@@ -1069,7 +1069,7 @@ function spawnType(x: Pair, devices: readonly Sexp[], body: Sexp | undefined, cx
     if (ds.some((t) => t.k === 'never')) return NEVER;
     const starts = body !== undefined && body.t === 'pair' && body.car.t === 'sym' && lookup(cx.env, body.car.name) === null
         ? fnNamed(cx, body.car.name) : undefined;
-    const m = starts !== undefined && starts.module === 'user' ? (cx.g.mailboxes[starts.name] ?? ANY) : ANY;
+    const m = starts !== undefined && starts.module === 'user' ? (own(cx.g.mailboxes, starts.name) ?? ANY) : ANY;
     if (body !== undefined) typeOf(body, { ...cx, kind: 'actor', self: actorOf(m), mailbox: ANY });
     if (isForm(x, 'connect') && devices.length >= 1 && isKeyword(devices[0]!, 'keypress') && m.k !== 'any' && starts !== undefined) {
         const sly = isSly(x.pos);

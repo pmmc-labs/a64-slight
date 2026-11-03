@@ -33,6 +33,12 @@ export const fitsInt = (n: bigint): boolean => n >= INT_MIN && n <= INT_MAX;
 
 export const isSym = (x: Sexp, name: string): boolean => x.t === 'sym' && x.name === name;
 
+// A table's entry for a name a program gave, or undefined: its own, never
+// Object.prototype's, so a function named toString or constructor isn't
+// taken for one of the compiler's.
+export const own = <V>(table: Readonly<Record<string, V>>, name: string): V | undefined =>
+    (Object.hasOwn(table, name) ? table[name] : undefined);
+
 // --- hidden names -----------------------------------------------------------
 //
 // The compiler makes names of its own: a builtin no local can hide, a

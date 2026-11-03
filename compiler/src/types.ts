@@ -21,7 +21,7 @@
 
 import { CompileError } from './errors.ts';
 import { displayName } from './modules.ts';
-import { isForm, isSym, posOf, show as showSexp, toArray, TUPLE, type Sexp } from './sexp.ts';
+import { isForm, isSym, own, posOf, show as showSexp, toArray, TUPLE, type Sexp } from './sexp.ts';
 
 export type Ty =
     | { readonly k: 'any' }
@@ -455,7 +455,7 @@ export function readType(x: Sexp, vars: readonly string[], defs: Defs): Ty {
         case 'sym': {
             if (x.name === '#true' || x.name === '#false') return lit(x.name);
             if (vars.includes(x.name)) return { k: 'var', name: x.name };
-            const base = BASE[x.name];
+            const base = own(BASE, x.name);
             if (base !== undefined) return base;
             return aliasType(x.name, [], x, defs);
         }
@@ -521,7 +521,7 @@ const SLY_OPERATORS: Readonly<Record<string, string>> = {
 };
 
 export function slyName(name: string): string {
-    const op = SLY_OPERATORS[name];
+    const op = own(SLY_OPERATORS, name);
     if (op !== undefined) return op;
     const word = [...name].some((c) => (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9'));
     if (!word) return name;
