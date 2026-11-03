@@ -484,10 +484,11 @@ static void free_msg(rt_msg_t *m) {
 
 // A shared box of header for len bytes (RT_SHARED_MIN or more), for the
 // caller to fill through *data. The handle first, so that a heap at its
-// cap faults before the buffer's made.
+// cap faults before the buffer's made. Tested so that nothing wraps: a
+// len near 2^64 would make the sum, and the size malloc is given, small.
 rt_value_t rt_new_shared(uint64_t header, size_t len, char **data, const char *site) {
     rt_proc_t *p = rt_current;
-    if (held(p) + len > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
+    if (len > heap_max || held(p) > heap_max - len) rt_fault(RT_FAULT_HEAP, 0, site);
     uint64_t    *box = rt_alloc(32, site);
     rt_buffer_t *b   = rt_must(malloc(sizeof *b + len + 1));
     b->refs       = 1;

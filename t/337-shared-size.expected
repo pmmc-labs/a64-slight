@@ -1,0 +1,18 @@
+fault in #<pid 2>: heap exhausted (str/repeat at t/337-shared-size.slight:12:27)
+heap
+fault in #<pid 3>: heap exhausted (str/repeat at t/337-shared-size.slight:13:27)
+heap
+fault in #<pid 4>: heap exhausted (str/repeat at t/337-shared-size.slight:14:27)
+heap
+fault in #<pid 5>: heap exhausted (str/repeat at t/337-shared-size.slight:15:27)
+heap
+fault in #<pid 6>: heap exhausted (str/repeat at t/337-shared-size.slight:16:27)
+heap
+fault in #<pid 7>: heap exhausted (str/pad-start at t/337-shared-size.slight:17:27)
+heap
+fault in #<pid 8>: heap exhausted (str/pad-start at t/337-shared-size.slight:18:27)
+heap
+fault in #<pid 9>: heap exhausted (str/pad-end at t/337-shared-size.slight:19:27)
+heap
+4096
+()
