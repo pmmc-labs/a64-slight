@@ -253,16 +253,19 @@
 ; A URL must be http or https: curl reads files and much else too, and
 ; --proto holds it to those as well. curl doesn't follow a redirect: the
 ; model is told where it goes, and fetching that is asked about in turn,
-; so a page can't send a fetch where the person didn't agree to. 20
-; seconds and 5 MB at most; and a failure is curl's message, with the
-; trailer and anything it fetched before left out.
+; so a page can't send a fetch where the person didn't agree to; -q,
+; first, keeps a .curlrc from saying otherwise. --globoff makes the URL
+; one URL, [ and { included, not a pattern of many that one approval
+; would let through. 20 seconds and 5 MB at most; and a failure is
+; curl's message, with the trailer and anything it fetched before left
+; out.
 (defun tools/get (approve url)
     (cond
         ((not (or (str/starts-with? url "http://") (str/starts-with? url "https://")))
             (raise "the URL must start with http:// or https://"))
         ((not (tools/allowed? approve (str "fetch " url))) "the user didn't let it be fetched")
         (#true
-            (match (exec/run (list "curl" "-sS" "--proto" "=http,https" "--max-time" "20" "--max-filesize" "5000000"
+            (match (exec/run (list "curl" "-q" "-sS" "--proto" "=http,https" "--globoff" "--max-redirs" "0" "--max-time" "20" "--max-filesize" "5000000"
                                    "-w" (str "\\n" (tools/marker) "%{http_code}\\n%{url_effective}\\n%{content_type}\\n%{redirect_url}") "--" url))
                 ((:ok (0 output))      (tools/fetched output))
                 ((:ok (status output)) (raise (tools/curl-error output status)))

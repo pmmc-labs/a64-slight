@@ -158,12 +158,14 @@
 ; which comes with the reply: its exit code says what failed. It sends what
 ; http:// does, no User-Agent or Accept of its own, nor a Content-Type
 ; unless one's given. https alone, and no redirect followed, as http://
-; follows none.
+; follows none. -q, first, keeps a .curlrc from changing any of that (its
+; location would follow redirects), and --globoff takes [ and { in the URL
+; as themselves, as http:// does, not as a pattern of many URLs.
 (defun http/curl-command (method url headers body)
     (let data (or (> (bytes/len body) 0) (not (member? method (list "GET" "HEAD")))))
     (let typed (member? "content-type" (map (lambda (h) (str/lower (car h))) headers)))
-    (append (list "curl" "-s" "-i" "--raw" "--http1.1" "--suppress-connect-headers" "--proto" "=https"
-                  "-H" "Expect:" "-H" "User-Agent:" "-H" "Accept:")
+    (append (list "curl" "-q" "-s" "-i" "--raw" "--http1.1" "--suppress-connect-headers" "--proto" "=https"
+                  "--globoff" "--max-redirs" "0" "-H" "Expect:" "-H" "User-Agent:" "-H" "Accept:")
         (append (if (eq? method "HEAD") (list "--head") (list "-X" method))
             (append (if (and data (not typed)) (list "-H" "Content-Type:") ())
                 (append (fold/r () (lambda (h acc) (cons "-H" (cons (http/curl-header h) acc))) headers)

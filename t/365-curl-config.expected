@@ -1,0 +1,5 @@
+(ok "HTTP 302: a redirect to BASE/echo, which a fetch of its own can get")
+(ok "/echo filter[a]=b")
+(ok "/x[1-2] ")
+(ok "/y{a,b} ")
+(ok done)

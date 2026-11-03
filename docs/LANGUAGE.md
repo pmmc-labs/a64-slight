@@ -2461,7 +2461,9 @@ request and one reply to each connection, which then closes. A client's
 installed: it checks the server's certificate against the system's, and
 goes through a proxy if the environment names one (`https_proxy`), and
 what comes back is read as a socket's reply is, so it's the same
-responses and streams (D251). A server leaves TLS to a proxy in front of
+responses and streams (D251). curl is run with `-q`, so a `.curlrc`
+can't change what it does (follow redirects, say), and `--globoff`, so a
+URL with `[` or `{` in it is that URL, as over `http://`. A server leaves TLS to a proxy in front of
 it, such as nginx or Caddy.
 
     (@include :http)
@@ -2721,7 +2723,9 @@ argument it needs, or with one that isn't a string.
   anything out. A redirect isn't followed: the model is told where it
   goes, `HTTP 302: a redirect to http://...`, and fetching that is
   asked about in turn, so a page can't send a fetch somewhere the person
-  didn't agree to (D205). A web page comes as plain text, by
+  didn't agree to (D205); curl is run with `-q`, so a `.curlrc` can't
+  say otherwise. The URL is one URL, `[` and `{` taken as themselves
+  (`--globoff`), not a pattern of many. A web page comes as plain text, by
   `tools/html->text` (below), its links resolved against its URL; other
   text (JSON, XML, plain text) as it is; anything else as what it is,
   `not text: image/png, 5120 bytes`. Any other status that isn't 2xx
