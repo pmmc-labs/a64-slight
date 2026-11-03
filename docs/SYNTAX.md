@@ -255,7 +255,10 @@ right (the outermost one, if that's a call of a call), which suits the
 prelude, whose functions take their data last:
 `xs |> filter(even?) |> map(square)` is
 `(map square (filter even? xs))`. The `str::` builtins take the string
-first, so the pipe doesn't help with them.
+first, so the pipe doesn't help with them. Its right is a function's name
+or a call: a lambda there (`x |> fun(y) => y + 1`), a list or a tuple
+is an error, since each would take `x` as one more element rather than
+be called with it. Name a lambda with `let` first.
 
 ## What each form becomes
 

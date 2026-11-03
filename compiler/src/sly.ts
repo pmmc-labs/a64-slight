@@ -555,6 +555,7 @@ function parseBinary(ts: Ts, i: number, min: number): [Sexp, number] {
         const t  = ts[j];
         const op = opAt(t);
         if (op === null || op.prec < min || (t!.text === '-' && freshLine(ts, j))) return [left, j];
+        if (op.name === '|>') pipeable(ts[j + 1], t!.pos);
         const [right, k] = parseBinary(ts, j + 1, op.prec + 1);
         left = binary(op, left, right, t!.pos);
         j = k;
@@ -565,8 +566,22 @@ function parseBinary(ts: Ts, i: number, min: number): [Sexp, number] {
     }
 }
 
+// The right of |> is a function, which it calls, or a call, which it
+// adds its left side to. A lambda, a list or a tuple there would take it
+// as one more element, quietly, so each is refused by its first token
+// ([f] reads as list(f), the same s-expression), and a lambda in
+// parentheses by its form.
+function pipeable(t: Token | undefined, at: Pos): void {
+    const what = isW(t, 'fun') ? LAMBDA : isP(t, '[') ? 'a list' : isP(t, '#(') ? 'a tuple' : null;
+    if (what !== null) throw notPipeable(what, t?.pos ?? at);
+}
+
+const LAMBDA      = 'a lambda: name it with let first';
+const notPipeable = (what: string, at: Pos): CompileError => new CompileError(`the right of '|>' is a function or a call, not ${what}`, at);
+
 function binary(op: Op, left: Sexp, right: Sexp, at: Pos): Sexp {
     if (op.name !== '|>') return form(at, sym(op.name, at), left, right);
+    if (isForm(right, 'lambda')) throw notPipeable(LAMBDA, posOf(right) ?? at);
     // x |> f is (f x), and x |> f(a) is (f a x)
     if (right.t === 'sym') return form(at, right, left);
     if (right.t === 'pair' && !isForm(right, 'quote')) return cons(right.car, appendOne(right.cdr, left), right.pos);

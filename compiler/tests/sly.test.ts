@@ -115,6 +115,14 @@ test('the pipe puts its value last', () => {
     same('xs |> filter(even?) |> map(square);', '(map square (filter even? xs))');
     same('x |> f;', '(f x)');
     fails('x |> 1;', /the right of '\|>'/);
+    // a lambda, a list or a tuple would take the left side as one more
+    // element, so each is refused; a call of a call is still a call
+    fails('3 |> fun(y) => y + 1;', /the right of '\|>' is a function or a call, not a lambda/, 1, 6);
+    fails('3 |> (fun(y) => y + 1);', /not a lambda/, 1, 7);
+    fails('3 |> [inc];', /not a list/, 1, 6);
+    fails('3 |> #(inc);', /not a tuple/, 1, 6);
+    same('xs |> list(1);', '(list 1 xs)');
+    same('x |> f(a)(b);', '((f a) b x)');
 });
 
 test('lambdas', () => {
