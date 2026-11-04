@@ -5,7 +5,7 @@
 
 (pprint (join (fork (grow ()))))
 
-; A process waiting for a message holds no stack.
+; A process waiting for a message keeps its stack (D276).
 (defun idle ()
     (recv (_ :done)))
 

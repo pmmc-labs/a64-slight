@@ -2222,7 +2222,7 @@ browser when watching from afar matters. It would sit with the
 simulation library above: the flagship's dashboard is this viewer, fed
 by the root.
 
-### One kind of process, and an address for every message (proposed, open, Nov 2026)
+### One kind of process, and an address for every message (Nov 2026: step 1 built, D276; the rest open)
 
 Proposed by Claude after Stevan went back to ts-slight ("the process
 split felt kind of wrong when we did it ... I've struggled with the
@@ -2371,7 +2371,11 @@ Mac, stackful against today.
    a new state, and skips messages marked for an address. The compiler
    emits a `recv` as a call that returns, its clauses the `match` they
    are. `split.ts` and `classify.ts` go; `make test` still passes,
-   since every program that obeyed the rule still does.
+   since every program that obeyed the rule still does. *Built (D276):
+   the only expected outputs that changed are the five the change
+   explains, two deadlock messages, `:system`'s stacks, the guide's
+   memory demo and `million-forks`, now `ten-thousand-forks`; no
+   program's order of events moved.*
 2. **One kind.** The actor flag, `spawn`, `:not-a-task` and
    `:not-an-actor` go; `address`, `read`, `read/any` and `open` work in
    every process; `read` of a pid faults unless it's `$$`; `monitor`
@@ -2478,7 +2482,7 @@ builtin. Beyond that:
 |---|---|
 | `fib`, `fold-konts`, `game-of-life`, `simple-crappy-adts`, `closure-objects` | ported in step 6 (`examples/`) |
 | `scratchpad` | nothing else (pure) |
-| `ping-pong`, `ring-benchmark`, `million-forks` | ported in step 7 (`examples/`, D97) |
+| `ping-pong`, `ring-benchmark`, `million-forks` | ported in step 7 (`examples/`, D97); `million-forks` is `ten-thousand-forks` since D276, a waiting process keeping its stack |
 | `pub-sub`, `even-odd-actors`, `fixed-tournament` | ported in step 8 (D104) |
 | `ping-pong-tournament` | ported in step 10a, without a golden test (D115) |
 | `simple-db-server`, `game-of-life-actors` | ported after step 13: `recv` goes in the middle of a function now (D167); `simple-db-server`'s client asks with `lib/ds.slight`'s `ask`, as a lambda can't wait; `game-of-life-actors` takes its count and its change in two steps, the root waiting for every cell between them, and is on `game-of-life`'s glider, so it prints just what that does |

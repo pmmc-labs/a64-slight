@@ -9,8 +9,8 @@ assembly. The compiler is TypeScript for now and should self-host later.
 **Steps 0–9, 10a–10e and 11 of [`docs/PLAN.md`](docs/PLAN.md) are done**:
 the reader, and a compiler for integers, floats, `#true`/`#false`, `()`,
 symbols, lists (a heap per process of chunks, capped at 1 GB or what
-`SLIGHT_HEAP_MAX` says, D202, in two generations, D200, and collected when a receive function waits for a
-message, or at a function's entry, with the frames as roots: D166),
+`SLIGHT_HEAP_MAX` says, D202, in two generations, D200, and collected when a process waits in `recv`, or at a
+function's entry, with the frames as roots: D166, D276),
 strings, closures
 (`lambda`, functions and builtins as values, `apply`), arithmetic
 (integers inline; floats inline too, D198, and mixed in C), structural `eq?`
@@ -20,11 +20,10 @@ predicates, the string and math builtins (C, in `runtime/`), `cond`,
 tail calls (arguments in `x0`–`x7`; stack and reduction checks at every
 function entry). The prelude (`lib/prelude.slight`) is compiled with every
 program (with `sort`, `sort-by` and `zip`, D175); `lib/test.slight` is a TAP library. Processes: `fork`, `send`,
-`recv` (anywhere a tail call could go: `split.ts` splits a function at
-each one into receive functions, D167, and `classify.ts` checks the
-`recv` rule),
-`$$`, `^$$`, `yield`, preemption, a FIFO run queue, pooled stacks that a
-process waiting in `recv` gives back, and the lifecycle: `join`,
+`recv` (anywhere in an actor's code, the stack kept while it waits:
+D276, which retired the `recv` rule, D8 and D167),
+`$$`, `^$$`, `yield`, preemption, a FIFO run queue, pooled stacks, held
+from a process's first run to its end, and the lifecycle: `join`,
 `monitor`, `kill`, `raise`, `join/race` (D220), exit records, and faults that end just their
 process with `(:error (kind value site))` (`runtime/process.c`). Timers:
 `after`, `sleep`, and a virtual clock for tests (`SLIGHT_CLOCK=virtual`);
@@ -374,7 +373,7 @@ says what and how): step 4's K (IPv6), L (a lambda after `|>`), M (a
 runtime cache outside the install) and N (CI, ASan, fuzzing), each to
 be put to Stevan; step 5's documents (README, leap seconds, the
 Unicode License's text); and what's to be checked on the M2.
-**Next:** the review's last items, above; nothing else is under way. Candidates, none agreed: one kind of process, every wait keeping its stack, and an address for every message, `recv` a read of the process's own inbox and an end a message from `monitor` (`docs/PLAN.md`, "One kind of process, and an address for every message", proposed and open, Nov 2026, which would retire the `recv` rule, D8 and D167, and the two kinds, D243); a simulation library across
+**Next:** one kind of process, every wait keeping its stack, and an address for every message (`docs/PLAN.md`, "One kind of process, and an address for every message", Nov 2026), under way: step 1 is built (D276), `recv` keeps its stack and goes anywhere in an actor, and `split.ts`, `classify.ts` and the `recv` rule are gone; steps 2 to 5 (one kind of process, a pid its own inbox and an end a message from `monitor`; the fork-and-join dance out of `lib/` and the examples; the docs; ts-cpi's Life programs as golden tests) to come, each on Stevan's word; and the review's last items, above. Candidates, none agreed: a simulation library across
 islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in
 conservative windows on a `clock/hold` builtin, with an HP-lattice
@@ -533,7 +532,7 @@ to get them back from git (`3fd71e0`).
 | Path | |
 |---|---|
 | `bin/slightc.ts` | The driver: read and expand (with the files it includes), compile, write `out.S`, link with clang |
-| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `sly.ts` (the C-style syntax, `.sly`, read into the same forms, D246, `docs/SYNTAX.md`), `expand.ts` (`@include`, and the forms that become `cond`; with `keepMatch`, all but `match`, for the checker), `modules.ts` (a file with a header is a module: linking the units by renaming, D248), `types.ts` (types: union, meet, fits, reading and showing them, D247), `check.ts` (the type checker, its warnings, and `eraseTypes`), `builtins.ts` (the builtins' types), `pattern.ts` (`match`'s and `recv`'s patterns, as tests and bindings), `split.ts` (a `recv` anywhere a tail call could go, made the whole body of a generated receive function), `classify.ts` (the `recv` rule: which functions are state functions), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
+| `compiler/src/` | `sexp.ts` (the data), `reader.ts`, `sly.ts` (the C-style syntax, `.sly`, read into the same forms, D246, `docs/SYNTAX.md`), `expand.ts` (`@include`, and the forms that become `cond`; with `keepMatch`, all but `match`, for the checker), `modules.ts` (a file with a header is a module: linking the units by renaming, D248), `types.ts` (types: union, meet, fits, reading and showing them, D247), `check.ts` (the type checker, its warnings, and `eraseTypes`), `builtins.ts` (the builtins' types), `pattern.ts` (`match`'s and `recv`'s patterns, as tests and bindings), `codegen.ts` (what to emit), `target.ts` (the shapes a target supplies, and `placeArgs`), `aarch64.ts` and `x86_64.ts` (the targets), `values.ts` (value encodings; must match `rt.h`), `errors.ts` |
 | `compiler/tests/` | Unit tests, `node:test` |
 | `runtime/` | `rt.h` (tags and offsets shared with assembly), `asm_aarch64.h` and `asm_x86_64.h` (assembler macros, included by generated code), `rt_asm_aarch64.S` and `rt_asm_x86_64.S` (context switch, process entry, `apply`), `rt.c` (the core: faults, allocation, printing, equality), `process.c` (processes, run queue, stacks, heap chunks, message copying, the collector, timers, reading keys, files, sockets and commands, `:system`, `main`), `tty.c` (raw mode, decoding keys, the screen's size), `strings.c` (the string builtins, D219), `files.c` (`fs/list`, `fs/stat`, `fs/delete`, `fs/rename`, `fs/mkdir`, D254, and `fs/delete-all`, D275), `crypto.c` (SHA-2, HMAC, `crypto/equal?`, `crypto/random-bytes`, D255), `unicode.c` (Unicode's case mappings and the properties they need, made by `gen-unicode.py`; don't edit it), `numbers.c`, `tuples.c`, `arrays.c` (arrays of numbers, D253), `json.c`, `sexp.c`, `dns.c` (looking up host names), `replay.c` and `io.h` (every system call that brings something in, or starts or stops a command, for recording and replaying a run) |
 | `vendor/` | Vendored C, unmodified, compiled with the runtime (D152, D251): `core-math/`, CORE-MATH's functions for `math/` (D253), with its `LICENSE` and a `VENDOR` file saying where it came from and how to update it |

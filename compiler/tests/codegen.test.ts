@@ -607,64 +607,46 @@ test("the prelude's not is inline, as a value and as a test; a program's own not
 
 const W = '(defun w () (recv (m m))) ';
 
-test('recv goes anywhere a tail call could (D167), but not in a lambda', () => {
+test('recv goes anywhere, and keeps its stack (D276)', () => {
     assert.doesNotThrow(() => compile('(spawn (recv (m m)))'));
     assert.doesNotThrow(() => compile('(defun f () (pprint 1) (recv (m m))) (spawn (f))'));
     assert.doesNotThrow(() => compile('(defun f () (cond (#true (recv (m m))))) (spawn (f))'));
     assert.doesNotThrow(() => compile('(defun f () (recv (m (recv (n n))))) (spawn (f))'));
     assert.doesNotThrow(() => compile('(defun f () (recv)) (spawn (f))'));
     assert.doesNotThrow(() => compile('(spawn (pprint (list (recv) (recv))))'));
-    fails('(lambda () (recv (m m)))', "test.slight:1:12: recv can't be in a lambda: a lambda can't wait for messages");
-    fails('(lambda () (fork 1) (pprint (recv)))', "test.slight:1:29: recv can't be in a lambda: a lambda can't wait for messages");
-    fails('(defun f () (cond ((recv) 1)) 2) (f)',
-        "test.slight:1:13: a recv can only be in a cond that's in tail position; take the message first, with (let m (recv ...))");
-    fails('(defun f () (pprint (cond (#true (recv))))) (f)',
-        "test.slight:1:21: a recv can only be in a cond that's in tail position; take the message first, with (let m (recv ...))");
-    fails('(defun f () (do (let x (recv)) x) 2) (f)',
-        "test.slight:1:13: a recv can only be in a do that's in tail position, or one with no lets; take the message first, with (let m (recv ...))");
-    fails('(defun f () (yield (recv)) 2) (f)',
-        "test.slight:1:13: a recv can only be in a yield that's in tail position; take the message first, with (let m (recv ...))");
-    // a case or a match becomes a do that binds its topic, and is named as written
-    const expanded = (src: string, message: string): void =>
-        assert.throws(() => compileProgram(expand(read(src, 'test.slight'))), (e: unknown) => e instanceof CompileError && e.message === message);
-    expanded('(defun f (x) (let v (case x (1 (recv (m m))) (#true 2))) v) (f 1)',
-        "test.slight:1:21: a recv can only be in a case that's in tail position; take the message first, with (let m (recv ...))");
-    expanded('(defun f (x) (match x (1 (recv (m m))) (_ 2)) 3) (f 1)',
-        "test.slight:1:14: a recv can only be in a match that's in tail position; take the message first, with (let m (recv ...))");
-    expanded('(defun f () (do (let x (recv)) x) 2) (f)',
-        "test.slight:1:13: a recv can only be in a do that's in tail position, or one with no lets; take the message first, with (let m (recv ...))");
+    // where a tail call couldn't go, which D167 refused
+    assert.doesNotThrow(() => compile('(defun f () (cond ((recv) 1)) 2) (spawn (f))'));
+    assert.doesNotThrow(() => compile('(defun f () (pprint (cond (#true (recv)))) 2) (spawn (f))'));
+    assert.doesNotThrow(() => compile('(defun f () (do (let x (recv)) x) 2) (spawn (f))'));
+    assert.doesNotThrow(() => compile('(defun f () (yield (recv)) 2) (spawn (f))'));
+    const expanded = (src: string): string => compileProgram(expand(read(src, 'test.slight')));
+    assert.doesNotThrow(() => expanded('(defun f (x) (let v (case x (1 (recv (m m))) (#true 2))) v) (spawn (f 1))'));
+    assert.doesNotThrow(() => expanded('(defun f (x) (match x (1 (recv (m m))) (_ 2)) 3) (spawn (f 1))'));
+    // and in a lambda
+    assert.doesNotThrow(() => compile('(lambda () (recv (m m)))'));
+    assert.doesNotThrow(() => compile('(lambda () (fork 1) (pprint (recv)))'));
 });
 
-test('a function with a recv in it waits, so it can only be called in tail position', () => {
-    fails('(defun f () (let m (recv)) m) (defun g () (pprint (f)))', 'test.slight:1:51: f waits for messages (it reaches a recv), so it can only be called in tail position');
-});
-
-test('a function that waits can only be called in tail position', () => {
-    fails(W + '(defun f () (+ 1 (w)))', 'test.slight:1:44: w waits for messages (it reaches a recv), so it can only be called in tail position');
-    fails(W + '(defun g () (w)) (defun h () (pprint (g)))', 'test.slight:1:64: g waits for messages (it reaches a recv), so it can only be called in tail position');
-    fails(W + '(defun h () (cond ((w) 1)))', 'test.slight:1:46: w waits for messages (it reaches a recv), so it can only be called in tail position');
-});
-
-test('a lambda never waits, and a function that waits is never a value', () => {
-    fails(W + '(lambda () (w))', "test.slight:1:38: a lambda can't call w, which waits for messages (it reaches a recv)");
-    fails(W + '(let f w)', "test.slight:1:34: w waits for messages, so it can't be used as a value");
-});
-
-test('a function that waits can be the body of a spawn, the end of a connect, or after a yield', () => {
+test('a function that waits is called anywhere, and can be a value (D276)', () => {
+    assert.doesNotThrow(() => compile(W + '(defun f () (+ 1 (w)))'));
+    assert.doesNotThrow(() => compile(W + '(defun g () (w)) (defun h () (pprint (g)))'));
+    assert.doesNotThrow(() => compile(W + '(defun h () (cond ((w) 1)))'));
+    assert.doesNotThrow(() => compile(W + '(lambda () (w))'));
+    assert.doesNotThrow(() => compile(W + '(let f w)'));
     assert.doesNotThrow(() => compile(W + '(spawn (w))'));
     assert.doesNotThrow(() => compile(W + '(spawn (do (pprint 1) (w)))'));
     assert.doesNotThrow(() => compile(W + '(connect :keypress (w))'));
     assert.doesNotThrow(() => compile(W + '(defun y () (yield (w))) (spawn (y))'));
-    assert.doesNotThrow(() => compile(W + '(lambda () (spawn (w)))'));
 });
 
-test("a task, a fork's body or the top level, can't wait (D243)", () => {
-    const task = "a task (a fork's body, or the top level) can't wait for messages";
-    fails(W + '(fork (w))', `test.slight:1:33: ${task}, and w, which waits for messages (it reaches a recv), would: spawn an actor for it`);
-    fails(W + '(pprint 1) (w)', `test.slight:1:38: ${task}, and w, which waits for messages (it reaches a recv), would: spawn an actor for it`);
-    fails('(recv (m m))', `test.slight:1:1: ${task}, and this recv would: spawn an actor for it`);
-    fails('(fork (do (pprint 1) (recv)))', `test.slight:1:22: ${task}, and this recv would: spawn an actor for it`);
-    fails('(spawn (fork (recv)))', `test.slight:1:14: ${task}, and this recv would: spawn an actor for it`);
+test("a task, a fork's body or the top level, can't have a recv of its own (D243)", () => {
+    const task = "a task (a fork's body, or the top level) can't wait for messages, and this recv would: spawn an actor for it";
+    fails('(recv (m m))', `test.slight:1:1: ${task}`);
+    fails('(fork (do (pprint 1) (recv)))', `test.slight:1:22: ${task}`);
+    fails('(spawn (fork (recv)))', `test.slight:1:14: ${task}`);
+    // one that calls a function that waits is found when it runs (:not-an-actor)
+    assert.doesNotThrow(() => compile(W + '(fork (w))'));
+    assert.doesNotThrow(() => compile(W + '(pprint 1) (w)'));
 });
 
 test('recv clauses and patterns', () => {
@@ -679,9 +661,9 @@ test('recv clauses and patterns', () => {
     assert.doesNotThrow(() => compile('(defun f () (recv ((5 a) a) ((:a 1) 1) (#true 2) (((x y) & r) r)))'));
 });
 
-test('a receive function restarts at its own entry with its parameters', () => {
+test('recv is told the slots in use, the frame and its function, as rt_preempt is (D276)', () => {
     const asm = compile('(defun loop (a b) (recv (m (loop b a))))');
-    assert.match(asm, /Lrecv_\d+:\n {4}mov {2}x0, x28\n {4}mov {2}x1, sp\n {4}mov {2}x2, #2\n {4}LOADADDR x3, fn_loop\n {4}bl {3}rt_recv/);
+    assert.match(asm, /Lrecv_\d+:\n {4}mov {2}x0, x28\n {4}mov {2}x3, x29\n {4}mov {2}x1, sp\n {4}mov {2}x2, #2\n {4}LOADADDR x4, fn_loop\n {4}bl {3}rt_recv/);
     assert.match(asm, /bl {3}rt_dead_letter\n {4}b {4}Lrecv_\d+/);
 });
 

@@ -27,11 +27,10 @@
 // The warnings are collected as they're found (report), in the last
 // round only; the rounds before it only work out results.
 
-import { stateFunctions } from './classify.ts';
 import { CompileError } from './errors.ts';
 import { expand } from './expand.ts';
 import { displayName, PRELUDE_SUFFIX } from './modules.ts';
-import { REST } from './pattern.ts';
+import { patternNames, REST } from './pattern.ts';
 import { NIL, builtinOf, cons, isForm, isSym, list, own, posOf, show, toArray, TUPLE, type Pair, type Pos, type Sexp } from './sexp.ts';
 import { BUILTINS, CONSTANTS, PREDICATES, RESULT_ANY, cxr, cxrSteps, faultOf, resultOf } from './builtins.ts';
 import {
@@ -133,10 +132,10 @@ export function checkProgram(prelude: Sexp, program: Sexp, opts: CheckOptions = 
     const uforms = toArray(program) ?? [];
     const defs   = readDeftypes(pforms, uforms);
     const pfns   = readFunctions(pforms, 'prelude', defs, []);
-    const states = stateFunctions(defunsOf(uforms).map((d) => {
+    const states = waitingFunctions(defunsOf(uforms).map((d) => {
         const lowered = toArray(eraseTypes(expand(d, false)))!;
         return { name: (lowered[1] as { name: string }).name, params: paramNames(lowered[2]!), body: list(...lowered.slice(3)) };
-    }), (body) => waits(body));
+    }));
     const ufns  = readFunctions(uforms, 'user', defs, states);
     const fnsP: Fns = Object.fromEntries(pfns.map((f) => [f.name, f]));
     const fnsU: Fns = { ...fnsP, ...Object.fromEntries(ufns.map((f) => [f.name, f])) };
@@ -217,6 +216,80 @@ function waits(x: Sexp): boolean {
     }
     for (let xs: Sexp = x; xs.t === 'pair'; xs = xs.cdr) if (waits(xs.car)) return true;
     return false;
+}
+
+// The functions that wait: those with a recv in their body (waits), and
+// those that call one, anywhere but in a lambda or a new process's body,
+// since a recv keeps its stack, so a call to a function that waits waits
+// too (D276): the fixpoint over the program's calls.
+type FnSource = { readonly name: string; readonly params: readonly string[]; readonly body: Sexp };
+
+function waitingFunctions(defuns: readonly FnSource[]): readonly string[] {
+    const names = defuns.map((d) => d.name);
+    const calls = defuns.map((d) => callsIn(d.body, d.params, names));
+    let state   = defuns.filter((d) => waits(d.body)).map((d) => d.name);
+    for (;;) {
+        const more = defuns.filter((d, i) => !state.includes(d.name) && calls[i]!.some((c) => state.includes(c)));
+        if (more.length === 0) return state;
+        state = [...state, ...more.map((d) => d.name)];
+    }
+}
+
+// The program's functions (globals) that body calls, outside a lambda or
+// a new process's body. A call through a local of the same name isn't one.
+function callsIn(body: Sexp, params: readonly string[], globals: readonly string[]): readonly string[] {
+    const found: string[] = [];
+    const scanBody = (forms: Sexp, bound: readonly string[]): void => {
+        for (; forms.t === 'pair'; forms = forms.cdr) {
+            const form = forms.car;
+            const [head, name, expr] = toArray(form) ?? [];
+            if (head !== undefined && head.t === 'sym' && head.name === 'let' && expr !== undefined) {
+                scan(expr, bound);
+                if (name !== undefined && name.t === 'sym') bound = [...bound, name.name];
+            } else {
+                scan(form, bound);
+            }
+        }
+    };
+    const scanClauses = (clauses: Sexp, bound: readonly string[], patterns: boolean): void => {
+        for (; clauses.t === 'pair'; clauses = clauses.cdr) {
+            const clause = clauses.car;
+            if (clause.t !== 'pair') continue;
+            if (patterns) scanBody(clause.cdr, [...bound, ...patternNames(clause.car)]);
+            else {
+                scan(clause.car, bound);
+                scanBody(clause.cdr, bound);
+            }
+        }
+    };
+    const scan = (x: Sexp, bound: readonly string[]): void => {
+        if (x.t !== 'pair') return;
+        const head = x.car;
+        if (head.t === 'sym' && !bound.includes(head.name)) {
+            switch (head.name) {
+                case 'quote': case 'lambda': case 'fork': case 'spawn': case 'spawn/on': case 'connect': case 'defun':
+                    return;
+                case 'cond':
+                    return scanClauses(x.cdr, bound, false);
+                case 'recv':
+                    return scanClauses(x.cdr, bound, true);
+                case 'match':
+                    if (x.cdr.t === 'pair') {
+                        scan(x.cdr.car, bound);
+                        scanClauses(x.cdr.cdr, bound, true);
+                    }
+                    return;
+                case 'do': case 'yield':
+                    return scanBody(x.cdr, bound);
+            }
+            if (globals.includes(head.name) && !found.includes(head.name)) found.push(head.name);
+        } else {
+            scan(head, bound);
+        }
+        for (let args = x.cdr; args.t === 'pair'; args = args.cdr) scan(args.car, bound);
+    };
+    scanBody(body, params);
+    return found;
 }
 
 // The forms with the types taken out, for code generation and split.ts:
@@ -356,8 +429,8 @@ function recvsTake(x: Sexp): Ty {
 }
 
 // The names a body calls, anywhere but in a lambda's or a new process's:
-// the state functions among them are the ones it can tail-call, since a
-// state function can only be tail-called (the recv rule).
+// the functions that wait among them are the ones whose recvs its actor
+// reaches.
 function tailCallsIn(x: Sexp): readonly string[] {
     if (x.t !== 'pair') return [];
     if (x.car.t === 'sym' && ['quote', 'lambda', 'fork', 'spawn', 'spawn/on', 'connect'].includes(x.car.name)) return [];

@@ -40,9 +40,9 @@ export const NOT: Readonly<Record<Cond, Cond>> = { eq: 'ne', ne: 'eq', lt: 'ge',
 // What a call passes, in order: the accumulator, the left operand, the
 // current process, a frame slot, an assembler constant (a small number or
 // an rt.h name), a word (any 64 bits: a literal's), the address of a
-// label, the frame's slots (a receive function's arguments, for rt_recv),
-// the address of slot si, or the frame pointer (for rt_preempt, to find
-// the frames below).
+// label, the frame's slots (the roots, for rt_preempt and rt_recv), the
+// address of slot si, or the frame pointer (for the same two, to find the
+// frames below).
 export type Operand =
     | { readonly t: 'acc' }
     | { readonly t: 'left' }

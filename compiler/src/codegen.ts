@@ -41,9 +41,7 @@
 import { CompileError } from './errors.ts';
 import { builtinOf, builtinSym, float, form, own, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SPECIAL_FORMS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
-import { isReceiveBody, stateFunctions } from './classify.ts';
 import { lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
-import { splitProgram } from './split.ts';
 import { checkBindable, checkDefunShape, checkParams } from './expand.ts';
 import { eraseTypes } from './check.ts';
 import { displayName, PRELUDE_SUFFIX } from './modules.ts';
@@ -56,23 +54,20 @@ type Env = { readonly name: string; readonly slot: number; readonly next: Env } 
 
 // The top-level functions: an association list from name to label and arity.
 type Module = 'user' | 'prelude';
-// state: it can reach a recv (classify.ts), so the recv rule applies to it.
-type Fn  = { readonly name: string; readonly label: string; readonly arity: number; readonly module: Module; readonly state: boolean };
+type Fn  = { readonly name: string; readonly label: string; readonly arity: number; readonly module: Module };
 type Fns = { readonly fn: Fn; readonly next: Fns } | null;
 
 // Where an expression is being compiled: the functions and locals it can
 // see, the first free frame slot (anything below si belongs to someone),
-// whether it's in tail position, whether it's in a lambda's body, and, for
-// the recv that is the whole body of a receive function, that function's
-// entry and number of parameters (to start it again when a message comes).
+// whether it's in tail position, whether it's in a task's body, and the
+// entry of the function it's in (what a recv says it waits in).
 type Cx = {
     readonly fns: Fns;
     readonly env: Env;
     readonly si: number;
     readonly tail: boolean;
-    readonly inLambda: boolean;
     readonly task: boolean;          // a fork's body, or the top level: it can't wait (D243)
-    readonly receive: { readonly entry: string; readonly params: number } | null;
+    readonly entry: string;
     readonly noFloatTrees?: true;    // compiling a float expression's way back (D261)
 };
 
@@ -112,12 +107,11 @@ export function compileProgram(typed: Sexp, typedPrelude: Sexp = NIL, t: Target 
         if (!isForm(f, 'defun')) throw new CompileError(`the prelude can only define functions, not ${show(f)}`, posOf(f));
     });
     const preludeDefuns = preludeForms.map((f) => checkDefun(f as Pair));
-    const preludeFns    = preludeDefuns.reduce<Fns>((fns, d) => declare(fns, d, 'prelude', false), null);
+    const preludeFns    = preludeDefuns.reduce<Fns>((fns, d) => declare(fns, d, 'prelude'), null);
 
-    const all    = toArray(splitProgram(forms))!;     // every recv the whole body of a receive function (D167)
+    const all    = toArray(forms)!;
     const defuns = all.filter((f) => isForm(f, 'defun')).map((f) => checkDefun(f as Pair));
-    const state  = stateFunctions(defuns.map((d) => ({ name: d.name.name, params: d.params.map((p) => p.name), body: d.body })));
-    const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user', state.includes(d.name.name)), preludeFns);
+    const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user'), preludeFns);
     const top    = all.filter((f) => !isForm(f, 'defun'));
     const empty: St = { t, labels: 0, slots: 0, calls: false, symbols: null, stubs: [], data: [], consts: [], lambdas: [], closures: [], functions: [] };
     const st0 = [...RESERVED_SYMBOLS, ...RUNTIME_SYMBOLS].reduce((st, name) => symbolId(st, name)[1], empty);
@@ -204,11 +198,11 @@ function checkDefun(x: Pair): Defun {
 
 // A program's functions are declared on top of the prelude's, so they
 // shadow them; only a second definition in the same module is an error.
-function declare(fns: Fns, d: Defun, module: Module, state: boolean): Fns {
+function declare(fns: Fns, d: Defun, module: Module): Fns {
     const existing = lookupFn(fns, d.name.name);
     if (existing !== null && existing.module === module) throw new CompileError(`${d.name.name} is already defined`, d.name.pos);
     const label = module === 'user' ? functionLabel(d.name.name) : `pf_${functionLabel(d.name.name).slice(3)}`;
-    return { fn: { name: d.name.name, label, arity: d.params.length, module, state }, next: fns };
+    return { fn: { name: d.name.name, label, arity: d.params.length, module }, next: fns };
 }
 
 function findFn(fns: Fns, name: string, module: Module): Fn | null {
@@ -224,18 +218,16 @@ function findFn(fns: Fns, name: string, module: Module): Fn | null {
 // its roots are the locals so far, and the frames below. A function that
 // calls another, not in tail position, can be one of those, so it zeroes
 // the rest of its slots first.
-// kind: only a defun can be a receive function, a lambda's body is held
-// to the recv rule (D11), and a task's (a fork's body, or the top level)
-// can't wait at all (D243). at: where the stack fault says it happened, which
-// a lambda or fork leaves out, since its name already says.
+// kind: a task's body (a fork's, or the top level) can't wait (D243). at:
+// where the stack fault says it happened, which a lambda or fork leaves
+// out, since its name already says.
 type Kind = 'defun' | 'lambda' | 'task' | 'actor' | 'other';
 
 function compileFunction(entry: string, d: Defun, free: readonly string[], fns: Fns, kind: Kind, st: St,
                          at: Pos | null = d.pos): [Code, St] {
     const locals = [...d.params.map((p) => p.name), ...free];
     const env = locals.reduce<Env>((e, name, i) => ({ name, slot: i, next: e }), null);
-    const receive = kind === 'defun' && isReceiveBody(d.body) ? { entry, params: d.params.length } : null;
-    const cx: Cx = { fns, env, si: locals.length, tail: true, inLambda: kind === 'lambda', task: kind === 'task', receive };
+    const cx: Cx = { fns, env, si: locals.length, tail: true, task: kind === 'task', entry };
     const [body, st1] = compileBody(d.body, cx, { ...st, slots: locals.length, calls: false });
     const size = 16 * Math.ceil(st1.slots / 2);
     if (size > 4095) throw new CompileError(`${d.name.name} needs too many frame slots (${st1.slots})`, d.pos);
@@ -259,24 +251,13 @@ function compileFunction(entry: string, d: Defun, free: readonly string[], fns: 
 function compileCall(x: Pair, fn: Fn, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     checkArity(x, fn.name, args, fn.arity);
     if (isPreludeNot(x, cx)) return compileCond(x, [list(args[0]!, sym('#false')), list(sym('#true'), sym('#true'))], cx, st);
-    if (fn.state && cx.inLambda) {
-        throw new CompileError(`a lambda can't call ${fn.name}, which waits for messages (it reaches a recv)`, x.pos);
-    }
-    if (fn.state && cx.task) throw new CompileError(taskWaits(fn.name), x.pos);
-    if (fn.state && !cx.tail) {
-        throw new CompileError(`${fn.name} waits for messages (it reaches a recv), so it can only be called in tail position`, x.pos);
-    }
     const [code, ops, st1] = callOperands(args, { ...cx, tail: false }, st);
     return [[code, st.t.call(fn.label, ops, cx.tail)], called(st1, cx)];
 }
 
-// A task (a fork's body, or the top level) that would wait: in a recv of
-// its own, which split.ts made a function named for it, or by calling a
-// function that waits.
-function taskWaits(name: string): string {
-    const what = name.includes(' (recv at ') ? 'this recv' : `${name}, which waits for messages (it reaches a recv),`;
-    return `a task (a fork's body, or the top level) can't wait for messages, and ${what} would: spawn an actor for it`;
-}
+// A task (a fork's body, or the top level) with a recv of its own; one
+// that calls a function that waits is found when it runs (D243).
+const TASK_WAITS = "a task (a fork's body, or the top level) can't wait for messages, and this recv would: spawn an actor for it";
 
 // A call's arguments, as operands for the target's call: each simple one
 // as it is, read when the call is made; the others worked out in order,
@@ -397,7 +378,6 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     const constant = own(CONSTANTS, x.name);
     if (constant !== undefined) return compileExpr(constant, cx, st);
     const fn = lookupFn(cx.fns, x.name);
-    if (fn !== null && fn.state) throw new CompileError(`${fn.name} waits for messages, so it can't be used as a value`, x.pos);
     if (fn !== null) return loadClosure(staticClosure(fn.label, fn.arity, displayName(fn.name), st));
     if (isBuiltin(x.name)) return loadClosure(builtinWrapper(x, st));
     throw new CompileError(`unknown name '${x.name}'`, x.pos);
@@ -572,21 +552,20 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
 
 // --- processes ----------------------------------------------------------------
 
-// (recv clause...), the whole body of a receive function. rt_recv returns
-// the next message; when there's none, it remembers this function and its
-// parameters (the first slots of the frame) and gives up the stack, and
-// the process starts this function again from the top when one comes. So
-// the stack is empty here: nothing has run yet but the prologue. Clause
-// bodies are in tail position. A message no clause matches goes to the
-// dead letters, and recv takes the next.
-function compileRecv(x: Pair, clauses: readonly Sexp[], cx: Cx, st: St): [Code, St] {
-    if (cx.receive === null) throw new CompileError('recv can only be the whole body of a defun', x.pos);
-    if (clauses.length === 0) throw new CompileError('recv needs at least one clause', x.pos);
-    const { entry, params } = cx.receive;
+// (recv clause...): rt_recv gives the next message, waiting for one with
+// the stack kept, as join does (D276); it may collect first, with the
+// slots in use so far and the frames below as the roots. The clauses are
+// tried in order, their bodies where the recv is (in tail position, when
+// it is); a message none matches goes to the dead letters, and recv takes
+// the next. (recv) takes any message, and gives it.
+function compileRecv(x: Pair, clauses0: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    if (cx.task) throw new CompileError(TASK_WAITS, x.pos);
+    const any     = sym(RECV_MESSAGE, x.pos);
+    const clauses = clauses0.length > 0 ? clauses0 : [list(any, any)];
     const msg = cx.si;
     const [top, st1]  = label(st, 'recv');
     const [site, st2] = siteLabel(st1, 'recv', x.pos);
-    const inner: Cx   = { ...cx, si: msg + 1, receive: null };
+    const inner: Cx   = { ...cx, si: msg + 1 };
     const [code, st3] = clauses.reduce<[Code, St]>(([acc, s], clause) => {
         const [c, s1] = compileRecvClause(x, clause, msg, `${top}_done`, inner, s);
         return [[acc, c], s1];
@@ -594,7 +573,7 @@ function compileRecv(x: Pair, clauses: readonly Sexp[], cx: Cx, st: St): [Code, 
     const t = st.t;
     return [[
         `${top}:`,
-        t.call('rt_recv', [PROC, FRAME, imm(params), addr(entry)], false),
+        t.call('rt_recv', [PROC, FRAME, imm(msg), FP, addr(cx.entry)], false),
         t.storeSlot(msg),
         code,
         t.call('rt_dead_letter', [inSlot(msg), addr(site)], false),

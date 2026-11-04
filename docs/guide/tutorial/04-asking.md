@@ -168,16 +168,13 @@ reply with `recv`. Here an actor counts words in the store:
 (ok (ok ("a" "b")))
 ```
 
-`(let r (recv ...))` waits in the middle of the function. That's
-allowed because of where it is, and that's the `recv` rule.
+`(let r (recv ...))` waits in the middle of the function, and the
+function goes on from there when the reply comes.
 
-## The recv rule
+## Waiting, and where
 
-**A `recv` can go only where a tail call could, and a function that can
-reach one can only be called in tail position.** The `let` above is in
-tail position: everything after it in the body is the rest of the loop.
-
-It's natural to pull the asking out into a helper:
+A `recv` can go anywhere in an actor's code (D276), so it's natural to
+pull the asking out into a helper:
 
 ```
 (defun ask-store (s cmd)
@@ -187,33 +184,22 @@ It's natural to pull the asking out into a helper:
             (pprint (list word (ask-store s (list :incr word))))
 ```
 
-and the compiler turns it down:
+and that works: `ask-store` waits, keeping the process's stack, and
+gives the reply back as its value.
 
-```
-tally.slight:11:32: ask-store waits for messages (it reaches a recv), so it can only be called in tail position
-```
+Two things to know:
 
-A function that waits can't give a value back to its caller. The rule
-is what lets a waiting process hold no stack at all: the compiler
-splits a function at each `recv`, so when the process waits, there's
-nothing to come back to. It's a function, its arguments and a mailbox,
-and a million of them is cheap.
-
-In practice:
-
-- **Waiting goes inline**, as `(let r (recv ...))` in the function's
-  own body.
-- **A conversation goes in a task.** A task can call a function that
-  asks, as deep as it likes, and get the answer back as a value: `ask`
-  and `join` keep the task's stack while they wait. When an actor needs
-  a conversation with several steps, it can `fork` a task to have it.
 - **An actor waiting for a reply takes the next message, whatever it
   is.** There's no selective receive: if something else arrives first,
-  `tally`'s `recv` doesn't match it, and it's a dead letter. `tally`
+  `ask-store`'s `recv` doesn't match it, and it's a dead letter. `tally`
   gets away with it because nothing else sends to it. An actor that
   serves requests shouldn't stop to wait for a reply in the middle of
-  one. It's another reason conversations belong in tasks, and state in
-  actors.
+  one: state goes in actors, and conversations in tasks.
+- **A conversation goes in a task.** A task can call a function that
+  asks, as deep as it likes, and get the answer back: `ask` reads the
+  reply at an address of its own, so nothing else can be taken for it,
+  and `join` waits for a process to end. When an actor needs a
+  conversation with several steps, it can `fork` a task to have it.
 
 ---
 

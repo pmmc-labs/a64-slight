@@ -1,74 +1,50 @@
-# The recv rule
+# Waiting for a message
 
-> A `recv` can go only where a tail call could, and a function that can
-> reach one can only be called in tail position.
+> A `recv` goes anywhere in an actor's code, and the process keeps its
+> stack while it waits.
 
-This is the rule the rest of slight is built around (D8). The compiler
-enforces it, and its messages say when you've broken it. This page
-explains what it costs and what it buys, and how to write actors with
-it rather than against it.
+That's how slight has worked since D276. Till then a `recv` could go
+only where a tail call could, and a function that could reach one could
+only be tail-called: the recv rule, D8, which let a waiting process
+give its stack back. This page says what a wait is now, what it costs,
+and the idioms that still hold.
 
 ## What it says
 
-A function that contains a `recv`, or tail-calls a function that does,
-is a **state function**. The compiler works out which functions are.
-A state function:
-
-- can be called only in tail position, or as the body of a `spawn` or
-  `connect`;
-- can't be used as a value, or called from a lambda;
-- can't be called from a task, the top level included.
-
-Inside a state function, a `recv` can go anywhere a tail call could:
-as the last form of a body, as a `let`'s value there
-(`(let m (recv ...))`), or inside a call there. Everything before it
-runs first.
-
-## Why: a waiting process holds nothing
-
-Most actors spend most of their time waiting. The rule means that when
-one waits, nothing of it is on a stack: no frame is waiting for a
-`recv` to return, because a `recv` only ever comes where the function
-had nothing left to do but continue.
-
-The compiler makes this literal. It splits a function at each `recv`.
-The `recv` and everything after it become a **receive function** of
-their own, which the first part tail-calls with the locals the rest
-needs. A function written as
+A `recv` can go anywhere in a function that runs in an actor: as the
+last form of a body, as a `let`'s value (`(let m (recv ...))`), inside
+a call, in a helper the function calls, in a lambda it runs. Everything
+before it runs first, and a function that waits gives its value back to
+its caller:
 
 ```
-(defun tally (s words)
-    ...
-    (send s (list :do (list :incr word) $$))
-    (let r (recv ((:reply r) r)))
-    (pprint (list word r))
-    (tally s rest))
+(defun ask-store (s cmd)
+    (send s (list :do cmd $$))
+    (recv ((:reply r) r)))
 ```
 
-becomes, in effect, two: one that sends and then tail-calls the second,
-and a second whose whole body is the `recv` and what follows it. So a
-waiting process is exactly a function, its arguments and its mailbox.
+What stays: a task, a `fork`'s body or the top level, can't wait for a
+message (see [Tasks and actors](tasks-and-actors.md)); and there's no
+selective receive, so whatever `recv` a process is in takes the next
+message.
 
-What that buys:
+## What a wait costs
 
-- **A waiting process gives its stack back** (D9). Stacks are pooled,
-  and held only by processes that are running, so memory goes with how
-  many processes are *busy*, not how many exist. A million idle actors
-  is cheap.
-- **Collection is simple there.** When a process waits, its only roots
-  are its arguments, and that's when its heap is collected.
-- **No selective receive.** An actor takes its messages in order, so
-  there's no mailbox to scan, and no message left behind forever by a
-  pattern that never matches. (One that matches nothing is a dead
-  letter, logged at once.)
-- **No call-cycle deadlocks between actors.** An actor can't call
-  another and wait inside a call for its reply, so two actors can't
-  each be stuck waiting for the other's answer inside a handler.
+A process takes a stack when it first runs, and keeps it till it ends,
+through every wait: `recv`, `join`, `read` and `sleep` alike. A stack
+is 8 MB of address space, of which only the pages the process has
+touched are memory, a few KB for most actors. So an idle actor is its
+stack's pages, its mailbox and its heap, and how many can wait at once
+is how many stacks the system will map: about 32,000 on Linux as it
+comes (`vm.max_map_count`). Past that, a new process ends with `:stack`
+(D267), and the rest go on. Ten thousand actors are fine; a million
+aren't, where before D276 they were.
 
-## What it costs, and the idioms
+Collection is as it was: a process's heap is collected when it waits
+in `recv`, if it has grown enough, and at a function's entry, with its
+frames as roots.
 
-**A function that waits can't return a value to its caller.** That's
-the real cost, and the idioms are about where to put the waiting.
+## The idioms
 
 - **Each state is a function.** An actor with modes (logged in or not,
   open or closed, playing or paused) is a function per mode. Each waits
@@ -118,35 +94,24 @@ the real cost, and the idioms are about where to put the waiting.
   needs checking, and a message that a state has no clause for is a
   dead letter, logged, rather than handled as if it were another
   state's.
-- **Waiting goes inline.** Within an actor, `(let r (recv ...))` in the
-  function's own body, not in a helper that returns `r`.
-- **A conversation goes in a task.** A task can't `recv`, but it can
-  `ask`, `join` and `read`, which keep its stack while they wait, so a
-  task can wait as deep in ordinary function calls as it likes and get
-  values back. When an actor needs a multi-step exchange with others, it
-  `fork`s a task to have it, and the task sends the actor the result
-  as a message.
-- **An actor waiting for a reply takes the next message, whatever it
-  is.** Without selective receive, a reply it waits for mid-function can
-  be beaten by another request, which then doesn't match. Actors that
-  serve requests shouldn't stop to wait in the middle of one. That's
-  another reason conversations go in tasks.
+- **A conversation can go inline.** An actor that needs an answer from
+  another can send and `recv` for it in a helper, and use the value.
+  But a `recv` in the middle of a handler takes the next message,
+  whatever it is: another request can arrive before the reply, and then
+  doesn't match. An actor that serves requests shouldn't stop to wait
+  inside one; what asks other actors, and must get the right answer, is
+  a task, which reads the reply at an address of its own (`ask`), or
+  one the actor forks to.
 
-## The two compile errors
-
-```
-prog.slight:11:32: ask-store waits for messages (it reaches a recv), so it can only be called in tail position
-```
-
-A state function was called where its result would be used. Move the
-wait inline, or move the work into a task.
+## The one compile error
 
 ```
 prog.slight:5:1: a task (a fork's body, or the top level) can't wait for messages, and this recv would: spawn an actor for it
 ```
 
 A task tried to `recv`. Spawn an actor, or, if the task only wants an
-answer, `ask` an actor for it.
+answer, `ask` an actor for it. A task that calls a function that waits
+is found when it runs, with `:not-an-actor`.
 
 ---
 

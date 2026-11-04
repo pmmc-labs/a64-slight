@@ -7,7 +7,7 @@ puts each to work.
 
 1. [Nothing changes](immutability.md): where state goes when nothing
    can be mutated, and why the language is built that way.
-2. [The recv rule](recv-rule.md): where a process can wait, what that
+2. [Waiting for a message](recv-rule.md): where a process can wait, what that
    buys, and how to write actors with it.
 3. [Tasks and actors](tasks-and-actors.md): the two kinds of process,
    what each is for, and how to choose.

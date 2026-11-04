@@ -353,14 +353,6 @@ function topicName(of: 'case' | 'match', x: Pair): Sym {
     return sym(`${of} topic${where}`, x.pos);
 }
 
-// The case or match a do was made from, or null: so that a message about
-// it can name what the program has (split.ts), not the do it became.
-export function madeFrom(x: Pair): string | null {
-    const first = x.cdr.t === 'pair' ? toArray(x.cdr.car) : null;
-    const name  = first !== null && first.length === 3 && isSym(first[0]!, 'let') && first[1]!.t === 'sym' ? first[1]!.name : '';
-    return name.startsWith('case topic') ? 'case' : name.startsWith('match topic') ? 'match' : null;
-}
-
 function expandCase(x: Pair): Sexp {
     const [topic, ...clauses] = args(x, 'case', 1, Infinity, 'a topic and clauses');
     const t     = topicName('case', x);

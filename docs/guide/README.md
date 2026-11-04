@@ -57,7 +57,7 @@ The guide has four parts, each for a different need:
   write slight well, and why they're there:
   - [Nothing changes](concepts/immutability.md): where state goes
     instead
-  - [The `recv` rule](concepts/recv-rule.md)
+  - [Waiting for a message](concepts/recv-rule.md)
   - [Tasks and actors](concepts/tasks-and-actors.md)
   - [Failure](concepts/failure.md): faults, errors, and how processes
     end

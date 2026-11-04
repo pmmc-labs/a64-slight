@@ -105,4 +105,4 @@ thin layer of processes around them (tutorial, chapter 6).
 
 ---
 
-[Concepts](README.md) · Next: [The recv rule](recv-rule.md)
+[Concepts](README.md) · Next: [Waiting for a message](recv-rule.md)

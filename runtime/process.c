@@ -5,10 +5,10 @@
 // queue, timers and devices, `my`, which no other island's thread
 // touches. The scheduler runs on the C stack and switches to a process
 // with rt_switch; the process switches back when it pauses (preempted,
-// or yield), waits in recv, or ends. A process holds a stack only while it
-// needs one: waiting in recv, it's just (code, args, mailbox), and it gives
-// its stack back to the pool. A message arriving puts it back in the run
-// queue, and it starts again at code, on a stack from the pool.
+// or yield), waits (recv, join, read, sleep), or ends. A process takes a
+// stack from the pool when it first runs and keeps it till it ends, a
+// wait included (D276): a message arriving puts a process waiting in recv
+// back in the run queue, and it goes on from the recv.
 //
 // A process that ends tells its result to those waiting for it then, and
 // leaves an exit record in the table: a task's value, if its parent
@@ -1949,32 +1949,39 @@ rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *sit
     return RT_NIL;
 }
 
-// A device's message is cut only now, when its owner waits again after
-// taking the last one, so whatever the owner did with that one, (:read
-// how) or disconnect, applies to the next (D158).
-rt_value_t rt_recv(rt_proc_t *p, rt_value_t *args, uint64_t n, rt_code_t code) {
-    if (!p->actor) rt_fault(RT_FAULT_NOT_ACTOR, p->pid, "recv");   // the compiler refuses it; this is a backstop
+// The next message, waiting for one with the stack kept, as join does
+// (D276), and going on from here when it comes: with a new slice, and a
+// call counted, as a receive function started again from the top had
+// (D8, D167), so a program is preempted where it was. A device's message
+// is cut only now, when its owner waits again after taking the last one,
+// so whatever the owner did with that one, (:read how) or disconnect,
+// applies to the next (D158). The roots, if it collects, are the frame's
+// slots in use and the frames below, as rt_preempt's are.
+rt_value_t rt_recv(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t at) {
+    if (!p->actor) rt_fault(RT_FAULT_NOT_ACTOR, p->pid, "recv");   // a task can't wait (D243)
     if (p->reading) {
         rt_value_t device = p->reading;
         p->reading = 0;
         read_on(p, device);                     // which may end p, if reading fails
     }
-    if (due(p)) collect(p, args, n, NULL);
-    rt_msg_t  *m = p->mail;
-    if (m) {
-        p->mail = m->next;
-        if (!p->mail) p->mail_last = NULL;
-        rt_value_t v = m->value;
-        p->reading = m->device;
-        if (bare(m)) free_msg(m);
-        else         adopt(p, m->chunk);
-        return v;
+    for (;;) {
+        if (due(p)) collect(p, frame, n, fp);
+        rt_msg_t *m = p->mail;
+        if (m) {
+            p->mail = m->next;
+            if (!p->mail) p->mail_last = NULL;
+            rt_value_t v = m->value;
+            p->reading = m->device;
+            if (bare(m)) free_msg(m);
+            else         adopt(p, m->chunk);
+            return v;
+        }
+        p->state = RT_WAITING;
+        p->at    = at;
+        to_scheduler(p);
+        refill(p);
+        if (--p->reductions <= 0) rt_preempt(p, frame, n, fp, at);
     }
-    p->code = code;
-    memcpy(p->args, args, n * sizeof *args);
-    p->state = RT_WAITING;
-    to_scheduler(p);
-    __builtin_unreachable();
 }
 
 void rt_dead_letter(rt_value_t msg, const char *site) {
@@ -5324,10 +5331,9 @@ void rt_run(void) {
         rt_current = p;
         rt_switch(&my.scheduler, &p->ctx);
         rt_current = NULL;                      // so nothing takes the scheduler for p
-        // back: it paused (and queued itself again), waits in recv, join
-        // or sleep, or ended
-        if (p->state == RT_WAITING)   release_stack(p);
-        else if (p->state == RT_DONE) {
+        // back: it paused (and queued itself again), waits in recv, join,
+        // read or sleep, keeping its stack, or ended
+        if (p->state == RT_DONE) {
             retire(p);
             free(p);
         }

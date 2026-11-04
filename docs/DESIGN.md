@@ -142,7 +142,7 @@ never changes the code.
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
 | `(fork expr)` | Runs `expr` in a new process and returns its pid: a task. `(spawn expr)` starts an actor (D243), and `(spawn/on k expr)` one on island `k` (D256). |
 | `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`, or a Unix socket, `(connect :unix path expr)` or `(connect :unix/listen path expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
-| `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
+| `(recv clause...)` | Takes the next message, waiting for one with the stack kept (D276), anywhere in an actor's code. |
 | `(deftype ...)`, `(sig ...)`, `(the type expr)` | Types (D247): a type's name and a function's types, at the top level, and an expression's. The checker reads them; code generation leaves them out (`(the T e)` is `e`). Not counted among the 10, since none does anything when the program runs. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
@@ -187,110 +187,40 @@ but nothing needs that yet.
 A function takes at most 8 parameters, one register each (see the
 register convention below). More could go on the stack later.
 
-### The `recv` rule
+### Waiting, and the stack
 
-This rule is what makes the runtime simple, so it gets its own section.
+A process keeps its stack across every wait: `recv`, `join`,
+`join/race`, `read` and `sleep` alike (D276, which retired D8 and D167:
+till then the stack was empty at every `recv`, which could go only
+where a tail call could, and a waiting process held none). So a `recv`
+goes anywhere in a function that runs in an actor, a helper or a lambda
+included, and a function that waits gives its value back to its caller
+as any function does. The runtime's `rt_recv` takes the next message,
+or parks the process in state `RT_WAITING`, keeping its stack, and
+returns the message when one comes; the process gets a new slice then,
+and a call is counted, as a receive function started again had, so a
+program is preempted where it was before D276.
 
-- A **receive function** is a top-level `defun` whose body is a single
-  `recv` form. In the code the compiler generates, `recv` appears nowhere
-  else. In a program it can go anywhere a tail call could (D167), and the
-  compiler splits the function there (`compiler/src/split.ts`): the `recv`
-  and what follows it become a receive function of their own, which the
-  function tail-calls with the locals that are still needed. See below.
-- A **state function** is a receive function, or any function that
-  tail-calls a state function (so, after the split, any function with a
-  `recv` in it). The compiler computes this as a fixpoint over the call
-  graph.
-- State functions may only be called **in tail position**, or as the body of
-  `fork`/`connect`.
-- Every other function is **plain**. Plain functions can be called anywhere,
-  and can never reach a `recv`. Lambdas are always plain: a lambda body
-  can't contain `recv` or call a state function. Indirect calls would hide
-  the call graph otherwise.
+What's left of the rule: a task (a `fork`'s body, or the top level)
+can't wait for a message (D243); a `recv` written in one is a compile
+error, and a call from one to a function that waits faults
+`:not-an-actor` when it runs. And there's still no selective receive:
+whatever `recv` a process is in takes the next message.
 
-The result: **the stack is empty at every `recv`.** A process waiting for a
-message is fully described by (function, arguments, mailbox). Its stack goes
-back to a pool. When a message arrives, the runtime calls the function again
-from the top with the same arguments. That's exact, because the function's
-body is just the `recv`. "All state lives in the loop arguments" is
-literally true at every wait.
-
-Syntax (D85):
-
-```lisp
-(defun counter (n)
-    (recv
-        ((:inc)        (counter (+ n 1)))
-        ((:get from)   (send from (list :count n)) (counter n))
-        ((:stop)       n)
-        (other         (log-unknown other) (counter n))))
-```
-
-- `(:tag a b ...)` matches a list of exactly that length whose head is the
-  symbol `:tag`, and binds the rest by position. `_` in a position matches
-  anything and binds nothing.
-- `:tag` on its own matches exactly that symbol.
-- A bare name matches anything and binds the whole message (`_` binds
-  nothing).
-- Clauses are tried in order. Only the **first** message in the mailbox is
-  considered: there's no selective receive. If no clause matches, the
-  message goes to the **dead-letter log** (a line on stderr,
-  `dead letter: <message> (recv at file:line:col)`) and the function takes
-  the next message, or waits.
-- The patterns are `match`'s (D168, `compiler/src/pattern.ts`): they
-  nest, a literal (a number, a string, `#true`, `#false`, `()`, anything
-  quoted) can go anywhere, `(p ... & rest)` binds the rest of a
-  list, and `#(p ...)` matches a tuple of exactly that many elements
-  (D176). One lowering, to tests and bindings, serves both: the expander
-  makes `match` into `cond` with it, and the code generator compiles
-  `recv`'s clauses with it, branching on each test. No guards: match the
-  shape, and test the rest with `cond` in the body. A tuple pattern's test
-  is one compare of the box's header with the header a tuple of that many
-  elements has, and each element one load, so it costs about what a list
-  pattern does (D178).
-
-Send-then-wait is written in one function, and becomes two:
-
-```lisp
-(defun pinger (target n)
-    (cond
-        ((== n 0) (send target (list :stop $$)) :ping-done)
-        (#true
-            (send target (list :ping $$))
-            (recv ((:pong from) (pprint (list :round n))))
-            (pinger target (- n 1)))))
-```
-
-Where a `recv` can go (D167): a form of a body in tail position (a
-function's, a `cond` or `recv` clause's, or that of a `do` or `yield` in
-tail position), or a `let`'s value there; or inside a call there, or a
-`do` with no `let`s, which is flattened first, in the order things are
-evaluated, so what comes before the `recv` still happens first; or a
-`cond`'s test, when the `cond` is in tail position. As an expression,
-`recv` gives the value of the clause that matched, and `(recv)` takes any
-message. Not in a lambda, and not in a `cond`, `do` (with `let`s) or
-`yield` that isn't in tail position. A `recv` with several clauses and
-something after it gets a generated function for what's after, rather
-than a copy of it in each clause, and so does one whose pattern binds a
-name that what's after it uses as a function's or a builtin's; more than
-8 locals go across as one list. Generated names have spaces in them, which a program can't write,
-and say where the `recv` is (`ask (recv at f.slight:3:12)`).
-
-A function that waits still can't give a value back to a function that
-called it: that's a process and `join` (as `ask` in `lib/ds.slight` does,
-and `(join (connect :tcp ...))`), which works anywhere, a lambda included.
-
-Request/reply is correlated by the actor's own state: put a counter or the
-request's details in the arguments and match the reply when it arrives
-(run-to-completion style). There's no AWAIT/REQUEST/REPLY machinery and no
-reply refs.
+What it costs: a waiting process holds a stack, 8 MB of address space
+and the pages it touched, and the system maps about 32,000 of them at
+once on default Linux (`vm.max_map_count`), so a million processes
+can't all wait, where they could before (`million-forks` is
+`ten-thousand-forks`). What it buys is the process model's simplicity:
+one kind of wait, no split pass, no state functions, and a call to a
+function that waits is a call.
 
 ### Processes
 
 | | |
 |---|---|
 | `(fork expr)` | Starts a **task** (D243). The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. A task can't wait in `recv` (the compiler refuses a state function in `expr`, or in the top level, which is the root's task), nor be sent to, timed (`after`) or monitor (`:not-an-actor`). Inside `expr`, `$$` is the child. |
-| `(spawn expr)` | As `fork`, but starts an **actor** (D243): `expr` runs at the base of the child's stack, so it may tail-call a state function, and the actor can be sent to. |
+| `(spawn expr)` | As `fork`, but starts an **actor** (D243): `expr` runs at the base of the child's stack, so it may wait in `recv`, and the actor can be sent to. |
 | `(connect :keypress expr)` | `spawn`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
 | `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `spawn`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
 | `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `spawn`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
@@ -354,9 +284,9 @@ actor makes no address, so it can't `ask`; it may block in `join` and
   into a compiled function: LANGUAGE.md, under Scheduling). When it runs out, the
   process pauses where it is, *keeping its stack*, and goes to the back of
   the run queue. `yield` is the same pause, chosen by the program.
-- **Stacks exist only while needed.** A process that is running, paused
-  (preempted or yielded), blocked in `join` or `join/race`, or blocked in a syscall holds a
-  stack. A process waiting in `recv` holds none.
+- **A process holds a stack from its first run to its end** (D276),
+  whatever it waits in. One that can't have one ends `:stack` (D267);
+  the pool keeps a few hundred of those that have ended, for the next.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
   sources, no blocked I/O) is detected and reported. So far (step 10d): if
   the run queue empties, no timer is pending, no process is connected to
@@ -421,9 +351,7 @@ value)` lists of strings, in the environment's order, for `lookup`
 parameter, seen as `@ARGV` is, and for the same reason: the environment is
 the program's input, given to the root, and a key reaches only the code
 it's passed to. The runtime's `main` builds it in the root's heap; an
-entry is cut at its first `=`, and one without an `=` is left out. A
-receive function split from the top level (D167) carries both under
-names no program can write.
+entry is cut at its first `=`, and one without an `=` is left out.
 
 ### Builtins and the prelude
 
@@ -817,10 +745,11 @@ Lalloc_N:
 
 **Collection** (step 9, step 12b, and D200):
 
-- **It runs when a receive function asks for its next message** (D105),
-  in `rt_recv`, before it takes one. The `recv` rule means the stack is
-  empty then, so the roots are just the receive function's arguments, in
-  its frame. Nothing outside the process's heap points into it.
+- **It runs when a process waits in `recv`** (D105), in `rt_recv`,
+  before it takes a message, and again each time it wakes to one. The
+  roots are as at a function's entry (below), the frame's slots in use
+  so far and the frames below, since the stack is kept (D276). Nothing
+  outside the process's heap points into it.
 - **And at a function's entry** (D166), in `rt_preempt`, so the root and
   a process that never waits collect too, and the cap is on what's
   live. The roots are the frames: the function's parameters and
@@ -1133,8 +1062,8 @@ run (option (b), D256's step 6, put off).
   exact and take no real time; but a process that sleeps while others stay
   busy never wakes.
 - **Stack pool**: a process takes a stack when it starts running and gives
-  it back when it waits in `recv` or ends. An island keeps 256 given
-  back, and unmaps the rest. With none to be had (about 32,700 held at
+  it back when it ends (D276; till then at `recv` too). An island keeps
+  256 given back, and unmaps the rest. With none to be had (about 32,700 held at
   once reach Linux's default `vm.max_map_count`, two mappings a stack),
   the process that wanted one faults `:stack`, and the program goes on
   (D267).

@@ -30,7 +30,7 @@ actor, say, the message follows the chain, naming the function each
 process is in, up to the one waiting for a message:
 
 ```
-deadlock: the root process is waiting in the top level for #<pid 2> to end, which is waiting in ask-twice (recv at prog.slight:7:12) for a message, and nothing else can run
+deadlock: the root process is waiting in the top level for #<pid 2> to end, which is waiting in ask-twice for a message, and nothing else can run
 ```
 
 ## Looking inside a running program

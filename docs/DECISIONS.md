@@ -6859,3 +6859,41 @@ directory, a FIFO, links), and `t/live.py`'s delete race, where
 as fast as it can: the walk in slight lost the file outside in 5 runs
 of 5, the builtin in none of 10.
 
+
+**D276. `recv` keeps its stack, and goes anywhere in an actor.**
+*(Stevan, Nov 2026: "Start step 1, recv keeps its stack", the first
+step of PLAN.md's "One kind of process, and an address for every
+message", after going back to ts-slight: "I've struggled with the `recv`
+rule every time I wrote slight, where the join/fork/yield patterns felt
+more intuitive.")* A `recv` can go anywhere in a function that runs in
+an actor: in a helper, in a lambda, in the middle of a body, inside a
+call, and a function that waits gives its value back to its caller. The
+process keeps its stack while it waits, as it does in `join`, `read` and
+`sleep`: `rt_recv` takes the next message or parks the process, stack
+kept, and returns the message when one comes, with a new slice and a
+call counted, as a receive function started again from the top had, so
+a program is preempted where it was. Retired: D8 (`recv` only at the top
+of a receive function), D9's stack given back at `recv`, D167's
+splitting of functions at `recv`, and with them `split.ts` (542 lines),
+`classify.ts` (85), state and receive functions, the rule's compile
+errors, and review H2. The checker finds which functions wait with a
+fixpoint of its own over the program's calls, not tail calls alone, so
+an actor's mailbox is the union of every `recv` it can reach. Left for
+step 2: a task still can't wait (D243), a `recv` written in one a
+compile error and a call from one to a function that waits a fault,
+`:not-an-actor`, when it runs; and a plain `recv` still takes any
+message. What changed in the tests, each worked out from the change:
+the deadlock message names the function a process waits in, not a
+generated one (192, 201); `:system` shows a waiting actor with its
+stack, and eight stacks held where four were (200); the guide's memory
+demo shows a waiting actor with a stack (`con-memory`); and
+`million-forks`, a million waiting at once, meets the system's limit on
+mappings at about 32,700 (D267), so it's `ten-thousand-forks` now, and
+`bench/idle-memory` at a million no longer runs as it is. No other
+output moved: nothing's order of events changed. Rejected: charging the
+stackless path's cost exactly (a reduction at a `recv` that wasn't a
+function's whole body, for the tail call `split.ts` made), since every
+expected output came out the same without it; and keeping a
+compile-time check that a task calls no function that waits, which the
+checker's fixpoint could give as a warning, left for step 2, where
+tasks go.

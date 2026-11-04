@@ -303,9 +303,10 @@ next message, or drops it as a dead letter. So a message that no `recv`
 the actor could ever be in can take is certainly a dead letter, and
 what the actor takes is the union of all those `recv`s' patterns.
 
-`classify.ts` already knows which functions wait, and how they call
-each other: each `recv` reachable by tail calls from the function a
-`spawn` starts is one the actor can be in. For each `spawn`, the
+The checker works out which functions wait, and how they call each
+other: each `recv` reachable by calls from the function a `spawn`
+starts is one the actor can be in (D276; till then by tail calls alone,
+from `classify.ts`). For each `spawn`, the
 checker takes the union of those `recv`s' patterns as types: a literal
 is its type, `:tag(x, y)` is `:tag(any, any)`, and a name or `_` alone
 is `any`. That's `M`, with no annotation:
@@ -398,10 +399,9 @@ display actor, which D243 had made a fault (`:not-a-task`).
   s-expression, and showing one in either syntax. 560 lines.
 - `compiler/src/check.ts`: the pass. It runs on the forms `expand.ts`
   gives with `match` kept (`expandProgram`'s `keepMatch`), includes
-  spliced in, before `split.ts`, so its places are the source's; the
-  driver then lowers the matches as `expand.ts` always did. It uses
-  `classify.ts`'s fixpoint over tail calls, with a recv anywhere in a
-  body, to know which functions wait. `eraseTypes`, which code
+  spliced in, so its places are the source's; the driver then lowers
+  the matches as `expand.ts` always did. A fixpoint of its own over the
+  program's calls says which functions wait (D276). `eraseTypes`, which code
   generation calls first, drops `deftype` and `sig` and makes `(the T
   e)` `e`, so the code is the same with types or without. 1,140 lines.
 - `compiler/src/builtins.ts`: the builtins' types. 240 lines.

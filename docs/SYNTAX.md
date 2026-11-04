@@ -346,10 +346,9 @@ front; `[...xs, a]` is an error (write `append(xs, [a])`).
 | `connect(conn) { body }` | `(connect conn body...)` |
 | `self`, `parent` | `$$`, `^$$` |
 
-The `recv` rule is unchanged, and reads naturally: a `recv`, and a call
-to a function that waits, can go where a tail call could, which is the
-last expression of a block, or the value of a `let` there
-(`let msg = recv;`).
+A `recv`, and a call to a function that waits, go anywhere in an
+actor's code (D276): the last expression of a block, the value of a
+`let` (`let msg = recv;`), an argument, a helper.
 
 **Calls** are `f(a, b)`, whatever `f` is: a function, a builtin, a
 local holding a function, or an expression (`adder(1)(2)`). Builtins

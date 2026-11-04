@@ -392,8 +392,8 @@ nothing changes, that's rarely visible, except that a lambda can't call
 itself (the name it's `let` to isn't bound while it's made). Use a
 `defun` for that. At most 8 parameters.
 
-A lambda can't contain a `recv`, or call a function that waits in one
-(see "The recv rule", below).
+A lambda can wait in a `recv`, or call a function that does, when the
+process running it is an actor (see "Where a `recv` can go", below).
 
 ### let
 
@@ -725,7 +725,8 @@ does setting a timer for one (`after`), so whatever sends its caller
 messages (`http/stream`, `agent/say`, `rpc/stream`) is called from an
 actor.
 
-A function whose whole body is a `recv` is a **receive function**:
+An actor's loop is a function that takes a message, and calls itself
+with its new state:
 
     (defun counter (n)
         (recv
@@ -757,45 +758,40 @@ If no clause matches it, it's dropped and logged as a dead letter
 (`dead letter: (bogus 1) (recv at prog.slight:2:5)`), and the function
 takes the next.
 
-### The recv rule
+### Where a `recv` can go
 
-A `recv` can go anywhere a tail call could (D167): as a form of a body
-in tail position (a function's, a `spawn`'s or `connect`'s, or a `cond`
-or `recv` clause's), or as a `let`'s value there:
+Anywhere in a function that runs in an actor (D276): as a form of a
+body, as a `let`'s value, inside a call or a `cond`'s test, in a helper
+the function calls, or in a lambda it runs. What's evaluated before it
+still comes first: in `(list (send $$ :hi) (recv))` the `send` is done
+before the `recv`, which gets `:hi`. A function that waits gives its
+value back to its caller:
 
-    (defun ask (c)
+    (defun ask-counter (c)
         (send c (list :get $$))
-        (let n (recv ((:count n) n)))
-        (pprint (list :count n)))
+        (recv ((:count n) n)))
 
-It can go inside a call there too, and what's evaluated before it still
-comes first: in `(list (send $$ :hi) (recv))` the `send` is done before
-the `recv`, which gets `:hi`. And in a `cond`'s test, when the `cond` is
-in tail position. Not in a lambda, nor in a `cond`, `yield` or `do` (one
-with `let`s) that isn't in tail position: take the message first, with
-`(let m (recv))`.
+    (defun report (c)
+        (pprint (list :count (ask-counter c))))
 
-The compiler splits the function at each `recv`: the `recv` and the rest
-become a receive function of their own, which the function tail-calls
-with the locals the rest uses. So a function with a `recv` in it is a
-**state function**, as is any function that tail-calls one. The compiler
-works out which functions they are, and a state function can only be
-called in tail position, or as the body of a `spawn` or `connect`. It
-can't be used as a value, and a lambda can't call it. A task (a `fork`'s
-body, or the top level) can't wait at all: a `recv` there, or a call to
-a state function, is an error (`a task (a fork's body, or the top
-level) can't wait for messages, ...: spawn an actor for it`).
+The process keeps its stack while it waits, as it does in `join`, and
+goes on from the `recv` when a message comes. So an actor holds its
+stack from its first run to its end, and what a waiting actor costs is
+its stack's touched pages, its mailbox and its heap, which is collected
+at the `recv` if it has grown enough (D105).
 
-So when a process waits, there's nothing on its stack: it's just the
-receive function, its arguments and the mailbox. A waiting process holds
-no stack at all (D8), and its heap is collected then if it's grown
-enough (D105).
+A task (a `fork`'s body, or the top level) can't wait for a message
+(D243): a `recv` written in one is an error (`a task (a fork's body, or
+the top level) can't wait for messages, and this recv would: spawn an
+actor for it`), and a call from one to a function that waits faults
+`:not-an-actor` when it runs. A task gets what it needs from actors
+with `ask`, or by waiting for them to end.
 
-The cost is that a function that waits can't give a value back to the
-function that called it. For that, use a task: `join` waits for one to
-end and gives its result, from anywhere, a lambda or an actor included;
-and a task can `ask` an actor (in the prelude, under Addresses), which
-sends a request and reads the answer.
+An actor that waits for a reply in the middle of a handler takes the
+next message, whatever it is: there's no selective receive. So an actor
+that serves requests shouldn't stop to wait inside one; what asks other
+actors, and must get the right answer, is a task, which reads the reply
+at an address of its own (Addresses, below).
 
 ### How processes end
 
@@ -1117,9 +1113,9 @@ memory is limited to less than 4 GB, as in a container (`docker run
 instead (D233): a process that grows without end then holds about half
 the limit when it faults, as its last collection copies, so it ends on
 its own and the kernel doesn't kill the program. That caps each
-process, not all of them together. It's collected when a receive function asks
-for its next message, or at the entry of the next function called
-(D166), in two generations (D200): what's new is allocated in a nursery
+process, not all of them together. It's collected when the process
+waits in `recv`, or at the entry of the next function called (D166,
+D276), in two generations (D200): what's new is allocated in a nursery
 (from 4 KB, growing to 1 MB), and once that's full, what's still
 reachable in it is moved to the old generation and the nursery starts
 again; the old generation is collected once it's at least 256 KB and
@@ -1563,12 +1559,10 @@ which `lookup` reads; more keys may come. A process's:
   `:joining` (in `join` or `join/race`) or `:sleeping`.
 - `(:joining p)`: the process it waits for in `join`, the list of those
   it races in `join/race`, or `()`.
-- `(:in name)`: the function it's in, as a string: the receive function
-  it waits in; the one that called `join`, `join/race`, `sleep`,
+- `(:in name)`: the function it's in, as a string: the one it waits in
+  (`recv`, `join`, `join/race`, `read`, `sleep`); the one that called
   `yield`, or `send` to a device; the one it was entering when it was
-  preempted; or the one it starts in. A `recv` in the middle of a function waits in a receive
-  function of its own, named for both: `"server (recv at
-  prog.slight:7:12)"`. The top level is `"the top level"`, a `fork`'s
+  preempted; or the one it starts in. The top level is `"the top level"`, a `fork`'s
   body `"fork at prog.slight:3:9"` (a `spawn`'s, `"spawn at ..."`, and a
   `connect`'s, `"connect at ..."`),
   and a lambda `"lambda at ..."`.
@@ -2464,7 +2458,7 @@ and an index outside the matrix `(:out-of-range (i j))`. Its header,
 
 `lib/ds.slight`: data structures as processes, state that changes made
 of values that don't. Each structure is a process holding its state in
-the arguments of its receive function, so it takes one message at a
+the arguments of its loop, so it takes one message at a
 time: no races, and an update is atomic. Writes are sends, and return
 at once; reads wait for the answer. Everything goes across by copying,
 so ask for pieces, not the whole of something big. A structure lasts

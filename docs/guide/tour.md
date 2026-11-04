@@ -246,22 +246,23 @@ When nothing can run any more and nothing more can come, the program
 prints the top level's value and ends. Here that's while the counter is
 still waiting for its next message, which is fine.
 
-## The one rule
+## Waiting
 
-A `recv` can go only where a tail call could, and a function that can
-reach one can only be tail-called. That's what lets a waiting actor give
-its stack back: when it waits there's nothing on it, only a function,
-its arguments and a mailbox.
+A `recv` goes anywhere in an actor's code, a helper or a lambda
+included, and the process keeps its stack while it waits, as it does
+in `join`. So a function that waits gives its value back to whoever
+called it.
 
-Two consequences show up early:
+Two things show up early:
 
 - **A task can't wait for messages.** The top level is a task, so a
-  `recv` there, or a call to `counter`, is a compile error that tells
-  you to spawn an actor for it. A task gets what it needs from actors
-  with `ask`, or by waiting for them to end.
-- **A function that waits can't return a value to its caller.** Its
-  result is the process's result. To get a value back from something
-  that waits, run it as its own process and wait for that.
+  `recv` there is a compile error that tells you to spawn an actor for
+  it, and a call from it to `counter` faults when it runs. A task gets
+  what it needs from actors with `ask`, or by waiting for them to end.
+- **An actor waiting for a reply takes the next message, whatever it
+  is.** There's no selective receive, so an actor that serves requests
+  doesn't stop to wait in the middle of one; a task asks, at an address
+  of its own.
 
 ## Where next
 

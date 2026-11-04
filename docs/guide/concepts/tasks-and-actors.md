@@ -39,7 +39,7 @@ An actor can:
   address of its own);
 - connect to devices (files, sockets, commands, the keyboard) with
   `connect`, and take what they send as messages;
-- give its stack back while it waits. See [the recv rule](recv-rule.md).
+- wait in `recv` anywhere in its code, keeping its stack. See [Waiting for a message](recv-rule.md).
 
 Both can `send` to actors and addresses, `kill`, `sleep`, and start
 either kind.
@@ -141,4 +141,4 @@ it yet.
 
 ---
 
-Previous: [The recv rule](recv-rule.md) · Next: [Failure](failure.md)
+Previous: [Waiting for a message](recv-rule.md) · Next: [Failure](failure.md)

@@ -638,10 +638,10 @@ extern const uintptr_t slight_functions[]    RT_ASM(slight_functions);
 // --- called by compiled code --------------------------------------------------
 
 // Processes (process.c). rt_recv returns the next message, or, when there
-// is none, remembers code(args...) and gives up the stack; the process
-// starts again at code when a message comes. First, it may collect
-// garbage, with args (the receive function's, in its frame) as the roots,
-// which it updates. rt_fork starts code(values...)
+// is none, waits for one, keeping the stack, and returns it when it comes
+// (D276). First, it may collect garbage, with the frame's slots in use
+// and the frames below as the roots, which it updates, as rt_preempt
+// does. rt_fork starts code(values...)
 // in a new process, a task, with the values deep-copied into its heap;
 // rt_spawn does the same for an actor (D243); rt_connect starts an actor,
 // and sends it every key from :keypress; rt_connect_system does too, and
@@ -685,7 +685,7 @@ rt_value_t rt_disconnect(rt_value_t pid, const char *site) RT_ASM(rt_disconnect)
 // ((:uid u) (:gid g) (:pid p)), or () for any other pid (D235).
 rt_value_t rt_socket_peer(rt_value_t c, const char *site) RT_ASM(rt_socket_peer);
 rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *site) RT_ASM(rt_send);
-rt_value_t rt_recv(rt_proc_t *p, rt_value_t *args, uint64_t n, rt_code_t code) RT_ASM(rt_recv);
+rt_value_t rt_recv(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t at) RT_ASM(rt_recv);
 void       rt_dead_letter(rt_value_t msg, const char *site) RT_ASM(rt_dead_letter);
 void       rt_yield(void) RT_ASM(rt_yield);
 
