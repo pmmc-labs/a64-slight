@@ -2446,7 +2446,7 @@ Mac, stackful against today.
   message meant for someone else. A `--strict` warning, when it follows
   a `send` in the same body; not a rule.
 
-### An agent team: a design exercise (agreed, D281; step 1 built, Nov 2026)
+### An agent team: a design exercise (agreed, D281; steps 1 and 2 built, Nov 2026)
 
 Stevan, after the Life ports (D280): "So what would be a good design
 exercise? Should we flesh out an example to a larger app? Or do
@@ -2524,7 +2524,9 @@ split and answered; the fake model and the golden test. *Built
 (D281): `examples/team-agents.slight` and `examples/team.slight`,
 golden test 375.* 2. The pool,
 the budgets, the kill on overrun and the restart on failure, each
-tested. 3. Workers asking each other, the review round, and `ask_team`
+tested. *Built (D282): `team/new`'s options, the CLI's flags and
+approvals, golden test 376; a kill doesn't take a process's children,
+so the lead keeps each agent's pid.* 3. Workers asking each other, the review round, and `ask_team`
 in `chat`. 4. Record and replay, and the seeds, in t/replay.sh; the
 live check. 5. The friction list written up in the decision, each entry
 weighed: a library function, a language change to propose, or nothing.

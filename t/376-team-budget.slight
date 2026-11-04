@@ -1,0 +1,106 @@
+; A team's pool and budgets, on a fake model (D282, PLAN.md's "An agent
+; team", step 2). First, five quick tasks with at most two workers at
+; once: the tasks start in order, and never more than two run. Then a
+; job of three with 5 seconds a task: one stalls, its fake reply never
+; coming, and is killed at 5000 ms on the virtual clock; one fails in
+; mid-answer and is tried again, with the failure in its new task, and
+; answers; and one asks to write a file, which the test's approve
+; function declines and reports, so the model is told and answers
+; without. The events are collected and printed in task order once the
+; answer has come, with how many ran at once at most, since the
+; workers' replies come in whatever order the fake's do. Worked out by
+; hand from the script.
+
+(@include "../examples/team-agents.slight")
+(@include :tools)
+(@include :http)
+
+; --- the fake ollama ---------------------------------------------------
+
+(defun handler (req)
+    (match (json/parse (lookup :body req))
+        ((:ok (:object & fields))
+            (let messages (lookup "messages" fields))
+            (let last     (cdr (car (reverse messages))))
+            (let users    (filter (lambda (m) (eq? (lookup "role" (cdr m)) "user")) (reverse messages)))
+            (let asked    (lookup "content" (cdr (car users))))
+            (when (eq? asked "stall") (sleep 86400000))
+            (list 200 () (lines (reply asked last))))))
+
+(defun reply (asked last)
+    (cond
+        ((eq? asked "The job: five quick ones")           (list (piece "one\ntwo\nthree\nfour\nfive") (done)))
+        ((eq? asked "The job: stall and retry")           (list (piece "stall\nflaky\nwrite") (done)))
+        ((member? asked (list "one" "two" "three" "four" "five"))
+            (list (piece (str (+ 1 (length (take-while asked))))) (done)))
+        ((eq? asked "flaky")                              (list (piece "hic") (list :object (list "error" "hiccup"))))
+        ((str/includes? asked "A previous attempt")       (list (piece "steady") (done)))
+        ((eq? (lookup "role" last) "tool")                (list (piece "declined, then") (done)))
+        ((eq? asked "write")                              (list (calls (list (call "write_file" (list (list "path" "out.txt") (list "content" "hi"))))) (done)))
+        ((str/starts-with? asked "The job was: five")     (list (piece "12345") (done)))
+        ((str/starts-with? asked "The job was: stall")    (list (piece "stall timed out; steady; declined") (done)))
+        (#true                                            (list (piece (str "? " asked)) (done)))))
+
+; The words before asked in the plan: "three" is the third.
+(defun take-while (asked)
+    (take (- (length (list "one" "two" "three" "four" "five")) (length (member-from asked (list "one" "two" "three" "four" "five")))) (list "one" "two" "three" "four" "five")))
+
+(defun member-from (x xs)
+    (match xs
+        (()         ())
+        ((y & rest) (if (eq? x y) xs (member-from x rest)))))
+
+(defun piece (text)
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" text))) (list "done" #false)))
+
+(defun calls (cs)
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" "") (list "tool_calls" cs))) (list "done" #false)))
+
+(defun call (name args)
+    (list :object (list "function" (list :object (list "name" name) (list "arguments" (cons :object args))))))
+
+(defun done ()
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" ""))) (list "done" #true)))
+
+(defun lines (values)
+    (str/join "" (map (lambda (v) (str (json/print v) "\n")) values)))
+
+; --- the run -----------------------------------------------------------
+
+; The events of a job: started, the ids in the order they started;
+; running and most, how many run and the most that did; by id, each
+; task's events, oldest first; and what the workers would have done.
+(defun collect (started running most events woulds)
+    (recv
+        ((:team/plan _ _)        (collect started running most events woulds))
+        ((:team/task _ id _)     (collect (cons id started) (+ running 1) (if (> (+ running 1) most) (+ running 1) most) events woulds))
+        ((:team/done _ id a)     (collect started (- running 1) most (noted id (list :done a) events) woulds))
+        ((:team/failed _ id why) (collect started (- running 1) most (noted id (list :failed why) events) woulds))
+        ((:team/retry _ id why)  (collect started (- running 1) most (noted id (list :retried why) events) woulds))
+        ((:would what)           (collect started running most events (cons what woulds)))
+        ((:team/answer _ text)
+            (pprint (list :started (reverse started) :most-at-once most))
+            (map (lambda (e) (pprint (cons (car e) (reverse (cadr e))))) (sort-by car events))
+            (map (lambda (w) (pprint (list :would w))) (reverse woulds))
+            (pprint (list :answer text)))
+        ((:team/error _ reason)  (pprint (list :error reason)))))
+
+(defun noted (id event events)
+    (let before (match (lookup id events) (:not-found ()) (es es)))
+    (assoc id (cons event before) (remove (lambda (e) (== (car e) id)) events)))
+
+(match (http/listen 0 handler)
+    ((:ok (srv port))
+        (let me      $$)
+        (let approve (lambda (what) (send me (list :would what)) #false))
+        (let url     (str "http://127.0.0.1:" port))
+        (let quick   (team/new url "fake" () (list (list :at-most 2))))
+        (team/say quick "five quick ones")
+        (collect () 0 0 () ())
+        (let budget  (team/new url "fake" (list (tools/write-file approve)) (list (list :task-ms 5000))))
+        (team/say budget "stall and retry")
+        (collect () 0 0 () ())
+        (kill quick)
+        (kill budget)
+        (kill srv)
+        :done))

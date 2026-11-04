@@ -6,7 +6,8 @@
 ; combination. The events are collected and printed in task order,
 ; since the workers' answers come in whatever order the fake's replies
 ; do, the plan first and the answer last. Then team/ask, which passes
-; the events over. Worked out by hand from the script.
+; the events over. No retries, so the failure shows: step 2's budgets
+; are t/376's. Worked out by hand from the script.
 
 (@include "../examples/team-agents.slight")
 (@include :http)
@@ -70,7 +71,7 @@
 
 (match (http/listen 0 handler)
     ((:ok (srv port))
-        (let t (team/new (str "http://127.0.0.1:" port) "fake" (list (add-tool))))
+        (let t (team/new (str "http://127.0.0.1:" port) "fake" (list (add-tool)) (list (list :retries 0))))
         (team/say t "greet, and add")
         (collect () ())
         (pprint (team/ask t "just greet"))

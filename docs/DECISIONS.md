@@ -7072,3 +7072,42 @@ what it says (D248, by design, and a surprise each time). Nothing else,
 in about 200 lines: the lead asks in the middle of handling a message
 and reads its workers at an address of its own with no dance at all,
 which is what the exercise was to find out first.
+
+**D282. The agent team, step 2: a pool, budgets, a kill on overrun, a
+retry on failure.** *(Stevan, Nov 2026: "Let's proceed to step 2".)*
+`team/new` takes options: `(:at-most k)` workers at once, 4 unless
+given; `(:task-ms n)`, two minutes unless given; `(:retries n)`, one
+unless given. The lead's loop starts tasks from its queue while there's
+room, and reads its address for the next report, end or overrun; no
+`join/race`, since the reads are the wait, which the plan's sketch had
+wrong. A task's timer, `after` to the lead's address, rings `(:overrun
+id)`, and the lead kills the worker's agent and the worker: the agent's
+end takes its turn, its stream and its commands, by the agent library's
+own monitors (D182, D193), so the lead makes each worker's agent itself,
+to hold its pid. The task fails with `(:timeout n)`, and isn't retried;
+a failure of any other kind, a model's error, a fault, is tried again
+with why it failed in its new task, `(:team/retry t id why)` to the
+asker, till the retries are spent. A report for a task no longer live,
+after an overrun, say, is dropped, and killing an ended process does
+nothing, so the lead kills both at every settling. Tools that change
+something are the program's to approve, as the chat's: `examples/
+team.slight` reports what a worker would have done unless `--yes` was
+given, and takes `--at-most` and `--ms`. Test 375 asks for no retries,
+so its failure still shows; test 376 has the pool at two over five
+quick tasks (they start in order, and never more than two run), a stall
+killed at 5000 ms on the virtual clock, a failure tried again and
+answered, and a write declined and reported. Friction, for the list:
+(1) there's no way to end a process's children with it: killing the
+worker would have left its agent, the agent's turn and a command
+running, so the lead keeps the agent's pid to kill, and leans on the
+library's monitors from there; Erlang's links do this, and a `kill`
+that takes a tree is a thing to weigh. (2) `assoc` adds a pair without
+removing the old, so an update of an alist is `assoc` after `remove`,
+as `rpc` does with `rpc/without`; a replacing `assoc`, or a `put`, is
+wanted in the prelude, and the bug it cost here was a task listed
+twice. (3) `lookup` reads `(key value)` pairs only, so a table of
+records is `(id (w a timer task tries))`, the record one value; a shape
+to know. (4) A default that changes behaviour, retries at one, changed
+step 1's test, which says `(:retries 0)` now. Nothing of the process
+model's: the pool is the read loop, the overrun a timer to the same
+address, the restart a fork from the queue.
