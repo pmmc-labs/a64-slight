@@ -1293,6 +1293,8 @@ enum {
     ITEM_ENDED,                         // from's end, for a task reading it, or its parent
     ITEM_ASK,                           // :system's question, for device to, about from (D256)
     ITEM_TOLD,                          // the answer, to the device that asked
+    ITEM_CANCEL,                        // timer/cancel of timer n, this island's, for from (D274)
+    ITEM_CANCELLED,                     // whether it was, n, to the process that asked
 };
 
 // A message's item is only its head, kept in the message's own chunk, so
@@ -2507,6 +2509,7 @@ static void start_here(item_t *it) {
 
 static void system_asked(const item_t *it);
 static void system_told(item_t *it);
+static int  cancel_here(uint64_t id);
 static void end_taken(void);
 
 #define ENDING_KILLED 1
@@ -2543,6 +2546,18 @@ static void take_item(item_t *it) {
         case ITEM_PLACED:
             if (t && t->state == RT_PLACING) {
                 t->joining = it->from;
+                enqueue(t);
+            }
+            break;
+        case ITEM_CANCEL: {
+            item_t *r = new_item(ITEM_CANCELLED, it->from, 0);
+            r->n = (uint64_t)cancel_here(it->n);
+            push(rt_pid_island(it->from), r);
+            break;
+        }
+        case ITEM_CANCELLED:
+            if (t && t->state == RT_PLACING) {
+                t->joining = it->n ? RT_TRUE : RT_FALSE;
                 enqueue(t);
             }
             break;
@@ -2911,21 +2926,47 @@ static void ring(void) {
     }
 }
 
+// A timer's number has its island above TIMER_ISLAND, so that one
+// island's can't be taken for another's: island 0's are 1 up, as they
+// were before islands (D232), and island k's k * 2^52 up (D274).
+#define TIMER_ISLAND 52
+
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) {
     uint64_t due = due_in(ms, site);
     if (!rt_is_address(pid) && !far(pid)) need_actor(entry(pid, site), pid, site);
-    set_alarm(due, pid, new_msg_reserving(&my, msg, 0, site), ++my.afters);
-    return rt_int((int64_t)my.afters);
+    uint64_t id = my.island << TIMER_ISLAND | ++my.afters;
+    set_alarm(due, pid, new_msg_reserving(&my, msg, 0, site), id);
+    return rt_int((int64_t)id);
 }
 
-rt_value_t rt_timer_cancel(rt_value_t t, const char *site) {
-    int64_t id = rt_need_int(t, site);
-    if (id <= 0 || !my.ids_cap || my.ids[id_slot((uint64_t)id)] != (uint64_t)id) return RT_FALSE;
-    uint64_t  i = my.places[id_slot((uint64_t)id)];
+// Takes back this island's timer id, if it's pending: 1 if it was.
+static int cancel_here(uint64_t id) {
+    if (!my.ids_cap || my.ids[id_slot(id)] != id) return 0;
+    uint64_t  i = my.places[id_slot(id)];
     rt_msg_t *m = my.alarms[i].msg;
     remove_alarm(i);
     free_msg(m);
-    return RT_TRUE;
+    return 1;
+}
+
+// Another island's timer is taken back there, and the caller waits for
+// the answer, keeping its stack, as spawn/on waits for its pid, so that
+// any process can take back any timer, wherever it was set (D232, D274).
+rt_value_t rt_timer_cancel(rt_value_t t, const char *site) {
+    int64_t id = rt_need_int(t, site);
+    if (id <= 0) return RT_FALSE;
+    uint64_t k = (uint64_t)id >> TIMER_ISLAND;
+    if (k == my.island) return cancel_here((uint64_t)id) ? RT_TRUE : RT_FALSE;
+    if (k >= nislands) return RT_FALSE;         // no island's, so no timer's
+    rt_proc_t *p  = rt_current;
+    item_t    *it = new_item(ITEM_CANCEL, 0, p->pid);
+    it->n = (uint64_t)id;
+    push(k, it);
+    p->state   = RT_PLACING;
+    p->joining = rt_int((int64_t)k);
+    p->at      = (uintptr_t)__builtin_return_address(0);
+    to_scheduler(p);                            // till ITEM_CANCELLED says
+    return p->joining;
 }
 
 // Whether nothing can come of a: its process has ended, or its device

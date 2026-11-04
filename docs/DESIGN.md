@@ -384,9 +384,11 @@ actor makes no address, so it can't `ask`; it may block in `join` and
   number of milliseconds; a negative one counts as 0. Timers due at the
   same time fire in the order they were set, at the scheduler's next
   decision (so `(sleep 0)` lets the processes already waiting go first).
-  `after` gives its timer's number, 1 up, and `timer/cancel` takes one
-  back by it, found in an index of the pending ones, kept as the heap
-  moves them. A timer whose process has ended is dropped when it's due,
+  `after` gives its timer's number, 1 up, with its island above bit 52
+  (D274), and `timer/cancel` takes one back by it, found in an index of
+  the pending ones, kept as the heap moves them; another island's is
+  taken back by that island, the caller waiting for its answer, as
+  `spawn/on` waits. A timer whose process has ended is dropped when it's due,
   as a message to it would be, or sooner: when nothing can run, those
   next due whose process has ended are dropped, so the program neither
   waits for them nor moves the clock to them.

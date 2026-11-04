@@ -992,12 +992,15 @@ answer as a message, or forks a task to ask.
 - `(after ms pid msg)` sends `msg` to `pid` once `ms` milliseconds have
   passed. `msg` is copied when `after` is called. Returns the timer's
   number, an integer: 1 for the program's first, and one more for each
-  after it.
+  after it; on island k, k × 2^52 more, so that no two islands' timers
+  have the same number (D274).
 - `(timer/cancel t)` takes back `after`'s timer `t`, its number, if it
   hasn't fired: its message never comes, and it no longer keeps the
   program running. Gives `#true` if it took it back, or `#false` if it
   had fired already (its message may be in the mailbox, or taken), had
-  been taken back, or is no timer's number. Any process can take a
+  been taken back, or is no timer's number. A timer set on another
+  island is taken back there, the caller waiting for its answer, keeping
+  its stack, as `spawn/on` waits for its pid (D274). Any process can take a
   timer back (D232).
 - `(sleep ms)` blocks the calling process, and only that one, for `ms`
   milliseconds. Returns `()`.

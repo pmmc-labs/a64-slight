@@ -21,7 +21,7 @@ dir=build/t/$TARGET/tsan
 mkdir -p "$dir"
 
 fail=0
-./t/run.sh t/32[4-9]-*.slight t/33[0-36]-*.slight || fail=1
+./t/run.sh t/32[4-9]-*.slight t/33[0-36]-*.slight t/347-*.slight || fail=1
 
 # n: the size each program is run at, small, since TSan is slow.
 for prog in bench/parallel-fib/parallel-fib-mc.slight:20 bench/fan-in/fan-in-mc.slight:200000 \

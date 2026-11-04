@@ -364,8 +364,9 @@ and H5, requests that would put more on the wire than they say refused
 (D271, golden test 341), G, an address an id its island gives once
 (D273, golden test 324), and J, a file that isn't a regular one, a FIFO
 or a terminal, read and written as a socket is, so it holds up no
-island (D272, golden tests 344 to 346), are settled, and the rest wait
-for him.
+island (D272, golden tests 344 to 346), and H, a timer's number
+carrying its island, another island's taken back there (D274, golden
+test 347), are settled, and the rest wait for him.
 **Next:** nothing is under way. Candidates, none agreed: a simulation library across
 islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in

@@ -31,6 +31,10 @@ are settled:
   socket is; a FIFO opened to write with no reader fails `:enxio` at
   once. macOS's FIFO with no writer yet, and its `/dev/stdin`, are to
   be checked on the M2.
+- **H** is built (D274, golden test 347): a timer's number carries its
+  island (island 0's still 1 up), and a cancel of another island's
+  timer is answered by that island, the caller waiting as `spawn/on`
+  does.
 
 The rest of step 4 waits for Stevan. Step 5 is begun: CLAUDE.md's
 status says what's done.

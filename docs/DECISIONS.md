@@ -6806,3 +6806,24 @@ hours at the most an island can fork, but the numbers wrapping at
 4,096). Golden test 324, which tested the wrap, now tests that ids
 aren't reused, and that a message to a closed address reaches no other.
 
+**D274. A timer's number carries its island, and one set on another
+island is taken back there.** *(Stevan, Nov 2026, from the review of
+2026-11-02, L1; Claude's recommendation.)* Each island numbered its own
+`after` timers from 1, and `timer/cancel` looked a number up on its own
+island alone, so taking back island 1's timer 3 from island 0 took
+island 0's own timer 3, if one was pending, and left island 1's to fire.
+D232's "any process can take a timer back" held on one island only. Now
+island k's timer n is numbered k × 2^52 + n (island 0's are still 1 up,
+so nothing written for one island changes), and `timer/cancel` of
+another island's number sends that island an item, `ITEM_CANCEL`, and
+waits, keeping its stack, for `ITEM_CANCELLED`, with `#true` or
+`#false`, as `spawn/on` waits for its pid (it uses the same state, and
+the inbox's items, so it's recorded and replayed as they are). A number
+for an island there isn't is no timer's, `#false`. Rejected: faulting on
+another island's number (simpler, but D232 narrowed on islands, where
+D256 has sends, kills and reads cross as they are); and `#false` for
+one, which says the timer had fired, so a caller would wait for a
+timeout that never comes. Golden test 347 (in `make tsan` too), whose
+worker keeps island 1 busy while the cancel comes, since an island with
+nothing to run moves its virtual clock to its next timer.
+

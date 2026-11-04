@@ -1,0 +1,35 @@
+; A timer's number carries its island (D274): island 0's are 1 up, as
+; before islands, and island 1's 2^52 + 1 up. So timer/cancel of island
+; 1's first timer, from island 0, takes that one back, asking island 1
+; and waiting for its answer, and not island 0's own first, which still
+; fires; till D274 the two had the same number, 1, and the cancel took
+; island 0's. Taken back again it's #false, as is a number for an island
+; there isn't (4 here). An island's virtual clock moves to its next
+; timer whenever it has nothing to run, so the worker keeps island 1 busy,
+; yielding a million times, while the cancel comes; and the islands'
+; clocks are their own, so which of the two reports comes first is put
+; in order. Expected output worked out by hand.
+
+(defun spin (n) (if (== n 0) () (do (yield ()) (spin (- n 1)))))
+
+(defun worker (to)
+    (let t (after 100 $$ :late))
+    (send to (list :timer t))
+    (after 200 $$ :check)
+    (spin 1000000)
+    (recv
+        (:late  (send to :fired))
+        (:check (send to :not-fired))))
+
+(let me (address))
+(spawn/on 1 (worker me))
+(let theirs (match (read me) ((:timer t) t)))
+(let mine (after 1000 me :mine))
+(pprint (list theirs mine))
+(pprint (timer/cancel theirs))
+(pprint (timer/cancel theirs))
+(pprint (timer/cancel (+ (* 255 (math/pow 2 52)) 1)))
+(let a (read me))
+(let b (read me))
+(pprint (if (eq? a :mine) (list a b) (list b a)))
+:done
