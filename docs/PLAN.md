@@ -2446,6 +2446,112 @@ Mac, stackful against today.
   message meant for someone else. A `--strict` warning, when it follows
   a `send` in the same body; not a rule.
 
+### An agent team: a design exercise (proposed, Nov 2026)
+
+Stevan, after the Life ports (D280): "So what would be a good design
+exercise? Should we flesh out an example to a larger app? Or do
+something new?" Claude's answer, written up here: something new,
+mid-sized, and dense with conversations between long-lived processes,
+since that's the one shape the ports didn't exercise and the one D277
+was for. Proposed, not agreed; nothing built.
+
+**What it is.** `examples/team.slight`: a lead agent is given a job, in
+text. It asks its model to break the job into tasks, forks a worker
+agent for each, with a role, tools (read, list, search, calc, a command
+run within a limit, a fetch) and a budget (turns, and milliseconds),
+hands each its task, gathers the answers, asks its model to combine
+them, and answers. At most k workers run at once: a pool, forking till
+k are running and `join/race` for the first to end. A worker that
+overruns its time is killed, its command with it (D193); one that
+faults or raises is started again once, with why it ended, from its
+monitor's notice, in its new task; a worker may ask another, and the
+lead may ask a reviewer a second round. The person watches in the
+terminal as `chat` does, or asks the team from `chat`, as a tool,
+`ask_team`. Everything the run took from the world, the model's
+answers, the commands' output, the fetches, goes in the record, so a
+run replays exactly with no model and no network, and `SLIGHT_SCHED`
+runs the same job under other orders, the answer the same.
+
+**Why this one.**
+
+- Every actor in it holds a conversation in the middle of handling a
+  message: the lead asks its model while workers report, a worker asks
+  its model and its tools while the lead may be telling it to stop.
+  That's the case the old model made a dance of (D243's fork to hold
+  the address, out since D278), and nothing yet exercises it at size.
+- It uses `lib/agent`, `tools`, `exec`, `http` and `rpc` together,
+  which nothing does.
+- Supervision, cancellation and timeouts, which the Life ports barely
+  touched: `ask-within`, `kill` and what it takes with it, a restart
+  from a monitor's notice, a pool.
+- Replay meets its most plausible use: an agent run recorded and
+  replayed, the same answer under any schedule, and a transcript a test
+  can hold.
+- It ends in something a person can run.
+
+**What it isn't.** Not a product, and not the chat's replacement:
+`chat` stays the one-agent conversation, and the team can be a tool in
+it. The question it answers is whether slight is a good language to
+write an agent harness in, and the deliverable is the friction list,
+not the program: everything reached for that isn't there, with what was
+done instead, as the Life ports gave three entries in a day (`/` giving
+a float where an index was wanted, `$$` in a `fork`'s body being the
+child's, a `sleep`'s wake needing a turn where a timer's message lands
+at once). Each entry is then proposed on its own, or left. "No, it
+isn't" is an acceptable answer at a thousand lines, and the safeguard
+against the trap Stevan named: a solution looking for a problem.
+
+**Shape.** 500 to 1,000 lines. Messages: `(:job text to)` to the lead;
+`(:task id text to)` to a worker; `(:done id answer)` and `(:failed id
+why)` back; a worker's tools approved by a function, as `chat`'s are.
+The budget: turns per worker, which `lib/agent`'s rounds give; ms per
+task, `ask-within`; k at once, the pool. Output: the terminal as `chat`
+writes it, and a transcript written as s-expressions (`spew`), which the
+tests compare.
+
+**Tests.** A golden test on a fake model, as test 224's: a fake ollama
+that answers from a script keyed on the question, so the lead's plan,
+the workers' answers and the combination are fixed; one worker told to
+overrun, its command a `sleep`, killed at its limit on the virtual
+clock; one told to fail, started again once; the transcript worked out
+by hand from the script. In t/replay.sh: a recorded run with the fake
+model replayed without it, and the same job under five `SLIGHT_SCHED`
+seeds giving one transcript. In t/live.py: the team on a real local
+model when there is one, as the chat's live check does.
+
+**Steps.** 1. The lead and one worker, no pool and no budget: a job
+split and answered; the fake model and the golden test. 2. The pool,
+the budgets, the kill on overrun and the restart on failure, each
+tested. 3. Workers asking each other, the review round, and `ask_team`
+in `chat`. 4. Record and replay, and the seeds, in t/replay.sh; the
+live check. 5. The friction list written up in the decision, each entry
+weighed: a library function, a language change to propose, or nothing.
+
+**To settle, with Stevan:**
+
+- Before the simulation's decisions (the living town's clock,
+  "Simulation across islands") or after. Recommended: before, since it
+  needs no runtime change and a few sessions, and what it finds about
+  the language is worth having before the town is written in it.
+- Approvals. A team that asks y/n twenty times isn't a team.
+  Recommended: tools that change something are off for workers; the
+  lead reports what they would have done; the person approves once, for
+  the job.
+- One model for all, or a worker's own, as `CHAT_EXPERT` gives the chat
+  a second. Recommended: one, with a worker's model an argument, so a
+  reviewer can be a bigger one.
+- How far the output goes. Recommended: the terminal as `chat` has it,
+  and the transcript file; a view is "Seeing a simulation"'s business,
+  not this.
+
+**Rejected, for this exercise:** growing `airline`, which is fork-and-join
+shaped and was right under the old model, so it would prove nothing
+about the new one; growing the Life ports, the same at small scale; the
+living town now, which needs the simulation decisions first and is
+`fork`, `send` and `recv` at scale, which the ports just did; and a
+supervision library first, OTP's shapes, since the way to find what
+repeats is to write the program and look.
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written
