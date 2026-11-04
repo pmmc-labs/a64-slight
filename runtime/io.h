@@ -71,7 +71,7 @@ int64_t rt_io_epoch(const char *given);
 int      rt_io_select(int n, fd_set *in, fd_set *out, struct timeval *timeout);
 ssize_t  rt_io_read(int fd, void *buf, size_t len);
 ssize_t  rt_io_write(int fd, const void *buf, size_t len);
-int      rt_io_open(const char *path, int flags);
+int      rt_io_open(const char *path, int flags, int *polled);   // *polled: not a regular file or a directory (D272)
 int      rt_io_close(int fd);
 
 // Sockets, AF_INET or AF_UNIX. rt_io_setup makes one not block, not be

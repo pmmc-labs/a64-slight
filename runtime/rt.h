@@ -191,18 +191,19 @@
 #define RT_ERR_ENOTEMPTY    27    // :enotempty     deleting a directory that has something in it (D254)
 #define RT_ERR_EXDEV        28    // :exdev         renaming to another file system
 #define RT_ERR_EBUSY        29    // :ebusy
-#define RT_ERR_COUNT        30
+#define RT_ERR_ENXIO        30    // :enxio         a FIFO opened to write that nothing reads (D272)
+#define RT_ERR_COUNT        31
 
 // The symbols JSON's values need beyond #true and #false (json.c):
 // RT_JSON_x is symbol RT_SYM_JSON + x.
-#define RT_SYM_JSON        106    // RT_SYM_ERRS + RT_ERR_COUNT
+#define RT_SYM_JSON        107    // RT_SYM_ERRS + RT_ERR_COUNT
 #define RT_JSON_NULL         0    // :null
 #define RT_JSON_OBJECT       1    // :object        (:object (key value) ...)
 #define RT_JSON_COUNT        2
 
 // And those the s-expression reader makes (sexp.c): RT_SEXP_x is symbol
 // RT_SYM_SEXP + x.
-#define RT_SYM_SEXP        108    // RT_SYM_JSON + RT_JSON_COUNT
+#define RT_SYM_SEXP        109    // RT_SYM_JSON + RT_JSON_COUNT
 #define RT_SEXP_SYMBOL       0    // :symbol        (:symbol "name"), a name the program doesn't mention
 #define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
 #define RT_SEXP_COUNT        2
@@ -210,7 +211,7 @@
 // What :system (process.c, D171) is asked and answers with: RT_SYS_x is
 // symbol RT_SYM_SYSTEM + x. A process's :heap and :stack are the fault
 // kinds' symbols, which have those names already.
-#define RT_SYM_SYSTEM      110    // RT_SYM_SEXP + RT_SEXP_COUNT
+#define RT_SYM_SYSTEM      111    // RT_SYM_SEXP + RT_SEXP_COUNT
 #define RT_SYS_PROCESSES     0    // :processes     asked for every process; and how many there are
 #define RT_SYS_PROCESS       1    // :process       asked for one; and (:process s info) for each
 #define RT_SYS_RUNTIME       2    // :runtime       asked for the runtime's counts, and (:runtime s info)
@@ -241,7 +242,7 @@
 // it, name being one of these (the same on macOS and Linux, where some of
 // their numbers aren't), or the number of any other. RT_EXEC_x is symbol
 // RT_SYM_EXEC + x.
-#define RT_SYM_EXEC        133    // RT_SYM_SYSTEM + RT_SYS_COUNT
+#define RT_SYM_EXEC        134    // RT_SYM_SYSTEM + RT_SYS_COUNT
 #define RT_EXEC_EXITED       0    // :exited
 #define RT_EXEC_SIGNAL       1    // :signal
 #define RT_EXEC_HUP          2    // :hup           the signals' names, without SIG
@@ -264,14 +265,14 @@
 // Who's at the other end of a Unix connection (socket/peer, process.c,
 // D235): ((:uid u) (:gid g) (:pid p)), :pid being RT_SYS_PID's. RT_PEER_x
 // is symbol RT_SYM_PEER + x.
-#define RT_SYM_PEER        150    // RT_SYM_EXEC + RT_EXEC_COUNT
+#define RT_SYM_PEER        151    // RT_SYM_EXEC + RT_EXEC_COUNT
 #define RT_PEER_UID          0    // :uid
 #define RT_PEER_GID          1    // :gid
 #define RT_PEER_COUNT        2
 
 // What kind a process is (D243), in :system's info as (:kind k): RT_KIND_x
 // is symbol RT_SYM_KIND + x.
-#define RT_SYM_KIND        152    // RT_SYM_PEER + RT_PEER_COUNT
+#define RT_SYM_KIND        153    // RT_SYM_PEER + RT_PEER_COUNT
 #define RT_KIND_KIND         0    // :kind
 #define RT_KIND_TASK         1    // :task          started with fork, or the root
 #define RT_KIND_ACTOR        2    // :actor         started with spawn or connect
@@ -279,7 +280,7 @@
 
 // What open (process.c, D243) opens for a task: RT_SOURCE_x is symbol
 // RT_SYM_SOURCE + x.
-#define RT_SYM_SOURCE      155    // RT_SYM_KIND + RT_KIND_COUNT
+#define RT_SYM_SOURCE      156    // RT_SYM_KIND + RT_KIND_COUNT
 #define RT_SOURCE_FS_READ    0    // :fs/read
 #define RT_SOURCE_FS_WRITE   1    // :fs/write
 #define RT_SOURCE_FS_APPEND  2    // :fs/append
@@ -291,13 +292,13 @@
 
 // What :system's (:runtime s info) says of the process table (D244):
 // RT_TABLE_x is symbol RT_SYM_TABLE + x.
-#define RT_SYM_TABLE       162    // RT_SYM_SOURCE + RT_SOURCE_COUNT
+#define RT_SYM_TABLE       163    // RT_SYM_SOURCE + RT_SOURCE_COUNT
 #define RT_TABLE_RECORDS     0    // :records       entries in use: running, open, or keeping a value
 #define RT_TABLE_COUNT       1
 
 // What fs/stat (files.c, D254) says of a file, (:kind k) among them:
 // RT_STAT_x is symbol RT_SYM_STAT + x.
-#define RT_SYM_STAT        163    // RT_SYM_TABLE + RT_TABLE_COUNT
+#define RT_SYM_STAT        164    // RT_SYM_TABLE + RT_TABLE_COUNT
 #define RT_STAT_FILE         0    // :file
 #define RT_STAT_DIR          1    // :dir
 #define RT_STAT_LINK         2    // :link          a symbolic link, not followed
@@ -310,7 +311,7 @@
 // bytes/pack's and bytes/unpack's specs (strings.c, D254), and :short, an
 // unpack that hasn't the bytes yet: RT_PACK_x is symbol RT_SYM_PACK + x.
 // The first 18 are numbers, a width and an order each.
-#define RT_SYM_PACK        170    // RT_SYM_STAT + RT_STAT_COUNT
+#define RT_SYM_PACK        171    // RT_SYM_STAT + RT_STAT_COUNT
 #define RT_PACK_U8            0    // :u8
 #define RT_PACK_I8            1    // :i8
 #define RT_PACK_U16BE         2    // :u16be
@@ -335,7 +336,7 @@
 
 // log's levels (json.c, D254), below :error, which is RT_SYM_ERROR:
 // RT_LOG_x is symbol RT_SYM_LOG + x.
-#define RT_SYM_LOG         190    // RT_SYM_PACK + RT_PACK_COUNT
+#define RT_SYM_LOG         191    // RT_SYM_PACK + RT_PACK_COUNT
 #define RT_LOG_DEBUG         0    // :debug
 #define RT_LOG_INFO          1    // :info
 #define RT_LOG_WARN          2    // :warn
@@ -343,12 +344,12 @@
 
 // An array's kinds (arrays.c, D253): :float is symbol RT_SYM_ARRAY +
 // RT_ARRAY_FLOAT, and :int is SIGINT's name, RT_SYM_EXEC + RT_EXEC_INT.
-#define RT_SYM_ARRAY       193    // RT_SYM_LOG + RT_LOG_COUNT
+#define RT_SYM_ARRAY       194    // RT_SYM_LOG + RT_LOG_COUNT
 #define RT_ARRAY_FLOAT       0    // :float
 #define RT_ARRAY_COUNT       1
 
 // What :system says of islands (D256): RT_ISLE_x is symbol RT_SYM_ISLE + x.
-#define RT_SYM_ISLE        194    // RT_SYM_ARRAY + RT_ARRAY_COUNT
+#define RT_SYM_ISLE        195    // RT_SYM_ARRAY + RT_ARRAY_COUNT
 #define RT_ISLE_ISLAND       0    // :island        the island a process is on, or an island's number
 #define RT_ISLE_STARTED      1    // :started       whether an island's thread has started
 #define RT_ISLE_SENT         2    // :sent          messages to other islands, and their bytes

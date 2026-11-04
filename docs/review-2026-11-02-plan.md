@@ -26,6 +26,11 @@ are settled:
   a table of the island's open ones says whose it is, so neither a pid
   past 2^32 nor a wrapped number can misdeliver. It prints
   `#<address 7>`. Golden test 324 is now `324-address-ids`.
+- **J** is built (D272), golden tests 344 to 346: a file that isn't a
+  regular one is opened `O_NONBLOCK` and polled, read and written as a
+  socket is; a FIFO opened to write with no reader fails `:enxio` at
+  once. macOS's FIFO with no writer yet, and its `/dev/stdin`, are to
+  be checked on the M2.
 
 The rest of step 4 waits for Stevan. Step 5 is begun: CLAUDE.md's
 status says what's done.

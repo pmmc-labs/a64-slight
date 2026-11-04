@@ -49,7 +49,7 @@
 
 #include "io.h"
 
-#define MAGIC "slight record 4\n"
+#define MAGIC "slight record 5\n"
 
 enum { OFF, RECORD, REPLAY };
 
@@ -481,9 +481,33 @@ ssize_t rt_io_write(int fd, const void *buf, size_t len) {
     return (ssize_t)done(IO_WRITE, write(fd, buf, len));
 }
 
-int rt_io_open(const char *path, int flags) {
-    if (mode == REPLAY) return (int)replayed(IO_OPEN);
-    return (int)done(IO_OPEN, open(path, flags | O_CLOEXEC, 0666));
+// Opened without waiting, since a FIFO with no writer, or a terminal,
+// would hold open() up, and the island with it (D272). A regular file,
+// or a directory, then blocks again, as it always has; anything else is
+// polled, so it must fit in select()'s sets, as a socket must.
+int rt_io_open(const char *path, int flags, int *polled) {
+    int32_t p = 0;
+    if (mode == REPLAY) {
+        int fd = (int)next(IO_OPEN, &p, sizeof p, NULL);
+        *polled = p;
+        return fd;
+    }
+    int fd = open(path, flags | O_NONBLOCK | O_CLOEXEC, 0666), err = 0, fl;
+    struct stat st;
+    if (fd >= 0) {
+        if (fstat(fd, &st) < 0)                                    err = errno;
+        else if (!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode))      p   = 1;
+        else if ((fl = fcntl(fd, F_GETFL)) < 0 || fcntl(fd, F_SETFL, fl & ~O_NONBLOCK) < 0) err = errno;
+        if (!err && p && fd >= FD_SETSIZE) err = EMFILE;
+        if (err) {
+            close(fd);
+            fd    = -1;
+            p     = 0;
+            errno = err;
+        }
+    }
+    *polled = p;
+    return (int)done_with(IO_OPEN, fd, &p, sizeof p);
 }
 
 int rt_io_close(int fd) {

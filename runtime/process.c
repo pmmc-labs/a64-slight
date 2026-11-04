@@ -131,7 +131,7 @@ typedef struct rt_isle {
     struct open_address *open;          // ...and those open, by id (address_task)
     uint64_t           open_n, open_cap;
     uint64_t           nsockets;
-    struct rt_device  *sockets;         // open sockets and commands, and closing sockets (nsockets counts them)
+    struct rt_device  *sockets;         // open sockets, commands and polled files, and closing ones (nsockets counts them)
     uint64_t           ndevices;        // open devices
     struct rt_device  *graveyard;       // closed sockets
     uint64_t           nchildren;       // commands not yet waited for
@@ -3264,6 +3264,7 @@ typedef struct rt_device {
     struct rt_device *next;             // the owner's next device
     rt_value_t        pid, owner;
     int               fd, mode;
+    int               polled;           // a file that isn't a regular one, waited for as a socket is (D272)
     const char       *site;             // the connect's, for dead letters
     rt_value_t        path;             // a file's path, a connection's "host:port", a command's name, as a
     uint64_t         *path_space;       // string in path_space (string_in), for (:error (name path)); or 0
@@ -3337,6 +3338,7 @@ uint64_t rt_errno_name(int err) {
         case ENOTEMPTY:     return RT_ERR_ENOTEMPTY;
         case EXDEV:         return RT_ERR_EXDEV;
         case EBUSY:         return RT_ERR_EBUSY;
+        case ENXIO:         return RT_ERR_ENXIO;
         default:            return RT_ERR_OTHER;
     }
 }
@@ -3356,9 +3358,16 @@ static rt_value_t string_in(uint64_t *space, const char *bytes, size_t len) {
     return (rt_value_t)box | RT_TAG_BOXED;
 }
 
-// A socket or a command: waited for in select(), and on sockets.
+// A socket or a command, or a file that isn't a regular one (a FIFO, a
+// pipe, a terminal: D272): waited for in select(), and on sockets.
 static int is_socket(const rt_device_t *d) {
-    return d->mode == DEV_TCP || d->mode == DEV_LISTEN || d->mode == DEV_EXEC;
+    return d->mode == DEV_TCP || d->mode == DEV_LISTEN || d->mode == DEV_EXEC || d->polled;
+}
+
+static void on_sockets(rt_device_t *d) {
+    d->next_socket = my.sockets;
+    my.sockets     = d;
+    my.nsockets++;
 }
 
 static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site, const char *path, size_t len) {
@@ -3379,11 +3388,7 @@ static rt_device_t *new_device(rt_proc_t *p, int mode, int fd, const char *site,
     d->next             = devices_of(p);
     side_of(p)->devices = d;
     my.ndevices++;
-    if (is_socket(d)) {
-        d->next_socket = my.sockets;
-        my.sockets     = d;
-        my.nsockets++;
-    }
+    if (is_socket(d)) on_sockets(d);
     return d;
 }
 
@@ -3436,14 +3441,14 @@ static void bury(void) {
 }
 
 // Closes d, and forgets it: its pid is then like a process that has
-// ended. A socket with something still to write lingers till it's
-// written. The owner's list is the caller's to fix.
+// ended. A socket, or a polled file, with something still to write
+// lingers till it's written. The owner's list is the caller's to fix.
 static void shut(rt_device_t *d) {
     slot(d->pid)->device = NULL;
     settle(rt_pid_number(d->pid));
     my.ndevices--;
-    if (d->mode == DEV_TCP && d->out_len > d->out_at && !d->lookup) d->closing = 1;
-    else                                                            close_now(d);   // (a host still looked up never connected)
+    if ((d->mode == DEV_TCP || d->polled) && d->out_len > d->out_at && !d->lookup) d->closing = 1;
+    else                                                                           close_now(d);   // (a host still looked up never connected)
 }
 
 static void close_all(rt_proc_t *p) {
@@ -3790,8 +3795,8 @@ static int cut(rt_device_t *d) {
 }
 
 // p, waiting again, took reader pid's message last: on to its next. A
-// file reads till it has one; a connection or a command waits in select()
-// for more.
+// regular file reads till it has one; a connection, a command or a polled
+// file waits in select() for more.
 static void system_next(rt_device_t *d);
 
 static void read_on(rt_proc_t *p, rt_value_t pid) {
@@ -3802,7 +3807,7 @@ static void read_on(rt_proc_t *p, rt_value_t pid) {
         system_next(d);
         return;
     }
-    while (!cut(d) && d->mode == RT_FS_READ) {
+    while (!cut(d) && d->mode == RT_FS_READ && !d->polled) {
         if (fill(d) < 0) {
             fail(d, errno);
             return;
@@ -3824,15 +3829,15 @@ static int read_as(rt_device_t *d, rt_value_t args) {
     } else {
         return 0;
     }
-    // A connection or command waiting in select() may have enough for the
-    // new way.
-    if ((d->mode == DEV_TCP || d->mode == DEV_EXEC) && !d->sent && !d->connecting && !d->waiting) cut(d);
+    // A connection, command or polled file waiting in select() may have
+    // enough for the new way.
+    if ((d->mode == DEV_TCP || d->mode == DEV_EXEC || d->polled) && !d->sent && !d->connecting && !d->waiting) cut(d);
     return 1;
 }
 
-// Writes what a socket or a command's input has, as far as it takes it:
-// 0, or -1 with errno set. (SIGPIPE is ignored, so a closed connection is
-// EPIPE.)
+// Writes what a socket, a polled file or a command's input has, as far as
+// it takes it: 0, or -1 with errno set. (SIGPIPE is ignored, so a closed
+// connection, or a FIFO with no reader left, is EPIPE.)
 static int flush(rt_device_t *d) {
     int fd = d->mode == DEV_EXEC ? d->in_fd : d->fd;
     while (d->out_at < d->out_len) {
@@ -3880,12 +3885,13 @@ static void command(rt_device_t *d, rt_value_t msg) {
         return;
     }
     if (d->mode == DEV_EXEC && (d->in_fd < 0 || d->in_closing)) return;      // input that goes nowhere
-    // Output waits in memory off every heap till the other end takes it:
-    // more for one that has READ_MAX waiting, which may never read, fails
-    // it, as so much in fails a read; and a write whose text would be more
-    // than a heap can hold, which a value with sharing in it can print as,
-    // fails before it's all made (D270).
-    if ((d->mode == DEV_EXEC || d->mode == DEV_TCP) && d->out_len - d->out_at >= READ_MAX) {
+    // Output to a socket, a command or a polled file waits in memory off
+    // every heap till the other end takes it: more for one that has
+    // READ_MAX waiting, which may never read, fails it, as so much in fails
+    // a read; and a write whose text would be more than a heap can hold,
+    // which a value with sharing in it can print as, fails before it's all
+    // made (D270, D272).
+    if (is_socket(d) && d->out_len - d->out_at >= READ_MAX) {
         fail(d, ERR_TOOBIG);
         return;
     }
@@ -3903,7 +3909,7 @@ static void command(rt_device_t *d, rt_value_t msg) {
         if (flush(d) < 0) close_input(d);       // the command has closed its input, or ended
         return;
     }
-    if (d->mode == DEV_TCP) {
+    if (d->mode == DEV_TCP || d->polled) {
         queue(d, b.bytes, b.len);
         rt_buf_free(&b);
         if (!d->connecting && flush(d) < 0) fail(d, errno);
@@ -3923,14 +3929,24 @@ static void command(rt_device_t *d, rt_value_t msg) {
     rt_buf_free(&b);
 }
 
-// Opens the file at path for p: 0, or an errno.
+// Opens the file at path for p: 0, or an errno. A regular file is read
+// and written where it's asked, its wait the disk's (D254); anything else
+// may wait for ever, a FIFO for a writer or a terminal for a key, so it's
+// polled: read when select() says it can be, and written to as a socket
+// is, so that no wait of its holds up the island (D272).
 static int fs_open(rt_proc_t *p, const char *site, rt_value_t path, uint64_t mode) {
-    const char *bytes = rt_string_bytes(path);
-    size_t      len   = rt_string_len(path);
-    int         flags = mode == RT_FS_READ ? O_RDONLY : O_WRONLY | O_CREAT | (mode == RT_FS_APPEND ? O_APPEND : O_TRUNC);
-    int         fd    = memchr(bytes, '\0', len) ? (errno = EINVAL, -1) : rt_io_open(bytes, flags);
+    const char *bytes  = rt_string_bytes(path);
+    size_t      len    = rt_string_len(path);
+    int         flags  = mode == RT_FS_READ ? O_RDONLY : O_WRONLY | O_CREAT | (mode == RT_FS_APPEND ? O_APPEND : O_TRUNC);
+    int         polled = 0;
+    int         fd     = memchr(bytes, '\0', len) ? (errno = EINVAL, -1) : rt_io_open(bytes, flags, &polled);
     if (fd < 0) return errno;
-    tell_open(new_device(p, (int)mode, fd, site, bytes, len));
+    rt_device_t *d = new_device(p, (int)mode, fd, site, bytes, len);
+    if (polled) {
+        d->polled = 1;
+        on_sockets(d);
+    }
+    tell_open(d);
     return 0;
 }
 
@@ -4232,7 +4248,8 @@ static void accept_all(rt_device_t *l) {
 // reads; a connection writes while it connects or has output waiting,
 // and reads while its owner waits for what it has (not accepted and not
 // yet handed over, not sent a message it hasn't taken, not at its end,
-// not closing); a lookup waits on its query's socket. A command writes
+// not closing); a polled file does too, but reads only if it's a
+// reader; a lookup waits on its query's socket. A command writes
 // its input while it has some, reads its output as a connection does,
 // and once that has ended, while its owner waits, waits for it to end
 // (the SIGCHLD pipe, which select() waits on while any command runs). A
@@ -4252,7 +4269,8 @@ static int wants(const rt_device_t *d, int *r, int *w) {
         return 1;
     }
     *r = d->mode == DEV_LISTEN ? !d->alarm      // not while it rests (accept_all)
-                               : !d->connecting && !d->waiting && !d->sent && !d->eof && !d->closing;
+                               : d->mode != RT_FS_WRITE && d->mode != RT_FS_APPEND
+                                 && !d->connecting && !d->waiting && !d->sent && !d->eof && !d->closing;
     *w = d->connecting || d->out_len > d->out_at;
     return *r || *w;
 }
@@ -4358,7 +4376,7 @@ static void socket_event(rt_device_t *d, int r, int w) {
         d->connecting = 0;
         if (!d->closing) tell_open(d);
     }
-    if (w && d->mode == DEV_TCP && !d->connecting && d->out_len > d->out_at) {
+    if (w && (d->mode == DEV_TCP || d->polled) && !d->connecting && d->out_len > d->out_at) {
         if (flush(d) < 0) {
             if (d->closing) close_now(d);
             else            fail(d, errno);

@@ -1225,6 +1225,22 @@ compiled code. The new process owns it.
   adds to it, or creates it) takes `(:write x ...)` from any process,
   and writes the `x`s at once, rendered as `tty/write` renders them.
 
+A file that isn't a regular one, a FIFO, a pipe (`/dev/stdin`, say,
+when stdin is one), a terminal or a device such as `/dev/null`, can keep
+a read or a write waiting for ever, so it's read and written as a
+socket is (D272): it's read when there's something to read, and what
+it doesn't take yet is kept and written when it can, up to 64 MB
+waiting, after which a write fails the device `:too-big` (D270). So
+`send` never waits, and neither does anything else on the island.
+Closing it waits till what it has is written. While it's read or has
+output waiting, it's something that can still happen, as a socket is,
+so the program waits for it. A FIFO opened to write that nothing has
+open to read fails at once, with `(:error (:enxio path))`, rather than
+waiting for a reader. One opened to read before anything has opened it
+to write waits for a writer, and its `(:eof f)` comes once every writer
+has closed it (on Linux; macOS may say `(:eof f)` at once, which is to
+be checked there).
+
 `(send f (list :read how))`, from any process, changes how a reader
 cuts what it reads into messages, from the next message on. `how` is
 one of:
@@ -2299,7 +2315,9 @@ anything.
 of its own (D243), which blocks only its caller; and trees.
 
 - `(slurp path)`: `(:ok lines)`, the file's lines without their
-  newlines, as a list of strings.
+  newlines, as a list of strings. `(slurp "/dev/stdin")` reads stdin to
+  its end, a pipe or a terminal too, without holding up the island
+  (D272).
 - `(spew path lines)`: writes each line followed by a newline, replacing
   what was in the file. `(:ok ())`.
 

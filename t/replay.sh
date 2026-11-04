@@ -5,7 +5,7 @@
 #
 # Each of t/replay/world.slight, net.slight and exec.slight runs once
 # with SLIGHT_RECORD, on the real clock, with what it reads from outside
-# (keys, a file, a hosts file, sockets, commands); then again with
+# (keys, a file, a hosts file, sockets, commands, a FIFO); then again with
 # SLIGHT_REPLAY, with other arguments, no stdin and none of those files.
 # The replay must print what the recorded run did, exit as it did, and
 # leave alone the file the recorded run (or its command) wrote. Nothing here depends on how long anything takes: a
@@ -128,17 +128,20 @@ if [ "$(cat "$dir/net.sock" 2>/dev/null)" = kept ]; then check "net's replay lea
 # the first wrote isn't written again. The last sees no SLIGHT_RECORD.
 run SLIGHT_RECORD="$dir/exec.record" exec "$dir/exec.out" </dev/null >"$dir/exec.recorded"
 written=$(cat "$dir/exec.out" 2>/dev/null)
-rm -f "$dir/exec.out"
+fifo=no
+[ -p "$dir/exec.out.fifo" ] && fifo=yes
+rm -f "$dir/exec.out" "$dir/exec.out.fifo"
 run SLIGHT_REPLAY="$dir/exec.record" exec other args </dev/null >"$dir/exec.replayed"
 if cmp -s "$dir/exec.recorded" "$dir/exec.replayed" && [ "$written" = written ] \
    && grep -q '^(ok (3 ("fed in" "[0-9]*")))$' "$dir/exec.recorded" && grep -q '^(ok "first")$' "$dir/exec.recorded" \
-   && grep -q '^(ok (0 ("rec=unset play=unset")))$' "$dir/exec.recorded"; then
+   && grep -q '^(ok (0 ("rec=unset play=unset")))$' "$dir/exec.recorded" \
+   && grep -q '^(fifo ("one" "two"))$' "$dir/exec.recorded" && [ $fifo = yes ]; then
     check "exec replays as recorded" ok
 else
     diff -u "$dir/exec.recorded" "$dir/exec.replayed"
     check "exec replays as recorded" no
 fi
-if [ -e "$dir/exec.out" ]; then check "exec's replay runs no command" no; else check "exec's replay runs no command" ok; fi
+if [ -e "$dir/exec.out" ] || [ -e "$dir/exec.out.fifo" ]; then check "exec's replay runs no command" no; else check "exec's replay runs no command" ok; fi
 
 # islands: each island's record, replayed together.
 run SLIGHT_ISLANDS=4 SLIGHT_RECORD="$dir/islands.record" islands </dev/null >"$dir/islands.recorded"

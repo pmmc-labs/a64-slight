@@ -1195,10 +1195,18 @@ run (option (b), D256's step 6, put off).
   sent after that goes nowhere. A file that can't be opened ends the owner
   before it runs, with `(:error (name path))`, `name` being errno's
   (`:enoent`, `:eacces`, `:eisdir`, ..., or `:io-error`); a read or a
-  write that fails ends it the same way then. A file is read when its
-  owner waits for its next message, so a reader is never waited for, and
-  never counts as something that can still happen; one that can keep a
-  read waiting (a FIFO, a terminal) waits with the whole runtime. To
+  write that fails ends it the same way then. A regular file is read
+  when its owner waits for its next message, and written where it's
+  sent to, so a reader is never waited for, and never counts as
+  something that can still happen; the only wait is the disk's. Anything
+  else (a FIFO, a pipe, a terminal, a device such as `/dev/zero`) is
+  opened without waiting, `O_NONBLOCK`, and then read and written as a
+  socket is (D272): read when `select()` says it can be, what it hasn't
+  taken kept and written when it can, up to 64 MB waiting (D270),
+  closing once that's written, and counted as something that can still
+  happen while `select()` waits on it. So no FIFO or terminal holds up
+  its island; and a FIFO opened to write that nothing has open to read
+  fails at once, `(:error (:enxio path))`, where it would wait. To
   `join`, `monitor` and `kill`, a device is a process that ended with
   `(:ok ())`.
 - **Sockets are devices too** (D133–D139). `(connect :tcp "host:port"
@@ -1233,8 +1241,9 @@ run (option (b), D256's step 6, put off).
   `:eaddrinuse`, ...), and `:enotfound` (Node's) for a host that can't be
   found, or `:etimedout` when no name server answers; SIGPIPE is ignored, so writing to a closed connection is
   `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets (D266).
-  Output a socket or a command hasn't taken waits in memory off every
-  heap: a write while 64 MB waits fails the device `:too-big` (D270). A Unix
+  Output a socket, a command or a polled file hasn't taken waits in
+  memory off every heap: a write while 64 MB waits fails the device
+  `:too-big` (D270, D272). A Unix
   socket (`:unix`, `:unix/listen`, D231) is the same device at a path:
   a listener makes the socket there, replacing only one that refuses a
   connection, left by a program that was killed, and removes it when it

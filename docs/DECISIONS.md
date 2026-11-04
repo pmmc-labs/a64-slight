@@ -6733,6 +6733,49 @@ caller handles less easily than the errors it already gets;
 percent-encoding a URL's bad bytes rather than refusing it, which curl
 doesn't do either. Golden test 341.
 
+
+**D272. A file that isn't a regular one is read and written as a socket
+is.** *(Stevan, Nov 2026, from the review's L4, plan item J; Claude's
+recommendation.)* Files were opened, read and written where they were
+asked for (D254's "a one-shot call whose wait is the disk's"), so
+opening a FIFO with no writer, reading a terminal or `/dev/stdin` when
+it's a pipe, or writing to a FIFO whose reader is slow, held up its
+whole island, not only the agent's tools. Now `fs_open` opens every
+file `O_NONBLOCK` and `fstat`s it (`rt_io_open`, which records which it
+was, so a replay goes the same way):
+- **A regular file, or a directory,** is made to block again, and
+  behaves as before: read when its owner waits, written where it's sent
+  to.
+- **Anything else** (a FIFO, a pipe, a terminal, a character device) is
+  a polled file: a flag on the device, `polled`, which puts it on the
+  sockets' list, so `wants`, `socket_fds` and `socket_events` wait for it
+  in `select()` as for a connection, and it must fit there (D113, D266).
+  It's read when `select()` says it can be, through the same `fill` and
+  `cut` and `(:read how)`; written through `queue` and `flush`, so `send`
+  never blocks, with D270's 64 MB on what waits; and closing it waits
+  till that's written. A flag rather than a mode of its own, since a
+  polled file is still `:fs/read`, `:fs/write` or `:fs/append` in all
+  the rest: its first message, its end at `(:eof f)`, a write to a
+  reader being a dead letter.
+- **A FIFO opened to write that nothing has open to read** fails at once
+  with `(:error (:enxio path))` (a new errno name), where it waited for a
+  reader. Accepted: waiting for one would need polling the open itself.
+- **A FIFO opened to read before any writer** waits, on Linux, till a
+  writer has come and gone (checked); macOS may report it readable, and
+  so `(:eof f)`, at once. That's to be checked on the M2, and not worked
+  around; so is `/dev/stdin` there, which macOS opens as a copy of
+  descriptor 0, sharing its flags, so whether `O_NONBLOCK` takes, and
+  whether a terminal is left non-blocking for the shell after, are to be
+  seen.
+- Rejected: refusing what isn't a regular file, which would break
+  `slurp "/dev/stdin"`; a thread per blocking file, against D113's one
+  thread an island.
+- Golden tests 344 (a FIFO read while another actor on the island runs),
+  345 (a megabyte written to a FIFO nobody reads yet, and closed, while
+  another actor runs) and 346 (`:enxio`, `:too-big` and `:epipe`), and
+  `t/replay/exec.slight` reads a FIFO, recorded and replayed. The record's
+  format is 5 now, since an open records whether it was polled.
+
 **D273. An address is an id its island gives once, and a table says
 whose it is.** *(Stevan, Nov 2026, from the review of 2026-11-02, M5;
 Claude's recommendation.)* An address held its task's pid number in 32

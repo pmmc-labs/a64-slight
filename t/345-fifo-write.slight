@@ -1,0 +1,42 @@
+; args: build/t/345-fifo-write
+; Writing to a FIFO is queued, as writing to a socket is, so a reader
+; that's slow to take it holds up nothing else on its island (D272). A
+; command makes the FIFO and holds it open both ways, so there's a
+; reader for the top level's open to find, but reads it only once it's
+; told to go. The top level writes a megabyte, far more than a pipe
+; holds, and closes the FIFO, which then lingers till what it has is
+; written; meanwhile an actor on the same island yields a thousand
+; times, and says so; only then is the command told to go, and it reads
+; the megabyte and counts it. Before D272 the write held up the island
+; till the command read, which it never did. No timers: the order is the
+; messages'. Expected output worked out by hand.
+
+(let fifo (car @ARGV))
+(let script "rm -f $1 && mkfifo $1 && exec 3<>$1 && echo ready && read go && head -c 1000000 <&3 | wc -c | tr -d ' ' && echo read")
+
+(defun tick (to n)
+    (if (== n 0)
+        (send to (list :ticked (island)))
+        (yield (tick to (- n 1)))))
+
+; What the command says, to its end.
+(defun said (c out)
+    (match (read c)
+        ((:line _ s)   (said c (cons s out)))
+        ((:eof _)      (said c out))
+        ((:exited _ n) (list n (reverse out)))))
+
+(match (open :exec (list "sh" "-c" script "sh" fifo))
+    ((:ok c)
+        (match (read c) ((:line _ s) (pprint s)))
+        (match (open :fs/write fifo)
+            ((:ok w)
+                (send w (list :write (str/repeat "x" 1000000)))
+                (disconnect w)
+                (send w (list :write "after disconnect: nowhere"))))
+        (let to (address))
+        (spawn (tick to 1000))
+        (pprint (read to))
+        (send c (list :write "go" \n))
+        (pprint (said c ()))))
+(island)

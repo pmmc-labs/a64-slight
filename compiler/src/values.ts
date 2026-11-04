@@ -64,7 +64,7 @@ export const ERRNO_NAMES: readonly string[] = [
     'enoent', 'eacces', 'eperm', 'eexist', 'eisdir', 'enotdir', 'enametoolong', 'eloop', 'erofs', 'enospc',
     'efbig', 'emfile', 'enfile', 'eio', 'econnrefused', 'econnreset', 'epipe', 'etimedout', 'eaddrinuse',
     'eaddrnotavail', 'ehostunreach', 'enetunreach', 'enotfound', 'too-big', 'bad-json', 'bad-sexp', 'io-error',
-    'enotempty', 'exdev', 'ebusy',
+    'enotempty', 'exdev', 'ebusy', 'enxio',
 ];
 
 // What JSON's values need beyond #true and #false, in RT_JSON_ order.
