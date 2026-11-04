@@ -10,4 +10,4 @@
 (defun hello ()
     (recv ((:open c) (send c (list :write "hello" \n)) (disconnect c))))
 
-(read (connect :unix/listen (car @ARGV) (server)))
+(join (connect :unix/listen (car @ARGV) (server)))

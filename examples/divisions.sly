@@ -72,7 +72,7 @@ fun keyboard(rows, cols) {
     }
 }
 
-read(connect(:keypress) { keyboard(screen_rows, screen_cols) });
+join(connect(:keypress) { keyboard(screen_rows, screen_cols) });
 
 tty::write("rows:", screen_rows);
 tty::write("cols:", screen_cols);

@@ -6,7 +6,7 @@
     (cadr (run-command table cmd)))
 
 (let t1 (car (run-command () (list :put "a" 1))))
-(let s (spawn (ttl-store () () 1)))
+(let s (fork (ttl-store () () 1)))
 
 (run-tests (list
     (is (reply-of () (list :get "a")) (list :error :not-found) "get of a key that isn't there")

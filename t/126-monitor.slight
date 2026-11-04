@@ -19,7 +19,7 @@
     (let a (fork :quick))
     (yield ())
     (monitor a)
-    (let b (spawn (server)))
+    (let b (fork (server)))
     (monitor b)
     (monitor b)
     (let c (fork (car 5)))
@@ -27,5 +27,5 @@
     (kill b)
     (watcher 4))
 
-(read (spawn (top-level)))
+(join (fork (top-level)))
 ; warns: 25:23

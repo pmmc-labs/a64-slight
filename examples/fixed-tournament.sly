@@ -37,9 +37,9 @@ fun rally(game, limit, counter, reply_to, reply_tag) {
 // wait for the :START gate, serve, then collect the two finals: p2 always
 // reaches the limit first, so they arrive (R) then (R-1); and tell to
 fun game(to, limit) {
-    let me = self;      // self inside the spawn would be the child
-    let p1 = spawn player(me, limit, 0);
-    let p2 = spawn player(me, limit, 0);
+    let me = self;      // self inside the fork would be the child
+    let p1 = fork player(me, limit, 0);
+    let p2 = fork player(me, limit, 0);
     recv;
     send(p1, :Serve(p2));
     let first = recv { :Final(counter) => counter }
@@ -47,7 +47,7 @@ fun game(to, limit) {
 }
 
 fun setup_tournament(to, n, limit) {
-    if n == 0 { [] } else { [spawn game(to, limit), ...setup_tournament(to, n - 1, limit)] }
+    if n == 0 { [] } else { [fork game(to, limit), ...setup_tournament(to, n - 1, limit)] }
 }
 
 fun start_tournament(pids) {

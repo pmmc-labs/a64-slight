@@ -9,7 +9,7 @@ fun bump(s, key) {
     }
 }
 
-let s = spawn store([]);
+let s = fork store([]);
 call(s, :put("hits", 0));
 
 let a = fork bump(s, "hits");

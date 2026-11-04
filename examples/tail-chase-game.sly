@@ -43,7 +43,7 @@ fun trail(x, y, to_clear) {
 }
 
 tty::write("\e[?25l");
-read(connect(:keypress) {
+join(connect(:keypress) {
     tail_chaser(
         40, 40,
         10, 20,

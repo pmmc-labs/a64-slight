@@ -35,4 +35,4 @@
     (pprint (timer/cancel b))
     (after-a a c))
 
-(read (spawn (top-level)))
+(join (fork (top-level)))

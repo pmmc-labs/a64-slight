@@ -27,4 +27,4 @@
         ((:end s2)       (reverse acc))))
 
 (fork (napper))
-(read (connect :system (ticker 3)))
+(join (connect :system (ticker 3)))

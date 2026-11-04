@@ -5,7 +5,7 @@
         ((:inc)    (counter (+ n 1)))
         ((:get to) (reply to n) (counter n))))
 
-(let c (spawn (counter 0)))
+(let c (fork (counter 0)))
 (send c (list :inc))
 (send c (list :inc))
 (send c (list :inc))

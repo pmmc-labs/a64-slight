@@ -28,5 +28,5 @@ fun pinger(target, n) {
     }
 }
 
-let pong = spawn ponger();
-read(spawn pinger(pong, 30))
+let pong = fork ponger();
+join(fork pinger(pong, 30))

@@ -23,7 +23,7 @@
         ((:error p reason)  (reverse (cons (list :error reason (eq? p s)) acc)))))
 
 (defun streamed (url)
-    (cadr (read (spawn (heard (http/stream :get url () "" :lines) ())))))
+    (cadr (join (fork (heard (http/stream :get url () "" :lines) ())))))
 
 (let base "https://example.test")
 (map pprint (list

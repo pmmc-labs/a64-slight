@@ -6897,3 +6897,51 @@ expected output came out the same without it; and keeping a
 compile-time check that a task calls no function that waits, which the
 checker's fixpoint could give as a warning, left for step 2, where
 tasks go.
+
+**D277. One kind of process, and an address for every message.**
+*(Stevan, Nov 2026: "Let's go with step 2", after "fork/join/yield is
+the core process model; address/read/send is the core message model ...
+actors is just a pattern of usage for those two models", PLAN.md's "One
+kind of process, and an address for every message".)* `fork` starts a
+process, on this island, and `fork/on k` on island `k`; `spawn` and
+`spawn/on` are gone, with the actor flag, the two fault kinds
+`:not-a-task` and `:not-an-actor`, and `:system`'s `:kind`. Every
+process can be sent to, and takes its messages with `recv`; can be
+joined for its value, on any island; can make addresses, open devices
+and read them; and can monitor, be monitored, timed and killed. The
+root is one too, so a top level waits for a message itself. A pid is
+its process's inbox: `send` to it fills the mailbox `recv` takes from.
+An address is an inbox of its own, read only by its maker, and `recv`
+leaves what's sent to one, and what comes from a device the process
+opened, for `read`. A process's end is a message: `(monitor pid)` tells
+the caller's inbox `(:exit pid result)`, and `(monitor pid to)` the
+address `to`, so a reply and the end of the process asked come to one
+place; `disconnect` of the address drops the monitors told at it.
+`read` and `read/any` take addresses and devices only: a process is no
+source, live or ended, and `read` of one faults `:not-a-pid`. A
+process's value is kept for its parent till the parent has it, whatever
+started it (D244's rule for every process; D243's point 5 and D245's
+exception go), and a far child's end comes to its parent's island for
+a join (D256). `ask` makes an address, monitors the process to it,
+sends, and reads: one source, in any process. `join` and `join/race`
+work across islands, the end coming as an item, kept apart from the
+mail till joined. The checker's types: `task<T>` and `actor<M>` are
+one, `pid<M>`, what the process takes, written `pid` when it's `any`;
+`join` of a `fork` in view is typed from its body. Its warnings for a
+task sent to, an actor joined, a monitor in a task and an address in an
+actor go; one comes, `read` of a process. Tasks and actors stay as
+words for the two shapes a process is written in. Rejected, as PLAN.md's
+proposal did: pids and addresses disjoint (ts-cpi's); several readers
+on an address; selective receive by pattern; and keeping `spawn` as a
+word for `fork`. Built: the runtime's kinds and `parent_task` went,
+`WATCH_READ` became `WATCH_JOIN`, a device's entry records that it was
+opened, and `rt_recv` skips what's for `read`. Changed by the change,
+each worked out by hand: tests 268, 296, 298, 299, 300, 301 and 325 are
+about one kind now; `:system` has no kind (281, 331); the root joins
+rather than reads (202); sites say `fork/on` (339); and `ask/via` waits
+at one address (the guide's deadlock page). 254 files moved from
+`spawn` to `fork` by a script, and some forty reads of a process to
+`join` by hand; the docs say one kind, the guide's pages each in place.
+Open, for step 3: the fork-and-join dance in `lib/` and the examples,
+which one kind makes needless; and for step 4, the guide's two concept
+pages folded into one.

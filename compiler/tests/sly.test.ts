@@ -166,7 +166,7 @@ test('recv', () => {
 });
 
 test('processes', () => {
-    same('spawn counter(0); fork f(x) + 1; yield loop(n);', '(spawn (counter 0)) (fork (+ (f x) 1)) (yield (loop n))');
+    same('fork counter(0); fork f(x) + 1; yield loop(n);', '(fork (counter 0)) (fork (+ (f x) 1)) (yield (loop n))');
     same('connect(:tcp, "h:7000") { echo() };', '(connect :tcp "h:7000" (echo))');
     same('connect(c) { a; b };', '(connect c (do a b))');
 });

@@ -23,7 +23,7 @@
 //   if c { a } else { b }      (if c a b)
 //   match e { p => a, ... }    (match e (p a) ...)
 //   recv { p => a }, recv      (recv (p a)), (recv)
-//   spawn e, fork e, yield e   (spawn e), (fork e), (yield e)
+//   fork e, yield e            (fork e), (yield e)
 //   self, parent               $$, ^$$
 //
 // And types (D247, docs/TYPES.md), which the checker reads and the
@@ -66,7 +66,7 @@ type Token =
     | { readonly kind: 'name'; readonly text: string; readonly plain: boolean; readonly pos: Pos }
     | { readonly kind: 'quoted'; readonly text: string; readonly datum: Sexp; readonly pos: Pos };
 
-const RESERVED = ['fun', 'let', 'if', 'else', 'cond', 'case', 'match', 'recv', 'spawn', 'fork', 'connect', 'yield',
+const RESERVED = ['fun', 'let', 'if', 'else', 'cond', 'case', 'match', 'recv', 'fork', 'connect', 'yield',
                   'true', 'false', 'self', 'parent'];
 
 // Longest first, so that `...` isn't read as something shorter.
@@ -152,7 +152,7 @@ function nextToken(c: Cursor): [Token | null, Cursor] {
         }
         let end    = skipWhile(step(c), isKwChar);
         let text   = s.slice(c.i + 1, end.i);
-        // a keyword doesn't end in >, so that a type's actor<:ok> closes
+        // a keyword doesn't end in >, so that a type's pid<:ok> closes
         let trim = 0;
         while (trim < text.length && text[text.length - 1 - trim] === '>') trim++;
         if (trim > 0 && trim < text.length) {
@@ -673,7 +673,6 @@ function parseWord(ts: Ts, i: number, w: string, at: Pos): [Sexp, number] {
         case 'parent': return [sym('^$$', at), i + 1];
         case '@ARGV':  return [sym('@ARGV', at), i + 1];
         case '%ENV':   return [sym('%ENV', at), i + 1];
-        case 'spawn':
         case 'fork':
         case 'yield': {
             const [x, j] = parseExpr(ts, i + 1);

@@ -20,7 +20,7 @@
 ; at an address how many came; another takes the timer.
 (let to (address))
 (connect :keypress (keys to 0))
-(pprint (cadr (read (spawn (ticking)))))
+(pprint (cadr (join (fork (ticking)))))
 (pprint (list :clock (> (clock/us) 4999) (clock/us)))
 (pprint (list :now (> (clock/now) 1767225600000000) (clock/now)))
 (pprint (slurp (car @ARGV)))

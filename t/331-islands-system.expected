@@ -6,10 +6,10 @@
 (1 #true 1 0 (1 32) (1 48))
 (2 #true 1 0 (2 64) (2 96))
 (3 #false 0 0 (0 0) (0 0))
-(#<pid 1> 0 task running (2 96) (3 96))
-(#<pid 1@1> 1 actor recv (1 32) (1 48))
-(#<pid 1@2> 2 actor recv (2 64) (2 96))
-(#<pid 1@2> 2 actor recv (2 64) (2 96))
+(#<pid 1> 0 running (2 96) (3 96))
+(#<pid 1@1> 1 recv (1 32) (1 48))
+(#<pid 1@2> 2 recv (2 64) (2 96))
+(#<pid 1@2> 2 recv (2 64) (2 96))
 process
 runtime
 (from-3 (ok (3 (#<pid 1@2> recv) (#true #true #true #true))))

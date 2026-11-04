@@ -36,10 +36,10 @@
 
 (defun run (n)
     (let me (address))
-    (spawn/on 3 (connect :tcp/listen 0 (listener me)))
+    (fork/on 3 (connect :tcp/listen 0 (listener me)))
     (let l (read me))
-    (let a (spawn/on 1 (commands)))
-    (let b (spawn/on 2 (connecting (str "127.0.0.1:" (car (cdr l))))))
+    (let a (fork/on 1 (commands)))
+    (let b (fork/on 2 (connecting (str "127.0.0.1:" (car (cdr l))))))
     (let outs (listings n ()))
     (map kill (list a b (car l)))
     (list (fold/l 0 (lambda (k o) (if (eq? o "0\n1\n2\n") k (+ k 1))) outs) (car outs)))

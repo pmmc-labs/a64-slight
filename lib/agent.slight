@@ -68,7 +68,7 @@
 ; An agent for model at url ("http://host:port"), its system prompt system
 ; ("" for none), with tools (() for none). Gives its pid.
 (defun agent/new (url model system tools)
-    (spawn (agent/idle (list url model tools) (if (eq? system "") () (list (agent/message "system" system))) ())))
+    (fork (agent/idle (list url model tools) (if (eq? system "") () (list (agent/message "system" system))) ())))
 
 ; Asks a for an answer to text, which comes to the caller.
 (defun agent/say (a text) (send a (list :say text $$)))
@@ -82,16 +82,18 @@
 
 (defun agent/asking (a text)
     (let to (address))
+    (monitor a to)
     (send a (list :say text to))
     (let answer (agent/answer a to))
     (disconnect to)
     answer)
 
 (defun agent/answer (a to)
-    (match (read/any (list to a))
-        ((_ (:answer _ text))  text)
-        ((_ (:error _ reason)) (raise reason))
-        ((p result)            (if (eq? p a) (raise (list :ended a result)) (agent/answer a to)))))
+    (match (read to)
+        ((:answer _ text)  text)
+        ((:error _ reason) (raise reason))
+        ((:exit _ result)  (raise (list :ended a result)))
+        (_                 (agent/answer a to))))
 
 ; A message of the conversation, as /api/chat takes it.
 (defun agent/message (role content)
@@ -112,7 +114,7 @@
 (defun agent/start (settings history waiting text from)
     (let a     $$)
     (let asked (cons (agent/message "user" text) history))
-    (let turn  (spawn (agent/turn settings (reverse asked) from a)))
+    (let turn  (fork (agent/turn settings (reverse asked) from a)))
     (monitor turn)
     (agent/busy settings asked history waiting from))
 

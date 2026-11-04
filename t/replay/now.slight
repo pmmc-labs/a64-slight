@@ -6,5 +6,5 @@
 (defun later () (sleep 1500) (clock/now))
 
 (let start (clock/now))
-(let after (cadr (read (spawn (later)))))
+(let after (cadr (join (fork (later)))))
 (list start (- after start))

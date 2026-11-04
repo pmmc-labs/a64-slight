@@ -2,7 +2,7 @@
     (recv
         ((:get to) (store n))))
 
-(let s (spawn (store 0)))
+(let s (fork (store 0)))
 (let asker (fork (ask s (list :get))))
 (sleep 1)
 
@@ -15,7 +15,7 @@
 (match (open :system)
     ((:ok sys)
         (send sys (list :processes))
-        (map (lambda (info) (pprint (map (lambda (k) (lookup k info)) (list :pid :kind :state :in :mail))))
+        (map (lambda (info) (pprint (map (lambda (k) (lookup k info)) (list :pid :state :in :mail))))
             (processes sys ()))))
 (kill asker)
 :done

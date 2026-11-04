@@ -43,7 +43,7 @@ export const FAULT_KINDS: readonly string[] = [
     'not-an-int', 'overflow', 'not-a-bool', 'no-clause', 'stack', 'not-a-cons', 'not-a-list', 'heap',
     'not-a-string', 'not-a-symbol', 'out-of-range', 'not-a-number', 'div-by-zero', 'not-a-function',
     'arity', 'not-a-pid', 'join-self', 'not-a-device', 'not-json', 'not-sexp', 'no-match', 'not-a-tuple',
-    'not-an-actor', 'not-a-task', 'not-an-array',
+    'not-an-array',
 ];
 
 // The names of keys from :keypress, then the modifiers, in RT_KEY_ order.
@@ -89,8 +89,9 @@ export const EXEC_WORDS: readonly string[] = [
 // Who's at the other end of a Unix connection, in RT_PEER_ order (D235).
 export const PEER_WORDS: readonly string[] = ['uid', 'gid'];
 
-// What kind a process is, in :system's info (D243), in RT_KIND_ order.
-export const KIND_WORDS: readonly string[] = ['kind', 'task', 'actor'];
+// :kind, in fs/stat's info (D254), in RT_KIND_ order; :system's kind went
+// with the two kinds of process (D277).
+export const KIND_WORDS: readonly string[] = ['kind'];
 
 // What open opens for a task (D243), in RT_SOURCE_ order.
 export const SOURCE_WORDS: readonly string[] = ['fs/read', 'fs/write', 'fs/append', 'tcp', 'unix', 'exec', 'system'];

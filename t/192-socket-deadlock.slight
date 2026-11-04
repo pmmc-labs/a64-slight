@@ -12,6 +12,6 @@
     (let conn (recv ((:accept l2 conn) conn)))
     (disconnect conn)
     (disconnect (car lp))
-    (join (fork (read h))))
+    (join (fork (join h))))
 (let q (fork (read (address))))
-(read (connect :tcp/listen 0 (server q)))
+(join (connect :tcp/listen 0 (server q)))

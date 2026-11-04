@@ -175,8 +175,8 @@ program can tell it more, with types of its own (LANGUAGE.md, "Types").
 
 ## Tasks
 
-A **task** is a process that computes a value. `fork` starts one and
-gives its pid, and `join` waits for it to end and gives its result:
+A **task** is a process started to compute a value. `fork` starts one
+and gives its pid, and `join` waits for it to end and gives its result:
 
 <!-- code: code/tour-tasks.slight -->
 ```lisp
@@ -200,14 +200,14 @@ into the new process, and each process has a heap of its own, collected
 on its own. The runtime runs every process on one core and preempts
 them, so no process can hold up the rest. Processes are about
 structure, not parallel speed: a million of them is fine. Speed comes
-from placing actors on the other cores, islands, with `spawn/on`
+from placing processes on the other cores, islands, with `fork/on`
 ([Use every core](howto/cores.md)).
 
-The top level of a program is a task too.
+The top level of a program is a process like the others.
 
 ## Actors
 
-An **actor** is a process with a mailbox. It's how slight holds state
+An **actor** is a process that waits for messages. It's how slight holds state
 that lives on: in the arguments of a function that waits for a message,
 handles it, and calls itself with the next state.
 
@@ -220,7 +220,7 @@ handles it, and calls itself with the next state.
         ((:inc)    (counter (+ n 1)))
         ((:get to) (reply to n) (counter n))))
 
-(let c (spawn (counter 0)))
+(let c (fork (counter 0)))
 (send c (list :inc))
 (send c (list :inc))
 (send c (list :inc))
@@ -232,13 +232,13 @@ handles it, and calls itself with the next state.
 3
 ```
 
-- `spawn` starts an actor and gives its pid.
+- `fork` starts it, as it starts any process, and gives its pid.
 - `send` copies a message into its mailbox, and never waits. Messages
   from one process to another arrive in the order they were sent.
 - `recv` takes the next message and matches it against its clauses,
   with the same patterns as `match`. A message that matches none is
   dropped and logged as a dead letter.
-- `ask`, in the prelude, is how a task gets an answer from an actor: it
+- `ask`, in the prelude, is how anything gets an answer from an actor: it
   adds an address to the message, sends it, and waits there for the
   `reply`.
 
@@ -248,21 +248,21 @@ still waiting for its next message, which is fine.
 
 ## Waiting
 
-A `recv` goes anywhere in an actor's code, a helper or a lambda
-included, and the process keeps its stack while it waits, as it does
-in `join`. So a function that waits gives its value back to whoever
-called it.
+A `recv` goes anywhere in a process's code, a helper or a lambda
+included, the top level too, and the process keeps its stack while it
+waits, as it does in `join`. So a function that waits gives its value
+back to whoever called it.
 
 Two things show up early:
 
-- **A task can't wait for messages.** The top level is a task, so a
-  `recv` there is a compile error that tells you to spawn an actor for
-  it, and a call from it to `counter` faults when it runs. A task gets
-  what it needs from actors with `ask`, or by waiting for them to end.
-- **An actor waiting for a reply takes the next message, whatever it
-  is.** There's no selective receive, so an actor that serves requests
-  doesn't stop to wait in the middle of one; a task asks, at an address
-  of its own.
+- **A `recv` takes the next message, whatever it is.** There's no
+  selective receive, so an actor that serves requests shouldn't stop in
+  the middle of one to `recv` a reply: the next message may be another
+  request.
+- **An address takes only what's sent to it.** `ask` makes one for
+  each question, so the reply can't be taken for anything else, and
+  `recv` leaves it alone. That's how a process asks from the middle of
+  anything, the top level included.
 
 ## Where next
 

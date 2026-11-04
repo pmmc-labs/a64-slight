@@ -28,7 +28,7 @@ go wrong, and what each looks like.
     (recv
         ((:exit _ result) (list :watched result))))
 
-(pprint (read (spawn (watcher (list :check -1)))))
+(pprint (join (fork (watcher (list :check -1)))))
 
 (raise :gave-up)
 ```
@@ -69,15 +69,16 @@ exit: 1
 There's no `catch`. A failure ends a process, and the processes that
 care are told:
 
-- **`join`** or **`read`** gives a task's result, `(:error ...)`
-  included. So `(join (fork (f)))` is how to run `f` and turn its
-  failure into a value: a task is slight's `try`.
+- **`join`** gives a process's result, `(:error ...)` included. So
+  `(join (fork (f)))` is how to run `f` and turn its failure into a
+  value: a task is slight's `try`.
 - **`ask`** raises `(:ended pid result)` if the actor it asked ends
   before answering, and `ask-within` raises `(:timeout pid)`. The asking
-  task ends too, unless it's in a `fork` of its own.
-- **`monitor`**, from an actor, sends `(:exit pid result)` when the
-  process ends. It's how a supervisor watches what it started (tutorial,
-  chapter 5).
+  process ends too, unless it's in a `fork` of its own.
+- **`monitor`** sends `(:exit pid result)` when the process ends, to
+  the caller's mailbox, or to an address it names. It's how a
+  supervisor watches what it started (tutorial, chapter 5), and how
+  `ask` hears that no answer is coming.
 - **The top level.** If the root ends with an error, the program prints
   `error: reason` and exits 1. A program whose root is left waiting for
   something that can never come prints `deadlock: ...`, saying what it

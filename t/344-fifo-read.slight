@@ -36,7 +36,7 @@
         (let to (address))
         (connect :fs/read fifo (reader to ()))
         (pprint (read to))
-        (spawn (tick to 1000))
+        (fork (tick to 1000))
         (pprint (read to))
         (send c (list :write "go" \n))
         (pprint (read to))

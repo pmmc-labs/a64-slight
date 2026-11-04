@@ -4,5 +4,5 @@
 ; worked out by hand.
 
 (defun forever () (recv (_ (forever))))
-(spawn/on 2 (forever))
+(fork/on 2 (forever))
 (read (address))

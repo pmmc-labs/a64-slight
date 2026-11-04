@@ -59,10 +59,10 @@ fun broker(subs) {
     }
 }
 
-let s1 = spawn subscriber();
-let s2 = spawn subscriber();
-let b  = spawn broker([s1, s2]);
+let s1 = fork subscriber();
+let s2 = fork subscriber();
+let b  = fork broker([s1, s2]);
 send(b, :pub(1));
 send(b, :pub(2));
 send(b, :stop());
-read(b)
+join(b)

@@ -16,7 +16,7 @@
     (map (lambda (_) (open :fs/write "/dev/null")) (range 0 n)))
 
 (defun ping (k me)
-    (send (spawn/on k (echo me)) :ping)
+    (send (fork/on k (echo me)) :ping)
     (read me))
 
 (defun run-case (how n me)

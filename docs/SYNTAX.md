@@ -96,7 +96,7 @@ kchar   = any character but white space and ( ) [ ] { } , ; " ' `
 
 So `:on-next`, `:fs/read`, `:tcp/listen`, `:RECV`. A keyword followed
 by `(` is a tagged list (below). A keyword doesn't end in `>`, so that
-a type's `actor<:ok>` closes (D247); `:>` alone is a keyword.
+a type's `pid<:ok>` closes (D247); `:>` alone is a keyword.
 
 **A type's `:`** has white space on each side (D247): `x : int`. One
 touching a name on its right begins a keyword, and one touching what's
@@ -113,7 +113,7 @@ before it, `x: int`, is an error that says to write `x : int`.
 - `[]` is `()`.
 
 **Reserved words:** `fun`, `let`, `if`, `else`, `cond`, `case`, `match`,
-`recv`, `spawn`, `fork`, `connect`, `yield`, `true`, `false`, `self`,
+`recv`, `fork`, `connect`, `yield`, `true`, `false`, `self`,
 `parent`. A slight name that is one of these is written as a raw name.
 
 **Special names:** `self` is `$$`, `parent` is `^$$`, and `@ARGV`,
@@ -143,7 +143,7 @@ block     = "{" { stmt } [ expr ] "}"
 stmt      = "let" pattern [ ":" type ] "=" expr end | expr end
 end       = ";"            (optional after an expr that ends with "}")
 
-expr      = "spawn" expr | "fork" expr | "yield" expr
+expr      = "fork" expr | "yield" expr
           | "connect" "(" sep(expr, ",") ")" block
           | pipe
 pipe      = or { "|>" or }
@@ -203,7 +203,7 @@ arms. Write `recv { ... }` itself, or `match (recv) { ... }`.
 
 ```
 type      = one { "|" one }
-one       = name [ "<" sep(type, ",") ">" ]          int, list<T>, task<T>, Tree<int>
+one       = name [ "<" sep(type, ",") ">" ]          int, list<T>, pid<T>, Tree<int>
           | "true" | "false" | keyword
           | keyword "(" sep(type | "..." type, ",") ")"
           | "[" sep(type, ",") [ "," "..." type ] "]" | "[" "..." type "]"
@@ -242,7 +242,7 @@ From tightest to loosest:
 | `&&` | left | `(and a b)` |
 | `\|\|` | left | `(or a b)` |
 | `\|>` | left | `x \|> f(a)` is `(f a x)`; `x \|> f` is `(f x)` |
-| `spawn` `fork` `yield` | prefix, takes the whole expression after it | `(spawn e)` ... |
+| `fork` `yield` | prefix, takes the whole expression after it | `(fork e)` ... |
 
 `a + b + c` is `(+ (+ a b) c)`, since slight's `+` takes two. `a < b < c`
 is an error, as is `a == b == c`: write `&&`. `/` is slight's `/`, which
@@ -339,7 +339,7 @@ front; `[...xs, a]` is an error (write `append(xs, [a])`).
 |---|---|
 | `recv { p => a, ... }` | `(recv (p a) ...)` |
 | `recv` | `(recv)` |
-| `spawn e` | `(spawn e)` |
+| `fork e` | `(fork e)` |
 | `fork e` | `(fork e)` |
 | `yield e` | `(yield e)` |
 | `connect(:tcp, "h:7000") { body }` | `(connect :tcp "h:7000" body...)` |
@@ -460,11 +460,11 @@ fun Producer(sub, items) {
     }
 }
 
-let o1 = spawn Consumer(pprint);
-let o2 = spawn Consumer(pprint);
+let o1 = fork Consumer(pprint);
+let o2 = fork Consumer(pprint);
 
-let op1 = spawn Operation(fun(x) => x + 100, o1);
-let op2 = spawn Operation(fun(x) => x + 200, o2);
+let op1 = fork Operation(fun(x) => x + 100, o1);
+let op2 = fork Operation(fun(x) => x + 200, o2);
 
 let p1 = fork Producer(op1, [10, 20, 30, 40, 50, 60]);
 let p2 = fork Producer(op2, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -550,7 +550,7 @@ fun store(table) {
     }
 }
 
-// A task's way to run a command: send it, and wait for the reply.
+// A caller's way to run a command: send it, and wait for the reply.
 fun call(s, cmd) {
     ask(s, :do(cmd))
 }

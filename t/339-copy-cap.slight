@@ -13,9 +13,9 @@
 (defun sink () (recv (_ (sink))))
 
 (pprint (kind (join (fork (do (let v (big)) (fork (length v)) :forked)))))
-(pprint (kind (join (fork (do (let v (big)) (send (spawn (sink)) v) :sent)))))
-(pprint (kind (join (fork (do (let v (big)) (after 10 (spawn (sink)) v) :timed)))))
-(pprint (kind (join (fork (do (let v (big)) (spawn/on 1 (length v)) :placed)))))
+(pprint (kind (join (fork (do (let v (big)) (send (fork (sink)) v) :sent)))))
+(pprint (kind (join (fork (do (let v (big)) (after 10 (fork (sink)) v) :timed)))))
+(pprint (kind (join (fork (do (let v (big)) (fork/on 1 (length v)) :placed)))))
 (pprint (kind (join (fork (big)))))
 (pprint (kind (join (fork (raise (big))))))
 (pprint (kind (join (fork (double :leaf 3)))))

@@ -140,9 +140,9 @@ never changes the code.
 | `(cond (test body...) ...)` | The conditional the others become (below). Each test must be `#true` or `#false`, or the process faults; so does running out of clauses. |
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
-| `(fork expr)` | Runs `expr` in a new process and returns its pid: a task. `(spawn expr)` starts an actor (D243), and `(spawn/on k expr)` one on island `k` (D256). |
+| `(fork expr)` | Runs `expr` in a new process and returns its pid; `(fork/on k expr)` on island `k` (D256). One kind of process (D277). |
 | `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`, or a Unix socket, `(connect :unix path expr)` or `(connect :unix/listen path expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
-| `(recv clause...)` | Takes the next message, waiting for one with the stack kept (D276), anywhere in an actor's code. |
+| `(recv clause...)` | Takes the next message, waiting for one with the stack kept (D276), anywhere (D277). |
 | `(deftype ...)`, `(sig ...)`, `(the type expr)` | Types (D247): a type's name and a function's types, at the top level, and an expression's. The checker reads them; code generation leaves them out (`(the T e)` is `e`). Not counted among the 10, since none does anything when the program runs. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
@@ -193,19 +193,17 @@ A process keeps its stack across every wait: `recv`, `join`,
 `join/race`, `read` and `sleep` alike (D276, which retired D8 and D167:
 till then the stack was empty at every `recv`, which could go only
 where a tail call could, and a waiting process held none). So a `recv`
-goes anywhere in a function that runs in an actor, a helper or a lambda
-included, and a function that waits gives its value back to its caller
+goes anywhere, a helper or a lambda included, the top level too (D277),
+and a function that waits gives its value back to its caller
 as any function does. The runtime's `rt_recv` takes the next message,
 or parks the process in state `RT_WAITING`, keeping its stack, and
 returns the message when one comes; the process gets a new slice then,
 and a call is counted, as a receive function started again had, so a
 program is preempted where it was before D276.
 
-What's left of the rule: a task (a `fork`'s body, or the top level)
-can't wait for a message (D243); a `recv` written in one is a compile
-error, and a call from one to a function that waits faults
-`:not-an-actor` when it runs. And there's still no selective receive:
-whatever `recv` a process is in takes the next message.
+There's still no selective receive: whatever `recv` a process is in
+takes the next message, but what's sent to an address of its own, or
+comes from a device it opened, which `read` takes (D277).
 
 What it costs: a waiting process holds a stack, 8 MB of address space
 and the pages it touched, and the system maps about 32,000 of them at
@@ -219,46 +217,49 @@ function that waits is a call.
 
 | | |
 |---|---|
-| `(fork expr)` | Starts a **task** (D243). The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. A task can't wait in `recv` (the compiler refuses a state function in `expr`, or in the top level, which is the root's task), nor be sent to, timed (`after`) or monitor (`:not-an-actor`). Inside `expr`, `$$` is the child. |
-| `(spawn expr)` | As `fork`, but starts an **actor** (D243): `expr` runs at the base of the child's stack, so it may wait in `recv`, and the actor can be sent to. |
-| `(connect :keypress expr)` | `spawn`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
-| `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `spawn`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
-| `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `spawn`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
+| `(fork expr)` | Starts a process (D277: one kind, where D243 had two). The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. `expr` runs at the base of the child's stack, and may wait in `recv` anywhere (D276). Inside `expr`, `$$` is the child. |
+| `(fork/on k expr)` | As `fork`, on island `k` (D256); `fork` stays on its parent's. |
+| `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
+| `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
+| `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
 | `(connect :unix path expr)`, `(connect :unix/listen path expr)` | The same, at a Unix socket's path (D231). |
 | `(socket/peer c)` | The uid, gid and pid at the other end of the Unix connection `c`, or `()` (D235). |
-| `(connect :exec cmd expr)` | `spawn`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
-| `(connect :system expr)` | `spawn`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
-| `(connect dev expr)` | `spawn`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
+| `(connect :exec cmd expr)` | `fork`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
+| `(connect :system expr)` | `fork`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
+| `(connect dev expr)` | `fork`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
 | `(disconnect f)` | Closes the device `f`. Anything that isn't an open device it ignores. Returns `()`. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
-| `(join pid)` | **Blocking** wait for `pid`, a task, to end. Returns `(:ok value)` or `(:error reason)`. Works on any task (not just children), anywhere (including inside lambdas, and in an actor), and after the task has already ended, till its parent has had the result: joined or read it, been told by a monitor, or ended; then `:ended` (D244). Joiners wake in the order they joined, each with a copy. `(join $$)` faults (`:join-self`), and so does a running actor's pid (`:not-a-task`, D243): a task reads its end. |
-| `(join/race pids)` | **Blocking** wait for the first of `pids`, tasks, to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
-| `(address)`, `(read src)`, `(read/any srcs)` | A task's (D243): `address` makes a place it can be sent to, an immediate under the pid tag (its island's id for it, never given twice, D273), which `send`, `after` and `disconnect` take; `read` waits, keeping the stack, for the next message to one of its open addresses, or for a pid to end (an actor's end is told to those reading it then, a read's watch lasting till the task next reads without it, and is `:ended` after); `read/any` for the first of several, in their order, giving `(src what)`. The messages wait in the task's mailbox, marked with their address. `ask`, `ask-within` and `reply` are prelude functions on them. |
-| `(open source arg)` | A task's (D243): opens a device it owns, with no process started, from `connect`'s sources but the listeners and `:keypress`, and waits till it's open: `(:ok d)`, or `(:error reason)`. `read` gives its messages, its next cut at the `read` after (D158); a failure is `(:error d reason)` there, and the device closes, rather than ending the task (D128's rule is an actor's). |
-| `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has, `result` being `:ended` for an actor (D243). Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
+| `(join pid)` | **Blocking** wait for `pid` to end, keeping the stack. Returns `(:ok value)` or `(:error reason)`. Works on any process (not just children), on any island (D277), anywhere (including inside lambdas), and after the process has already ended, till its parent has had the result: joined it, been told by a monitor, or ended; then `:ended` (D244). Joiners wake in the order they joined, each with a copy. `(join $$)` faults (`:join-self`), and so does an address (`:not-a-pid`). |
+| `(join/race pids)` | **Blocking** wait for the first of `pids` to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
+| `(address)`, `(read src)`, `(read/any srcs)` | `address` makes an inbox of the caller's own, which only it reads: an immediate under the pid tag (its island's id for it, never given twice, D273), which `send`, `after`, `monitor` and `disconnect` take; `read` waits, keeping the stack, for the next message to one of its open addresses, or from a device it opened; `read/any` for the first of several, in their order, giving `(src what)`. A process is no source: `read` of a pid faults (`:not-a-pid`), its end being a message, from `monitor`, or a join's (D277). The messages wait in the process's mailbox, marked with their address, and `recv` leaves them. `ask`, `ask-within` and `reply` are prelude functions on them. |
+| `(open source arg)` | Opens a device the caller owns, with no process started (D243, D277), from `connect`'s sources but the listeners and `:keypress`, and waits till it's open: `(:ok d)`, or `(:error reason)`. `read` gives its messages, which `recv` leaves, its next cut at the `read` after (D158); a failure is `(:error d reason)` there, and the device closes, rather than ending the process (D128's rule is `connect`'s). |
+| `(monitor pid)`, `(monitor pid to)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller, or to its address `to` (D277), so a reply and the end of the process asked come to one place; at once, if it already has, `result` being `:ended` once the value is gone (D244). Monitoring twice means two messages; `disconnect` of `to` drops the monitors told at it. There are no automatic messages to the parent. Returns `()`. |
 | `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns the timer's number (D232). |
 | `(timer/cancel t)` | Takes back `after`'s timer `t` if it hasn't fired: `#true`, or `#false` (D232). |
 
-**Tasks and actors (D243, with D244 and D245; built).** Two kinds of
-process.
-An actor, started with `(spawn expr)`, has a mailbox and the `recv`
-rule; it can be sent to, monitored and killed, not joined, and read by
-a task. When it ends, monitors and readers are told; its value is kept
-for its parent if that's a task, till the parent reads it (D245), and
-otherwise one that asks later hears `:ended`. A task, started with `(fork expr)`, computes a value: it
-can't `recv` or be sent to, and can be joined. The root is a task. A
-task waits for something other than a process's end through addresses
-it makes, `(address)`, which `send` and `after` take where they take a
-pid, and devices it opens, `(open how ...)`, with `(read src)` for the
-next message from one, or `(read/any srcs)` for the first of several, a
-pid's being its end; each keeps the stack, as `join` does. An address is
-an immediate under the pid tag: its island and an id the island gives
-it, once, which a table of the island's open addresses maps to its task
-(D273). `ask` is a prelude function on them. An
-actor makes no address, so it can't `ask`; it may block in `join` and
-`sleep`. `connect` starts an actor that owns a device, as before.
+**One kind of process (D277; D243's two, tasks and actors, with D245,
+are retired).** Every process, started with `(fork expr)`, has a
+mailbox and a value: it can be sent to, and takes its messages with
+`recv`, wherever it is in its code (D276); it can be joined for its
+value, on any island; monitored, timed and killed; and it can make
+addresses, `(address)`, which `send`, `after` and `monitor` take where
+they take a pid, and open devices, `(open how ...)`, with `(read src)`
+for the next message from one, or `(read/any srcs)` for the first of
+several; each wait keeps the stack. The root is one too. A pid is its
+process's inbox: what's sent to it is what `recv` takes. An address is
+an inbox of its own, read only by its maker, an immediate under the
+pid tag: its island and an id the island gives it, once, which a table
+of the island's open addresses maps to its process (D273); `recv`
+leaves what's sent to one, and what comes from a device the process
+opened, for `read`. A process's end is a message: `(monitor pid to)`
+tells the address `to`, so a reply and the end of the process asked
+come to one place, which is how `ask`, a prelude function, waits. A
+process's value is kept for its parent till the parent has it (D244,
+for every process). `connect` starts a process that owns a device, as
+before. Tasks and actors stay as the two shapes a process is written
+in: one that computes a value, and one that loops through `recv`.
 | `(sleep ms)` | **Blocking** wait for `ms` milliseconds, keeping the stack. Works anywhere. Returns `()`. |
 | `(clock/us)` | The microseconds since the program started, on the timers' clock (D208). |
 | `(raise reason)` | Ends the current process with `(:error reason)`. |
@@ -318,7 +319,7 @@ actor makes no address, so it can't `ask`; it may block in `join` and
   (D274), and `timer/cancel` takes one back by it, found in an index of
   the pending ones, kept as the heap moves them; another island's is
   taken back by that island, the caller waiting for its answer, as
-  `spawn/on` waits. A timer whose process has ended is dropped when it's due,
+  `fork/on` waits. A timer whose process has ended is dropped when it's due,
   as a message to it would be, or sooner: when nothing can run, those
   next due whose process has ended are dropped, so the program neither
   waits for them nor moves the clock to them.
@@ -947,15 +948,14 @@ RT_EXEC_INT`, since a symbol is its name.
   queue it to run the entry function.
 - Ending: the Result goes, from the process's own heap, to those
   waiting then: each joiner, and a race it wins, is given a copy to
-  take when it runs; each task with a read's watch on it is sent it,
-  marked with the pid, so it waits for that task's next `read`; and
-  monitors get `(:exit pid result)` (D243, D244). Then a Result isn't
-  kept if the parent was among them, or has ended, nor an actor's whose
-  parent is an actor, which can't read it: the record says only that it
-  ended, and later asks get `:ended`. Else the Result is copied into its
-  small per-pid **exit record**, kept for the parent, which lists it
-  (D244, D245); the parent's `join`, `read` or
-  `monitor` of it, or its end, lets it go. The monitors a process set
+  take when it runs, a joiner on another island as an item to its
+  island (D277); and monitors get `(:exit pid result)`, in their inbox
+  or at the address they named (D243, D244, D277). Then a Result isn't
+  kept if the parent was among them, or has ended: the record says only
+  that it ended, and later asks get `:ended`. Else the Result is copied
+  into its small per-pid **exit record**, kept for the parent, which
+  lists it (D244); the parent's `join` or `monitor` of it, or its end,
+  lets it go. The monitors a process set
   on others are taken off their lists (D183). A `join/race` is a watch
   on each of its pids, as a monitor is, that wakes its process rather
   than sending it a message; the first to end wakes it, and it takes the
@@ -987,7 +987,7 @@ and record; nothing is shared between islands but an inbox each and
 the shared buffers (D253), which never change. A fixed set, `(islands)`
 of them, one per core unless `SLIGHT_ISLANDS` says; island 0 is the
 main one, and owns the signals, the terminal and `:system`. A program
-places an actor with `(spawn/on k expr)`; nothing moves on its own, and
+places a process with `(fork/on k expr)`; nothing moves on its own, and
 `fork` stays on its parent's island. A pid carries its island in 8 bits
 below the address bit (`#<pid 5@2>`, island 0's printed as now), each
 island numbering its own; a send to another island's pid copies the
@@ -1007,12 +1007,13 @@ reply that comes back quickly needs no wake (two islands' round trip,
 3.4 µs on the cloud machine, where a wake through the pipe took 50).
 What crosses is an item: a message, already copied into its chunk by
 the sender, the item's head in the same chunk, so that crossing is one
-allocation; a start, for `spawn/on`, which the island makes and answers
-with its pid, the spawner waiting, so each island numbers only its own;
+allocation; a start, for `fork/on`, which the island makes and answers
+with its pid, the forker waiting, so each island numbers only its own;
 and kills, watches and ends. A pid not on this island reads as ended
-(`slot`), except where send, kill, monitor and read see to it. An
-actor's end goes to its parent, a task on another island, and is kept
-there apart from its mail, as a record keeps one here (D245). The
+(`slot`), except where send, kill, monitor and join see to it. A
+process's end goes to its parent on another island, and to a joiner
+there, and is kept apart from the mail, as a record keeps one here
+(D244, D277). The
 program ends when `busy`, the islands that may still do something and
 the items not yet handled, comes to 0.
 
@@ -1477,5 +1478,5 @@ step 9: collecting only at `recv` (D105). In step 10a: the virtual clock
 ended (D112), and waiting in `select()` (D113). In step 10b: feeding tests
 keys (D116), Ctrl-C (D117), the end of stdin (D118), and several
 connected processes (D119). In step 12b: collecting at a function's
-entry, with the frames as roots (D166). In Oct 2026: tasks and actors (D243, below
-Processes).
+entry, with the frames as roots (D166). In Oct 2026: tasks and actors (D243), and in Nov 2026 one kind of
+process again (D277, below Processes).

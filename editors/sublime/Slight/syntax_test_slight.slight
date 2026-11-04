@@ -23,7 +23,7 @@
 ;                            ^^^ variable.function
 ;                                          ^^^^^^^^^ variable.function
 
-(let s (spawn (store ())))
+(let s (fork (store ())))
 ;^^^ keyword.declaration.variable
 ;    ^ variable.other
 ;       ^^^^^ keyword.control.process

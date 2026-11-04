@@ -1,9 +1,10 @@
-; open (D243): a task opens a device of its own, with no process to own
-; it, and reads it; open gives (:ok d) once it's open, or (:error reason).
+; open (D243): a process opens a device of its own, with no process to
+; own it, and reads it; open gives (:ok d) once it's open, or (:error
+; reason).
 ; A reader's next message is cut at the next read (D158), so (:read how)
 ; applies to it. A failure is (:error d reason), read where the device's
 ; next message would be, and the task goes on. A device closed while its
-; reader waits ends the wait. Only a task opens, and not a listener.
+; reader waits ends the wait. Not a listener.
 
 (let path "build/t/300-open.txt")
 (match (open :fs/write path)
@@ -30,14 +31,13 @@
 (match (open :system)
     ((:ok s)
         (send s (list :process $$))
-        (pprint (match (read s) ((:process _ info) (lookup :kind info))))))
+        (pprint (match (read s) ((:process _ info) (lookup :state info))))))
 
 (match (open :system)
     ((:ok s) (fork (disconnect s)) (pprint (read s))))
 
-(pprint (read (spawn (open :fs/read path))))
+(pprint (join (fork (open :fs/read path))))
 (pprint (join (fork (open :tcp/listen 0))))
 (pprint (join (fork (open :fs/read 42))))
 (pprint (open :tcp "127.0.0.1:1"))
 :done
-; warns: 38:22

@@ -37,4 +37,4 @@
 (defun top-level ()
     (race 997))
 
-(read (spawn (top-level)))
+(join (fork (top-level)))

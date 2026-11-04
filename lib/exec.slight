@@ -28,7 +28,8 @@
             (send p (list :eof))
             (let to (address))
             (when (int? ms) (after ms to :timeout))
-            (exec/collect (list p to ^$$) ms ()))
+            (match ^$$ (() ()) (caller (monitor caller to)))   ; the caller's end comes to the same address (D277)
+            (exec/collect (list p to) ms ()))
         ((:error reason) (raise reason))))
 
 ; chunks is the output so far, last first.
@@ -39,6 +40,6 @@
         ((_ (:exited _ n))      (list n (str/join "" (reverse chunks))))
         ((_ (:error _ reason))  (raise reason))
         ((_ :timeout)           (list (list :timeout ms) (str/join "" (reverse chunks))))
-        ; the caller has ended: there's no one to answer, and the task's
-        ; end closes the device, which kills the command (D193)
-        (_                      (raise :caller-ended))))
+        ; the caller has ended: there's no one to answer, and this
+        ; process's end closes the device, which kills the command (D193)
+        ((_ (:exit _ _))        (raise :caller-ended))))

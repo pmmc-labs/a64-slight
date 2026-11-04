@@ -1,11 +1,11 @@
 ; Addresses (D243): a task makes them, and reads what's sent to each. A
-; message to an address waits for its read; read/any takes the first of
-; its sources, in their order, that has something, a pid's being its end;
-; a timer can be set for an address, and taken back; and disconnect closes
-; one, dropping what waits there and what comes after. ask is the
-; prelude's, on them; asking an actor that has ended raises with :ended,
-; since its result isn't kept. Only a task makes and reads addresses, and
-; only its own, open ones.
+; message to an address waits for its read; a process's end comes to one
+; from a monitor told it (D277); a timer can be set for an address, and
+; taken back; and disconnect closes one, dropping what waits there and
+; what comes after. ask is the prelude's, on them; asking an actor that
+; has ended raises (:ended pid result), the result kept for its parent
+; till it has it (D244). Any process makes and reads addresses, its own,
+; open ones; a process is no source for read.
 
 (defun echo ()
     (recv
@@ -26,18 +26,20 @@
 (pprint r)
 (send r :to-myself)
 (pprint (read r))
-(let e (spawn (echo)))
+(let e (fork (echo)))
 (send e (list :hi r))
 (pprint (read r))
 (fork (later r 10 :late))
 (pprint (read r))
 
 (let w (fork (sleep 20)))
+(monitor w r)
 (after 5 r :tick)
-(pprint (read/any (list r w)))
-(pprint (read/any (list r w)))
+(pprint (read r))
+(pprint (read r))
 (send r :queued)
-(pprint (read/any (list w r)))
+(monitor w r)
+(pprint (read r))
 (pprint (read r))
 
 (let t (after 5 r :never))
@@ -48,15 +50,14 @@
 (pprint (join (fork (read r))))
 (pprint (join (fork (do (let a (address)) (disconnect a) (read a)))))
 
-(let c (spawn (cell 42)))
+(let c (fork (cell 42)))
 (pprint (ask c (list :get)))
 (send c :stop)
 (pprint (join (fork (ask c (list :get)))))
-(let s (spawn (deaf)))
+(let s (fork (deaf)))
 (pprint (join (fork (ask-within 50 s (list :get)))))
 
-(pprint (read (spawn (address))))
+(pprint (join (fork (do (address) :made))))
 (pprint (join (fork (read/any ()))))
 (pprint (join (fork (read $$))))
 :done
-; warns: 58:22

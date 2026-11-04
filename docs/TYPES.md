@@ -76,10 +76,9 @@ when the code runs.
 | `#(A, B)` | `(tuple A B)` | a tuple of two |
 | `array<float>`, `array<int>` | `(array float)`, `(array int)` | an array of numbers of one kind (D253) |
 | `fun(A, B) -> C` | `(fun (A B) C)` | a function of two arguments |
-| `task<T>` | `(task T)` | a task's pid; its value is a `T` |
-| `actor<M>` | `(actor M)` | an actor's pid; it takes messages of type `M` |
+| `pid<M>` | `(pid M)` | a process's pid; it takes messages of type `M` (D277) |
 | `address<M>` | `(address M)` | an address; what's sent to it is an `M` |
-| `pid` | `pid` | any process or device |
+| `pid` | `pid` | any process, address or device: `pid<any>` |
 | `tuple`, `fun`, `array` | `tuple`, `fun`, `array` | any tuple; any function; any array of numbers |
 | `A \| B` | `(or A B)` | either |
 | `any` | `any` | anything: not checked |
@@ -93,7 +92,7 @@ s-expressions, a list type headed by a keyword is a tagged list, and
 
 In `.sly`, `fun(A) -> B | C` gives `B | C`, as TypeScript reads it;
 `(fun(A) -> B) | C` is the union of a function and a `C`. And a keyword
-there doesn't take a `>` after it, so `actor<:ok>` closes: in `.sly` no
+there doesn't take a `>` after it, so `pid<:ok>` closes: in `.sly` no
 keyword ends in `>`.
 
 Types are structural: two types with the same shape are the same type,
@@ -126,10 +125,10 @@ What fits where:
   a handler that gives a `str` is no `fun(Request) -> Response`. A
   function whose result is `never`, one that always raises, overlaps
   any.
-- `task<T>`, `actor<M>` and `address<M>` are each a `pid` (an address is
-  `pid?`). An `actor<M>` fits where an `actor<N>` is wanted if every `N`
-  is an `M`: an actor that takes more messages can stand in for one that
-  takes fewer.
+- `pid<M>` and `address<M>` are each a `pid` (an address is `pid?`).
+  A `pid<M>` fits where a `pid<N>` is wanted if every `N` is an `M`: a
+  process that takes more messages can stand in for one that takes
+  fewer.
 - `any` fits everywhere, and everything fits `any`. That makes it
   gradual: where a type isn't known, nothing is checked.
 
@@ -161,7 +160,8 @@ All optional. Three forms, each erased once the checker has read it:
   -> B, xs : list<A>) : list<B>` and `(sig (map A B) ((fun (A) B) (list
   A)) (list B))`. Only a `sig` is generic; the checker never infers one.
   At each call, it works out what `A` and `B` are from the arguments.
-- A function that waits says what its actor takes, after its result:
+- A function that waits says what the process it runs in takes, after
+  its result:
   `fun counter(n : int) recv CounterMsg { ... }`, and `(sig counter (int)
   any (recv CounterMsg))`. `recv` is reserved already, so no new word.
 - `(the T e)` is `e`, checked to be a `T`, and taken to be one after:
@@ -266,47 +266,45 @@ goes).
 | A call of something that isn't a function, or with the wrong number of arguments through a function value | `:not-a-function`, `:arity` |
 | A `match` none of whose arms can match the topic's type | `:no-match` |
 | An arm no value can reach: its pattern can't fit what's left | (dead code) |
-| A message no `recv` of the actor can take | a dead letter |
-| `join` of an actor; `join`, `monitor` or `kill` of an address; `monitor` in a task | `:not-a-task`, `:not-a-pid`, `:not-an-actor` |
-| `address`, `read`, `read/any` or `open` in a function that waits | `:not-a-task` |
-| An actor connected to the keyboard that can take no key | every key a dead letter |
+| A message no `recv` of the process can take | a dead letter |
+| `join`, `monitor` or `kill` of an address; `read` of a process | `:not-a-pid` |
+| A process connected to the keyboard that can take no key | every key a dead letter |
 | A call against its `sig`, a body against its result, `the` against its value | (what the program said) |
 
 And with `--strict`: a `match` whose arms leave out part of the topic's
-type, when it has no `any` in it; a `send` or `after` to a task, which
-faults only if the task hasn't ended (one that has takes it, as any
-ended process does); and every argument, test and result whose type is
-wider than the one wanted.
+type, when it has no `any` in it; and every argument, test and result
+whose type is wider than the one wanted.
 
 The row for messages closes a question `SYNTAX.md` left open (3, D246),
-for sends: a message sent as `:stop()` to an actor that takes `:stop` is
+for sends: a message sent as `:stop()` to a process that takes `:stop` is
 a dead letter, and it's found when the program is compiled.
 
 ## Processes
 
-A pid's type says what kind of process it is, which the language
-already distinguishes (D243): `fork e` gives a `task<T>`, `T` being
-`e`'s type, and `join` on it gives `:ok(T) | :error(any) | :ended`, or
-without `:ended` where the task is started right there, `(join (fork
-e))`, since its value is kept for its parent till it has it (D244), and
-the same for `read` of an actor started there (D245);
-`spawn e` and `connect(...) { e }` give an `actor<M>`; `address()`
-gives an `address<M>`; `self` is the actor's own `actor<M>`. `parent`
-(`^$$`) is a `pid`, or `()` in the root, which has none; in a function
-that waits, which runs in an actor and so never in the root, a task, it's
-a `pid`.
+A pid's type says what the process takes (D277; till then, which of
+D243's two kinds it was): `fork e` and `connect(...) { e }` give a
+`pid<M>`, `M` being what the `recv`s `e` can reach take (below), and
+`pid` when they take anything. `join` on a pid gives `:ok(T) |
+:error(any) | :ended`, `T` being `e`'s type where the checker can see
+the `fork`, and `any` where it can't; without `:ended` where the
+process is started right there, `(join (fork e))`, since its value is
+kept for its parent till it has it (D244). `address()` gives an
+`address<M>`; `self` is the process's own `pid<M>`. `parent` (`^$$`)
+is a `pid`, or `()` in the root, which has none; in a function that
+waits, the checker takes it to be a `pid`, a guess since D277, when
+the root may wait too.
 
-### An actor's mailbox, from its `recv`s
+### A process's mailbox, from its `recv`s
 
-There's no selective receive: whatever `recv` an actor is in takes the
+There's no selective receive: whatever `recv` a process is in takes the
 next message, or drops it as a dead letter. So a message that no `recv`
-the actor could ever be in can take is certainly a dead letter, and
-what the actor takes is the union of all those `recv`s' patterns.
+the process could ever be in can take is certainly a dead letter, and
+what the process takes is the union of all those `recv`s' patterns.
 
 The checker works out which functions wait, and how they call each
-other: each `recv` reachable by calls from the function a `spawn`
-starts is one the actor can be in (D276; till then by tail calls alone,
-from `classify.ts`). For each `spawn`, the
+other: each `recv` reachable by calls from a `fork`'s expression is one
+the process can be in (D276; till then by tail calls alone, from
+`classify.ts`). For each `fork`, the
 checker takes the union of those `recv`s' patterns as types: a literal
 is its type, `:tag(x, y)` is `:tag(any, any)`, and a name or `_` alone
 is `any`. That's `M`, with no annotation:
@@ -320,11 +318,11 @@ fun counter(n) {
     }
 }
 
-let c = spawn counter(0);    // actor<:inc() | :get(any) | :stop>
+let c = fork counter(0);    // pid<:inc() | :get(any) | :stop>
 send(c, :inc);               // warning: counter takes :inc(), not :inc
 ```
 
-An actor with an arm that takes anything (`msg => ...`) takes `any`,
+A process with an arm that takes anything (`msg => ...`) takes `any`,
 and nothing sent to it is warned about. That's right: it takes
 everything.
 
@@ -349,7 +347,7 @@ fun counter(n : int) recv CounterMsg {
 
 A device sends what `LANGUAGE.md` says it does, and those have types
 too. Built: the keyboard's, `[str | sym, ...list<sym>]`, checked
-against the mailbox of the actor connected to it. A timer's message is
+against the mailbox of the process connected to it. A timer's message is
 `after`'s, checked as a `send`'s is. The other devices' messages (a
 file's `:open(pid) | :line(pid, str) | :eof(pid)`, `monitor`'s
 `:exit(pid, any)`) aren't checked yet: `open` gives `:ok(pid) |
@@ -389,7 +387,8 @@ tests of whole programs' warnings, `t/types/NAME.slight` (or `.sly`),
 each with its `.expected`, `--strict` if a line says `; check: strict`.
 
 Its first run found a real bug: `author/boids.slight` joined its
-display actor, which D243 had made a fault (`:not-a-task`).
+display actor, which D243 had made a fault (`:not-a-task`; D277 made
+it a join again).
 
 ## In the compiler
 
@@ -420,8 +419,9 @@ Steps 1 to 4 are done (D247); 5 waits.
    in a body, narrowing, and the warnings that need no annotations:
    builtins, tests, `:no-match` and unreachable arms. `slightc
    --check`, and `make types` clean over the repository.
-2. **Processes.** Task, actor and address types; mailboxes from
-   `recv`; dead letters; `join` of an actor and `send` to a task.
+2. **Processes.** Process and address types (task and actor types
+   till D277); mailboxes from `recv`; dead letters; `join` of an
+   address.
 3. **Annotations.** `deftype`, `sig`, `the`, the `.sly` syntax for
    them, generics, and the prelude's `sig`s. Needs Stevan's word first:
    these are new forms.
@@ -493,4 +493,4 @@ himself.
   ...)` beside the definition, and occurrence typing, its narrowing.
 - **Gleam**, **Akka Typed** and **Pony**: typed actors, a pid with the
   type of what it takes (`Subject(msg)`, `ActorRef[T]`). The idea of
-  `actor<M>`; here `M` is inferred from `recv` rather than declared.
+  `pid<M>`; here `M` is inferred from `recv` rather than declared.

@@ -39,6 +39,6 @@
     (send to (spin 20000000)))
 
 (let me (address))
-(spawn/on 1 (island-work me 2000))
-(spawn/on 2 (island-work me 2000))
+(fork/on 1 (island-work me 2000))
+(fork/on 2 (island-work me 2000))
 (pprint (length (map (lambda (_) (read me)) (range 0 4))))

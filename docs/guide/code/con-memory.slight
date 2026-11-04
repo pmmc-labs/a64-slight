@@ -9,7 +9,7 @@
 (defun idle ()
     (recv (_ :done)))
 
-(let a (spawn (idle)))
+(let a (fork (idle)))
 (sleep 1)
 (match (open :system)
     ((:ok s)

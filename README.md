@@ -5,12 +5,12 @@ mutated. This is its compiler, which turns a whole program into native
 code for AArch64 (macOS on Apple Silicon, and Linux) or x86-64, linked
 with a small actor runtime in C and assembly.
 
-A slight program is processes sending each other messages. `spawn`
-starts an actor, `send` copies a value into its mailbox, and `recv`
-takes the next message; `fork` starts a task, which computes a value
-that `join` waits for. What would be mutable state elsewhere lives in an
-actor, in the arguments of the function it loops through, one call per
-message. Errors are values: a process ends with `(:ok value)` or
+A slight program is processes sending each other messages. `fork`
+starts a process, `send` copies a value into its mailbox, `recv` takes
+the next message, and `join` waits for the value a process ends with.
+What would be mutable state elsewhere lives in an actor, a process that
+loops through a function, one call per message, its state in the
+arguments. Errors are values: a process ends with `(:ok value)` or
 `(:error reason)`, and a fault such as an integer overflow ends only the
 process it happens in.
 
@@ -24,7 +24,7 @@ process it happens in.
         ((:get to) (reply to n) (counter n))))
 
 ; ask sends a request with an address to answer at, and waits there.
-(let c (spawn (counter 0)))
+(let c (fork (counter 0)))
 (dotimes 0 3 (lambda (i) (send c (list :inc))))
 (ask c (list :get))
 ```

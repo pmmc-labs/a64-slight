@@ -272,12 +272,12 @@ if frames < 1 { tty::write("\e[?25l\e[2J") }
 let shown = connect(:system) { display_on(n, sky, frames) }
 let birds = zip(range(0, n), states) |> map(fun(b) {
     let [i, #(x, y, vx, vy)] = b;
-    spawn bird(i, #(i, x, y, vx, vy), sky, shown, [])
+    fork bird(i, #(i, x, y, vx, vy), sky, shown, [])
 });
 birds |> map(fun(b) => send(b, :flock(birds)));
 let keyboard = connect(:keypress) { keys(shown) }
 
-let drawn = read(shown);
+let drawn = join(shown);
 map(kill, [keyboard, ...birds]);
 if frames < 1 { tty::write("\e[?25h\n") }
 match drawn {

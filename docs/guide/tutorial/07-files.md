@@ -12,13 +12,14 @@ A file, a socket, a running command and the keyboard are all
 **devices**. A device is a pid the runtime serves, not compiled code. It
 talks in messages like any process. There are two ways to have one:
 
-- `(connect source arg expr)` starts an actor, as `spawn` does, to
-  evaluate `expr`, and connects it to the device. The actor gets
+- `(connect source arg expr)` starts a process, as `fork` does, to
+  evaluate `expr`, and connects it to the device. The process gets
   `(:open f)` first, `f` being the device's pid, and then whatever the
-  device sends: a reader's lines as `(:line f s)`, then `(:eof f)`.
-- `(open source arg)`, from a task, opens a device the task owns, and
-  gives `(:ok f)` or `(:error reason)`. The task takes the device's
-  messages with `read`.
+  device sends, as messages for `recv`: a reader's lines as `(:line f
+  s)`, then `(:eof f)`.
+- `(open source arg)` opens a device the calling process owns, and
+  gives `(:ok f)` or `(:error reason)`. The process takes the device's
+  messages with `read`, which `recv` leaves for it.
 
 For files, `source` is `:fs/read`, `:fs/write` (which empties the file
 first) or `:fs/append`, and `arg` is the path. A file opened to write
@@ -146,7 +147,7 @@ are in the file.
 
 ## Back to the supervisor
 
-Chapter 5's supervisor, with `start` in place of `spawn`:
+Chapter 5's supervisor, with `start` in place of `fork`:
 
 <!-- code: ../code/tut-7-supervised.slight -->
 ```lisp
@@ -168,7 +169,7 @@ Chapter 5's supervisor, with `start` in place of `spawn`:
 (let path (if (nil? @ARGV) "store.log" (car @ARGV)))
 (spew path ())
 
-(let sup (spawn (supervise path)))
+(let sup (fork (supervise path)))
 (call sup (list :put "apple" 3))
 (call sup (list :put "color" "red"))
 (pprint (join (fork (ask-within 1000 sup (list :do (list :incr "color"))))))

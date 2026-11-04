@@ -1,6 +1,6 @@
 ; Files, the whole of one at a time, on top of open (D243): not part of
 ; the prelude, so a program that wants them says (@include :fs).
-; Each works in a task of its own, which a task or an actor can join.
+; Each works in a process of its own, which its caller joins.
 ;
 ;     (slurp "notes.txt")                  (:ok ("first line" "second line"))
 ;     (spew "out.txt" (list "one" "two"))  (:ok ())

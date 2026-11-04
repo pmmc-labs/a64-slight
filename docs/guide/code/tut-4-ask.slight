@@ -1,6 +1,6 @@
 (@include "tut-store.slight")
 
-(let s (spawn (store ())))
+(let s (fork (store ())))
 (call s (list :put "apple" 3))
 (pprint (call s (list :get "apple")))
 (pprint (call s (list :get "plum")))

@@ -1,45 +1,34 @@
-; Tasks and actors (D243): fork starts a task, which computes a value and
-; is joined; spawn starts an actor, which takes messages. A task can't be
-; sent a message, nor a timer, and can't monitor, since it has nowhere to
-; take what comes: each faults :not-an-actor, in the process that tried.
-; An actor's end is read, not joined (:not-a-task).
-; A message to a task that has ended still just disappears (D92). And
-; :system tells the kinds apart.
+; One kind of process (D277): fork starts one, which is joined for its
+; value, sent to, timed with after, and monitored, whatever it does; the
+; root waits for a message too. A message to one that has ended just
+; disappears (D92). And :system says no kind.
 
 (defun counter (n)
     (recv
         (:inc  (counter (inc n)))
         (:stop n)))
 
-(defun kinds (pids)
-    (recv ((:open s) (ask-kinds s pids ()))))
-
-(defun ask-kinds (s pids acc)
-    (if (nil? pids)
-        (reverse acc)
-        (do (send s (list :process (car pids)))
-            (recv ((:process _ info) (ask-kinds s (cdr pids) (cons (lookup :kind info) acc)))))))
+(defun info (pid)
+    (recv ((:open s) (send s (list :process pid)) (recv ((:process _ i) (lookup :kind i))))))
 
 (pprint (join (fork (+ 1 2))))
 
-(let c (spawn (counter 0)))
+(let c (fork (counter 0)))
 (send c :inc)
 (send c :inc)
 (send c :stop)
-(pprint (read c))
-(pprint (join (fork (join (spawn (recv (_ :never)))))))
+(pprint (join c))
 
 (pprint (join (fork (send (fork (sleep 10)) :hi))))
-(pprint (join (fork (after 10 (fork (sleep 10)) :hi))))
-(pprint (join (fork (monitor ^$$))))
+(pprint (join (fork (do (after 10 (fork (sleep 10)) :hi) :set))))
+(pprint (join (fork (do (let t (fork 5)) (monitor t) (recv ((:exit _ r) r))))))
+
+(send $$ :to-myself)
+(pprint (recv (m m)))
 
 (let t (fork :done))
 (join t)
 (pprint (send t :late))
 
-(let w (spawn (recv)))
-(let z (fork (sleep 100)))
-(let root $$)
-(pprint (read (connect :system (kinds (list root w z)))))
+(pprint (join (connect :system (info $$))))
 :end
-; warns: 30:27 34:21

@@ -31,6 +31,6 @@
                     (reply to answer)
                     (store next))))))
 
-; A task's way to run a command: send it, and wait for the reply.
+; A caller's way to run a command: send it, and wait for the reply.
 (defun call (s cmd)
     (ask s (list :do cmd)))

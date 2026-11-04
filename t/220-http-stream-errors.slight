@@ -20,7 +20,7 @@
         ((:error p reason)  (reverse (cons (list :error reason (eq? p s)) acc)))))
 
 (defun streamed (url)
-    (cadr (read (spawn (heard (http/stream :get url () "" :lines) ())))))
+    (cadr (join (fork (heard (http/stream :get url () "" :lines) ())))))
 
 ; The top level is a task (D243), so the raw server says its port with raw-up.
 (let up (raw-up (list

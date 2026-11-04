@@ -37,10 +37,9 @@ export type Ty =
     | { readonly k: 'tuple'; readonly of: readonly Ty[] | null }      // null: any tuple
     | { readonly k: 'array'; readonly of: Ty }                       // of numbers (D253): int, float, or num for either kind
     | { readonly k: 'fun'; readonly params: readonly Ty[] | null; readonly result: Ty }
-    | { readonly k: 'task'; readonly of: Ty }
-    | { readonly k: 'actor'; readonly msg: Ty }
+    | { readonly k: 'pid'; readonly msg: Ty; readonly of?: Ty }     // a process, taking msg (any: any pid, a device's or an address included);
+                                                                     // of, its value, for join, when a fork's is in view (D277); not shown
     | { readonly k: 'address'; readonly msg: Ty }
-    | { readonly k: 'pid' }                                          // any pid, a device's or an address included
     | { readonly k: 'or'; readonly of: readonly Ty[] }
     | { readonly k: 'var'; readonly name: string }
     | { readonly k: 'alias'; readonly name: string; readonly args: readonly Ty[] };
@@ -52,7 +51,7 @@ export const FLOAT: Ty = { k: 'float' };
 export const STR: Ty   = { k: 'str' };
 export const SYM: Ty   = { k: 'sym' };
 export const NIL_T: Ty = { k: 'nil' };
-export const PID: Ty   = { k: 'pid' };
+export const PID: Ty   = { k: 'pid', msg: { k: 'any' } };
 export const lit       = (name: string): Ty => ({ k: 'lit', name });
 export const TRUE_T    = lit('#true');
 export const FALSE_T   = lit('#false');
@@ -62,8 +61,7 @@ export const consOf    = (head: Ty, tail: Ty): Ty =>
 export const tupleOf   = (of: readonly Ty[] | null): Ty => (of !== null && of.some((t) => t.k === 'never') ? NEVER : { k: 'tuple', of });
 export const arrayOf   = (of: Ty): Ty => (of.k === 'never' ? NEVER : { k: 'array', of });
 export const funOf     = (params: readonly Ty[] | null, result: Ty): Ty => ({ k: 'fun', params, result });
-export const taskOf    = (of: Ty): Ty => ({ k: 'task', of });
-export const actorOf   = (msg: Ty): Ty => ({ k: 'actor', msg });
+export const pidOf     = (msg: Ty, of?: Ty): Ty => (of === undefined || of.k === 'any' ? { k: 'pid', msg } : { k: 'pid', msg, of });
 export const addressOf = (msg: Ty): Ty => ({ k: 'address', msg });
 export const LIST_ANY  = listOf(ANY);
 export const CONS_ANY  = consOf(ANY, LIST_ANY);
@@ -107,8 +105,7 @@ export function subst(t: Ty, vars: readonly (readonly [string, Ty])[]): Ty {
         case 'tuple':   return tupleOf(t.of === null ? null : t.of.map((x) => subst(x, vars)));
         case 'array':   return arrayOf(subst(t.of, vars));
         case 'fun':     return funOf(t.params === null ? null : t.params.map((x) => subst(x, vars)), subst(t.result, vars));
-        case 'task':    return taskOf(subst(t.of, vars));
-        case 'actor':   return actorOf(subst(t.msg, vars));
+        case 'pid':     return pidOf(subst(t.msg, vars), t.of === undefined ? undefined : subst(t.of, vars));
         case 'address': return addressOf(subst(t.msg, vars));
         case 'or':      return union(...t.of.map((x) => subst(x, vars)));
         case 'alias':   return { k: 'alias', name: t.name, args: t.args.map((x) => subst(x, vars)) };
@@ -126,8 +123,7 @@ export function same(a: Ty, b: Ty): boolean {
         case 'list':    return same(a.of, (b as typeof a).of);
         case 'array':   return same(a.of, (b as typeof a).of);
         case 'cons':    return same(a.head, (b as typeof a).head) && same(a.tail, (b as typeof a).tail);
-        case 'task':    return same(a.of, (b as typeof a).of);
-        case 'actor':   return same(a.msg, (b as typeof a).msg);
+        case 'pid':     return same(a.msg, (b as typeof a).msg);
         case 'address': return same(a.msg, (b as typeof a).msg);
         case 'tuple':   return sameAll(a.of, (b as typeof a).of);
         case 'fun':     return sameAll(a.params, (b as typeof a).params) && same(a.result, (b as typeof a).result);
@@ -163,7 +159,7 @@ export function union(...ts: readonly Ty[]): Ty {
     members = members.filter((t) =>
         !(t.k === 'lit' && has('sym'))
         && !(t.k === 'nil' && has('list'))
-        && !((t.k === 'task' || t.k === 'actor' || t.k === 'address') && has('pid')));
+        && !((t.k === 'address' || (t.k === 'pid' && t.msg.k !== 'any')) && members.some((u) => u.k === 'pid' && u.msg.k === 'any')));
     if (members.length > MAX_MEMBERS) return ANY;
     if (members.length === 0) return NEVER;
     return members.length === 1 ? members[0]! : { k: 'or', of: members };
@@ -223,11 +219,12 @@ export function meet(a: Ty, b: Ty, defs: Defs, depth = 0): Ty {
             if (a.result.k !== 'never' && b.result.k !== 'never' && meet(a.result, b.result, defs, depth + 1).k === 'never') return NEVER;
             return a.params === null ? b : a;
         case 'pid':
-            return b.k === 'pid' || b.k === 'task' || b.k === 'actor' || b.k === 'address' ? b : NEVER;
-        case 'task': case 'actor': case 'address':
-            // a pid's type says what it is, and how it's used: any two of
-            // a kind can be the same pid
-            return b.k === 'pid' || b.k === a.k ? a : NEVER;
+            // a pid's type says how it's used: any two processes can be
+            // the same pid, and a plain pid may be an address
+            if (b.k === 'pid') return a.msg.k === 'any' ? b : a;
+            return b.k === 'address' && a.msg.k === 'any' ? b : NEVER;
+        case 'address':
+            return (b.k === 'pid' && b.msg.k === 'any') || b.k === 'address' ? a : NEVER;
     }
 }
 
@@ -253,7 +250,7 @@ export function fits(a: Ty, b: Ty, defs: Defs, depth = 0): boolean {
     }
     if (b.k === 'never') return false;
     switch (a.k) {
-        case 'int': case 'float': case 'str': case 'sym': case 'pid':
+        case 'int': case 'float': case 'str': case 'sym':
             return b.k === a.k;
         case 'nil':
             return b.k === 'nil' || b.k === 'list';
@@ -277,12 +274,11 @@ export function fits(a: Ty, b: Ty, defs: Defs, depth = 0): boolean {
                 if (!b.params.every((p, i) => fits(p, a.params![i]!, defs, depth + 1))) return false;
             }
             return fits(a.result, b.result, defs, depth + 1);
-        case 'task':
-            return b.k === 'pid' || (b.k === 'task' && fits(a.of, b.of, defs, depth + 1));
-        case 'actor':
-            return b.k === 'pid' || (b.k === 'actor' && fits(b.msg, a.msg, defs, depth + 1));
+        case 'pid':
+            // one that takes more messages stands in for one that takes fewer
+            return b.k === 'pid' && fits(b.msg, a.msg, defs, depth + 1);
         case 'address':
-            return b.k === 'pid' || (b.k === 'address' && fits(b.msg, a.msg, defs, depth + 1));
+            return (b.k === 'pid' && b.msg.k === 'any') || (b.k === 'address' && fits(b.msg, a.msg, defs, depth + 1));
     }
 }
 
@@ -442,7 +438,7 @@ export const BASE_TYPES: readonly string[] = Object.keys(BASE);
 //   :ok #true #false ()             one value
 //   (list T) (shape A B & T) (tuple A B) (fun (A B) C) (or A B)
 //   array (array int) (array float)  an array of numbers, of either kind or one
-//   (task T) (actor M) (address M)
+//   (pid M) (address M)
 //   (:tag A B & T)                  a tagged list
 //   Name (Name T ...)               an alias
 // vars are the type variables in scope; defs the aliases, for checking
@@ -477,8 +473,7 @@ export function readType(x: Sexp, vars: readonly string[], defs: Defs): Ty {
             switch (head!.name) {
                 case 'list':    return listOf(one());
                 case 'array':   return arrayOf(one());
-                case 'task':    return taskOf(one());
-                case 'actor':   return actorOf(one());
+                case 'pid':     return pidOf(one());
                 case 'address': return addressOf(one());
                 case 'shape':   return listShape(rest, vars, defs, x);
                 case 'tuple':   return tupleOf(rest.map((r) => readType(r, vars, defs)));
@@ -534,14 +529,13 @@ export function showType(t: Ty, sly: boolean): string {
     const keyword = (name: string): string =>
         name === '#true' ? (sly ? 'true' : '#true') : name === '#false' ? (sly ? 'false' : '#false') : `:${name}`;
     switch (t.k) {
-        case 'any': case 'never': case 'int': case 'float': case 'str': case 'sym': case 'pid':
+        case 'any': case 'never': case 'int': case 'float': case 'str': case 'sym':
             return t.k;
         case 'nil':     return sly ? '[]' : '()';
         case 'lit':     return keyword(t.name);
         case 'var':     return t.name;
         case 'list':    return sly ? `list<${s(t.of)}>` : `(list ${s(t.of)})`;
-        case 'task':    return sly ? `task<${s(t.of)}>` : `(task ${s(t.of)})`;
-        case 'actor':   return sly ? `actor<${s(t.msg)}>` : `(actor ${s(t.msg)})`;
+        case 'pid':     return t.msg.k === 'any' ? 'pid' : sly ? `pid<${s(t.msg)}>` : `(pid ${s(t.msg)})`;
         case 'address': return sly ? `address<${s(t.msg)}>` : `(address ${s(t.msg)})`;
         case 'array':
             if (same(t.of, NUM)) return 'array';

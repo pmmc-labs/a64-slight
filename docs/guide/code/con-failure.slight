@@ -18,6 +18,6 @@
     (recv
         ((:exit _ result) (list :watched result))))
 
-(pprint (read (spawn (watcher (list :check -1)))))
+(pprint (join (fork (watcher (list :check -1)))))
 
 (raise :gave-up)

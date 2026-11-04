@@ -17,7 +17,7 @@
 (pprint (join (fork (bytes/len (~ s "!")))))
 (pprint (bytes/len (cadr (join (fork s)))))
 (let me (address))
-(map (lambda (i) (spawn (back me i s))) (range 0 20))
+(map (lambda (i) (fork (back me i s))) (range 0 20))
 (let got (map (lambda (_) (read me)) (range 0 20)))
 (pprint (list (length got) (eq? (map car got) (range 0 20)) (length (filter (lambda (m) (eq? (cadr m) s)) got))))
 (join (fork (churn 1000 0)))

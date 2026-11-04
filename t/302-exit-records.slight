@@ -33,7 +33,7 @@
     (let c (fork :c))
     (monitor c)
     (recv ((:exit q r) (list (eq? q c) r c))))
-(let w (cadr (read (spawn (watches)))))
+(let w (cadr (join (fork (watches)))))
 (pprint (list (car w) (cadr w) (join (nth 2 w))))
 
 ; (records pids), asked of :system
@@ -50,7 +50,7 @@
     (if (== n 0)
         :done
         (do (join (fork n))
-            (read (spawn n))
+            (join (fork n))
             (churn (- n 1)))))
 (churn 3000)
 (pprint (table))

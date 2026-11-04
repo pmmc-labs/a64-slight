@@ -256,7 +256,7 @@ and who's at the other end of a Unix socket, `(socket/peer c)`, its
 uid, gid and pid as the kernel has them, and `(rpc/peer)` in a handler
 (D235, golden test 291).
 And tasks and actors (D243,
-`docs/PLAN.md`, "Tasks and actors"), built in five steps; step 1: `spawn`
+`docs/PLAN.md`, "Tasks and actors"; retired by D277, one kind again, under **Next**), built in five steps; step 1: `spawn`
 starts an actor, `fork` a task, which can't wait, nor be sent to, timed
 or monitor, and the root is a task, so a top level that waits spawns an
 actor and reads its end; the deadlock message follows the root's join to
@@ -373,7 +373,7 @@ says what and how): step 4's K (IPv6), L (a lambda after `|>`), M (a
 runtime cache outside the install) and N (CI, ASan, fuzzing), each to
 be put to Stevan; step 5's documents (README, leap seconds, the
 Unicode License's text); and what's to be checked on the M2.
-**Next:** one kind of process, every wait keeping its stack, and an address for every message (`docs/PLAN.md`, "One kind of process, and an address for every message", Nov 2026), under way: step 1 is built (D276), `recv` keeps its stack and goes anywhere in an actor, and `split.ts`, `classify.ts` and the `recv` rule are gone; steps 2 to 5 (one kind of process, a pid its own inbox and an end a message from `monitor`; the fork-and-join dance out of `lib/` and the examples; the docs; ts-cpi's Life programs as golden tests) to come, each on Stevan's word; and the review's last items, above. Candidates, none agreed: a simulation library across
+**Next:** one kind of process, every wait keeping its stack, and an address for every message (`docs/PLAN.md`, "One kind of process, and an address for every message", Nov 2026), under way: step 1 is built (D276), `recv` keeps its stack and goes anywhere, and `split.ts`, `classify.ts` and the `recv` rule are gone; and step 2 (D277): one kind of process, `fork` and `fork/on` (`spawn` is gone), every process sent to, joined (across islands too), monitored, timed and killed, with addresses and devices of its own; a pid its process's inbox, `recv` leaving what's for `read`; a process's end a message, `(monitor pid to)` telling an address, and `ask` on that; `read` of addresses and devices only; the root one too; the types `pid<M>` in place of `task<T>` and `actor<M>` (golden tests 296 to 301, 268 and 325 rewritten); steps 3 to 5 (the fork-and-join dance out of `lib/` and the examples; the docs, the guide's two concept pages folded into one; ts-cpi's Life programs as golden tests) to come, each on Stevan's word; and the review's last items, above. Candidates, none agreed: a simulation library across
 islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in
 conservative windows on a `clock/hold` builtin, with an HP-lattice
@@ -395,7 +395,7 @@ expressions), each to be proposed first. Done before that: more than
 one core (D249's step 7, moved up by D253), agreed as islands (D256,
 `docs/PLAN.md`, "More than one core: islands"): a thread per core, each
 today's runtime, sharing nothing but an inbox each and the shared
-buffers; actors placed with `(spawn/on k expr)`, pids printed `#<pid
+buffers; actors placed with `(spawn/on k expr)` (`fork/on` since D277), pids printed `#<pid
 5@2>`, island 0 owning signals, the terminal and `:system`, and replay
 per island; to be built in seven steps, of which step 1, the runtime's
 state an island's (`RT_ISLAND`, thread-local) and pids with their

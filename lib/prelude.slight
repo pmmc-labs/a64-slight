@@ -234,7 +234,7 @@
 ; join/race, in the runtime, gives the first of pids to end, as (pid
 ; result). These are JavaScript's Promise.any and Promise.all on top of
 ; it; both leave the processes they don't wait for running (D220). Each
-; joins a task as soon as the race says it has ended, so that its value,
+; joins a process as soon as the race says it has ended, so that its value,
 ; kept for its parent till it has it, goes at once (D244); the results
 ; are kept here, by pid, so a pid listed twice is joined once.
 
@@ -267,9 +267,10 @@
 ; --- asking actors ------------------------------------------------------------
 
 ; Sends msg to pid with an address of the caller's added at the end, and
-; reads the answer from it: a task's way to have an actor's answer (D243).
-; The actor answers with (reply to v), to being the address. If pid ends
-; first, ask raises (:ended pid result) rather than waiting for ever.
+; reads the answer from it (D243). The actor answers with (reply to v),
+; to being the address. If pid ends first, ask raises (:ended pid result)
+; rather than waiting for ever: its end comes to the same address, from a
+; monitor (D277).
 (defun ask (pid msg) (ask/via pid msg ()))
 
 ; As ask, but raises (:timeout pid) if no answer comes within ms
@@ -284,11 +285,12 @@
 ; timer is () or (to t): the address it was set for, and its number.
 (defun ask/via (pid msg timer)
     (let to (if (nil? timer) (address) (car timer)))
+    (monitor pid to)
     (send pid (append msg (list to)))
-    (let got (read/any (list to pid)))
+    (let got (read to))
     (if (nil? timer) () (timer/cancel (cadr timer)))
     (disconnect to)
     (match got
-        ((_ (:reply v)) v)
-        ((_ :timeout)   (raise (list :timeout pid)))
-        ((_ result)     (raise (list :ended pid result)))))
+        ((:reply v)        v)
+        (:timeout          (raise (list :timeout pid)))
+        ((:exit _ result)  (raise (list :ended pid result)))))

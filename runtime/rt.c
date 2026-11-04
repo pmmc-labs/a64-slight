@@ -561,8 +561,6 @@ static const struct {
     [RT_FAULT_NOT_SEXP]   = { "not data: ", 1 },
     [RT_FAULT_NO_MATCH]   = { "no pattern matched: ", 1 },
     [RT_FAULT_NOT_TUPLE]  = { "not a tuple: ", 1 },
-    [RT_FAULT_NOT_ACTOR]  = { "not an actor: ", 1 },
-    [RT_FAULT_NOT_TASK]   = { "not a task: ", 1 },
     [RT_FAULT_NOT_ARRAY]  = { "not an array: ", 1 },
 };
 

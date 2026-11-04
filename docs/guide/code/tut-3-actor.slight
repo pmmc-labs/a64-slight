@@ -24,11 +24,11 @@
                     (store next))))
         (:stop table)))
 
-(let s (spawn (store ())))
+(let s (fork (store ())))
 (send s (list :do (list :put "apple" 3)))
 (send s (list :do (list :put "pear" 5)))
 (send s (list :put "plum" 7))
 (send s (list :do (list :keys)))
 (send s :stop)
-(read s)
+(join s)
 ; warns: 30:9

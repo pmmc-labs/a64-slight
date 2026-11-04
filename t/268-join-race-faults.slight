@@ -1,14 +1,12 @@
 ; join/race's faults (D220): an empty list, which has nothing to wait for;
 ; something that isn't a list; something in it that isn't a pid, found
-; before it waits; the caller's own pid; and an actor, which can't be
-; joined (D243). And a root racing processes that never end is a
-; deadlock, which says which they are.
+; before it waits; and the caller's own pid. And a root racing processes
+; that never end is a deadlock, which says which they are.
 
 (defun kind (pid) (car (cadr (join pid))))
 (pprint (kind (fork (join/race ()))))
 (pprint (kind (fork (join/race 5))))
 (pprint (kind (fork (join/race (list (fork (sleep 5)) 3)))))
 (pprint (kind (fork (join/race (list $$)))))
-(pprint (kind (fork (join/race (list (spawn (recv (_ :a))))))))
 (join/race (list (fork (read (address))) (fork (read (address)))))
-; warns: 9:32 10:32
+; warns: 8:32 9:32

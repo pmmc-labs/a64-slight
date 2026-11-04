@@ -5,7 +5,7 @@
     (match (call s (list :get key))
         ((:ok n) (call s (list :put key (+ n 1))))))
 
-(let s (spawn (store ())))
+(let s (fork (store ())))
 (call s (list :put "hits" 0))
 
 (let a (fork (bump s "hits")))

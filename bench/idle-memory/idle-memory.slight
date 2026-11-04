@@ -6,7 +6,7 @@
 (defun idle () (recv ((:ping from) (send from 1))))
 
 (defun start (n acc)
-    (if (== n 0) acc (start (- n 1) (cons (spawn (idle)) acc))))
+    (if (== n 0) acc (start (- n 1) (cons (fork (idle)) acc))))
 
 (defun gather (n acc)
     (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
@@ -18,4 +18,4 @@
     (map (lambda (p) (send p (list :ping $$))) (start n ()))
     (gather n 0))
 
-(cadr (read (spawn (top-level @ARGV))))
+(cadr (join (fork (top-level @ARGV))))

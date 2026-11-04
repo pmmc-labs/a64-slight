@@ -11,7 +11,7 @@
 
 ; The top level is a task, which can't wait (D243), so an actor does its work.
 (defun top-level ()
-    (let k (spawn (keeper (tuple 0 ()))))
+    (let k (fork (keeper (tuple 0 ()))))
     (dotimes 0 100000 (lambda (i) (send k (list :add i)) (when (== (% i 1000) 0) (send k (list :push (tuple i))))))
     (send k (list :get $$))
     (let got (recv))
@@ -23,4 +23,4 @@
                     (lambda (acc t) (tuple (+ (tuple/get acc 0) (tuple/get t 0)) (+ (tuple/get acc 1) (tuple/get t 1))))
                     squares)))
 
-(read (spawn (top-level)))
+(join (fork (top-level)))

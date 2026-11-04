@@ -41,7 +41,7 @@
         ((:ok value)     value)
         ((:error reason) (raise (list reason key)))))
 
-(let s (spawn (store ())))
+(let s (fork (store ())))
 (call s (list :put "color" "red"))
 (pprint (call s (list :incr "color")))
 (pprint (call s (list :incr "hits")))

@@ -29,17 +29,17 @@
     (recv (never never)))
 
 (let me (address))
-(let c (spawn (collect me 30000 ())))
-(dotimes 1 4 (lambda (k) (spawn/on k (worker c k 10000))))
+(let c (fork (collect me 30000 ())))
+(dotimes 1 4 (lambda (k) (fork/on k (worker c k 10000))))
 (let runs (read me))
 (pprint (list :runs (length runs) (hash runs)))
 
-(spawn/on 2 (later me))
+(fork/on 2 (later me))
 (pprint (read me))
 
-(let s (spawn/on 3 (sleeper)))
+(let s (fork/on 3 (sleeper)))
 (kill s)
-(pprint (read s))
+(pprint (join s))
 
 (match (open :system)
     ((:ok d)

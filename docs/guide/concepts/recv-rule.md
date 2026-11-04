@@ -11,11 +11,11 @@ and the idioms that still hold.
 
 ## What it says
 
-A `recv` can go anywhere in a function that runs in an actor: as the
-last form of a body, as a `let`'s value (`(let m (recv ...))`), inside
-a call, in a helper the function calls, in a lambda it runs. Everything
-before it runs first, and a function that waits gives its value back to
-its caller:
+A `recv` can go anywhere in a process's code, the top level's included:
+as the last form of a body, as a `let`'s value (`(let m (recv ...))`),
+inside a call, in a helper the function calls, in a lambda it runs.
+Everything before it runs first, and a function that waits gives its
+value back to its caller:
 
 ```
 (defun ask-store (s cmd)
@@ -23,10 +23,10 @@ its caller:
     (recv ((:reply r) r)))
 ```
 
-What stays: a task, a `fork`'s body or the top level, can't wait for a
-message (see [Tasks and actors](tasks-and-actors.md)); and there's no
-selective receive, so whatever `recv` a process is in takes the next
-message.
+What stays: there's no selective receive, so whatever `recv` a process
+is in takes the next message. What it leaves is what's sent to an
+address, or comes from a device the process opened, which `read` takes
+(see [Tasks and actors](tasks-and-actors.md)).
 
 ## What a wait costs
 
@@ -73,7 +73,7 @@ frames as roots.
 
   <!-- code: ../code/con-states.slight -->
   ```lisp
-  (let door (spawn (locked "1234" 0)))
+  (let door (fork (locked "1234" 0)))
   (list
       (ask door (list :open "0000"))
       (ask door (list :open "1234"))
@@ -99,19 +99,9 @@ frames as roots.
   But a `recv` in the middle of a handler takes the next message,
   whatever it is: another request can arrive before the reply, and then
   doesn't match. An actor that serves requests shouldn't stop to wait
-  inside one; what asks other actors, and must get the right answer, is
-  a task, which reads the reply at an address of its own (`ask`), or
-  one the actor forks to.
-
-## The one compile error
-
-```
-prog.slight:5:1: a task (a fork's body, or the top level) can't wait for messages, and this recv would: spawn an actor for it
-```
-
-A task tried to `recv`. Spawn an actor, or, if the task only wants an
-answer, `ask` an actor for it. A task that calls a function that waits
-is found when it runs, with `:not-an-actor`.
+  inside one; what asks other actors, and must get the right answer,
+  reads the reply at an address of its own, `ask`, which takes nothing
+  else, whatever process calls it.
 
 ---
 

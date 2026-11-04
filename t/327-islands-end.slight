@@ -4,5 +4,5 @@
 ; out by hand.
 
 (defun fib (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
-(spawn/on 1 (pprint (list :late (island) (fib 20))))
+(fork/on 1 (pprint (list :late (island) (fib 20))))
 :root-done

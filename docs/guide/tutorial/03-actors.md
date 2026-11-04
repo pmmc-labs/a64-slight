@@ -8,8 +8,8 @@ process.
 
 ## An actor
 
-An **actor** is a process with a mailbox. It runs a function that waits
-for a message, handles it, and calls itself with what it has become:
+An **actor** is a process that waits for messages. It runs a function
+that takes one, handles it, and calls itself with what it has become:
 
 <!-- code: ../code/tut-3-actor.slight -->
 ```lisp
@@ -43,13 +43,13 @@ without any processes, and the actor only decides when it runs.
 
 <!-- code: ../code/tut-3-actor.slight -->
 ```lisp
-(let s (spawn (store ())))
+(let s (fork (store ())))
 (send s (list :do (list :put "apple" 3)))
 (send s (list :do (list :put "pear" 5)))
 (send s (list :put "plum" 7))
 (send s (list :do (list :keys)))
 (send s :stop)
-(read s)
+(join s)
 ```
 
 <!-- output: ../code/tut-3-actor.expected -->
@@ -61,12 +61,12 @@ dead letter: (put "plum" 7) (recv at docs/guide/code/tut-3-actor.slight:19:5)
 (ok (("pear" 5) ("apple" 3)))
 ```
 
-- `(spawn expr)` starts a new process that evaluates `expr`, here a
+- `(fork expr)` starts a new process that evaluates `expr`, here a
   call to `store` with an empty table, and gives its **pid**.
 - `(send pid msg)` puts a copy of `msg` at the end of the process's
   mailbox, and returns at once. It doesn't wait for the message to be
   taken, or answered.
-- `(read s)` waits for the store to end and gives how it ended:
+- `(join s)` waits for the store to end and gives how it ended:
   `(:ok value)`, here the last table.
 
 The third message forgot its `:do`. No clause matches it, so the store
@@ -88,27 +88,22 @@ time.
 Processes share nothing, and since nothing can be changed in place,
 there's nothing a copy could get out of step with.
 
-## Why the top level can't do this
+## The top level could take them too
 
-The program's top level is a process too, but a **task**, not an actor:
-a process that computes a value, and can't wait for messages. If the
-top level tried to take the store's replies with `recv`:
+The program's top level is a process like any other, so a store that
+answered could be asked from it with `recv`:
 
 ```
 (send s (list :do (list :get "apple") $$))
 (recv ((:reply r) r))
 ```
 
-the compiler would say:
-
-```
-top.slight:5:1: a task (a fork's body, or the top level) can't wait for messages, and this recv would: spawn an actor for it
-```
-
 (`$$` is the current process's pid, which a message carries so the
-receiver knows where to answer.) That's why the store prints its replies
-here, and the top level just reads its end. Getting replies back to a
-task is the next chapter.
+receiver knows where to answer.) Nothing stops it. But a `recv` takes
+the next message, whatever it is, so this answers right only while
+nothing else sends to the top level. That's why the store prints its
+replies here, and the top level just reads its end. Getting replies
+back, to any process, is the next chapter.
 
 ---
 

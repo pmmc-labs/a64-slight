@@ -6,8 +6,8 @@ explain why things are the way they are.
 
 **Files and data**
 
-- [Read a file](read-a-file.md): whole, a line at a time from a task, or
-  from an actor
+- [Read a file](read-a-file.md): whole, a line at a time with `read`,
+  or as messages to a process
 - [Read and write JSON](json.md): from strings, files and sockets
 - [Read arguments and the environment](arguments.md): `@ARGV` and
   `%ENV`
@@ -21,7 +21,7 @@ explain why things are the way they are.
 
 **More than one core**
 
-- [Use every core](cores.md): actors placed on islands with `spawn/on`,
+- [Use every core](cores.md): processes placed on islands with `fork/on`,
   what crossing costs, island 0's terminal, and replaying
 
 **Getting it right**

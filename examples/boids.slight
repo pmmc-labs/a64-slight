@@ -217,7 +217,7 @@
 ; split as evenly as they go: share s has birds n·s/k up to n·(s + 1)/k.
 (defun shares (n sky)
     (let k (math/min n (islands)))
-    (map (lambda (s) (spawn/on s (share sky (div (* n s) k) (div (* n (+ s 1)) k))))
+    (map (lambda (s) (fork/on s (share sky (div (* n s) k) (div (* n (+ s 1)) k))))
          (range 0 k)))
 
 ; Every share told the flock, to answer me.
@@ -420,10 +420,10 @@
     (("--time" n ticks)
         (rand/seed 2026)
         (let flock (hatch (str->int n) sky))
-        (cadr (read (spawn (timed (str->int n) (str->int ticks) sky flock)))))
+        (cadr (join (fork (timed (str->int n) (str->int ticks) sky flock)))))
     (_
         (let args (map str->int @ARGV))
         (let n (arg 0 args 300))
         (rand/seed (arg 2 args 2026))
         (let flock (hatch n sky))
-        (cadr (read (spawn (live n (arg 1 args 0) (arg 3 args 50) sky flock))))))
+        (cadr (join (fork (live n (arg 1 args 0) (arg 3 args 50) sky flock))))))

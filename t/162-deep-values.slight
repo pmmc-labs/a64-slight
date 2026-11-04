@@ -42,8 +42,8 @@
     (pprint (join (fork (eq? (nest 1000000 1) (nest 1000000 2)))))
     (let k (chain (lambda () :bottom) 200000))
     (pprint (join (fork (k))))
-    (let e (spawn (echo)))
+    (let e (fork (echo)))
     (send e (list :echo $$ deep))
     (echoed))
 
-(read (spawn (top-level)))
+(join (fork (top-level)))

@@ -37,8 +37,8 @@
 ; reaches the limit first, so they arrive (R) then (R-1); and tell to
 (defun game (to limit)
     (let me $$)     ; $$ inside the spawn would be the child
-    (let p1 (spawn (player me limit 0)))
-    (let p2 (spawn (player me limit 0)))
+    (let p1 (fork (player me limit 0)))
+    (let p2 (fork (player me limit 0)))
     (recv)
     (send p1 (list :Serve p2))
     (let first (recv ((:Final counter) counter)))
@@ -47,7 +47,7 @@
 (defun setup-tournament (to n limit)
     (cond
         ((== n 0) ())
-        (#true    (cons (spawn (game to limit)) (setup-tournament to (- n 1) limit)))))
+        (#true    (cons (fork (game to limit)) (setup-tournament to (- n 1) limit)))))
 
 (defun start-tournament (pids)
     (map (lambda (pid) (send pid :START) pid) pids))

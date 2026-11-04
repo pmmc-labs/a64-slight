@@ -36,8 +36,8 @@
 ; them, then collect the two finals, labelled in the order they arrive,
 ; and tell to
 (defun ping-pong (to duration)
-    (let p1 (spawn (player 0)))
-    (let p2 (spawn (player 0)))
+    (let p1 (fork (player 0)))
+    (let p2 (fork (player 0)))
     (recv)
     (send p1 (list :Serve p2))
     (sleep duration)
@@ -49,7 +49,7 @@
 (defun setup-tournament (to n duration)
     (cond
         ((== n 0) ())
-        (#true    (cons (spawn (ping-pong to duration)) (setup-tournament to (- n 1) duration)))))
+        (#true    (cons (fork (ping-pong to duration)) (setup-tournament to (- n 1) duration)))))
 
 (defun start-tournament (pids)
     (map (lambda (pid) (send pid :START) pid) pids))

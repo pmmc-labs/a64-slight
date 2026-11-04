@@ -17,7 +17,7 @@
     (let m (recv ((:n n) n)))
     (pprint (list n m)))
 
-(let p (spawn (scale (list 1 2 3))))
+(let p (fork (scale (list 1 2 3))))
 (send p (list :scale 10))
 (send p (list :sum 7))
 (send p (list :n 2))

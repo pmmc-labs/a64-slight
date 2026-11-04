@@ -40,4 +40,4 @@ fun pick_color(key, color) {
     }
 }
 
-read(connect(:keypress) { keyboard(47) })
+join(connect(:keypress) { keyboard(47) })

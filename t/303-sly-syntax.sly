@@ -67,7 +67,7 @@ fun counter(n) {
     }
 }
 
-let c = spawn counter(0);
+let c = fork counter(0);
 send(c, :inc());
 send(c, :inc());
 pprint(ask(c, :get()));

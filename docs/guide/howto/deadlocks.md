@@ -10,13 +10,13 @@ store forgot to reply:
     (recv
         ((:get to) (store n))))
 
-(let s (spawn (store 0)))
+(let s (fork (store 0)))
 (ask s (list :get))
 ```
 
 <!-- output: ../code/howto-deadlock.expected -->
 ```
-deadlock: the root process is waiting in ask/via for the first of #<address 1>, #<pid 2>, and nothing else can run
+deadlock: the root process is waiting in ask/via for a message to #<address 1>, and nothing else can run
 exit: 1
 ```
 
@@ -37,7 +37,7 @@ deadlock: the root process is waiting in the top level for #<pid 2> to end, whic
 
 A deadlock among other processes doesn't end the program, and a program
 that's slow or stuck while it serves needs looking at while it runs.
-The `:system` device describes every process: its kind, state, the
+The `:system` device describes every process: its state, the
 function it's in, its mailbox, its heap and its reductions.
 
 <!-- code: ../code/howto-system.slight -->
@@ -46,7 +46,7 @@ function it's in, its mailbox, its heap and its reductions.
     (recv
         ((:get to) (store n))))
 
-(let s (spawn (store 0)))
+(let s (fork (store 0)))
 (let asker (fork (ask s (list :get))))
 (sleep 1)
 
@@ -59,7 +59,7 @@ function it's in, its mailbox, its heap and its reductions.
 (match (open :system)
     ((:ok sys)
         (send sys (list :processes))
-        (map (lambda (info) (pprint (map (lambda (k) (lookup k info)) (list :pid :kind :state :in :mail))))
+        (map (lambda (info) (pprint (map (lambda (k) (lookup k info)) (list :pid :state :in :mail))))
             (processes sys ()))))
 (kill asker)
 :done
@@ -67,9 +67,9 @@ function it's in, its mailbox, its heap and its reductions.
 
 <!-- output: ../code/howto-system.expected -->
 ```
-(#<pid 1> task running "the top level" 0)
-(#<pid 2> actor recv "store" 0)
-(#<pid 3> task reading "ask/via" 0)
+(#<pid 1> running "the top level" 0)
+(#<pid 2> recv "store" 0)
+(#<pid 3> reading "ask/via" 0)
 done
 ```
 
@@ -77,8 +77,8 @@ The asking task, pid 3, is `reading`, in `ask/via`; the store, pid 2, is
 in `recv`, with nothing in its mailbox. Together they say the store
 took the request and didn't answer.
 
-- `(open :system)` from a task, or `(connect :system expr)` from an
-  actor, opens the device. `(:processes)` asks for every process, which
+- `(open :system)`, or `(connect :system expr)` for a process of its
+  own, opens the device. `(:processes)` asks for every process, which
   come as `(:process s info)` one at a time, then `(:end s)`, all from
   the same moment. `(:process pid)` asks about one, and `(:runtime)`
   about the runtime: processes, timers, devices, heap, the clock.

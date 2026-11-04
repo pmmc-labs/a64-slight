@@ -2,9 +2,9 @@
 ; for a message, ready to run (started or not), or blocked in join or
 ; read; or the caller itself. Killing a process that has ended does
 ; nothing. A process's result is kept for its parent, the root here,
-; till it has it, an actor's too since the root is a task (D244, D245):
-; so one killed and read after still says how it ended; and a second
-; join is :ended.
+; till it has it, whatever kind of process it was (D244, D277): so one
+; killed and joined after still says how it ended; and a second join is
+; :ended.
 
 (defun server ()
     (recv
@@ -20,12 +20,12 @@
     (pprint :not-reached))
 
 ; waiting in recv; a message sent after it's killed goes nowhere
-(let s (spawn (server)))
+(let s (fork (server)))
 (send s :one)
 (yield ())
 (pprint (kill s))
 (send s :two)
-(pprint (read s))
+(pprint (join s))
 
 ; never started
 (let never (fork (pprint :never-runs)))
@@ -39,13 +39,13 @@
 (pprint (join busy))
 
 ; blocked in read; then what it was reading ends, and mustn't wake it
-(let s2 (spawn (server)))
-(let blocked (fork (read s2)))
+(let s2 (fork (server)))
+(let blocked (fork (join s2)))
 (yield ())
 (kill blocked)
 (pprint (join blocked))
 (kill s2)
-(pprint (read s2))
+(pprint (join s2))
 
 (pprint (join (fork (suicide))))
 

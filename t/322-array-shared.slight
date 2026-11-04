@@ -29,7 +29,7 @@
 (rand/seed 7)
 (pprint (eq? r1 (list->array :int (map (lambda (i) (rand/int 1000000)) (range 0 1100)))))
 (let me (address))
-(map (lambda (i) (spawn (back me i a))) (range 0 20))
+(map (lambda (i) (fork (back me i a))) (range 0 20))
 (let got (map (lambda (_) (read me)) (range 0 20)))
 (pprint (list (length got) (eq? (map car got) (range 0 20)) (map (lambda (m) (array/sum (cadr m))) got)))
 (join (fork (churn 250 0)))

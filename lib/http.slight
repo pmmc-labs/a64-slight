@@ -40,14 +40,14 @@
 
 ; Any method, headers (a list of (name value)) and a body (a string, "" for
 ; none). Gives (:ok response), or (:error reason).
-; The connection's actor ends with the reply, which a task reads as it
-; does, from the start (D243); the caller joins the task, so it can be
-; an actor, a handler say, too.
+; The connection's process ends with the reply, which a process forked
+; here joins (D243; one could do both since D277); the caller joins that
+; one, so it can be a handler too.
 (defun http/request (method url headers body)
     (match (http/check method url headers)
         ((:ok host port target)
             (let ctx (list :client (http/method-name method) (http/via url host port)))
-            (http/unwrap (join (fork (http/unwrap (read (http/connect url host port target headers body ctx)))))))
+            (http/unwrap (join (fork (http/unwrap (join (http/connect url host port target headers body ctx)))))))
         ((:error reason) (list :error reason))))
 
 ; As http/request, but gives (:error :timeout) if no answer comes within ms
@@ -61,13 +61,17 @@
         ((:error reason) (list :error reason))))
 
 ; The pid's result, or (:error :timeout) after ms milliseconds, killing it:
-; it reads the first of it and a process that sleeps that long to end.
+; its end, from a monitor, and a timer's word come to one address (D277).
 (defun http/await (pid ms)
-    (let timer (fork (sleep ms)))
-    (match (read/any (list pid timer))
-        ((p exit) (if (eq? p pid)
-                      (do (kill timer) (http/unwrap exit))
-                      (do (kill pid) (list :error :timeout))))))
+    (let to (address))
+    (monitor pid to)
+    (let t (after ms to :timeout))
+    (let got (read to))
+    (timer/cancel t)
+    (disconnect to)
+    (match got
+        ((:exit _ exit) (http/unwrap exit))
+        (:timeout       (kill pid) (list :error :timeout))))
 
 ; A connection's process ends with its result, or with (:error reason) if the
 ; device failed (D136). join gives either as (:ok result) or (:error reason).
@@ -89,7 +93,7 @@
     (let s      (match (http/check method url headers)
         ((:ok host port target) (http/connect url host port target headers body (list :stream name caller how-to (http/via url host port))))
         ((:error reason)        (fork (raise reason)))))
-    (spawn (http/watch s caller))
+    (fork (http/watch s caller))
     s)
 
 ; A stream cuts its body into :lines or :chunks; anything else faults, in the
@@ -213,7 +217,7 @@
 ; to the caller, and the listener's pid is the result, which kill stops.
 (defun http/serve (port handler) (http/serve-with port handler ()))
 
-; As http/serve, for a task (D243), which can't be told: it waits till
+; As http/serve, for a caller that wants a value (D243): it waits till
 ; the listener listens, and gives (:ok (l port)), or (:error reason) if it
 ; can't, (:eaddrinuse 8080) say.
 (defun http/listen (port handler) (http/listen-with port handler ()))
@@ -239,11 +243,12 @@
         ((opt & _)             (raise (list :bad-option opt)))))
 
 (defun http/listening (to l)
-    (let got (read/any (list to l)))
+    (monitor l to)
+    (let got (read to))
     (disconnect to)
     (match got
-        ((_ (:listening port)) (list :ok (list l port)))
-        ((_ (:error reason))   (list :error reason))))
+        ((:listening port)         (list :ok (list l port)))
+        ((:exit _ (:error reason)) (list :error reason))))
 
 ; n connections open, counted only with a most, by watching each end.
 (defun http/accept (handler told most n)

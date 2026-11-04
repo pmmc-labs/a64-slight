@@ -2,22 +2,21 @@
 to-myself
 (echo hi)
 late
-(#<address 1> tick)
-(#<pid 4> (ok ()))
-(#<pid 4> ended)
+tick
+(exit #<pid 4> (ok ()))
 queued
+(exit #<pid 4> ended)
 #true
-fault in #<pid 5>: not a pid: #<address 1> (read at t/298-addresses.slight:48:21)
-(error (not-a-pid #<address 1> "read at t/298-addresses.slight:48:21"))
-fault in #<pid 6>: not a pid: #<address 2> (read at t/298-addresses.slight:49:58)
-(error (not-a-pid #<address 2> "read at t/298-addresses.slight:49:58"))
+fault in #<pid 5>: not a pid: #<address 1> (read at t/298-addresses.slight:50:21)
+(error (not-a-pid #<address 1> "read at t/298-addresses.slight:50:21"))
+fault in #<pid 6>: not a pid: #<address 2> (read at t/298-addresses.slight:51:58)
+(error (not-a-pid #<address 2> "read at t/298-addresses.slight:51:58"))
 42
-(error (ended #<pid 7> ended))
+(error (ended #<pid 7> (ok 42)))
 (error (timeout #<pid 9>))
-fault in #<pid 11>: not a task: #<pid 11> (address at t/298-addresses.slight:58:22)
-(error (not-a-task #<pid 11> "address at t/298-addresses.slight:58:22"))
-fault in #<pid 12>: not a pid: () (read/any at t/298-addresses.slight:59:21)
-(error (not-a-pid () "read/any at t/298-addresses.slight:59:21"))
-fault in #<pid 13>: a process can't join itself: #<pid 13> (read at t/298-addresses.slight:60:21)
-(error (join-self #<pid 13> "read at t/298-addresses.slight:60:21"))
+(ok made)
+fault in #<pid 12>: not a pid: () (read/any at t/298-addresses.slight:61:21)
+(error (not-a-pid () "read/any at t/298-addresses.slight:61:21"))
+fault in #<pid 13>: not a pid: #<pid 13> (read at t/298-addresses.slight:62:21)
+(error (not-a-pid #<pid 13> "read at t/298-addresses.slight:62:21"))
 done

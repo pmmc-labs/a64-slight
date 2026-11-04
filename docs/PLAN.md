@@ -912,7 +912,7 @@ with Stevan first.
     as it is, which without selective receive would make every caller
     of `(join (fork ...))` a state function.
 
-### Tasks and actors (agreed, D243; built, with D244)
+### Tasks and actors (agreed, D243; built, with D244; retired by D277)
 
 Claude's proposal, after Stevan's "there are two forms of concurrency
 here ... perhaps we should spawn actors instead of fork them"; agreed
@@ -2222,7 +2222,7 @@ browser when watching from afar matters. It would sit with the
 simulation library above: the flagship's dashboard is this viewer, fed
 by the root.
 
-### One kind of process, and an address for every message (Nov 2026: step 1 built, D276; the rest open)
+### One kind of process, and an address for every message (Nov 2026: steps 1 and 2 built, D276, D277; the rest open)
 
 Proposed by Claude after Stevan went back to ts-slight ("the process
 split felt kind of wrong when we did it ... I've struggled with the
@@ -2383,7 +2383,16 @@ Mac, stackful against today.
    are rewritten for one kind. A script turns `spawn` into `fork` (179
    uses in `t/`, 75 in the examples, 21 in the guide's code, 28 in
    `bench/`, 14 in `lib/`), and the expected outputs that named a kind
-   (8 files) are worked out again by hand.
+   (8 files) are worked out again by hand. *Built (D277): as written,
+   but `read` of a pid faults for every process, `$$` and one that has
+   ended included, a process being no source; `monitor` takes the
+   address as a second argument, `(monitor pid to)`; `join` and
+   `join/race` wait across islands, an end crossing as an item, since
+   it no longer comes as a readable message; `ask` monitors to its
+   address, so one `read` hears the reply or the end; the types are
+   one, `pid<M>`; and 268, 325 and the guide's deadlock page changed
+   with 296 to 301. The guide's pages say one kind, each in place;
+   folding the two concept pages is step 4's.*
 3. **The dance comes out.** `agent/ask`, `lib/ds.slight`, `rpc/call`,
    `http/request` and the examples that forked a task to hold an
    address ask directly. The checker's two warnings go; one comes:

@@ -9,7 +9,7 @@
 (deftype Tool (:tool str any (fun (Args) any)))
 
 ; An agent, an actor whose state is the conversation.
-(deftype Agent (actor any))
+(deftype Agent (pid any))
 
 (sig tool/new (str str (list (list any)) (fun (Args) any)) Tool)
 (sig tool/name (Tool) str)

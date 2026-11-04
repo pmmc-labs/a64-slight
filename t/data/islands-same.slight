@@ -1,5 +1,5 @@
 ; What t/332 and t/333 run, on four islands and on one (D256): work spread
-; with (spawn/on (% i (islands)) ...), whose answer mustn't depend on how
+; with (fork/on (% i (islands)) ...), whose answer mustn't depend on how
 ; many islands there are, nor on the order they run in. Each result is
 ; gathered by where it belongs, never by when it came.
 
@@ -14,7 +14,7 @@
 (defun pmap (f xs)
     (let tos (map (lambda (x) (address)) xs))
     (dotimes 0 (length xs)
-        (lambda (i) (spawn/on (% i (islands)) (send (nth i tos) (f (nth i xs))))))
+        (lambda (i) (fork/on (% i (islands)) (send (nth i tos) (f (nth i xs))))))
     (map read tos))
 
 ; A ring of n actors, the ith on island i mod (islands), passing a count
@@ -26,7 +26,7 @@
 
 (defun ring (n laps)
     (let me    (address))
-    (let nodes (map (lambda (i) (spawn/on (% i (islands)) (ring-node me))) (range 0 n)))
+    (let nodes (map (lambda (i) (fork/on (% i (islands)) (ring-node me))) (range 0 n)))
     (dotimes 0 (- n 1) (lambda (i) (send (nth i nodes) (list :next (nth (+ i 1) nodes)))))
     (send (car nodes) (list :count 0))
     (laps-of me (car nodes) n (- laps 1)))

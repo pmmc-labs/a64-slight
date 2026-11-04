@@ -4,7 +4,7 @@ A slight program runs on **islands**: a thread each, one per core
 unless `SLIGHT_ISLANDS` says otherwise, each a whole runtime of its
 own, with its own processes, heaps and clock. Nothing moves between
 them on its own. A program puts an actor on island `k` with
-`(spawn/on k expr)`, and spreads its work by putting each piece on
+`(fork/on k expr)`, and spreads its work by putting each piece on
 `(% i (islands))`, so it runs the same on one core or twelve.
 
 Here a parallel map works out Collatz's steps for twelve numbers, each
@@ -24,7 +24,7 @@ on an island in turn, and reads the answers back in order:
 (defun pmap (f xs)
     (let tos (map (lambda (_) (address)) xs))
     (dotimes 0 (length xs)
-        (lambda (i) (spawn/on (% i (islands)) (send (nth i tos) (f (nth i xs))))))
+        (lambda (i) (fork/on (% i (islands)) (send (nth i tos) (f (nth i xs))))))
     (map read tos))
 
 (pprint (pmap (lambda (n) (steps n 0)) (range 1 13)))
@@ -56,8 +56,8 @@ a grid, a share of a simulation. Many small messages to one actor from
 every island is the worst case, as it is in Go or Rust.
 `bench/`'s `slight-mc` programs show both (`docs/BENCHMARKS.md`).
 
-`fork` stays on its parent's island, so a task is always joined at home,
-and `join` of another island's pid faults (`:not-a-task`).
+`fork` stays on its parent's island. `join` of another island's pid
+works, its end coming home as a message does (D277).
 
 ## Island 0
 

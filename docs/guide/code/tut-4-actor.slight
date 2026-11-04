@@ -1,7 +1,7 @@
 (@include "tut-store.slight")
 
-; An actor counts words in the store. It can't ask, which is a task's,
-; so it sends its own pid to be answered at, and waits for the reply.
+; An actor counts words in the store. It sends its own pid to be
+; answered at, and takes the reply with recv.
 (defun tally (s words)
     (match words
         (()
@@ -13,5 +13,5 @@
             (pprint (list word r))
             (tally s rest))))
 
-(let s (spawn (store ())))
-(read (spawn (tally s (list "a" "b" "a"))))
+(let s (fork (store ())))
+(join (fork (tally s (list "a" "b" "a"))))

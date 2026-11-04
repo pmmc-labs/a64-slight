@@ -81,7 +81,7 @@
 ; A raw client: pieces are sent one after another, a millisecond apart, and
 ; what the server sends comes back as one string, once it closes.
 (defun talk (port pieces)
-    (reply-of (read (connect :tcp (str "127.0.0.1:" port) (talk-conn pieces)))))
+    (reply-of (join (connect :tcp (str "127.0.0.1:" port) (talk-conn pieces)))))
 
 (defun talk-conn (pieces)
     (recv
@@ -107,7 +107,7 @@
 
 ; A client that connects and says nothing, closing at once.
 (defun quit-at-once (port)
-    (reply-of (read (connect :tcp (str "127.0.0.1:" port) (quit-now)))))
+    (reply-of (join (connect :tcp (str "127.0.0.1:" port) (quit-now)))))
 
 (defun quit-now ()
     (recv ((:open c) (disconnect c) :quit)))

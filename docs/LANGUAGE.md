@@ -64,9 +64,9 @@ exits 1:
     to end, which is waiting in wait-forever for a message, and nothing
     else can run
 
-(on one line). The root is a task, so it waits in `read`, `join` or
-`join/race` (`... for the first of #<pid 2>, #<pid 3> to end, ...`); the
-message follows a `read` or a `join` to the process it waits for, and so
+(on one line). A root waiting in `join` or `join/race` (`... for the
+first of #<pid 2>, #<pid 3> to end, ...`) says so; the message follows
+a `join` to the process it waits for, and so
 on, till it comes to one waiting for a message or racing, or after
 eight, `..., and so on`. It names the function each waits in, as `:system` does (under
 Devices).
@@ -392,8 +392,8 @@ nothing changes, that's rarely visible, except that a lambda can't call
 itself (the name it's `let` to isn't bound while it's made). Use a
 `defun` for that. At most 8 parameters.
 
-A lambda can wait in a `recv`, or call a function that does, when the
-process running it is an actor (see "Where a `recv` can go", below).
+A lambda can wait in a `recv`, or call a function that does, as any
+function can (see "Where a `recv` can go", below).
 
 ### let
 
@@ -443,42 +443,31 @@ by every process.
 
     (fork expr)
 
-Starts a new process, a **task**, that evaluates `expr`, and returns
-its pid. The locals `expr` uses are deep-copied into the new process, at
-most 8 of them. A local is copied whole, however little of it `expr`
-uses, so a big one is worth narrowing first: `(let mine (part-of big
-i))`, then `(fork (worker mine))`. Inside `expr`, `$$` is the new
-process. A task computes a value, which `join` gives: it can't wait in
-`recv`, nor be sent to (Processes, D243).
+Starts a new process that evaluates `expr`, and returns its pid. The
+locals `expr` uses are deep-copied into the new process, at most 8 of
+them. A local is copied whole, however little of it `expr` uses, so a
+big one is worth narrowing first: `(let mine (part-of big i))`, then
+`(fork (worker mine))`. Inside `expr`, `$$` is the new process. There's
+one kind of process (D277): its value is what `join` gives, and its pid
+is its inbox, which `send` fills and `recv` takes from. An actor is a
+process that loops in `recv`, and `expr` then calls the function it
+loops in:
 
     (join (fork (+ 1 2)))                (:ok 3)
+    (let c (fork (counter 0)))
 
-### spawn
+### fork/on
 
-    (spawn expr)
+    (fork/on k expr)
 
-As `fork`, but the new process is an **actor**: it has a mailbox, can be
-sent to, and can wait in `recv`. `expr` may tail-call a function that
-waits, which is the usual way to start one:
-
-    (let c (spawn (counter 0)))
-
-An actor can't be joined: a task that wants its value reads the actor's
-pid. Its value is kept for its parent if that's a task, till the parent
-has read it, and otherwise isn't kept (Processes, D243, D245).
-
-### spawn/on
-
-    (spawn/on k expr)
-
-As `spawn`, but the actor is on island `k`, from 0 below `(islands)`
+As `fork`, but the process is on island `k`, from 0 below `(islands)`
 (Islands, under Processes, D256). `k` is worked out first, by the
 caller; an island that isn't one faults (`:out-of-range`), as does
 anything but an integer (`:not-an-int`). On the caller's own island it's
-`spawn`; on another, the caller waits while that island makes the actor,
-and gets its pid, `#<pid 1@2>`.
+`fork`; on another, the caller waits while that island makes the
+process, and gets its pid, `#<pid 1@2>`.
 
-    (spawn/on (% i (islands)) (work me i))
+    (fork/on (% i (islands)) (work me i))
 
 ### connect
 
@@ -489,8 +478,8 @@ and gets its pid, `#<pid 1@2>`.
     (connect :system expr)
     (connect device expr)
 
-A `spawn` whose new process, an actor, is also connected to a source of
-messages. See Devices.
+A `fork` whose new process is also connected to a source of messages.
+See Devices.
 
 ### recv
 
@@ -501,8 +490,7 @@ messages. See Devices.
 
 Takes the next message, and gives the value of the clause whose pattern
 it fits (Patterns, under "The forms that become cond"); `(recv)` gives
-the message itself. A `recv` can go anywhere a tail call could, and
-inside a call there, in an actor. See Processes.
+the message itself. A `recv` can go anywhere (D276). See Processes.
 
 ### yield
 
@@ -596,7 +584,7 @@ The compiler knows what it can of each value's type, and says, before
 the program runs, what will go wrong if it gets there: a builtin given
 what it never takes, a test that's never a boolean, a match none of
 whose arms can match, an arm nothing can reach, a message an actor can
-never take, a task sent to or an actor joined (D247, `docs/TYPES.md`).
+never take, a process read as a source (D247, `docs/TYPES.md`).
 It knows the builtins' types, the prelude's, literals', what patterns
 and tests say of a value, and what each function gives; where it knows
 nothing, it says nothing. Types say nothing to the code: a program runs
@@ -610,8 +598,8 @@ A type is a name, `int`, `float`, `num` (either), `str`, `sym`, `bool`,
 then a list of type `T`; `(:tag A B)`, a list headed by `:tag`, with `&`
 for the rest as in patterns; `(tuple A B)`; `(array int)` and `(array
 float)`; `(fun (A B) C)`; `(or A B)`;
-`(task T)`, a task whose value is a `T`; `(actor M)`, an actor that takes
-messages of type `M`; `(address M)`; or a name `deftype` gave, with its
+`(pid M)`, a process that takes messages of type `M`; `(address M)`;
+or a name `deftype` gave, with its
 parameters: `(Result int str)`.
 
 ### deftype
@@ -691,24 +679,20 @@ Everything runs in processes, each on an island, a core of its own
 Each has its own heap and a mailbox. Processes share nothing; they talk
 by sending messages, which are copied.
 
-There are two kinds (D243). A **task**, started with `(fork expr)`,
-computes a value: it can't wait in `recv`, nor be sent to, and `join`
-gives its result. An **actor**, started with `(spawn expr)` (or
-`connect`, under Devices), has a mailbox: it's sent messages, and takes
-them with `recv`, as a loop with its state in its arguments. It can't
-be joined (`:not-a-task`): a task that wants its value reads the
-actor's pid (under Addresses). The root is a task. Each gives its pid. `$$` is the
+A process is started with `(fork expr)` (or `connect`, under Devices),
+and gives its pid. There's one kind (D277): any process can be sent to,
+and takes its messages with `recv`; any can be joined for its value;
+any can make addresses and open devices, and wait for them. An
+**actor** is a process that loops in `recv` with its state in its
+arguments, and a **task** one that computes a value: ways to use a
+process, not kinds. The root is a process like the rest. `$$` is the
 current process, and `^$$` the one that started it (the root's is
 `()`).
 
-A program whose top level would wait for messages spawns an actor to do
-it, and reads its end:
+So a program's top level can wait for a message itself:
 
-    (defun main ()
-        (send $$ :hi)
-        (recv (m m)))
-
-    (read (spawn (main)))                (:ok hi)
+    (send $$ :hi)
+    (recv (m m))                        hi
 
 ### Messages
 
@@ -716,14 +700,11 @@ it, and reads its end:
 and returns `()`. It never blocks. A copy keeps no sharing: a value
 built by doubling a list 40 times is 40 cells, but copies as 2^40. A
 copy that would be more than a heap can hold faults the sender
-(`:heap`), as does one a `fork`, a `spawn` or an `after` makes, and a
+(`:heap`), as does one a `fork` or an `after` makes, and a
 process whose value as it ends is that big ends `:heap` instead (D265).
 A message can be any value, and is conventionally a list headed by a
 keyword: `(list :add 5)`. A message to a process that has ended
-disappears. Sending to a task that hasn't faults (`:not-an-actor`), as
-does setting a timer for one (`after`), so whatever sends its caller
-messages (`http/stream`, `agent/say`, `rpc/stream`) is called from an
-actor.
+disappears.
 
 An actor's loop is a function that takes a message, and calls itself
 with its new state:
@@ -760,7 +741,7 @@ takes the next.
 
 ### Where a `recv` can go
 
-Anywhere in a function that runs in an actor (D276): as a form of a
+Anywhere (D276, D277): as a form of a
 body, as a `let`'s value, inside a call or a `cond`'s test, in a helper
 the function calls, or in a lambda it runs. What's evaluated before it
 still comes first: in `(list (send $$ :hi) (recv))` the `send` is done
@@ -775,23 +756,16 @@ value back to its caller:
         (pprint (list :count (ask-counter c))))
 
 The process keeps its stack while it waits, as it does in `join`, and
-goes on from the `recv` when a message comes. So an actor holds its
+goes on from the `recv` when a message comes. So a process holds its
 stack from its first run to its end, and what a waiting actor costs is
 its stack's touched pages, its mailbox and its heap, which is collected
 at the `recv` if it has grown enough (D105).
 
-A task (a `fork`'s body, or the top level) can't wait for a message
-(D243): a `recv` written in one is an error (`a task (a fork's body, or
-the top level) can't wait for messages, and this recv would: spawn an
-actor for it`), and a call from one to a function that waits faults
-`:not-an-actor` when it runs. A task gets what it needs from actors
-with `ask`, or by waiting for them to end.
-
-An actor that waits for a reply in the middle of a handler takes the
+A process that waits for a reply in the middle of a handler takes the
 next message, whatever it is: there's no selective receive. So an actor
 that serves requests shouldn't stop to wait inside one; what asks other
-actors, and must get the right answer, is a task, which reads the reply
-at an address of its own (Addresses, below).
+actors, and must get the right answer, reads the reply at an address of
+its own (Addresses, below), as `ask` does.
 
 ### How processes end
 
@@ -844,28 +818,20 @@ The fault kinds:
 - `:not-sexp`: `sexp/print` given something that isn't data
 - `:no-match`: a `match` that no clause matched
 - `:not-a-tuple`: a tuple operation given something else
-- `:not-an-actor`: a task sent a message, or a timer, or monitoring
-  something, which would tell it with a message it can't take (D243)
-- `:not-a-task`: an actor joined (or among `join/race`'s pids), or an
-  actor making an address, reading or opening a device, which are a
-  task's (D243)
 
 ### Waiting for a process
 
-- `(join pid)` waits until `pid`, a task, ends, and gives its result,
-  `(:ok value)` or `(:error reason)`. It works from anywhere (a lambda,
-  or an actor, included), and after the task has ended, till its parent
-  has had the result (below); after that it gives `:ended`. Several
-  joiners wake in the order they joined, each with the result. An actor
-  can't be joined while it runs (`:not-a-task`): a task reads its end
-  instead; once it has ended, `join` gives `:ended`, as for any pid
-  whose result isn't kept.
-- `(join/race pids)` waits until the first of the list `pids`, tasks,
-  ends, and
+- `(join pid)` waits until `pid` ends, and gives its result, `(:ok
+  value)` or `(:error reason)`. It works from anywhere (a lambda
+  included), on any process, on any island (D277), and after the
+  process has ended, till its parent has had the result (below); after
+  that it gives `:ended`. Several joiners wake in the order they joined,
+  each with the result.
+- `(join/race pids)` waits until the first of the list `pids` ends, and
   gives `(pid result)`, `result` being what `join` would give (D220). If
   some have ended already, it's the first of those in the list. Like
   `join`, it works from anywhere, and the caller keeps its stack while it
-  waits, so it needn't be a function that waits in `recv`. An empty list
+  waits. An empty list
   faults (`:not-a-pid`), since it would wait forever, and so does
   something in the list that isn't a pid, or the caller's own pid
   (`:join-self`), all found before it waits. The others go on running:
@@ -891,97 +857,88 @@ The fault kinds:
   one that waits for every result, ended well or not.
 
   Both are in the prelude, on `join/race`, and both leave running the
-  processes they no longer wait for. Each joins a task as soon as the
+  processes they no longer wait for. Each joins a process as soon as the
   race says it has ended, so its value goes then, and a pid listed twice
   is joined once; one that was joined before gives `:ended`, a failure
   to both.
 - `(monitor pid)` asks to be told when `pid` ends: the caller is sent
   `(:exit pid result)` then, or at once if it already has, `result`
-  being `:ended` for an actor that has (D243). Monitoring
-  twice means two messages. Nothing is sent to a parent unless it asks.
-  Only an actor can monitor (`:not-an-actor`). Returns `()`. A monitor lasts while both processes do: if the caller
-  ends first, its monitor goes with it, so short-lived processes can
-  monitor a long-lived one as often as they like, as `ask`'s boxes do.
+  being `:ended` once the result is no longer kept (below).
+  `(monitor pid to)` sends it to `to`, an address of the caller's,
+  instead (D277), so a reply and the end of the process asked come to
+  one place. Monitoring twice means two messages. Nothing is sent to a
+  parent unless it asks. Returns `()`. A monitor lasts while both
+  processes do, and while its address is open: if the caller ends
+  first, or closes the address, its monitor goes with it, so
+  short-lived processes can monitor a long-lived one as often as they
+  like, as `ask` does.
 - `(kill pid)` ends `pid`, wherever it is: running, waiting in `recv` or
   `join`, or asleep. `(kill $$)` ends the caller. Killing a process that
   has ended does nothing. Returns `()`.
 
 When a process ends, its result goes to those waiting for it then: its
-joiners, the tasks reading it, a race it wins, and its monitors. After
-that it's kept for its parent, till the parent has had it: by joining
-or reading it, by a monitor's notice, or by ending (D244). Till then
-anyone may join a task, as often as they like, or race it, which
-doesn't take it, and anyone may read an actor; after, it's `:ended`. An
-actor's is kept so only if its parent is a task, which can read it
-(D245); an actor's parent can't, and hears of its end only by
-monitoring it, so the end of an actor an actor started isn't kept, and
-is `:ended` to whoever asks after (D243). So a task forked and joined
-at once, the usual way, keeps nothing once joined; a task can read an
-actor it started whenever it likes; and a parent that starts many and
-never takes them holds their values till it ends. A pid is never
-reused, and the runtime forgets one once nothing more can come of it,
-so a program that runs for good, starting processes as it goes, holds
-only those running, open or keeping a value (`:system`'s `(:records
-n)`).
+joiners, a race it wins, and its monitors. After that it's kept for its
+parent, till the parent has had it: by joining it, by a monitor's
+notice, or by ending (D244). Till then anyone may join it, as often as
+they like, or race it, which doesn't take it; after, it's `:ended`. So
+a process forked and joined at once, the usual way, keeps nothing once
+joined, and a parent that starts many and never takes them holds their
+values till it ends. A pid is never reused, and the runtime forgets one
+once nothing more can come of it, so a program that runs for good,
+starting processes as it goes, holds only those running, open or
+keeping a value (`:system`'s `(:records n)`).
 
 ### Addresses
 
-A task can't be sent to, so it makes a place that can be (D243):
+A process's pid is its inbox, which `recv` takes from. An address is an
+inbox of its own, which `read` takes from (D243, D277):
 
 - `(address)` makes one, a value of its own, printed `#<address 1>`
   (its id, which its island gives it and never gives again, so what's
   sent to one that's closed can't reach another, D273; `#<address 1@2>`
-  on island 2). `send` and
-  `after` take it where they take a pid, so it goes in a message for an
-  actor to answer at. `pid?` is `#true` of it; `join`, `monitor`, `kill`
-  and the rest fault on it (`:not-a-pid`). Only a task makes one: in an
-  actor, `address` faults `:not-a-task`, since an actor takes what comes
-  to it with `recv`.
+  on island 2). `send` and `after` take it where they take a pid, so it
+  goes in a message for an actor to answer at, and `monitor` takes it
+  as the place to tell. `pid?` is `#true` of it; `join`, `kill` and the
+  rest fault on it (`:not-a-pid`). Only its maker reads it.
 - `(read src)` waits, keeping the stack as `join` does, for the next
-  message sent to `src`, an address of the caller's, and gives it; or,
-  if `src` is a pid, for it to end, and gives its result, as `join`.
-  An actor's end is kept for its parent if that's a task (above);
-  another task gets it only if it was watching when the actor ended:
-  from a `read` or `read/any` of the actor's pid begun before then,
-  even one that has since returned with something else, which keeps
-  watching till the task reads it again, or reads without it. After
-  that, the end of an actor not kept is `:ended`.
-  Messages to one address come in the order they were sent, and no
-  other message can be taken for one: there's nothing to steal, and no
-  dead letters.
+  message sent to `src`, an address of the caller's, or from a device
+  it opened (Devices), and gives it. Messages to one address come in
+  the order they were sent, and no other message can be taken for one:
+  there's nothing to steal, and no dead letters; nor does `recv` take
+  what's sent to an address. A process is no source: `read` of one
+  faults (`:not-a-pid`), since its end is a message, from `monitor`,
+  or a join's.
 - `(read/any srcs)` waits for the first of a list of them to have
-  something, and gives `(src what)`. They're looked at in their order,
-  as `join/race`'s pids are: an address with a message waiting, or a pid
-  that has ended. So with an address and the actor it asked, the answer,
-  or the actor's end, whichever comes; and with a timer set for the
-  address too, a timeout.
+  something, and gives `(src what)`. They're looked at in their order.
 - `(disconnect a)` closes an address: what's waiting there is dropped,
-  and anything sent to it after disappears, as to an ended process. So
-  does what's sent to an address of a task that has ended. Reading a
-  closed address, or another task's, faults (`:not-a-pid`).
+  anything sent to it after disappears, as to an ended process, and
+  the monitors told at it go. So does what's sent to an address of a
+  process that has ended. Reading a closed address, or another's,
+  faults (`:not-a-pid`).
 
-`read` and `read/any` are a task's alone (`:not-a-task` in an actor). A
-task reading what will never come is waiting for ever: `deadlock: the
-root process is waiting in the top level for a message to #<address
+A process reading what will never come is waiting for ever: `deadlock:
+the root process is waiting in the top level for a message to #<address
 1>, ...`.
 
     (defun counter (n)
         (recv
             ((:get to) (reply to n) (counter n))))
 
-    (let c (spawn (counter 5)))
+    (let c (fork (counter 5)))
     (let to (address))
+    (monitor c to)
     (send c (list :get to))
     (read to)                            (reply 5)
 
-That's what `ask` does, in the prelude: `(ask pid msg)` adds an address
-to the end of `msg`, sends it, and reads the answer, which the actor
-gives with `(reply to v)` (it sends `(:reply v)`). It gives `v`; or, if
-`pid` ends first, raises `(:ended pid result)`. `(ask-within ms pid
-msg)` raises `(:timeout pid)` too, if no answer comes in `ms`
-milliseconds, and takes its timer back if one does. Since `ask` makes
-an address, only a task asks (D243): an actor sends, and takes the
-answer as a message, or forks a task to ask.
+That's what `ask` does, in the prelude: `(ask pid msg)` makes an
+address, monitors `pid` to it, adds it to the end of `msg`, sends it,
+and reads the answer, which the actor gives with `(reply to v)` (it
+sends `(:reply v)`). It gives `v`; or, if `pid` ends first, its end
+comes to the address instead, and `ask` raises `(:ended pid result)`.
+`(ask-within ms pid msg)` raises `(:timeout pid)` too, if no answer
+comes in `ms` milliseconds, and takes its timer back if one does. Any
+process asks, an actor in the middle of a handler included, though one
+that serves requests shouldn't stop to (Where a `recv` can go, above).
 
 ### Time
 
@@ -996,7 +953,7 @@ answer as a message, or forks a task to ask.
   had fired already (its message may be in the mailbox, or taken), had
   been taken back, or is no timer's number. A timer set on another
   island is taken back there, the caller waiting for its answer, keeping
-  its stack, as `spawn/on` waits for its pid (D274). Any process can take a
+  its stack, as `fork/on` waits for its pid (D274). Any process can take a
   timer back (D232).
 - `(sleep ms)` blocks the calling process, and only that one, for `ms`
   milliseconds. Returns `()`.
@@ -1006,7 +963,7 @@ same time fire in the order they were set. A pending timer keeps the
 program running, but not one for a process that has ended, which is
 dropped (D232): a sleeper that's killed, or a timeout sent to a process
 that has gone, doesn't hold up the program's end. An `after` is for an
-actor, since a task can't be sent to. In one:
+actor:
 
     (let t (after 5000 $$ :timeout))
     (send worker (list :job $$))
@@ -1038,9 +995,9 @@ Processes take turns from a run queue, first in, first out. A running
 process counts **reductions**, slight's measure of a process's work (the
 word is Erlang's): one each time it enters a function compiled from
 slight, by a call or a tail call alike. That's a `defun`, the prelude's
-included; a lambda; a `fork`'s, `spawn`'s or `connect`'s body; and a receive
-function, which counts again when it starts over after waiting for a
-message (one already in the mailbox it takes without starting over). A
+included; a lambda; and a `fork`'s or `connect`'s body; and a `recv` that
+waited counts one when its message comes (one already in the mailbox
+it takes for nothing). A
 builtin, such as `car`, `+` or `send`, runs inline or in C, and counts
 nothing. After 1,000 reductions, a process goes to the back of the queue
 if another is ready. Every loop is a tail call, so no process can hold
@@ -1061,9 +1018,9 @@ starts the first time something's placed on it, so a program that never
 places anything runs on one, as it would without islands.
 
 Nothing moves from island to island on its own: a process runs where
-it's started. `fork` starts a task on its parent's island, as `spawn`
-does an actor, and `(spawn/on k expr)` starts an actor on island `k`.
-A program spreads its work with `(spawn/on (% i (islands)) ...)`, and
+it's started. `fork` starts a process on its parent's island, and
+`(fork/on k expr)` one on island `k`.
+A program spreads its work with `(fork/on (% i (islands)) ...)`, and
 runs the same, if slower, on one island.
 
 A pid says its island: `#<pid 5@2>` is the fifth process made on island
@@ -1072,19 +1029,16 @@ A pid says its island: `#<pid 5@2>` is the fifth process made on island
 
 - `send` and `after` to another island's process copy the message
   there, in order: messages from one process to another arrive in the
-  order they were sent, wherever each is. A message sent to a task
-  there goes nowhere, said as a dead letter.
-- `monitor` of another island's process, and `read` of one from a task,
-  tell its end as they would of one here; an actor's end comes to its
-  parent if that's a task, wherever it is, to be read.
+  order they were sent, wherever each is.
+- `monitor`, `join` and `join/race` of another island's process tell
+  its end as they would of one here, and a child's end comes to its
+  parent's island, kept there till it's joined (D277).
 - `kill` of another island's process ends it when its island takes the
   word, a moment later; `kill` doesn't wait for that.
-- `join` and `join/race` take a task, which is always on its parent's
-  island, so another island's pid faults (`:not-a-task`).
 
 The terminal and `:system` are island 0's: `connect :keypress` or
-`connect :system` from another island starts its actor on island 0
-(though a task's `open :system` is its own island's), and `:system`
+`connect :system` from another island starts its process on island 0
+(though `open :system` is the opener's own island's), and `:system`
 tells of every island, asking the others through their inboxes, with
 each process's messages to and from other islands counted.
 Commands (`:exec`), files and sockets are the island's that opens them.
@@ -1099,7 +1053,7 @@ or string, a frame of a simulation, goes to island 0 as a handle.
 
     (defun work (to n) (send to (list n (fib n))))
     (let me (address))
-    (dotimes 0 20 (lambda (i) (spawn/on (% i (islands)) (work me (+ i 15)))))
+    (dotimes 0 20 (lambda (i) (fork/on (% i (islands)) (work me (+ i 15)))))
     (sort-by car (map (lambda (_) (read me)) (range 0 20)))
 
 ### The heap
@@ -1130,7 +1084,7 @@ returns: a `let` at the top level keeps its value till the program ends.
 
 A string of 4 KB or more, or an array of numbers of 4 KB or more (512
 elements), isn't in the heap but in a buffer of its own, which
-processes share (D253): sending it, forking with it, or a task's result
+processes share (D253): sending it, forking with it, or a process's result
 holding it, copies a handle and not the bytes, so a big string sent to
 a thousand processes is in memory once. It's freed when the last
 process holding it has collected it, or ended. Each process counts the
@@ -1141,28 +1095,27 @@ often as it needs to. Nothing about it shows to a program but memory.
 
 ## Devices
 
-`connect` is `spawn` plus a connection: it starts an actor to evaluate
-`expr`, as `spawn` does, connects it to a source of messages, and
-returns the new process's pid. The actor takes the device's messages
+`connect` is `fork` plus a connection: it starts a process to evaluate
+`expr`, as `fork` does, connects it to a source of messages, and
+returns the new process's pid. The process takes the device's messages
 with `recv`, as below.
 
-A task opens a device of its own instead, and reads it (D243):
+Or a process opens a device of its own, and reads it (D243):
 
-- `(open source arg)` opens one, owned by the calling task, with no
+- `(open source arg)` opens one, owned by the calling process, with no
   process started: `source` is `:fs/read`, `:fs/write` or `:fs/append`
   with a path, `:tcp` with `"host:port"`, `:unix` with a path, `:exec`
   with a command, or `:system` alone. It waits till the device is open
   (a connection connected, a command started) and gives `(:ok d)`; or
-  `(:error reason)`, as an actor that connected would have ended with.
-  A listener, and the keyboard, are an actor's: `open` faults
-  (`:not-a-device`) on `:tcp/listen`, `:unix/listen` and `:keypress`,
-  and in an actor, `:not-a-task`.
+  `(:error reason)`, as a process that connected would have ended with.
+  A listener, and the keyboard, are `connect`'s: `open` faults
+  (`:not-a-device`) on `:tcp/listen`, `:unix/listen` and `:keypress`.
 - `(read d)` gives the device's next message, as an owner gets it below:
   `(:line d s)`, `(:chunk d s)`, `(:eof d)`, a command's `(:exited d
   status)`, `:system`'s answers. The next is cut at the `read` after it
   (D158), so `(:read how)` sent in between applies to it. `read/any`
   takes a device among its sources too. A device that fails (a read or
-  a write, bad JSON, `:too-big`) doesn't end the task: it closes, and
+  a write, bad JSON, `:too-big`) doesn't end the process: it closes, and
   its next message is `(:error d reason)`. Once a device has closed and
   its messages are read, `read` gives `:ended`, as for a process that
   has ended and kept nothing; so does a device closed while its reader
@@ -1172,8 +1125,8 @@ A task opens a device of its own instead, and reads it (D243):
           ((:ok f)         (read f))           ; (:line f "first line")
           ((:error reason) reason))            ; (:enoent "notes.txt")
 
-`lib/fs`, `lib/exec` and `tools/read` work so, each in a task of its
-own, which an actor can join too.
+`lib/fs`, `lib/exec` and `tools/read` work so, each in a process of its
+own.
 
 ### The keyboard
 
@@ -1289,7 +1242,7 @@ isn't an open device it ignores. A device also closes when its owner
 ends, and messages to a closed device go nowhere.
 
 If the file can't be opened, the owner ends as it starts, before its
-expression runs (so a task that reads it at once gets this), with
+expression runs (so a join of it at once gets this), with
 `(:error (name path))`, `name` being errno's: `:enoent`, `:eacces`,
 `:eisdir`, `:enotdir`, `:enospc`, and so on, or `:io-error`. A read or a
 write that fails ends it the same way, when it happens; and so does a
@@ -1553,7 +1506,6 @@ which `lookup` reads; more keys may come. A process's:
 
 - `(:pid p)`, and `(:parent q)`, the process that forked it (`()` for
   the root).
-- `(:kind k)`: `:task` or `:actor` (D243).
 - `(:state st)`: `:running` (the one asking, unless a timer asked),
   `:ready` (in the run queue), `:recv` (waiting for a message),
   `:joining` (in `join` or `join/race`) or `:sleeping`.
@@ -1563,8 +1515,7 @@ which `lookup` reads; more keys may come. A process's:
   (`recv`, `join`, `join/race`, `read`, `sleep`); the one that called
   `yield`, or `send` to a device; the one it was entering when it was
   preempted; or the one it starts in. The top level is `"the top level"`, a `fork`'s
-  body `"fork at prog.slight:3:9"` (a `spawn`'s, `"spawn at ..."`, and a
-  `connect`'s, `"connect at ..."`),
+  body `"fork at prog.slight:3:9"` (a `connect`'s, `"connect at ..."`),
   and a lambda `"lambda at ..."`.
 - `(:mail n)`: the messages waiting for it.
 - `(:heap bytes)`: its heap in use, both generations.
@@ -1585,7 +1536,7 @@ which `lookup` reads; more keys may come. A process's:
 The runtime's, every island's added up: `(:processes n)` that haven't
 ended; `(:pids n)` made, processes and devices, ended or not;
 `(:records n)` of those the runtime still holds an entry for: running,
-open, or keeping a task's value for its parent (D244); `(:ready n)` in
+open, or keeping a process's value for its parent (D244); `(:ready n)` in
 the run queues; `(:timers n)` pending; `(:devices n)` open; `(:heap
 bytes)` in use by all the processes; `(:heap-max bytes)`, the most one
 process's heap holds (D233); `(:stacks n)` held; `(:clock ms)` since the
@@ -2317,8 +2268,8 @@ anything.
 
 ### (@include :fs)
 
-`lib/fs.slight`: whole files at once, on top of `open`, each in a task
-of its own (D243), which blocks only its caller; and trees.
+`lib/fs.slight`: whole files at once, on top of `open`, each in a process
+of its own, joined (D243), which blocks only its caller; and trees.
 
 - `(slurp path)`: `(:ok lines)`, the file's lines without their
   newlines, as a list of strings. `(slurp "/dev/stdin")` reads stdin to
@@ -2488,14 +2439,14 @@ until it's killed.
 For structures of one's own: `(ask pid msg)`, in the prelude (under
 Addresses), sends `msg` with an address for the answer added at the end,
 and reads the answer; the structure answers with `(reply to v)`, `to`
-being that address. A task asks; an actor can't.
+being that address. Any process asks (D277).
 
     (defun counter (n)
         (recv
             (:inc      (counter (+ n 1)))
             ((:get to) (reply to n) (counter n))))
 
-    (let k (spawn (counter 0)))
+    (let k (fork (counter 0)))
     (send k :inc)
     (ask k (list :get))                  1
 
@@ -2528,9 +2479,9 @@ it, such as nginx or Caddy.
 
 - `(http/serve port handler)` listens on all interfaces and gives the
   listener's pid, which `kill` stops. Port 0 lets the system pick, and
-  the listener sends `(:listening port)` to the caller, an actor, which
-  is how a test learns the port. From a task, `(http/listen port
-  handler)` waits till it listens and gives `(:ok (l port))`, `l` the
+  the listener sends `(:listening port)` to the caller, which is how a
+  test learns the port. `(http/listen port handler)` waits till it
+  listens and gives `(:ok (l port))`, `l` the
   listener's pid, or `(:error reason)`. Each connection gets a process of its own, which
   calls `handler` with the request and writes the response it gives. The
   handler runs in a process of its own too: if it faults, or raises, the
@@ -2572,8 +2523,8 @@ it, such as nginx or Caddy.
   and 60 among them, TLS failing, as curl's manual lists them. A reply
   isn't given till curl has ended with 0, so one cut short is never taken
   for a whole one. `(:enoent "curl")` means there's no curl. They wait as
-  long as the reply takes (D236), in a task the caller joins, so an
-  actor, or a handler, can ask too.
+  long as the reply takes (D236), in a process the caller joins, so a
+  handler can ask too.
 - `(http/request-within ms method url headers body)` is `http/request`
   with `(:error :timeout)` if the reply hasn't all come in `ms`
   milliseconds. Its timer doesn't hold up the program's end once the
@@ -2672,10 +2623,9 @@ plain HTTP; the agent includes `:http` itself.
   for it, and its answer comes after.
 - `(agent/ask a text)` asks `a` and waits for the whole answer: `(:ok
   answer)`, or `(:error reason)` as `(:error a reason)` would have said,
-  or `(:error (:ended a result))` if `a` has ended or ends first. A task
-  of its own asks, at an address of its own (D243), so none of the
-  pieces or calls reach the caller, and it works anywhere, a lambda, a
-  tool or an actor included (D192).
+  or `(:error (:ended a result))` if `a` has ended or ends first. A
+  process of its own asks, at an address of its own (D243), so none of
+  the pieces or calls reach the caller (D192).
 - `(kill a)` ends the agent, and stops an answer on its way, and any
   tool it was running.
 
@@ -2831,7 +2781,7 @@ argument it needs, or with one that isn't a string.
 - `(tools/read path)`: the file's bytes, as a string, or it raises why
   not; `(tools/save path text)` makes the file hold `text` and nothing
   else, or raises why not. What the tools to read and write files are
-  made of, in a task of their own (D243).
+  made of, in a process of their own (D243).
 
 The commands these run are given their arguments directly, with no
 shell (but `run`'s), so a path or a text can't be taken for anything
@@ -2930,8 +2880,8 @@ socket. Either end can call the other, whichever connected.
   the port it got, or the path. Each connection gets a process of its
   own, whose other end can call `handlers`. A path is any string with a
   `/` in it, so one here is `"./ctl.sock"`; that holds wherever `rpc`
-  takes `"host:port"` (D231). From a task, `(rpc/listen where
-  handlers)` waits till it listens and gives `(:ok (l at))`, or `(:error
+  takes `"host:port"` (D231). `(rpc/listen where handlers)` waits till
+  it listens and gives `(:ok (l at))`, or `(:error
   reason)`. `(rpc/serve-with where handlers opts)` and `(rpc/listen-with
   where handlers opts)` take `(:most n)`, as `http/serve-with` does
   (D270).
@@ -2947,9 +2897,8 @@ socket. Either end can call the other, whichever connected.
   write anything else there.
 - `(rpc/call conn name args)` calls `name`, a string or a symbol, on the
   other end with the list `args`, and waits for the answer: `(:ok v)`,
-  or `(:error reason)`. It waits in `join`, for a task that reads the
-  answer, so it works anywhere, a lambda, an actor or a handler
-  included. A stream's values are dropped. `args`
+  or `(:error reason)`. It waits in `join`, for a process that reads
+  the answer, so it works anywhere, a lambda or a handler included. A stream's values are dropped. `args`
   that aren't data fault in the caller (`:not-sexp`).
 - `(rpc/stream conn name args)` makes the same call, and gives the
   caller what comes as it comes: `(:next s v)` for each value, then

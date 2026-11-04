@@ -7,7 +7,7 @@
 (match (slurp path)
     ((:ok lines) (pprint (length lines))))
 
-; A file of any size, a line at a time, from a task.
+; A file of any size, a line at a time, with read.
 (defun words (line)
     (remove (lambda (w) (eq? w "")) (str/split line " ")))
 
@@ -25,12 +25,12 @@
 (pprint (count-words path))
 (pprint (count-words "no-such-file.txt"))
 
-; The same from an actor, which connects to the file and takes its lines
-; as messages.
+; The same as messages: a process connected to the file takes its lines
+; with recv.
 (defun longest (best)
     (recv
         ((:open f)   (longest best))
         ((:line f s) (longest (if (> (str/len s) (str/len best)) s best)))
         ((:eof f)    best)))
 
-(read (connect :fs/read path (longest "")))
+(join (connect :fs/read path (longest "")))

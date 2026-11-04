@@ -28,13 +28,13 @@
         ((:json p v) :a-value)
         ((:eof p)    :eof)))
 
-(defun command (script) (read (connect :exec (list "sh" "-c" script) (reading))))
+(defun command (script) (join (connect :exec (list "sh" "-c" script) (reading))))
 
 (defun churn (n)
     (if (== n 0)
         :done
         (do (join (fork n))
-            (read (spawn n))
+            (join (fork n))
             (churn (- n 1)))))
 
 ; Holds s till it's told to end, then says how long it was.
@@ -43,7 +43,7 @@
 
 (defun shared (s)
     (let me (address))
-    (let actors (map (lambda (_) (spawn (holder me s))) (range 0 40)))
+    (let actors (map (lambda (_) (fork (holder me s))) (range 0 40)))
     (map (lambda (a) (send a :end)) actors)
     (fold/l 0 (lambda (sum _) (+ sum (read me))) actors))
 

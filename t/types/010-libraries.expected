@@ -1,5 +1,4 @@
 t/types/010-libraries.slight:7:17: warning: http/get's argument is int, not str
-t/types/010-libraries.slight:8:13: warning: join of an actor, which can't be joined: it faults :not-a-task (read it, from a task)
 t/types/010-libraries.slight:9:28: warning: tool/new's fourth argument is int, not (fun (Args) any)
 t/types/010-libraries.slight:10:16: warning: str/len's argument is int, not str: it faults :not-a-string
 t/types/010-libraries.slight:11:34: warning: rpc/connect's second argument is (shape int), not (list Handler)

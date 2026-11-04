@@ -18,6 +18,6 @@
 ; The top level is a task, which can't wait (D243), so an actor does its
 ; work, and the root gives its value.
 (defun top-level (argv)
-    (ping (spawn (pong)) 0 (str->int (car argv)) (range 1 101)))
+    (ping (fork (pong)) 0 (str->int (car argv)) (range 1 101)))
 
-(cadr (read (spawn (top-level @ARGV))))
+(cadr (join (fork (top-level @ARGV))))

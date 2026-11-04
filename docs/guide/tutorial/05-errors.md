@@ -16,11 +16,11 @@ keeps it running through bugs not yet found.
 ```lisp
 (@include "tut-store.slight")
 
-(let s (spawn (store ())))
+(let s (fork (store ())))
 (call s (list :put "apple" 3))
 (call s (list :put "color" "red"))
 (pprint (join (fork (call s (list :incr "color")))))
-(read s)
+(join s)
 ```
 
 <!-- output: ../code/tut-5-fault.expected -->
@@ -41,7 +41,7 @@ Three things happened, one per line:
    site))`, the fault as a value.
 
 The top level went on. A fault ends one process, and the others find
-out by waiting for it, with `join`, `read` or `ask`. There's no
+out by waiting for it, with `join`, `monitor` or `ask`. There's no
 exception to catch, and so no stack of handlers to unwind. The way to
 contain something that might fail is to run it in a process of its
 own, which is why the `call` went in a `fork`. Asked from the top level
@@ -84,7 +84,7 @@ ending of its own with `raise`:
         ((:ok value)     value)
         ((:error reason) (raise (list reason key)))))
 
-(let s (spawn (store ())))
+(let s (fork (store ())))
 (call s (list :put "color" "red"))
 (pprint (call s (list :incr "color")))
 (pprint (call s (list :incr "hits")))
@@ -119,7 +119,7 @@ message, and starts a fresh one when it ends:
 ; Starts the store and watches it, and passes it every message. When it
 ; ends, it starts another, with an empty table.
 (defun supervise ()
-    (let s (spawn (store ())))
+    (let s (fork (store ())))
     (monitor s)
     (supervisor s))
 
@@ -146,7 +146,7 @@ This is the store from `tut-store.slight`, bug and all:
 
 <!-- code: ../code/tut-5-supervisor.slight -->
 ```lisp
-(let sup (spawn (supervise)))
+(let sup (fork (supervise)))
 (call sup (list :put "apple" 3))
 (call sup (list :put "color" "red"))
 (pprint (join (fork (ask-within 1000 sup (list :do (list :incr "color"))))))
@@ -180,20 +180,20 @@ take it, which is chapter 7's file.
 
 ## Tasks and actors
 
-The tutorial has now used both kinds of process:
+The tutorial has now used processes in both of their usual shapes:
 
-- A **task** (`fork`) computes a value. It can wait for other
-  processes, with `join`, `read` and `ask`, keeping its stack while it
-  waits, so it can ask from deep inside ordinary functions. It can't
-  take messages with `recv`. The top level is a task.
-- An **actor** (`spawn`) keeps state, in the arguments of a loop that
-  takes messages with `recv`. It can be sent to and monitored, and it
-  can monitor others. A function that waits in it can't return a value
-  to its caller.
+- A **task** computes a value: `fork` starts it, and `join` gives what
+  it ended with. It waits for other processes with `join` and `ask`,
+  keeping its stack, so it can ask from deep inside ordinary functions.
+  The top level is one.
+- An **actor** keeps state, in the arguments of a loop that takes
+  messages with `recv`. It's sent to, and monitored, and it monitors
+  others.
 
-Actors own state; tasks do work and hold conversations. When you're
-unsure which you need, ask whether anything should be able to send to
-it. If so, it's an actor.
+They're one kind of process (D277): any can be sent to, joined,
+monitored or asked. Actors own state; tasks do work and hold
+conversations. When you're unsure which you're writing, ask whether
+anything should be able to send to it. If so, it's an actor.
 
 ---
 

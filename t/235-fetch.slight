@@ -66,4 +66,4 @@
     (kill srv)
     :done)
 
-(read (spawn (top-level)))
+(join (fork (top-level)))

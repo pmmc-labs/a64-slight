@@ -151,12 +151,12 @@
     (recv
         ((:open f) (send f (list :write text)) (disconnect f))))
 
-(defun resolv-conf (text) (read (connect :fs/write "build/t/186-dns.resolv.conf" (writer text))))
+(defun resolv-conf (text) (join (connect :fs/write "build/t/186-dns.resolv.conf" (writer text))))
 
 (resolv-conf (str "nameserver 127.0.0.1:1\nnameserver 127.0.0.1:" dns-port "\nsearch test\noptions use-vc timeout:1 attempts:3\n"))
 
 ; What connecting to name gets: the echo, or why not.
-(defun try (port name) (pprint (list name (outcome (read (connect :tcp (str name ":" port) (client)))))))
+(defun try (port name) (pprint (list name (outcome (join (connect :tcp (str name ":" port) (client)))))))
 
 (defun outcome (r)
     (match r
@@ -174,4 +174,4 @@
 ; and what the name server was asked, in order
 (send echo :stop)
 (send dns :stop)
-(pprint (cadr (read dns)))
+(pprint (cadr (join dns)))

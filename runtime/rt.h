@@ -78,10 +78,8 @@
 #define RT_FAULT_NOT_SEXP   20    // :not-sexp        sexp/print was given something that isn't data
 #define RT_FAULT_NO_MATCH   21    // :no-match        no clause of a match matched
 #define RT_FAULT_NOT_TUPLE  22    // :not-a-tuple     a tuple operation was given something else
-#define RT_FAULT_NOT_ACTOR  23    // :not-an-actor    a task was sent to, or asked to recv (D243)
-#define RT_FAULT_NOT_TASK   24    // :not-a-task      an actor was joined (D243)
-#define RT_FAULT_NOT_ARRAY  25    // :not-an-array    an array operation was given something else (D253)
-#define RT_FAULT_COUNT      25
+#define RT_FAULT_NOT_ARRAY  23    // :not-an-array    an array operation was given something else (D253)
+#define RT_FAULT_COUNT      23
 
 // Symbols the runtime makes: every program has them, after #false and
 // #true, in this order (values.ts, RUNTIME_SYMBOLS). The fault kinds
@@ -97,7 +95,7 @@
 // in the order :ctrl :alt :shift. Their symbols follow the fault kinds:
 // RT_KEY_x is symbol RT_SYM_KEYS + x. compiler/tests/values.test.ts reads
 // the names from here.
-#define RT_SYM_KEYS         31    // RT_SYM_FAULTS + RT_FAULT_COUNT
+#define RT_SYM_KEYS         29    // RT_SYM_FAULTS + RT_FAULT_COUNT
 #define RT_KEY_UP            0    // :ArrowUp       the arrows are in the order of
 #define RT_KEY_DOWN          1    // :ArrowDown     their escape sequences, ESC [ A
 #define RT_KEY_RIGHT         2    // :ArrowRight    to ESC [ D
@@ -139,7 +137,7 @@
 // (:sexp f v), and of source (:form f form line) and (:doc f text line). A
 // command also takes (:eof), which closes its input. RT_DEV_x is symbol
 // RT_SYM_DEVICE + x.
-#define RT_SYM_DEVICE       61    // RT_SYM_KEYS + RT_KEY_COUNT
+#define RT_SYM_DEVICE       59    // RT_SYM_KEYS + RT_KEY_COUNT
 #define RT_DEV_OPEN          0    // :open
 #define RT_DEV_LINE          1    // :line
 #define RT_DEV_EOF           2    // :eof
@@ -160,7 +158,7 @@
 // Why a device failed, from errno: a device's owner ends with
 // (:error (name path)), path being the file's, or the socket's "host:port"
 // (a listener's port). RT_ERR_x is symbol RT_SYM_ERRS + x.
-#define RT_SYM_ERRS         76    // RT_SYM_DEVICE + RT_DEV_COUNT
+#define RT_SYM_ERRS         74    // RT_SYM_DEVICE + RT_DEV_COUNT
 #define RT_ERR_ENOENT        0    // :enoent        no such file or directory
 #define RT_ERR_EACCES        1    // :eacces        permission denied
 #define RT_ERR_EPERM         2    // :eperm         operation not permitted
@@ -196,14 +194,14 @@
 
 // The symbols JSON's values need beyond #true and #false (json.c):
 // RT_JSON_x is symbol RT_SYM_JSON + x.
-#define RT_SYM_JSON        107    // RT_SYM_ERRS + RT_ERR_COUNT
+#define RT_SYM_JSON        105    // RT_SYM_ERRS + RT_ERR_COUNT
 #define RT_JSON_NULL         0    // :null
 #define RT_JSON_OBJECT       1    // :object        (:object (key value) ...)
 #define RT_JSON_COUNT        2
 
 // And those the s-expression reader makes (sexp.c): RT_SEXP_x is symbol
 // RT_SYM_SEXP + x.
-#define RT_SYM_SEXP        109    // RT_SYM_JSON + RT_JSON_COUNT
+#define RT_SYM_SEXP        107    // RT_SYM_JSON + RT_JSON_COUNT
 #define RT_SEXP_SYMBOL       0    // :symbol        (:symbol "name"), a name the program doesn't mention
 #define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
 #define RT_SEXP_COUNT        2
@@ -211,7 +209,7 @@
 // What :system (process.c, D171) is asked and answers with: RT_SYS_x is
 // symbol RT_SYM_SYSTEM + x. A process's :heap and :stack are the fault
 // kinds' symbols, which have those names already.
-#define RT_SYM_SYSTEM      111    // RT_SYM_SEXP + RT_SEXP_COUNT
+#define RT_SYM_SYSTEM      109    // RT_SYM_SEXP + RT_SEXP_COUNT
 #define RT_SYS_PROCESSES     0    // :processes     asked for every process; and how many there are
 #define RT_SYS_PROCESS       1    // :process       asked for one; and (:process s info) for each
 #define RT_SYS_RUNTIME       2    // :runtime       asked for the runtime's counts, and (:runtime s info)
@@ -242,7 +240,7 @@
 // it, name being one of these (the same on macOS and Linux, where some of
 // their numbers aren't), or the number of any other. RT_EXEC_x is symbol
 // RT_SYM_EXEC + x.
-#define RT_SYM_EXEC        134    // RT_SYM_SYSTEM + RT_SYS_COUNT
+#define RT_SYM_EXEC        132    // RT_SYM_SYSTEM + RT_SYS_COUNT
 #define RT_EXEC_EXITED       0    // :exited
 #define RT_EXEC_SIGNAL       1    // :signal
 #define RT_EXEC_HUP          2    // :hup           the signals' names, without SIG
@@ -265,22 +263,20 @@
 // Who's at the other end of a Unix connection (socket/peer, process.c,
 // D235): ((:uid u) (:gid g) (:pid p)), :pid being RT_SYS_PID's. RT_PEER_x
 // is symbol RT_SYM_PEER + x.
-#define RT_SYM_PEER        151    // RT_SYM_EXEC + RT_EXEC_COUNT
+#define RT_SYM_PEER        149    // RT_SYM_EXEC + RT_EXEC_COUNT
 #define RT_PEER_UID          0    // :uid
 #define RT_PEER_GID          1    // :gid
 #define RT_PEER_COUNT        2
 
-// What kind a process is (D243), in :system's info as (:kind k): RT_KIND_x
-// is symbol RT_SYM_KIND + x.
-#define RT_SYM_KIND        153    // RT_SYM_PEER + RT_PEER_COUNT
+// The word :kind, in fs/stat's info (D254); :system's kind went with the
+// two kinds of process (D277).
+#define RT_SYM_KIND        151    // RT_SYM_PEER + RT_PEER_COUNT
 #define RT_KIND_KIND         0    // :kind
-#define RT_KIND_TASK         1    // :task          started with fork, or the root
-#define RT_KIND_ACTOR        2    // :actor         started with spawn or connect
-#define RT_KIND_COUNT        3
+#define RT_KIND_COUNT        1
 
-// What open (process.c, D243) opens for a task: RT_SOURCE_x is symbol
-// RT_SYM_SOURCE + x.
-#define RT_SYM_SOURCE      156    // RT_SYM_KIND + RT_KIND_COUNT
+// What open (process.c, D243) opens: RT_SOURCE_x is symbol RT_SYM_SOURCE
+// + x.
+#define RT_SYM_SOURCE      152    // RT_SYM_KIND + RT_KIND_COUNT
 #define RT_SOURCE_FS_READ    0    // :fs/read
 #define RT_SOURCE_FS_WRITE   1    // :fs/write
 #define RT_SOURCE_FS_APPEND  2    // :fs/append
@@ -292,13 +288,13 @@
 
 // What :system's (:runtime s info) says of the process table (D244):
 // RT_TABLE_x is symbol RT_SYM_TABLE + x.
-#define RT_SYM_TABLE       163    // RT_SYM_SOURCE + RT_SOURCE_COUNT
+#define RT_SYM_TABLE       159    // RT_SYM_SOURCE + RT_SOURCE_COUNT
 #define RT_TABLE_RECORDS     0    // :records       entries in use: running, open, or keeping a value
 #define RT_TABLE_COUNT       1
 
 // What fs/stat (files.c, D254) says of a file, (:kind k) among them:
 // RT_STAT_x is symbol RT_SYM_STAT + x.
-#define RT_SYM_STAT        164    // RT_SYM_TABLE + RT_TABLE_COUNT
+#define RT_SYM_STAT        160    // RT_SYM_TABLE + RT_TABLE_COUNT
 #define RT_STAT_FILE         0    // :file
 #define RT_STAT_DIR          1    // :dir
 #define RT_STAT_LINK         2    // :link          a symbolic link, not followed
@@ -311,7 +307,7 @@
 // bytes/pack's and bytes/unpack's specs (strings.c, D254), and :short, an
 // unpack that hasn't the bytes yet: RT_PACK_x is symbol RT_SYM_PACK + x.
 // The first 18 are numbers, a width and an order each.
-#define RT_SYM_PACK        171    // RT_SYM_STAT + RT_STAT_COUNT
+#define RT_SYM_PACK        167    // RT_SYM_STAT + RT_STAT_COUNT
 #define RT_PACK_U8            0    // :u8
 #define RT_PACK_I8            1    // :i8
 #define RT_PACK_U16BE         2    // :u16be
@@ -336,7 +332,7 @@
 
 // log's levels (json.c, D254), below :error, which is RT_SYM_ERROR:
 // RT_LOG_x is symbol RT_SYM_LOG + x.
-#define RT_SYM_LOG         191    // RT_SYM_PACK + RT_PACK_COUNT
+#define RT_SYM_LOG         187    // RT_SYM_PACK + RT_PACK_COUNT
 #define RT_LOG_DEBUG         0    // :debug
 #define RT_LOG_INFO          1    // :info
 #define RT_LOG_WARN          2    // :warn
@@ -344,12 +340,12 @@
 
 // An array's kinds (arrays.c, D253): :float is symbol RT_SYM_ARRAY +
 // RT_ARRAY_FLOAT, and :int is SIGINT's name, RT_SYM_EXEC + RT_EXEC_INT.
-#define RT_SYM_ARRAY       194    // RT_SYM_LOG + RT_LOG_COUNT
+#define RT_SYM_ARRAY       190    // RT_SYM_LOG + RT_LOG_COUNT
 #define RT_ARRAY_FLOAT       0    // :float
 #define RT_ARRAY_COUNT       1
 
 // What :system says of islands (D256): RT_ISLE_x is symbol RT_SYM_ISLE + x.
-#define RT_SYM_ISLE        195    // RT_SYM_ARRAY + RT_ARRAY_COUNT
+#define RT_SYM_ISLE        191    // RT_SYM_ARRAY + RT_ARRAY_COUNT
 #define RT_ISLE_ISLAND       0    // :island        the island a process is on, or an island's number
 #define RT_ISLE_STARTED      1    // :started       whether an island's thread has started
 #define RT_ISLE_SENT         2    // :sent          messages to other islands, and their bytes
@@ -470,15 +466,16 @@ typedef struct rt_msg {
     rt_value_t     value;
     rt_chunk_t    *chunk;       // what this record and value live in (new_msg in process.c)
     rt_value_t     device;      // a reader's pid, if it's to read on at the taker's next recv;
-                                // the address it was sent to, in a task's mailbox; or 0
+                                // the address it was sent to; or 0. Sent to an address, or from a
+                                // device its owner opened, it's for read, not recv (D277)
 } rt_msg_t;
 
-// READY: in the run queue. WAITING: in recv, with no stack. JOINING:
+// READY: in the run queue. WAITING: in recv, keeping its stack (D276). JOINING:
 // blocked in join, keeping its stack. RACING: blocked in join/race,
 // keeping its stack, with a watch that wakes it on each of its pids.
 // SLEEPING: in sleep, keeping its stack, until its timer wakes it.
-// READING: a task in read or read/any, keeping its stack, woken by a
-// message to one of its sources or by a watch on a pid among them (D243).
+// READING: in read or read/any, keeping its stack, woken by a message
+// to one of its sources (D243, D277).
 // DONE: ended, about to be freed.
 typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_RACING, RT_SLEEPING, RT_READING, RT_PLACING, RT_DONE } rt_state_t;
 
@@ -490,7 +487,8 @@ typedef struct rt_watch {
     struct rt_watch *next, *prev;           // on the watched one's list
     struct rt_watch *next_held, *prev_held; // on the watcher's
     struct rt_proc  *watched, *watcher;
-    int              wakes;                 // join/race's or read's (process.c): wakes the watcher, rather than telling it
+    int              wakes;                 // join/race's (process.c): wakes the watcher, rather than telling it
+    rt_value_t       addr;                  // a monitor's: the address told, or 0 for the watcher's inbox (D277)
 } rt_watch_t;
 
 // A process. Compiled code finds the current one in x28 (r15 on x86-64),
@@ -508,8 +506,6 @@ typedef struct rt_proc {
 
     rt_state_t      state;
     uint8_t         keypress;   // connected to :keypress
-    uint8_t         actor;      // started with spawn or connect, so it can recv and be sent to (D243)
-    uint8_t         parent_task;    // its parent, on another island, is a task, which can read its end (D256)
     void           *stack;      // the bottom of its stack (above the guard page), or NULL
     rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c)
     rt_chunk_t     *chunks;     // the old generation, newest first, the messages it's taken among them
@@ -642,16 +638,14 @@ extern const uintptr_t slight_functions[]    RT_ASM(slight_functions);
 // (D276). First, it may collect garbage, with the frame's slots in use
 // and the frames below as the roots, which it updates, as rt_preempt
 // does. rt_fork starts code(values...)
-// in a new process, a task, with the values deep-copied into its heap;
-// rt_spawn does the same for an actor (D243); rt_connect starts an actor,
-// and sends it every key from :keypress; rt_connect_system does too, and
-// gives the new process a :system device (D171). Compiled code hands
-// rt_fork, rt_spawn, rt_send and rt_recv the process, which it keeps in a
+// in a new process, with the values deep-copied into its heap; rt_connect
+// starts one too, and sends it every key from :keypress; rt_connect_system
+// does too, and gives the new process a :system device (D171). Compiled
+// code hands rt_fork, rt_send and rt_recv the process, which it keeps in a
 // register, since on macOS looking up rt_current, a thread-local, is a
 // call, and these are the busiest (D256).
 rt_value_t rt_fork(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
-rt_value_t rt_spawn(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_spawn);
-rt_value_t rt_spawn_on(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) RT_ASM(rt_spawn_on);
+rt_value_t rt_fork_on(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) RT_ASM(rt_fork_on);
 rt_value_t rt_island_of(const char *site) RT_ASM(rt_island_of);
 rt_value_t rt_islands(const char *site) RT_ASM(rt_islands);
 rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect);
@@ -697,7 +691,7 @@ void       rt_yield(void) RT_ASM(rt_yield);
 // ends the caller with (:error reason). These three return ().
 rt_value_t rt_join(rt_value_t pid, const char *site) RT_ASM(rt_join);
 rt_value_t rt_join_race(rt_value_t pids, const char *site) RT_ASM(rt_join_race);
-rt_value_t rt_monitor(rt_value_t pid, const char *site) RT_ASM(rt_monitor);
+rt_value_t rt_monitor(rt_value_t pid, rt_value_t to, const char *site) RT_ASM(rt_monitor);
 // A task's addresses (D243): rt_address makes one; rt_read waits, keeping
 // the stack, for the next message to an address of the task's, or for a
 // process to end, and gives it; rt_read_any does that for the first of a

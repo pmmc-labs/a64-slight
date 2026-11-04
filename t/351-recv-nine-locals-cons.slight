@@ -11,6 +11,6 @@
     (pprint (list a b c d e f g car cdr v))
     (w a b c d e f g car))
 
-(let p (spawn (w 1 2 3 4 5 6 7 8)))
+(let p (fork (w 1 2 3 4 5 6 7 8)))
 (send p (list :x 10))
 (send p (list :y 20))

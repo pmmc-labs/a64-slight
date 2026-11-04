@@ -39,7 +39,7 @@
 ; The registry's devices, asked by an actor of its own, whose end is read,
 ; since a task can't be told (D243).
 (defun devices-of (reg)
-    (match (read (spawn (listing reg)))
+    (match (join (fork (listing reg)))
         ((:ok ds) ds)))
 
 (defun listing (reg)
@@ -49,7 +49,7 @@
 ; The top level is a task (D243): rpc/listen starts the hub from it, and
 ; the registry tells it at an address when a device hangs up.
 (let to (address))
-(let reg (spawn (registry () to)))
+(let reg (fork (registry () to)))
 (match (rpc/listen "127.0.0.1:0" (hub-handlers reg))
     ((:ok (l port))
         (let conns (map (lambda (d) (device port (car d) (cadr d))) (list (list "b" 19) (list "a" 21) (list "c" 23))))

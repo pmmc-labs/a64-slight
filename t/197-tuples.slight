@@ -34,7 +34,7 @@
     ; rendered as pprint shows it, and as JSON arrays
     (pprint (str "t=" (tuple 1 (tuple 2))))
     (pprint (json/print (tuple 1 (tuple "a" :null) (list 2) (tuple))))
-    (let e (spawn (echo)))
+    (let e (fork (echo)))
     (send e (list $$ (tuple "s" 1.5 (tuple (list 1 2)) t)))
     (pprint (recv))
     (let deep (nest 100000 ()))
@@ -46,5 +46,5 @@
     (pprint (join (fork (tuple/len (list 1)))))
     (pprint (join (fork (tuple/get (tuple 1 2) 1.0)))))
 
-(read (spawn (top-level)))
+(join (fork (top-level)))
 ; warns: 46:36 47:48

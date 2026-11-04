@@ -6,4 +6,4 @@
         (msg (server))))
 
 (pprint :before)
-(read (spawn (server)))
+(join (fork (server)))

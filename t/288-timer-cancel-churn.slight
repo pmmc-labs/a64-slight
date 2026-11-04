@@ -18,7 +18,7 @@
 (defun rounds (to r ok)
     (if (== r 0) ok (rounds to (- r 1) (one-round to ok))))
 
-(let to (spawn (recv)))
+(let to (fork (recv)))
 (let long (set-timers to 40))
 (let ok (rounds to 50 0))
 (+ ok (trues (map timer/cancel (reverse long))))

@@ -57,7 +57,7 @@
 (let to (address))
 (let l (connect :unix/listen path (server to)))
 (read to)
-(let connected (read (connect :unix path (client))))
+(let connected (join (connect :unix path (client))))
 (let who (cadr (read to)))
 (pprint (list :accepted (eq? who mine)))
 (pprint (list :connected (eq? connected (list :ok mine))))

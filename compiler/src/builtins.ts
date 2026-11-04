@@ -199,7 +199,7 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'read': fn([PID], ANY),
     'read/any': fn([listOf(PID)], shape([PID, ANY])),
     'open': fn([SYM, ANY], okOr(PID, ANY)),
-    'monitor': fn([PID], NIL_T),
+    'monitor': fn([PID, addressOf(ANY)], NIL_T),
     'kill': fn([PID], NIL_T),
     'raise': fn([ANY], NEVER),
     'after': fn([INT, PID, ANY], INT),
@@ -292,7 +292,7 @@ export function faultFor(t: Ty): string | null {
         case 'list': case 'nil': return 'not-a-list';
         case 'cons':    return 'not-a-cons';
         case 'fun':     return 'not-a-function';
-        case 'pid': case 'task': case 'actor': case 'address': return 'not-a-pid';
+        case 'pid': case 'address': return 'not-a-pid';
         case 'or':
             if (t.of.every((x) => x.k === 'int' || x.k === 'float')) return 'not-a-number';
             if (t.of.every((x) => x.k === 'lit' && (x.name === '#true' || x.name === '#false'))) return 'not-a-bool';

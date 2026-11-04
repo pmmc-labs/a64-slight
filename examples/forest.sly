@@ -166,7 +166,7 @@ fun grow(painter, x, y, angle, len, depth, lean) {
     dotimes(0, children, fun(i) {
         let a = angle + (0.42 * (i - (children - 1) / 2.0) + (0.5 * (rand::float() - 0.5) + lean));
         let l = len * (0.66 + 0.16 * rand::float());
-        let b = spawn bud(painter, x1, y1, a, l, inc(depth), lean);
+        let b = fork bud(painter, x1, y1, a, l, inc(depth), lean);
         after(150 + rand::int(250), b, :grow)
     })
 }
@@ -180,7 +180,7 @@ let rows = tty::screen::rows() - 1;
 let w = 2 * cols;
 let h = 4 * rows;
 let trees = 3 + rand::int(3);
-let painter = spawn paint(map::new(), #(cols, rows), trees, 0);
+let painter = fork paint(map::new(), #(cols, rows), trees, 0);
 tty::write("\e[?25l\e[2J");
 
 send(painter, :dots(range(0, div(w * h, 120)) |> map(fun(i) => [rand::int(w), rand::int(div(h, 2))]), rank::star()));
@@ -194,11 +194,11 @@ let lean = 0.06 * (rand::float() - 0.5);
 dotimes(0, trees, fun(i) {
     let x = math::round(w * (i + 0.5) / trees + w / (3.0 * trees) * (rand::float() - 0.5));
     let len = h * (0.13 + 0.06 * rand::float());
-    let b = spawn bud(painter, x, ground(h, x), math::PI / 2 + 0.2 * (rand::float() - 0.5), len, 0, lean);
+    let b = fork bud(painter, x, ground(h, x), math::PI / 2 + 0.2 * (rand::float() - 0.5), len, 0, lean);
     after(700 * i, b, :grow)
 });
 
-match read(painter) {
+match join(painter) {
     :ok([drawn, lit, picture]) => {
         tty::write("\e[0m\e[", inc(rows), ";1H\e[?25h",
                    drawn, " branches, ", if int?(seed) { str("from seed ", seed) } else { "from the system's seed" },

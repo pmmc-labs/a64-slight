@@ -51,8 +51,8 @@ fun collect(to, n, answers, is_even?, is_odd?) {
 
 let $reply_to = address();
 
-let is_even? = spawn is_it_even?($reply_to);
-let is_odd?  = spawn is_it_odd?($reply_to);
+let is_even? = fork is_it_even?($reply_to);
+let is_odd?  = fork is_it_odd?($reply_to);
 
 pprint($reply_to);
 send(is_even?, :IS-EVEN?(21, is_odd?));

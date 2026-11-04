@@ -55,4 +55,4 @@
     (pprint (call (tools/read-file) ()))
     (pprint (call (tools/read-file) (list (list "path" 5)))))
 
-(read (spawn (top-level)))
+(join (fork (top-level)))

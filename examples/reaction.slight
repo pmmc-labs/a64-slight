@@ -106,7 +106,7 @@
 (defun start (w h)
     (let k  (math/min (islands) (div h 2)))
     (let ss (seeds w h (math/max 3 (div (* w h) 400)) 7 ()))
-    (map (lambda (b) (spawn/on b (band b w (div (* b h) k) (div (* (+ b 1) h) k) ss))) (range 0 k)))
+    (map (lambda (b) (fork/on b (band b w (div (* b h) k) (div (* (+ b 1) h) k) ss))) (range 0 k)))
 
 ; Each band its neighbours' edges, for a step; or asked for its own
 ; edges, before the first. What's asked goes on in go-on, with k.
@@ -208,4 +208,4 @@
         (("--steps" n w h) (quiet (str->int n) (str->int w) (str->int h)))
         (_                 (live))))
 
-(cadr (read (spawn (main @ARGV))))
+(cadr (join (fork (main @ARGV))))

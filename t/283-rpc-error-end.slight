@@ -12,7 +12,7 @@
 ; Says held, then tells w of the process running it, which never ends.
 (defun hold (w)
     (rpc/handler "hold" "Says held, then never ends." ()
-        (lambda () (rpc/next :held) (send w (list :running $$)) (read (spawn (stuck))))))
+        (lambda () (rpc/next :held) (send w (list :running $$)) (join (fork (stuck))))))
 
 ; --- a raw client, and the server's calls ----------------------------------
 
@@ -107,7 +107,7 @@
     (recv
         ((:listening port)
             ; an actor can't read, so a task it joins reads the client's end (D243)
-            (join (fork (read (connect :tcp (str "127.0.0.1:" port) (client (script))))))
+            (join (fork (join (connect :tcp (str "127.0.0.1:" port) (client (script))))))
             (kill l)
             (stopped 2))))
 
@@ -115,4 +115,4 @@
 (defun top-level ()
     (main (rpc/serve "127.0.0.1:0" (list (hold $$)))))
 
-(read (spawn (top-level)))
+(join (fork (top-level)))
