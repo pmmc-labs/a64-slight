@@ -7004,3 +7004,39 @@ end; its two programs, `con-tasks` and `con-states`, are as they were.
 The tutorial's chapter 4 answers at an address first, finds the lost
 update, then answers at a pid, and says why `ask` is the usual way.
 Nothing else moved.
+
+**D280. ts-cpi's Games of Life as golden tests.** *(Stevan, Nov 2026:
+"Let's proceed to step 5", PLAN.md's "One kind of process, and an
+address for every message", step 5.)* Eight of ts-cpi's twenty-two
+Games of Life, those that use only processes and messages, are golden
+tests 367 to 374, each on `t/data/life.slight`, the board, the seed, the
+rule and the frames, and each printing the nine frames of
+`t/models/life.py`, which models every port's commentary too and writes
+its expected output. What each shows: 367, a process per cell, where an
+address per generation does the buffering ts-cpi kept a list for, a
+neighbour's state for g+1 waiting at the address for g+1 while the cell
+reads g's eight times; 368, row workers meeting at a barrier that is
+one address read eight times; 369, a metronome on the virtual clock,
+`sleep` and `after`, a player 30 ms late and the conductor's watch a
+timer to its own address; 370, literal death, a live cell a process and
+a dead one none, where an undertaker address hears every end, read
+before the next death, so each obituary's count of neighbours outlived
+is the model's; 371, dataflow by join, 576 processes joining nine each,
+the top level joining each generation for its frame; 372, the board in
+the timer queue, a timer per live cell ringing at a time that is the
+cell; 373, let it crash, a cell raising its own death and the supervisor
+restarting it on the exit notice, from the state in its own hands; and
+374, the hostile scheduler, four workers on one job queue under
+`SLIGHT_SCHED`, whose frames hold under any seed, and which t/replay.sh
+runs under five. Bent to the language, not the other way (D84): `kill`
+carries no reason, so fate tells a cell why and the cell raises it
+(370); ts-cpi's shared mailbox is a queue process (374); and the
+commentary that went by ts-cpi's scheduler, rounds, quotas and who
+computed what, is left out, since a golden test's output is worked out
+by hand. Found on the way: a timer's message lands the instant it rings,
+while a process woken by `sleep` at the same instant still has to run,
+so the conductor's watch grumbles once more than the sketch said (369).
+The other fourteen don't port: traps, parking, checkpoints, pads, tick
+metering, multi-shot continuations and a deliberate deadlock need a
+scheduler with its hands inside a process, and 08's forked timelines are
+"Branching a replay". With this the proposal is built.

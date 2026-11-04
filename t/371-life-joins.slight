@@ -1,0 +1,46 @@
+; ts-cpi's 11, dataflow by join (D280): every cell of every generation
+; is a short-lived process of its own, 64 cells by 9 generations, 576
+; processes, all forked before the first frame is printed. A cell of
+; generation g+1 is handed the pids of the nine processes of generation g
+; it depends on, itself and its eight neighbours, joins each, applies
+; the rule, and ends with its state. The whole run is one dataflow
+; graph whose edges are joins, and the runtime knows nothing about Life:
+; a join of a process that hasn't ended waits, keeping its stack, and
+; one of a process that has ended takes its value, kept till its parent,
+; the top level, has it too.
+;
+; Frames are read back from the ended: the top level joins each
+; generation's 64 processes in turn. Worked out by hand: the frames are
+; t/models/life.py's, and 512 processes join nine each, 4608 joins,
+; before the top level's own 576.
+
+(@include "data/life.slight")
+
+; Generation g+1: deps is (self n1 .. n8), nine pids of generation g.
+(defun cell (deps)
+    (let states (map (lambda (p) (match (join p) ((:ok s) s))) deps))
+    (life/rule (car states) (sum (cdr states))))
+
+; A pid board has a board's shape, with a pid where each state would be.
+(defun seed-pids (seed)
+    (life/make (lambda (row col) (let s (life/cell seed row col)) (fork s))))
+
+(defun next-pids (prev)
+    (life/make (lambda (row col)
+        (let deps (cons (life/cell prev row col)
+                        (map (lambda (p) (life/cell prev (car p) (cadr p))) (life/neighbors row col))))
+        (fork (cell deps)))))
+
+; The pid boards, generation 0 first.
+(defun build (gen prev acc)
+    (if (== gen (life/generations))
+        (reverse (cons prev acc))
+        (build (+ gen 1) (next-pids prev) (cons prev acc))))
+
+(defun frame (pids)
+    (life/make (lambda (row col) (match (join (life/cell pids row col)) ((:ok s) s)))))
+
+(let boards (build 0 (seed-pids (life/seed)) ()))
+(pprint (list :processes (* (length boards) (life/cells)) :joins-each 9))
+(map (lambda (gen) (life/print gen (frame (nth gen boards)))) (range 0 (+ (life/generations) 1)))
+:done

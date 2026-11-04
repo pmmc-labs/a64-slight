@@ -1,0 +1,93 @@
+; ts-cpi's 04, the metronome (D280): generations are driven by the
+; clock, one beat every 100 ms and a generation a beat. Eight row players
+; sit with their music, the three rows around their own, and sleep till
+; the next beat; then they play, computing their row, hand it in at the
+; conductor's address, and wait for new music. The conductor, the top
+; level, prints each frame with the time it was complete.
+;
+; One player drags: on beat 3 the player of row 5 oversleeps by 30 ms.
+; The conductor won't print a frame with a hole in it, so once a beat is
+; due with rows missing it checks its watch every 10 ms, with a timer to
+; its own address, and grumbles. Frame 3 lands at 330 ms, not 300. The
+; players aim at absolute beats, the conductor writing the time on each
+; score, so beat 4 is still on time at 400 ms: lateness doesn't
+; accumulate. Nothing takes real time: the virtual clock moves only when
+; everything waits, straight to the next timer.
+;
+; Worked out by hand: the frames are t/models/life.py's; beats 0 to 8
+; land at 0, 100, 200, 330, 400, 500, 600, 700 and 800 ms, with grumbles
+; at 310, 320 and 330 ms: a timer's message lands the instant it rings,
+; while the player woken at 330 still has its row to play, so the watch
+; set at 320 grumbles once more before row 5 lands. The watch it sets
+; then, for 340, is taken back.
+
+(@include "data/life.slight")
+
+(defun beat () 100)
+(defun now-ms () (div (clock/us) 1000))
+
+; How long a player sleeps: till the beat, from now, the time the
+; conductor wrote on the score; row 5 oversleeps beat 3.
+(defun sleep-for (row beat-no now)
+    (let on-time (- (* beat-no (beat)) now))
+    (if (and (== row 5) (== beat-no 3)) (+ on-time 30) on-time))
+
+; A score is (:score gen now above own below); the row, (row gen+1
+; new-row), goes to the conductor's address. :stop ends the performance.
+(defun player (row to)
+    (recv
+        ((:score gen now above own below)
+            (sleep (sleep-for row (+ gen 1) now))
+            (send to (list row (+ gen 1) (life/step-row above own below)))
+            (player row to))
+        (:stop :bow)))
+
+(defun hand-out (players gen board)
+    (let now (now-ms))
+    (map (lambda (row)
+            (send (nth row players)
+                (list :score gen now
+                    (nth (life/wrap (- row 1) (life/height)) board)
+                    (nth row board)
+                    (nth (life/wrap (+ row 1) (life/height)) board))))
+        (range 0 (life/height))))
+
+(defun missing (got)
+    (filter (lambda (row) (eq? (lookup row got) :not-found)) (range 0 (life/height))))
+
+; Waits at to for the rows of beat gen, due at due. got is (row new-row)
+; pairs, and check the watch timer's number, or () while none is set:
+; one is set when the beat is due and rows are still missing, and taken
+; back once they're all in.
+(defun await (to gen due got check)
+    (if (== (length got) (life/height))
+        (do (when (not (nil? check)) (timer/cancel check)) got)
+        (match (read to)
+            ((row g new-row)
+                (when (not (== g gen)) (raise (list :off-beat row g)))
+                (let got2 (cons (list row new-row) got))
+                (if (and (>= (now-ms) due) (and (< (length got2) (life/height)) (nil? check)))
+                    (await to gen due got2 (after 10 to :check))
+                    (await to gen due got2 check)))
+            (:check
+                (pprint (list :conductor :t (now-ms) :ms (- (now-ms) due) :late :waiting-for (missing got)))
+                (await to gen due got (after 10 to :check))))))
+
+(defun perform (players to gen board)
+    (pprint (list :conductor :t (now-ms) :beat gen))
+    (life/print gen board)
+    (when (< gen (life/generations))
+        (hand-out players gen board)
+        (let due (* (+ gen 1) (beat)))
+        (let got (await to (+ gen 1) due () ()))
+        (when (> (now-ms) due)
+            (pprint (list :conductor :beat (+ gen 1) :lands (- (now-ms) due) :ms-late :beat (+ gen 2) :still-due-at (+ due (beat)))))
+        (perform players to (+ gen 1) (map (lambda (row) (lookup row got)) (range 0 (life/height))))))
+
+(let to (address))
+(let players (map (lambda (row) (fork (player row to))) (range 0 (life/height))))
+(pprint (list :conductor (length players) :players :a-beat-every (beat) :ms))
+(perform players to 0 (life/seed))
+(map (lambda (p) (send p :stop)) players)
+(pprint (list :conductor :t (now-ms) :the-players (map join players)))
+:done

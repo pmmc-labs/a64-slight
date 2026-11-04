@@ -1,0 +1,95 @@
+; ts-cpi's 02, actors (D280): a process per cell, 64 in all. Each knows
+; only its own state and, after an introduction, an address for each of
+; its eight neighbours. Every generation it tells its neighbours its
+; state, hears theirs, and applies the rule: no global clock, no central
+; board, and nothing tells a cell what generation it is.
+;
+; The trap is that cells run at different speeds: a fast neighbour's
+; state for generation g+1 can arrive before this cell has heard all of
+; g, and a cell that counted the first eight states it got would mix two
+; generations. ts-cpi tagged each state with its generation and buffered
+; the early ones. Here an address per generation does the buffering: a
+; cell makes an address for the next generation and sends it with its
+; state, so a neighbour's state for g+1 goes to the address for g+1 and
+; waits there, unread, while the cell reads the address for g eight
+; times. A neighbour can never be more than one generation ahead, since
+; it can't compute g+1 without this cell's state for g.
+;
+; The collector is the top level: every cell reports (gen index state)
+; to it each generation, and it prints a frame once all 64 cells have
+; reported that generation, even while fast cells are further on. At the
+; end it joins every cell. Worked out by hand: the frames are
+; t/models/life.py's; 64 cells send 8 states to 8 neighbours each, 4096
+; in all, and 9 reports each, 576.
+
+(@include "data/life.slight")
+
+; A cell's first message is its introduction: its neighbours' addresses
+; for generation 0. It made its own, and told the collector, first.
+(defun cell (index state collector)
+    (let here (address))
+    (send collector (list :hello index here))
+    (recv
+        ((:neighbors addrs) (live index 0 state addrs here collector))))
+
+; One generation: report, tell each neighbour this state and the address
+; the next generation's states should come to, and hear eight states
+; for this one, each with its sender's address for the next.
+(defun live (index gen state neighbors here collector)
+    (send collector (list :report gen index state))
+    (if (== gen (life/generations))
+        (do (disconnect here) (list :retired index))
+        (do
+            (let next (address))
+            (map (lambda (n) (send n (list :state state next))) neighbors)
+            (match (gather here 8 0 ())
+                ((count addrs)
+                    (disconnect here)
+                    (live index (+ gen 1) (life/rule state count) addrs next collector))))))
+
+(defun gather (here need count addrs)
+    (if (== need 0)
+        (list count addrs)
+        (match (read here)
+            ((:state s next) (gather here (- need 1) (+ count s) (cons next addrs))))))
+
+; --- the collector -------------------------------------------------------
+
+; Every cell's hello, as (index address), by index.
+(defun hellos (n table)
+    (if (== n 0)
+        table
+        (recv ((:hello index here) (hellos (- n 1) (assoc index here table))))))
+
+(defun introduce (cells table)
+    (map (lambda (i)
+            (let addrs (map (lambda (p) (lookup (life/index (car p) (cadr p)) table))
+                            (life/neighbors (life/row i) (life/col i))))
+            (send (nth i cells) (list :neighbors addrs)))
+        (range 0 (life/cells))))
+
+; Reports come in any order; a frame is printed once its 64 are in. gen
+; is the next frame to print, reports those not yet printed, as (gen
+; index state), and seen how many have come in all.
+(defun collect (gen reports seen)
+    (let mine (filter (lambda (r) (== (car r) gen)) reports))
+    (cond
+        ((> gen (life/generations)) seen)
+        ((== (length mine) (life/cells))
+            (life/print gen (life/make (lambda (row col)
+                (caddr (find (lambda (r) (== (cadr r) (life/index row col))) mine)))))
+            (collect (+ gen 1) (remove (lambda (r) (== (car r) gen)) reports) seen))
+        (#true
+            (recv ((:report g index state) (collect gen (cons (list g index state) reports) (+ seen 1)))))))
+
+(let me $$)
+(let board (life/seed))
+(let cells (map (lambda (i)
+                    (let state (life/cell board (life/row i) (life/col i)))
+                    (fork (cell i state me)))
+                (range 0 (life/cells))))
+(introduce cells (hellos (life/cells) ()))
+(let seen (collect 0 () 0))
+(let ends (map join cells))
+(pprint (list :reports seen :retired (length (filter (lambda (e) (match e ((:ok (:retired _)) #true) (_ #false))) ends))))
+:done

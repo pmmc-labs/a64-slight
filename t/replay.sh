@@ -17,7 +17,8 @@
 # all give one order. A seeded run must replay as it went. And
 # t/267-join-any-all.slight, whose results go by the virtual clock and
 # not by the order processes run in, must print its golden output under
-# five seeds (D220).
+# five seeds (D220); and so must t/374-life-hostile.slight, whose frames
+# don't go by which worker takes which job (D280).
 #
 # t/replay/rand.slight draws random numbers in processes that interleave
 # (D222): with SLIGHT_SEED it must print the same under five SLIGHT_SCHED
@@ -64,6 +65,10 @@ done
 if ! node bin/slightc.ts --target "$TARGET" -o "$dir/joins" t/267-join-any-all.slight >"$dir/joins.compile" 2>&1; then
     cat "$dir/joins.compile"
     check "joins (compile)" no
+fi
+if ! node bin/slightc.ts --target "$TARGET" -o "$dir/life" t/374-life-hostile.slight >"$dir/life.compile" 2>&1; then
+    cat "$dir/life.compile"
+    check "life (compile)" no
 fi
 [ $fail -eq 0 ] || exit 1
 
@@ -235,6 +240,18 @@ for seed in 1 2 3 4 5; do
     else
         diff -u t/267-join-any-all.expected "$dir/joins.$seed"
         check "join/any and join/all, seed $seed" no
+    fi
+done
+
+# The hostile scheduler's Life (374): the same frames under five seeds, as
+# its golden run under one (D280).
+for seed in 1 2 3 4 5; do
+    run SLIGHT_CLOCK=virtual SLIGHT_SCHED=$seed life >"$dir/life.$seed"
+    if printf 'exit: 0\n' | cat t/374-life-hostile.expected - | cmp -s - "$dir/life.$seed"; then
+        check "the hostile scheduler's Life, seed $seed" ok
+    else
+        diff -u t/374-life-hostile.expected "$dir/life.$seed"
+        check "the hostile scheduler's Life, seed $seed" no
     fi
 done
 

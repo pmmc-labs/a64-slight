@@ -1,0 +1,85 @@
+; ts-cpi's 13, let it crash (D280): Erlang's motto, applied to biology.
+; Death isn't a decision the supervisor makes: it's a failure. Every live
+; cell is a process that, each generation, is told its number of live
+; neighbours, judges itself, and either lives on and says so, or raises
+; (:died row col cause count age lives). The supervisor, the top level,
+; monitors every cell to one address, where the cells' answers come too,
+; so each generation it reads one message per live cell: alive, or an
+; exit with the crash's reason, in the order the cells were told. Birth
+; is a restart: when a dead place has exactly three live neighbours, the
+; supervisor starts the cell that last lived there again, from the state
+; in its own hands, the incarnation the crash reported, bumped, and the
+; age reset. Each crash gets a post-mortem from the exit's reason.
+;
+; Worked out by hand, by t/models/life.py's model of the same rule and
+; the same bookkeeping: the frames, each boot and restart, each
+; post-mortem, and each step's tally.
+
+(@include "data/life.slight")
+
+(defun cell (row col age lives to)
+    (recv
+        ((:neighbors n)
+            (let cause (cond ((< n 2) :loneliness) ((> n 3) :overcrowding) (#true ())))
+            (if (nil? cause)
+                (do (send to (list :alive row col)) (cell row col (+ age 1) lives to))
+                (raise (list :died row col cause n age lives))))))
+
+; --- the supervisor ---------------------------------------------------------
+
+; The registry has, at each place, () for one never lived in, (:live pid
+; lives) or (:dead lives), lives being the incarnations so far.
+(defun live-pid (entry) (match entry ((:live p _) p) (_ ())))
+(defun lives-of (entry) (match entry ((:live _ n) n) ((:dead n) n) (_ 0)))
+(defun at (board pos) (life/cell board (car pos) (cadr pos)))
+(defun board-of (registry)
+    (life/make (lambda (row col) (if (nil? (live-pid (life/cell registry row col))) 0 1))))
+
+(defun start (entry row col to)
+    (let lives (+ (lives-of entry) 1))
+    (pprint (list :supervisor (list row col) (if (== lives 1) :first-boot-as :restarted-as) (list row col 0 lives)))
+    (let p (fork (cell row col 0 lives to)))
+    (monitor p to)
+    (list :live p lives))
+
+; One message per live cell: it lived, or it crashed. Gives the crashes,
+; (row col cause count age lives), in the order they came.
+(defun judgements (to n crashes)
+    (if (== n 0)
+        (reverse crashes)
+        (match (read to)
+            ((:alive _ _) (judgements to (- n 1) crashes))
+            ((:exit _ (:error (:died row col cause count age lives)))
+                (judgements to (- n 1) (cons (list row col cause count age lives) crashes))))))
+
+(defun step (gen registry to)
+    (let board (board-of registry))
+    (let counts (life/make (lambda (row col) (life/count board row col))))
+    (let live (filter (lambda (pos) (== (at board pos) 1)) (life/positions)))
+    (map (lambda (pos) (send (live-pid (at registry pos)) (list :neighbors (at counts pos)))) live)
+    (let crashes (judgements to (length live) ()))
+    (map (lambda (c)
+            (match c
+                ((row col cause count age lives)
+                    (pprint (list :supervisor (list row col) :crashed-of cause :its-frame-says :count count :age age :life lives)))))
+        crashes)
+    (let born? (lambda (pos) (and (== (at board pos) 0) (== (at counts pos) 3))))
+    (let next (life/make (lambda (row col)
+        (let entry (life/cell registry row col))
+        (cond
+            ((not (nil? (find (lambda (c) (and (== (car c) row) (== (cadr c) col))) crashes))) (list :dead (lives-of entry)))
+            ((born? (list row col)) (start entry row col to))
+            (#true                  entry)))))
+    (pprint (list :supervisor :tally :crashes (length crashes) :births (length (filter born? (life/positions)))))
+    next)
+
+(defun generation (gen registry to)
+    (life/print gen (board-of registry))
+    (when (< gen (life/generations))
+        (generation (+ gen 1) (step gen registry to) to)))
+
+(let to (address))
+(let seed (life/seed))
+(let registry (life/make (lambda (row col) (if (== (life/cell seed row col) 1) (start () row col to) ()))))
+(generation 0 registry to)
+:done

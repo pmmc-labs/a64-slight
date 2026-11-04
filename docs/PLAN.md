@@ -2222,7 +2222,7 @@ browser when watching from afar matters. It would sit with the
 simulation library above: the flagship's dashboard is this viewer, fed
 by the root.
 
-### One kind of process, and an address for every message (Nov 2026: steps 1 to 4 built, D276 to D279; step 5 open)
+### One kind of process, and an address for every message (Nov 2026: built, D276 to D280)
 
 Proposed by Claude after Stevan went back to ts-slight ("the process
 split felt kind of wrong when we did it ... I've struggled with the
@@ -2423,7 +2423,11 @@ Mac, stackful against today.
    (traps, parking, checkpoints, pads, tick metering, multi-shot
    continuations, a deliberate deadlock) need a scheduler with its
    hands inside a process, and don't port; 08's forked timelines are
-   "Branching a replay."
+   "Branching a replay." *Built (D280): golden tests 367 to 374, on
+   `t/data/life.slight`, their frames and commentary from
+   `t/models/life.py`; `kill` carries no reason, so a cell told to die
+   raises it; ts-cpi's shared job queue is a process; and 374 runs under
+   five seeds in t/replay.sh too.*
 
 **To settle:**
 

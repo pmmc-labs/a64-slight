@@ -1,0 +1,100 @@
+; env: SLIGHT_SCHED=18
+; ts-cpi's 18, the hostile scheduler (D280): four workers share one job
+; queue, a process they ask for the next job, and each job is "compute
+; cell i of generation g from this board", the board sent in the job.
+; Each answer, (gen index value worker), goes to the collector's address,
+; the top level's. The adversary is the scheduler: SLIGHT_SCHED runs the
+; processes in a seeded order (D170), so which worker takes which job,
+; and when its answer lands, is the seed's to say; and the collector
+; cheats too: it posts the 64 jobs in a shuffled order, a random odd
+; stride, forges a stale job from the previous generation, posts one job
+; twice, and declares a generation over the moment 64 distinct answers
+; are in, so late answers leak into the next. None of it changes the
+; frames, because correctness lives in the protocol, not in the
+; schedule: boards are values, every answer is tagged, and the collector
+; keeps the first answer for each cell of the generation and drops the
+; rest.
+;
+; Worked out by hand: the frames are t/models/life.py's; each
+; generation's stride, offset, forgery and duplicate come from a pure
+; hash of its number; and 66 answers a generation, 528 in all, are read
+; by the end, 512 kept and 16 dropped. Which worker computed what, and
+; whether a drop was stale or a repeat, go by the schedule, so they
+; aren't printed; t/replay.sh runs this under other seeds too, and the
+; frames must come out the same.
+
+(@include "data/life.slight")
+
+; The job queue: jobs waiting for a worker, or workers waiting for a job.
+(defun queue (jobs takers)
+    (recv
+        ((:post job)
+            (match takers
+                (()          (queue (append jobs (list job)) ()))
+                ((to & rest) (reply to job) (queue jobs rest))))
+        ((:take to)
+            (match jobs
+                (()           (queue () (append takers (list to))))
+                ((job & rest) (reply to job) (queue rest takers))))))
+
+; A job is (gen index board); the answer is (gen index value id).
+(defun worker (id q results)
+    (match (ask q (list :take))
+        ((gen index board)
+            (send results (list gen index (life/step-cell board (life/row index) (life/col index)) id))
+            (worker id q results))))
+
+; The dice: a pure hash of (gen salt), as ts-cpi rolled them, so the
+; chaos is the same every run. Nothing here reaches 2^62.
+(defun lcg (x) (% (+ (* x 1103515245) 12345) 2147483648))
+(defun mix (x) (lcg (% (+ (div (* x x) 65536) x) 2147483648)))
+(defun dice (gen salt n) (% (div (mix (+ salt (mix (mix (+ gen 977))))) 65536) n))
+
+(defun post (q gen index board) (send q (list :post (list gen index board))))
+
+; The forged stale job, the 64 real jobs in a shuffled order, and a
+; duplicate of the first of them.
+(defun post-all (q gen board prev)
+    (let stride (+ 1 (* 2 (dice gen 11 32))))
+    (let offset (dice gen 12 64))
+    (let forged (dice gen 13 64))
+    (let order (map (lambda (i) (% (+ offset (* i stride)) 64)) (range 0 (life/cells))))
+    (post q (- gen 1) forged prev)
+    (map (lambda (index) (post q gen index board)) order)
+    (post q gen (car order) board)
+    (pprint (list :adversary :posts 66 :stride stride :offset offset :forged-from (- gen 1) :cell forged :duplicate (car order))))
+
+; Reads answers till 64 distinct ones for gen are in: got is (index
+; value) pairs, and dropped how many were stale or repeats, over the run.
+(defun collect (results gen got dropped)
+    (if (== (length got) (life/cells))
+        (list got dropped)
+        (match (read results)
+            ((g index value _)
+                (if (or (not (== g gen)) (not (eq? (lookup index got) :not-found)))
+                    (collect results gen got (+ dropped 1))
+                    (collect results gen (assoc index value got) dropped))))))
+
+(defun run (gen board prev q results dropped)
+    (life/print gen board)
+    (if (< gen (life/generations))
+        (do
+            (post-all q (+ gen 1) board prev)
+            (match (collect results (+ gen 1) () dropped)
+                ((got dropped2)
+                    (pprint (list :kept 64 :for (+ gen 1)))
+                    (run (+ gen 1) (life/make (lambda (row col) (lookup (life/index row col) got))) board q results dropped2))))
+        dropped))
+
+; The leftovers: every job posted gets an answer in the end.
+(defun drain (results n dropped)
+    (if (== n 0) dropped (do (read results) (drain results (- n 1) (+ dropped 1)))))
+
+(let results (address))
+(let q (fork (queue () ())))
+(let workers (map (lambda (id) (fork (worker id q results))) (range 0 4)))
+(pprint (list :workers (length workers) :one-queue :scheduler :hostile))
+(let dropped (run 0 (life/seed) (life/seed) q results 0))
+(let total (* 66 (life/generations)))
+(pprint (list :answers total :kept (* 64 (life/generations)) :dropped (drain results (- (- total (* 64 (life/generations))) dropped) dropped)))
+:done

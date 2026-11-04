@@ -1,0 +1,106 @@
+; ts-cpi's 07, literal death (D280): a live cell is a process, and a dead
+; cell is no process at all. Fate, the top level, keeps a registry of
+; who lives where, and each generation takes a census, decides for the
+; whole board at once who dies and who is born, tells each dying cell
+; why, :loneliness or :overcrowding, and forks a newborn in the place of
+; each ghost. A cell told to die raises its reason, with its place, its
+; birth and how many neighbours it has outlived: kill carries no reason,
+; so death is the cell's own last act. An undertaker, an address fate
+; monitors every cell to, hears each end, and fate reads an obituary
+; from it before the next death, so a dying cell has heard of every
+; neighbour that died before it, row by row. Neighbours watch each
+; other: a newborn monitors every live neighbour, and each older one is
+; told to monitor it, so a cell's whole life is hearing of its
+; neighbours' ends and counting them. After wiring, fate yields once, so
+; every cell has set its monitors before anyone can die.
+;
+; Worked out by hand, by t/models/life.py's model of the same census and
+; the same order of deaths: the frames, each step's births and deaths,
+; and each obituary.
+
+(@include "data/life.slight")
+
+(defun cell (row col born mourned)
+    (recv
+        ((:neighbor p) (monitor p) (cell row col born mourned))
+        ((:exit _ _)   (cell row col born (+ mourned 1)))
+        ((:die reason) (raise (list reason row col born mourned)))))
+
+; --- fate -----------------------------------------------------------------
+
+(defun board-of (registry)
+    (life/make (lambda (row col) (if (pid? (life/cell registry row col)) 1 0))))
+
+; What fate has in store for a cell: :born, :stays, :empty, or why it dies.
+(defun fate-of (board row col)
+    (let alive (== (life/cell board row col) 1))
+    (let n (life/count board row col))
+    (let next (life/rule (if alive 1 0) n))
+    (cond
+        ((and alive (== next 1)) :stays)
+        (alive                   (if (< n 2) :loneliness :overcrowding))
+        ((== next 1)             :born)
+        (#true                   :empty)))
+
+(defun dies? (fate) (or (eq? fate :loneliness) (eq? fate :overcrowding)))
+
+(defun at (board pos) (life/cell board (car pos) (cadr pos)))
+
+; Tells a cell to die, and reads its obituary from the undertaker.
+(defun bury (p reason undertaker gen)
+    (send p (list :die reason))
+    (match (read undertaker)
+        ((:exit _ (:error (why row col born mourned)))
+            (list :obituary (list row col) why :lived born :to gen :outlived mourned))))
+
+(defun spawn-cell (row col gen undertaker)
+    (let p (fork (cell row col gen 0)))
+    (monitor p undertaker)
+    p)
+
+; A newborn watches every live neighbour, and each older one watches it;
+; two born together each wire the other.
+(defun wire (registry fates row col)
+    (let me (life/cell registry row col))
+    (map (lambda (pos)
+            (let other (at registry pos))
+            (when (pid? other)
+                (send me (list :neighbor other))
+                (when (not (eq? (at fates pos) :born))
+                    (send other (list :neighbor me)))))
+        (life/neighbors row col)))
+
+(defun tally (fates keep?)
+    (length (filter (lambda (pos) (keep? (at fates pos))) (life/positions))))
+
+(defun generation (gen registry undertaker)
+    (let board (board-of registry))
+    (life/print gen board)
+    (if (< gen (life/generations))
+        (do
+            (let fates (life/make (lambda (row col) (fate-of board row col))))
+            (let obituaries
+                (map (lambda (pos) (bury (at registry pos) (at fates pos) undertaker gen))
+                    (filter (lambda (pos) (dies? (at fates pos))) (life/positions))))
+            (let next (life/make (lambda (row col)
+                (match (life/cell fates row col)
+                    (:born  (spawn-cell row col (+ gen 1) undertaker))
+                    (:stays (life/cell registry row col))
+                    (_      ())))))
+            (map (lambda (pos) (when (eq? (at fates pos) :born) (wire next fates (car pos) (cadr pos))))
+                (life/positions))
+            (yield ())
+            (pprint (list :census :to (+ gen 1) :births (tally fates (lambda (f) (eq? f :born)))
+                :deaths (tally fates dies?) :living (sum (map sum (board-of next)))))
+            (map pprint obituaries)
+            (generation (+ gen 1) next undertaker))
+        (pprint (list :census :the-end :living (sum (map sum board)) :the-rest-ghosts))))
+
+(let undertaker (address))
+(let seed (life/seed))
+(let registry (life/make (lambda (row col) (if (== (life/cell seed row col) 1) (spawn-cell row col 0 undertaker) ()))))
+(let fates (life/make (lambda (row col) (if (== (life/cell seed row col) 1) :born :empty))))
+(map (lambda (pos) (when (eq? (at fates pos) :born) (wire registry fates (car pos) (cadr pos)))) (life/positions))
+(yield ())
+(generation 0 registry undertaker)
+:done

@@ -1,0 +1,82 @@
+; The Game of Life, shared by t/367 to t/374, the ports of ts-cpi's
+; examples/life/ (D280). A board is a list of rows, each a list of cells,
+; 1 for alive and 0 for dead, on a torus: row -1 is the last row, and
+; column 8 is column 0. Every port runs the same seed, a glider in the
+; top left and a blinker in the bottom right, for 8 generations, and
+; prints each frame with life/print, so t/models/life.py can say what
+; every one of them must print.
+
+(defun life/width () 8)
+(defun life/height () 8)
+(defun life/generations () 8)
+(defun life/cells () (* (life/width) (life/height)))
+
+(defun life/seed-cells () '((0 1) (1 2) (2 0) (2 1) (2 2) (6 4) (6 5) (6 6)))
+(defun life/offsets () '((-1 -1) (-1 0) (-1 1) (0 -1) (0 1) (1 -1) (1 0) (1 1)))
+
+(defun life/wrap (i n) (% (+ i n) n))
+
+; Conway's rule, B3/S23: a cell's next state from its state and its
+; number of live neighbours.
+(defun life/rule (alive count)
+    (cond
+        ((== count 3)                 1)
+        ((and (== alive 1) (== count 2)) 1)
+        (#true                        0)))
+
+; A board from (f row col).
+(defun life/make (f)
+    (map (lambda (row) (map (lambda (col) (f row col)) (range 0 (life/width)))) (range 0 (life/height))))
+
+(defun life/seed ()
+    (life/make (lambda (row col) (if (member? (list row col) (life/seed-cells)) 1 0))))
+
+(defun life/cell (board row col)
+    (nth (life/wrap col (life/width)) (nth (life/wrap row (life/height)) board)))
+
+; The (row col) of a cell's eight neighbours, wrapped.
+(defun life/neighbors (row col)
+    (map (lambda (o) (list (life/wrap (+ row (car o)) (life/height)) (life/wrap (+ col (cadr o)) (life/width))))
+        (life/offsets)))
+
+(defun life/count (board row col)
+    (sum (map (lambda (p) (life/cell board (car p) (cadr p))) (life/neighbors row col))))
+
+(defun life/step-cell (board row col)
+    (life/rule (life/cell board row col) (life/count board row col)))
+
+(defun life/step (board)
+    (life/make (lambda (row col) (life/step-cell board row col))))
+
+; The three cells of a row centred on col, as a count; and a row's next
+; state from the rows above and below it, for the ports that work a row
+; at a time.
+(defun life/triple (row col)
+    (+ (nth (life/wrap (- col 1) (life/width)) row)
+       (+ (nth col row) (nth (life/wrap (+ col 1) (life/width)) row))))
+
+(defun life/step-row (above own below)
+    (map (lambda (col)
+            (let alive (nth col own))
+            (life/rule alive (- (+ (life/triple above col) (+ (life/triple own col) (life/triple below col))) alive)))
+        (range 0 (life/width))))
+
+; Cells are also numbered 0 to 63, row by row.
+(defun life/index (row col) (+ (* row (life/width)) col))
+(defun life/row (i) (div i (life/width)))
+(defun life/col (i) (% i (life/width)))
+
+; Every (row col), row by row; and those of the live cells.
+(defun life/positions ()
+    (fold/l () (lambda (acc row) (append acc (map (lambda (col) (list row col)) (range 0 (life/width)))))
+        (range 0 (life/height))))
+
+(defun life/live (board)
+    (filter (lambda (p) (== (life/cell board (car p) (cadr p)) 1)) (life/positions)))
+
+; Every port prints its frames with this, so the model's frames can be
+; checked against each.
+(defun life/print (gen board)
+    (tty/write "generation " gen \n)
+    (map (lambda (row) (tty/write (str/join "" (map (lambda (c) (if (== c 1) "#" ".")) row)) \n)) board)
+    ())
