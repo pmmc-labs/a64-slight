@@ -12,9 +12,11 @@ program, or the system to measure the run.
   before D244 every pid's entry was kept, 40 MB of them. And a 32 MB
   string held by 40 actors at once, which shares one buffer (D253), and
   600 strings of 1 MB made and dropped, whose buffers are freed: each
-  under PEAK, where copies, or a leak, would be over it. And 8 faults of
-  str/replace-all past a heap of 64 MB peak within FLAT of 1: before
+  under PEAK, where copies, or a leak, would be over it. And 24 faults
+  of str/replace-all past a heap of 64 MB peak within FLAT of 8: before
   H3 and L8, each built its 100 MB outside the heap and left it there.
+  (8, not 1, as the base, since macOS's malloc keeps some large blocks
+  it's freed, which count in the peak but don't grow with the faults.)
 - chat: examples/chat.slight in a terminal, with t/live/model.slight as
   its model: what the model sends with terminal escapes in it is shown
   escaped, approvals included; a refused command isn't run; and a fetch
@@ -199,10 +201,13 @@ def memory():
         check(f'{what}: {out.splitlines()[0] if out else "nothing"}, at most {peak >> 20} MB',
               status == 0 and ok_out and peak < most, f'exit {status}, printed {out!r}')
     capped = ENV | {'SLIGHT_HEAP_MAX': '64M'}
-    out1, status1, peak1 = peak_run(prog, ['faults', '1'], capped)
-    out8, status8, peak8 = peak_run(prog, ['faults', '8'], capped)
-    check(f'8 faults past the heap in str/replace-all, at most {peak8 >> 20} MB, and 1 at most {peak1 >> 20} MB',
-          (status1, out1, status8, out8) == (0, '1\n()\n', 0, '8\n()\n') and peak8 < peak1 + FLAT,
+    # 8 against 24, not 1 against 8: a leak grows with the faults, but
+    # an allocator may keep some freed blocks for reuse, as macOS's does
+    # its large ones, which count in the peak but don't grow with them.
+    out1, status1, peak1 = peak_run(prog, ['faults', '8'], capped)
+    out8, status8, peak8 = peak_run(prog, ['faults', '24'], capped)
+    check(f'24 faults past the heap in str/replace-all, at most {peak8 >> 20} MB, and 8 at most {peak1 >> 20} MB',
+          (status1, out1, status8, out8) == (0, '8\n()\n', 0, '24\n()\n') and peak8 < peak1 + FLAT,
           f'exit {status1} and {status8}, printed {out1!r} and {out8!r}')
 
 
