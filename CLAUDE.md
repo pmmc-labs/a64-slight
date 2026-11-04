@@ -369,8 +369,12 @@ island (D272, golden tests 344 to 346), and H, a timer's number
 carrying its island, another island's taken back there (D274, golden
 test 347), and I, `fs/delete-all` a builtin that finds nothing below
 the top by a path (D275, golden test 348, `t/live.py`'s delete race),
-are settled, and the rest wait for him.
-**Next:** nothing is under way. Candidates, none agreed: a simulation library across
+are settled. Left, to pick up where it was left (the plan's status
+says what and how): step 4's K (IPv6), L (a lambda after `|>`), M (a
+runtime cache outside the install) and N (CI, ASan, fuzzing), each to
+be put to Stevan; step 5's documents (README, leap seconds, the
+Unicode License's text); and what's to be checked on the M2.
+**Next:** the review's last items, above; nothing else is under way. Candidates, none agreed: a simulation library across
 islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in
 conservative windows on a `clock/hold` builtin, with an HP-lattice

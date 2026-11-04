@@ -1,47 +1,79 @@
 # Fixing the review of 2026-11-02: the plan
 
-**Status (2026-11-04):** steps 1 to 3 are done. In step 4, A, E and F
-are settled:
-- **A** is built as recommended (D265, golden tests 339 and 340).
-  - What a process ends with is checked on its first copy, not by a copy
-    of its own, which made a fork and join of lists 30 per cent slower.
-  - A fault whose reason holds the value ends `:heap` too.
-- **E** stays as D257 has it (D266).
-- **F** is built, with `:stack` (D267, `t/live.py`'s stacks).
-- **B** is documented only (D268): only a program's own code makes a
-  value with sharing.
-- **C**, timeouts, isn't taken (D269): a server facing the internet goes
-  behind a proxy, as LANGUAGE.md now says.
-- **D** is built (D270), golden tests 342 and 343, and 278 extended:
-  - output waiting for a socket or a command fails the device
-    `:too-big` when more comes while 64 MB waits, so a single big reply
-    still goes;
-  - a write whose text would pass the heap fails too;
-  - `barf` echoes only what prints in 1 KB;
-  - `(:most n)` in the new `http/serve-with`, `http/listen-with`,
-    `rpc/serve-with` and `rpc/listen-with`.
-- **H5** is built (D271, golden test 341): requests refused as Results,
-  a handler's bad response a 500 with a warning.
-- **G** is built (D273): an address is an id its island gives once, and
-  a table of the island's open ones says whose it is, so neither a pid
-  past 2^32 nor a wrapped number can misdeliver. It prints
-  `#<address 7>`. Golden test 324 is now `324-address-ids`.
-- **J** is built (D272), golden tests 344 to 346: a file that isn't a
-  regular one is opened `O_NONBLOCK` and polled, read and written as a
-  socket is; a FIFO opened to write with no reader fails `:enxio` at
-  once. macOS's FIFO with no writer yet, and its `/dev/stdin`, are to
-  be checked on the M2.
-- **H** is built (D274, golden test 347): a timer's number carries its
-  island (island 0's still 1 up), and a cancel of another island's
-  timer is answered by that island, the caller waiting as `spawn/on`
-  does.
-- **I** is built (D275, golden test 348, `t/live.py`'s delete race):
-  `fs/delete-all` is a builtin on `openat`, `fstatat` and `unlinkat`,
-  so a link swapped in is deleted, not followed; `fs/walk` stays, said
-  to be led out of a tree others write in.
+**Status (2026-11-04, where this was left):** steps 1 to 3 are done,
+step 4 is all but four items, and step 5 is begun. `make test` passes on
+x86-64 Linux, both targets, and `make tsan`; Stevan's M2 last ran
+`make test` before H and I, and failed only `t/live.py`'s fault check,
+since made Linux's alone (see "To check on the M2").
 
-The rest of step 4 waits for Stevan. Step 5 is begun: CLAUDE.md's
-status says what's done.
+**Step 4, settled with Stevan**, each with its decision and tests:
+- **A** (D265, golden tests 339 and 340, `5b02671`): a copy a process
+  asks for that would pass `heap_max` faults it `:heap`; what a process
+  ends with is checked on its first copy, not a copy of its own, which
+  made a fork and join of lists 30 per cent slower; a fault whose reason
+  holds such a value ends `:heap` too. A fault's, a dead letter's and
+  the root's error's value is cut at 64 KB.
+- **B** (D268): documented only; only a program's own code makes a value
+  with sharing.
+- **C** (D269): no server timeouts; a server facing the internet goes
+  behind a proxy, as LANGUAGE.md says.
+- **D** (D270, golden tests 342 and 343, 278 extended, `d9f47ac`): a
+  write while 64 MB waits unwritten fails the device `:too-big` (checked
+  when more comes, so a single big reply still goes), as does a write
+  whose text would pass the heap; `barf` echoes only what prints in 1
+  KB; `(:most n)` in the new `http/serve-with`, `http/listen-with`,
+  `rpc/serve-with` and `rpc/listen-with`.
+- **H5** (D271, golden test 341, `d9f47ac`): requests refused as
+  Results, a handler's bad response a 500 with a warning.
+- **E** (D266): the descriptor ceiling stays, as D257 has it.
+- **F** (D267, `t/live.py`'s stacks, `5b02671`): no stack to be had
+  faults the process `:stack`; an island keeps 256 stacks given back,
+  and unmaps the rest.
+- **G** (D273, golden test 324, now `324-address-ids`, `2bd93c9`): an
+  address is an id its island gives once, in a table of the open ones;
+  printed `#<address 7>`.
+- **J** (D272, golden tests 344 to 346, `d7fdc67`, `1f48146`): a file
+  that isn't a regular one is polled, read and written as a socket is;
+  a FIFO opened to write with no reader fails `:enxio`; a polled reader
+  blocks once open, and the file stdin, stdout or stderr is isn't polled
+  to write, since macOS shares their flags.
+- **H** (D274, golden test 347, `c5caa28`): a timer's number carries its
+  island (island 0's still 1 up); another island's is cancelled there,
+  the caller waiting as `spawn/on` does.
+- **I** (D275, golden test 348, `t/live.py`'s delete race, `47d6195`,
+  `9029b31`): `fs/delete-all` is a builtin on `openat`, `fstatat` and
+  `unlinkat`; `fs/walk` stays, said to be led out of a tree others
+  write in.
+
+**What's left, to pick up:**
+- **Step 4's K, L, M and N**, each still to be put to Stevan (the
+  recommendations below, under "Step 4", stand): K, IPv6, proposed to
+  stay parked; L, a lambda after `|>` made a call (it's refused now);
+  M, `SLIGHT_CACHE` for a runtime cache outside the install; N, CI on
+  GitHub Actions, `make asan`, and fuzzing the JSON and s-expression
+  validators.
+- **Step 5's documents**, none needing a decision: N1, README.md still
+  says "one core" (line 43) and "Next is `:exec` ... then TLS" (line
+  90); N2, `time/parse-iso` refusing second 60 said on the parser and in
+  LANGUAGE.md; P7, the Unicode License v3's text beside `NOTICE`, a
+  Unicode line in `runtime/unicode.c`'s header (it's generated: in
+  `gen-unicode.py`), and a line on notices in the containers how-to.
+- **Found on the way** (below, after step 3), not yet planned.
+
+**To check on the M2** (run `make test`; nothing below has run on
+macOS):
+- J: a FIFO opened to read before any writer (Linux waits for one;
+  macOS may say `(:eof f)` at once); `slurp "/dev/stdin"` from a
+  terminal, and the shell after.
+- I: `t/live/swap.c`'s `renamex_np(RENAME_SWAP)`, and the delete's
+  second pass over a directory, for APFS (golden test 348).
+- Step 1's M7: `POSIX_SPAWN_CLOEXEC_DEFAULT`, compiled out here.
+- `t/live.py`'s fault check is Linux's alone now (`e3d4821`): macOS's
+  malloc keeps large freed blocks in the peak, by an amount that varies
+  (178 and 459 MB for the same 8 faults); `leaks` there found none, and
+  the physical footprint's peak was 62 MB, as on Linux.
+
+**Steps 1 to 3**, as built:
 
 - **Step 1**, `b0b69d1` to `8e4a0be`, a commit an item. Golden tests 336
   to 338, t/320 extended, and `t/live.py`'s wakes, inherit, accept and
