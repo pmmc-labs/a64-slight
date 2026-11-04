@@ -1,0 +1,48 @@
+; team: a job for a team of agents on a local ollama (D281).
+;
+;     team Say hello in French and in German.
+;     TEAM_MODEL=llama3.2 team ...
+;
+; The model is TEAM_MODEL, or llama3.2; ollama is where OLLAMA_HOST
+; says, as chat reads it, or http://localhost:11434. The team's events
+; are printed as they come, and the answer last. The workers have the
+; read-only tools: read_file, list_files, search and calc.
+
+(@include "team-agents.slight")
+(@include :tools)
+
+(defun main (args env)
+    (let job   (str/join " " args))
+    (let model (match (lookup "TEAM_MODEL" env) (:not-found "llama3.2") (m m)))
+    (if (eq? job "")
+        (do (tty/write "usage: team <the job, in words>" \n) :usage)
+        (do
+            (let t (team/new (ollama-url env) model (list (tools/read-file) (tools/list-files) (tools/search) (tools/calc))))
+            (team/say t job)
+            (watch t))))
+
+(defun watch (t)
+    (recv
+        ((:team/plan _ tasks)
+            (tty/write "plan:" \n)
+            (map (lambda (task) (tty/write "  " task \n)) tasks)
+            (watch t))
+        ((:team/task _ id text)   (tty/write "worker " id " starts: " text \n) (watch t))
+        ((:team/done _ id answer) (tty/write "worker " id " done: " answer \n) (watch t))
+        ((:team/failed _ id why)  (tty/write "worker " id " failed: " (str why) \n) (watch t))
+        ((:team/answer _ text)    (tty/write \n text \n) :done)
+        ((:team/error _ reason)   (tty/write "the team failed: " (str reason) \n) :failed)))
+
+; Where OLLAMA_HOST says ollama is, as chat reads it: without a scheme
+; it's http, and without a port, ollama's.
+(defun ollama-url (env)
+    (let h (lookup "OLLAMA_HOST" env))
+    (cond
+        ((or (eq? h :not-found) (eq? h "")) "http://localhost:11434")
+        ((>= (bytes/index-of h "://") 0)    (with-port h (+ (bytes/index-of h "://") 3)))
+        (#true                              (with-port (str "http://" h) 7))))
+
+(defun with-port (url at)
+    (if (>= (bytes/index-of (bytes/slice url at) ":") 0) url (str url ":11434")))
+
+(main @ARGV %ENV)

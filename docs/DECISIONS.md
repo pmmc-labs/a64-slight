@@ -7040,3 +7040,35 @@ The other fourteen don't port: traps, parking, checkpoints, pads, tick
 metering, multi-shot continuations and a deliberate deadlock need a
 scheduler with its hands inside a process, and 08's forked timelines are
 "Branching a replay". With this the proposal is built.
+
+**D281. An agent team, as a design exercise: agreed, and step 1 built.**
+*(Stevan, Nov 2026: "Let's start step 1 of the agent team", to PLAN.md's
+"An agent team", which answered his "what would be a good design
+exercise?")* The exercise is on, with its points settled as the plan
+recommended: before the simulation's decisions; workers' changing tools
+off, the lead reporting what they would have done and the person
+approving once a job (step 2's, with the budgets); one model, a
+worker's an argument; the terminal and a transcript file for output.
+Step 1: `examples/team-agents.slight`, a lead actor that, given `(:job
+text from)`, asks a planner agent of its own for the tasks, one a line,
+forks a worker per task, each asking an agent of its own with the
+team's tools and reporting to the lead's address for the job, which the
+lead monitors it to as well, so a worker that faults is a failure;
+then asks the planner to combine, and answers; the asker hears the
+events as an agent's caller hears pieces, and `team/ask` waits for the
+answer at an address of its own, the events passed over. The planner
+is killed and joined when the job is done, and a worker's agent killed
+when it has reported, so nothing is kept (D244). `examples/team.slight`
+runs a job from its arguments on a local ollama. Golden test 375, on a
+fake model answering from a script: a plan written three ways, an
+answer, a tool call, a failure in mid-answer, and the combination; its
+events printed in task order, since the workers' replies come in the
+order the fake's do. Friction so far, for the list: the events of
+concurrent workers can't be printed in arrival order by a test, so the
+test sorts, a shape every such test will have; and the test needed
+`(@include :http)` for `http/listen`, though the team's file includes
+`:agent`, which includes `:http`, since a module's header shows only
+what it says (D248, by design, and a surprise each time). Nothing else,
+in about 200 lines: the lead asks in the middle of handling a message
+and reads its workers at an address of its own with no dance at all,
+which is what the exercise was to find out first.

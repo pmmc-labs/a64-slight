@@ -2446,7 +2446,7 @@ Mac, stackful against today.
   message meant for someone else. A `--strict` warning, when it follows
   a `send` in the same body; not a rule.
 
-### An agent team: a design exercise (proposed, Nov 2026)
+### An agent team: a design exercise (agreed, D281; step 1 built, Nov 2026)
 
 Stevan, after the Life ports (D280): "So what would be a good design
 exercise? Should we flesh out an example to a larger app? Or do
@@ -2520,7 +2520,9 @@ seeds giving one transcript. In t/live.py: the team on a real local
 model when there is one, as the chat's live check does.
 
 **Steps.** 1. The lead and one worker, no pool and no budget: a job
-split and answered; the fake model and the golden test. 2. The pool,
+split and answered; the fake model and the golden test. *Built
+(D281): `examples/team-agents.slight` and `examples/team.slight`,
+golden test 375.* 2. The pool,
 the budgets, the kill on overrun and the restart on failure, each
 tested. 3. Workers asking each other, the review round, and `ask_team`
 in `chat`. 4. Record and replay, and the seeds, in t/replay.sh; the

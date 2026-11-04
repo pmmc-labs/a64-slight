@@ -1,0 +1,161 @@
+; A team of agents: a lead and its workers (D281, PLAN.md's "An agent
+; team"). Included by its path: examples/team.slight, beside it, is the
+; program, and t/375 the test.
+;
+;     (let t (team/new "http://localhost:11434" "llama3.2" tools))
+;     (team/ask t "Say hello in French and in German.")
+;     ; (:ok "Bonjour. Guten Tag.")
+;
+; The lead is an actor. Given a job, it asks a planner, an agent of its
+; own for the job, to split it into tasks, one a line; forks a worker
+; for each, which asks an agent of its own, with the team's tools, and
+; reports (:done id answer) or (:failed id why) to the lead's address
+; for the job, which the lead monitors it to as well, so a worker that
+; faults is a failure too; then it asks the planner to combine the
+; answers, and answers. All of it happens in the middle of handling one
+; message, the lead asking at addresses of its own while the next job
+; waits in its mailbox (D277). Whoever asked hears the team's events as
+; it goes, as an agent's caller hears pieces: (:team/plan t tasks),
+; (:team/task t id text), (:team/done t id answer), (:team/failed t id
+; why), then (:team/answer t text), or (:team/error t reason) in its
+; place.
+;
+; Step 1 of the exercise: no pool, no budget, no second round. The
+; workers all run at once, each for as long as it takes.
+
+(@include :agent)
+
+(defun team/new (url model tools) (fork (lead url model tools)))
+
+; Asks the team to do job; the events come to the caller.
+(defun team/say (t job) (send t (list :job job $$)))
+
+; Asks, and waits for the answer: (:ok text), or (:error reason), the
+; events passed over, at an address of its own (D277).
+(defun team/ask (t job)
+    (let to (address))
+    (monitor t to)
+    (send t (list :job job to))
+    (let answer (team/answer t to))
+    (disconnect to)
+    answer)
+
+(defun team/answer (t to)
+    (match (read to)
+        ((:team/answer _ text)  (list :ok text))
+        ((:team/error _ reason) (list :error reason))
+        ((:exit _ result)       (list :error (list :ended t result)))
+        (_                      (team/answer t to))))
+
+; --- the lead ----------------------------------------------------------
+
+(defun lead (url model tools)
+    (recv
+        ((:job job from)
+            (lead/job url model tools job from)
+            (lead url model tools))))
+
+(defun lead/prompt ()
+    "You lead a team of workers. Given a job, reply with the tasks to give them, one task a line, each complete in itself, and nothing else. Later you'll be given their answers to combine.")
+
+(defun worker/prompt ()
+    "You are a worker on a team. Do the task you're given, using your tools if they help, and reply with your result, briefly.")
+
+; One job: plan, work, combine. The planner is the lead's for the job
+; and goes with it, killed, since it would wait for ever, and joined, so
+; nothing is kept (D244).
+(defun lead/job (url model tools job from)
+    (let me      $$)
+    (let planner (agent/new url model (lead/prompt) ()))
+    (match (agent/ask planner (str "The job: " job))
+        ((:error reason) (send from (list :team/error me (list :planning reason))))
+        ((:ok plan)
+            (let tasks (lead/tasks plan))
+            (send from (list :team/plan me tasks))
+            (let answers (lead/work url model tools tasks from))
+            (match (agent/ask planner (lead/combine job tasks answers))
+                ((:ok text)      (send from (list :team/answer me text)))
+                ((:error reason) (send from (list :team/error me (list :combining reason)))))))
+    (kill planner)
+    (join planner))
+
+; The plan's lines as tasks: trimmed, without a list's marks, empty ones
+; dropped.
+(defun lead/tasks (plan)
+    (remove (lambda (s) (eq? s "")) (map lead/task-text (str/split plan "\n"))))
+
+(defun lead/task-text (line)
+    (let s (str/trim line))
+    (cond
+        ((str/starts-with? s "- ") (str/trim (str/slice s 2)))
+        ((str/starts-with? s "* ") (str/trim (str/slice s 2)))
+        ((lead/numbered? s)        (str/trim (str/slice s (+ (str/index-of s ".") 1))))
+        (#true                     s)))
+
+(defun lead/numbered? (s)
+    (let dot (str/index-of s "."))
+    (and (> dot 0) (and (< dot 4) (lead/digits? (str/slice s 0 dot)))))
+
+(defun lead/digits? (s)
+    (nil? (find (lambda (c) (not (str/includes? "0123456789" c))) (str/chars s))))
+
+; The workers, one a task, all at once; what each gave, in task order,
+; as (id (:ok answer)) or (id (:error why)).
+(defun lead/work (url model tools tasks from)
+    (let me  $$)
+    (let to  (address))
+    (let ids (range 1 (+ (length tasks) 1)))
+    (let pids (map (lambda (pair)
+                      (match pair
+                          ((id task)
+                              (send from (list :team/task me id task))
+                              (let w (fork (worker url model tools id task to)))
+                              (monitor w to)
+                              (list w id))))
+                  (zip ids tasks)))
+    (let verdicts (lead/gather to pids (length tasks) () from me))
+    (disconnect to)
+    (map (lambda (id) (list id (lookup id verdicts))) ids))
+
+; Reads reports till every task has one. A worker's end comes here too:
+; one that ended with an error before reporting failed.
+(defun lead/gather (to pids n verdicts from me)
+    (if (== (length verdicts) n)
+        verdicts
+        (match (read to)
+            ((:done id answer)
+                (send from (list :team/done me id answer))
+                (lead/gather to pids n (assoc id (list :ok answer) verdicts) from me))
+            ((:failed id why)
+                (send from (list :team/failed me id why))
+                (lead/gather to pids n (assoc id (list :error why) verdicts) from me))
+            ((:exit w result)
+                (let id (lookup w pids))
+                (match (list result (lookup id verdicts))
+                    (((:error why) :not-found)
+                        (send from (list :team/failed me id why))
+                        (lead/gather to pids n (assoc id (list :error why) verdicts) from me))
+                    (_ (lead/gather to pids n verdicts from me)))))))
+
+(defun lead/combine (job tasks answers)
+    (str "The job was: " job "\n\nYour workers' answers, by task:\n"
+         (str/join "" (map (lambda (pair)
+                               (match pair
+                                   ((id verdict)
+                                       (str id ". " (nth (- id 1) tasks) "\n   "
+                                            (match verdict ((:ok a) a) ((:error why) (str "FAILED: " why)))
+                                            "\n"))))
+                           answers))
+         "\nCombine them into one answer to the job, saying what failed, if anything."))
+
+; --- a worker ----------------------------------------------------------
+
+; One task, through an agent of its own, reported to to. The agent is
+; killed after, since it would wait for ever, and goes with the worker.
+(defun worker (url model tools id task to)
+    (let a (agent/new url model (worker/prompt) tools))
+    (match (agent/ask a task)
+        ((:ok answer)    (send to (list :done id answer)))
+        ((:error reason) (send to (list :failed id reason))))
+    (kill a)
+    :reported)
