@@ -69,8 +69,8 @@
         ((:line c _) (raw-wait c))
         ((:eof c)    (disconnect c))))
 
-; From a task, which can't be told (D243): the raw server's owner and its
-; port, which its listener says at an address of the task's.
+; The raw server's owner and its port, which its listener says at an
+; address of the caller's (D243, D277).
 (defun raw-up (replies)
     (let to (address))
     (let raw (raw-listen :raw replies to))
