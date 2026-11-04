@@ -40,9 +40,9 @@ a function of the arguments.
             (lambda () (answer (call s (list :keys)))))))
 ```
 
-Each call runs its handler in a task of its own, so calls from many
-connections run at once. Each is a task, so it can `call` the store,
-which, as ever, takes their commands one at a time. The library checks
+Each call runs its handler in a process of its own, so calls from many
+connections run at once, and each can `call` the store, which, as
+ever, takes their commands one at a time. The library checks
 the arguments against the types before the function runs, and the
 handler's value is the answer. A raise is a failure, so `answer` turns
 the store's `(:error reason)` back into one, and the caller sees the

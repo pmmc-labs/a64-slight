@@ -272,8 +272,10 @@ goes).
 | A call against its `sig`, a body against its result, `the` against its value | (what the program said) |
 
 And with `--strict`: a `match` whose arms leave out part of the topic's
-type, when it has no `any` in it; and every argument, test and result
-whose type is wider than the one wanted.
+type, when it has no `any` in it; a bare `recv` right after a `send` to
+another process, which takes the next message, whatever it is, where
+`ask` would read the reply at an address of its own (D277); and every
+argument, test and result whose type is wider than the one wanted.
 
 The row for messages closes a question `SYNTAX.md` left open (3, D246),
 for sends: a message sent as `:stop()` to a process that takes `:stop` is

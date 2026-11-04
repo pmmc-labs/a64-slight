@@ -147,7 +147,7 @@
 (defun reading (f records)
     (match (read f)
         ((:sexp _ r) (reading f (cons r records)))
-        ((:eof _)    (reverse records))))
+        ((:eof _)    (disconnect f) (reverse records))))
 
 (defun read-records (path)
     (match (open :fs/read path)
@@ -802,7 +802,7 @@
 (defun opt/remedies (o) (tuple/get o 10))
 (defun opt/shard (o) (tuple/get o 11))
 
-(defun read-sexps (path) (match (join (fork (read-records path))) ((:ok records) records)))
+(defun read-sexps (path) (read-records path))
 
 ; What decides a run but its changes: the model, its constants, and the
 ; day's aircraft, legs, connections, wind and closures; not its branches
@@ -1236,12 +1236,8 @@
 
 ; A stand-in, listening where the system says: its URL and its pid.
 (defun stand-in (handler)
-    (match (join (fork (serve-for handler)))
-        ((:ok (port pid)) (list (str "http://127.0.0.1:" port "/") pid))))
-
-(defun serve-for (handler)
-    (let server (http/serve 0 handler))
-    (recv ((:listening port) (list port server))))
+    (match (http/listen 0 handler)
+        ((:ok (l port)) (list (str "http://127.0.0.1:" port "/") l))))
 
 ; A service's results for candidates, each (name flights): (:ok results),
 ; each (name members), or (:error why).

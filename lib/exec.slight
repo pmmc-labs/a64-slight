@@ -8,38 +8,39 @@
 ; together, and status its exit code, or (:signal name). Or (:error
 ; reason), if it can't be started: (:error (:enoent "ls")). If the caller
 ; ends first, killed, say, so does the command (D193).
-(defun exec/run (cmd)
-    (join (fork (exec/running cmd ()))))
+(defun exec/run (cmd) (exec/running cmd ()))
 
 ; As exec/run, but a command still running after ms milliseconds is
 ; killed, its group with it, and its status is (:timeout ms), its output
 ; what it printed till then (D234). On the virtual clock, time stands
 ; still while a command runs (D185), so there it has no limit.
-(defun exec/run-within (ms cmd)
-    (join (fork (exec/running cmd ms))))
+(defun exec/run-within (ms cmd) (exec/running cmd ms))
 
-; The command's task (D243) opens it, and reads it, an address its timer
-; is for if it has one, and its caller's end, ending with the caller,
-; which closes the device and so kills the command's group (D193).
+; Opens the command and reads it, with an address its timer is for if it
+; has one, till it has exited, the timer rings, or the device fails. The
+; device is the caller's own (D277): closed here when the command is
+; done, which kills its group if it's still going, and closed by the
+; runtime if the caller ends first, killed, say, with the same effect
+; (D193).
 (defun exec/running (cmd ms)
     (match (open :exec cmd)
         ((:ok p)
             (send p (list :read :chunks))
             (send p (list :eof))
             (let to (address))
-            (when (int? ms) (after ms to :timeout))
-            (match ^$$ (() ()) (caller (monitor caller to)))   ; the caller's end comes to the same address (D277)
-            (exec/collect (list p to) ms ()))
-        ((:error reason) (raise reason))))
+            (let t (if (int? ms) (after ms to :timeout) ()))
+            (let got (exec/collect (list p to) ms ()))
+            (when (int? ms) (timer/cancel t))
+            (disconnect to)
+            (disconnect p)
+            got)
+        ((:error reason) (list :error reason))))
 
 ; chunks is the output so far, last first.
 (defun exec/collect (srcs ms chunks)
     (match (read/any srcs)
         ((_ (:chunk _ s))       (exec/collect srcs ms (cons s chunks)))
         ((_ (:eof _))           (exec/collect srcs ms chunks))
-        ((_ (:exited _ n))      (list n (str/join "" (reverse chunks))))
-        ((_ (:error _ reason))  (raise reason))
-        ((_ :timeout)           (list (list :timeout ms) (str/join "" (reverse chunks))))
-        ; the caller has ended: there's no one to answer, and this
-        ; process's end closes the device, which kills the command (D193)
-        ((_ (:exit _ _))        (raise :caller-ended))))
+        ((_ (:exited _ n))      (list :ok (list n (str/join "" (reverse chunks)))))
+        ((_ (:error _ reason))  (list :error reason))
+        ((_ :timeout)           (list :ok (list (list :timeout ms) (str/join "" (reverse chunks)))))))

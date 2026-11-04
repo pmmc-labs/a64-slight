@@ -178,9 +178,9 @@ Chapter 5's supervisor, with `start` in place of `fork`:
 
 <!-- output: ../code/tut-7-supervised.expected -->
 ```
-fault in #<pid 7>: not a number: "red" (+ at docs/guide/code/tut-store.slight:23:40)
+fault in #<pid 5>: not a number: "red" (+ at docs/guide/code/tut-store.slight:23:40)
 (restarting not-a-number)
-(error (timeout #<pid 4>))
+(error (timeout #<pid 3>))
 (ok 3)
 ```
 
@@ -196,9 +196,8 @@ and keeps only the fault's kind. It also matches only an error, so an
 `:exit` of any other shape would be passed on to the store, where it
 would be a dead letter.
 
-The pids are the runtime's, given out in order: `spew`'s task and its
-file are 2 and 3, the supervisor 4, `load`'s task and its file 5 and 6,
-and the store 7.
+The pids are the runtime's, given out in order: `spew`'s file is 2,
+the supervisor 3, `load`'s file 4, and the store 5.
 
 A log grows for ever. A real store would now and then write the whole
 table out (`(spew path (map sexp/print ...))`, as `put` commands) and

@@ -6945,3 +6945,47 @@ at one address (the guide's deadlock page). 254 files moved from
 Open, for step 3: the fork-and-join dance in `lib/` and the examples,
 which one kind makes needless; and for step 4, the guide's two concept
 pages folded into one.
+
+**D278. The fork-and-join dance comes out of the libraries.** *(Stevan,
+Nov 2026: "Let's move onto step 3", PLAN.md's "One kind of process, and
+an address for every message", step 3.)* A function that waited for an
+answer used to fork a process to hold the address or the device, since
+an actor could have neither (D243), and join it; with one kind of
+process (D277) the caller holds them itself. So `agent/ask` asks at an
+address of its own; `exec/run` and `exec/run-within` open the command in
+the caller, which closes it when the command is done, and whose end
+closes it too, killing the command's group as before (D193); `slurp`,
+`spew`, `tools/read` and `tools/save` open the file in the caller,
+their helpers giving `(:ok ...)` and `(:error ...)` where they raised,
+and closing it at its end, since no process's end closes it now;
+`http/request` joins the connection's process directly, and
+`http/request-within` waits for it at an address; `rpc/connect` and
+`rpc/exec` wait at an address for the connection to open; `rpc/system`'s
+handler opens `:system` in the call's own process; and `rpc/call` waits
+at an address of its own. A connection stops a call whose caller ends
+(D230, test 277), which it knew from the end of the forked process; so
+a call now names its caller beside its address, `(:rpc/call text to
+from)`, and the connection monitors each caller once, however many
+calls it makes, keeping those it has in a list that a caller's end
+takes it off, so a process that calls for good adds no monitor per
+call. `examples/airline.slight` reads its records and starts its
+stand-in servers directly. Found on the way: D277 keeps a result for a
+parent that never joins, every process's where D245 kept an actor's end
+for a task alone, and `http/accept` and `rpc/accepting` monitored a
+connection only when `:most` was set, so a plain server kept a record
+per connection till it ended; both monitor every connection now, and
+the rule is written down, in LANGUAGE.md's Processes and the guide:
+what you start for good, join or monitor. The checker's word, as the
+plan proposed: a bare `(recv)`, with no clause, right after a `send` to
+another process, under `--strict` alone, since the pair is right
+whenever nothing else sends to the process, which the checker can't
+tell; a send to `$$` is left alone (`t/types/015`). What changed in the
+tests, each worked out from the change: a process fewer before a fork
+in 155, 175 and 180, so the fault's pid is one lower; the fs library's
+defuns in 182; the pids in the guide's chapter 7, where `spew` and
+`load` no longer start a process; and 244 and 254 ask from the top
+level, which couldn't before. Kept: `http/stream` and `rpc/stream` a
+process each, since a stream's pid is its handle; `http/respond` and
+`rpc/called` a process per request from the other end, which contains
+a fault and can be stopped; and `agent/start` a process per turn, for
+the same reasons.

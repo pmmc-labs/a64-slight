@@ -117,37 +117,39 @@
 
 ; The file at path, its bytes as they are; or it raises why not.
 (defun tools/read (path)
-    (match (join (fork (tools/reading path)))
+    (match (tools/reading path)
         ((:ok text)      text)
         ((:error reason) (raise reason))))
 
+; (:ok text), or (:error reason): the file, read here (D277).
 (defun tools/reading (path)
     (match (open :fs/read path)
         ((:ok f)         (send f (list :read :chunks)) (tools/chunks f ()))
-        ((:error reason) (raise reason))))
+        ((:error reason) (list :error reason))))
 
 (defun tools/chunks (f acc)
     (match (read f)
         ((:chunk _ s)      (tools/chunks f (cons s acc)))
-        ((:eof _)          (str/join "" (reverse acc)))
-        ((:error _ reason) (raise reason))))
+        ((:eof _)          (disconnect f) (list :ok (str/join "" (reverse acc))))
+        ((:error _ reason) (list :error reason))))
 
 ; Makes the file at path hold text, and nothing else.
 (defun tools/save (path text)
-    (match (join (fork (tools/writing path text)))
+    (match (tools/writing path text)
         ((:ok _)         ())
         ((:error reason) (raise reason))))
 
-; A write that fails leaves (:error f reason) to be read, closed or not.
+; (:ok ()), or (:error reason). A write that fails leaves (:error f
+; reason) to be read, closed or not.
 (defun tools/writing (path text)
     (match (open :fs/write path)
         ((:ok f)
             (send f (list :write text))
             (disconnect f)
             (match (read f)
-                ((:error _ reason) (raise reason))
-                (_                 ())))
-        ((:error reason) (raise reason))))
+                ((:error _ reason) (list :error reason))
+                (_                 (list :ok ()))))
+        ((:error reason) (list :error reason))))
 
 ; What a command printed, and its status if that wasn't 0.
 (defun tools/output (ran)
@@ -588,7 +590,7 @@
         ((:keys to)    (reply to (map car table)) (notes/loop path table))
         ((:put key text to)
             (let new (cons (list key text) (remove (lambda (n) (eq? (car n) key)) table)))
-            (match (join (fork (tools/save path (str (sexp/print new) \n))))
+            (match (tools/writing path (str (sexp/print new) \n))
                 ((:ok _)
                     (reply to ())
                     (notes/loop path new))
@@ -597,7 +599,7 @@
                     (notes/loop path table))))))
 
 (defun notes/read (path)
-    (match (join (fork (tools/read path)))
+    (match (tools/reading path)
         ((:error (:enoent _)) ())
         ((:error reason)      (raise reason))
         ((:ok text)

@@ -1,6 +1,5 @@
-; Files, the whole of one at a time, on top of open (D243): not part of
-; the prelude, so a program that wants them says (@include :fs).
-; Each works in a process of its own, which its caller joins.
+; Files, the whole of one at a time, on top of open (D243, D277): not
+; part of the prelude, so a program that wants them says (@include :fs).
 ;
 ;     (slurp "notes.txt")                  (:ok ("first line" "second line"))
 ;     (spew "out.txt" (list "one" "two"))  (:ok ())
@@ -9,27 +8,23 @@
 ; written: (:error (enoent "notes.txt")), say.
 
 ; The lines of the file at path, without their newlines.
-(defun slurp (path) (join (fork (slurp-file path))))
-
-(defun slurp-file (path)
+(defun slurp (path)
     (match (open :fs/read path)
         ((:ok f)         (slurp-lines f ()))
-        ((:error reason) (raise reason))))
+        ((:error reason) (list :error reason))))
 
 (defun slurp-lines (f lines)
     (match (read f)
-        ((:line _ s)      (slurp-lines f (cons s lines)))
-        ((:eof _)         (reverse lines))
-        ((:error _ reason) (raise reason))))
+        ((:line _ s)       (slurp-lines f (cons s lines)))
+        ((:eof _)          (disconnect f) (list :ok (reverse lines)))
+        ((:error _ reason) (list :error reason))))
 
 ; Writes lines to the file at path, each with a newline after it,
 ; replacing what was there.
-(defun spew (path lines) (join (fork (spew-file path lines))))
-
-(defun spew-file (path lines)
+(defun spew (path lines)
     (match (open :fs/write path)
         ((:ok f)         (spew-each f lines))
-        ((:error reason) (raise reason))))
+        ((:error reason) (list :error reason))))
 
 ; A write that fails closes the file, and leaves (:error f reason) to be
 ; read, which closing it here leaves too: or the file's end, ().
@@ -38,8 +33,8 @@
         (()
             (disconnect f)
             (match (read f)
-                ((:error _ reason) (raise reason))
-                (_                 ())))
+                ((:error _ reason) (list :error reason))
+                (_                 (list :ok ()))))
         ((line & rest)
             (send f (list :write line \n))
             (spew-each f rest))))

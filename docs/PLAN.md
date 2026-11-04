@@ -2222,7 +2222,7 @@ browser when watching from afar matters. It would sit with the
 simulation library above: the flagship's dashboard is this viewer, fed
 by the root.
 
-### One kind of process, and an address for every message (Nov 2026: steps 1 and 2 built, D276, D277; the rest open)
+### One kind of process, and an address for every message (Nov 2026: steps 1 to 3 built, D276 to D278; the rest open)
 
 Proposed by Claude after Stevan went back to ts-slight ("the process
 split felt kind of wrong when we did it ... I've struggled with the
@@ -2397,7 +2397,13 @@ Mac, stackful against today.
    `http/request` and the examples that forked a task to hold an
    address ask directly. The checker's two warnings go; one comes:
    `ask` in a function that handles messages is fine, a bare `(recv)`
-   after a `send` in one is worth a word.
+   after a `send` in one is worth a word. *Built (D278): as written,
+   but the word is under `--strict`, since a send then a bare `recv` is
+   right whenever nothing else sends to the process, which the checker
+   can't tell; `rpc/call` names its caller beside its address, so the
+   connection still stops a call whose caller ends; and the acceptors
+   monitor every connection, since one kind of process keeps a result
+   for a parent that never joins.*
 4. **The docs.** LANGUAGE.md's Processes and Addresses, DESIGN.md's
    process model, TYPES.md's process types, the guide's two concept
    pages folded into one, "Processes and messages," and the tutorial's

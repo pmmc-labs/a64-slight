@@ -40,14 +40,13 @@
 
 ; Any method, headers (a list of (name value)) and a body (a string, "" for
 ; none). Gives (:ok response), or (:error reason).
-; The connection's process ends with the reply, which a process forked
-; here joins (D243; one could do both since D277); the caller joins that
-; one, so it can be a handler too.
+; The connection's process ends with the reply, which the caller joins
+; (D243, D277), wherever it is: a handler can ask too.
 (defun http/request (method url headers body)
     (match (http/check method url headers)
         ((:ok host port target)
             (let ctx (list :client (http/method-name method) (http/via url host port)))
-            (http/unwrap (join (fork (http/unwrap (join (http/connect url host port target headers body ctx)))))))
+            (http/unwrap (join (http/connect url host port target headers body ctx))))
         ((:error reason) (list :error reason))))
 
 ; As http/request, but gives (:error :timeout) if no answer comes within ms
@@ -57,7 +56,7 @@
     (match (http/check method url headers)
         ((:ok host port target)
             (let ctx (list :client (http/method-name method) (http/via url host port)))
-            (http/unwrap (join (fork (http/await (http/connect url host port target headers body ctx) ms)))))
+            (http/await (http/connect url host port target headers body ctx) ms))
         ((:error reason) (list :error reason))))
 
 ; The pid's result, or (:error :timeout) after ms milliseconds, killing it:
@@ -256,16 +255,14 @@
         ((:open _ bound)
             (send told (list :listening bound))
             (http/accept handler told most n))
+        ; each connection is monitored, so its end isn't kept for this
+        ; process, which never joins one (D277), and n is how many are
+        ; open, which :most bounds (D270)
         ((:accept _ conn)
-            (cond
-                ((not (int? most))
-                    (connect conn (http/conn conn handler))
+            (if (and (int? most) (>= n most))
+                (do (disconnect conn)
                     (http/accept handler told most n))
-                ((>= n most)
-                    (disconnect conn)
-                    (http/accept handler told most n))
-                (#true
-                    (monitor (connect conn (http/conn conn handler)))
+                (do (monitor (connect conn (http/conn conn handler)))
                     (http/accept handler told most (+ n 1)))))
         ((:exit _ _)
             (http/accept handler told most (- n 1)))))

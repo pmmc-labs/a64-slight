@@ -46,7 +46,7 @@ no shell unless you ask for one, `(list "sh" "-c" "...")`, so nothing
 in an argument is expanded or needs quoting. The name is looked for in
 `PATH`.
 
-**With input, or a line at a time:** `(open :exec cmd)` from a task gives
+**With input, or a line at a time:** `(open :exec cmd)` gives
 `(:ok p)`. `(send p (list :write x ...))` writes to its input, and
 `(send p (list :eof))` closes it. A command that reads its input waits
 until you close it. `read` gives its output as `(:line p s)`, then

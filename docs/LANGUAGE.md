@@ -883,7 +883,8 @@ notice, or by ending (D244). Till then anyone may join it, as often as
 they like, or race it, which doesn't take it; after, it's `:ended`. So
 a process forked and joined at once, the usual way, keeps nothing once
 joined, and a parent that starts many and never takes them holds their
-values till it ends. A pid is never reused, and the runtime forgets one
+values till it ends: one that starts processes for good, a server
+accepting connections, say, monitors each, and nothing is kept. A pid is never reused, and the runtime forgets one
 once nothing more can come of it, so a program that runs for good,
 starting processes as it goes, holds only those running, open or
 keeping a value (`:system`'s `(:records n)`).
@@ -1125,8 +1126,8 @@ Or a process opens a device of its own, and reads it (D243):
           ((:ok f)         (read f))           ; (:line f "first line")
           ((:error reason) reason))            ; (:enoent "notes.txt")
 
-`lib/fs`, `lib/exec` and `tools/read` work so, each in a process of its
-own.
+`lib/fs`, `lib/exec` and `tools/read` work so, in the calling process
+(D277).
 
 ### The keyboard
 
@@ -2268,8 +2269,8 @@ anything.
 
 ### (@include :fs)
 
-`lib/fs.slight`: whole files at once, on top of `open`, each in a process
-of its own, joined (D243), which blocks only its caller; and trees.
+`lib/fs.slight`: whole files at once, on top of `open`, in the calling
+process (D243, D277), which blocks only it; and trees.
 
 - `(slurp path)`: `(:ok lines)`, the file's lines without their
   newlines, as a list of strings. `(slurp "/dev/stdin")` reads stdin to
@@ -2523,8 +2524,8 @@ it, such as nginx or Caddy.
   and 60 among them, TLS failing, as curl's manual lists them. A reply
   isn't given till curl has ended with 0, so one cut short is never taken
   for a whole one. `(:enoent "curl")` means there's no curl. They wait as
-  long as the reply takes (D236), in a process the caller joins, so a
-  handler can ask too.
+  long as the reply takes (D236), the caller joining the connection's
+  process (D277), so a handler can ask too.
 - `(http/request-within ms method url headers body)` is `http/request`
   with `(:error :timeout)` if the reply hasn't all come in `ms`
   milliseconds. Its timer doesn't hold up the program's end once the
@@ -2623,9 +2624,9 @@ plain HTTP; the agent includes `:http` itself.
   for it, and its answer comes after.
 - `(agent/ask a text)` asks `a` and waits for the whole answer: `(:ok
   answer)`, or `(:error reason)` as `(:error a reason)` would have said,
-  or `(:error (:ended a result))` if `a` has ended or ends first. A
-  process of its own asks, at an address of its own (D243), so none of
-  the pieces or calls reach the caller (D192).
+  or `(:error (:ended a result))` if `a` has ended or ends first. It
+  asks at an address of its own (D243, D277), so none of the pieces or
+  calls reach the caller's mailbox (D192).
 - `(kill a)` ends the agent, and stops an answer on its way, and any
   tool it was running.
 
@@ -2781,7 +2782,7 @@ argument it needs, or with one that isn't a string.
 - `(tools/read path)`: the file's bytes, as a string, or it raises why
   not; `(tools/save path text)` makes the file hold `text` and nothing
   else, or raises why not. What the tools to read and write files are
-  made of, in a process of their own (D243).
+  made of, in the calling process (D243, D277).
 
 The commands these run are given their arguments directly, with no
 shell (but `run`'s), so a path or a text can't be taken for anything
@@ -2897,8 +2898,9 @@ socket. Either end can call the other, whichever connected.
   write anything else there.
 - `(rpc/call conn name args)` calls `name`, a string or a symbol, on the
   other end with the list `args`, and waits for the answer: `(:ok v)`,
-  or `(:error reason)`. It waits in `join`, for a process that reads
-  the answer, so it works anywhere, a lambda or a handler included. A stream's values are dropped. `args`
+  or `(:error reason)`. It waits at an address of its own, which the
+  answer and the connection's end come to (D277), so it works anywhere,
+  a lambda or a handler included. A stream's values are dropped. `args`
   that aren't data fault in the caller (`:not-sexp`).
 - `(rpc/stream conn name args)` makes the same call, and gives the
   caller what comes as it comes: `(:next s v)` for each value, then

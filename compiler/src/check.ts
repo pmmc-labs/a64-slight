@@ -483,20 +483,34 @@ function warn(cx: Cx, pos: Pos | null, message: string, certain: boolean): void 
 function bodyType(forms: Sexp, cx: Cx): Ty {
     let env = cx.env;
     let t: Ty = NIL_T;
+    let sent = false;                           // the form before was a send to another process
     for (; forms.t === 'pair'; forms = forms.cdr) {
         const f = forms.car;
         const here = { ...cx, env };
         if (isForm(f, 'let')) {
             const items = toArray(f) ?? [];
             const value = items[2];
+            if (sent && value !== undefined) bareRecvAfterSend(value, cx);
             t = value === undefined ? ANY : typeOf(value, here);
             if (items[1]?.t === 'sym') env = bind(env, items[1].name, t, aliasOf(value, env));
         } else {
+            if (sent) bareRecvAfterSend(f, cx);
             t = typeOf(f, here);
         }
         if (t.k === 'never') return NEVER;
+        const items = isForm(f, 'send') ? toArray(f) ?? [] : [];
+        sent = items.length === 3 && !(items[1]!.t === 'sym' && items[1]!.name === '$$');
     }
     return t;
+}
+
+// A send, then a bare (recv) for the reply: it takes the next message,
+// whatever it is, so it's right only while nothing else sends to this
+// process. ask reads the reply at an address of its own (D277).
+function bareRecvAfterSend(f: Sexp, cx: Cx): void {
+    if (isForm(f, 'recv') && (toArray(f) ?? []).length === 1) {
+        warn(cx, posOf(f) ?? null, `a bare recv after a send takes the next message, whatever it is: ask, and the reply comes to an address of its own`, false);
+    }
 }
 
 // The binding a let of a plain local is another name for.
