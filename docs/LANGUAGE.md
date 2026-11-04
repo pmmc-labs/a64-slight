@@ -932,8 +932,10 @@ n)`).
 
 A task can't be sent to, so it makes a place that can be (D243):
 
-- `(address)` makes one, a value of its own, printed `#<address 1.0>`
-  (the task's pid and its number among the task's addresses). `send` and
+- `(address)` makes one, a value of its own, printed `#<address 1>`
+  (its id, which its island gives it and never gives again, so what's
+  sent to one that's closed can't reach another, D273; `#<address 1@2>`
+  on island 2). `send` and
   `after` take it where they take a pid, so it goes in a message for an
   actor to answer at. `pid?` is `#true` of it; `join`, `monitor`, `kill`
   and the rest fault on it (`:not-a-pid`). Only a task makes one: in an
@@ -965,7 +967,7 @@ A task can't be sent to, so it makes a place that can be (D243):
 `read` and `read/any` are a task's alone (`:not-a-task` in an actor). A
 task reading what will never come is waiting for ever: `deadlock: the
 root process is waiting in the top level for a message to #<address
-1.0>, ...`.
+1>, ...`.
 
     (defun counter (n)
         (recv

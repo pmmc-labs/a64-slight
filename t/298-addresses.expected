@@ -1,16 +1,16 @@
-#<address 1.0>
+#<address 1>
 to-myself
 (echo hi)
 late
-(#<address 1.0> tick)
+(#<address 1> tick)
 (#<pid 4> (ok ()))
 (#<pid 4> ended)
 queued
 #true
-fault in #<pid 5>: not a pid: #<address 1.0> (read at t/298-addresses.slight:48:21)
-(error (not-a-pid #<address 1.0> "read at t/298-addresses.slight:48:21"))
-fault in #<pid 6>: not a pid: #<address 6.0> (read at t/298-addresses.slight:49:58)
-(error (not-a-pid #<address 6.0> "read at t/298-addresses.slight:49:58"))
+fault in #<pid 5>: not a pid: #<address 1> (read at t/298-addresses.slight:48:21)
+(error (not-a-pid #<address 1> "read at t/298-addresses.slight:48:21"))
+fault in #<pid 6>: not a pid: #<address 2> (read at t/298-addresses.slight:49:58)
+(error (not-a-pid #<address 2> "read at t/298-addresses.slight:49:58"))
 42
 (error (ended #<pid 7> ended))
 (error (timeout #<pid 9>))

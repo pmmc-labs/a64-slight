@@ -6733,3 +6733,27 @@ caller handles less easily than the errors it already gets;
 percent-encoding a URL's bad bytes rather than refusing it, which curl
 doesn't do either. Golden test 341.
 
+**D273. An address is an id its island gives once, and a table says
+whose it is.** *(Stevan, Nov 2026, from the review of 2026-11-02, M5;
+Claude's recommendation.)* An address held its task's pid number in 32
+bits and its number among the task's in 20 (D243, D256). Pids are never
+reused (D244), and an island forks and joins about 4.2 million tasks a
+second, so in about 17 minutes of that a task's address no longer named
+it: `read` faulted `:not-a-pid`, so `ask`, `http/request` and `rpc/call`
+failed, and a message could go to another live task whose pid was the
+same modulo 2^32. And a task's numbers wrapped at 2^20, skipping only
+those open, so a late reply could reach a new address that had taken a
+closed one's number. Now an address is its island and an id of 52 bits,
+the island's next, which it never gives again; each island keeps its
+open addresses in a hash table, id to task (open addressing, at most
+half full, closing by moving back what follows, so no tombstones), and a
+task keeps its own ids so its end closes them. A send to an address is a
+lookup there in place of an index. It prints `#<address 7>` (and
+`#<address 7@2>` on island 2), where it printed the task and number,
+`#<address 1.0>`. Rejected: faulting once a task's pid passes 2^32 (no
+misdelivery, but `ask` and the rest broken in a program that has run a
+while); 40 bits of pid and 12 of number, faulting past 2^40 (about 73
+hours at the most an island can fork, but the numbers wrapping at
+4,096). Golden test 324, which tested the wrap, now tests that ids
+aren't reused, and that a message to a closed address reaches no other.
+

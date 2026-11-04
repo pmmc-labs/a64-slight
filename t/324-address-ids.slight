@@ -1,0 +1,21 @@
+; An address's id (D273) is its island's, given once and never again,
+; however many are made and closed: the root keeps its first, 1, open,
+; makes and closes 1,048,575 more, 2 to 1,048,576, and the next are
+; 1,048,577 and 1,048,578. Till D273 the numbers were a task's, and
+; wrapped past 2^20 to reuse those closed. And a message sent to an
+; address that's closed goes nowhere, not to one made after it. Expected
+; output worked out by hand.
+
+(defun churn (n)
+    (if (== n 0) () (do (disconnect (address)) (churn (- n 1)))))
+
+(let first (address))
+(churn 1048575)
+(pprint (list first (address) (address)))
+(let closed (address))
+(disconnect closed)
+(send closed :late)
+(let next (address))
+(send next :on-time)
+(pprint (list closed next (read next)))
+:done

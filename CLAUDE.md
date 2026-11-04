@@ -361,7 +361,8 @@ stacks), B, `eq?` and `hash` walking a value as a tree, documented
 connection's waiting output, `barf`'s echo and how many are open, with
 `http/serve-with` and `rpc/serve-with` (D270, golden tests 342 and 343),
 and H5, requests that would put more on the wire than they say refused
-(D271, golden test 341), are settled, and the rest wait for him.
+(D271, golden test 341), and G, an address an id its island gives once
+(D273, golden test 324), are settled, and the rest wait for him.
 **Next:** nothing is under way. Candidates, none agreed: a simulation library across
 islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in

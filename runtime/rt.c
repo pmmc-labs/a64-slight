@@ -198,7 +198,7 @@ void rt_pid_text(char *buf, size_t size, rt_value_t v) {
     char     at[8] = "";
     uint64_t island = rt_pid_island(v);
     if (island) snprintf(at, sizeof at, "@%" PRIu64, island);
-    if (rt_is_address(v)) snprintf(buf, size, "#<address %" PRIu64 ".%" PRIu64 "%s>", rt_address_task(v), rt_address_number(v), at);
+    if (rt_is_address(v)) snprintf(buf, size, "#<address %" PRIu64 "%s>", rt_address_id(v), at);
     else                  snprintf(buf, size, "#<pid %" PRIu64 "%s>", rt_pid_number(v), at);
 }
 

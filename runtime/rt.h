@@ -550,16 +550,14 @@ static inline uint64_t rt_pid_number(rt_value_t v) { return (v >> RT_PID_SHIFT) 
 static inline uint64_t rt_pid_island(rt_value_t v) { return (v >> RT_ISLAND_SHIFT) & (RT_ISLANDS_MAX - 1); }
 
 // An address (D243): a place a task makes to be sent to. An immediate under
-// the pid tag, with the top bit set: the task's number in its low 32 bits
-// (as a pid's, from RT_PID_SHIFT), its number among the task's addresses
-// in the 20 above them, and its island above those, as a pid's.
+// the pid tag, with the top bit set: its id, where a pid has its number,
+// which its island gives it, never giving one twice, so a message for one
+// that's closed can't reach another; and its island above that, as a
+// pid's. Which task it's for is in its island's table of those open
+// (D273).
 #define RT_ADDRESS_BIT    (1ULL << 63)
-#define RT_ADDRESS_SHIFT  35
-static inline int      rt_is_address(rt_value_t v)   { return (v & RT_TAG_MASK) == RT_TAG_PID && (v & RT_ADDRESS_BIT); }
-static inline uint64_t rt_address_task(rt_value_t v) { return (v >> RT_PID_SHIFT) & 0xffffffffu; }
-static inline uint64_t rt_address_number(rt_value_t v) {
-    return (v >> RT_ADDRESS_SHIFT) & ((1ULL << (RT_ISLAND_SHIFT - RT_ADDRESS_SHIFT)) - 1);
-}
+static inline int      rt_is_address(rt_value_t v) { return (v & RT_TAG_MASK) == RT_TAG_PID && (v & RT_ADDRESS_BIT); }
+static inline uint64_t rt_address_id(rt_value_t v) { return rt_pid_number(v); }
 
 static inline const uint64_t *rt_box(rt_value_t v) { return (const uint64_t *)(v - RT_TAG_BOXED); }
 static inline int rt_is_box(rt_value_t v, uint64_t type) {
@@ -1048,7 +1046,7 @@ static inline rt_value_t rt_work_pop(rt_work_t *w) {
 }
 
 // A pid or an address as pprint shows it, into buf (of at least 64): #<pid
-// 5>, and #<pid 5@2> on island 2 (D256); #<address 3.1>, #<address 3.1@2>.
+// 5>, and #<pid 5@2> on island 2 (D256); #<address 3>, #<address 3@2>.
 void rt_pid_text(char *buf, size_t size, rt_value_t v);
 
 // Appends v as pprint shows it. With raw, a string is its bytes, without

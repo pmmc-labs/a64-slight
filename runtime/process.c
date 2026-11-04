@@ -127,6 +127,9 @@ typedef struct rt_isle {
     uint64_t           virtual_now;     // the virtual clock, each island's its own
     uint64_t           input_seen;      // when stdin and the sockets were last looked at while busy (events)
     const char        *ending_site;     // while a process ends, till the first copy of its value (end, D265)
+    uint64_t           addresses_made;  // the last address's id (D273)...
+    struct open_address *open;          // ...and those open, by id (address_task)
+    uint64_t           open_n, open_cap;
     uint64_t           nsockets;
     struct rt_device  *sockets;         // open sockets and commands, and closing sockets (nsockets counts them)
     uint64_t           ndevices;        // open devices
@@ -1670,9 +1673,8 @@ static void need_actor(const entry_t *e, rt_value_t pid, const char *site) {
 // owns devices), so read takes it by that, and nothing else can.
 
 typedef struct rt_addresses {
-    uint64_t  next;                     // the number the next address gets
     uint64_t  n, cap;
-    uint64_t *open;                     // the numbers of those not closed
+    uint64_t *open;                     // the ids of those not closed, for its end to close
 } rt_addresses_t;
 
 // The children whose values a process's records keep for it, since they
@@ -1736,20 +1738,73 @@ static struct rt_device *devices_of(const rt_proc_t *p) {
     return p->side ? p->side->devices : NULL;
 }
 
-#define ADDRESS_NUMBERS (1ULL << (RT_ISLAND_SHIFT - RT_ADDRESS_SHIFT))
+// Each island's open addresses, by id (D273): open addressing, probing on
+// from where an id hashes to, at most half full, and one closed by moving
+// back what follows it, so no slot is ever left a tombstone. An id is
+// never 0, which marks a slot empty.
+typedef struct open_address {
+    uint64_t   id;
+    rt_value_t task;
+} open_address_t;
 
+static uint64_t address_home(uint64_t id, uint64_t cap) {
+    return (id * 0x9e3779b97f4a7c15ULL >> 32) & (cap - 1);
+}
+
+// Where id is in the island's table, or where it would go.
+static uint64_t address_at(uint64_t id) {
+    uint64_t i = address_home(id, my.open_cap);
+    while (my.open[i].id && my.open[i].id != id) i = (i + 1) & (my.open_cap - 1);
+    return i;
+}
+
+// The task the open address id is for, or RT_NIL.
+static rt_value_t address_task(uint64_t id) {
+    if (!my.open_cap) return RT_NIL;
+    uint64_t i = address_at(id);
+    return my.open[i].id ? my.open[i].task : RT_NIL;
+}
+
+static void address_add(uint64_t id, rt_value_t task) {
+    if (2 * (my.open_n + 1) > my.open_cap) {
+        open_address_t *old = my.open;
+        uint64_t        n   = my.open_cap;
+        my.open_cap = n ? 2 * n : 64;
+        my.open     = rt_must(calloc(my.open_cap, sizeof *my.open));
+        for (uint64_t i = 0; i < n; i++) if (old[i].id) my.open[address_at(old[i].id)] = old[i];
+        free(old);
+    }
+    my.open[address_at(id)] = (open_address_t){ id, task };
+    my.open_n++;
+}
+
+// Each that follows id's slot, up to an empty one, moves back into the gap
+// unless the gap is before where it hashes to.
+static void address_drop(uint64_t id) {
+    if (!my.open_cap) return;
+    uint64_t mask = my.open_cap - 1, gap = address_at(id);
+    if (!my.open[gap].id) return;
+    for (uint64_t j = (gap + 1) & mask; my.open[j].id; j = (j + 1) & mask) {
+        uint64_t home = address_home(my.open[j].id, my.open_cap);
+        if (((j - home) & mask) >= ((j - gap) & mask)) {
+            my.open[gap] = my.open[j];
+            gap          = j;
+        }
+    }
+    my.open[gap] = (open_address_t){ 0, 0 };
+    my.open_n--;
+}
+
+// Whether a is p's, and open.
 static int address_open(const rt_proc_t *p, rt_value_t a) {
-    const rt_addresses_t *s = p->side ? &p->side->addresses : NULL;
-    for (uint64_t i = 0; s && i < s->n; i++) if (s->open[i] == rt_address_number(a)) return 1;
-    return 0;
+    return here(a) && address_task(rt_address_id(a)) == p->pid;
 }
 
 // The task a is for, while it runs and has a open; or NULL.
 static rt_proc_t *address_owner(rt_value_t a) {
     if (!here(a)) return NULL;
-    uint64_t   i = rt_address_task(a);
-    rt_proc_t *p = i >= 1 && i <= my.nprocs ? at(i)->proc : NULL;
-    return p && address_open(p, a) ? p : NULL;
+    rt_value_t task = address_task(rt_address_id(a));
+    return task == RT_NIL ? NULL : slot(task)->proc;
 }
 
 static void deliver(rt_proc_t *p, rt_msg_t *m);
@@ -1766,21 +1821,20 @@ static void to_address(rt_value_t a, rt_msg_t *m) {
     deliver(p, m);
 }
 
-// A new address of the calling task's. Its number wraps past 2^20 (a
-// million), skipping any still open, of which a task has few.
+// A new address of the calling task's, with the island's next id.
 rt_value_t rt_address(const char *site) {
     rt_proc_t *p = rt_current;
     if (p->actor) rt_fault(RT_FAULT_NOT_TASK, p->pid, site);   // an actor takes its answers as messages
+    if (my.addresses_made + 1 >= 1ULL << 52) rt_fault(RT_FAULT_RANGE, RT_NIL, site);   // 4.5e15 of them, never
     rt_addresses_t *s = &side_of(p)->addresses;
     if (s->n == s->cap) {
         s->cap  = s->cap ? s->cap * 2 : 4;
         s->open = rt_must(realloc(s->open, s->cap * sizeof *s->open));
     }
-    uint64_t num;
-    do num = s->next++ % ADDRESS_NUMBERS;
-    while (address_open(p, RT_ADDRESS_BIT | num << RT_ADDRESS_SHIFT | p->pid));
-    s->open[s->n++] = num;
-    return RT_ADDRESS_BIT | num << RT_ADDRESS_SHIFT | p->pid;
+    uint64_t id = ++my.addresses_made;
+    s->open[s->n++] = id;
+    address_add(id, p->pid);
+    return RT_ADDRESS_BIT | (p->pid & (uint64_t)(RT_ISLANDS_MAX - 1) << RT_ISLAND_SHIFT) | id << RT_PID_SHIFT | RT_TAG_PID;
 }
 
 // Closes a, of p's: what's sent to it after goes nowhere, and what's
@@ -1788,10 +1842,11 @@ rt_value_t rt_address(const char *site) {
 static void close_address(rt_proc_t *p, rt_value_t a) {
     rt_addresses_t *s = &p->side->addresses;    // open, so it has one
     for (uint64_t i = 0; i < s->n; i++) {
-        if (s->open[i] != rt_address_number(a)) continue;
+        if (s->open[i] != rt_address_id(a)) continue;
         s->open[i] = s->open[--s->n];
         break;
     }
+    address_drop(rt_address_id(a));
     rt_msg_t *last = NULL;
     for (rt_msg_t **link = &p->mail; *link; ) {
         rt_msg_t *m = *link;
@@ -2063,6 +2118,7 @@ static void free_side(rt_proc_t *p) {
         next = m->next;
         free_msg(m);
     }
+    for (uint64_t i = 0; i < s->addresses.n; i++) address_drop(s->addresses.open[i]);
     free(s->addresses.open);
     free(s);
     p->side = NULL;
@@ -2305,7 +2361,7 @@ static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char 
         if (!rt_is_cons(xs)) rt_fault(RT_FAULT_NOT_LIST, srcs, site);
         rt_value_t src = rt_car(xs);
         if (rt_is_address(src)) {
-            if (rt_address_task(src) != rt_pid_number(p->pid) || !address_open(p, src)) rt_fault(RT_FAULT_NOT_PID, src, site);
+            if (!address_open(p, src)) rt_fault(RT_FAULT_NOT_PID, src, site);
         } else if (!far(src)) {
             entry(src, site);
             if (src == p->pid) rt_fault(RT_FAULT_JOIN_SELF, src, site);

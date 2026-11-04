@@ -16,7 +16,7 @@ store forgot to reply:
 
 <!-- output: ../code/howto-deadlock.expected -->
 ```
-deadlock: the root process is waiting in ask/via for the first of #<address 1.0>, #<pid 2>, and nothing else can run
+deadlock: the root process is waiting in ask/via for the first of #<address 1>, #<pid 2>, and nothing else can run
 exit: 1
 ```
 

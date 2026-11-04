@@ -1,4 +1,4 @@
-#<address 1.0>
+#<address 1>
 (is-it-even? got (IS-EVEN? 21 #<pid 3>))
 (is-it-even? got (IS-EVEN? 36 #<pid 3>))
 (is-it-even? got (IS-EVEN? 57 #<pid 3>))

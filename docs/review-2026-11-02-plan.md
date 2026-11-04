@@ -22,6 +22,10 @@ are settled:
     `rpc/serve-with` and `rpc/listen-with`.
 - **H5** is built (D271, golden test 341): requests refused as Results,
   a handler's bad response a 500 with a warning.
+- **G** is built (D273): an address is an id its island gives once, and
+  a table of the island's open ones says whose it is, so neither a pid
+  past 2^32 nor a wrapped number can misdeliver. It prints
+  `#<address 7>`. Golden test 324 is now `324-address-ids`.
 
 The rest of step 4 waits for Stevan. Step 5 is begun: CLAUDE.md's
 status says what's done.
