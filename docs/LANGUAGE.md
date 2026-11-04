@@ -1239,7 +1239,9 @@ open to read fails at once, with `(:error (:enxio path))`, rather than
 waiting for a reader. One opened to read before anything has opened it
 to write waits for a writer, and its `(:eof f)` comes once every writer
 has closed it (on Linux; macOS may say `(:eof f)` at once, which is to
-be checked there).
+be checked there). Written to, the file stdin, stdout or stderr is
+(`/dev/stdout`, say) is written as a regular file is, as before, since
+a shell, and the program's own output, may share how it's opened.
 
 `(send f (list :read how))`, from any process, changes how a reader
 cuts what it reads into messages, from the next message on. `how` is

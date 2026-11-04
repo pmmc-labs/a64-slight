@@ -6763,10 +6763,16 @@ was, so a replay goes the same way):
 - **A FIFO opened to read before any writer** waits, on Linux, till a
   writer has come and gone (checked); macOS may report it readable, and
   so `(:eof f)`, at once. That's to be checked on the M2, and not worked
-  around; so is `/dev/stdin` there, which macOS opens as a copy of
-  descriptor 0, sharing its flags, so whether `O_NONBLOCK` takes, and
-  whether a terminal is left non-blocking for the shell after, are to be
-  seen.
+  around.
+- **What can share its flags isn't left non-blocking.** macOS opens
+  `/dev/stdin` and the rest as copies of descriptors 0 to 2, sharing
+  their flags with the runtime's own output and the shell's terminal.
+  So a polled reader blocks again once open, reading only when
+  `select()` says it can (`fill` reads once each time), and a writer to
+  the file stdin, stdout or stderr is (same device and inode) isn't
+  polled, written as a regular file is, as before; only other writers,
+  a FIFO's, a pipe's, stay `O_NONBLOCK`, as `queue` and `flush` need.
+  (Claude's, on review of the agent's first version.)
 - Rejected: refusing what isn't a regular file, which would break
   `slurp "/dev/stdin"`; a thread per blocking file, against D113's one
   thread an island.

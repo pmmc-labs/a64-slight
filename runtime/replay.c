@@ -481,10 +481,26 @@ ssize_t rt_io_write(int fd, const void *buf, size_t len) {
     return (ssize_t)done(IO_WRITE, write(fd, buf, len));
 }
 
+// Whether st is the file stdin, stdout or stderr is. On macOS /dev/stdin
+// and the rest are copies of those descriptors, their flags shared with
+// the runtime's own output and with the shell after the program, so
+// O_NONBLOCK mustn't stay on one (D272).
+static int standard(const struct stat *st) {
+    struct stat s;
+    for (int fd = 0; fd < 3; fd++) {
+        if (fstat(fd, &s) == 0 && s.st_dev == st->st_dev && s.st_ino == st->st_ino) return 1;
+    }
+    return 0;
+}
+
 // Opened without waiting, since a FIFO with no writer, or a terminal,
 // would hold open() up, and the island with it (D272). A regular file,
 // or a directory, then blocks again, as it always has; anything else is
-// polled, so it must fit in select()'s sets, as a socket must.
+// polled, so it must fit in select()'s sets, as a socket must. A polled
+// reader blocks again too, since it reads only once select() says it
+// can; a polled writer can't, or a full pipe would hold the island up,
+// so one to the file stdin, stdout or stderr is, which a shell may
+// share, is written to as a regular file is, as before.
 int rt_io_open(const char *path, int flags, int *polled) {
     int32_t p = 0;
     if (mode == REPLAY) {
@@ -495,9 +511,11 @@ int rt_io_open(const char *path, int flags, int *polled) {
     int fd = open(path, flags | O_NONBLOCK | O_CLOEXEC, 0666), err = 0, fl;
     struct stat st;
     if (fd >= 0) {
-        if (fstat(fd, &st) < 0)                                    err = errno;
-        else if (!S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode))      p   = 1;
-        else if ((fl = fcntl(fd, F_GETFL)) < 0 || fcntl(fd, F_SETFL, fl & ~O_NONBLOCK) < 0) err = errno;
+        int reader = (flags & O_ACCMODE) == O_RDONLY, other = 0;
+        if (fstat(fd, &st) < 0) err = errno;
+        else other = !S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode);
+        p = other && (reader || !standard(&st));
+        if (!err && (!p || reader) && ((fl = fcntl(fd, F_GETFL)) < 0 || fcntl(fd, F_SETFL, fl & ~O_NONBLOCK) < 0)) err = errno;
         if (!err && p && fd >= FD_SETSIZE) err = EMFILE;
         if (err) {
             close(fd);
