@@ -15,8 +15,9 @@ program, or the system to measure the run.
   under PEAK, where copies, or a leak, would be over it. And 24 faults
   of str/replace-all past a heap of 64 MB peak within FLAT of 8: before
   H3 and L8, each built its 100 MB outside the heap and left it there.
-  (8, not 1, as the base, since macOS's malloc keeps some large blocks
-  it's freed, which count in the peak but don't grow with the faults.)
+  That's Linux's alone: macOS's malloc keeps large blocks it has freed,
+  counted in the peak, by an amount that varies from run to run, so the
+  peak there can't tell a leak; it's skipped.
 - chat: examples/chat.slight in a terminal, with t/live/model.slight as
   its model: what the model sends with terminal escapes in it is shown
   escaped, approvals included; a refused command isn't run; and a fetch
@@ -200,10 +201,16 @@ def memory():
         ok_out = out == expected if expected else out.startswith('(error (heap () "str/pad-start at ')
         check(f'{what}: {out.splitlines()[0] if out else "nothing"}, at most {peak >> 20} MB',
               status == 0 and ok_out and peak < most, f'exit {status}, printed {out!r}')
+    # Linux's alone: glibc gives a freed block this big back to the
+    # system at once, so a leak shows in the peak; macOS's malloc keeps
+    # large blocks it has freed, which count in the peak, by an amount
+    # that varies from run to run (8 faults peaked at 178 MB in one run
+    # on the M2 and 459 in the next), so the peak there can't tell.
+    if platform.system() != 'Linux':
+        print('skip faults past the heap leave nothing behind: only Linux gives freed blocks back at once')
+        return
     capped = ENV | {'SLIGHT_HEAP_MAX': '64M'}
-    # 8 against 24, not 1 against 8: a leak grows with the faults, but
-    # an allocator may keep some freed blocks for reuse, as macOS's does
-    # its large ones, which count in the peak but don't grow with them.
+    # 8 against 24: a leak grows with the faults.
     out1, status1, peak1 = peak_run(prog, ['faults', '8'], capped)
     out8, status8, peak8 = peak_run(prog, ['faults', '24'], capped)
     check(f'24 faults past the heap in str/replace-all, at most {peak8 >> 20} MB, and 8 at most {peak1 >> 20} MB',
