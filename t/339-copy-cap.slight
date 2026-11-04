@@ -1,0 +1,22 @@
+; A copy a process asks for that would be more than a heap can hold
+; faults :heap in that process, and the program goes on (D265). A copy
+; keeps no sharing, so a value built by doubling 30 times, 30 cells in
+; the heap, is 2^30 cells, 16 GB, as a copy, past the tests' 64 MB:
+; captured by a fork, sent, timed, captured by a spawn/on, and ended
+; with, as a task's value or a raise's reason. Each case is a task that
+; builds its own, since a fork that captured it would fault the root.
+; One built 3 times copies as it is. Expected output worked out by hand.
+
+(defun double (x n) (if (== n 0) x (double (list x x) (- n 1))))
+(defun big () (double :leaf 30))
+(defun kind (r) (match r ((:error (k _ _)) k) (other other)))
+(defun sink () (recv (_ (sink))))
+
+(pprint (kind (join (fork (do (let v (big)) (fork (length v)) :forked)))))
+(pprint (kind (join (fork (do (let v (big)) (send (spawn (sink)) v) :sent)))))
+(pprint (kind (join (fork (do (let v (big)) (after 10 (spawn (sink)) v) :timed)))))
+(pprint (kind (join (fork (do (let v (big)) (spawn/on 1 (length v)) :placed)))))
+(pprint (kind (join (fork (big)))))
+(pprint (kind (join (fork (raise (big))))))
+(pprint (kind (join (fork (double :leaf 3)))))
+:done

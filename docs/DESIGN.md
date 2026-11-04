@@ -988,7 +988,11 @@ RT_EXEC_INT`, since a symbol is its name.
   the target's FIFO mailbox. Static data is not copied, and nor is a
   string of `RT_SHARED_MIN` (4 KB) or more, a buffer off the heap whose
   handle is copied, its references counted (D253, below). Sharing within a
-  message is duplicated (as in the BEAM); that's acceptable at this scale.
+  message is duplicated (as in the BEAM); that's acceptable at this scale,
+  but a copy a process asks for (a send, a fork, its end) is held to the
+  most a heap can hold, past which that process faults `:heap` (D265).
+  What the runtime says of a value, a fault's or a dead letter's, is cut
+  at 64 KB.
   The copy is one walk over the value, into a scratch buffer, which then
   moves into a chunk of just its size; the message's record (its place in
   the mailbox) is at the front of the same chunk, so a send is one malloc
@@ -1125,7 +1129,11 @@ run (option (b), D256's step 6, put off).
   exact and take no real time; but a process that sleeps while others stay
   busy never wakes.
 - **Stack pool**: a process takes a stack when it starts running and gives
-  it back when it waits in `recv` or ends.
+  it back when it waits in `recv` or ends. An island keeps 256 given
+  back, and unmaps the rest. With none to be had (about 32,700 held at
+  once reach Linux's default `vm.max_map_count`, two mappings a stack),
+  the process that wanted one faults `:stack`, and the program goes on
+  (D267).
 - **Context switch**: `rt_switch`, 25 instructions on AArch64 (x19–x30,
   sp, d8–d15).
 - **Idle**: when nothing is runnable, wait in `select()` (on macOS and

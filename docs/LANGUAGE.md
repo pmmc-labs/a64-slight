@@ -713,12 +713,17 @@ it, and reads its end:
 ### Messages
 
 `(send pid msg)` puts a deep copy of `msg` at the end of `pid`'s mailbox,
-and returns `()`. It never blocks. A message can be any value, and is
-conventionally a list headed by a keyword: `(list :add 5)`. A message to
-a process that has ended disappears. Sending to a task that hasn't
-faults (`:not-an-actor`), as does setting a timer for one (`after`), so
-whatever sends its caller messages (`http/stream`, `agent/say`,
-`rpc/stream`) is called from an actor.
+and returns `()`. It never blocks. A copy keeps no sharing: a value
+built by doubling a list 40 times is 40 cells, but copies as 2^40. A
+copy that would be more than a heap can hold faults the sender
+(`:heap`), as does one a `fork`, a `spawn` or an `after` makes, and a
+process whose value as it ends is that big ends `:heap` instead (D265).
+A message can be any value, and is conventionally a list headed by a
+keyword: `(list :add 5)`. A message to a process that has ended
+disappears. Sending to a task that hasn't faults (`:not-an-actor`), as
+does setting a timer for one (`after`), so whatever sends its caller
+messages (`http/stream`, `agent/say`, `rpc/stream`) is called from an
+actor.
 
 A function whose whole body is a `recv` is a **receive function**:
 
@@ -802,7 +807,8 @@ A process ends when its expression gives a value, and its result is
   test that isn't a boolean, and so on. The reason is
   `(kind value site)`: a keyword for the kind, the value at fault (or
   `()`), and a string saying where. A fault is always a bug, so it's
-  logged as it happens.
+  logged as it happens, with at most 64 KB of its value, then `...`
+  (D265).
 
       (join (fork (car ())))
       ; (:error (:not-a-cons () "car at prog.slight:1:13"))
@@ -820,7 +826,10 @@ The fault kinds:
 - `:overflow`: an integer result that doesn't fit in 63 bits
 - `:not-a-bool`: a `cond` test that's neither `#true` nor `#false`
 - `:no-clause`: no `cond` clause matched
-- `:stack`: a call with the stack nearly full
+- `:stack`: a call with the stack nearly full; or, with the reason
+  `(:stack () "no stack to be had")`, a process the system had no
+  stack for as it was to run, about 32,000 being held at once on Linux,
+  by processes preempted, joining, sleeping or reading (D267)
 - `:not-a-cons`: `car` or `cdr` of something that isn't a cons
 - `:not-a-list`: `cons` onto something that isn't a list
 - `:heap`: the process's heap is full

@@ -105,7 +105,8 @@ typedef struct rt_isle {
     uint64_t           nrecords;        // entries made and not yet dead, for :system
     rt_proc_t         *ready_head, *ready_tail;
     rt_ctx_t           scheduler;
-    void              *free_stacks;     // a list through each stack's first word
+    void              *free_stacks;     // a list through each stack's first word...
+    uint64_t           nfree_stacks;    // ...this long
     uint64_t           stressed;        // the collections SLIGHT_GC_STRESS has made, every eighth a major one
     uint64_t           sched;           // SLIGHT_SCHED's generator, or 0: first in, first out
     char              *scratch;         // the copy being made, kept from one copy to the next
@@ -125,6 +126,7 @@ typedef struct rt_isle {
     uint64_t           ids_cap, nids;   // ids_cap a power of two, or 0
     uint64_t           virtual_now;     // the virtual clock, each island's its own
     uint64_t           input_seen;      // when stdin and the sockets were last looked at while busy (events)
+    const char        *ending_site;     // while a process ends, till the first copy of its value (end, D265)
     uint64_t           nsockets;
     struct rt_device  *sockets;         // open sockets and commands, and closing sockets (nsockets counts them)
     uint64_t           ndevices;        // open devices
@@ -229,25 +231,40 @@ static void to_scheduler(rt_proc_t *p) {
 
 // --- stacks -------------------------------------------------------------------
 
+#define STACKS_KEPT 256                 // given back stacks an island keeps; past that, they're unmapped
+
 // A stack with a guard page under it, so running off the end crashes
-// instead of corrupting memory. Returns its bottom, above the guard.
+// instead of corrupting memory. Returns its bottom, above the guard; or
+// NULL if the system has none to give, which is mostly its limit on a
+// program's mappings, two a stack (about 32,000 stacks at once at
+// Linux's default vm.max_map_count), and the process that wanted it
+// faults (D267).
 static void *get_stack(void) {
     if (my.free_stacks) {
         void *s = my.free_stacks;
         my.free_stacks = *(void **)s;
+        my.nfree_stacks--;
         return s;
     }
     char *base = mmap(NULL, page + STACK_BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (base == MAP_FAILED || mprotect(base, page, PROT_NONE) != 0) {
-        perror("rt: can't allocate a stack");
-        exit(2);
+    if (base == MAP_FAILED) return NULL;
+    if (mprotect(base, page, PROT_NONE) != 0) {
+        munmap(base, page + STACK_BYTES);
+        return NULL;
     }
     return base + page;
 }
 
+// Kept for the next process, or, past STACKS_KEPT, unmapped, so a burst
+// of processes holding stacks doesn't hold its mappings for good.
 static void release_stack(rt_proc_t *p) {
-    *(void **)p->stack = p->isle->free_stacks;
-    p->isle->free_stacks = p->stack;
+    if (p->isle->nfree_stacks < STACKS_KEPT) {
+        *(void **)p->stack = p->isle->free_stacks;
+        p->isle->free_stacks = p->stack;
+        p->isle->nfree_stacks++;
+    } else {
+        munmap((char *)p->stack - page, page + STACK_BYTES);
+    }
     p->stack = NULL;
 }
 
@@ -270,9 +287,11 @@ static void refill(rt_proc_t *p) {
 }
 
 // A stack, and registers that make the first switch land in rt_trampoline
-// with x28 (r15) = p, which calls p->code with p->args.
-static void start(rt_proc_t *p) {
-    p->stack       = get_stack();
+// with x28 (r15) = p, which calls p->code with p->args; or 0, if there's
+// no stack to be had.
+static int start(rt_proc_t *p) {
+    p->stack = get_stack();
+    if (!p->stack) return 0;
     p->stack_limit = (uintptr_t)p->stack + STACK_HEADROOM;
     refill(p);
     memset(&p->ctx, 0, sizeof p->ctx);
@@ -288,6 +307,7 @@ static void start(rt_proc_t *p) {
     p->ctx.lr         = (uint64_t)rt_trampoline;
     p->ctx.x19_x28[9] = (uint64_t)p;
 #endif
+    return 1;
 }
 
 // --- heaps --------------------------------------------------------------------
@@ -613,7 +633,11 @@ static rt_value_t *stack_grow(rt_value_t *todo, size_t cap, rt_value_t *local) {
 // each cdr as the walk comes to it; a car that's a list, and a box of
 // values (a closure or a tuple), goes on the stack, with where its copy
 // is, for after. So a flat list never touches the stack. Sharing isn't
-// kept: a DAG is copied as a tree.
+// kept: a DAG is copied as a tree, which can be 2^40 cells of a value
+// built in 40. So a copy a process asks for (a send, a fork, its end)
+// is held to the most a heap can hold, past which the process faults
+// :heap, rather than the runtime running out of memory (D265); the
+// runtime's own copies, of what's within a cap already, aren't.
 
 
 #define SCRATCH_KEPT (1 << 20)          // scratch bigger than this is let go after a copy
@@ -628,6 +652,9 @@ typedef struct {
     uintptr_t   r0, r1, c0, c1;         // read-only, and the quoted constants
     size_t     *handles;                // the offsets of the shared strings' handles copied (D253)
     size_t      nhandles, handles_cap;
+    size_t      max;                    // the most the copy may come to: heap_max, or SIZE_MAX
+    const char *site;                   // where it faults past max
+    island_state_t *s;                  // whose scratch it is
 } copying_t;
 
 // Whether v is copied: a cell or a box, but not static data, which is
@@ -640,17 +667,40 @@ WALK int copied(const copying_t *c, rt_value_t v) {
     return a - c->lo >= c->hi - c->lo || !(a - c->r0 < c->r1 - c->r0 || a - c->c0 < c->c1 - c->c0);
 }
 
-// The offset of n more bytes at the end of scratch (n a multiple of 16, so
-// every offset is 16-aligned, as a cell or a box must be). Slots grow with
-// it, so that noting one never needs to.
-WALK size_t scratch_take(copying_t *c, size_t n) {
-    if (c->used + n > c->cap) {
-        size_t cap = c->cap;
-        while (c->used + n > cap) cap = cap ? cap * 2 : 4096;
-        c->scratch = rt_must(realloc(c->scratch, cap));
-        c->slots   = rt_must(realloc(c->slots, cap / 8 * sizeof *c->slots));
-        c->cap     = cap;
+// A copy past c->max: what it took is given back (the references to
+// shared buffers, the work stack, and scratch, to its island, since it
+// may have moved), and the process asking for it faults.
+static _Noreturn __attribute__((noinline, cold)) void too_big(copying_t *c) {
+    for (size_t i = 0; i < c->nhandles; i++) ((rt_buffer_t *)((uint64_t *)(c->scratch + c->handles[i]))[2])->refs--;
+    free(c->handles);
+    if (c->todo != c->local) free(c->todo);
+    if (c->cap > SCRATCH_KEPT) {
+        free(c->scratch), free(c->slots);
+        c->scratch = NULL, c->slots = NULL;
+        c->cap = 0;
     }
+    c->s->scratch     = c->scratch;
+    c->s->slots       = c->slots;
+    c->s->scratch_cap = c->cap;
+    rt_fault(RT_FAULT_HEAP, 0, c->site);
+    __builtin_unreachable();
+}
+
+// Room for n more bytes in scratch, which grows, and slots with it, so
+// that noting one never needs to.
+static __attribute__((noinline)) void scratch_grow(copying_t *c, size_t n) {
+    if (c->used + n > c->max) too_big(c);
+    size_t cap = c->cap;
+    while (c->used + n > cap) cap = cap ? cap * 2 : 4096;
+    c->scratch = rt_must(realloc(c->scratch, cap));
+    c->slots   = rt_must(realloc(c->slots, cap / 8 * sizeof *c->slots));
+    c->cap     = cap;
+}
+
+// The offset of n more bytes at the end of scratch (n a multiple of 16, so
+// every offset is 16-aligned, as a cell or a box must be).
+WALK size_t scratch_take(copying_t *c, size_t n) {
+    if (c->used + n > c->cap) scratch_grow(c, n);
     size_t at = c->used;
     c->used  += n;
     return at;
@@ -740,14 +790,17 @@ WALK void copy(copying_t *c, rt_value_t v, size_t at) {
 // 16) left for the caller, and puts what to use for each in into. The
 // values themselves go first in scratch, as words that point into it like
 // any other, and are taken out of it at the end. Each word noted is made
-// where it will be before the copy is moved.
-static rt_chunk_t *copy_walk(island_state_t *s, const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve) {
+// where it will be before the copy is moved. With a site, the copy is the
+// running process's, and faults there past heap_max (D265).
+static rt_chunk_t *copy_walk(island_state_t *s, const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve,
+                             const char *site) {
     rt_value_t local[RT_WORK_LOCAL];
     copying_t  c = {
         .scratch = s->scratch, .slots = s->slots, .cap = s->scratch_cap,
         .todo = local, .local = local, .todo_cap = RT_WORK_LOCAL,
         .r0 = (uintptr_t)slight_rodata_start, .r1 = (uintptr_t)slight_rodata_end,
         .c0 = (uintptr_t)slight_const_start, .c1 = (uintptr_t)slight_const_end,
+        .max = site ? heap_max : SIZE_MAX, .site = site, .s = s,
     };
     c.lo = c.r0 < c.c0 ? c.r0 : c.c0;
     c.hi = c.r1 > c.c1 ? c.r1 : c.c1;
@@ -784,16 +837,23 @@ static rt_chunk_t *copy_walk(island_state_t *s, const rt_value_t *from, rt_value
 
 // Values with no pointer among them, as fork's and join's often are, and
 // many messages, need no walk.
-static rt_chunk_t *copy_values_after(island_state_t *s, const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve) {
+static rt_chunk_t *copy_values_after(island_state_t *s, const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve,
+                                     const char *site) {
     for (uint64_t i = 0; i < n; i++) {
-        if (rt_is_cons(from[i]) || (from[i] & RT_TAG_MASK) == RT_TAG_BOXED) return copy_walk(s, from, into, n, reserve);
+        if (rt_is_cons(from[i]) || (from[i] & RT_TAG_MASK) == RT_TAG_BOXED) {
+            if (!site && s->ending_site) {      // the first copy of what the running process ends with (end)
+                site           = s->ending_site;
+                s->ending_site = NULL;
+            }
+            return copy_walk(s, from, into, n, reserve, site);
+        }
     }
     for (uint64_t i = 0; i < n; i++) into[i] = from[i];
     return reserve ? new_chunk(reserve) : NULL;
 }
 
 static rt_chunk_t *copy_values(const rt_value_t *from, rt_value_t *into, uint64_t n) {
-    return copy_values_after(&my, from, into, n, 0);
+    return copy_values_after(&my, from, into, n, 0, NULL);
 }
 
 // A copy of v in the current process's heap.
@@ -1573,24 +1633,27 @@ static void fail_start(rt_proc_t *p, rt_value_t reason) {
 
 // A task (fork) or an actor (spawn, and connect's processes): only an
 // actor can recv or be sent to (D243).
-static rt_proc_t *new_child(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, int actor) {
+// The values are copied first, so that one too big faults the parent
+// before there's a child (D265).
+static rt_proc_t *new_child(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, int actor,
+                            const char *site) {
+    rt_value_t  args[RT_MAX_ARGS];
+    rt_chunk_t *c = copy_values_after(parent->isle, values, args, n, 0, site);
     rt_proc_t  *p = new_process_on(parent->isle, code, parent->pid);
     p->actor = (uint8_t)actor;
     at_on(p->isle, rt_pid_number(p->pid))->actor = (uint8_t)actor;
     rt_rand_split(parent, p);
-    rt_chunk_t *c = copy_values_after(p->isle, values, p->args, n, 0);
+    memcpy(p->args, args, n * sizeof *args);
     if (c) adopt(p, c);
     return p;
 }
 
 rt_value_t rt_fork(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
-    (void)site;
-    return new_child(parent, code, n, values, 0)->pid;
+    return new_child(parent, code, n, values, 0, site)->pid;
 }
 
 rt_value_t rt_spawn(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
-    (void)site;
-    return new_child(parent, code, n, values, 1)->pid;
+    return new_child(parent, code, n, values, 1, site)->pid;
 }
 
 // A live process that's sent a message, a timer's included, or told of
@@ -1752,16 +1815,18 @@ static void close_address(rt_proc_t *p, rt_value_t a) {
 // its record, which is freed as it's taken (D199).
 _Static_assert(sizeof(rt_msg_t) % 16 == 0, "a message's record keeps the copy after it 16-aligned");
 
-static rt_msg_t *new_msg_reserving(island_state_t *s, rt_value_t msg, size_t more) {
+// With a site, the message is the running process's, which faults there
+// if it's too big to copy (D265).
+static rt_msg_t *new_msg_reserving(island_state_t *s, rt_value_t msg, size_t more, const char *site) {
     rt_value_t  v;
-    rt_chunk_t *c = copy_values_after(s, &msg, &v, 1, sizeof(rt_msg_t) + more);
+    rt_chunk_t *c = copy_values_after(s, &msg, &v, 1, sizeof(rt_msg_t) + more, site);
     rt_msg_t   *m = (rt_msg_t *)(c + 1);
     *m = (rt_msg_t){ .next = NULL, .value = v, .chunk = c, .device = 0 };
     return m;
 }
 
 static rt_msg_t *new_msg_on(island_state_t *s, rt_value_t msg) {
-    return new_msg_reserving(s, msg, 0);
+    return new_msg_reserving(s, msg, 0, NULL);
 }
 
 // Whether m's chunk holds no copy, only its record (and a far message's
@@ -1799,7 +1864,7 @@ static void read_on(rt_proc_t *p, rt_value_t pid);
 rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *site) {
     if ((pid & RT_TAG_MASK) != RT_TAG_PID) rt_fault(RT_FAULT_NOT_PID, pid, site);
     if (rt_pid_island(pid) != rt_pid_island(p->pid)) {     // its island checks it, when it takes it (D256)
-        rt_msg_t *m  = new_msg_reserving(p->isle, msg, ITEM_HEAD);
+        rt_msg_t *m  = new_msg_reserving(p->isle, msg, ITEM_HEAD, site);
         item_t   *it = (item_t *)(void *)(m + 1);
         memset(it, 0, ITEM_HEAD);
         it->kind   = ITEM_MSG;
@@ -1813,13 +1878,13 @@ rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *sit
         return RT_NIL;
     }
     if (rt_is_address(pid)) {
-        to_address(pid, new_msg_on(p->isle, msg));
+        to_address(pid, new_msg_reserving(p->isle, msg, 0, site));
         return RT_NIL;
     }
     entry_t *e = at_on(p->isle, rt_pid_number(pid));      // this island's, as just seen
     need_actor(e, pid, site);
     if (e->proc) {
-        deliver(e->proc, new_msg_on(p->isle, msg));
+        deliver(e->proc, new_msg_reserving(p->isle, msg, 0, site));
     } else if (e->device) {
         p->at = (uintptr_t)__builtin_return_address(0);   // for :system
         command(e->device, msg);
@@ -1857,7 +1922,7 @@ rt_value_t rt_recv(rt_proc_t *p, rt_value_t *args, uint64_t n, rt_code_t code) {
 
 void rt_dead_letter(rt_value_t msg, const char *site) {
     rt_buf_t b = { 0 };
-    rt_render(&b, msg, 0);
+    rt_render_brief(&b, msg);
     fflush(stdout);
     fprintf(stderr, "dead letter: %.*s (%s)\n", (int)b.len, b.bytes, site);
     rt_buf_free(&b);
@@ -2021,7 +2086,7 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     e->value = value;                          // in p's heap till it's told to whoever waits, below
     if (p->pid == RT_ROOT && !ok && !logged) {
         rt_buf_t b = { 0 };
-        rt_render(&b, e->value, 0);
+        rt_render_brief(&b, e->value);
         fflush(stdout);
         fprintf(stderr, "error: %.*s\n", (int)b.len, b.bytes);
         rt_buf_free(&b);
@@ -2079,7 +2144,7 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     // only if it monitors. Else it's :ended now (D243).
     rt_proc_t *parent = p->parent == RT_NIL || far_parent ? NULL : at_on(p->isle, rt_pid_number(p->parent))->proc;
     if (p->parent == RT_NIL || (!had && parent && (!p->actor || !parent->actor))) {
-        e->chunk = copy_values_after(p->isle, &value, &e->value, 1, 0);
+        e->chunk = copy_values_after(p->isle, &value, &e->value, 1, 0, NULL);
         if (parent) keep_for(parent, id);
     } else {
         e->value = RT_NIL;
@@ -2110,8 +2175,16 @@ static void retire(rt_proc_t *p) {
     settle_on(s, rt_pid_number(p->pid));
 }
 
+// What p ends with is copied for each who waits for it, and for its
+// record, all copies of the same value, around which (:ok v) or (:exit
+// pid r) adds a few cells: so the first of them is held to the heap's
+// cap, as a send is, and faults p :heap if it's too big, before anyone's
+// been told anything (D265); the rest are of what fitted. When nobody
+// waits, and nothing's kept, nothing's copied, and nothing's checked.
 static _Noreturn void end(rt_proc_t *p, int ok, rt_value_t value, int logged) {
+    p->isle->ending_site = "its end";
     finish(p, ok, value, logged);
+    p->isle->ending_site = NULL;
     to_scheduler(p);                            // which retires it
     __builtin_unreachable();
 }
@@ -2548,13 +2621,16 @@ static int inbox_now(void) {
 // An actor on island k, another, made there, which numbers it itself;
 // the caller waits for its pid, keeping its stack, as join does.
 static rt_value_t place(uint64_t k, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, int source) {
-    rt_proc_t *p  = rt_current;
-    item_t    *it = new_item(ITEM_START, 0, p->pid);
-    rt_proc_t  child;
+    rt_proc_t  *p = rt_current;
+    rt_value_t  args[RT_MAX_ARGS];
+    rt_chunk_t *c = copy_values_after(&my, values, args, n, 0, site);     // first, as new_child's (D265)
+    item_t     *it = new_item(ITEM_START, 0, p->pid);
+    rt_proc_t   child;
     rt_rand_split(p, &child);
+    memcpy(it->args, args, n * sizeof *args);
     it->code        = code;
     it->n           = n;
-    it->chunk       = copy_values(values, it->args, n);
+    it->chunk       = c;
     it->rand_seed   = child.rand_seed;
     it->rand_gamma  = child.rand_gamma;
     it->parent_task = !p->actor;
@@ -2782,7 +2858,7 @@ static void ring(void) {
 rt_value_t rt_after(rt_value_t ms, rt_value_t pid, rt_value_t msg, const char *site) {
     uint64_t due = due_in(ms, site);
     if (!rt_is_address(pid) && !far(pid)) need_actor(entry(pid, site), pid, site);
-    set_alarm(due, pid, new_msg(msg), ++my.afters);
+    set_alarm(due, pid, new_msg_reserving(&my, msg, 0, site), ++my.afters);
     return rt_int((int64_t)my.afters);
 }
 
@@ -5076,6 +5152,28 @@ rt_value_t rt_open(rt_value_t source, rt_value_t arg, const char *site) {
 
 // --- the scheduler ------------------------------------------------------------
 
+// p was to run, but there's no stack to be had for it: it ends :stack,
+// as a fault would end it, its line saying why, and the program goes on
+// (D267). It's waiting again, as far as ending it goes, since it's out
+// of the run queue and hasn't run.
+static void no_stack(rt_proc_t *p) {
+    static const char site[] = "no stack to be had";
+    char              who[64];
+    int               err = errno;
+    rt_pid_text(who, sizeof who, p->pid);
+    fflush(stdout);
+    if (p->pid == RT_ROOT) fprintf(stderr, "fault: %s (%s)\n", site, strerror(err));
+    else                   fprintf(stderr, "fault in %s: %s (%s)\n", who, site, strerror(err));
+    uint64_t space[sizeof site / 8 + 6];
+    _Alignas(16) rt_value_t cells[6] = {
+        rt_symbol(RT_SYM_FAULTS - 1 + RT_FAULT_STACK), (rt_value_t)&cells[2] | RT_TAG_LIST,
+        RT_NIL,                                         (rt_value_t)&cells[4] | RT_TAG_LIST,
+        string_in(space, site, sizeof site - 1),        RT_NIL,
+    };
+    p->state = RT_WAITING;
+    end_other(p, (rt_value_t)cells | RT_TAG_LIST);
+}
+
 void rt_run(void) {
     for (;;) {
         events();
@@ -5088,7 +5186,10 @@ void rt_run(void) {
             if (!idle() && !(atomic_load(&many) && spin()) && !quiesce()) return;
             continue;
         }
-        if (!p->stack) start(p);
+        if (!p->stack && !start(p)) {
+            no_stack(p);
+            continue;
+        }
         p->state   = RT_RUNNING;
         rt_current = p;
         rt_switch(&my.scheduler, &p->ctx);

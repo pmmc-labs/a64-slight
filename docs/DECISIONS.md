@@ -6607,3 +6607,65 @@ no credit. Now `Apache-2.0 WITH LLVM-exception`, LLVM's own licence:
   moved to Apache 2.0); a source-available licence for the core (it
   stops being open source). Proprietary work, such as a customer's
   product, lives in repositories of its own, not here.
+
+**D265. A copy too big for a heap faults the process that asked for it.**
+*(Stevan, Nov 2026, from the review of 2026-11-02, H3(a); Claude's
+recommendation.)* A copy keeps no sharing (D25, D223), so a value built
+by doubling 40 times, 40 cells in a heap, copies as 2^40, and nothing
+held the copy's scratch to anything: one process could end the program
+with `rt: out of memory`. Now a copy a process asks for is held to
+`heap_max`, the most any heap can hold:
+- **A send, an `after`, a `fork` or `spawn`, and a `spawn/on`** whose
+  copy would pass it faults `:heap` in the sender or parent, at that
+  form's site; nothing is delivered or started (a child's values are
+  copied before it's made).
+- **What a process ends with** is copied for each who waits for it and
+  for its record, all copies of the same value but for a few cells
+  around it, so the first of them is held to the cap, and faults the
+  process `:heap` (`its end`) before anyone's told anything. Nothing's
+  copied, or checked, when nobody waits and nothing's kept. A fault
+  whose reason holds such a value, `(+ 1 big)`'s, so ends `:heap` too,
+  after its own line.
+- **The cost** is a compare each time scratch grows, nothing a cell
+  (D240's walk is as it was; a fork and join of lists times the same).
+- **What the runtime says of a value**, a fault's, a dead letter's, the
+  root's error, is cut at 64 KB, then `...`, and the walk stops there,
+  so a fault can't take a terabyte or forever to say. `pprint` and the
+  root's value printed at the end are the program's output, and whole.
+- **Not done:** the runtime's own copies (a join's result, out of a
+  record that fitted) aren't checked; a copy just under the default
+  1 GB cap still takes about a second, and can't be preempted.
+- **Rejected:** keeping sharing in the copy, forwarding as the
+  collector does (every message 30 to 50 per cent dearer, against
+  D240's 41 instructions a cell, for nothing a tree needs); holding a
+  message to the receiver's room (mailboxes stay uncapped, D88, D202).
+  Golden tests 339 and 340 (`t/models/brief.py`).
+
+**D266. The descriptor ceiling stays, as D257 has it.** *(Stevan, Nov
+2026, from the review's H4(b).)* About 1,000 open sockets, files and
+commands in the whole program, from `select()`'s `FD_SETSIZE` (D113).
+Since step 1 of the review's plan, an island's wake pipe past it ends
+the program with a message where it overran the stack (M2), so the
+ceiling is safe, only low. Offered and not taken for now: keeping
+`select()` over a bitmap of our own that grows, with the soft
+`RLIMIT_NOFILE` raised (about 120 lines, D113 kept, thousands of
+descriptors). Simulation comes before servers (D257), and that's there
+for when a program needs it.
+
+**D267. A process with no stack to be had faults `:stack`.** *(Stevan,
+Nov 2026, from the review's M4; Claude's recommendation.)* Every stack
+is an `mmap` of 8 MB with a guard page under it, two of the kernel's
+mappings, so about 32,700 processes holding stacks at once (preempted,
+joining, sleeping or reading; one waiting in `recv` holds none) reach
+Linux's default `vm.max_map_count` of 65,530, and `get_stack` exited
+the program with status 2. Now the scheduler, which takes a stack only
+as it starts a process or runs one again after its `recv`, ends that
+process, which hasn't run, with `(:stack () "no stack to be had")`, its
+line saying the system's reason, and the program goes on. An island
+keeps 256 stacks given back, and unmaps the rest, so a burst doesn't
+keep its mappings. Chosen: `:stack`, which the kind already means,
+the stack ran out, over `:heap`, and over a new `:no-stack` (a new
+fault kind shifts the symbols after it, shared with the compiler).
+Rejected: `MAP_NORESERVE` (the limit is mappings, not memory); no guard
+page, halving the mappings (it's what catches a check that's missed).
+`t/live.py`'s stacks, natively on Linux.

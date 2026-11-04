@@ -65,6 +65,14 @@ program, or the system to measure the run.
   connections waiting, takes what it can, and then, with no descriptor
   for the next (EMFILE), rests a while each time, using under a quarter
   of the CPU over two seconds, where it used all of it before (H4).
+- stacks: more tasks sleeping at once than the system has mappings for,
+  two a stack, so those it has no stack for end :stack, each with its
+  fault line, and the rest, and the program, go on (D267), where the
+  program exited 2 before. On the virtual clock, so all are asleep at
+  once. It takes Linux's vm.max_map_count, and the
+  target run natively, since qemu maps a program's memory itself;
+  otherwise it's skipped, as it is when the limit's so high that the
+  tasks it would take are too many to run here.
 - https: http/request on an https:// URL runs curl (D251), over real TLS
   to a server here with a certificate made for the run: a whole reply
   and a chunked one come as over http, and without the certificate to
@@ -584,6 +592,30 @@ def accept():
     check(f'{what}: {cpu:.2f} s of CPU in 2 s', cpu < 0.5, f'exit {p.returncode}')
 
 
+def stacks():
+    what = 'tasks past the mappings for their stacks end :stack, and the rest go on'
+    try:
+        with open('/proc/sys/vm/max_map_count') as f:
+            limit = int(f.read())
+    except OSError:
+        print(f'skip {what}: no vm.max_map_count')
+        return
+    if RUN or limit > 200000:
+        print(f'skip {what}: ' + ('qemu maps memory itself' if RUN else f'vm.max_map_count is {limit}'))
+        return
+    n    = limit // 2 + 4000
+    prog = build('stacks', 't/live/stacks.slight')
+    # the virtual clock, so that every task is asleep before the first wakes
+    p    = subprocess.run(RUN + [prog, str(n)], capture_output=True, env=ENV | {'SLIGHT_CLOCK': 'virtual'}, timeout=DEADLINE)
+    m    = re.fullmatch(rb'\((\d+) (\d+)\)\n', p.stdout)
+    ok, ended = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    lines = p.stderr.decode().splitlines()
+    told  = all(re.fullmatch(r'fault in #<pid \d+(@\d+)?>: no stack to be had \(.*\)', l) for l in lines)
+    check(f'{what}: {ok} ran and {ended} ended :stack, of {n}',
+          p.returncode == 0 and ok + ended == n and ended > 0 and len(lines) == ended and told,
+          f'exit {p.returncode}: {p.stdout[:200]!r} {p.stderr[:400]!r}')
+
+
 # What a connection to the socket at path says first, or None.
 def hello(path):
     try:
@@ -702,6 +734,7 @@ sockets()
 wakes()
 inherit()
 accept()
+stacks()
 https()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

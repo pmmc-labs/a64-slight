@@ -296,13 +296,13 @@ static cursor_t pop_cursor(rt_work_t *w) {
 // A list or a tuple, element by element, going down into an element
 // that's a list or a tuple with the one around it on the work stack: the
 // stack holds the sequences open around the one being printed. Elements
-// are never raw.
-static void render_seq(rt_buf_t *b, rt_value_t v) {
+// are never raw. It stops once b has stop bytes.
+static void render_seq(rt_buf_t *b, rt_value_t v, size_t stop) {
     rt_work_t w;
     rt_work_init(&w);
     cursor_t c = { v, 0 };
     buf_str(b, rt_is_tuple(v) ? "#(" : "(");
-    for (;;) {
+    while (b->len < stop) {
         if (at_end(c)) {                        // the end of this one, and of any it ends
             buf_str(b, ")");
             if (!w.n) break;
@@ -324,8 +324,22 @@ static void render_seq(rt_buf_t *b, rt_value_t v) {
 }
 
 void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
-    if (is_seq(v)) render_seq(b, v);
+    if (is_seq(v)) render_seq(b, v, SIZE_MAX);
     else           render_atom(b, v, raw);
+}
+
+// What the runtime says of a value, a fault's, a dead letter's, is a
+// line, not the whole of a value that may print as a terabyte (D265).
+#define BRIEF (64 << 10)
+
+void rt_render_brief(rt_buf_t *b, rt_value_t v) {
+    size_t from = b->len;
+    if (is_seq(v)) render_seq(b, v, from + BRIEF + 1);    // past BRIEF, if it stops short
+    else           render_atom(b, v, 0);
+    if (b->len - from <= BRIEF) return;
+    b->len = from + BRIEF;
+    while (b->len > from && (b->bytes[b->len] & 0xc0) == 0x80) b->len--;   // not in the middle of a character
+    buf_str(b, "...");
 }
 
 // In one write, so a line from another island can't come between the
@@ -548,7 +562,7 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
 
     rt_buf_t b = { 0 };
     buf_str(&b, faults[fault].what);
-    if (faults[fault].shows) rt_render(&b, value, 0);
+    if (faults[fault].shows) rt_render_brief(&b, value);
     char who[64];
     rt_pid_text(who, sizeof who, rt_current->pid);
     fflush(stdout);                             // so a fault lands after the output before it

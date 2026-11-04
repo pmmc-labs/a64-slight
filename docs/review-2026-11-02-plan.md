@@ -1,7 +1,16 @@
 # Fixing the review of 2026-11-02: the plan
 
-**Status (2026-11-03):** steps 1 to 3 are done. Step 4 waits for Stevan,
-and step 5 is begun: CLAUDE.md's status says what's done.
+**Status (2026-11-04):** steps 1 to 3 are done. In step 4, A, E and F
+are settled:
+- **A** is built as recommended (D265, golden tests 339 and 340).
+  - What a process ends with is checked on its first copy, not by a copy
+    of its own, which made a fork and join of lists 30 per cent slower.
+  - A fault whose reason holds the value ends `:heap` too.
+- **E** stays as D257 has it (D266).
+- **F** is built, with `:stack` (D267, `t/live.py`'s stacks).
+
+The rest of step 4 waits for Stevan. Step 5 is begun: CLAUDE.md's
+status says what's done.
 
 - **Step 1**, `b0b69d1` to `8e4a0be`, a commit an item. Golden tests 336
   to 338, t/320 extended, and `t/live.py`'s wakes, inherit, accept and

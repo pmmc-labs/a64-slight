@@ -1,0 +1,16 @@
+; t/live.py's stacks: tasks that sleep, each holding its stack, more of
+; them than the system has mappings for (two a stack), so those it has
+; none for end :stack, and the rest, and the program, go on (D267).
+; @ARGV is how many.
+
+(defun kind (r)
+    (match r
+        ((:ok _)             :ok)
+        ((:error (k _ _))    k)))
+
+(defun count (rs k) (length (filter (lambda (r) (eq? r k)) rs)))
+
+(let n  (str->int (car @ARGV)))
+(let ts (map (lambda (i) (fork (do (sleep 100) i))) (range 0 n)))
+(let rs (map (lambda (t) (kind (join t))) ts))
+(list (count rs :ok) (count rs :stack))

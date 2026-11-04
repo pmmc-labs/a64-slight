@@ -1056,6 +1056,10 @@ void rt_pid_text(char *buf, size_t size, rt_value_t v);
 // escaped as rt_quote does.
 void rt_render(rt_buf_t *b, rt_value_t v, int raw);
 
+// As rt_render, not raw, but of 64 KB at most, then "...": for a fault's
+// value, a dead letter, and the root's error (D265).
+void rt_render_brief(rt_buf_t *b, rt_value_t v);
+
 // Appends d as pprint shows a float: the shortest that reads back as it.
 void rt_render_float(rt_buf_t *b, double d);
 
