@@ -884,10 +884,11 @@ they like, or race it, which doesn't take it; after, it's `:ended`. So
 a process forked and joined at once, the usual way, keeps nothing once
 joined, and a parent that starts many and never takes them holds their
 values till it ends: one that starts processes for good, a server
-accepting connections, say, monitors each, and nothing is kept. A pid is never reused, and the runtime forgets one
-once nothing more can come of it, so a program that runs for good,
-starting processes as it goes, holds only those running, open or
-keeping a value (`:system`'s `(:records n)`).
+accepting connections, say, monitors each, and nothing is kept. A pid
+is never reused, and the runtime forgets one once nothing more can
+come of it, so a program that runs for good, starting processes as it
+goes, holds only those running, open or keeping a value (`:system`'s
+`(:records n)`).
 
 ### Addresses
 

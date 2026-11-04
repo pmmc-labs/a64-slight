@@ -2222,7 +2222,7 @@ browser when watching from afar matters. It would sit with the
 simulation library above: the flagship's dashboard is this viewer, fed
 by the root.
 
-### One kind of process, and an address for every message (Nov 2026: steps 1 to 3 built, D276 to D278; the rest open)
+### One kind of process, and an address for every message (Nov 2026: steps 1 to 4 built, D276 to D279; step 5 open)
 
 Proposed by Claude after Stevan went back to ts-slight ("the process
 split felt kind of wrong when we did it ... I've struggled with the
@@ -2407,7 +2407,10 @@ Mac, stackful against today.
 4. **The docs.** LANGUAGE.md's Processes and Addresses, DESIGN.md's
    process model, TYPES.md's process types, the guide's two concept
    pages folded into one, "Processes and messages," and the tutorial's
-   "Asking."
+   "Asking." *Built (D279): the reference docs were rewritten in place
+   with step 2; the guide's two pages are one, `concepts/processes.md`,
+   and chapter 4 answers at an address, then at a pid, and says what
+   the address buys.*
 5. **ts-cpi's Life programs** that use only processes and messages,
    ported as golden tests, each to `01-reference`'s frames: 02 actors
    (an address per generation does the buffering), 03 row workers (a

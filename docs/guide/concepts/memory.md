@@ -54,7 +54,7 @@ fault in #<pid 2>: heap exhausted (cons at docs/guide/code/con-memory.slight:4:1
   shows the idle actor waiting in `recv`, with its stack: 8 MB of
   address space, of which only the pages it has touched, a few KB, are
   memory. A process holds a stack from its first run to its end,
-  whatever it waits in (see [Waiting for a message](recv-rule.md)). An
+  whatever it waits in (see [Processes and messages](processes.md)). An
   idle actor is its stack's pages, its mailbox and its heap.
 - **A stack has a limit too**, 8 MB. Recursion that isn't a tail call
   uses it, and too much faults with `:stack`. Loops are tail calls, and

@@ -6989,3 +6989,18 @@ process each, since a stream's pid is its handle; `http/respond` and
 `rpc/called` a process per request from the other end, which contains
 a fault and can be stopped; and `agent/start` a process per turn, for
 the same reasons.
+
+**D279. The docs for one kind of process.** *(Stevan, Nov 2026: "Let's
+proceed to step4", PLAN.md's "One kind of process, and an address for
+every message", step 4.)* LANGUAGE.md's Processes and Addresses,
+DESIGN.md's process model and TYPES.md's process types were rewritten
+in place with D277, and read as a whole. The guide's two concept pages,
+"Waiting for a message" (`recv-rule.md`, D276's) and "Tasks and actors"
+(`tasks-and-actors.md`, D243's), are one, "Processes and messages"
+(`concepts/processes.md`): one kind of process and what any can do,
+sending and waiting, what an address buys, tasks and actors as the two
+shapes, a state per function, what a wait costs, and who hears of an
+end; its two programs, `con-tasks` and `con-states`, are as they were.
+The tutorial's chapter 4 answers at an address first, finds the lost
+update, then answers at a pid, and says why `ask` is the usual way.
+Nothing else moved.

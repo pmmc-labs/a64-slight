@@ -1,9 +1,10 @@
 # 4. Asking and answering
 
 The store from chapter 3 prints its replies, which is no use to the code
-that sent the commands. This chapter has it answer, shows two ways to
-wait for the answer, and finds a bug that only shows up when two
-callers share the store.
+that sent the commands. This chapter has it answer, at an address the
+command carries, finds a bug that only shows up when two callers share
+the store, and then answers at a pid instead, to see what an address
+buys.
 
 ## Answering at an address
 
@@ -170,36 +171,28 @@ words in the store that way:
 ```
 
 `(let r (recv ...))` waits in the middle of the function, and the
-function goes on from there when the reply comes.
-
-## Waiting, and where
-
-A `recv` can go anywhere in a process's code (D276), so it's natural to
-pull the asking out into a helper:
+function goes on from there when the reply comes. A `recv` can go
+anywhere in a process's code (D276), so the asking could be a helper:
 
 ```
 (defun ask-store (s cmd)
     (send s (list :do cmd $$))
     (recv ((:reply r) r)))
-...
-            (pprint (list word (ask-store s (list :incr word))))
 ```
 
-and that works: `ask-store` waits, keeping the process's stack, and
-gives the reply back as its value.
+and that works just as well: `ask-store` waits, keeping the process's
+stack, and gives the reply back as its value.
 
-Two things to know:
-
-- **A `recv` takes the next message, whatever it is.** There's no
-  selective receive: if something else arrives first, `ask-store`'s
-  `recv` doesn't match it, and it's a dead letter. `tally` gets away
-  with it because nothing else sends to it.
-- **An address takes only what's sent to it.** That's why `ask` is the
-  usual way: it reads the reply at an address of its own, which `recv`
-  leaves alone, so nothing else can be taken for it, and nothing sent
-  to the process meanwhile is lost. `tally` could have used `call`, and
-  the store would have been none the wiser. Answer at a pid when the
-  process has nothing else to hear; ask when it might.
+The difference from `call` is what the `recv` takes: the next message,
+whatever it is. There's no selective receive. If something else arrives
+first, the `recv` doesn't match it, and it's a dead letter. `tally`
+gets away with it because nothing else sends to it. An address takes
+only what's sent to it, which is why `ask` is the usual way: the reply
+can't be taken for anything else, and nothing sent to the process
+meanwhile is lost. `tally` could have used `call`, and the store would
+have been none the wiser. Answer at a pid when the process has nothing
+else to hear; ask when it might. The checker says as much, under
+`--strict`, where a bare `recv` follows a `send`.
 
 ---
 

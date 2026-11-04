@@ -107,4 +107,4 @@ processes for isolation that's worth having.
 
 ---
 
-Previous: [Tasks and actors](tasks-and-actors.md) · Next: [Time](time.md)
+Previous: [Processes and messages](processes.md) · Next: [Time](time.md)
