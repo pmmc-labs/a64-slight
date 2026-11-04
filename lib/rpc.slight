@@ -213,10 +213,10 @@
         (connect :unix where (rpc/opening handlers told))
         (connect :tcp where (rpc/opening handlers told))))
 
-(defun rpc/listen-at (where handlers told)
+(defun rpc/listen-at (where handlers told most)
     (if (rpc/path? where)
-        (connect :unix/listen where (rpc/accepting handlers told))
-        (connect :tcp/listen where (rpc/accepting handlers told))))
+        (connect :unix/listen where (rpc/accepting handlers told most 0))
+        (connect :tcp/listen where (rpc/accepting handlers told most 0))))
 
 ; As rpc/connect, over a command's input and output: ssh, say, to a
 ; machine whose program listens at 127.0.0.1 alone,
@@ -241,25 +241,54 @@
 ; (:listening at), at being the port it got, or the path. Each
 ; connection gets a process of its own, whose other end can call
 ; handlers.
-(defun rpc/serve (where handlers)
-    (let told $$)
-    (rpc/listen-at where handlers told))
+(defun rpc/serve (where handlers) (rpc/serve-with where handlers ()))
 
 ; As rpc/serve, for a task (D243): waits till it listens, and gives (:ok
 ; (l at)), or (:error reason).
-(defun rpc/listen (where handlers)
+(defun rpc/listen (where handlers) (rpc/listen-with where handlers ()))
+
+; As rpc/serve and rpc/listen, with options, a list of (name value):
+; (:most n) closes a connection as it's accepted while n are open
+; (D270). Anything else raises (:bad-option opt).
+(defun rpc/serve-with (where handlers opts)
+    (let told $$)
+    (rpc/listen-at where handlers told (rpc/most opts)))
+
+(defun rpc/listen-with (where handlers opts)
     (let to (address))
-    (let l (rpc/listen-at where handlers to))
+    (let l (rpc/listen-at where handlers to (rpc/most opts)))
     (let got (read/any (list to l)))
     (disconnect to)
     (match got
         ((_ (:listening at)) (list :ok (list l at)))
         ((_ (:error reason)) (list :error reason))))
 
-(defun rpc/accepting (handlers told)
+; The options' (:most n), or #false.
+(defun rpc/most (opts)
+    (match opts
+        (()                    #false)
+        (((:most n) & rest)    (if (and (int? n) (> n 0)) n (raise (list :bad-option (car opts)))))
+        ((opt & _)             (raise (list :bad-option opt)))))
+
+; n connections open, counted only with a most, by watching each end.
+(defun rpc/accepting (handlers told most n)
     (recv
-        ((:open _ at)   (send told (list :listening at)) (rpc/accepting handlers told))
-        ((:accept _ c)  (connect c (rpc/opening handlers ())) (rpc/accepting handlers told))))
+        ((:open _ at)
+            (send told (list :listening at))
+            (rpc/accepting handlers told most n))
+        ((:accept _ c)
+            (cond
+                ((not (int? most))
+                    (connect c (rpc/opening handlers ()))
+                    (rpc/accepting handlers told most n))
+                ((>= n most)
+                    (disconnect c)
+                    (rpc/accepting handlers told most n))
+                (#true
+                    (monitor (connect c (rpc/opening handlers ())))
+                    (rpc/accepting handlers told most (+ n 1)))))
+        ((:exit _ _)
+            (rpc/accepting handlers told most (- n 1)))))
 
 ; Closes conn: calls made over it fail with :disconnected, and calls from
 ; the other end are stopped. Or ends a keeper, closing its connection.
@@ -375,20 +404,26 @@
         ((:helo :rpc 1)
             (rpc/loop c seq mine theirs handlers))
         ((:helo & _)
-            (rpc/send c (list :barf (list :unknown-protocol msg)))
+            (rpc/send c (list :barf (list :unknown-protocol (rpc/echo msg))))
             (rpc/hang-up c mine theirs))
         ((:barf _)
             (rpc/loop c seq mine theirs handlers))
         (_
-            (rpc/send c (list :barf (list :bad-message msg)))
+            (rpc/send c (list :barf (list :bad-message (rpc/echo msg))))
             (rpc/loop c seq mine theirs handlers))))
+
+; What a barf says of a message the other end sent: the message, if it
+; prints in 1 KB, else :too-big, so a stream of bad messages can't have
+; this end send them all back (D270).
+(defun rpc/echo (v)
+    (if (<= (bytes/len (sexp/print v)) 1024) v :too-big))
 
 ; A call from the other end: answered at once if it can't be made, or
 ; started in a process of its own. Gives theirs, with it if it started.
 (defun rpc/called (c theirs handlers id name args)
     (cond
         ((not (eq? (lookup id theirs) :not-found))
-            (rpc/send c (list :barf (list :id-in-use id)))
+            (rpc/send c (list :barf (list :id-in-use (rpc/echo id))))
             theirs)
         (#true
             (match (rpc/find (rpc/word name) handlers)

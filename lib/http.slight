@@ -22,7 +22,9 @@
 ; reply as a socket would, which the same code reads.
 ;
 ; Errors are (:error reason): what the device gave (D136), (:bad-http what)
-; for a reply that isn't HTTP, (:bad-url url), :closed for a connection
+; for a reply that isn't HTTP, (:bad-url url), (:bad-method m) and
+; (:bad-header name) for a request that would put a caller's words on the
+; wire as more than they are (D271), :closed for a connection
 ; that closed before its reply, or :timeout, from http/request-within;
 ; over curl, what its exit code says (http/curl-reason). http/request waits
 ; as long as it takes (D236).
@@ -42,7 +44,7 @@
 ; does, from the start (D243); the caller joins the task, so it can be
 ; an actor, a handler say, too.
 (defun http/request (method url headers body)
-    (match (http/parse-url url)
+    (match (http/check method url headers)
         ((:ok host port target)
             (let ctx (list :client (http/method-name method) (http/via url host port)))
             (http/unwrap (join (fork (http/unwrap (read (http/connect url host port target headers body ctx)))))))
@@ -52,7 +54,7 @@
 ; milliseconds. Its timer is a sleeper's, killed once the reply has come, so
 ; it doesn't hold up the program's end (D232).
 (defun http/request-within (ms method url headers body)
-    (match (http/parse-url url)
+    (match (http/check method url headers)
         ((:ok host port target)
             (let ctx (list :client (http/method-name method) (http/via url host port)))
             (http/unwrap (join (fork (http/await (http/connect url host port target headers body ctx) ms)))))
@@ -84,7 +86,7 @@
     (let caller $$)
     (let name   (http/method-name method))
     (let how-to (http/how how))
-    (let s      (match (http/parse-url url)
+    (let s      (match (http/check method url headers)
         ((:ok host port target) (http/connect url host port target headers body (list :stream name caller how-to (http/via url host port))))
         ((:error reason)        (fork (raise reason)))))
     (spawn (http/watch s caller))
@@ -209,16 +211,32 @@
 
 ; Listens on port (0 lets the system pick). Its owner sends (:listening port)
 ; to the caller, and the listener's pid is the result, which kill stops.
-(defun http/serve (port handler)
-    (let told $$)
-    (connect :tcp/listen port (http/accept handler told)))
+(defun http/serve (port handler) (http/serve-with port handler ()))
 
 ; As http/serve, for a task (D243), which can't be told: it waits till
 ; the listener listens, and gives (:ok (l port)), or (:error reason) if it
 ; can't, (:eaddrinuse 8080) say.
-(defun http/listen (port handler)
+(defun http/listen (port handler) (http/listen-with port handler ()))
+
+; As http/serve and http/listen, with options, a list of (name value):
+; (:most n) closes a connection as it's accepted while n are open
+; (D270). Anything else raises (:bad-option opt).
+(defun http/serve-with (port handler opts)
+    (let told $$)
+    (let most (http/most opts))
+    (connect :tcp/listen port (http/accept handler told most 0)))
+
+(defun http/listen-with (port handler opts)
     (let to (address))
-    (http/listening to (connect :tcp/listen port (http/accept handler to))))
+    (let most (http/most opts))
+    (http/listening to (connect :tcp/listen port (http/accept handler to most 0))))
+
+; The options' (:most n), or #false.
+(defun http/most (opts)
+    (match opts
+        (()                    #false)
+        (((:most n) & rest)    (if (and (int? n) (> n 0)) n (raise (list :bad-option (car opts)))))
+        ((opt & _)             (raise (list :bad-option opt)))))
 
 (defun http/listening (to l)
     (let got (read/any (list to l)))
@@ -227,14 +245,25 @@
         ((_ (:listening port)) (list :ok (list l port)))
         ((_ (:error reason))   (list :error reason))))
 
-(defun http/accept (handler told)
+; n connections open, counted only with a most, by watching each end.
+(defun http/accept (handler told most n)
     (recv
         ((:open _ bound)
             (send told (list :listening bound))
-            (http/accept handler told))
+            (http/accept handler told most n))
         ((:accept _ conn)
-            (connect conn (http/conn conn handler))
-            (http/accept handler told))))
+            (cond
+                ((not (int? most))
+                    (connect conn (http/conn conn handler))
+                    (http/accept handler told most n))
+                ((>= n most)
+                    (disconnect conn)
+                    (http/accept handler told most n))
+                (#true
+                    (monitor (connect conn (http/conn conn handler)))
+                    (http/accept handler told most (+ n 1)))))
+        ((:exit _ _)
+            (http/accept handler told most (- n 1)))))
 
 (defun http/conn (c handler)
     (recv
@@ -604,10 +633,64 @@
         ((:ok resp) (http/write c resp))
         ((:error _) (http/write c (list 500 () "")))))
 
+; A response that would put a handler's words on the wire as more than
+; they are, a CR and an LF in a header's value, say, is a 500, and the
+; log says why (D271).
 (defun http/write (c resp)
     (match resp
         ((status headers body)
-            (send c (list :write (http/response-text status headers body))))))
+            (match (http/unsendable status headers)
+                (()
+                    (send c (list :write (http/response-text status headers body))))
+                (reason
+                    (log :warn "a handler's response can't be sent" (list (list "reason" reason)))
+                    (send c (list :write (http/response-text 500 () ""))))))))
+
+(defun http/unsendable (status headers)
+    (if (and (int? status) (>= status 100) (<= status 999))
+        (http/bad-header headers)
+        (list :bad-status status)))
+
+; The URL parsed, (:ok host port target), if nothing in the request can
+; put a caller's words on the wire as more than they are (D271): the URL
+; has no space or control character, the method is a token, and so is
+; each header's name, and its value has no CR, LF or NUL; or (:error
+; reason). Over curl as over :tcp, which put the same words in its
+; arguments.
+(defun http/check (method url headers)
+    (let name (http/method-name method))
+    (cond
+        ((not (str? name))           (list :error (list :bad-method method)))
+        ((not (http/token? name))    (list :error (list :bad-method name)))
+        (#true
+            (match (http/bad-header headers)
+                (()     (http/parse-url url))
+                (reason (list :error reason))))))
+
+; (:bad-header name) for the first header that can't go, or ().
+(defun http/bad-header (headers)
+    (cond
+        ((nil? headers) ())
+        ((and (http/token? (str (car (car headers)))) (http/field? (str (cadr (car headers)))))
+            (http/bad-header (cdr headers)))
+        (#true (list :bad-header (car (car headers))))))
+
+; RFC 9110's token: letters, digits and !#$%&'*+-.^_`|~, at least one.
+(defun http/token? (s)
+    (and (> (bytes/len s) 0) (http/every-byte? s 0 http/tchar?)))
+
+(defun http/tchar? (b)
+    (or (http/unreserved? b) (== b 33) (and (>= b 35) (<= b 39)) (== b 42) (== b 43) (== b 94) (== b 96) (== b 124)))
+
+; A field's value: anything but CR, LF and NUL, which would end it.
+(defun http/field? (s)
+    (http/every-byte? s 0 (lambda (b) (not (or (== b 13) (== b 10) (== b 0))))))
+
+(defun http/every-byte? (s i ok?)
+    (cond
+        ((== i (bytes/len s)) #true)
+        ((ok? (bytes/at s i)) (http/every-byte? s (+ i 1) ok?))
+        (#true                #false)))
 
 (defun http/request-of (msg body)
     (let words  (car msg))
@@ -678,6 +761,8 @@
 ; is 80, or 443 for https, and the target "/" when none is given.
 (defun http/parse-url (url)
     (cond
+        ((not (http/every-byte? url 0 (lambda (b) (and (> b 32) (not (== b 127))))))
+            (list :error (list :bad-url url)))
         ((str/starts-with? url "http://")  (http/split-url (bytes/slice url 7) url 80))
         ((str/starts-with? url "https://") (http/split-url (bytes/slice url 8) url 443))
         (#true                             (list :error (list :bad-url url)))))

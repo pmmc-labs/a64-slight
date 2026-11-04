@@ -356,7 +356,12 @@ inherit and accept); of its step 4, what needs Stevan, A, a copy too
 big for a heap faulting the process that asked for it (D265, golden
 tests 339 and 340), E, the descriptor ceiling kept (D266), and F, a
 process with no stack to be had faulting `:stack` (D267, `t/live.py`'s
-stacks), are settled, and the rest wait for him.
+stacks), B, `eq?` and `hash` walking a value as a tree, documented
+(D268), C, no server timeouts, a proxy's job (D269), D, bounds on a
+connection's waiting output, `barf`'s echo and how many are open, with
+`http/serve-with` and `rpc/serve-with` (D270, golden tests 342 and 343),
+and H5, requests that would put more on the wire than they say refused
+(D271, golden test 341), are settled, and the rest wait for him.
 **Next:** nothing is under way. Candidates, none agreed: a simulation library across
 islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in

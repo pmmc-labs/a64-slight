@@ -8,6 +8,20 @@ are settled:
   - A fault whose reason holds the value ends `:heap` too.
 - **E** stays as D257 has it (D266).
 - **F** is built, with `:stack` (D267, `t/live.py`'s stacks).
+- **B** is documented only (D268): only a program's own code makes a
+  value with sharing.
+- **C**, timeouts, isn't taken (D269): a server facing the internet goes
+  behind a proxy, as LANGUAGE.md now says.
+- **D** is built (D270), golden tests 342 and 343, and 278 extended:
+  - output waiting for a socket or a command fails the device
+    `:too-big` when more comes while 64 MB waits, so a single big reply
+    still goes;
+  - a write whose text would pass the heap fails too;
+  - `barf` echoes only what prints in 1 KB;
+  - `(:most n)` in the new `http/serve-with`, `http/listen-with`,
+    `rpc/serve-with` and `rpc/listen-with`.
+- **H5** is built (D271, golden test 341): requests refused as Results,
+  a handler's bad response a 500 with a warning.
 
 The rest of step 4 waits for Stevan. Step 5 is begun: CLAUDE.md's
 status says what's done.

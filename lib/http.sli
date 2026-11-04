@@ -24,6 +24,10 @@
 (sig http/serve ((or int str) (fun (Request) Response)) pid)
 (sig http/listen ((or int str) (fun (Request) Response)) (Result (shape pid int) any))
 
+; options: (:most n), the most connections open at once (D270)
+(sig http/serve-with ((or int str) (fun (Request) Response) (list any)) pid)
+(sig http/listen-with ((or int str) (fun (Request) Response) (list any)) (Result (shape pid int) any))
+
 (sig http/parse-url (str) (or (:ok str int str) (:error any)))
 
 ; Percent-encoding (RFC 3986): http/url-decode is #false for a bad %XX.

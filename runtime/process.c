@@ -3824,8 +3824,23 @@ static void command(rt_device_t *d, rt_value_t msg) {
         return;
     }
     if (d->mode == DEV_EXEC && (d->in_fd < 0 || d->in_closing)) return;      // input that goes nowhere
+    // Output waits in memory off every heap till the other end takes it:
+    // more for one that has READ_MAX waiting, which may never read, fails
+    // it, as so much in fails a read; and a write whose text would be more
+    // than a heap can hold, which a value with sharing in it can print as,
+    // fails before it's all made (D270).
+    if ((d->mode == DEV_EXEC || d->mode == DEV_TCP) && d->out_len - d->out_at >= READ_MAX) {
+        fail(d, ERR_TOOBIG);
+        return;
+    }
     rt_buf_t b = { 0 };
-    for (rt_value_t x = rt_cdr(msg); rt_is_cons(x); x = rt_cdr(x)) rt_render(&b, rt_car(x), 1);
+    for (rt_value_t x = rt_cdr(msg); rt_is_cons(x); x = rt_cdr(x)) {
+        if (!rt_render_upto(&b, rt_car(x), 1, heap_max)) {
+            rt_buf_free(&b);
+            fail(d, ERR_TOOBIG);
+            return;
+        }
+    }
     if (d->mode == DEV_EXEC) {
         queue(d, b.bytes, b.len);
         rt_buf_free(&b);

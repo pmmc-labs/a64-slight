@@ -6669,3 +6669,67 @@ fault kind shifts the symbols after it, shared with the compiler).
 Rejected: `MAP_NORESERVE` (the limit is mappings, not memory); no guard
 page, halving the mappings (it's what catches a check that's missed).
 `t/live.py`'s stacks, natively on Linux.
+
+**D268. `eq?` and `hash` walk a value as a tree, as documented.**
+*(Stevan, Nov 2026, from the review of 2026-11-02, H3(b); Claude's
+recommendation, which changed from the plan's.)* A value built with
+sharing, `(list x x)` doubled 40 times, is walked as 2^40, in C, in one
+step nothing preempts. But `eq?` already stops wherever both sides are
+the same value, so it's slow only between two such values built apart,
+and only a program's own code makes one: what's read from outside, JSON,
+`sexp/parse`, a device, is a tree, and a copy is too, capped (D265). So
+it's the program's own exponential work, said in LANGUAGE.md. Offered
+and not taken: `eq?` remembering the pairs it has compared once past
+what a tree in the heap could hold (about 60 lines, a tree never paying);
+and a hash made of its parts' hashes, remembered too, which changes every
+hash value, D209's, `lib/map.slight`'s order and its tests.
+
+**D269. No timeouts in the HTTP and RPC servers; a proxy has them.**
+*(Stevan, Nov 2026, from the review's H4(a).)* A client that connects
+and says nothing, or a byte at a time, holds its connection and its
+process for good. A default would reopen D236 (a pending timer overtakes
+loopback replies on the virtual clock), so only opt-in timeouts were
+offered: a whole request within a time in `http/serve-with` (a 408),
+an idle time in `rpc/listen-with`, and the runtime giving up on a
+closing socket's unwritten output after 30 s, on the real clock alone.
+Not taken: LANGUAGE.md says a server facing the internet goes behind a
+proxy that has timeouts, as it does for TLS (D251).
+
+**D270. Bounds on what connections hold.** *(Stevan, Nov 2026, from the
+review's H4(c) and H4(e); Claude's recommendation.)*
+- **Output waiting** for a socket or a command, off every heap: a write
+  while 64 MB or more waits (`READ_MAX`, the most a read takes) fails
+  the device `:too-big`, as so much read does. Checked when more comes,
+  not on what's waiting, so a single reply of 100 MB still goes, and
+  what waits is at most 64 MB and one message. Stopping reading instead
+  was turned down: it deadlocks `cat` under `:exec`, and peers that
+  echo. And a write whose text would be more than a heap holds, which a
+  value with sharing can print as, fails before it's all made
+  (`rt_render_upto`).
+- **`barf`** sends back a message, or an id, only if it prints in 1 KB,
+  and `too-big` in its place otherwise, so a stream of bad messages, up
+  to 64 MB each, isn't all sent back (revisits D230's text).
+- **`(:most n)`**, an option of `http/serve-with`, `http/listen-with`,
+  `rpc/serve-with` and `rpc/listen-with`, whose options are a list of
+  `(name value)`, any other raising `(:bad-option opt)`: while `n`
+  connections are open, one accepted is closed at once, the listener
+  counting them by monitoring each. `http/serve` and the rest are these
+  with no options.
+- Golden tests 342 and 343, and 278 extended.
+
+**D271. What would put a caller's words on the wire as more than they
+are is refused.** *(Stevan, Nov 2026, from the review's H5; Claude's
+recommendation.)* A CR and an LF in a URL, a method or a header made a
+second request, or a header of the caller's own; nothing checked them.
+Now `http/request`, `http/request-within` and `http/stream` give, before
+anything's sent, over curl as over `:tcp`, `(:error (:bad-url url))`
+for a URL with a space or a control character in it (in
+`http/parse-url`), `(:error (:bad-method m))` for a method that isn't a
+token (RFC 9110), and `(:error (:bad-header name))` for a header whose
+name isn't one, or whose value has a CR, LF or NUL. A handler's response
+with a status outside 100 to 999, or such a header, is a 500, and
+logged as a warning. Rejected: raising rather than a Result, which a
+caller handles less easily than the errors it already gets;
+percent-encoding a URL's bad bytes rather than refusing it, which curl
+doesn't do either. Golden test 341.
+

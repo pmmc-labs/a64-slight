@@ -296,16 +296,21 @@ static cursor_t pop_cursor(rt_work_t *w) {
 // A list or a tuple, element by element, going down into an element
 // that's a list or a tuple with the one around it on the work stack: the
 // stack holds the sequences open around the one being printed. Elements
-// are never raw. It stops once b has stop bytes.
-static void render_seq(rt_buf_t *b, rt_value_t v, size_t stop) {
+// are never raw. It stops once b has stop bytes, and says whether it got
+// to the end.
+static int render_seq(rt_buf_t *b, rt_value_t v, size_t stop) {
     rt_work_t w;
     rt_work_init(&w);
     cursor_t c = { v, 0 };
     buf_str(b, rt_is_tuple(v) ? "#(" : "(");
+    int whole = 0;
     while (b->len < stop) {
         if (at_end(c)) {                        // the end of this one, and of any it ends
             buf_str(b, ")");
-            if (!w.n) break;
+            if (!w.n) {
+                whole = 1;
+                break;
+            }
             c = pop_cursor(&w);
             if (!at_end(c)) buf_str(b, " ");
             continue;
@@ -321,11 +326,18 @@ static void render_seq(rt_buf_t *b, rt_value_t v, size_t stop) {
         if (!at_end(c)) buf_str(b, " ");
     }
     rt_work_free(&w);
+    return whole;
 }
 
 void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
     if (is_seq(v)) render_seq(b, v, SIZE_MAX);
     else           render_atom(b, v, raw);
+}
+
+int rt_render_upto(rt_buf_t *b, rt_value_t v, int raw, size_t stop) {
+    if (is_seq(v)) return render_seq(b, v, stop);
+    render_atom(b, v, raw);
+    return 1;
 }
 
 // What the runtime says of a value, a fault's, a dead letter's, is a

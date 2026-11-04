@@ -1,0 +1,44 @@
+; env: SLIGHT_LOG=error
+; What would put a caller's words on the wire as more than they are, a
+; CR and an LF making a second request or a header of their own, is
+; refused before anything's sent (D271): a URL with a space or a control
+; character in it, a method that isn't a token, a header whose name
+; isn't one or whose value has CR, LF or NUL in it, over https:// (curl)
+; as over http://. A handler's response that would do the same, with a
+; status outside 100 to 999 or such a header, is a 500 (its log line,
+; a warning, is turned off here: its pid isn't worth working out). A URL
+; is shown by its kind alone, since its port is the system's pick.
+; Expected output worked out by hand.
+
+(@include :http)
+
+(defun handler (req)
+    (match (lookup :path req)
+        ("/next"   (list 302 (list (list "location" (str "/next?" (http/url-decode (lookup :query req))))) ""))
+        ("/status" (list 1000 () ""))
+        ("/name"   (list 200 (list (list "x y" "1")) ""))
+        (_         (list 200 () "fine"))))
+
+(defun kind (r)
+    (match r
+        ((:error (k _)) k)
+        ((:ok (status _ body)) (list status body))))
+
+(match (http/listen 0 handler)
+    ((:ok (l port))
+        (let base (str "http://127.0.0.1:" port))
+        (map pprint (list
+            (kind (http/get (str base "/x?q=a b")))
+            (kind (http/get (str base "/x?q=a HTTP/1.1\r\nHost: api\r\n\r\nGET /admin")))
+            (http/request "GET /admin HTTP/1.1\r\nX:" (str base "/") () "")
+            (http/request :get (str base "/") (list (list "X\r\nInjected" "yes")) "")
+            (http/request :get (str base "/") (list (list "X-Ok" "1\r\nX-Injected: yes")) "")
+            (http/request :get (str base "/") (list (list "X-Nul" "a\u{0}b")) "")
+            (http/request :get "https://127.0.0.1:1/" (list (list "a" "b\nc")) "")
+            (kind (http/get (str base "/fine")))
+            (kind (http/get (str base "/next?a%0D%0ASet-Cookie:%20x=1")))
+            (kind (http/get (str base "/next?b")))
+            (kind (http/get (str base "/status")))
+            (kind (http/get (str base "/name")))))
+        (kill l)
+        :done))

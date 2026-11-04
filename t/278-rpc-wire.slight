@@ -6,7 +6,9 @@
 ; server can call the client back while it waits; what isn't a message is
 ; barfed at, and messages about calls that aren't in flight are let be.
 ; Comments, and a message over lines, are read as the compiler reads
-; them. A helo for another version ends the connection.
+; them. A helo for another version ends the connection. A bad message
+; that prints in more than 1 KB is barfed at without being sent back
+; (D270); one of 1 KB is sent back whole.
 
 (@include :rpc)
 
@@ -57,6 +59,8 @@
         (list "(fail 2 no)" 1)
         (list "(call 14 help)" 1)
         (list "; a comment, and a message over two lines\n(call 15\n    add 40 2)" 1)
+        (list (str "(" (str/repeat "y" 1022) ")") 1)
+        (list (str "(" (str/repeat "y" 1023) ")") 1)
         (list "(helo rpc 2)" 2)))
 
 (defun client (script)

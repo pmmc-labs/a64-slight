@@ -1337,7 +1337,10 @@ it reads as a file does: lines at first, one message at a time, and
 `(:read how)` changes the way; and `(:eof c)` when the other end closes.
 It can still be written to after that. It takes `(:write x ...)` as a
 file does, and keeps what the socket can't take yet, so `send` still
-never blocks. Closing it waits until that's written.
+never blocks. Closing it waits until that's written. What it keeps is
+off every heap, so a write while 64 MB or more waits, the other end not
+reading, fails the connection `:too-big`, as so much read does; and a
+write whose text would be more than a heap holds fails it too (D270).
 
 A listener on a port listens on all interfaces; one at `"host:port"`
 listens at that address alone, so `"127.0.0.1:7317"` takes connections
@@ -1438,7 +1441,8 @@ does, so its errors come where they happened, in order (D185).
   `:bus`, `:fpe`, `:kill`, `:usr1`, `:segv`, `:usr2`, `:pipe`, `:alrm`
   or `:term`, or the number of any other.
 - `(:write x ...)`, from any process, writes to its input, as to a
-  socket: kept till the pipe takes it, so `send` never blocks.
+  socket: kept till the pipe takes it, so `send` never blocks, up to 64
+  MB waiting (D270).
   `(:eof)` closes the input, once what was written before it has gone,
   while the output still comes. A command that reads its input waits for
   it till then, so send `(:eof)` at once to one that has none. Input
@@ -1716,6 +1720,12 @@ mustn't be guessed.
   lists element by element, strings byte by byte, floats by value.
   An integer is never `eq?` to a float, so `(eq? 1 1.0)` is `#false`.
   Functions are `eq?` only to themselves, and pids to the same pid.
+  `eq?` and `hash` walk a value as a tree: a value built with sharing,
+  `(list x x)` doubled 40 times, is 40 cells but walked as 2^40, all in
+  one step that nothing can preempt, though `eq?` stops wherever the two
+  sides are the same value, so a value against itself is quick. Only a
+  program's own code makes such a value: what's read from outside is a
+  tree, and so is a copy (D268).
 - `(hash v)`: a non-negative integer for any value, the same for values
   that are `eq?` (`0.0` and `-0.0` included), and the same on every run,
   target and machine, so a hash kept in a file means the same value
@@ -2498,6 +2508,13 @@ it, such as nginx or Caddy.
   calls `handler` with the request and writes the response it gives. The
   handler runs in a process of its own too: if it faults, or raises, the
   client gets a 500.
+- `(http/serve-with port handler opts)` and `(http/listen-with port
+  handler opts)` are the same with options, a list of `(name value)`:
+  `(:most n)` closes a connection as it's accepted while `n` are open
+  (D270). Any other raises `(:bad-option opt)`. There are no timeouts: a
+  client that connects and says nothing holds its connection and its
+  process for good, so a server facing the internet goes behind a proxy
+  that has them, nginx or Caddy, say, as it does for TLS (D251, D269).
 - A request is a keyed list, read with `lookup`: `(:method m)`, `(:path
   p)`, `(:query q)` (`""` when there's none), `(:headers hs)` and `(:body
   b)`. A method is a keyword for GET, HEAD, POST, PUT and DELETE, and a
@@ -2506,13 +2523,22 @@ it, such as nginx or Caddy.
 - A response is `(status headers body)`, its headers `(name value)` pairs.
   The library adds Content-Length and Connection: close, so a handler
   leaves them out. The reason phrase comes from a table of the common
-  statuses.
+  statuses. One that would put the handler's words on the wire as more
+  than they are, a status outside 100 to 999, a header name that isn't a
+  token, or a CR, LF or NUL in a header's value, is a 500 instead, and
+  logged as a warning (D271).
 - `(http/get url)` and `(http/request method url headers body)` (`""` for
   no body) give `(:ok response)`, the response in the same shape, or
   `(:error reason)`. A reason is the device's, such as `(:econnrefused
   "127.0.0.1:1")`, or one of `(:bad-http what)` for a reply that isn't
   HTTP, `(:bad-url url)`, and `:closed` for a connection that closed
-  before its reply. Over `https://`, curl's exit code says what failed, in
+  before its reply. What would put the caller's words on the wire as
+  more than they are is refused before anything's sent, over `https://`
+  as over `http://` (D271): a URL with a space or a control character
+  in it, `(:bad-url url)`; a method that isn't a token (RFC 9110's
+  letters, digits and ``!#$%&'*+-.^_`|~``), `(:bad-method m)`; and a
+  header whose name isn't one, or whose value has a CR, LF or NUL in
+  it, `(:bad-header name)`. Over `https://`, curl's exit code says what failed, in
   the device's words where there are some, with the host and port:
   `:enotfound` (6), `:econnrefused` (7), `:etimedout` (28), `:epipe` (55)
   and `:econnreset` (56); and `(:curl code "host:port")` for the rest, 35
@@ -2541,7 +2567,8 @@ it, such as nginx or Caddy.
 - `(http/parse-url url)`: `(:ok host port target)` for
   `http://host[:port][/path[?query]]` and `https://...`, the port 80, or
   443 for `https`, and the target `"/"` when none is given; and `(:error
-  (:bad-url url))` for anything else. It's what `http/request` reads its
+  (:bad-url url))` for anything else, a space or a control character in
+  it among them (D271). It's what `http/request` reads its
   URL with.
 - `(http/url-encode s)`: `s` percent-encoded (RFC 3986): every byte but
   letters, digits and `-` `.` `_` `~` as `%XX`, so a space is `%20`.
@@ -2878,7 +2905,9 @@ socket. Either end can call the other, whichever connected.
   `/` in it, so one here is `"./ctl.sock"`; that holds wherever `rpc`
   takes `"host:port"` (D231). From a task, `(rpc/listen where
   handlers)` waits till it listens and gives `(:ok (l at))`, or `(:error
-  reason)`.
+  reason)`. `(rpc/serve-with where handlers opts)` and `(rpc/listen-with
+  where handlers opts)` take `(:most n)`, as `http/serve-with` does
+  (D270).
 - `(rpc/connect where handlers)` connects to `"host:port"` or a path,
   and once it's open gives `(:ok conn)`; or `(:error reason)`, the
   socket's, such as `(:econnrefused "localhost:7317")`. The other end
@@ -2959,7 +2988,8 @@ another protocol or version is barfed at, and the connection closed.
 `(call id help)`, which every connection answers, gives what can be
 called, `(name description params)` for each. Anything that isn't a
 message gets `(barf (:bad-message msg))`, and a `call` whose id is in
-use `(barf (:id-in-use id))`; a message about a call that isn't in
+use `(barf (:id-in-use id))`, `msg` or `id` being `too-big` if it
+prints in more than 1 KB (D270); a message about a call that isn't in
 flight is let be, since one can cross a `stop`. A person at `nc`:
 
     (helo rpc 1)

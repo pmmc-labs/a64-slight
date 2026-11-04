@@ -1230,7 +1230,9 @@ run (option (b), D256's step 6, put off).
   names are errno's (`:econnrefused`, `:econnreset`, `:epipe`,
   `:eaddrinuse`, ...), and `:enotfound` (Node's) for a host that can't be
   found, or `:etimedout` when no name server answers; SIGPIPE is ignored, so writing to a closed connection is
-  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. A Unix
+  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets (D266).
+  Output a socket or a command hasn't taken waits in memory off every
+  heap: a write while 64 MB waits fails the device `:too-big` (D270). A Unix
   socket (`:unix`, `:unix/listen`, D231) is the same device at a path:
   a listener makes the socket there, replacing only one that refuses a
   connection, left by a program that was killed, and removes it when it
