@@ -374,7 +374,7 @@ says what and how): step 4's K (IPv6), L (a lambda after `|>`), M (a
 runtime cache outside the install) and N (CI, ASan, fuzzing), each to
 be put to Stevan; step 5's documents (README, leap seconds, the
 Unicode License's text); and what's to be checked on the M2.
-**Next:** the review's last items, above; nothing else is under way. Candidates, none agreed: a simulation library across
+**Next:** the review's last items, above; nothing else is under way. Candidates, none agreed: one kind of process, every wait keeping its stack, and an address for every message, `recv` a read of the process's own inbox and an end a message from `monitor` (`docs/PLAN.md`, "One kind of process, and an address for every message", proposed and open, Nov 2026, which would retire the `recv` rule, D8 and D167, and the two kinds, D243); a simulation library across
 islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in
 conservative windows on a `clock/hold` builtin, with an HP-lattice
