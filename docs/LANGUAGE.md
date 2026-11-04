@@ -1335,9 +1335,16 @@ replay.
   A failure names `from`. `(:ok ())`.
 - `(fs/mkdir path)`: makes a directory, one level, readable and writable
   by whom the umask allows. `(:ok ())`.
+- `(fs/delete-all path)`: deletes the file, or the directory and all in
+  it, as `rm -r` does; a link is deleted, not what it points to. What
+  isn't there is no failure. `(:ok ())`, or the first failure, naming
+  the path that failed. Nothing below `path` is found by a path from the
+  top: each directory is opened from the one it's in, never following a
+  link, so a link put in a directory's place while it's deleted is
+  deleted as a link, and the delete stays in its tree even when others
+  can write in it (D275).
 
-`lib/fs.slight` has trees on these: `fs/mkdir-all`, `fs/delete-all` and
-`fs/walk`.
+`lib/fs.slight` has trees on these: `fs/mkdir-all` and `fs/walk`.
 
 ### Sockets
 
@@ -2336,12 +2343,13 @@ the first failure, `(:error (name path))`.
 - `(fs/mkdir-all path)`: makes the directory and any it's in that aren't
   there, as `mkdir -p` does. One that's there already is no failure, if
   it's a directory. `(:ok ())`.
-- `(fs/delete-all path)`: deletes the file, or the directory and all in
-  it, as `rm -r` does; a link is deleted, not what it points to. What
-  isn't there is no failure. `(:ok ())`.
 - `(fs/walk dir)`: `(:ok paths)`, every path in the tree, `dir/name` and
   deeper, but not `dir`: each directory before what's in it, and a
-  directory's names in their bytes' order.
+  directory's names in their bytes' order. It doesn't follow a link it
+  finds, but it lists each directory by its path from `dir`, so a link
+  put in a directory's place while it walks is followed: in a tree
+  others can write in, it can be led out of it, to list (D275).
+  `fs/delete-all`, which deletes, is a builtin that can't be.
 
 ### (@include :time)
 

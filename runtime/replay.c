@@ -57,7 +57,7 @@ enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
     IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER, IO_REALTIME, IO_LIST, IO_STAT, IO_REMOVE,
-    IO_RENAME, IO_MKDIR, IO_RANDOM, IO_SEEN, IO_TOOK, IO_WAKE,
+    IO_RENAME, IO_MKDIR, IO_RANDOM, IO_SEEN, IO_TOOK, IO_WAKE, IO_REMOVE_TREE,
 };
 
 static const char *const names[] = {
@@ -71,6 +71,7 @@ static const char *const names[] = {
     [IO_PEER] = "a socket's peer", [IO_REALTIME] = "the time of day",
     [IO_LIST] = "a directory's names", [IO_STAT] = "a file's stat", [IO_REMOVE] = "a remove",
     [IO_RENAME] = "a rename", [IO_MKDIR] = "a mkdir", [IO_RANDOM] = "random bytes",
+    [IO_REMOVE_TREE] = "a tree removed",
     [IO_SEEN] = "what another island did", [IO_TOOK] = "an inbox's items", [IO_WAKE] = "an inbox's pipe",
 };
 
@@ -391,6 +392,132 @@ int64_t rt_io_epoch(const char *given) {
 }
 
 // --- files (D254) -------------------------------------------------------------
+
+// A directory open in the tree being removed: its descriptor, read
+// through d, its name in the one above it, and whether this pass over it
+// removed anything.
+typedef struct {
+    DIR  *d;
+    char *name;
+    int   removed;
+} level_t;
+
+// "path/a/b/name", for a failure to name.
+static char *where_in(const char *path, const level_t *at, size_t n, const char *name) {
+    rt_buf_t b = { 0 };
+    rt_buf_add(&b, path, strlen(path));
+    for (size_t i = 1; i < n; i++) {
+        rt_buf_add(&b, "/", 1);
+        rt_buf_add(&b, at[i].name, strlen(at[i].name));
+    }
+    if (name) {
+        rt_buf_add(&b, "/", 1);
+        rt_buf_add(&b, name, strlen(name));
+    }
+    rt_buf_add(&b, "", 1);
+    return b.bytes;
+}
+
+// rm -r, nothing below path found by a path from the top: each directory
+// opened relative to the one it's in, O_NOFOLLOW, and what's in it
+// removed relative to it, so a link put where a directory was, while
+// it's removed, is removed as a link, never followed (D275). The levels
+// are a stack of their own, not C's, which is a process's, and a deep
+// tree would run it out. A directory is read again till a pass over it
+// removes nothing, since a file system may skip a name in one where a
+// name was removed while it was read (APFS can).
+static int remove_tree(const char *path, char **where) {
+    struct stat st;
+    *where = NULL;
+    if (fstatat(AT_FDCWD, path, &st, AT_SYMLINK_NOFOLLOW) != 0) return errno == ENOENT ? 0 : -1;
+    if (!S_ISDIR(st.st_mode)) return unlink(path) == 0 || errno == ENOENT ? 0 : -1;
+    int fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return errno == ENOENT ? 0 : -1;
+    size_t   n = 0, cap = 16;
+    level_t *at = rt_must(malloc(cap * sizeof *at)), *top;
+    int      err = 0;
+    char    *failed = NULL;
+    at[n++] = (level_t){ fdopendir(fd), NULL, 0 };
+    if (!at[0].d) err = errno, close(fd);
+    while (!err && n) {
+        top   = &at[n - 1];
+        errno = 0;
+        struct dirent *e = readdir(top->d);
+        if (!e && errno) {
+            err    = errno;
+            failed = where_in(path, at, n, NULL);
+            break;
+        }
+        if (!e) {
+            if (top->removed) {                 // again, for any a removal hid
+                top->removed = 0;
+                rewinddir(top->d);
+                continue;
+            }
+            closedir(top->d);
+            char *name = top->name;
+            n--;
+            if (n && unlinkat(dirfd(at[n - 1].d), name, AT_REMOVEDIR) != 0 && errno != ENOENT) {
+                err    = errno;
+                failed = where_in(path, at, n, name);
+            } else if (n) {
+                at[n - 1].removed = 1;
+            }
+            free(name);
+            continue;
+        }
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+        // Only a directory is opened, so a device isn't, nor a FIFO, which
+        // could wait; one swapped in after this fails O_NOFOLLOW or
+        // O_DIRECTORY, and is removed as it is.
+        struct stat s;
+        int sub = fstatat(dirfd(top->d), e->d_name, &s, AT_SYMLINK_NOFOLLOW) == 0 && !S_ISDIR(s.st_mode)
+                    ? (errno = ENOTDIR, -1)
+                    : openat(dirfd(top->d), e->d_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+        if (sub >= 0) {
+            DIR *d = fdopendir(sub);
+            if (!d) {
+                err    = errno;
+                failed = where_in(path, at, n, e->d_name);
+                close(sub);
+                break;
+            }
+            if (n == cap) at = rt_must(realloc(at, (cap *= 2) * sizeof *at));
+            at[n++] = (level_t){ d, rt_must(strdup(e->d_name)), 0 };
+        } else if (errno == ENOTDIR || errno == ELOOP) {     // a file, a link, a FIFO...: removed as it is
+            if (unlinkat(dirfd(top->d), e->d_name, 0) == 0) top->removed = 1;
+            else if (errno != ENOENT) err = errno, failed = where_in(path, at, n, e->d_name);
+        } else if (errno != ENOENT) {
+            err    = errno;
+            failed = where_in(path, at, n, e->d_name);
+        }
+    }
+    while (n) {                                 // what's still open, after a failure
+        n--;
+        closedir(at[n].d);
+        free(at[n].name);
+    }
+    free(at);
+    if (!err && rmdir(path) != 0 && errno != ENOENT) err = errno;
+    if (!err) return 0;
+    *where = failed ? failed : rt_must(strdup(path));
+    errno  = err;
+    return -1;
+}
+
+int rt_io_remove_tree(const char *path, char **where) {
+    if (mode == REPLAY) {
+        uint32_t len;
+        int      r = (int)next_alloc(IO_REMOVE_TREE, where, &len);
+        if (r == 0) {
+            free(*where);
+            *where = NULL;
+        }
+        return r;
+    }
+    int r = remove_tree(path, where);
+    return (int)done_with(IO_REMOVE_TREE, r, *where, r ? strlen(*where) + 1 : 0);
+}
 
 int64_t rt_io_list(const char *path, char **names, uint32_t *len) {
     if (mode == REPLAY) return next_alloc(IO_LIST, names, len);

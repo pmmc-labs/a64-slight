@@ -44,10 +44,12 @@
             (send f (list :write line \n))
             (spew-each f rest))))
 
-; Trees, on the fs/ builtins (D254): a directory and those it's in, a
-; tree deleted, and a tree's paths. None follows a link: fs/stat says a
-; link is one, so a walk or a delete stays in its tree. Each gives (:ok x),
-; or the first failure, (:error (name path)).
+; Trees, on the fs/ builtins (D254): a directory and those it's in, and
+; a tree's paths. Neither follows a link: fs/stat says a link is one. But
+; each step finds its path from the top, so a link put in a directory's
+; place while it walks is followed: fs/walk can be led out of its tree,
+; to read, when others can write in it (D275). Each gives (:ok x), or the
+; first failure, (:error (name path)).
 
 ; Makes the directory at path, and any it's in that aren't there yet, as
 ; mkdir -p does. One that's there is no failure, if it's a directory.
@@ -65,25 +67,9 @@
             (failed  failed))
         (fs/mkdir path)))
 
-; Deletes path, and if it's a directory, all in it, as rm -r does. What
-; isn't there is no failure.
-(defun fs/delete-all (path)
-    (match (fs/stat path)
-        ((:ok info)           (if (eq? (lookup :kind info) :dir) (fs/delete-in path (fs/list path)) (fs/delete path)))
-        ((:error (:enoent _)) (list :ok ()))
-        (failed               failed)))
-
-(defun fs/delete-in (path listed)
-    (match listed
-        ((:ok names) (fs/delete-each path names))
-        (failed      failed)))
-
-(defun fs/delete-each (path names)
-    (match names
-        (()            (fs/delete path))
-        ((name & rest) (match (fs/delete-all (str path "/" name))
-                           ((:ok _) (fs/delete-each path rest))
-                           (failed  failed)))))
+; rm -r is the builtin fs/delete-all (D275), in C, so that nothing below
+; the top is found by a path, and a link put in a directory's place while
+; it's deleted is deleted, not followed.
 
 ; Every path in the tree at dir, not dir itself: each directory before
 ; what's in it, the names in a directory in their bytes' order.

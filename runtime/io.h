@@ -129,6 +129,9 @@ int     rt_io_stat(const char *path, int64_t got[4]);
 int     rt_io_remove(const char *path);
 int     rt_io_rename(const char *from, const char *to);
 int     rt_io_mkdir(const char *path);
+// rm -r, nothing below path followed or found from the top (D275): 0, or
+// -1 with errno set and *where the path that failed, NUL-ended, malloc'd.
+int     rt_io_remove_tree(const char *path, char **where);
 
 // A text file read a line at a time (the hosts file, resolv.conf).
 FILE *rt_io_fopen(const char *path);

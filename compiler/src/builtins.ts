@@ -214,6 +214,7 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'fs/delete': fn([STR], okOr(NIL_T, ANY)),
     'fs/rename': fn([STR, STR], okOr(NIL_T, ANY)),
     'fs/mkdir': fn([STR], okOr(NIL_T, ANY)),
+    'fs/delete-all': fn([STR], okOr(NIL_T, ANY)),
     'bytes/pack': fn([LIST_ANY, LIST_ANY], STR),
     'crypto/sha256': fn([STR], STR),
     'crypto/sha512': fn([STR], STR),

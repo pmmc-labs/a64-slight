@@ -1,0 +1,11 @@
+502
+(ok ())
+(error (enoent "build/t/348-tree"))
+(ok ())
+(error (enoent "build/t/348-link"))
+(ok ("kept"))
+(ok ())
+(ok ())
+(error (io-error "a\u{0}b"))
+(ok ())
+done

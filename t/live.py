@@ -76,6 +76,12 @@ program, or the system to measure the run.
   target run natively, since qemu maps a program's memory itself;
   otherwise it's skipped, as it is when the limit's so high that the
   tasks it would take are too many to run here.
+- delete race: fs/delete-all deletes a tree 2,000 times while
+  t/live/swap.c swaps its subdirectory with a link to a directory
+  outside it, back and forth, atomically (RENAME_EXCHANGE, or macOS's
+  RENAME_SWAP); the file outside is never deleted (D275). The walk in
+  slight it replaced lost it in 5 runs of 5. It takes cc; without it,
+  it's skipped.
 - https: http/request on an https:// URL runs curl (D251), over real TLS
   to a server here with a certificate made for the run: a whole reply
   and a chunked one come as over http, and without the certificate to
@@ -628,6 +634,32 @@ def stacks():
           f'exit {p.returncode}: {p.stdout[:200]!r} {p.stderr[:400]!r}')
 
 
+def delete_race():
+    what = 'fs/delete-all with a link swapped in for its subdirectory, again and again, deletes nothing outside'
+    prog  = build('delete-race', 't/live/delete-race.slight')
+    swap  = os.path.join(DIR, 'swap')
+    built = subprocess.run(['cc', '-O2', '-o', swap, 't/live/swap.c'], capture_output=True, text=True)
+    if built.returncode != 0:
+        print(f'skip {what}: t/live/swap.c did not compile\n{built.stderr}')
+        return
+    base = os.path.abspath(os.path.join(DIR, 'delete-race.d'))
+    top, outside = os.path.join(base, 'tree'), os.path.join(base, 'outside')
+    shutil.rmtree(base, ignore_errors=True)
+    os.makedirs(outside)
+    os.makedirs(top)
+    kept = os.path.join(outside, 'kept')
+    with open(kept, 'w') as f:
+        f.write('kept')
+    s = subprocess.Popen([swap, os.path.join(top, 'sub'), os.path.join(base, 'link'), outside])
+    try:
+        p = subprocess.run(RUN + [prog, top, '2000'], capture_output=True, env=ENV, timeout=DEADLINE)
+    finally:
+        s.kill()
+        s.wait()
+    check(what, p.returncode == 0 and os.path.exists(kept), f'exit {p.returncode}: {p.stdout[:200]!r} {p.stderr[:400]!r}')
+    shutil.rmtree(base, ignore_errors=True)
+
+
 # What a connection to the socket at path says first, or None.
 def hello(path):
     try:
@@ -747,6 +779,7 @@ wakes()
 inherit()
 accept()
 stacks()
+delete_race()
 https()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

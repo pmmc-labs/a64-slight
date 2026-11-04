@@ -101,6 +101,23 @@ rt_value_t rt_fs_rename(rt_value_t from, rt_value_t to, const char *site) {
     return rt_io_rename(f, t) == 0 ? ok(RT_NIL, site) : failed(errno, from, site);
 }
 
+// rm -r (D275): what's below path is never found by a path from the top,
+// so a link put in a directory's place while it's deleted is deleted as a
+// link, where the walk in slight on fs/stat, fs/list and fs/delete it
+// replaced could be led out of the tree. A failure names the path that
+// failed, as that walk's did.
+rt_value_t rt_fs_delete_all(rt_value_t path, const char *site) {
+    const char *p;
+    char       *where;
+    int         err = path_of(path, site, &p);
+    if (err) return failed(err, path, site);
+    if (rt_io_remove_tree(p, &where) == 0) return ok(RT_NIL, site);
+    err = errno;
+    rt_value_t at = rt_new_string(where, strlen(where), site);
+    free(where);
+    return failed(err, at, site);
+}
+
 rt_value_t rt_fs_mkdir(rt_value_t path, const char *site) {
     const char *p;
     int         err = path_of(path, site, &p);

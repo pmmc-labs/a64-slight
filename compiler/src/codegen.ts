@@ -1123,6 +1123,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'fs/delete':          fixed('rt_fs_delete', 1),
     'fs/rename':          fixed('rt_fs_rename', 2),
     'fs/mkdir':           fixed('rt_fs_mkdir', 1),
+    'fs/delete-all':      fixed('rt_fs_delete_all', 1),
     'bytes/pack':         fixed('rt_bytes_pack', 2),
     'bytes/unpack':       fixed('rt_bytes_unpack', 3),
     'log':                fixed('rt_log_line', 3),

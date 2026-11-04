@@ -733,6 +733,7 @@ rt_value_t rt_fs_stat(rt_value_t path, const char *site) RT_ASM(rt_fs_stat);
 rt_value_t rt_fs_delete(rt_value_t path, const char *site) RT_ASM(rt_fs_delete);
 rt_value_t rt_fs_rename(rt_value_t from, rt_value_t to, const char *site) RT_ASM(rt_fs_rename);
 rt_value_t rt_fs_mkdir(rt_value_t path, const char *site) RT_ASM(rt_fs_mkdir);
+rt_value_t rt_fs_delete_all(rt_value_t path, const char *site) RT_ASM(rt_fs_delete_all);
 
 // (bytes/pack specs values) and (bytes/unpack specs s at) (strings.c,
 // D254): numbers as bytes, by width and order, and back.

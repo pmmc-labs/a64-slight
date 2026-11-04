@@ -1,0 +1,17 @@
+; t/live.py's delete race: makes a tree at its first argument, a
+; directory sub with a file in it, and deletes it, n times (its second),
+; while t/live.py swaps sub for a link to a directory outside, whose file
+; must be kept whenever the swap lands (D275).
+
+(@include :fs)
+
+(defun rounds (top n)
+    (cond
+        ((== n 0) :done)
+        (#true
+            (fs/mkdir-all (str top "/sub"))
+            (spew (str top "/sub/f") (list "x"))
+            (fs/delete-all top)
+            (rounds top (- n 1)))))
+
+(rounds (car @ARGV) (str->int (cadr @ARGV)))

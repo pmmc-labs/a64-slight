@@ -1,0 +1,36 @@
+; fs/delete-all, a builtin (D275): rm -r with nothing below the top found
+; by a path, so a link where a directory was is deleted, not followed. A
+; tree 200 directories deep, with 500 files in one directory and a FIFO
+; (deleted, not opened, which would wait), and a link to a directory
+; outside it, which is kept; a link given as the path is deleted, its
+; target kept; a file; what isn't there; and a path with a NUL in it.
+; Expected output worked out by hand.
+
+(@include :fs)
+(@include :exec)
+
+(defun deep (n acc) (if (== n 0) acc (deep (- n 1) (str acc "/d"))))
+
+(let top "build/t/348-tree")
+(let out "build/t/348-outside")
+(fs/delete-all top)
+(fs/delete-all out)
+(fs/delete-all "build/t/348-link")
+(fs/mkdir-all (deep 200 top))
+(fs/mkdir-all out)
+(spew (str out "/kept.txt") (list "kept"))
+(exec/run (list "sh" "-c" "cd build/t/348-tree/d && i=0; while [ $i -lt 500 ]; do : > f$i; i=$((i+1)); done"))
+(exec/run (list "mkfifo" "build/t/348-tree/d/d/fifo"))
+(exec/run (list "ln" "-s" "../../348-outside" "build/t/348-tree/d/out"))
+(exec/run (list "ln" "-s" "348-outside" "build/t/348-link"))
+(pprint (length (match (fs/list (str top "/d")) ((:ok names) names))))
+(pprint (fs/delete-all top))
+(pprint (fs/stat top))
+(pprint (fs/delete-all "build/t/348-link"))
+(pprint (fs/stat "build/t/348-link"))
+(pprint (slurp (str out "/kept.txt")))
+(pprint (fs/delete-all (str out "/kept.txt")))
+(pprint (fs/delete-all (str out "/kept.txt")))
+(pprint (fs/delete-all "a\u{0}b"))
+(pprint (fs/delete-all out))
+:done

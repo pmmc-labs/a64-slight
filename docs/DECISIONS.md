@@ -6236,7 +6236,10 @@ through `replay.c`, so a run still replays.
   as opening a file is, recorded, and not made in a replay. Trees are
   `lib/fs.slight`'s, in slight. *(Built: `fs/stat` doesn't follow a
   link, `lstat`, its `:kind` then `:link`, so a walk or a delete can't
-  be led out of its tree, where the proposal had it follow one; and the
+  be led out of its tree (*so long as nobody changes the tree while it
+  goes: each step found its path from the top, so a link swapped in
+  between a look and a listing was followed; D275 made `fs/delete-all`
+  a builtin that can't be*), where the proposal had it follow one; and the
   trees are `fs/mkdir-all`, `fs/delete-all` and `fs/walk`. Three errno
   names came with it, `:enotempty`, `:exdev` and `:ebusy`.)* Refines D151: a one-shot call whose wait
   is the disk's may be a builtin, since a device, with no thread, would
@@ -6826,4 +6829,33 @@ one, which says the timer had fired, so a caller would wait for a
 timeout that never comes. Golden test 347 (in `make tsan` too), whose
 worker keeps island 1 busy while the cancel comes, since an island with
 nothing to run moves its virtual clock to its next timer.
+
+**D275. `fs/delete-all` is a builtin that finds nothing below the top by
+a path.** *(Stevan, Nov 2026, from the review of 2026-11-02, L2; Claude's
+recommendation.)* `lib/fs.slight`'s `fs/delete-all` was `fs/stat`,
+`fs/list` and `fs/delete` on joined paths, each found afresh from the
+top, so a link to `/etc` put where `build/sub` was, between the walk's
+look at it and its listing, had `/etc` emptied: the old `rm -r` race,
+for a program deleting where someone else can write (`/tmp`, a shared
+build directory, a container's volume). Now it's a builtin
+(`runtime/files.c`, on `rt_io_remove_tree` in `replay.c`): the top is
+`lstat`ed, and below it each directory is opened from the one it's in,
+`O_DIRECTORY | O_NOFOLLOW`, after `fstatat` without following says it's
+one (so no device or FIFO is opened), and what's in it is removed with
+`unlinkat` relative to it; a link swapped in fails the open and is
+removed as a link. The open directories are a stack of the runtime's
+own, not C's, which is a process's, and a deep tree would run it out; a
+directory is read again till a pass over it removes nothing, since a
+file system may skip a name where one was removed while it was read
+(APFS can). It gives what the walk gave, `(:ok ())` or the first
+failure naming its path, and the whole delete is recorded as one result,
+so a replay touches no file. `fs/walk` stays in slight, said in
+LANGUAGE.md to be led out of its tree by a swap, since it only reads.
+Rejected: saying so of both and changing nothing (a delete led out of
+its tree destroys); `fs/walk` in C too (about 40 lines more, for a walk
+that reads). Golden test 348 (a tree 200 deep, 500 names in a
+directory, a FIFO, links), and `t/live.py`'s delete race, where
+`t/live/swap.c` swaps the subdirectory with a link to outside, atomically,
+as fast as it can: the walk in slight lost the file outside in 5 runs
+of 5, the builtin in none of 10.
 

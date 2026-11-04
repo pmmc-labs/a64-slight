@@ -35,6 +35,10 @@ are settled:
   island (island 0's still 1 up), and a cancel of another island's
   timer is answered by that island, the caller waiting as `spawn/on`
   does.
+- **I** is built (D275, golden test 348, `t/live.py`'s delete race):
+  `fs/delete-all` is a builtin on `openat`, `fstatat` and `unlinkat`,
+  so a link swapped in is deleted, not followed; `fs/walk` stays, said
+  to be led out of a tree others write in.
 
 The rest of step 4 waits for Stevan. Step 5 is begun: CLAUDE.md's
 status says what's done.
