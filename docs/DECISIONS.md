@@ -7145,3 +7145,28 @@ chat's new tool reads its argument itself; the header could export it.
 address, handed to agents that don't exist yet, is how a worker reaches
 a teammate through the lead; an address in a closure is the capability.
 Still nothing of the process model's.
+
+**D284. The agent team, step 4: record and replay, the seeds, the
+transcript, and the live check.** *(Stevan, Nov 2026: "Let's proceed
+to step 4".)* `examples/team.slight` takes `--transcript path`, and
+writes the run's events, as they came, as s-expressions, one a line,
+when the job is done. In t/replay.sh: a run of test 375, its fake model
+inside the program, is recorded and replayed with no socket, as `net`
+is, and prints its golden output; and 375 and 376 print theirs under
+five `SLIGHT_SCHED` seeds, since their events are printed in task order
+and the pool's bound, the overrun and the retry don't go by the
+schedule. In t/live.py: the team from the command line on
+`t/live/model.slight`, which answers a team's questions now too, a plan
+of two tasks, one of which asks to write a file: the run answers, its
+workers report, the write is reported and not done, the model is told
+it wasn't allowed, and the transcript holds the plan and the answer.
+Friction, for the list: (8) the runtime prints the root's value after
+the program's own output, so a program for the command line ends with
+a `done` line of the runtime's, as `chat` ends with `bye`; harmless,
+and a thing such a program would want to turn off. (9) `sexp/print`
+writes a keyword as `pprint` does, without its colon, so the
+transcript says `(plan ...)` where the live check first looked for
+`(:plan ...)`; reading it back gives the symbol, so nothing is lost,
+but a transcript meant for other programs would say so. Nothing else:
+recording and replaying a run with a model, sockets and timers in it
+needed nothing of the program, which is the point of D170.

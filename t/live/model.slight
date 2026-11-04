@@ -4,7 +4,10 @@
 ; and fetch: run's command has an escape in it too, and fetch's URL is a
 ; redirect. Once it's told what they gave, it writes that to stdout, and
 ; answers "done". A fetch of where the redirect goes says so, which
-; shouldn't happen (D205). It writes its port first.
+; shouldn't happen (D205). It writes its port first. For a team
+; (examples/team.slight, D284) it plans two tasks, answers one, asks to
+; write a file for the other and, told it may not, answers it too, and
+; combines; it tells what it was told, as it does for the chat.
 
 (@include :http)
 
@@ -24,14 +27,25 @@
                     (list "done" #false)))
         (line (list (message (list (list "content" ""))) (list "done" #true)))))
 
+(defun plain (text) (line (list (message (list (list "content" text))) (list "done" #true))))
+
 (defun answer (host body)
     (let messages (match (json/parse body) ((:ok (:object & fields)) (lookup "messages" fields)) (_ ())))
     (let told     (filter (lambda (m) (eq? (lookup "role" (cdr m)) "tool")) messages))
+    (let users    (filter (lambda (m) (eq? (lookup "role" (cdr m)) "user")) messages))
+    (let asked    (if (nil? users) "" (lookup "content" (cdr (car (reverse users))))))
+    (map (lambda (m) (tty/write "told: " (lookup "content" (cdr m)) \n)) told)
     (cond
-        ((nil? told) (first-answer host))
-        (#true
-            (map (lambda (m) (tty/write "told: " (lookup "content" (cdr m)) \n)) told)
-            (line (list (message (list (list "content" "done"))) (list "done" #true))))))
+        ((str/starts-with? asked "The job: ")     (plain "say hello\nsay goodbye"))
+        ((eq? asked "say hello")                   (plain "hello"))
+        ((and (eq? asked "say goodbye") (nil? told))
+            (str (line (list (message (list (list "content" "") (list "tool_calls" (list (call "write_file" (list (list "path" "out.txt") (list "content" "bye")))))))
+                       (list "done" #false)))
+                 (line (list (message (list (list "content" ""))) (list "done" #true)))))
+        ((eq? asked "say goodbye")                 (plain "goodbye"))
+        ((str/starts-with? asked "The job was: ")  (plain "hello and goodbye"))
+        ((nil? told)                               (first-answer host))
+        (#true                                     (plain "done"))))
 
 (defun handler (req)
     (let host (lookup "host" (lookup :headers req)))

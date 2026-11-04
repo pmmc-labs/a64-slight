@@ -18,7 +18,8 @@
 # t/267-join-any-all.slight, whose results go by the virtual clock and
 # not by the order processes run in, must print its golden output under
 # five seeds (D220); and so must t/374-life-hostile.slight, whose frames
-# don't go by which worker takes which job (D280).
+# don't go by which worker takes which job (D280); and so must the
+# agent team's 375 and 376, and 375 must replay as recorded (D284).
 #
 # t/replay/rand.slight draws random numbers in processes that interleave
 # (D222): with SLIGHT_SEED it must print the same under five SLIGHT_SCHED
@@ -69,6 +70,14 @@ fi
 if ! node bin/slightc.ts --target "$TARGET" -o "$dir/life" t/374-life-hostile.slight >"$dir/life.compile" 2>&1; then
     cat "$dir/life.compile"
     check "life (compile)" no
+fi
+if ! node bin/slightc.ts --target "$TARGET" -o "$dir/team" t/375-team.slight >"$dir/team.compile" 2>&1; then
+    cat "$dir/team.compile"
+    check "team (compile)" no
+fi
+if ! node bin/slightc.ts --target "$TARGET" -o "$dir/budget" t/376-team-budget.slight >"$dir/budget.compile" 2>&1; then
+    cat "$dir/budget.compile"
+    check "budget (compile)" no
 fi
 [ $fail -eq 0 ] || exit 1
 
@@ -253,6 +262,31 @@ for seed in 1 2 3 4 5; do
         diff -u t/374-life-hostile.expected "$dir/life.$seed"
         check "the hostile scheduler's Life, seed $seed" no
     fi
+done
+
+# The agent team (375, 376): a run with its fake model inside the program
+# is recorded and replayed with no socket, and prints its golden output;
+# and both print theirs under five seeds, their events in task order
+# (D284).
+run SLIGHT_CLOCK=virtual SLIGHT_RECORD="$dir/team.record" team </dev/null >"$dir/team.recorded"
+run SLIGHT_CLOCK=virtual SLIGHT_REPLAY="$dir/team.record" team </dev/null >"$dir/team.replayed"
+if cmp -s "$dir/team.recorded" "$dir/team.replayed" && printf 'exit: 0\n' | cat t/375-team.expected - | cmp -s - "$dir/team.recorded"; then
+    check "the team replays as recorded" ok
+else
+    diff -u "$dir/team.recorded" "$dir/team.replayed"
+    check "the team replays as recorded" no
+fi
+for seed in 1 2 3 4 5; do
+    for prog in team budget; do
+        case $prog in team) expected=t/375-team.expected ;; budget) expected=t/376-team-budget.expected ;; esac
+        run SLIGHT_CLOCK=virtual SLIGHT_SCHED=$seed $prog </dev/null >"$dir/$prog.$seed"
+        if printf 'exit: 0\n' | cat "$expected" - | cmp -s - "$dir/$prog.$seed"; then
+            check "the team's $prog, seed $seed" ok
+        else
+            diff -u "$expected" "$dir/$prog.$seed"
+            check "the team's $prog, seed $seed" no
+        fi
+    done
 done
 
 # Random numbers: the same, whatever the order, from one seed.

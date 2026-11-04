@@ -2446,7 +2446,7 @@ Mac, stackful against today.
   message meant for someone else. A `--strict` warning, when it follows
   a `send` in the same body; not a rule.
 
-### An agent team: a design exercise (agreed, D281; steps 1 to 3 built, Nov 2026)
+### An agent team: a design exercise (agreed, D281; steps 1 to 4 built, Nov 2026)
 
 Stevan, after the Life ports (D280): "So what would be a good design
 exercise? Should we flesh out an example to a larger app? Or do
@@ -2530,7 +2530,8 @@ so the lead keeps each agent's pid.* 3. Workers asking each other, the review ro
 in `chat`. *Built (D283): golden test 377; a worker's agent lives till
 the job's end, for its teammates, and reaches them through the lead.*
 4. Record and replay, and the seeds, in t/replay.sh; the
-live check. 5. The friction list written up in the decision, each entry
+live check. *Built (D284): `--transcript`; 375 recorded and replayed,
+375 and 376 under five seeds; the team on t/live.py's model.* 5. The friction list written up in the decision, each entry
 weighed: a library function, a language change to propose, or nothing.
 
 **To settle, with Stevan:**

@@ -18,6 +18,10 @@ program, or the system to measure the run.
   That's Linux's alone: macOS's malloc keeps large blocks it has freed,
   counted in the peak, by an amount that varies from run to run, so the
   peak there can't tell a leak; it's skipped.
+- team: examples/team.slight from the command line, on the same model,
+  which plans two tasks: the team answers, its workers report, a write a
+  worker asks for is reported and not done, and the transcript holds
+  the run (D284).
 - chat: examples/chat.slight in a terminal, with t/live/model.slight as
   its model: what the model sends with terminal escapes in it is shown
   escaped, approvals included; a refused command isn't run; and a fetch
@@ -313,6 +317,35 @@ def chat():
     moved = f'told: HTTP 302: a redirect to http://127.0.0.1:{port}/page, which a fetch of its own can get\n'
     check('a redirect is told to the model, and not followed', moved in told and 'the page was fetched' not in told,
           f'the model was told {told!r}')
+
+
+def team():
+    model = build('model', 't/live/model.slight')
+    prog  = build('team', 'examples/team.slight')
+    server = subprocess.Popen(RUN + [model], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=ENV)
+    port   = server.stdout.readline().decode().strip()
+    env = dict(ENV, OLLAMA_HOST=f'127.0.0.1:{port}', no_proxy='127.0.0.1', NO_PROXY='127.0.0.1')
+    transcript = os.path.join(DIR, 'team.sexp')
+    for stale in (transcript, 'out.txt'):
+        if os.path.exists(stale):
+            os.remove(stale)
+    try:
+        r = subprocess.run(RUN + [prog, '--transcript', transcript, 'say', 'hello', 'and', 'goodbye'],
+                           stdin=subprocess.DEVNULL, capture_output=True, env=env, timeout=DEADLINE)
+        status, out = r.returncode, r.stdout.decode()
+    except subprocess.TimeoutExpired:
+        status, out = None, ''
+    server.kill()
+    told = server.communicate()[0].decode()
+    text = open(transcript).read() if os.path.exists(transcript) else ''
+    check('the team answers from the command line', status == 0 and out.endswith('\nhello and goodbye\ndone\n'),
+          f'exit {status}, said {out!r}')
+    check('its workers report', 'worker 1 done: hello\n' in out and 'worker 2 done: goodbye\n' in out, f'said {out!r}')
+    check("a write a worker would do is reported, and not done",
+          'a worker would have: write out.txt' in out and "told: the user didn't let it be written\n" in told and not os.path.exists('out.txt'),
+          f'said {out!r}; the model was told {told!r}')
+    check('the transcript holds the run', '(plan ("say hello" "say goodbye"))' in text and '(answer "hello and goodbye")' in text,
+          f'the transcript is {text!r}')
 
 
 def airline():
@@ -769,6 +802,7 @@ os.makedirs(DIR, exist_ok=True)
 keys()
 memory()
 chat()
+team()
 airline()
 signals()
 memory_limit()
