@@ -7111,3 +7111,37 @@ to know. (4) A default that changes behaviour, retries at one, changed
 step 1's test, which says `(:retries 0)` now. Nothing of the process
 model's: the pool is the read loop, the overrun a timer to the same
 address, the restart a fork from the queue.
+
+**D283. The agent team, step 3: teammates, a review round, and
+`ask_team` in the chat.** *(Stevan, Nov 2026: "Let's proceed to step
+3".)* A worker's agent has a tool, `ask_teammate`, that asks the worker
+on another task of the job, by its number: the tool sends `(:teammate
+other me r)` to the lead's address for the job, the lead answers at `r`
+with the agent on that task, or `()` for a task that isn't there or is
+the asker's own, and the tool asks that agent and gives its answer, or
+raises. For that, a worker's agent lives till the job is done, killed
+and joined then, rather than at its task's end, so a task finished can
+still be asked about; one that overran is killed at once, and one tried
+again goes with its failure. Two workers asking each other at once wait
+for each other till their budgets end them: the runtime detects a
+deadlock only when the root is in it, and the budgets are the answer. A
+review round, `(:review #true)`, with `(:reviewer model)` for a
+reviewer on another model: a reviewer agent judges the combined answer,
+the asker hears `(:team/review t said)`, and unless the verdict starts
+APPROVED the planner revises its answer once with what the reviewer
+said. And `ask_team` in `examples/chat.slight`: a team on the chat's
+model with the read-only tools, made at the start, for a job with
+several independent parts. Golden test 377: a worker asking a teammate
+what it found and doubling it, one asking a task that isn't there and
+being told so, a reviewer not approving and the planner revising, and a
+job the reviewer approves. Friction, for the list: (5) a function takes
+at most 8 parameters, arguments going in registers, and `lead/settle`
+reached nine; the loop's state became one value, `(queue live done
+verdicts)`, which reads better, but the limit was met by surprise,
+though with a clear message. (6) `tools/string`, which checks that an
+argument from a model is a string, is private to `lib/tools`, so the
+chat's new tool reads its argument itself; the header could export it.
+(7) Not friction, a shape: a tool is a closure, and one over the job's
+address, handed to agents that don't exist yet, is how a worker reaches
+a teammate through the lead; an address in a closure is the capability.
+Still nothing of the process model's.

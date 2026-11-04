@@ -1,0 +1,87 @@
+; A team's workers asking each other, and its review round, on a fake
+; model (D283, PLAN.md's "An agent team", step 3). The first job has
+; three tasks: one finds a number; the second asks the first's worker
+; what it found, through ask_teammate, and doubles it; the third asks a
+; task that doesn't exist, and is told so. The reviewer isn't happy
+; with the combined answer, so the planner revises it. The second job
+; is one task, and the reviewer approves. The events are collected and
+; printed in task order once the answer has come, the review before it.
+; Worked out by hand from the script.
+
+(@include "../examples/team-agents.slight")
+(@include :http)
+
+; --- the fake ollama ---------------------------------------------------
+
+(defun handler (req)
+    (match (json/parse (lookup :body req))
+        ((:ok (:object & fields))
+            (let messages (lookup "messages" fields))
+            (let last     (cdr (car (reverse messages))))
+            (let users    (filter (lambda (m) (eq? (lookup "role" (cdr m)) "user")) (reverse messages)))
+            (let asked    (lookup "content" (cdr (car users))))
+            (list 200 () (lines (reply asked (eq? (lookup "role" last) "tool") (lookup "content" last)))))))
+
+(defun reply (asked told result)
+    (cond
+        ((eq? asked "The job: find and double")       (list (piece "find the number\ndouble it\nask the void") (done)))
+        ((eq? asked "The job: approved one")          (list (piece "find the number") (done)))
+        ((eq? asked "find the number")                (list (piece "forty-two") (done)))
+        ((eq? asked "what number did you find?")      (list (piece "forty-two, as I said") (done)))
+        ((and (eq? asked "double it") told)           (list (piece (str "twice " result ": eighty-four")) (done)))
+        ((eq? asked "double it")                      (list (calls (list (call "ask_teammate" (list (list "task" 1) (list "question" "what number did you find?"))))) (done)))
+        ((and (eq? asked "ask the void") told)        (list (piece (str "nobody there: " result)) (done)))
+        ((eq? asked "ask the void")                   (list (calls (list (call "ask_teammate" (list (list "task" 9) (list "question" "anyone?"))))) (done)))
+        ((str/starts-with? asked "The job was: find") (list (piece "The number is forty-two, and twice that is eighty-four; the void was empty.") (done)))
+        ((str/starts-with? asked "The job was: appr") (list (piece "forty-two it is") (done)))
+        ((str/starts-with? asked "Review this. The job: find") (list (piece "Not approved: too long.") (done)))
+        ((str/starts-with? asked "Review this.")      (list (piece "APPROVED") (done)))
+        ((str/starts-with? asked "A reviewer said")   (list (piece "42, 84, void empty.") (done)))
+        (#true                                        (list (piece (str "? " asked)) (done)))))
+
+(defun piece (text)
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" text))) (list "done" #false)))
+
+(defun calls (cs)
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" "") (list "tool_calls" cs))) (list "done" #false)))
+
+(defun call (name args)
+    (list :object (list "function" (list :object (list "name" name) (list "arguments" (cons :object args))))))
+
+(defun done ()
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" ""))) (list "done" #true)))
+
+(defun lines (values)
+    (str/join "" (map (lambda (v) (str (json/print v) "\n")) values)))
+
+; --- the run -----------------------------------------------------------
+
+(defun collect (started events review)
+    (recv
+        ((:team/plan _ _)        (collect started events review))
+        ((:team/task _ id _)     (collect (cons id started) events review))
+        ((:team/done _ id a)     (collect started (noted id (list :done a) events) review))
+        ((:team/failed _ id why) (collect started (noted id (list :failed why) events) review))
+        ((:team/retry _ id why)  (collect started (noted id (list :retried why) events) review))
+        ((:team/review _ said)   (collect started events said))
+        ((:team/answer _ text)
+            (pprint (list :started (reverse started)))
+            (map (lambda (e) (pprint (cons (car e) (reverse (cadr e))))) (sort-by car events))
+            (pprint (list :review review))
+            (pprint (list :answer text)))
+        ((:team/error _ reason)  (pprint (list :error reason)))))
+
+(defun noted (id event events)
+    (let before (match (lookup id events) (:not-found ()) (es es)))
+    (assoc id (cons event before) (remove (lambda (e) (== (car e) id)) events)))
+
+(match (http/listen 0 handler)
+    ((:ok (srv port))
+        (let t (team/new (str "http://127.0.0.1:" port) "fake" () (list (list :review #true) (list :retries 0))))
+        (team/say t "find and double")
+        (collect () () ())
+        (team/say t "approved one")
+        (collect () () ())
+        (kill t)
+        (kill srv)
+        :done))
