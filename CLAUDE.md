@@ -348,7 +348,7 @@ reductions left to right, `array/matmul`), `array/generate`,
 the types `(array float)` and `(array int)` (golden tests 320 to 323,
 `t/models/arrays.py`; the checker's 011 and 012). `bench/`'s `slight-arrays`,
 `spectral-norm` with arrays (`docs/BENCHMARKS.md`). **Next:** nothing
-is under way. Candidates, none agreed: a simulation library across
+is under way. Candidates, none agreed: one kind of process, every wait keeping its stack, and an address for every message, `recv` a read of the process's own inbox and an end a message from `monitor` (`docs/PLAN.md`, "One kind of process, and an address for every message", proposed and open, Nov 2026, which would retire the `recv` rule, D8 and D167, and the two kinds, D243); a simulation library across
 islands (`docs/PLAN.md`, "Simulation across islands", proposed and
 open: time-stepped regions in `lib/sim.slight`, then discrete events in
 conservative windows on a `clock/hold` builtin, with an HP-lattice

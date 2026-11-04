@@ -2222,6 +2222,204 @@ browser when watching from afar matters. It would sit with the
 simulation library above: the flagship's dashboard is this viewer, fed
 by the root.
 
+### One kind of process, and an address for every message (proposed, open, Nov 2026)
+
+Proposed by Claude after Stevan went back to ts-slight ("the process
+split felt kind of wrong when we did it ... I've struggled with the
+`recv` rule every time I wrote slight, where the join/fork/yield
+patterns felt more intuitive") and set the shape: "fork/join/yield is
+the core process model; address/read/send is the core message model;
+actors are a pattern of usage for those two, and `recv` is a way to
+read a default address." Not yet agreed; the decision's number comes
+when it is.
+
+**Where it comes from.** In ts-slight every process was a continuation
+chain and a mailbox, and every wait, `recv`, `join`, `yield` and a
+syscall, parked the chain the same way. So `recv` went anywhere, a
+closure included, and the idiom the examples lived on was a closure
+wrapping a send and a `recv`, which made an actor callable
+(`simple-db-server`'s `db-client`, `active-objects`' `PointActor`). Its
+one hole was that `recv` took whatever came next, AVM's stray-reply
+bug. Natively a suspended process needs a stack, and D9 chose stacks
+only while running, which needs the stack empty at `recv`: D8, the
+`recv` rule, taken "if it simplifies things." The stackful waits then
+came back one by one as programs needed them, `join`, `sleep`,
+`join/race`, and D243's census found 33 processes that were both actor
+and task, and split the process into two kinds, giving tasks `address`
+and `read`, the correlated reply ts-slight's roadmap had planned, and
+actors nothing. So one process became two by an implementation
+decision, and the wait people reach for came back under another name,
+for the kind that can't be sent to.
+
+The runtime already has the floor. An address is a word under the pid
+tag, a message to one goes into its task's own mailbox marked with it,
+and `read` takes the first message so marked and leaves the rest
+(`process.c`, "addresses"). With the two `if (p->actor)` guards in
+`rt_address` and `read_from` turned off, an actor asking another actor
+in the middle of a handler, `(reply to (* 2 (ask c (list :get))))`,
+ran as written, parked in `read` with its stack as it may already in
+`join` and `sleep`. The one thing missing was that a plain `recv` took
+the reply meant for the address, since `rt_recv` looks at no marks.
+
+**The model.** Two sets of forms, and a pattern on top of them:
+
+| | Forms |
+|---|---|
+| Processes | `fork`, `fork/on`, `join`, `yield`, `kill`, `monitor`, `$$`, `^$$` |
+| Messages | `address`, `send`, `read`, `read/any`, `disconnect`, `after`, `open`, `connect` |
+| Actors, as a pattern | `recv`: `(recv)` is `(read $$)`, and `(recv (p body) ...)` a `match` on it |
+
+- **One kind of process.** `(fork expr)` starts one, on this island, and
+  `(fork/on k expr)` on island `k`; `spawn` and `spawn/on` go. Every
+  process keeps its stack across every wait, and can wait anywhere: in a
+  helper, in a lambda, in the middle of a body, in the root. Its value
+  is kept for its parent as a task's is (D244), till the parent has it
+  or ends. It can be joined, monitored, killed, and sent to.
+- **A pid is its process's inbox.** `(send pid msg)` goes into the
+  process's mailbox as now, unmarked; `(read $$)` takes the next unmarked
+  message, which is what `(recv)` is. Reading any other pid faults:
+  only a process reads its own inbox, as only a task reads its own
+  addresses. A process's end is no longer something `read` waits for.
+- **An address is an inbox of its own.** `(address)` makes one, owned by
+  the process that made it, read only by it, closed by `disconnect` or
+  the process's end. `send` and `after` take one where they take a pid.
+  `read` takes the first message marked for it and leaves the rest;
+  `read/any` the first of several sources, in their order, giving
+  `(src what)`. Nothing can be taken for an address but what was sent to
+  it: no stray reply, and no dead letter. `recv` skips what's marked for
+  an address, the one change to `rt_recv`.
+- **An end is a message.** `(monitor pid)` tells the caller's inbox
+  `(:exit pid result)` when `pid` ends, as now; `(monitor pid to)` tells
+  the address `to` instead, so a reply and the end of the process asked
+  come to one place. That's ts-cpi's `process::watch pid watcher`, "a
+  PID or an address." `ask` becomes: an address, a monitor to it, a
+  send, a read. `join` stays for a parent waiting on a child's value,
+  keeping its stack as now, and works across islands through the watch
+  that `read/any` of a far pid uses today.
+- **`recv` stays a word,** because the checker takes an inbox's type
+  from its patterns, and because `(recv (p body) ...)` reads better
+  than the `match` it stands for. It can go anywhere now.
+- **Devices are sources.** `(open how ...)` in any process gives a
+  device it owns, read with `read`, its failure a message; `(connect
+  ...)` starts a process that owns one and takes its messages in its
+  inbox, as now.
+
+**What goes.** The `recv` rule, D8 and D167, and with it `split.ts`
+(542 lines), `classify.ts` (85), state functions, receive functions,
+the stackless path in `rt_recv` (`p->code`, `p->args`, a function
+called again from the top), the stack given back at `recv`, the two
+kinds (D243's flag, `rt_spawn`, `:not-a-task`, `:not-an-actor`,
+`:kind`), `spawn` and `spawn/on`, `read` of a pid as its end, the
+checker's warnings about a task that waits or an actor that's joined,
+the guide's "The recv rule" and "Tasks and actors" pages, and review
+H2, since the pass it's in is gone. And the dance: `(join (fork (ask
+...)))` appears 139 times in `lib/`, the examples, the tests and the
+guide's code, most of them a process forked to hold an address.
+
+**What stays.** Replay, seeded orders and islands: a read is a pure
+function of the mailbox, and the mailbox is the same in a replay.
+The collector: D166 walks stacks as roots at a function's entry
+already, and can at a `read`. Patterns, `match`, the virtual clock,
+timers, devices, exit records, `:system`, the deadlock report (a
+process "waiting in f for a message to #<address 1.0>"), and the
+checker, whose inbox types still come from the `recv`s a function can
+reach, without the tail-position restriction.
+
+**What it costs.** A waiting process holds a stack, which is D9's
+trade reversed:
+
+| | In `recv` today | Every wait, proposed |
+|---|---|---|
+| Resident | a few hundred bytes | the pages touched, 4 to 16 KB |
+| Virtual | nothing | 8 MB (`STACK_BYTES`) |
+| Ceiling | millions | about 32,000 with a mapping per stack on default Linux; hundreds of thousands if stacks are carved from one region, since the entry check catches overflow without a guard page |
+
+`million-forks` and `bank`'s million customers no longer run as they
+are; `ring-benchmark`'s ten thousand do, and so does a town of ten
+thousand. The agent, the chat, `rpc` and `http` are nowhere near it.
+To measure before it's agreed: `ring-benchmark` and `fan-in` on the
+Mac, stackful against today.
+
+**Rejected as offered:**
+
+- **Selective receive by pattern,** Erlang's, scanning the mailbox for
+  the first match. Turned down four times already (D8, D85, after boids,
+  exit records), never for determinism, which it doesn't touch: a scan
+  in arrival order is a pure function too. Its costs are that a message
+  no clause takes stays in the mailbox instead of being a dead letter
+  reported at once, Erlang's silent leak, and that a wait costs the
+  mailbox's length. Selection by destination, an address, does the
+  request-and-reply case with neither.
+- **Pids and addresses disjoint,** ts-cpi's way (`process::address
+  pid`, `actor::self` an address). Cleaner on paper, and every send to
+  an actor takes a step more, in 300 programs, for nothing a program
+  can see.
+- **Several readers on one address,** ts-cpi's shared mailboxes, which
+  brought durable and non-durable mailboxes, closed ones, a wake rule,
+  a thundering herd, and "mailbox ownership is underspecified." A work
+  queue is a process that hands jobs out, in `lib/ds.slight`.
+- **Continuations on the heap** for the waits, so that a waiting
+  process holds no stack and `recv` still goes anywhere: D167 and D243
+  turned it down, and it's a compiler of a different shape.
+- **The rest of ts-cpi:** a scheduler written in the language, roles
+  and grants, traps, parking and checkpoints. The runtime schedules
+  natively and deterministically, and replay is its journal.
+
+**The steps,** each with `make test` passing:
+
+1. **`recv` keeps its stack.** `rt_recv` waits as `read_from` does, in
+   a new state, and skips messages marked for an address. The compiler
+   emits a `recv` as a call that returns, its clauses the `match` they
+   are. `split.ts` and `classify.ts` go; `make test` still passes,
+   since every program that obeyed the rule still does.
+2. **One kind.** The actor flag, `spawn`, `:not-a-task` and
+   `:not-an-actor` go; `address`, `read`, `read/any` and `open` work in
+   every process; `read` of a pid faults unless it's `$$`; `monitor`
+   takes an address; `ask` is rewritten on it. Golden tests 296 to 301
+   are rewritten for one kind. A script turns `spawn` into `fork` (179
+   uses in `t/`, 75 in the examples, 21 in the guide's code, 28 in
+   `bench/`, 14 in `lib/`), and the expected outputs that named a kind
+   (8 files) are worked out again by hand.
+3. **The dance comes out.** `agent/ask`, `lib/ds.slight`, `rpc/call`,
+   `http/request` and the examples that forked a task to hold an
+   address ask directly. The checker's two warnings go; one comes:
+   `ask` in a function that handles messages is fine, a bare `(recv)`
+   after a `send` in one is worth a word.
+4. **The docs.** LANGUAGE.md's Processes and Addresses, DESIGN.md's
+   process model, TYPES.md's process types, the guide's two concept
+   pages folded into one, "Processes and messages," and the tutorial's
+   "Asking."
+5. **ts-cpi's Life programs** that use only processes and messages,
+   ported as golden tests, each to `01-reference`'s frames: 02 actors
+   (an address per generation does the buffering), 03 row workers (a
+   barrier is one address read eight times), 04 metronome and 12 timer
+   wheel (`after` on the virtual clock), 07 literal death (`kill` with a
+   reason, an undertaker reading exit notices at one address), 11 join
+   dataflow (576 processes joining nine inputs each), 13 let it crash
+   (restart on `monitor`, the state in the supervisor's hands), and 18
+   hostile scheduler, whose adversary is `SLIGHT_SCHED`. The others
+   (traps, parking, checkpoints, pads, tick metering, multi-shot
+   continuations, a deliberate deadlock) need a scheduler with its
+   hands inside a process, and don't port; 08's forked timelines are
+   "Branching a replay."
+
+**To settle:**
+
+- **A pid is its inbox** (above), or pids and addresses disjoint.
+  Recommended: a pid is its inbox.
+- **The process types.** `task<T>` and `actor<M>` become one: `pid<M>`,
+  what its inbox takes, inferred from its `recv`s as `actor<M>` is. For
+  `join`, the checker carries the value type of a local bound to a
+  `fork` without a name for it in the syntax, so `(let p (fork e))
+  ... (join p)` is typed and a pid from elsewhere gives `any`.
+  Recommended.
+- **Stacks from one region,** without a mapping each, so that the
+  ceiling is memory rather than the kernel's map count. Only if a
+  program needs it; `ring-benchmark` says whether one does.
+- **A bare `(recv)` inside a handler,** the one way left to take a
+  message meant for someone else. A `--strict` warning, when it follows
+  a `send` in the same body; not a rule.
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written
