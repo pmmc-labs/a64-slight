@@ -91,8 +91,8 @@
     (if (== n 0) dropped (do (read results) (drain results (- n 1) (+ dropped 1)))))
 
 (let results (address))
-(let q (fork (queue () ())))
-(let workers (map (lambda (id) (fork (worker id q results))) (range 0 4)))
+(let q (fork queue () ()))
+(let workers (map (lambda (id) (fork worker id q results)) (range 0 4)))
 (pprint (list :workers (length workers) :one-queue :scheduler :hostile))
 (let dropped (run 0 (life/seed) (life/seed) q results 0))
 (let total (* 66 (life/generations)))

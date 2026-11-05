@@ -13,5 +13,5 @@
 
 (let k  (str->int (car @ARGV)))
 (let me (address))
-(dotimes 0 64 (lambda (i) (fork/on (% i (islands)) (work me k))))
+(dotimes 0 64 (lambda (i) (fork/on (% i (islands)) work me k)))
 (total me 64 0)

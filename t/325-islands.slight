@@ -23,32 +23,32 @@
 
 (pprint (list (islands) (island)))
 (let me (address))
-(let ps (map (lambda (k) (fork/on k (report me))) (range 0 4)))
+(let ps (map (lambda (k) (fork/on k report me)) (range 0 4)))
 (pprint ps)
 (pprint (sort (lambda (a b) (< (car a) (car b))) (map (lambda (_) (read me)) ps)))
 (pprint (map (lambda (p) (join p)) ps))
 
-(let e (fork/on 3 (echo me)))
+(let e (fork/on 3 echo me))
 (after 5 e :ping)
 (pprint (read me))
 
-(let f (fork/on 1 (forever)))
-(let w (fork/on 2 (watcher me f)))
+(let f (fork/on 1 forever))
+(let w (fork/on 2 watcher me f))
 (pprint (read me))
 (kill f)
 (pprint (read me))
 
-(let c (fork/on 3 (crash)))
+(let c (fork/on 3 crash))
 (pprint (join c))
 
 (let s (str/repeat "ab" 5000))
-(fork/on 1 (send me (list (bytes/len s) (eq? s (~ (str/repeat "ab" 4999) "ab")))))
+(fork/on 1 (lambda () (send me (list (bytes/len s) (eq? s (~ (str/repeat "ab" 4999) "ab"))))))
 (pprint (read me))
-(fork/on 2 (send me s))
+(fork/on 2 send me s)
 (pprint (eq? (read me) s))
 
-(pprint (try (fork (fork/on 4 ()))))
-(pprint (try (fork (fork/on :one ()))))
-(pprint (try (fork (join (fork/on 1 ())))))
+(pprint (try (fork (lambda () (fork/on 4 (lambda () ()))))))
+(pprint (try (fork (lambda () (fork/on :one (lambda () ()))))))
+(pprint (try (fork (lambda () (join (fork/on 1 (lambda () ())))))))
 :done
-; warns: 18:22 51:29
+; warns: 18:22 51:40

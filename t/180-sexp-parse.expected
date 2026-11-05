@@ -53,6 +53,6 @@
 (error (bad-sexp 7))
 (error (bad-sexp 19))
 (error (bad-sexp 5))
-fault in #<pid 3>: not a string: 5 (sexp/parse at t/180-sexp-parse.slight:62:21)
-(error (not-a-string 5 "sexp/parse at t/180-sexp-parse.slight:62:21"))
+fault in #<pid 3>: not a string: 5 (sexp/parse at t/180-sexp-parse.slight:62:32)
+(error (not-a-string 5 "sexp/parse at t/180-sexp-parse.slight:62:32"))
 ()

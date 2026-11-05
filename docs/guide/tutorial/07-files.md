@@ -12,8 +12,8 @@ A file, a socket, a running command and the keyboard are all
 **devices**. A device is a pid the runtime serves, not compiled code. It
 talks in messages like any process. There are two ways to have one:
 
-- `(connect source arg expr)` starts a process, as `fork` does, to
-  evaluate `expr`, and connects it to the device. The process gets
+- `(connect source arg f arg ...)` starts a process, as `fork` does,
+  to call `f`, and connects it to the device. The process gets
   `(:open f)` first, `f` being the device's pid, and then whatever the
   device sends, as messages for `recv`: a reader's lines as `(:line f
   s)`, then `(:eof f)`.
@@ -70,7 +70,7 @@ carried on with half its data would hide it.
 ; Starts a store on the log at path, and gives its pid.
 (defun start (path)
     (let table (load path))
-    (connect :fs/append path (logged-open table)))
+    (connect :fs/append path logged-open table))
 
 (defun logged-open (table)
     (recv
@@ -169,10 +169,10 @@ Chapter 5's supervisor, with `start` in place of `fork`:
 (let path (if (nil? @ARGV) "store.log" (car @ARGV)))
 (spew path ())
 
-(let sup (fork (supervise path)))
+(let sup (fork supervise path))
 (call sup (list :put "apple" 3))
 (call sup (list :put "color" "red"))
-(pprint (join (fork (ask-within 1000 sup (list :do (list :incr "color"))))))
+(pprint (join (fork ask-within 1000 sup (list :do (list :incr "color")))))
 (call sup (list :get "apple"))
 ```
 

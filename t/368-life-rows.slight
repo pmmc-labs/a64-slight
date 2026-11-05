@@ -59,7 +59,7 @@
         (run workers barrier (+ gen 1) (superstep workers barrier gen board))))
 
 (let barrier (address))
-(let workers (map (lambda (row) (fork (worker row barrier))) (range 0 (life/height))))
+(let workers (map (lambda (row) (fork worker row barrier)) (range 0 (life/height))))
 (run workers barrier 0 (life/seed))
 (map (lambda (w) (send w :stop)) workers)
 (pprint (map join workers))

@@ -9,4 +9,4 @@
             (pprint key)
             (show-keys))))
 
-(join (connect :keypress (show-keys)))
+(join (connect :keypress show-keys))

@@ -20,7 +20,7 @@
     (pprint :not-reached))
 
 ; waiting in recv; a message sent after it's killed goes nowhere
-(let s (fork (server)))
+(let s (fork server))
 (send s :one)
 (yield ())
 (pprint (kill s))
@@ -28,28 +28,28 @@
 (pprint (join s))
 
 ; never started
-(let never (fork (pprint :never-runs)))
+(let never (fork pprint :never-runs))
 (kill never)
 (pprint (join never))
 
 ; preempted, so holding a stack
-(let busy (fork (count-to 100000 0)))
+(let busy (fork count-to 100000 0))
 (yield ())
 (kill busy)
 (pprint (join busy))
 
 ; blocked in read; then what it was reading ends, and mustn't wake it
-(let s2 (fork (server)))
-(let blocked (fork (join s2)))
+(let s2 (fork server))
+(let blocked (fork (lambda () (join s2))))
 (yield ())
 (kill blocked)
 (pprint (join blocked))
 (kill s2)
 (pprint (join s2))
 
-(pprint (join (fork (suicide))))
+(pprint (join (fork suicide)))
 
-(let done (fork :finished))
+(let done (fork (lambda () :finished)))
 (yield ())
 (kill done)
 (pprint (join done))

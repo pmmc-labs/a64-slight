@@ -13,22 +13,22 @@ go wrong, and what each looks like.
         ((:div a b) (div a b))
         ((:check n) (if (< n 0) (raise (list :negative n)) n))))
 
-(pprint (join (fork (worker (list :div 6 3)))))
-(pprint (join (fork (worker (list :div 1 0)))))
-(pprint (join (fork (worker (list :check -5)))))
+(pprint (join (fork worker (list :div 6 3))))
+(pprint (join (fork worker (list :div 1 0))))
+(pprint (join (fork worker (list :check -5))))
 
-(let sleeper (fork (sleep 1000)))
+(let sleeper (fork sleep 1000))
 (kill sleeper)
 (pprint (join sleeper))
 
 ; An actor hears of another process's end by monitoring it.
 (defun watcher (job)
-    (let p (fork (worker job)))
+    (let p (fork worker job))
     (monitor p)
     (recv
         ((:exit _ result) (list :watched result))))
 
-(pprint (join (fork (watcher (list :check -1)))))
+(pprint (join (fork watcher (list :check -1))))
 
 (raise :gave-up)
 ```
@@ -70,7 +70,7 @@ There's no `catch`. A failure ends a process, and the processes that
 care are told:
 
 - **`join`** gives a process's result, `(:error ...)` included. So
-  `(join (fork (f)))` is how to run `f` and turn its failure into a
+  `(join (fork f))` is how to run `f` and turn its failure into a
   value: a task is slight's `try`.
 - **`ask`** raises `(:ended pid result)` if the actor it asked ends
   before answering, and `ask-within` raises `(:timeout pid)`. The asking
@@ -101,8 +101,8 @@ the actor goes on. It's a bug in the sender, reported where it shows.
   thrown past a caller that didn't know it might be.
 
 The cost is that containing a failure means a process. `(join (fork
-...))` is cheap, but it's a process, and its expression's locals are
-copied into it. So handle expected errors as values, and keep
+...))` is cheap, but it's a process, and its arguments are copied
+into it. So handle expected errors as values, and keep
 processes for isolation that's worth having.
 
 ---

@@ -26,4 +26,4 @@
 (let keep (upto 100000 ()))
 (pprint (churn 1000 0))
 (pprint (total keep 0))
-(join (fork (churn 1000 0)))
+(join (fork churn 1000 0))

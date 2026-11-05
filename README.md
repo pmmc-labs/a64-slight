@@ -24,7 +24,7 @@ process it happens in.
         ((:get to) (reply to n) (counter n))))
 
 ; ask sends a request with an address to answer at, and waits there.
-(let c (fork (counter 0)))
+(let c (fork counter 0))
 (dotimes 0 3 (lambda (i) (send c (list :inc))))
 (ask c (list :get))
 ```

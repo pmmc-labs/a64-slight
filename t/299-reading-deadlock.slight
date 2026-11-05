@@ -8,6 +8,6 @@
             (send s (list :process pid))
             (recv ((:process _ info) (list (lookup :state info) (lookup :joining info)))))))
 
-(let reader (fork (read (address))))
-(pprint (join (connect :system (state-of reader))))
+(let reader (fork (lambda () (read (address)))))
+(pprint (join (connect :system state-of reader)))
 (read/any (list (address) (address)))

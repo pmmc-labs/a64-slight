@@ -38,7 +38,7 @@ to the next timer. So:
     (send $$ :now)
     (collect () 4))
 
-(pprint (join (fork (timed))))
+(pprint (join (fork timed)))
 (clock/us)
 ```
 

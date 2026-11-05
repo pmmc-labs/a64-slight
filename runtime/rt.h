@@ -380,7 +380,8 @@
 #define RT_PROC_CODE        48    // rt_proc_t.code: what the trampoline calls...
 #define RT_PROC_ARGS        56    // rt_proc_t.args[RT_MAX_ARGS]: ...with these in the argument registers
 #define RT_MAX_ARGS          8    // the most a call passes (the compiler's MAX_ARGS)
-#define RT_PROC_CTX        120    // rt_proc_t.ctx: the registers, while it's switched out
+#define RT_PROC_FUN        120    // rt_proc_t.fun: the function a fork's process calls with them (D286)
+#define RT_PROC_CTX        128    // rt_proc_t.ctx: the registers, while it's switched out
 
 // rt_ctx_t: the callee-saved registers, which are all rt_switch keeps.
 #if defined(__x86_64__)
@@ -502,6 +503,7 @@ typedef struct rt_proc {
     rt_value_t  parent;         // as a value; () for the root
     rt_code_t   code;           // where it starts, or restarts after waiting in recv
     rt_value_t  args[RT_MAX_ARGS];
+    rt_value_t  fun;            // a fork's: the function rt_apply_start calls with args (D286)
     rt_ctx_t    ctx;
 
     rt_state_t      state;
@@ -637,25 +639,27 @@ extern const uintptr_t slight_functions[]    RT_ASM(slight_functions);
 // is none, waits for one, keeping the stack, and returns it when it comes
 // (D276). First, it may collect garbage, with the frame's slots in use
 // and the frames below as the roots, which it updates, as rt_preempt
-// does. rt_fork starts code(values...)
-// in a new process, with the values deep-copied into its heap; rt_connect
+// does. rt_fork starts a new process that calls values[0], a function,
+// with values[1..n-1], all deep-copied into its heap (D286); it faults
+// the caller, and starts nothing, if values[0] isn't a function of n - 1
+// arguments. rt_connect
 // starts one too, and sends it every key from :keypress; rt_connect_system
 // does too, and gives the new process a :system device (D171). Compiled
 // code hands rt_fork, rt_send and rt_recv the process, which it keeps in a
 // register, since on macOS looking up rt_current, a thread-local, is a
 // call, and these are the busiest (D256).
-rt_value_t rt_fork(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
-rt_value_t rt_fork_on(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) RT_ASM(rt_fork_on);
+rt_value_t rt_fork(rt_proc_t *parent, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_fork);
+rt_value_t rt_fork_on(uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) RT_ASM(rt_fork_on);
 rt_value_t rt_island_of(const char *site) RT_ASM(rt_island_of);
 rt_value_t rt_islands(const char *site) RT_ASM(rt_islands);
-rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect);
-rt_value_t rt_connect_system(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect_system);
+rt_value_t rt_connect(uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect);
+rt_value_t rt_connect_system(uint64_t n, const rt_value_t *values, const char *site) RT_ASM(rt_connect_system);
 
 // Files (process.c). rt_connect_fs forks as rt_fork does, and opens path
 // (RT_FS_READ, _WRITE or _APPEND) on a device, a new pid that the runtime
 // serves; the new process owns it, and hears from it first with
 // (:open f). rt_disconnect closes a device; anything else it ignores.
-rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+rt_value_t rt_connect_fs(uint64_t n, const rt_value_t *values, const char *site,
                          rt_value_t path, uint64_t mode) RT_ASM(rt_connect_fs);
 
 // Sockets (process.c). rt_connect_tcp forks, and connects to "host:port"
@@ -663,15 +667,15 @@ rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, c
 // or connects to or listens at a Unix socket's path (RT_UNIX_CONNECT,
 // RT_UNIX_LISTEN), on a device the new process owns. rt_connect_device forks, and hands the new process
 // the device dev.
-rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+rt_value_t rt_connect_tcp(uint64_t n, const rt_value_t *values, const char *site,
                           rt_value_t where, uint64_t mode) RT_ASM(rt_connect_tcp);
-rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+rt_value_t rt_connect_device(uint64_t n, const rt_value_t *values, const char *site,
                              rt_value_t dev) RT_ASM(rt_connect_device);
 
 // Commands (process.c, D185). rt_connect_exec forks, and runs cmd, a list
 // of strings, on a device the new process owns: its input and its output
 // (stdout and stderr together) are pipes.
-rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+rt_value_t rt_connect_exec(uint64_t n, const rt_value_t *values, const char *site,
                            rt_value_t cmd) RT_ASM(rt_connect_exec);
 rt_value_t rt_disconnect(rt_value_t pid, const char *site) RT_ASM(rt_disconnect);
 
@@ -1078,6 +1082,7 @@ void rt_switch(rt_ctx_t *from, rt_ctx_t *to) RT_ASM(rt_switch);
 
 // Where a process's first switch lands: calls code(args...), then rt_exit.
 void rt_trampoline(void) RT_ASM(rt_trampoline);
+void rt_apply_start(void) RT_ASM(rt_apply_start);    // a fork's code: calls proc->fun with proc->args (D286)
 
 // The end of a process, with its result. Doesn't return.
 __attribute__((noreturn))

@@ -14,7 +14,7 @@
         ((from v) (send from v) (echo))))
 
 ; fork's copy of v, the exit record's, and join's.
-(defun back (v) (cadr (join (fork v))))
+(defun back (v) (cadr (join (fork (lambda () v)))))
 
 (defun trip (e xs acc)
     (cond
@@ -58,8 +58,8 @@
     (capture 1 2 3 4 5 k ys)
     (map int->float (range 0 100))
     42 :sym #true () 2.5 "short"))
-(let e   (fork (echo)))
-(let got (cadr (join (fork (trip e things ())))))
+(let e   (fork echo))
+(let got (cadr (join (fork trip e things ()))))
 (let to (address))
 (send e (list to things))
 (let whole (read to))
@@ -83,7 +83,7 @@
 (pprint (list ((nth 10 got) 1) ((nth 11 got) 1)))
 (pprint (sum (nth 12 got)))
 (pprint (list (nth 13 got) (nth 14 got) (nth 15 got) (nth 16 got) (nth 17 got) (nth 18 got)))
-(pprint (join (fork (sum3 k 3 (nth 1 whole)))))
-(pprint (match (join/race (list (fork (nth 3 whole)))) ((p (:ok v)) (sum (map car v)))))
-(pprint (join (fork (+ k 1))))
+(pprint (join (fork sum3 k 3 (nth 1 whole))))
+(pprint (match (join/race (list (fork nth 3 whole))) ((p (:ok v)) (sum (map car v)))))
+(pprint (join (fork (lambda () (+ k 1)))))
 :done

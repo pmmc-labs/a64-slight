@@ -28,13 +28,13 @@
         ((:json p v) :a-value)
         ((:eof p)    :eof)))
 
-(defun command (script) (join (connect :exec (list "sh" "-c" script) (reading))))
+(defun command (script) (join (connect :exec (list "sh" "-c" script) reading)))
 
 (defun churn (n)
     (if (== n 0)
         :done
-        (do (join (fork n))
-            (join (fork n))
+        (do (join (fork (lambda () n)))
+            (join (fork (lambda () n)))
             (churn (- n 1)))))
 
 ; Holds s till it's told to end, then says how long it was.
@@ -43,7 +43,7 @@
 
 (defun shared (s)
     (let me (address))
-    (let actors (map (lambda (_) (fork (holder me s))) (range 0 40)))
+    (let actors (map (lambda (_) (fork holder me s)) (range 0 40)))
     (map (lambda (a) (send a :end)) actors)
     (fold/l 0 (lambda (sum _) (+ sum (read me))) actors))
 
@@ -53,7 +53,7 @@
 (defun faults (n s count)
     (if (== n 0)
         count
-        (match (join (fork (str/replace-all s "" s)))
+        (match (join (fork (lambda () (str/replace-all s "" s))))
             ((:error (:heap _ _)) (faults (- n 1) s (+ count 1)))
             (_                    (faults (- n 1) s count)))))
 
@@ -61,7 +61,7 @@
     (match name
         ("endless" (command "printf '\"'; head -c 536870912 /dev/zero | tr '\\000' a"))
         ("deep"    (command "head -c 31457280 /dev/zero | tr '\\000' '['; head -c 31457280 /dev/zero | tr '\\000' ']'"))
-        ("wide"    (join (fork (str/pad-start (str 1) 4000000000 "x"))))
+        ("wide"    (join (fork (lambda () (str/pad-start (str 1) 4000000000 "x")))))
         ("churn"   (churn 500000))
         ("shared"  (shared (str/repeat "x" 33554432)))
         ("dropped" (dropped 600 0))

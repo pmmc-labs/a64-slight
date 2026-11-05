@@ -5,7 +5,7 @@
 
 (@include :tools)
 
-(defun call (tool args) (join (fork (tool/call tool args))))
+(defun call (tool args) (join (fork tool/call tool args)))
 
 ; The top level is a task, which can't wait (D243), so an actor does its work.
 (defun top-level ()
@@ -55,4 +55,4 @@
     (pprint (call (tools/read-file) ()))
     (pprint (call (tools/read-file) (list (list "path" 5)))))
 
-(join (fork (top-level)))
+(join (fork top-level))

@@ -54,7 +54,7 @@
             (list :obituary (list row col) why :lived born :to gen :outlived mourned))))
 
 (defun spawn-cell (row col gen undertaker)
-    (let p (fork (cell row col gen 0)))
+    (let p (fork cell row col gen 0))
     (monitor p undertaker)
     p)
 

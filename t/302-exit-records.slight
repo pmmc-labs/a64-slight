@@ -6,15 +6,15 @@
 ; made.
 
 ; kept for the root, which hasn't joined it, so a sibling's join gets it
-(let t (fork 42))
+(let t (fork (lambda () 42)))
 (yield ())
-(pprint (join (fork (join t))))
+(pprint (join (fork (lambda () (join t)))))
 (pprint (join t))
-(pprint (join (fork (join t))))
+(pprint (join (fork (lambda () (join t)))))
 (pprint (join t))
 
 ; a race doesn't take it; the join after does
-(let r (fork :r))
+(let r (fork (lambda () :r)))
 (yield ())
 (pprint (join/race (list r)))
 (pprint (join r))
@@ -22,18 +22,18 @@
 
 ; what a parent didn't take goes when it ends
 (defun leaves ()
-    (let c (fork :child))
+    (let c (fork (lambda () :child)))
     (yield ())
     c)
-(let b (cadr (join (fork (leaves)))))
+(let b (cadr (join (fork leaves))))
 (pprint (list b (join b)))
 
 ; a parent that monitors has it when it's told
 (defun watches ()
-    (let c (fork :c))
+    (let c (fork (lambda () :c)))
     (monitor c)
     (recv ((:exit q r) (list (eq? q c) r c))))
-(let w (cadr (join (fork (watches)))))
+(let w (cadr (join (fork watches))))
 (pprint (list (car w) (cadr w) (join (nth 2 w))))
 
 ; (records pids), asked of :system
@@ -49,12 +49,12 @@
 (defun churn (n)
     (if (== n 0)
         :done
-        (do (join (fork n))
-            (join (fork n))
+        (do (join (fork (lambda () n)))
+            (join (fork (lambda () n)))
             (churn (- n 1)))))
 (churn 3000)
 (pprint (table))
-(let kept (map (lambda (i) (fork i)) (range 0 5)))
+(let kept (map (lambda (i) (fork (lambda () i))) (range 0 5)))
 (yield ())
 (pprint (table))
 (pprint (map join kept))

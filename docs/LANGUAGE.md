@@ -47,7 +47,7 @@ stdin that's still open), the program prints the root's value and a
 newline, and exits. That isn't the moment the root ends: other processes
 keep running after it, and its value comes out last.
 
-    (fork (pprint :child))
+    (fork pprint :child)
     (pprint :root)
     :done
 
@@ -441,24 +441,33 @@ by every process.
 
 ### fork
 
-    (fork expr)
+    (fork f arg ...)
 
-Starts a new process that evaluates `expr`, and returns its pid. The
-locals `expr` uses are deep-copied into the new process, at most 8 of
-them. A local is copied whole, however little of it `expr` uses, so a
-big one is worth narrowing first: `(let mine (part-of big i))`, then
-`(fork (worker mine))`. Inside `expr`, `$$` is the new process. There's
-one kind of process (D277): its value is what `join` gives, and its pid
-is its inbox, which `send` fills and `recv` takes from. An actor is a
-process that loops in `recv`, and `expr` then calls the function it
-loops in:
+Starts a new process that calls `f` with the arguments, and returns its
+pid. `f` and the arguments are worked out first, here, by the caller
+(D286): so `$$` among them is the caller, and what's passed is what's
+copied. Each argument is deep-copied into the new process, whole, so a
+big value is worth narrowing first: `(fork worker (part-of big i))`,
+not `(fork worker big i)`. At most 8 arguments, as in any call. `f` is
+any function: one of the program's, a lambda, a builtin that can be a
+value (as `(map car xs)` takes one). A literal where the function
+should be is a compile error, a function the compiler knows given
+another number of arguments is one too, as a call's would be, and
+anything else that isn't a function of as many faults the caller
+(`:not-a-function`, `:arity`) and starts nothing. Inside `f`, `$$` is
+the new process. A body that isn't one call is a lambda's: `(fork
+(lambda () (sleep ms) (send p :tick)))`. There's one kind of process
+(D277): its value is what `join` gives, and its pid is its inbox, which
+`send` fills and `recv` takes from. An actor is a process that loops in
+`recv`, and `f` is then the function it loops in:
 
-    (join (fork (+ 1 2)))                (:ok 3)
-    (let c (fork (counter 0)))
+    (join (fork + 1 2))                  (:ok 3)
+    (let c (fork counter 0))
+    (fork worker $$ job)                 ; the worker is told who started it
 
 ### fork/on
 
-    (fork/on k expr)
+    (fork/on k f arg ...)
 
 As `fork`, but the process is on island `k`, from 0 below `(islands)`
 (Islands, under Processes, D256). `k` is worked out first, by the
@@ -467,19 +476,20 @@ anything but an integer (`:not-an-int`). On the caller's own island it's
 `fork`; on another, the caller waits while that island makes the
 process, and gets its pid, `#<pid 1@2>`.
 
-    (fork/on (% i (islands)) (work me i))
+    (fork/on (% i (islands)) work $$ i)
 
 ### connect
 
-    (connect :keypress expr)
-    (connect :fs/read path expr)
-    (connect :tcp "host:port" expr)
-    (connect :exec (list "ls" "-l") expr)
-    (connect :system expr)
-    (connect device expr)
+    (connect :keypress f arg ...)
+    (connect :fs/read path f arg ...)
+    (connect :tcp "host:port" f arg ...)
+    (connect :exec (list "ls" "-l") f arg ...)
+    (connect :system f arg ...)
+    (connect device f arg ...)
 
-A `fork` whose new process is also connected to a source of messages.
-See Devices.
+A `fork` whose new process is also connected to a source of messages;
+`f` and the arguments are the fork's, and what comes before them is
+worked out by the caller too. See Devices.
 
 ### recv
 
@@ -679,7 +689,7 @@ Everything runs in processes, each on an island, a core of its own
 Each has its own heap and a mailbox. Processes share nothing; they talk
 by sending messages, which are copied.
 
-A process is started with `(fork expr)` (or `connect`, under Devices),
+A process is started with `(fork f arg ...)` (or `connect`, under Devices),
 and gives its pid. There's one kind (D277): any process can be sent to,
 and takes its messages with `recv`; any can be joined for its value;
 any can make addresses and open devices, and wait for them. An
@@ -769,7 +779,7 @@ its own (Addresses, below), as `ask` does.
 
 ### How processes end
 
-A process ends when its expression gives a value, and its result is
+A process ends when the function it calls gives a value, and its result is
 `(:ok value)`. Or it ends with an error, and its result is
 `(:error reason)`:
 
@@ -780,7 +790,7 @@ A process ends when its expression gives a value, and its result is
   logged as it happens, with at most 64 KB of its value, then `...`
   (D265).
 
-      (join (fork (car ())))
+      (join (fork (lambda () (car ()))))
       ; (:error (:not-a-cons () "car at prog.slight:1:13"))
 
 - `(raise reason)` ends the current process with `(:error reason)`.
@@ -838,7 +848,7 @@ The fault kinds:
   `kill` them if they're no longer wanted.
 
       (defun within (ms pid)
-          (let timer (fork (sleep ms)))
+          (let timer (fork sleep ms))
           (match (join/race (list pid timer))
               ((p result) (if (eq? p pid)
                               (do (kill timer) result)
@@ -926,7 +936,7 @@ the root process is waiting in the top level for a message to #<address
         (recv
             ((:get to) (reply to n) (counter n))))
 
-    (let c (fork (counter 5)))
+    (let c (fork counter 5))
     (let to (address))
     (monitor c to)
     (send c (list :get to))
@@ -1024,7 +1034,7 @@ places anything runs on one, as it would without islands.
 
 Nothing moves from island to island on its own: a process runs where
 it's started. `fork` starts a process on its parent's island, and
-`(fork/on k expr)` one on island `k`.
+`(fork/on k f arg ...)` one on island `k`.
 A program spreads its work with `(fork/on (% i (islands)) ...)`, and
 runs the same, if slower, on one island.
 
@@ -1100,8 +1110,8 @@ often as it needs to. Nothing about it shows to a program but memory.
 
 ## Devices
 
-`connect` is `fork` plus a connection: it starts a process to evaluate
-`expr`, as `fork` does, connects it to a source of messages, and
+`connect` is `fork` plus a connection: it starts a process to call `f`
+with its arguments, as `fork` does, connects it to a source of messages, and
 returns the new process's pid. The process takes the device's messages
 with `recv`, as below.
 
@@ -1135,7 +1145,7 @@ Or a process opens a device of its own, and reads it (D243):
 
 ### The keyboard
 
-    (connect :keypress expr)
+    (connect :keypress f arg ...)
 
 The new process is sent every key typed, as `(key mods...)`:
 
@@ -1161,9 +1171,9 @@ clock, a piped key arrives each time nothing else can run.
 
 ### Files
 
-    (connect :fs/read path expr)
-    (connect :fs/write path expr)
-    (connect :fs/append path expr)
+    (connect :fs/read path f arg ...)
+    (connect :fs/write path f arg ...)
+    (connect :fs/append path f arg ...)
 
 The file at `path` (a string, relative to the current directory) is
 opened on a **device**: a pid that the runtime serves rather than
@@ -1302,9 +1312,9 @@ replay.
 
 ### Sockets
 
-    (connect :tcp "host:port" expr)
-    (connect :tcp/listen port expr)
-    (connect :tcp/listen "host:port" expr)
+    (connect :tcp "host:port" f arg ...)
+    (connect :tcp/listen port f arg ...)
+    (connect :tcp/listen "host:port" f arg ...)
 
 TCP, IPv4 only, and about 1,000 sockets at once (the limit of
 `select()`). The port is a number. Neither connecting nor looking up the
@@ -1335,10 +1345,10 @@ servers are asked about, since it must be this machine's: any other is
 `:eaddrnotavail`. A listener first sends `(:open l port)`, `port` being
 the one it got: port 0 lets the system pick. Then `(:accept l conn)`
 for each connection. `conn` reads nothing until
-`(connect conn expr)` hands it to a process of its own, which then hears
+`(connect conn f arg ...)` hands it to a process of its own, which then hears
 `(:open conn)`.
 
-`(connect device expr)`, with anything but a keyword as its first
+`(connect device f arg ...)`, with anything but a keyword as its first
 argument, hands an open device to a new process in this way. Anything
 that isn't an open device faults (`:not-a-device`).
 
@@ -1357,15 +1367,15 @@ sockets keep the program running, and so does a host being looked up.
     (defun server ()
         (recv
             ((:open l port) (server))
-            ((:accept l c)  (connect c (echo)) (server))))
+            ((:accept l c)  (connect c echo) (server))))
 
-    (connect :tcp/listen 7000 (server))
+    (connect :tcp/listen 7000 server)
 
 A Unix socket, at a path on this machine, is the same but for where it
 is (D231):
 
-    (connect :unix "/run/app/ctl.sock" expr)
-    (connect :unix/listen "/run/app/ctl.sock" expr)
+    (connect :unix "/run/app/ctl.sock" f arg ...)
+    (connect :unix/listen "/run/app/ctl.sock" f arg ...)
 
 A connection reads and writes as a TCP one does, and a listener sends
 `(:open l path)`, then `(:accept l conn)` for each connection, whose
@@ -1405,7 +1415,7 @@ and kept nothing: `:ended`.
 
 ### Commands
 
-    (connect :exec (list "ls" "-l") expr)
+    (connect :exec (list "ls" "-l") f arg ...)
 
 Runs a command: a list of strings, its name and its arguments. There's
 no shell unless one is asked for, `(list "sh" "-c" "ls -l | wc -l")`, so
@@ -1440,7 +1450,7 @@ does, so its errors come where they happened, in order (D185).
               ((:eof p)      (run out))
               ((:exited p n) (list n (reverse out)))))
 
-      (join (connect :exec (list "sh" "-c" "echo hi; echo oops >&2; exit 3") (run ())))
+      (join (connect :exec (list "sh" "-c" "echo hi; echo oops >&2; exit 3") run ()))
       ; (:ok (3 ("hi" "oops")))
 
 `(disconnect p)` stops a command that hasn't ended: its process group is
@@ -1478,7 +1488,7 @@ once it has said all it will.
 
 ### The system
 
-    (connect :system expr)
+    (connect :system f arg ...)
 
 A device that tells about the program's processes and the runtime
 (D171). Any process may connect to it, and anyone may ask it; it
@@ -1566,7 +1576,7 @@ fuller `top`):
             ((:process s i) (show s (cons (lookup :in i) ins)))
             ((:end s)       (pprint (reverse ins)) (every-second s))))
 
-    (connect :system (recv ((:open s) (every-second s))))
+    (connect :system (lambda () (recv ((:open s) (every-second s)))))
 
 
 ## Builtins
@@ -2451,7 +2461,7 @@ being that address. Any process asks (D277).
             (:inc      (counter (+ n 1)))
             ((:get to) (reply to n) (counter n))))
 
-    (let k (fork (counter 0)))
+    (let k (fork counter 0))
     (send k :inc)
     (ask k (list :get))                  1
 

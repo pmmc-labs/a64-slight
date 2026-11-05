@@ -14,16 +14,16 @@
     (recv
         (:quit ())))
 
-(let w (fork (idle 0)))
+(let w (fork idle 0))
 (send w (list :work 1))
 (send w (list :done 2))
 (send w (list :stop))
 (send w :finish)
-(fork (read w))
-(connect :keypress (keys 0))
+(fork read w)
+(connect :keypress keys 0)
 
 (defun asks (pid)
     (recv
         (m (let to (address)) (send pid (list :get to)) (read to))))
-(fork (asks w))
-(monitor (fork 1))
+(fork asks w)
+(monitor (fork (lambda () 1)))

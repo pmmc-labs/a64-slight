@@ -109,7 +109,7 @@
     (recv
         ((:accept _ conn)
             (let me $$)
-            (connect conn (dns-conn me))
+            (connect conn dns-conn me)
             (dns-serving l asked))
         ((:asked name)    (dns-serving l (cons name asked)))
         (:stop            (disconnect l) (reverse asked))))
@@ -122,7 +122,7 @@
 
 (defun echo-serving (l)
     (recv
-        ((:accept _ conn) (connect conn (echo)) (echo-serving l))
+        ((:accept _ conn) (connect conn echo) (echo-serving l))
         (:stop            (disconnect l))))
 
 (defun echo ()
@@ -142,21 +142,21 @@
 (defun answer (to) (match (read to) ((_ v) v)))
 
 (let to (address))
-(let dns (connect :tcp/listen 0 (dns-server to)))
+(let dns (connect :tcp/listen 0 dns-server to))
 (let dns-port (answer to))
-(let echo (connect :tcp/listen 0 (echo-server to)))
+(let echo (connect :tcp/listen 0 echo-server to))
 (let echo-port (answer to))
 
 (defun writer (text)
     (recv
         ((:open f) (send f (list :write text)) (disconnect f))))
 
-(defun resolv-conf (text) (join (connect :fs/write "build/t/186-dns.resolv.conf" (writer text))))
+(defun resolv-conf (text) (join (connect :fs/write "build/t/186-dns.resolv.conf" writer text)))
 
 (resolv-conf (str "nameserver 127.0.0.1:1\nnameserver 127.0.0.1:" dns-port "\nsearch test\noptions use-vc timeout:1 attempts:3\n"))
 
 ; What connecting to name gets: the echo, or why not.
-(defun try (port name) (pprint (list name (outcome (join (connect :tcp (str name ":" port) (client)))))))
+(defun try (port name) (pprint (list name (outcome (join (connect :tcp (str name ":" port) client))))))
 
 (defun outcome (r)
     (match r

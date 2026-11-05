@@ -6,6 +6,6 @@
 (defun keep (n acc) (if (== n 0) acc (keep (- n 1) (cons n acc))))
 (defun kind (pid) (car (cadr (join pid))))
 
-(pprint (join (fork (length (keep 16000 ())))))
-(pprint (kind (fork (length (keep 200000 ())))))
+(pprint (join (fork (lambda () (length (keep 16000 ()))))))
+(pprint (kind (fork (lambda () (length (keep 200000 ()))))))
 :done

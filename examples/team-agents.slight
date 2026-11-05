@@ -47,7 +47,7 @@
 
 ; opts is a list of (name value): (:at-most k), (:task-ms n), (:retries n),
 ; (:review bool), (:reviewer model).
-(defun team/new (url model tools opts) (fork (lead url model tools opts)))
+(defun team/new (url model tools opts) (fork lead url model tools opts))
 
 (defun team/opt (opts name default)
     (match (lookup name opts) (:not-found default) (v v)))
@@ -205,7 +205,7 @@
 (defun lead/start (job to id task tries)
     (send (job/from job) (list :team/task (job/pid job) id task))
     (let a (agent/new (job/url job) (job/model job) (worker/prompt) (cons (teammate-tool to id) (job/tools job))))
-    (let w (fork (worker a id task to)))
+    (let w (fork worker a id task to))
     (monitor a to)
     (monitor w to)
     (let timer (after (team/opt (job/opts job) :task-ms 120000) to (list :overrun id)))

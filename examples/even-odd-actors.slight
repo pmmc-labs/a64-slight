@@ -43,8 +43,8 @@
 
 (let $reply-to (address))
 
-(let is-even? (fork (is-it-even? $reply-to)))
-(let is-odd?  (fork (is-it-odd?  $reply-to)))
+(let is-even? (fork is-it-even? $reply-to))
+(let is-odd?  (fork is-it-odd?  $reply-to))
 
 (pprint $reply-to)
 (send is-even? (list :IS-EVEN? 21 is-odd?))

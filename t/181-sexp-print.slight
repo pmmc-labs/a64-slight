@@ -32,7 +32,7 @@
     ())))
 
 ; what isn't data, each in a process of its own
-(defun try (v) (join (fork (sexp/print v))))
+(defun try (v) (join (fork (lambda () (sexp/print v)))))
 (pprint (try (list 1 $$)))
 (pprint (try (list car)))
 (pprint (try (math/sqrt -1)))

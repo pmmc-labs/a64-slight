@@ -4,7 +4,7 @@
 
 (defun start (i n me)
     (when (< i n)
-        (fork (send me i))
+        (fork send me i)
         (start (+ i 1) n me)))
 
 (defun gather (n acc)
@@ -17,4 +17,4 @@
     (start 0 n $$)
     (gather n 0))
 
-(cadr (join (fork (top-level @ARGV))))
+(cadr (join (fork top-level @ARGV)))

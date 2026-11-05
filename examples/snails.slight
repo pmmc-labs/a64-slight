@@ -36,7 +36,7 @@
 
 (defun field (seed steps ghost)
     (rand/seed seed)
-    (map (lambda (lane) (fork (crawl lane 0 steps ghost 0))) (range 1 6)))
+    (map (lambda (lane) (fork crawl lane 0 steps ghost 0)) (range 1 6)))
 
 (defun line (row text) (tty/write \e "[" row ";1H" \e "[0m" \e "[K" text))
 

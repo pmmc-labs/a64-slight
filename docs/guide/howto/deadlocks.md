@@ -10,7 +10,7 @@ store forgot to reply:
     (recv
         ((:get to) (store n))))
 
-(let s (fork (store 0)))
+(let s (fork store 0))
 (ask s (list :get))
 ```
 
@@ -46,8 +46,8 @@ function it's in, its mailbox, its heap and its reductions.
     (recv
         ((:get to) (store n))))
 
-(let s (fork (store 0)))
-(let asker (fork (ask s (list :get))))
+(let s (fork store 0))
+(let asker (fork ask s (list :get)))
 (sleep 1)
 
 ; Every process's info, from the :system device.

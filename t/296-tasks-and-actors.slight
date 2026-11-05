@@ -11,24 +11,24 @@
 (defun info (pid)
     (recv ((:open s) (send s (list :process pid)) (recv ((:process _ i) (lookup :kind i))))))
 
-(pprint (join (fork (+ 1 2))))
+(pprint (join (fork (lambda () (+ 1 2)))))
 
-(let c (fork (counter 0)))
+(let c (fork counter 0))
 (send c :inc)
 (send c :inc)
 (send c :stop)
 (pprint (join c))
 
-(pprint (join (fork (send (fork (sleep 10)) :hi))))
-(pprint (join (fork (do (after 10 (fork (sleep 10)) :hi) :set))))
-(pprint (join (fork (do (let t (fork 5)) (monitor t) (recv ((:exit _ r) r))))))
+(pprint (join (fork (lambda () (send (fork sleep 10) :hi)))))
+(pprint (join (fork (lambda () (do (after 10 (fork sleep 10) :hi) :set)))))
+(pprint (join (fork (lambda () (do (let t (fork (lambda () 5))) (monitor t) (recv ((:exit _ r) r)))))))
 
 (send $$ :to-myself)
 (pprint (recv (m m)))
 
-(let t (fork :done))
+(let t (fork (lambda () :done)))
 (join t)
 (pprint (send t :late))
 
-(pprint (join (connect :system (info $$))))
+(pprint (join (connect :system (lambda () (info $$)))))
 :end

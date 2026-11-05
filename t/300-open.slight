@@ -34,10 +34,10 @@
         (pprint (match (read s) ((:process _ info) (lookup :state info))))))
 
 (match (open :system)
-    ((:ok s) (fork (disconnect s)) (pprint (read s))))
+    ((:ok s) (fork (lambda () (disconnect s))) (pprint (read s))))
 
-(pprint (join (fork (open :fs/read path))))
-(pprint (join (fork (open :tcp/listen 0))))
-(pprint (join (fork (open :fs/read 42))))
+(pprint (join (fork (lambda () (open :fs/read path)))))
+(pprint (join (fork (lambda () (open :tcp/listen 0)))))
+(pprint (join (fork (lambda () (open :fs/read 42)))))
 (pprint (open :tcp "127.0.0.1:1"))
 :done

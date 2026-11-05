@@ -4,5 +4,5 @@
         (+ (fib (- n 1)) (fib (- n 2)))))
 
 ; A task computes a value; join waits for it.
-(let tasks (map (lambda (n) (fork (fib n))) (list 20 21 22)))
+(let tasks (map (lambda (n) (fork fib n)) (list 20 21 22)))
 (map join tasks)

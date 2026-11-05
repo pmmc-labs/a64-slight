@@ -13,7 +13,7 @@
 
 (toString "five")
 (map valueOf (list 1 2))
-(let a (fork (constructor 0)))
+(let a (fork constructor 0))
 (send a (list :add 2))
 (send a (list :show))
 (send a :hasOwnProperty)

@@ -284,12 +284,14 @@ a dead letter, and it's found when the program is compiled.
 ## Processes
 
 A pid's type says what the process takes (D277; till then, which of
-D243's two kinds it was): `fork e` and `connect(...) { e }` give a
-`pid<M>`, `M` being what the `recv`s `e` can reach take (below), and
-`pid` when they take anything. `join` on a pid gives `:ok(T) |
-:error(any) | :ended`, `T` being `e`'s type where the checker can see
-the `fork`, and `any` where it can't; without `:ended` where the
-process is started right there, `(join (fork e))`, since its value is
+D243's two kinds it was): `fork f(a, b)` and `connect(...) { e }` give
+a `pid<M>`, `M` being what the `recv`s the function can reach take
+(below), and `pid` when they take anything; the call itself is checked
+as any call is, since `f` and its arguments are worked out by the
+caller (D286). `join` on a pid gives `:ok(T) | :error(any) | :ended`,
+`T` being the call's type where the checker can see the `fork`, and
+`any` where it can't; without `:ended` where the process is started
+right there, `(join (fork f))`, since its value is
 kept for its parent till it has it (D244). `address()` gives an
 `address<M>`; `self` is the process's own `pid<M>`. `parent` (`^$$`)
 is a `pid`, or `()` in the root, which has none; in a function that
@@ -304,8 +306,8 @@ the process could ever be in can take is certainly a dead letter, and
 what the process takes is the union of all those `recv`s' patterns.
 
 The checker works out which functions wait, and how they call each
-other: each `recv` reachable by calls from a `fork`'s expression is one
-the process can be in (D276; till then by tail calls alone, from
+other: each `recv` reachable by calls from the function a `fork` calls
+is one the process can be in (D276; till then by tail calls alone, from
 `classify.ts`). For each `fork`, the
 checker takes the union of those `recv`s' patterns as types: a literal
 is its type, `:tag(x, y)` is `:tag(any, any)`, and a name or `_` alone

@@ -26,7 +26,7 @@
             (_                   (cons (list :chunk bytes) acc))))))
 
 (defun streamed (method url)
-    (cadr (join (fork (heard (http/stream method url () "" :chunks) ())))))
+    (cadr (join (fork (lambda () (heard (http/stream method url () "" :chunks) ()))))))
 
 ; The top level is a task (D243), so the raw server says its port with raw-up.
 (let up (raw-up (list

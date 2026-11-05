@@ -12,7 +12,7 @@
         ((:eof f)    (pprint (list :eof f)) lines)
         (other       (pprint (list :other other)) (reader lines))))
 
-(let r (connect :fs/read "t/data/lines.txt" (reader 0)))
+(let r (connect :fs/read "t/data/lines.txt" reader 0))
 (send r :hello)
 (pprint (join r))
 
@@ -30,4 +30,4 @@
         (:check :checked)
         (msg    (pprint (list :then msg)) (drain))))
 
-(pprint (join (connect :fs/read "t/data/lines.txt" (first-line))))
+(pprint (join (connect :fs/read "t/data/lines.txt" first-line)))

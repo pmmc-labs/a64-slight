@@ -217,7 +217,7 @@
 ; split as evenly as they go: share s has birds n·s/k up to n·(s + 1)/k.
 (defun shares (n sky)
     (let k (math/min n (islands)))
-    (map (lambda (s) (fork/on s (share sky (div (* n s) k) (div (* n (+ s 1)) k))))
+    (map (lambda (s) (fork/on s share sky (div (* n s) k) (div (* n (+ s 1)) k)))
          (range 0 k)))
 
 ; Every share told the flock, to answer me.
@@ -385,8 +385,7 @@
 
 ; Draws frames of n birds (or till q, live), a tick at least ms long.
 (defun live (n frames ms sky flock)
-    (let me $$)
-    (let keyboard (if (< frames 1) (connect :keypress (keys me)) ()))
+    (let keyboard (if (< frames 1) (connect :keypress keys $$) ()))
     (when (< frames 1) (tty/write \e "[?25l" \e "[2J"))
     (fly (tuple (shares n sky) sky frames ms n keyboard) 0 flock (clock/us) ()))
 
@@ -420,10 +419,10 @@
     (("--time" n ticks)
         (rand/seed 2026)
         (let flock (hatch (str->int n) sky))
-        (cadr (join (fork (timed (str->int n) (str->int ticks) sky flock)))))
+        (cadr (join (fork timed (str->int n) (str->int ticks) sky flock))))
     (_
         (let args (map str->int @ARGV))
         (let n (arg 0 args 300))
         (rand/seed (arg 2 args 2026))
         (let flock (hatch n sky))
-        (cadr (join (fork (live n (arg 1 args 0) (arg 3 args 50) sky flock))))))
+        (cadr (join (fork (lambda () (live n (arg 1 args 0) (arg 3 args 50) sky flock)))))))

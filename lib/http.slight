@@ -91,8 +91,8 @@
     (let how-to (http/how how))
     (let s      (match (http/check method url headers)
         ((:ok host port target) (http/connect url host port target headers body (list :stream name caller how-to (http/via url host port))))
-        ((:error reason)        (fork (raise reason)))))
-    (fork (http/watch s caller))
+        ((:error reason)        (fork (lambda () (raise reason))))))
+    (fork http/watch s caller)
     s)
 
 ; A stream cuts its body into :lines or :chunks; anything else faults, in the
@@ -134,8 +134,8 @@
 ; curl.
 (defun http/connect (url host port target headers body ctx)
     (if (eq? (http/via-of ctx) :tcp)
-        (connect :tcp (str host ":" port) (http/exchange host port target headers body ctx))
-        (connect :exec (http/curl-command (cadr ctx) url headers body) (http/curl-exchange body ctx))))
+        (connect :tcp (str host ":" port) http/exchange host port target headers body ctx)
+        (connect :exec (http/curl-command (cadr ctx) url headers body) http/curl-exchange body ctx)))
 
 ; The client's side of a connection: the request goes out, then the reply is
 ; read as ctx says: whole, (:client method via), or streamed to a caller,
@@ -227,12 +227,12 @@
 (defun http/serve-with (port handler opts)
     (let told $$)
     (let most (http/most opts))
-    (connect :tcp/listen port (http/accept handler told most 0)))
+    (connect :tcp/listen port http/accept handler told most 0))
 
 (defun http/listen-with (port handler opts)
     (let to (address))
     (let most (http/most opts))
-    (http/listening to (connect :tcp/listen port (http/accept handler to most 0))))
+    (http/listening to (connect :tcp/listen port http/accept handler to most 0)))
 
 ; The options' (:most n), or #false.
 (defun http/most (opts)
@@ -262,7 +262,7 @@
             (if (and (int? most) (>= n most))
                 (do (disconnect conn)
                     (http/accept handler told most n))
-                (do (monitor (connect conn (http/conn conn handler)))
+                (do (monitor (connect conn http/conn conn handler))
                     (http/accept handler told most (+ n 1)))))
         ((:exit _ _)
             (http/accept handler told most (- n 1)))))
@@ -631,7 +631,7 @@
 
 ; The handler runs in a process of its own (D173): a fault in it is a 500.
 (defun http/respond (c handler req)
-    (match (join (fork (handler req)))
+    (match (join (fork handler req))
         ((:ok resp) (http/write c resp))
         ((:error _) (http/write c (list 500 () "")))))
 

@@ -19,7 +19,7 @@
     (recv
         ((:open _ to) (reply to :alarm) (alarm))))
 
-(let door (fork (locked "1234" 0)))
+(let door (fork locked "1234" 0))
 (list
     (ask door (list :open "0000"))
     (ask door (list :open "1234"))

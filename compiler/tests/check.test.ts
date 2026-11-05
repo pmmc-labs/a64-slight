@@ -187,7 +187,7 @@ const COUNTER = `(defun counter (n)
         ((:inc)      (counter (+ n 1)))
         ((:get from) (send from n) (counter n))
         (:stop       n)))
-(let c (fork (counter 0)))
+(let c (fork counter 0))
 `;
 
 test("a message no recv of the actor takes is a dead letter", () => {
@@ -201,17 +201,17 @@ test("a message no recv of the actor takes is a dead letter", () => {
 test('what an actor takes is what every function it can go on to takes', () => {
     clean(`(defun a () (recv (:x (b))))
 (defun b () (recv (:y (a))))
-(let p (fork (a)))
+(let p (fork a))
 (send p :y)`);
     clean(`(defun any-msg () (recv (m (any-msg))))
-(send (fork (any-msg)) 42)`);
+(send (fork any-msg) 42)`);
 });
 
 test('one kind of process: joined, sent to, monitored, asked (D277)', () => {
     clean(`${COUNTER}(join c)`);
     clean('(defun w () (recv (m (read (address)))))');
-    clean('(monitor (fork 1))');
-    clean('(send (fork 1) :hi)', { strict: true });
+    clean('(monitor (fork (lambda () 1)))');
+    clean('(send (fork (lambda () 1)) :hi)', { strict: true });
     clean('(defun ask-it (c) (let to (address)) (monitor c to) (send c (list :get to)) (read to))');
     // a process is no source for read: its end is a message
     assert.deepEqual(warnings(`${COUNTER}(read c)`),
@@ -219,21 +219,23 @@ test('one kind of process: joined, sent to, monitored, asked (D277)', () => {
 });
 
 test("a task's value comes out of join and read with its type", () => {
-    assert.deepEqual(warnings('(match (join (fork 5)) ((:ok v) (str/len v)) (_ 0))'),
-        ["1:42 str/len's argument is int, not str: it faults :not-a-string"]);
+    assert.deepEqual(warnings('(match (join (fork (lambda () 5))) ((:ok v) (str/len v)) (_ 0))'),
+        ["1:54 str/len's argument is int, not str: it faults :not-a-string"]);
+    assert.deepEqual(warnings('(defun five () 5) (match (join (fork five)) ((:ok v) (str/len v)) (_ 0))'),
+        ["1:63 str/len's argument is int, not str: it faults :not-a-string"]);
 });
 
 test('the keyboard sends keys', () => {
     assert.deepEqual(warnings(`(defun k () (recv (:quit ())))
-(connect :keypress (k))`), ['2:20 the keyboard sends (shape (or str sym) & (list sym)), and k takes :quit: every key would be a dead letter']);
+(connect :keypress k)`), ['2:20 the keyboard sends (shape (or str sym) & (list sym)), and k takes :quit: every key would be a dead letter']);
     clean(`(defun k () (recv (("q" & _) ()) (_ (k))))
-(connect :keypress (k))`);
+(connect :keypress k)`);
 });
 
 test("a process joined or read where it's started can't have ended for anyone yet", () => {
-    clean('(match (join (fork 5)) ((:ok v) v) ((:error e) 0))', { strict: true });
-    assert.deepEqual(warnings('(let t (fork 5)) (match (join t) ((:ok v) v) ((:error e) 0))', { strict: true }),
-        ['1:18 this match has no arm for :ended: it would fault :no-match']);
+    clean('(match (join (fork (lambda () 5))) ((:ok v) v) ((:error e) 0))', { strict: true });
+    assert.deepEqual(warnings('(let t (fork (lambda () 5))) (match (join t) ((:ok v) v) ((:error e) 0))', { strict: true }),
+        ['1:30 this match has no arm for :ended: it would fault :no-match']);
 });
 
 test('a function that waits runs in an actor, so it has a parent', () => {
@@ -284,7 +286,7 @@ test('a recv type says what an actor takes', () => {
         ((:add k) (acc (+ n k)))
         (:reset   (acc 0))
         (:stop    n)))
-(let a (fork (acc 0)))
+(let a (fork acc 0))
 (send a (list :add "1"))`), [
         '6:10 this arm takes nothing this actor is sent, which is Msg',
         '9:9 this actor takes Msg, and this is (:add str): it would be a dead letter',

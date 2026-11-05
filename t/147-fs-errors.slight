@@ -15,12 +15,12 @@
     (recv
         ((:open f) (send f (list :write "no")) :poked)))
 
-(pprint (join (connect :fs/read "t/data/no-such-file" (reader))))
-(pprint (join (connect :fs/read "t/data" (reader))))
-(pprint (join (connect :fs/write "build/t/no-such-dir/x" (reader))))
-(pprint (join (connect :fs/read "t/data/lines.txt" (poke))))
-(pprint (join (fork (disconnect 5))))
+(pprint (join (connect :fs/read "t/data/no-such-file" reader)))
+(pprint (join (connect :fs/read "t/data" reader)))
+(pprint (join (connect :fs/write "build/t/no-such-dir/x" reader)))
+(pprint (join (connect :fs/read "t/data/lines.txt" poke)))
+(pprint (join (fork (lambda () (disconnect 5)))))
 (pprint (disconnect $$))
-(connect :fs/read 42 (reader))
+(connect :fs/read 42 reader)
 (pprint :not-reached)
-; warns: 22:33
+; warns: 22:44

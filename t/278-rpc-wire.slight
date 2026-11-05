@@ -25,7 +25,7 @@
             (list (list "n" :integer "How many"))
             (lambda (n) (map rpc/next (range 0 n)) n))
         (rpc/handler "hold" "Says held, then waits for ever." ()
-            (lambda () (rpc/next :held) (join (fork (stuck)))))
+            (lambda () (rpc/next :held) (join (fork stuck))))
         (rpc/handler "ask" "Asks the caller to approve, and gives the answer." ()
             (lambda () (rpc/call ^$$ "approve" (list "may I?"))))))
 
@@ -87,6 +87,6 @@
 ; The top level is a task (D243): rpc/listen starts the server from it.
 (match (rpc/listen "127.0.0.1:0" (handlers))
     ((:ok (l port))
-        (join (connect :tcp (str "127.0.0.1:" port) (client (script))))
+        (join (connect :tcp (str "127.0.0.1:" port) (lambda () (client (script)))))
         (kill l)
         :done))

@@ -14,13 +14,13 @@ happens when a process grows too big.
 (defun grow (xs)
     (grow (cons 0 xs)))
 
-(pprint (join (fork (grow ()))))
+(pprint (join (fork grow ())))
 
 ; A process waiting for a message keeps its stack (D276).
 (defun idle ()
     (recv (_ :done)))
 
-(let a (fork (idle)))
+(let a (fork idle))
 (sleep 1)
 (match (open :system)
     ((:ok s)
@@ -71,10 +71,10 @@ value. The copy is as big as the value, and so is the time it takes.
   copies 100,000 cells. If a process needs a big structure often, it's
   usually better for the process that owns it to answer questions about
   it than to send it whole.
-- **`fork` copies too.** The locals its expression uses
-  are copied into the new process whole. To fork a worker on part of a
-  big list, take the part first, with `(let mine (take n big))`, then
-  `(fork (work mine))`, so only the part is copied.
+- **`fork` copies too.** The arguments a fork passes are copied into
+  the new process whole. To fork a worker on part of a big list, pass
+  the part, `(fork work (take n big))`, not the list, so only the part
+  is copied.
 - **A device's data is the receiver's.** A line from a file arrives
   in the owner's heap. A line, count or value of 64 MB or more ends the
   owner with `:too-big`, so an endless line can't take all the memory.

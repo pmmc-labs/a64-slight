@@ -7,7 +7,7 @@
 
 (@include :tools)
 
-(defun call (tool args) (join (fork (tool/call tool args))))
+(defun call (tool args) (join (fork tool/call tool args)))
 
 (let dir  "build/t/237-notes")
 (let path (str dir "/notes.sexp"))

@@ -5,21 +5,21 @@
 (ok () 85)
 (63 240 0 0 0 0 0 0 0)
 (ok (-56 200) 2)
-fault in #<pid 2>: out of range: 256 (bytes/pack at t/314-bytes-pack.slight:25:21)
+fault in #<pid 2>: out of range: 256 (bytes/pack at t/314-bytes-pack.slight:25:32)
 out-of-range
-fault in #<pid 3>: out of range: 128 (bytes/pack at t/314-bytes-pack.slight:26:21)
+fault in #<pid 3>: out of range: 128 (bytes/pack at t/314-bytes-pack.slight:26:32)
 out-of-range
-fault in #<pid 4>: out of range: "abc" (bytes/pack at t/314-bytes-pack.slight:27:21)
+fault in #<pid 4>: out of range: "abc" (bytes/pack at t/314-bytes-pack.slight:27:32)
 out-of-range
-fault in #<pid 5>: out of range: u7 (bytes/pack at t/314-bytes-pack.slight:28:21)
+fault in #<pid 5>: out of range: u7 (bytes/pack at t/314-bytes-pack.slight:28:32)
 out-of-range
-fault in #<pid 6>: out of range: (1) (bytes/pack at t/314-bytes-pack.slight:29:21)
+fault in #<pid 6>: out of range: (1) (bytes/pack at t/314-bytes-pack.slight:29:32)
 out-of-range
-fault in #<pid 7>: out of range: (1 2) (bytes/pack at t/314-bytes-pack.slight:30:21)
+fault in #<pid 7>: out of range: (1 2) (bytes/pack at t/314-bytes-pack.slight:30:32)
 out-of-range
-fault in #<pid 8>: not a number: "x" (bytes/pack at t/314-bytes-pack.slight:31:21)
+fault in #<pid 8>: not a number: "x" (bytes/pack at t/314-bytes-pack.slight:31:32)
 not-a-number
-fault in #<pid 9>: integer overflow (bytes/unpack at t/314-bytes-pack.slight:32:21)
+fault in #<pid 9>: integer overflow (bytes/unpack at t/314-bytes-pack.slight:32:32)
 overflow
-fault in #<pid 10>: out of range: 3 (bytes/unpack at t/314-bytes-pack.slight:33:13)
+fault in #<pid 10>: out of range: 3 (bytes/unpack at t/314-bytes-pack.slight:33:24)
 out-of-range

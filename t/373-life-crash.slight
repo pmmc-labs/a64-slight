@@ -38,7 +38,7 @@
 (defun start (entry row col to)
     (let lives (+ (lives-of entry) 1))
     (pprint (list :supervisor (list row col) (if (== lives 1) :first-boot-as :restarted-as) (list row col 0 lives)))
-    (let p (fork (cell row col 0 lives to)))
+    (let p (fork cell row col 0 lives to))
     (monitor p to)
     (list :live p lives))
 

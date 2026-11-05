@@ -7,5 +7,5 @@
 (defun double (x n) (if (== n 0) x (double (list x x) (- n 1))))
 (defun kind (r) (match r ((:error (k _ _)) k) (other other)))
 
-(pprint (kind (join (fork (+ 1 (double :leaf 30))))))
+(pprint (kind (join (fork (lambda () (+ 1 (double :leaf 30)))))))
 :done

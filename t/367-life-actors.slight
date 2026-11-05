@@ -82,11 +82,10 @@
         (#true
             (recv ((:report g index state) (collect gen (cons (list g index state) reports) (+ seen 1)))))))
 
-(let me $$)
 (let board (life/seed))
 (let cells (map (lambda (i)
                     (let state (life/cell board (life/row i) (life/col i)))
-                    (fork (cell i state me)))
+                    (fork cell i state $$))
                 (range 0 (life/cells))))
 (introduce cells (hellos (life/cells) ()))
 (let seen (collect 0 () 0))

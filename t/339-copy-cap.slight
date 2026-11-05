@@ -12,11 +12,11 @@
 (defun kind (r) (match r ((:error (k _ _)) k) (other other)))
 (defun sink () (recv (_ (sink))))
 
-(pprint (kind (join (fork (do (let v (big)) (fork (length v)) :forked)))))
-(pprint (kind (join (fork (do (let v (big)) (send (fork (sink)) v) :sent)))))
-(pprint (kind (join (fork (do (let v (big)) (after 10 (fork (sink)) v) :timed)))))
-(pprint (kind (join (fork (do (let v (big)) (fork/on 1 (length v)) :placed)))))
-(pprint (kind (join (fork (big)))))
-(pprint (kind (join (fork (raise (big))))))
-(pprint (kind (join (fork (double :leaf 3)))))
+(pprint (kind (join (fork (lambda () (do (let v (big)) (fork length v) :forked))))))
+(pprint (kind (join (fork (lambda () (do (let v (big)) (send (fork sink) v) :sent))))))
+(pprint (kind (join (fork (lambda () (do (let v (big)) (after 10 (fork sink) v) :timed))))))
+(pprint (kind (join (fork (lambda () (do (let v (big)) (fork/on 1 length v) :placed))))))
+(pprint (kind (join (fork big))))
+(pprint (kind (join (fork (lambda () (raise (big)))))))
+(pprint (kind (join (fork double :leaf 3))))
 :done

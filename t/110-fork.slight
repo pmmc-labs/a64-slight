@@ -2,7 +2,7 @@
 ; run, in order. The root's result is printed when everything is done.
 (let greeting "hello")
 (let n 42)
-(fork (pprint (list greeting n $$ ^$$)))
-(fork (pprint :second))
+(fork (lambda () (pprint (list greeting n $$ ^$$))))
+(fork pprint :second)
 (pprint :root)
 :done

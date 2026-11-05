@@ -2,7 +2,7 @@
 
 
 (defun try/catch (to-try or-catch)
-    (match (join (fork (to-try)))
+    (match (join (fork to-try))
         ((:ok    val) val)
         ((:error err) (or-catch err))))
 

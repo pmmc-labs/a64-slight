@@ -14,8 +14,8 @@
     (send to (exec/run (list "sh" "-c" "sleep 0.1; echo there"))))
 
 (let me (address))
-(fork/on 2 (run-there me))
-(fork/on 2 (fib 38))
+(fork/on 2 run-there me)
+(fork/on 2 fib 38)
 (exec/run (list "sh" "-c" "sleep 0.2 & echo left"))
 (let there (read me))
 (pprint (if (eq? there (list :ok (list 0 (~ "there" \n)))) :left (list :wrong there)))

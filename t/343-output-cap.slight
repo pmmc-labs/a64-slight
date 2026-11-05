@@ -33,9 +33,9 @@
         (other          other)))
 
 (let to (address))
-(let l (connect :tcp/listen 0 (holder to)))
+(let l (connect :tcp/listen 0 holder to))
 (let at (str "127.0.0.1:" (read to)))
-(pprint (kind (join (connect :tcp at (flood (str/repeat "x" 1000000) 200)))))
-(pprint (kind (join (connect :tcp at (once (double "ab" 30))))))
+(pprint (kind (join (connect :tcp at (lambda () (flood (str/repeat "x" 1000000) 200))))))
+(pprint (kind (join (connect :tcp at (lambda () (once (double "ab" 30)))))))
 (kill l)
 :done

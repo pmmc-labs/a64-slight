@@ -7,7 +7,7 @@
 (defun start-all (n me acc)
     (cond
         ((== n 0) acc)
-        (#true    (start-all (- n 1) me (cons (fork (waiter me)) acc)))))
+        (#true    (start-all (- n 1) me (cons (fork waiter me) acc)))))
 
 (defun ask-all (pids n)
     (cond
@@ -27,4 +27,4 @@
 (defun top-level ()
     (ask-all (start-all 10000 $$ ()) 0))
 
-(join (fork (top-level)))
+(join (fork top-level))

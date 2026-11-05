@@ -79,12 +79,12 @@
     (recv
         ((:open l port)
             (let me $$)
-            (fork (send me (list :client (join (connect :tcp (str "localhost:" port) (client))))))
+            (fork (lambda () (send me (list :client (join (connect :tcp (str "localhost:" port) client))))))
             (serving l))))
 
 (defun serving (l)
     (recv
-        ((:accept _ conn) (connect conn (greet conn)) (serving l))
+        ((:accept _ conn) (connect conn greet conn) (serving l))
         ((:client r)      (disconnect l) r)))
 
-(pprint (join (connect :tcp/listen 0 (listener))))
+(pprint (join (connect :tcp/listen 0 listener)))

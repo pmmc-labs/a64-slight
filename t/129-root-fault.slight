@@ -6,7 +6,7 @@
         ((== n 0) (pprint :child-done))
         (#true    (later (- n 1)))))
 
-(fork (later 3000))
+(fork later 3000)
 (pprint :root-start)
 (car ())
 ; warns: 11:1

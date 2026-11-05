@@ -429,14 +429,14 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             return compileLambda(x, cx, st);
         case 'recv':
             return compileRecv(x, args, cx, st);
-        case 'fork':
-            checkArity(x, 'fork', args, 1);
-            return compileFork(x, 'fork', args[0]!, 'rt_fork', cx, st);
+        case 'fork':                            // (fork f arg ...): a process that calls f with the arguments (D286)
+            needFn(x, 'fork', args, 0, '(fork f arg ...)');
+            return compileFork(x, 'fork', args, 'rt_fork', cx, st);
         case 'spawn': case 'spawn/on':          // till D277, an actor's fork
             throw new CompileError(`${head.name} is ${head.name === 'spawn' ? 'fork' : 'fork/on'} now: there's one kind of process (D277)`, x.pos);
-        case 'fork/on':                         // (fork/on k expr): a process on island k (D256)
-            checkArity(x, 'fork/on', args, 2);
-            return compileFork(x, 'fork/on', args[1]!, 'rt_fork_on', cx, st, [args[0]!]);
+        case 'fork/on':                         // (fork/on k f arg ...): the same, on island k (D256)
+            needFn(x, 'fork/on', args, 1, '(fork/on k f arg ...)');
+            return compileFork(x, 'fork/on', args.slice(1), 'rt_fork_on', cx, st, [args[0]!]);
         case 'connect':
             return compileConnect(x, args, cx, st);
         case 'yield': {
@@ -615,39 +615,51 @@ function compileRecvClause(x: Pair, clause: Sexp, msg: number, done: string, cx:
     return [[code, bound, body, st.t.jump(done), `${next}:`], st4];
 }
 
-// (fork expr): expr becomes the body of a function of its own, whose
-// parameters are the locals it uses; the new process starts there, with
-// those values deep-copied into its heap. `form` and `fn` say which:
-// fork (rt_fork), fork/on (rt_fork_on, on another island), or connect
+// A fork, a fork/on or a connect needs a function after its first `i`
+// arguments.
+function needFn(x: Pair, form: string, args: readonly Sexp[], i: number, shape: string): void {
+    if (args.length <= i) throw new CompileError(`${form} takes a function, and its arguments: ${shape}`, x.pos);
+}
+
+// A literal: never a function, so refused where one must be.
+const isLiteral = (x: Sexp): boolean =>
+    x.t === 'int' || x.t === 'float' || x.t === 'str' || x.t === 'nil' || isForm(x, 'quote')
+    || (x.t === 'sym' && (x.name === '#true' || x.name === '#false'));
+
+// (fork f arg ...): f and the arguments are evaluated here, in the
+// parent, into slots, and the runtime starts a process that calls f with
+// them, deep-copied into its heap (D286). `form` and `fn` say which: fork
+// (rt_fork), fork/on (rt_fork_on, on another island), or connect
 // (rt_connect, rt_connect_fs, ...). `extra` is evaluated first, in the
-// parent, and passed after the site, then `flags` (assembler constants).
-function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: St,
+// parent too, and passed after the site, then `flags` (assembler
+// constants). A literal where the function should be is refused here, and
+// one of the program's functions is given as many arguments as it takes;
+// anything else that isn't a function of them faults the parent as it
+// runs, and the checker says what it can see.
+function compileFork(x: Pair, form: string, items: readonly Sexp[], fn: string, cx: Cx, st: St,
                      extra: readonly Sexp[] = [], flags: readonly string[] = []): [Code, St] {
-    const free = freeVars(list(expr), [], cx.env);
-    if (free.length > MAX_ARGS) {
-        throw new CompileError(`a ${form} can take at most ${MAX_ARGS} locals into the new process, and this one uses ${free.length}`, x.pos);
+    const f = items[0]!;
+    if (isLiteral(f)) throw new CompileError(`${form} takes a function, not ${show(f)}`, posOf(f) ?? x.pos);
+    if (items.length - 1 > MAX_ARGS) {
+        throw new CompileError(`a ${form} passes at most ${MAX_ARGS} arguments, and this one passes ${items.length - 1}`, x.pos);
     }
-    const [pre, st0] = extra.reduce<[Code, St]>(([acc, s], e, i) => {
+    if (f.t === 'sym' && lookup(cx.env, f.name) === null) {
+        const known = lookupFn(cx.fns, f.name);
+        const arity = known !== null ? known.arity : builtinArity(f.name);
+        if (arity !== null) checkArity(x, known?.name ?? f.name, items.slice(1), arity);
+    }
+    const [code, st1] = [...extra, ...items].reduce<[Code, St]>(([acc, s], e, i) => {
         const [c, s1] = compileExpr(e, { ...cx, si: cx.si + i, tail: false }, s);
         return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
     }, [[], st]);
-    const si = cx.si + extra.length;
-    const where = x.pos === null ? form : `${form} at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
-    const [entry, st1] = label(st0, form.replace('/', '_'));
-    const d: Defun = { name: sym(where, x.pos), params: free.map((n) => sym(n, x.pos)), body: list(expr), pos: x.pos };
-    const [code, st2]  = compileFunction(entry, d, [], cx.fns, 'process', st1, null);
-    const st3: St = { ...st2, slots: st0.slots, lambdas: [st2.lambdas, code] };
-    const [site, st4]  = siteLabel(st3, form, x.pos);
-    const st5 = free.length > 0 ? useSlot(st4, si + free.length - 1) : st4;
-    const t = st.t;
-    // fork and spawn are handed the process, as send is (D256)
+    const [site, st2] = siteLabel(st1, form, x.pos);
+    // fork is handed the process, as send is (D256)
     const proc = fn === 'rt_fork' ? [PROC] : [];
     return [[
-        pre,
-        free.map((name, i) => t.copySlot(lookup(cx.env, name)!, si + i, name)),
-        t.call(fn, [...proc, addr(entry), imm(free.length), slotAddr(si), addr(site),
-                    ...extra.map((_, i) => inSlot(cx.si + i)), ...flags.map(imm)], false),
-    ], st5];
+        code,
+        st.t.call(fn, [...proc, imm(items.length), slotAddr(cx.si + extra.length), addr(site),
+                       ...extra.map((_, i) => inSlot(cx.si + i)), ...flags.map(imm)], false),
+    ], st2];
 }
 
 // connect's sources, past :keypress (every key typed, runtime/tty.c):
@@ -664,32 +676,32 @@ const SOURCES: Readonly<Record<string, readonly [string, ...string[]]>> = {
     'exec':        ['rt_connect_exec'],
 };
 
-// (connect :keypress expr), (connect :fs/read path expr) and the other
-// sources, or (connect dev expr): a fork whose new process is connected
-// to the source, or is handed the device dev (an expression; anything
-// that isn't a :keyword is one).
+// (connect :keypress f arg ...), (connect :fs/read path f arg ...) and the
+// other sources, or (connect dev f arg ...): a fork whose new process is
+// connected to the source, or is handed the device dev (an expression;
+// anything that isn't a :keyword is one).
 function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
-    if (args.length === 0) checkArity(x, 'connect', args, 2);
+    if (args.length === 0) throw new CompileError('connect takes a source or a device, a function, and its arguments', x.pos);
     const source = args[0]!;
     const quoted = isForm(source, 'quote');
     const items  = quoted ? toArray(source) : null;
     const name   = items !== null && items.length === 2 && items[1]!.t === 'sym' ? (items[1] as Sym).name : null;
     if (name === 'keypress' || name === 'system') {
-        checkArity(x, 'connect', args, 2);
-        return compileFork(x, 'connect', args[1]!, name === 'keypress' ? 'rt_connect' : 'rt_connect_system', cx, st);
+        needFn(x, `connect :${name}`, args, 1, `(connect :${name} f arg ...)`);
+        return compileFork(x, 'connect', args.slice(1), name === 'keypress' ? 'rt_connect' : 'rt_connect_system', cx, st);
     }
     const opener = name === null ? undefined : own(SOURCES, name);
     if (opener !== undefined) {
-        checkArity(x, 'connect', args, 3);
+        needFn(x, `connect :${name}`, args, 2, `(connect :${name} ${name === 'exec' ? 'command' : name!.startsWith('fs/') ? 'path' : 'where'} f arg ...)`);
         const [fn, ...mode] = opener;
-        return compileFork(x, 'connect', args[2]!, fn, cx, st, [args[1]!], mode);
+        return compileFork(x, 'connect', args.slice(2), fn, cx, st, [args[1]!], mode);
     }
     if (quoted) {
         throw new CompileError(`connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not ${show(source)}`,
                                posOf(source) ?? x.pos);
     }
-    checkArity(x, 'connect', args, 2);
-    return compileFork(x, 'connect', args[1]!, 'rt_connect_device', cx, st, [source]);
+    needFn(x, 'connect', args, 1, '(connect dev f arg ...)');
+    return compileFork(x, 'connect', args.slice(1), 'rt_connect_device', cx, st, [source]);
 }
 
 // --- closures -----------------------------------------------------------------

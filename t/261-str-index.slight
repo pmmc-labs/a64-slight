@@ -43,10 +43,10 @@
 
 ; faults
 (defun kind (pid) (car (cadr (join pid))))
-(pprint (kind (fork (str/at u 5))))
-(pprint (kind (fork (str/at u -6))))
-(pprint (kind (fork (str/code-at "" 0))))
-(pprint (kind (fork (str/slice u "1"))))
-(pprint (kind (fork (str/index-of u 'a))))
-(kind (fork (str/last-index-of u "a" "0")))
-; warns: 49:34 50:37 51:38
+(pprint (kind (fork (lambda () (str/at u 5)))))
+(pprint (kind (fork (lambda () (str/at u -6)))))
+(pprint (kind (fork (lambda () (str/code-at "" 0)))))
+(pprint (kind (fork (lambda () (str/slice u "1")))))
+(pprint (kind (fork (lambda () (str/index-of u 'a)))))
+(kind (fork (lambda () (str/last-index-of u "a" "0"))))
+; warns: 49:45 50:48 51:49

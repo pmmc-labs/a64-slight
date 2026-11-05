@@ -28,17 +28,17 @@
 (defun listener (to n)
     (recv
         ((:open l port)
-            (connect :tcp (str "127.0.0.1:" port) (talker to n))
+            (connect :tcp (str "127.0.0.1:" port) talker to n)
             (listener to n))
         ((:accept l c)
-            (connect c (echo))
+            (connect c echo)
             (disconnect l))))
 
 (defun island-work (to n)
-    (connect :tcp/listen 0 (listener to n))
+    (connect :tcp/listen 0 listener to n)
     (send to (spin 20000000)))
 
 (let me (address))
-(fork/on 1 (island-work me 2000))
-(fork/on 2 (island-work me 2000))
+(fork/on 1 island-work me 2000)
+(fork/on 2 island-work me 2000)
 (pprint (length (map (lambda (_) (read me)) (range 0 4))))

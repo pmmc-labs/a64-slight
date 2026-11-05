@@ -8,7 +8,7 @@
         ((:open f) (first-owner))
         ((:line f s)
             (let me $$)
-            (connect f (second-owner me ()))
+            (connect f second-owner me ())
             (first-waits s))))
 
 (defun first-waits (s)
@@ -22,4 +22,4 @@
         ((:line f s)  (second-owner first (cons (list :line s) seen)))
         ((:chunk f s) (second-owner first (cons (list :chunk s) seen)))))
 
-(pprint (join (connect :fs/read "t/data/lines.txt" (first-owner))))
+(pprint (join (connect :fs/read "t/data/lines.txt" first-owner)))

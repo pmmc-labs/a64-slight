@@ -43,7 +43,7 @@ without any processes, and the actor only decides when it runs.
 
 <!-- code: ../code/tut-3-actor.slight -->
 ```lisp
-(let s (fork (store ())))
+(let s (fork store ()))
 (send s (list :do (list :put "apple" 3)))
 (send s (list :do (list :put "pear" 5)))
 (send s (list :put "plum" 7))
@@ -61,8 +61,10 @@ dead letter: (put "plum" 7) (recv at docs/guide/code/tut-3-actor.slight:19:5)
 (ok (("pear" 5) ("apple" 3)))
 ```
 
-- `(fork expr)` starts a new process that evaluates `expr`, here a
-  call to `store` with an empty table, and gives its **pid**.
+- `(fork f arg ...)` starts a new process that calls `f` with the
+  arguments, here `store` with an empty table, and gives its **pid**.
+  The arguments are worked out here, before the process starts, and
+  copied to it.
 - `(send pid msg)` puts a copy of `msg` at the end of the process's
   mailbox, and returns at once. It doesn't wait for the message to be
   taken, or answered.

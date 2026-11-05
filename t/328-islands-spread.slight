@@ -6,7 +6,7 @@
 
 (defun fib (n) (if (< n 2) n (+ (fib (- n 1)) (fib (- n 2)))))
 (defun work (to n) (send to (list n (fib n))))
-(defun place (to i n) (if (== i n) () (do (fork/on (% i (islands)) (work to (+ i 15))) (place to (+ i 1) n))))
+(defun place (to i n) (if (== i n) () (do (fork/on (% i (islands)) work to (+ i 15)) (place to (+ i 1) n))))
 (defun gather (to n acc) (if (== n 0) acc (gather to (- n 1) (cons (read to) acc))))
 
 (let me (address))

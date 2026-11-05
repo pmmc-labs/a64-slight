@@ -22,7 +22,7 @@
         (:check (send to :not-fired))))
 
 (let me (address))
-(fork/on 1 (worker me))
+(fork/on 1 worker me)
 (let theirs (match (read me) ((:timer t) t)))
 (let mine (after 1000 me :mine))
 (pprint (list theirs mine))

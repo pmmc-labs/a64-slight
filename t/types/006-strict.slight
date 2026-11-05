@@ -11,6 +11,6 @@
 (defun kind (k) (match k (:a 1) (:b 2)))
 
 (defun loose (x) (str/len x))
-(send (fork 1) :hi)
+(send (fork (lambda () 1)) :hi)
 (+ 1 (maybe-age "4"))
 (str/len 5)

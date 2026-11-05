@@ -22,4 +22,4 @@
     (let kept (filter (lambda (t) (not (== (math/mod t 3) 0))) ids))
     (gather (length kept) () (sort-by due kept)))
 
-(join (fork (top-level)))
+(join (fork top-level))

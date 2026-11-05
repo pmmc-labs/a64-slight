@@ -1,11 +1,11 @@
 ; The quantum is exactly 1000 reductions, one per function entry: a
 ; process starts with 1000, and the entry that uses the last one is where
 ; it's preempted, if another process is ready (D91). The counter's
-; (count i ...) is its entry i + 2, the fork's own entry function being
-; entry 1, so (count 998 ...) is entry 1000. A witness forked after the
-; counter gets to run first only if the counter is preempted: counting to
-; 997 the counter finishes first, and to 998 the witness gets in. Every
-; target must agree to the reduction.
+; (count i ...) is its entry i + 1, since a process starts in the
+; function it's forked with (D286), so (count 999 ...) is entry 1000. A
+; witness forked after the counter gets to run first only if the counter
+; is preempted: counting to 998 the counter finishes first, and to 999
+; the witness gets in. Every target must agree to the reduction.
 
 (defun count (i k to)
     (cond
@@ -14,8 +14,8 @@
 
 (defun race (k)
     (let me $$)
-    (fork (count 0 k me))
-    (fork (send me :saw))
+    (fork count 0 k me)
+    (fork send me :saw)
     (first k))
 
 ; the first message to arrive says who won
@@ -30,11 +30,11 @@
 
 (defun next (k)
     (cond
-        ((== k 997) (race 998))
+        ((== k 998) (race 999))
         (#true      :finished)))
 
 ; The top level is a task, which can't wait (D243), so an actor does its work.
 (defun top-level ()
-    (race 997))
+    (race 998))
 
-(join (fork (top-level)))
+(join (fork top-level))

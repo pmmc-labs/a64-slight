@@ -22,5 +22,5 @@
     (send p (list :ping $$))
     (recv (:pong :pong)))
 
-(let p (fork (echo)))
+(let p (fork echo))
 (list (asks p) (asks-let p) (notes-self) (asks-matching p))

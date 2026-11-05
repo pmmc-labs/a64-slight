@@ -12,7 +12,7 @@
 ; Says held, then tells w of the process running it, which never ends.
 (defun hold (w)
     (rpc/handler "hold" "Says held, then never ends." ()
-        (lambda () (rpc/next :held) (send w (list :running $$)) (join (fork (stuck))))))
+        (lambda () (rpc/next :held) (send w (list :running $$)) (join (fork stuck)))))
 
 ; --- a raw client, and the server's calls ----------------------------------
 
@@ -60,7 +60,7 @@
 (defun raw-server (w)
     (recv
         ((:open _ port) (send w (list :port port)) (raw-server w))
-        ((:accept _ c)  (connect c (raw-conn)) (raw-server w))))
+        ((:accept _ c)  (connect c raw-conn) (raw-server w))))
 
 (defun raw-conn ()
     (recv
@@ -84,7 +84,7 @@
 
 (defun to-raw ()
     (let me $$)
-    (from-here (connect :tcp/listen "127.0.0.1:0" (raw-server me))))
+    (from-here (connect :tcp/listen "127.0.0.1:0" raw-server me)))
 
 (defun from-here (l)
     (recv
@@ -107,7 +107,7 @@
     (recv
         ((:listening port)
             ; an actor can't read, so a task it joins reads the client's end (D243)
-            (join (fork (join (connect :tcp (str "127.0.0.1:" port) (client (script))))))
+            (join (fork (lambda () (join (connect :tcp (str "127.0.0.1:" port) (lambda () (client (script))))))))
             (kill l)
             (stopped 2))))
 
@@ -115,4 +115,4 @@
 (defun top-level ()
     (main (rpc/serve "127.0.0.1:0" (list (hold $$)))))
 
-(join (fork (top-level)))
+(join (fork top-level))

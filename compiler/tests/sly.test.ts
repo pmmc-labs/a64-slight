@@ -166,9 +166,15 @@ test('recv', () => {
 });
 
 test('processes', () => {
-    same('fork counter(0); fork f(x) + 1; yield loop(n);', '(fork (counter 0)) (fork (+ (f x) 1)) (yield (loop n))');
-    same('connect(:tcp, "h:7000") { echo() };', '(connect :tcp "h:7000" (echo))');
-    same('connect(c) { a; b };', '(connect c (do a b))');
+    // fork f(a, b) spreads the call, so f runs in the new process with the arguments worked out here (D286)
+    same('fork counter(0); fork f(x, 1); fork f; yield loop(n);', '(fork counter 0) (fork f x 1) (fork f) (yield (loop n))');
+    same('fork { a; b }; fork { a }; fork fun() { a };', '(fork (lambda () a b)) (fork (lambda () a)) (fork (lambda () a))');
+    same('connect(:tcp, "h:7000") echo();', '(connect :tcp "h:7000" echo)');
+    same('connect(:tcp, "h:7000") { echo() };', '(connect :tcp "h:7000" (lambda () (echo)))');
+    same('connect(c) { a; b };', '(connect c (lambda () a b))');
+    fails('fork [1, 2];', /: fork takes a function: fork f\(a, b\), fork f, or fork \{ \.\.\. \}$/, 1, 6);
+    fails('fork if a { b } else { c };', /: fork takes a function: /, 1, 6);
+    fails('connect(c) [1];', /: connect\(\.\.\.\) takes a function: connect\(\.\.\.\) f\(a, b\)/, 1, 12);
 });
 
 // --- definitions and lets ---------------------------------------------------
@@ -199,7 +205,7 @@ test("the ';' after a '}' can be left out", () => {
     same('fun f() { let x = match y { _ => 1 }\n x }', '(defun f () (let x (match y (_ 1))) x)');
     same('fun f() { let [a] = if b { c } else { d }\n a }', '(defun f () (match (if b c d) ((a) a)))');
     fails('fun f() { let [a] = g(fun() { 1 })\n a }', /expected ';' after a let/);
-    same('if a { b }\nlet s = connect(:system) { c }\nf(s);', '(if a b) (let s (connect :system c)) (f s)');
+    same('if a { b }\nlet s = connect(:system) { c }\nf(s);', '(if a b) (let s (connect :system (lambda () c))) (f s)');
     same('fun f() { if a { b } else { c }; d }', '(defun f () (if a b c) d)');
     fails('fun f() { g() h() }', /expected ';' between statements/);
 });

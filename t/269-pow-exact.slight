@@ -6,9 +6,9 @@
 (pprint (list (math/pow 1 4611686018427387903) (math/pow -1 4611686018427387903) (math/pow 2147483647 2)))
 (pprint (list (math/pow 2.0 3) (math/pow 2 -1.0) (math/pow 4 0.5)))
 (defun kind (pid) (car (cadr (join pid))))
-(pprint (kind (fork (math/pow 2 62))))
-(pprint (kind (fork (math/pow -2 62))))
-(pprint (kind (fork (math/pow 2147483648 2))))
-(pprint (kind (fork (math/pow 2 -1))))
-(kind (fork (math/pow "2" 2)))
-; warns: 13:23
+(pprint (kind (fork (lambda () (math/pow 2 62)))))
+(pprint (kind (fork (lambda () (math/pow -2 62)))))
+(pprint (kind (fork (lambda () (math/pow 2147483648 2)))))
+(pprint (kind (fork (lambda () (math/pow 2 -1)))))
+(kind (fork (lambda () (math/pow "2" 2))))
+; warns: 13:34

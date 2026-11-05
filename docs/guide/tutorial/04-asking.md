@@ -48,7 +48,7 @@ level can ask:
 ```lisp
 (@include "tut-store.slight")
 
-(let s (fork (store ())))
+(let s (fork store ()))
 (call s (list :put "apple" 3))
 (pprint (call s (list :get "apple")))
 (pprint (call s (list :get "plum")))
@@ -79,11 +79,11 @@ putting back one more. Each runs in a process of its own, started with
     (match (call s (list :get key))
         ((:ok n) (call s (list :put key (+ n 1))))))
 
-(let s (fork (store ())))
+(let s (fork store ()))
 (call s (list :put "hits" 0))
 
-(let a (fork (bump s "hits")))
-(let b (fork (bump s "hits")))
+(let a (fork bump s "hits"))
+(let b (fork bump s "hits"))
 (pprint (list (join a) (join b)))
 (pprint (call s (list :get "hits")))
 ```
@@ -115,8 +115,8 @@ step of the store. `tut-store.slight` has one, `:incr`:
 
 <!-- code: ../code/tut-4-race.slight -->
 ```lisp
-(let c (fork (call s (list :incr "views"))))
-(let d (fork (call s (list :incr "views"))))
+(let c (fork call s (list :incr "views")))
+(let d (fork call s (list :incr "views")))
 (pprint (list (join c) (join d)))
 (call s (list :get "views"))
 ```
@@ -158,8 +158,8 @@ words in the store that way:
             (pprint (list word r))
             (tally s rest))))
 
-(let s (fork (store ())))
-(join (fork (tally s (list "a" "b" "a"))))
+(let s (fork store ()))
+(join (fork tally s (list "a" "b" "a")))
 ```
 
 <!-- output: ../code/tut-4-actor.expected -->

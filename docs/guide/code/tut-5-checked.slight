@@ -41,9 +41,9 @@
         ((:ok value)     value)
         ((:error reason) (raise (list reason key)))))
 
-(let s (fork (store ())))
+(let s (fork store ()))
 (call s (list :put "color" "red"))
 (pprint (call s (list :incr "color")))
 (pprint (call s (list :incr "hits")))
-(pprint (join (fork (must-get s "hits"))))
-(join (fork (must-get s "plum")))
+(pprint (join (fork must-get s "hits")))
+(join (fork must-get s "plum"))

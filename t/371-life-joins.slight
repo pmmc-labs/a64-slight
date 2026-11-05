@@ -23,13 +23,13 @@
 
 ; A pid board has a board's shape, with a pid where each state would be.
 (defun seed-pids (seed)
-    (life/make (lambda (row col) (let s (life/cell seed row col)) (fork s))))
+    (life/make (lambda (row col) (let s (life/cell seed row col)) (fork (lambda () s)))))
 
 (defun next-pids (prev)
     (life/make (lambda (row col)
         (let deps (cons (life/cell prev row col)
                         (map (lambda (p) (life/cell prev (car p) (cadr p))) (life/neighbors row col))))
-        (fork (cell deps)))))
+        (fork cell deps))))
 
 ; The pid boards, generation 0 first.
 (defun build (gen prev acc)

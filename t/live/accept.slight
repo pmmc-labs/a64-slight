@@ -9,4 +9,4 @@
         ((:open l port) (pprint (list :port port)) (server))
         ((:accept l c)  (server))))
 
-(connect :tcp/listen 0 (server))
+(connect :tcp/listen 0 server)

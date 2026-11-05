@@ -60,4 +60,4 @@
     (http/serve 0 handler)
     (recv ((:listening port) (tty/write port \n))))
 
-(join (fork (top-level)))
+(join (fork top-level))

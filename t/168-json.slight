@@ -212,7 +212,7 @@
 (pprint (list :builtins-agree (nil? (filter (lambda (text) (not (agrees? text))) (cadr (slurp "t/data/json.txt"))))))
 
 ; and what a bad text does
-(defun try (text) (join (fork (parse-json text))))
+(defun try (text) (join (fork parse-json text)))
 (pprint (try "[1, 2,]"))
 (pprint (try "{\"a\" 1}"))
 (pprint (try "\"\\ud83d\""))

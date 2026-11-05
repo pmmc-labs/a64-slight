@@ -211,7 +211,8 @@ function waits(x: Sexp): boolean {
     if (x.car.t === 'sym') {
         switch (x.car.name) {
             case 'recv': return true;
-            case 'quote': case 'lambda': case 'fork': case 'fork/on': case 'connect': return false;
+            case 'quote': case 'lambda': return false;
+            case 'fork': case 'fork/on': case 'connect': return forkHere(x).some(waits);
         }
     }
     for (let xs: Sexp = x; xs.t === 'pair'; xs = xs.cdr) if (waits(xs.car)) return true;
@@ -267,8 +268,10 @@ function callsIn(body: Sexp, params: readonly string[], globals: readonly string
         const head = x.car;
         if (head.t === 'sym' && !bound.includes(head.name)) {
             switch (head.name) {
-                case 'quote': case 'lambda': case 'fork': case 'fork/on': case 'connect': case 'defun':
+                case 'quote': case 'lambda': case 'defun':
                     return;
+                case 'fork': case 'fork/on': case 'connect':
+                    return forkHere(x).forEach((a) => scan(a, bound));
                 case 'cond':
                     return scanClauses(x.cdr, bound, false);
                 case 'recv':
@@ -415,7 +418,8 @@ function recvsTake(x: Sexp): Ty {
     if (x.t !== 'pair') return NEVER;
     if (x.car.t === 'sym') {
         switch (x.car.name) {
-            case 'quote': case 'lambda': case 'fork': case 'fork/on': case 'connect': return NEVER;
+            case 'quote': case 'lambda': return NEVER;
+            case 'fork': case 'fork/on': case 'connect': return union(NEVER, ...forkHere(x).map(recvsTake));
             case 'recv': {
                 const clauses = toArray(x.cdr) ?? [];
                 if (clauses.length === 0) return ANY;
@@ -433,7 +437,8 @@ function recvsTake(x: Sexp): Ty {
 // reaches.
 function tailCallsIn(x: Sexp): readonly string[] {
     if (x.t !== 'pair') return [];
-    if (x.car.t === 'sym' && ['quote', 'lambda', 'fork', 'fork/on', 'connect'].includes(x.car.name)) return [];
+    if (x.car.t === 'sym' && ['quote', 'lambda'].includes(x.car.name)) return [];
+    if (x.car.t === 'sym' && ['fork', 'fork/on', 'connect'].includes(x.car.name)) return forkHere(x).flatMap(tailCallsIn);
     const out: string[] = x.car.t === 'sym' ? [x.car.name] : [];
     for (let xs: Sexp = x; xs.t === 'pair'; xs = xs.cdr) out.push(...tailCallsIn(xs.car));
     return out;
@@ -579,11 +584,11 @@ function formType(x: Pair, cx: Cx, expected: Ty | null): Ty {
             case 'match':   return matchType(x, args, cx);
             case 'recv':    return recvType(x, args, cx);
             case 'yield':   return args.length === 1 ? typeOf(args[0]!, cx) : ANY;
-            case 'fork':    return forkType(x, [], args[0], cx);
-            case 'connect': return forkType(x, args.slice(0, -1), args[args.length - 1], cx);
-            case 'fork/on': {                   // (fork/on k expr): k an island's number (D256)
-                if (args.length === 2) want(cx, typeOf(args[0]!, cx), INT, posOf(args[0]!) ?? x.pos, (v) => `fork/on's island ${v}`, 'not-an-int');
-                return forkType(x, [], args[args.length - 1], cx);
+            case 'fork':    return forkType(x, [], args, cx);
+            case 'connect': return forkType(x, ...connectParts(args), cx);
+            case 'fork/on': {                   // (fork/on k f arg ...): k an island's number (D256)
+                if (args.length >= 2) want(cx, typeOf(args[0]!, cx), INT, posOf(args[0]!) ?? x.pos, (v) => `fork/on's island ${v}`, 'not-an-int');
+                return forkType(x, [], args.slice(1), cx);
             }
             case 'the':     return theType(x, args, cx);
             case 'defun': case 'deftype': case 'sig': return NIL_T;
@@ -679,17 +684,21 @@ function callCxr(x: Pair, n: string, steps: readonly ('a' | 'd')[], args: readon
 
 // A call of a value: a local, or what an expression gives.
 function callValue(x: Pair, head: Sexp, args: readonly Sexp[], cx: Cx): Ty {
-    const h = typeOf(head, cx);
+    return callOf(x, typeOf(head, cx), head, args, cx, "what's called here");
+}
+
+// A call of what has the type h, written at head; `who` is what the
+// warnings call it.
+function callOf(x: Pair, h: Ty, head: Sexp, args: readonly Sexp[], cx: Cx, who: string): Ty {
     const fparams = h.k === 'fun' ? h.params : null;
     const ts = args.map((a, i) => typeOf(a, cx, fparams?.[i] ?? null));
     if (h.k === 'never' || ts.some((t) => t.k === 'never')) return NEVER;
-    const sly = isSly(x.pos);
     const pos = posOf(head) ?? x.pos;
-    if (!want(cx, h, FUN_ANY, pos, (v) => `what's called here ${v}`, 'not-a-function')) return NEVER;
+    if (!want(cx, h, FUN_ANY, pos, (v) => `${who} ${v}`, 'not-a-function')) return NEVER;
     const funs = members(h, cx.g.defs).filter((m) => m.k === 'fun') as { params: readonly Ty[] | null }[];
     if (funs.length > 0 && funs.every((f) => f.params !== null && f.params.length !== args.length)) {
         const ns = [...new Set(funs.map((f) => f.params!.length))].join(' or ');
-        warn(cx, pos, `what's called here takes ${ns} argument${ns === '1' ? '' : 's'}, and it's given ${args.length}: it faults :arity`, true);
+        warn(cx, pos, `${who} takes ${ns} argument${ns === '1' ? '' : 's'}, and it's given ${args.length}: it faults :arity`, true);
         return NEVER;
     }
     if (h.k === 'fun' && h.params !== null) {
@@ -1141,23 +1150,50 @@ function recvType(x: Pair, clauses: readonly Sexp[], cx: Cx): Ty {
 
 // --- processes -------------------------------------------------------------------------------------
 
-// fork, fork/on and connect: a process, taking what the recvs of the
-// function its body calls take (mailboxesOf), and ending with its body's
-// value, which a join of it gives (D277).
-function forkType(x: Pair, devices: readonly Sexp[], body: Sexp | undefined, cx: Cx): Ty {
+// fork, fork/on and connect: a process that calls f, the first of items,
+// with the rest, which are typed here, in the parent, as any call's are
+// (D286); its messages are what the recvs of f take (mailboxesOf) when f
+// is one of the program's functions, and its value, which a join of it
+// gives, the call's (D277).
+function forkType(x: Pair, devices: readonly Sexp[], items: readonly Sexp[], cx: Cx): Ty {
     const ds = devices.map((d) => typeOf(d, cx));
     if (ds.some((t) => t.k === 'never')) return NEVER;
-    const starts = body !== undefined && body.t === 'pair' && body.car.t === 'sym' && lookup(cx.env, body.car.name) === null
-        ? fnNamed(cx, body.car.name) : undefined;
+    const f = items[0];
+    if (f === undefined) return ANY;                // the compiler says what's missing
+    const args = items.slice(1);
+    const starts = f.t === 'sym' && lookup(cx.env, f.name) === null ? fnNamed(cx, f.name) : undefined;
     const m = starts !== undefined && starts.module === 'user' ? (own(cx.g.mailboxes, starts.name) ?? ANY) : ANY;
-    const t = body === undefined ? ANY : typeOf(body, { ...cx, root: false, self: pidOf(m), mailbox: ANY });
     if (isForm(x, 'connect') && devices.length >= 1 && isKeyword(devices[0]!, 'keypress') && m.k !== 'any' && starts !== undefined) {
         const sly = isSly(x.pos);
         if (!overlaps(KEY, m, cx.g.defs)) {
-            warn(cx, posOf(body!) ?? x.pos, `the keyboard sends ${showType(KEY, sly)}, and ${name(starts.name, sly)} takes ${showType(m, sly)}: every key would be a dead letter`, true);
+            warn(cx, posOf(f) ?? x.pos, `the keyboard sends ${showType(KEY, sly)}, and ${name(starts.name, sly)} takes ${showType(m, sly)}: every key would be a dead letter`, true);
         }
     }
+    // a lambda's body runs in the new process, so it's typed as there; a
+    // builtin is checked as a call of it would be
+    const child: Cx = { ...cx, root: false, self: pidOf(m), mailbox: ANY };
+    const builtin = f.t === 'sym' && lookup(cx.env, f.name) === null && own(BUILTINS, f.name) !== undefined ? f.name : null;
+    const t = starts !== undefined ? callFn(x, starts, args, cx)
+            : builtin !== null ? callBuiltin(x, builtin, args, cx)
+            : callOf(x, typeOf(f, isForm(f, 'lambda') ? child : cx), f, args, cx, "what's forked here");
     return pidOf(m, t.k === 'never' ? ANY : t);
+}
+
+// connect's arguments: what it connects to (a source, with a path, an
+// address or a command after some), then the function and its arguments.
+const WITH_ARG = ['fs/read', 'fs/write', 'fs/append', 'tcp', 'tcp/listen', 'unix', 'unix/listen', 'exec'];
+function connectParts(args: readonly Sexp[]): [readonly Sexp[], readonly Sexp[]] {
+    const k = args.length > 0 && WITH_ARG.some((n) => isKeyword(args[0]!, n)) ? 2 : 1;
+    return [args.slice(0, k), args.slice(k)];
+}
+
+// What a fork, fork/on or connect runs in the process it's written in:
+// everything but the function it calls, whose body runs in the new one
+// (D286).
+function forkHere(x: Pair): readonly Sexp[] {
+    const items = toArray(x.cdr) ?? [];
+    const [devices, rest] = isForm(x, 'connect') ? connectParts(items) : isForm(x, 'fork/on') ? [items.slice(0, 1), items.slice(1)] : [[], items];
+    return [...devices, ...rest.slice(1)];
 }
 
 // A key, as :keypress sends it: the key, a string or a name, and the mods.

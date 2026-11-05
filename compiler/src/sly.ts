@@ -23,7 +23,8 @@
 //   if c { a } else { b }      (if c a b)
 //   match e { p => a, ... }    (match e (p a) ...)
 //   recv { p => a }, recv      (recv (p a)), (recv)
-//   fork e, yield e            (fork e), (yield e)
+//   fork f(a, b), fork { e }   (fork f a b), (fork (lambda () e)) (D286)
+//   yield e                    (yield e)
 //   self, parent               $$, ^$$
 //
 // And types (D247, docs/TYPES.md), which the checker reads and the
@@ -49,7 +50,7 @@
 import { CompileError } from './errors.ts';
 import { atEnd, isDigit, isLetter, numberKind, parseAtom, peek, posOf as cursorPos, readDatumAt, readString,
          skipDoc, skipWhile, step, type Cursor } from './reader.ts';
-import { NIL, TUPLE, cons, fitsInt, float, form, int, isForm, isSpace, isSym, list, posOf, str, sym, writable, INT_MAX, INT_MIN,
+import { NIL, TUPLE, cons, fitsInt, float, form, int, isForm, isSpace, isSym, list, posOf, str, sym, toArray, writable, INT_MAX, INT_MIN,
          type Pos, type Sexp } from './sexp.ts';
 
 // ---------------------------------------------------------------------------
@@ -502,6 +503,25 @@ function parseStatements(ts: Ts, i: number): [readonly Sexp[], number] {
 }
 
 // A block's forms as one expression.
+// What a fork or a connect starts, as (f arg ...): a call, f(a, b), spread,
+// so that f runs in the new process with the arguments worked out here; a
+// name or a lambda as it is; and a block as a lambda of nothing (D286).
+// A list or a special form is refused, since neither is a function.
+const NOT_CALLS = ['if', 'cond', 'case', 'match', 'recv', 'do', 'and', 'or', 'quote', 'list', 'fork', 'fork/on', 'connect', 'yield'];
+function parseStart(ts: Ts, i: number, what: string): [readonly Sexp[], number] {
+    const at = ts[i]?.pos ?? ts[i - 1]!.pos;
+    if (isP(ts[i], '{')) {
+        const [body, j] = parseBlock(ts, i);
+        return [[form(at, sym('lambda', at), NIL, ...nonEmpty(body))], j];
+    }
+    const [x, j] = parseExpr(ts, i);
+    if (x.t !== 'pair' || isForm(x, 'lambda') || isForm(x, 'the')) return [[x], j];
+    if (x.car.t === 'sym' && NOT_CALLS.includes(x.car.name)) {
+        throw new CompileError(`${what} takes a function: ${what} f(a, b), ${what} f, or ${what} { ... }`, at);
+    }
+    return [toArray(x) ?? [x], j];
+}
+
 function blockExpr(forms: readonly Sexp[], at: Pos): Sexp {
     if (forms.length === 0) return NIL;
     if (forms.length === 1 && !isForm(forms[0]!, 'let')) return forms[0]!;
@@ -673,7 +693,10 @@ function parseWord(ts: Ts, i: number, w: string, at: Pos): [Sexp, number] {
         case 'parent': return [sym('^$$', at), i + 1];
         case '@ARGV':  return [sym('@ARGV', at), i + 1];
         case '%ENV':   return [sym('%ENV', at), i + 1];
-        case 'fork':
+        case 'fork': {                          // fork f(a, b), fork f, or fork { ... } (D286)
+            const [parts, j] = parseStart(ts, i + 1, 'fork');
+            return [form(at, sym('fork', at), ...parts), j];
+        }
         case 'yield': {
             const [x, j] = parseExpr(ts, i + 1);
             return [form(at, sym(w, at), x), j];
@@ -700,8 +723,8 @@ function parseWord(ts: Ts, i: number, w: string, at: Pos): [Sexp, number] {
         }
         case 'connect': {
             const [args, j] = parseItems(ts, expect(ts, i + 1, '(', 'after connect'), ')', 'what connect connects to');
-            const [body, k] = parseBlock(ts, j);
-            return [form(at, sym('connect', at), ...args.map((a) => a.x), blockExpr(body, at)), k];
+            const [parts, k] = parseStart(ts, j, 'connect(...)');
+            return [form(at, sym('connect', at), ...args.map((a) => a.x), ...parts), k];
         }
         case 'if':
             return parseIf(ts, i);

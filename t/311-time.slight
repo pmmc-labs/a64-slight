@@ -12,7 +12,7 @@
 (defun later () (sleep 2500) (clock/now))
 
 (let start (clock/now))
-(pprint (list start (- (cadr (join (fork (later)))) start) (time/iso start)))
+(pprint (list start (- (cadr (join (fork later))) start) (time/iso start)))
 
 (let instants (list 0 -1 951782400000000 1709210096789012 -62135596800000000
                     253402300799999999 253402300800000000 -62167219200000000 -62167219200000001))

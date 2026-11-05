@@ -19,5 +19,5 @@
         ((a b) (+ a b))
         ((a)   a)))
 
-(fork (match (tuple 1 2) (#(a) a)))
+(fork (lambda () (match (tuple 1 2) (#(a) a))))
 (list (sign 0) (flag #true) (pair-sum (list 1 2)))

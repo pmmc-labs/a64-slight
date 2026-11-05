@@ -14,9 +14,9 @@
 (defun maker (p)
     (let xs (map (lambda (i) (str "item " i)) (range 0 5)))
     (send p (list :show xs))
-    (fork (pprint (list :forked xs)))
+    (fork pprint (list :forked xs))
     :maker-done)
 
-(let p (fork (printer)))
-(fork (maker p))
-(fork (churn 2000))
+(let p (fork printer))
+(fork maker p)
+(fork churn 2000)

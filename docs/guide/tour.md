@@ -136,7 +136,7 @@ slight has two kinds of failure, and keeps them apart:
 (pprint (safe-div 1 0))
 
 ; A bug is a fault, which ends only the process it happens in.
-(let t (fork (car ())))
+(let t (fork (lambda () (car ()))))
 (join t)
 ```
 
@@ -144,8 +144,8 @@ slight has two kinds of failure, and keeps them apart:
 ```
 (ok 5)
 (error div-by-zero)
-fault in #<pid 2>: not a cons: () (car at docs/guide/code/tour-errors.slight:11:14)
-(error (not-a-cons () "car at docs/guide/code/tour-errors.slight:11:14"))
+fault in #<pid 2>: not a cons: () (car at docs/guide/code/tour-errors.slight:11:25)
+(error (not-a-cons () "car at docs/guide/code/tour-errors.slight:11:25"))
 ```
 
 An error you expect, such as a file that isn't there or a division you
@@ -166,7 +166,7 @@ compiler knows what it can of each value's type, and warns of what's
 sure to go wrong if that code runs:
 
 ```
-docs/guide/code/tour-errors.slight:11:14: warning: car takes a non-empty list, and this is (): it faults :not-a-cons
+docs/guide/code/tour-errors.slight:11:25: warning: car takes a non-empty list, and this is (): it faults :not-a-cons
 ```
 
 It compiles the program anyway: the fault would end only its own
@@ -186,7 +186,7 @@ and gives its pid, and `join` waits for it to end and gives its result:
         (+ (fib (- n 1)) (fib (- n 2)))))
 
 ; A task computes a value; join waits for it.
-(let tasks (map (lambda (n) (fork (fib n))) (list 20 21 22)))
+(let tasks (map (lambda (n) (fork fib n)) (list 20 21 22)))
 (map join tasks)
 ```
 
@@ -195,8 +195,8 @@ and gives its pid, and `join` waits for it to end and gives its result:
 ((ok 6765) (ok 10946) (ok 17711))
 ```
 
-Processes share nothing. A `fork` copies the locals its expression uses
-into the new process, and each process has a heap of its own, collected
+Processes share nothing. A `fork` copies the arguments it passes into
+the new process, and each process has a heap of its own, collected
 on its own. The runtime runs every process on one core and preempts
 them, so no process can hold up the rest. Processes are about
 structure, not parallel speed: a million of them is fine. Speed comes
@@ -220,7 +220,7 @@ handles it, and calls itself with the next state.
         ((:inc)    (counter (+ n 1)))
         ((:get to) (reply to n) (counter n))))
 
-(let c (fork (counter 0)))
+(let c (fork counter 0))
 (send c (list :inc))
 (send c (list :inc))
 (send c (list :inc))

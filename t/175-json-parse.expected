@@ -67,6 +67,6 @@
 (error (bad-json 1))
 (error (bad-json 0))
 (error (bad-json 1))
-fault in #<pid 3>: not a string: 5 (json/parse at t/175-json-parse.slight:64:21)
-(error (not-a-string 5 "json/parse at t/175-json-parse.slight:64:21"))
+fault in #<pid 3>: not a string: 5 (json/parse at t/175-json-parse.slight:64:32)
+(error (not-a-string 5 "json/parse at t/175-json-parse.slight:64:32"))
 ()

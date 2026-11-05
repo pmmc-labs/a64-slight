@@ -2,8 +2,8 @@
     (recv
         ((:get to) (store n))))
 
-(let s (fork (store 0)))
-(let asker (fork (ask s (list :get))))
+(let s (fork store 0))
+(let asker (fork ask s (list :get)))
 (sleep 1)
 
 ; Every process's info, from the :system device.

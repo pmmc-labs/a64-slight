@@ -85,7 +85,7 @@
         (perform players to (+ gen 1) (map (lambda (row) (lookup row got)) (range 0 (life/height))))))
 
 (let to (address))
-(let players (map (lambda (row) (fork (player row to))) (range 0 (life/height))))
+(let players (map (lambda (row) (fork player row to)) (range 0 (life/height))))
 (pprint (list :conductor (length players) :players :a-beat-every (beat) :ms))
 (perform players to 0 (life/seed))
 (map (lambda (p) (send p :stop)) players)

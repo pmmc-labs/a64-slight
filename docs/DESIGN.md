@@ -140,8 +140,8 @@ never changes the code.
 | `(cond (test body...) ...)` | The conditional the others become (below). Each test must be `#true` or `#false`, or the process faults; so does running out of clauses. |
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
 | `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
-| `(fork expr)` | Runs `expr` in a new process and returns its pid; `(fork/on k expr)` on island `k` (D256). One kind of process (D277). |
-| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`, or a Unix socket, `(connect :unix path expr)` or `(connect :unix/listen path expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
+| `(fork f arg ...)` | Starts a process that calls `f` with the arguments, worked out by the caller and copied (D286), and returns its pid; `(fork/on k f arg ...)` on island `k` (D256). One kind of process (D277). |
+| `(connect :source [x] f arg ...)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path f arg ...)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" f arg ...)` or `(connect :tcp/listen port f arg ...)`, or a Unix socket, `(connect :unix path f arg ...)` or `(connect :unix/listen path f arg ...)`; a command, `(connect :exec (list "ls" "-l") f arg ...)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
 | `(recv clause...)` | Takes the next message, waiting for one with the stack kept (D276), anywhere (D277). |
 | `(deftype ...)`, `(sig ...)`, `(the type expr)` | Types (D247): a type's name and a function's types, at the top level, and an expression's. The checker reads them; code generation leaves them out (`(the T e)` is `e`). Not counted among the 10, since none does anything when the program runs. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
@@ -217,12 +217,12 @@ function that waits is a call.
 
 | | |
 |---|---|
-| `(fork expr)` | Starts a process (D277: one kind, where D243 had two). The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. `expr` runs at the base of the child's stack, and may wait in `recv` anywhere (D276). Inside `expr`, `$$` is the child. |
-| `(fork/on k expr)` | As `fork`, on island `k` (D256); `fork` stays on its parent's. |
-| `(connect :keypress expr)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
-| `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
-| `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
-| `(connect :unix path expr)`, `(connect :unix/listen path expr)` | The same, at a Unix socket's path (D231). |
+| `(fork f arg ...)` | Starts a process (D277: one kind, where D243 had two). `f` and the arguments are evaluated by the caller and **deep-copied** into the child, which calls `f` with them (D286); at most 8 arguments. A literal in `f`'s place is a compile error; what isn't a function of as many arguments faults the caller, as `apply` does, and starts nothing. `f` runs at the base of the child's stack, and may wait in `recv` anywhere (D276). Inside `f`, `$$` is the child; in the fork form, the caller. |
+| `(fork/on k f arg ...)` | As `fork`, on island `k` (D256); `fork` stays on its parent's. |
+| `(connect :keypress f arg ...)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
+| `(connect :fs/read path f arg ...)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
+| `(connect :tcp "host:port" f arg ...)`, `(connect :tcp/listen port f arg ...)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
+| `(connect :unix path f arg ...)`, `(connect :unix/listen path f arg ...)` | The same, at a Unix socket's path (D231). |
 | `(socket/peer c)` | The uid, gid and pid at the other end of the Unix connection `c`, or `()` (D235). |
 | `(connect :exec cmd expr)` | `fork`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
 | `(connect :system expr)` | `fork`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
@@ -240,7 +240,7 @@ function that waits is a call.
 | `(timer/cancel t)` | Takes back `after`'s timer `t` if it hasn't fired: `#true`, or `#false` (D232). |
 
 **One kind of process (D277; D243's two, tasks and actors, with D245,
-are retired).** Every process, started with `(fork expr)`, has a
+are retired).** Every process, started with `(fork f arg ...)`, has a
 mailbox and a value: it can be sent to, and takes its messages with
 `recv`, wherever it is in its code (D276); it can be joined for its
 value, on any island; monitored, timed and killed; and it can make
@@ -944,8 +944,10 @@ RT_EXEC_INT`, since a symbol is its name.
 
 ### Process lifecycle
 
-- `fork`: allocate the process, deep-copy the free variables into its heap,
-  queue it to run the entry function.
+- `fork`: check that the function takes as many arguments as it's given,
+  allocate the process, deep-copy the function and its arguments into
+  its heap, queue it to start in `rt_apply_start`, which calls the
+  function with them (D286).
 - Ending: the Result goes, from the process's own heap, to those
   waiting then: each joiner, and a race it wins, is given a copy to
   take when it runs, a joiner on another island as an item to its
@@ -1185,7 +1187,7 @@ run (option (b), D256's step 6, put off).
   client can also give a reply's body to its caller as it comes, in
   messages, as a device does (`http/stream`, D181, D182).
 - **Commands are devices too** (D185). `(connect :exec (list "ls" "-l")
-  expr)` runs a command, a list of strings with no shell unless one is
+  f arg ...)` runs a command, a list of strings with no shell unless one is
   asked for, found in `PATH` by the runtime itself, with `posix_spawn`,
   in a process group of its own, with SIGPIPE back to its default; its
   input is a pipe, and its stdout and stderr are another, one pipe for

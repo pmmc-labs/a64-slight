@@ -1,0 +1,18 @@
+(from-child 21 parent? #true)
+(ok 42)
+hello
+(ok (1 2 #false #true))
+(ok 3)
+(ok 42)
+(ok 10)
+(from-child 5 parent? #true)
+(ok 14)
+(from-child 7 parent? #true)
+(ok (1 "; (fork f arg ...): f and the arguments are worked out by the caller, so"))
+fault in #<pid 10>: not a function: 1 (fork at t/378-fork-args.slight:44:32)
+(error (not-a-function 1 "fork at t/378-fork-args.slight:44:32"))
+fault in #<pid 11>: wrong number of arguments for #<function lambda at t/378-fork-args.slight:29:10> (fork at t/378-fork-args.slight:45:32)
+(error (arity #<function lambda at t/378-fork-args.slight:29:10> "fork at t/378-fork-args.slight:45:32"))
+fault in #<pid 12>: not a function: (1) (fork at t/378-fork-args.slight:46:32)
+(error (not-a-function (1) "fork at t/378-fork-args.slight:46:32"))
+done

@@ -7249,3 +7249,54 @@ runs for days, which would meet the kept-result rule (D278) in a lead
 that never joins what it starts, as the acceptors did. The three are
 candidates, each to be proposed on its own; nothing is agreed by this
 record.
+
+**D286. `fork` takes a function and its arguments.** *(Stevan, Nov
+2026: "Yes this is what I was thinking for fork and `$$`. It makes it
+much more clear", and "`fork` should always take a function in its
+first position, so `(fork 42)` should not compile".)* `(fork f arg
+...)`, `(fork/on k f arg ...)` and `(connect source [x] f arg ...)`
+evaluate `f` and the arguments in the caller, deep-copy them into the
+new process, and call `f` with them there, as Erlang's `spawn/3` does.
+So `$$` in a fork form is the caller, `(fork worker $$ job)` tells the
+worker who started it, and the thirty `(let me $$)` dances were for
+nothing; a body that isn't one call is a lambda, `(fork (lambda ()
+...))`; what's copied is what's passed. A literal where the function
+should be is a compile error, a function the compiler knows (the
+program's, the prelude's, a builtin's) given another number of
+arguments is one too, as a call's would be, and anything else that
+isn't a function of as many faults the caller, `:not-a-function` or
+`:arity` as `apply` gives them, and starts nothing; at most 8
+arguments. Gone: the hidden entry function at each fork site and the
+free-variable walk that found its parameters (D22), and the rule that
+a fork takes at most 8 locals (D95). A builtin as the function is the
+builtin's wrapper, with the builtin's name alone as the site of a
+fault in it, as `(map car xs)` has; a test that pins a site forks a
+lambda. The runtime: `rt_fork` and the connects take the values, the
+first the function, checked in the parent; a process record holds it
+(`fun`) and starts in `rt_apply_start`, which puts it in the closure
+register and jumps to its code; `:system` names that code for a
+process that hasn't run. So a process's first reduction is `f`'s
+entry, where it was the hidden function's: t/159 counts to 998 and
+999 where it counted to 997 and 998, and t/190's model makes N + 1
+calls where it made N + 2. The checker types a fork as the call it is,
+of the program's function, the builtin, or the value, "what's forked
+here" in its words, takes the process's mailbox from `f`'s recvs when
+`f` is one of the program's functions, as it took it from the body's
+call, and sees a fork's arguments as the caller's, so a `recv` among
+them counts for the caller. The C-style syntax reads `fork f(a, b)` as
+`(fork f a b)`, `fork f` as `(fork f)` and `fork { ... }` as a lambda,
+and `connect(...)` takes a call or a block the same way; a `fork` of a
+list or a special form is refused. Migration, by a script over every
+`.slight` file and the guide's blocks (t/guide.py holds them to their
+files): 626 forks and connects whose body was a call with simple
+arguments spread, and 367 wrapped in a lambda, 54 special forms, 28
+bare values, 8 variadic heads, 57 whose arguments called something, 4
+that mentioned `$$`, and 216 whose head was a builtin; the `.sly` files
+by hand, two of them. The expected outputs changed only in the columns
+of sites, and in two deadlock messages (t/192, t/297) that name the
+lambda a process waits in where they named the hidden function; the
+`; warns:` columns likewise. Rejected: `(fork v)` of a value as a
+process whose value is `v`, which is two meanings for one form, and
+hides an old-style fork whose function returns a value; and a shorter
+spelling than a lambda for a body that isn't a call. Golden test 378;
+the unit tests; D285's entry on `$$` revised.

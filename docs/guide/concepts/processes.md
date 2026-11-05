@@ -81,7 +81,7 @@ deadlock](../howto/deadlocks.md)).
 
 Two shapes of process cover nearly everything:
 
-- A **task** computes a value: `(fork expr)` starts one, and `join`
+- A **task** computes a value: `(fork f arg ...)` starts one, and `join`
   waits for it. It takes no messages, and ends when it's done.
 - An **actor** keeps state: it loops through a function that waits for
   a message with `recv`, handles it, and calls itself with the next
@@ -101,15 +101,15 @@ Tasks are how slight runs things at once and gathers the results:
 ; The result of pid, a task, or (:error :timeout) if it takes longer
 ; than ms.
 (defun within (ms pid)
-    (let timer (fork (sleep ms)))
+    (let timer (fork sleep ms))
     (match (join/race (list pid timer))
         ((p result) (if (eq? p pid)
                         (do (kill timer) result)
                         (do (kill pid) (list :error :timeout))))))
 
-(pprint (join/all (map (lambda (n) (fork (slow-square n (* n 100)))) (list 1 2 3))))
-(pprint (within 250 (fork (slow-square 5 100))))
-(pprint (within 250 (fork (slow-square 6 400))))
+(pprint (join/all (map (lambda (n) (fork slow-square n (* n 100))) (list 1 2 3))))
+(pprint (within 250 (fork slow-square 5 100)))
+(pprint (within 250 (fork slow-square 6 400)))
 (clock/us)
 ```
 
@@ -131,7 +131,7 @@ the virtual clock's reading, which counts only the sleeps. See
 `Promise.race`. A task is a promise you can kill.
 
 A task is also slight's `try`. A fault, a `raise` or a `kill` ends only
-the task, and `join` gives `(:error reason)`. So `(join (fork (risky)))`
+the task, and `join` gives `(:error reason)`. So `(join (fork risky))`
 runs `risky` with its failures turned into a value.
 
 An actor owns state that outlives any one computation: a table, a
@@ -184,7 +184,7 @@ that mode, and moves to another by calling it:
 
 <!-- code: ../code/con-states.slight -->
 ```lisp
-(let door (fork (locked "1234" 0)))
+(let door (fork locked "1234" 0))
 (list
     (ask door (list :open "0000"))
     (ask door (list :open "1234"))

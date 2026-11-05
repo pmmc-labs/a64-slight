@@ -23,7 +23,7 @@
 ; Starts a store on the log at path, and gives its pid.
 (defun start (path)
     (let table (load path))
-    (connect :fs/append path (logged-open table)))
+    (connect :fs/append path logged-open table))
 
 (defun logged-open (table)
     (recv

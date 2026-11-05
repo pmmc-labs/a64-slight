@@ -31,10 +31,10 @@
 
 ; faults
 (defun kind (pid) (car (cadr (join pid))))
-(pprint (kind (fork (str/split "a" "," -1))))
-(pprint (kind (fork (str/repeat "a" -1))))
-(pprint (kind (fork (str/pad-start "a" 3 5))))
-(pprint (kind (fork (str/join "," "abc"))))
-(pprint (kind (fork (str/replace "a" "a" 1))))
-(kind (fork (str/repeat "ab" 4611686018427387903)))
-; warns: 36:42 37:35 38:42
+(pprint (kind (fork (lambda () (str/split "a" "," -1)))))
+(pprint (kind (fork (lambda () (str/repeat "a" -1)))))
+(pprint (kind (fork (lambda () (str/pad-start "a" 3 5)))))
+(pprint (kind (fork (lambda () (str/join "," "abc")))))
+(pprint (kind (fork (lambda () (str/replace "a" "a" 1)))))
+(kind (fork (lambda () (str/repeat "ab" 4611686018427387903))))
+; warns: 36:53 37:46 38:53

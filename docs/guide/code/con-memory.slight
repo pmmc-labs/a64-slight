@@ -3,13 +3,13 @@
 (defun grow (xs)
     (grow (cons 0 xs)))
 
-(pprint (join (fork (grow ()))))
+(pprint (join (fork grow ())))
 
 ; A process waiting for a message keeps its stack (D276).
 (defun idle ()
     (recv (_ :done)))
 
-(let a (fork (idle)))
+(let a (fork idle))
 (sleep 1)
 (match (open :system)
     ((:ok s)

@@ -20,7 +20,7 @@
 ; The root is a task (D243): the actors answer at an address of its own,
 ; and it reads each one's end as soon as it has sent the last message.
 (let to (address))
-(let p (fork (shapes 0)))
+(let p (fork shapes 0))
 (send p (list :rect (list 2 3)))
 (send p (list :rect 2 3))
 (send p (list :square 4))
@@ -30,7 +30,7 @@
 (let p-end (join p))
 (pprint (match (read to) ((:total t) t)))
 (pprint p-end)
-(let c (fork (classify to)))
+(let c (fork classify to))
 (send c 5)
 (send c "hi")
 (send c #true)

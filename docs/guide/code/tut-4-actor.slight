@@ -13,5 +13,5 @@
             (pprint (list word r))
             (tally s rest))))
 
-(let s (fork (store ())))
-(join (fork (tally s (list "a" "b" "a"))))
+(let s (fork store ()))
+(join (fork tally s (list "a" "b" "a")))

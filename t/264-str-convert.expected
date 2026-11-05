@@ -18,27 +18,27 @@
 (3 -1 2 1)
 ("" "a12.5b#true()(1 \"x\" (\"y\"))z")
 ("" "a" "abc")
-fault in #<pid 2>: out of range: 1 (str->int at t/264-str-convert.slight:34:21)
+fault in #<pid 2>: out of range: 1 (str->int at t/264-str-convert.slight:34:32)
 out-of-range
-fault in #<pid 3>: out of range: 37 (str->int at t/264-str-convert.slight:35:21)
+fault in #<pid 3>: out of range: 37 (str->int at t/264-str-convert.slight:35:32)
 out-of-range
-fault in #<pid 4>: out of range: 0 (int->str at t/264-str-convert.slight:36:21)
+fault in #<pid 4>: out of range: 0 (int->str at t/264-str-convert.slight:36:32)
 out-of-range
-fault in #<pid 5>: not an integer: "1" (int->str at t/264-str-convert.slight:37:21)
+fault in #<pid 5>: not an integer: "1" (int->str at t/264-str-convert.slight:37:32)
 not-an-int
-fault in #<pid 6>: not a string: 1 (str->int at t/264-str-convert.slight:38:21)
+fault in #<pid 6>: not a string: 1 (str->int at t/264-str-convert.slight:38:32)
 not-a-string
-fault in #<pid 7>: out of range: 256 (bytes->str at t/264-str-convert.slight:39:21)
+fault in #<pid 7>: out of range: 256 (bytes->str at t/264-str-convert.slight:39:32)
 out-of-range
-fault in #<pid 8>: out of range: -1 (bytes->str at t/264-str-convert.slight:40:21)
+fault in #<pid 8>: out of range: -1 (bytes->str at t/264-str-convert.slight:40:32)
 out-of-range
-fault in #<pid 9>: out of range: 3 (bytes/at at t/264-str-convert.slight:41:21)
+fault in #<pid 9>: out of range: 3 (bytes/at at t/264-str-convert.slight:41:32)
 out-of-range
-fault in #<pid 10>: out of range: -4 (bytes/at at t/264-str-convert.slight:42:21)
+fault in #<pid 10>: out of range: -4 (bytes/at at t/264-str-convert.slight:42:32)
 out-of-range
-fault in #<pid 11>: not a symbol: "a" (sym->str at t/264-str-convert.slight:43:21)
+fault in #<pid 11>: not a symbol: "a" (sym->str at t/264-str-convert.slight:43:32)
 not-a-symbol
-fault in #<pid 12>: not a string: 1 (~ at t/264-str-convert.slight:44:21)
+fault in #<pid 12>: not a string: 1 (~ at t/264-str-convert.slight:44:32)
 not-a-string
-fault in #<pid 13>: not a string: a (~ at t/264-str-convert.slight:45:13)
+fault in #<pid 13>: not a string: a (~ at t/264-str-convert.slight:45:24)
 not-a-string

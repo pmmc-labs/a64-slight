@@ -4,9 +4,9 @@
 ; that never end is a deadlock, which says which they are.
 
 (defun kind (pid) (car (cadr (join pid))))
-(pprint (kind (fork (join/race ()))))
-(pprint (kind (fork (join/race 5))))
-(pprint (kind (fork (join/race (list (fork (sleep 5)) 3)))))
-(pprint (kind (fork (join/race (list $$)))))
-(join/race (list (fork (read (address))) (fork (read (address)))))
-; warns: 8:32 9:32
+(pprint (kind (fork (lambda () (join/race ())))))
+(pprint (kind (fork (lambda () (join/race 5)))))
+(pprint (kind (fork (lambda () (join/race (list (fork sleep 5) 3))))))
+(pprint (kind (fork (lambda () (join/race (list $$))))))
+(join/race (list (fork (lambda () (read (address)))) (fork (lambda () (read (address))))))
+; warns: 8:43 9:43

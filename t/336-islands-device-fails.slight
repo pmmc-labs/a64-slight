@@ -29,11 +29,11 @@
         (:done         (disconnect l))))
 
 (let me (address))
-(let l (connect :tcp/listen 0 (listener me)))
+(let l (connect :tcp/listen 0 listener me))
 (let port (read me))
-(fork/on 1 (connect :tcp (str "127.0.0.1:" port) (owner me)))
+(fork/on 1 (lambda () (connect :tcp (str "127.0.0.1:" port) owner me)))
 (let got (read me))
-(fork/on 2 (watcher me (car got) (car (cdr got))))
+(fork/on 2 watcher me (car got) (car (cdr got)))
 (pprint (read me))
 (send l :done)
 :end

@@ -56,7 +56,7 @@
                (divider) (prompt))
     (let extra  (if (str? expert) (list (expert-tool url expert)) ()))
     (let team   (team-tool (team/new url model (list (tools/read-file) (tools/list-files) (tools/search) (tools/calc)) ())))
-    (join (connect :keypress (typing (agent/new url model (system keys) (append (chat-tools $$ store) (cons team extra))) "" ())))
+    (join (connect :keypress (lambda () (typing (agent/new url model (system keys) (append (chat-tools $$ store) (cons team extra))) "" ()))))
     :bye)
 
 ; The notes go in the home directory, so every chat has them.

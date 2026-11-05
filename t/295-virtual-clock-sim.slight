@@ -21,7 +21,7 @@
     (when (> n 0)
         (let y (draw x))
         (let z (draw y))
-        (fork (customer bank (+ 1 (math/mod y 5399))))
+        (fork (lambda () (customer bank (+ 1 (math/mod y 5399)))))
         (sleep (+ 1 (math/mod z 1999)))
         (source bank (- n 1) z)))
 
@@ -46,13 +46,13 @@
 
 (defun simulate (n)
     (let me $$)
-    (fork (source me n 1))
+    (fork source me n 1)
     (bank 3 (list () ()) 0 0 0 n))
 
 ; The result, and how long it took on the clock, in ms.
 (defun timed (n)
     (let t0 (clock/us))
-    (let r  (cadr (join (fork (simulate n)))))
+    (let r  (cadr (join (fork simulate n))))
     (list r (div (- (clock/us) t0) 1000)))
 
 ; A listener's owner, which tells the root the listener at an address
@@ -64,7 +64,7 @@
 
 (pprint (timed 2000))
 (let to (address))
-(connect :tcp/listen 0 (telling to))
+(connect :tcp/listen 0 telling to)
 (let l (read to))
 (pprint (timed 2000))
 (disconnect l)

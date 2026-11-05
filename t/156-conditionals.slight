@@ -40,7 +40,7 @@
                 (:stop n)
                 (#true (if (int? msg) (counter (+ n msg)) (counter n)))))))
 
-(let c (fork (counter 0)))
+(let c (fork counter 0))
 (send c :inc)
 (send c 10)
 (send c :ignored)
@@ -50,5 +50,5 @@
 
 ; an operand before the last that isn't a boolean faults, as any cond
 ; test does
-(pprint (join (fork (and 5 #true))))
-; warns: 53:26
+(pprint (join (fork (lambda () (and 5 #true)))))
+; warns: 53:37

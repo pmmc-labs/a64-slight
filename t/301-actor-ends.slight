@@ -7,14 +7,14 @@
 (defun waits () (recv (_ :woke)))
 
 ; Lets everything that can run, run, while the root waits.
-(defun pause () (join (fork (yield ()))))
+(defun pause () (join (fork (lambda () (yield ())))))
 
 ; joined before it ends
-(pprint (join (fork 5)))
+(pprint (join (fork (lambda () 5))))
 
 ; the root's own, joined after it ends: kept for the root till it has
 ; it, :ended after; and a monitor set after its end is told at once
-(let a (fork 7))
+(let a (fork (lambda () 7)))
 (pause)
 (pprint (join a))
 (pprint (join a))
@@ -24,11 +24,11 @@
 ; a process that starts four, each waiting for a word, tells the root
 ; their pids, and stays: their ends are kept for it, not for the root
 (defun four (to)
-    (send to (list (fork (recv (_ :b))) (fork (recv (_ (yield ()) :c))) (fork (waits)) (fork (recv (_ 9)))))
+    (send to (list (fork (lambda () (recv (_ :b)))) (fork (lambda () (recv (_ (yield ()) :c)))) (fork waits) (fork (lambda () (recv (_ 9))))))
     (recv (_ :done)))
 
 (let to (address))
-(let h (fork (four to)))
+(let h (fork four to))
 (let kids (read to))
 (let b (car kids))
 (let c (cadr kids))

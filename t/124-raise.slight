@@ -7,8 +7,8 @@
         ((< n 0) (raise (list :negative n)))
         (#true   n)))
 
-(pprint (join (fork (check 5))))
-(pprint (join (fork (check -2))))
-(fork (pprint :after-the-root))
+(pprint (join (fork check 5)))
+(pprint (join (fork check -2)))
+(fork pprint :after-the-root)
 (check -7)
 (pprint :not-reached)

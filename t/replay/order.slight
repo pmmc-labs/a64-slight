@@ -9,6 +9,6 @@
     (tty/write i " ")
     i)
 
-(let pids (map (lambda (i) (fork (worker i))) (range 1 6)))
+(let pids (map (lambda (i) (fork worker i)) (range 1 6)))
 (map join pids)
 (tty/write \n)

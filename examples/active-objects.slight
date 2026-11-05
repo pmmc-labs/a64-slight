@@ -52,10 +52,10 @@
 (defun ActorRef (obj)
     (recv
         (:EXIT    ())
-        ((m o to) (fork (reply to (obj m o))) (ActorRef obj))))
+        ((m o to) (fork (lambda () (reply to (obj m o)))) (ActorRef obj))))
 
 (defun PointActor (oid x y)
-    (let ref (fork (ActorRef (Point oid x y))))
+    (let ref (fork (lambda () (ActorRef (Point oid x y)))))
     (lambda (m o)
         (match m
             (:EXIT (send ref :EXIT))

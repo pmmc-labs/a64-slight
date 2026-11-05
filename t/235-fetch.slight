@@ -23,7 +23,7 @@
         (_        (list 404 (list (list "content-type" "text/html")) "<h1>Not Found</h1>"))))
 
 (defun fetch (approve url)
-    (join (fork (tool/call (tools/fetch approve) (list (list "url" url))))))
+    (join (fork (lambda () (tool/call (tools/fetch approve) (list (list "url" url)))))))
 
 (defun based (fetched base) (match fetched ((:ok text) (list :ok (str/join "BASE" (str/split text base))))))
 
@@ -66,4 +66,4 @@
     (kill srv)
     :done)
 
-(join (fork (top-level)))
+(join (fork top-level))

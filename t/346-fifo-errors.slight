@@ -28,11 +28,11 @@
 (pprint (exec/run (list "sh" "-c" "rm -f $1 && mkfifo $1" "sh" fifo)))
 (pprint (open :fs/write fifo))
 (pprint (open :fs/append fifo))
-(pprint (join (connect :fs/write fifo (recv ((:open f) :opened)))))
+(pprint (join (connect :fs/write fifo (lambda () (recv ((:open f) :opened))))))
 
 (match (open :fs/read fifo)
     ((:ok r)
-        (pprint (kind (join (connect :fs/write fifo (flood (str/repeat "x" 1000000) 100)))))
+        (pprint (kind (join (connect :fs/write fifo (lambda () (flood (str/repeat "x" 1000000) 100))))))
         (match (open :fs/write fifo)
             ((:ok w)
                 (disconnect r)

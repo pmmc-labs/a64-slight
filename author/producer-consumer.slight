@@ -35,8 +35,8 @@
 (let op1 (spawn (Operation (lambda (x) (+ x 100)) o1)))
 (let op2 (spawn (Operation (lambda (x) (+ x 200)) o2)))
 
-(let p1 (fork (Producer op1 (list 10 20 30 40 50 60))))
-(let p2 (fork (Producer op2 (list 1 2 3 4 5 6 7 8 9))))
+(let p1 (fork Producer op1 (list 10 20 30 40 50 60)))
+(let p2 (fork Producer op2 (list 1 2 3 4 5 6 7 8 9)))
 
 (pprint (list (join p1) (join p2)))
 (pprint (list (read o1) (read o2)))

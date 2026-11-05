@@ -21,7 +21,7 @@
     (pprint (tuple (tuple 1 (tuple)) (list 2 (tuple 3)) "s" 4.5 :k))
     (pprint (tuple (list 1 2) "a" (big 40000) (tuple 3 (big 20000)) (list 4)))
     (let me $$)
-    (fork (send me (tuple :point 3 4)))
+    (fork send me (tuple :point 3 4))
     (pprint (recv (#(:point x y) (+ (* x x) (* y y)))))
     (pprint (list (eq? (tuple 1 2 3) (list->tuple (list 1 2 3)))
                   (tuple->list (tuple 1 2 3))
@@ -29,4 +29,4 @@
                   (match (tuple) (#() :empty))))
     :done)
 
-(join (fork (top-level)))
+(join (fork top-level))

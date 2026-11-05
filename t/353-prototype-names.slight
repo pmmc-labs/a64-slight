@@ -20,7 +20,7 @@
 (pprint (filter hasOwnProperty (list :yes :no :yes)))
 (let isPrototypeOf 3)
 (pprint (+ isPrototypeOf 1))
-(let a (fork (wait)))
+(let a (fork wait))
 (send a (list :make 1))
 (send a (list :make 2))
 (send a (list :stop))

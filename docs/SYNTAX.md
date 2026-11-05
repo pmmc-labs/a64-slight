@@ -143,8 +143,9 @@ block     = "{" { stmt } [ expr ] "}"
 stmt      = "let" pattern [ ":" type ] "=" expr end | expr end
 end       = ";"            (optional after an expr that ends with "}")
 
-expr      = "fork" expr | "yield" expr
-          | "connect" "(" sep(expr, ",") ")" block
+expr      = "fork" start | "yield" expr
+          | "connect" "(" sep(expr, ",") ")" start
+start     = block | expr        (a call spreads: see Processes)
           | pipe
 pipe      = or { "|>" or }
 or        = and { "||" and }
@@ -242,7 +243,7 @@ From tightest to loosest:
 | `&&` | left | `(and a b)` |
 | `\|\|` | left | `(or a b)` |
 | `\|>` | left | `x \|> f(a)` is `(f a x)`; `x \|> f` is `(f x)` |
-| `fork` `yield` | prefix, takes the whole expression after it | `(fork e)` ... |
+| `fork` `yield` | prefix, takes the whole expression after it | `(fork f a b)` from `fork f(a, b)`, `(yield e)` |
 
 `a + b + c` is `(+ (+ a b) c)`, since slight's `+` takes two. `a < b < c`
 is an error, as is `a == b == c`: write `&&`. `/` is slight's `/`, which
@@ -339,11 +340,12 @@ front; `[...xs, a]` is an error (write `append(xs, [a])`).
 |---|---|
 | `recv { p => a, ... }` | `(recv (p a) ...)` |
 | `recv` | `(recv)` |
-| `fork e` | `(fork e)` |
-| `fork e` | `(fork e)` |
+| `fork f(a, b)` | `(fork f a b)`: `f` runs in the new process with the arguments, worked out here (D286) |
+| `fork f` | `(fork f)` |
+| `fork { body }` | `(fork (lambda () body...))` |
 | `yield e` | `(yield e)` |
-| `connect(:tcp, "h:7000") { body }` | `(connect :tcp "h:7000" body...)` |
-| `connect(conn) { body }` | `(connect conn body...)` |
+| `connect(:tcp, "h:7000") f(a)` | `(connect :tcp "h:7000" f a)` |
+| `connect(conn) { body }` | `(connect conn (lambda () body...))` |
 | `self`, `parent` | `$$`, `^$$` |
 
 A `recv`, and a call to a function that waits, go anywhere in an

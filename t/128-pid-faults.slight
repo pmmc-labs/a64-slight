@@ -1,8 +1,8 @@
 ; join, monitor and kill take a pid, and a process can't join itself.
 
-(pprint (join (fork (join 5))))
-(pprint (join (fork (monitor :x))))
-(pprint (join (fork (kill "p"))))
+(pprint (join (fork (lambda () (join 5)))))
+(pprint (join (fork (lambda () (monitor :x)))))
+(pprint (join (fork (lambda () (kill "p")))))
 (join $$)
 (pprint :not-reached)
-; warns: 3:27 4:30 5:27
+; warns: 3:38 4:41 5:38

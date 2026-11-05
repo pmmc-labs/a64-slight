@@ -23,12 +23,12 @@
 
 ; ten processes, each adding 1 to a cell a hundred times, atomically
 (let c (cell/new 0))
-(let adders (map (lambda (i) (fork (adder c 100))) (range 0 10)))
+(let adders (map (lambda (i) (fork adder c 100)) (range 0 10)))
 (map join adders)
 (pprint (cell/get c))
 (let to (address))
-(let col (fork (collect to () 250)))
-(map (lambda (tag) (fork (sender col tag 50))) (list :a :b :c :d :e))
+(let col (fork collect to () 250))
+(map (lambda (tag) (fork sender col tag 50)) (list :a :b :c :d :e))
 (let seen (read to))
 (pprint (map (lambda (tag) (eq? (reverse (lookup* tag seen)) (range 0 50))) (list :a :b :c :d :e)))
 
@@ -41,4 +41,4 @@
     (after 5 me :sooner)
     (list (recv) (recv) (recv)))
 
-(pprint (cadr (join (fork (timers)))))
+(pprint (cadr (join (fork timers))))

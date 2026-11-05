@@ -28,11 +28,11 @@
 "5.0"
 "0.1"
 "1e+21"
-fault in #<pid 2>: out of range: 101 (float->str at t/271-float-to-str.slight:38:21)
+fault in #<pid 2>: out of range: 101 (float->str at t/271-float-to-str.slight:38:32)
 out-of-range
-fault in #<pid 3>: out of range: -1 (float->str at t/271-float-to-str.slight:39:21)
+fault in #<pid 3>: out of range: -1 (float->str at t/271-float-to-str.slight:39:32)
 out-of-range
-fault in #<pid 4>: not an integer: 2.0 (float->str at t/271-float-to-str.slight:40:21)
+fault in #<pid 4>: not an integer: 2.0 (float->str at t/271-float-to-str.slight:40:32)
 not-an-int
-fault in #<pid 5>: not a number: "1.5" (float->str at t/271-float-to-str.slight:41:13)
+fault in #<pid 5>: not a number: "1.5" (float->str at t/271-float-to-str.slight:41:24)
 not-a-number

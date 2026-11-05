@@ -11,6 +11,6 @@
 (defun count (rs k) (length (filter (lambda (r) (eq? r k)) rs)))
 
 (let n  (str->int (car @ARGV)))
-(let ts (map (lambda (i) (fork (do (sleep 100) i))) (range 0 n)))
+(let ts (map (lambda (i) (fork (lambda () (do (sleep 100) i)))) (range 0 n)))
 (let rs (map (lambda (t) (kind (join t))) ts))
 (list (count rs :ok) (count rs :stack))

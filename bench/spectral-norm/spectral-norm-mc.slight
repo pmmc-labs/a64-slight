@@ -24,7 +24,7 @@
 
 ; Each band an actor and an address its shares come to.
 (defun bands (n k)
-    (map (lambda (b) (list (fork/on b (band (div (* b n) k) (div (* (+ b 1) n) k) n)) (address)))
+    (map (lambda (b) (list (fork/on b band (div (* b n) k) (div (* (+ b 1) n) k) n) (address)))
         (range 0 k)))
 
 (defun product (bs which u)

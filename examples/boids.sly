@@ -240,7 +240,7 @@ fun move(flock, g, sky, lo, hi) {
 // split as evenly as they go: share s has birds n·s/k up to n·(s + 1)/k.
 fun shares(n, sky) {
     let k = math::min(n, islands());
-    range(0, k) |> map(fun(s) => fork::on(s, share(sky, div(n * s, k), div(n * (s + 1), k))))
+    range(0, k) |> map(fun(s) => fork::on(s, share, sky, div(n * s, k), div(n * (s + 1), k)))
 }
 
 // Every share told the flock, to answer me.

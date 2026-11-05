@@ -25,7 +25,7 @@
 
 ; --- cell: one value ---------------------------------------------------
 
-(defun cell/new (v) (fork (cell/loop v)))
+(defun cell/new (v) (fork cell/loop v))
 (defun cell/get (c) (ask c (list :get)))
 (defun cell/set (c v) (send c (list :set v)))
 
@@ -51,7 +51,7 @@
 ; Keys are compared with eq?, so any value can be one. The table is an
 ; association list, most recently put first, so a lookup costs the
 ; number of keys.
-(defun dict/new () (fork (dict/loop ())))
+(defun dict/new () (fork dict/loop ()))
 (defun dict/put (d k v) (send d (list :put k v)))
 (defun dict/delete (d k) (send d (list :delete k)))
 
@@ -84,7 +84,7 @@
 
 ; --- queue: first in, first out ----------------------------------------
 
-(defun queue/new () (fork (queue/loop () ())))
+(defun queue/new () (fork queue/loop () ()))
 (defun queue/push (q x) (send q (list :push x)))
 
 ; The oldest item, taken off, or :empty.
@@ -108,7 +108,7 @@
 
 ; --- channel: take waits for an item -----------------------------------
 
-(defun channel/new () (fork (channel/loop () ())))
+(defun channel/new () (fork channel/loop () ()))
 (defun channel/put (ch x) (send ch (list :put x)))
 
 ; The oldest item, taken off; waits until there is one. Don't take with

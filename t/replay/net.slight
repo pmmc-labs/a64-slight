@@ -12,7 +12,7 @@
 (defun server (parent)
     (recv
         ((:open l port) (send parent (list :port port)) (server parent))
-        ((:accept l c)  (connect c (echo)) (server parent))))
+        ((:accept l c)  (connect c echo) (server parent))))
 
 (defun client (lines got)
     (recv
@@ -27,12 +27,12 @@
 ; The top level is a task (D243): each listener tells it its port, or its
 ; path, at an address.
 (let to (address))
-(let l (connect :tcp/listen 0 (server to)))
+(let l (connect :tcp/listen 0 server to))
 (let port (cadr (read to)))
-(pprint (join (connect :tcp (str "echo.test:" port) (client (list "one" "two" "three") ()))))
+(pprint (join (connect :tcp (str "echo.test:" port) client (list "one" "two" "three") ())))
 (kill l)
-(let u (connect :unix/listen (car @ARGV) (server to)))
+(let u (connect :unix/listen (car @ARGV) server to))
 (let path (cadr (read to)))
-(pprint (join (connect :unix path (client (list "four" "five") ()))))
-(pprint (join (connect :unix path (recv ((:open c) (let who (socket/peer c)) (disconnect c) who)))))
+(pprint (join (connect :unix path client (list "four" "five") ())))
+(pprint (join (connect :unix path (lambda () (recv ((:open c) (let who (socket/peer c)) (disconnect c) who))))))
 (kill u)

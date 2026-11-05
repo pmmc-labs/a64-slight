@@ -34,8 +34,8 @@
 (pprint (list math/E math/INF (- 0 math/INF) (> math/INF 1.0e308) (== math/INF (* 2 math/INF))))
 (pprint (list (int->float 3) (int->float -4611686018427387904) (int->float 9007199254740993)))
 (defun kind (pid) (car (cadr (join pid))))
-(pprint (kind (fork (math/mod 1 0))))
-(pprint (kind (fork (math/mod 1.5 2))))
-(pprint (kind (fork (int->float 1.5))))
-(kind (fork (math/hypot "3" 4)))
-; warns: 38:31 39:33 40:25
+(pprint (kind (fork (lambda () (math/mod 1 0)))))
+(pprint (kind (fork (lambda () (math/mod 1.5 2)))))
+(pprint (kind (fork (lambda () (int->float 1.5)))))
+(kind (fork (lambda () (math/hypot "3" 4))))
+; warns: 38:42 39:44 40:36

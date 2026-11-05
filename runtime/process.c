@@ -1310,6 +1310,7 @@ typedef struct item {
     rt_value_t   addr;                  // a monitor's: the address its notice goes to, or 0 (D277)
     rt_msg_t    *msg;                   // a message, or a result
     rt_code_t    code;                  // a start's: the process's code...
+    rt_value_t   fun;                   // ...the function it calls (D286)...
     rt_chunk_t  *chunk;                 // ...the copy of its values...
     uint64_t     n;
     rt_value_t   args[RT_MAX_ARGS];
@@ -1634,21 +1635,32 @@ static void fail_start(rt_proc_t *p, rt_value_t reason) {
     if (c) adopt(p, c);
 }
 
+// What a fork applies, values[0], must be a function of the n - 1 values
+// after it: checked here, in the parent, so that a fork of what isn't one
+// faults where it's written and starts nothing (D286). A closure's words
+// after its header are its code, its arity and its name.
+static void check_fun(uint64_t n, const rt_value_t *values, const char *site) {
+    if (!rt_is_closure(values[0])) rt_fault(RT_FAULT_NOT_FUNC, values[0], site);
+    if (rt_box(values[0])[2] != n - 1) rt_fault(RT_FAULT_ARITY, values[0], site);
+}
+
 // A child of parent's, here (fork, and connect's processes). The values
 // are copied first, so that one too big faults the parent before there's
 // a child (D265).
-static rt_proc_t *new_child(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
-    rt_value_t  args[RT_MAX_ARGS];
-    rt_chunk_t *c = copy_values_after(parent->isle, values, args, n, 0, site);
-    rt_proc_t  *p = new_process_on(parent->isle, code, parent->pid);
+static rt_proc_t *new_child(rt_proc_t *parent, uint64_t n, const rt_value_t *values, const char *site) {
+    rt_value_t  vals[RT_MAX_ARGS + 1];
+    check_fun(n, values, site);
+    rt_chunk_t *c = copy_values_after(parent->isle, values, vals, n, 0, site);
+    rt_proc_t  *p = new_process_on(parent->isle, rt_apply_start, parent->pid);
     rt_rand_split(parent, p);
-    memcpy(p->args, args, n * sizeof *args);
+    p->fun = vals[0];
+    memcpy(p->args, vals + 1, (n - 1) * sizeof *vals);
     if (c) adopt(p, c);
     return p;
 }
 
-rt_value_t rt_fork(rt_proc_t *parent, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
-    return new_child(parent, code, n, values, site)->pid;
+rt_value_t rt_fork(rt_proc_t *parent, uint64_t n, const rt_value_t *values, const char *site) {
+    return new_child(parent, n, values, site)->pid;
 }
 
 // --- addresses (D243) ---------------------------------------------------------
@@ -2538,6 +2550,7 @@ static void system_for(rt_proc_t *p, const char *site);
 // parent, which waits for it.
 static void start_here(item_t *it) {
     rt_proc_t *c = rt_new_process(it->code, it->from);
+    c->fun         = it->fun;
     c->rand_seed   = it->rand_seed;
     c->rand_gamma  = it->rand_gamma;
     memcpy(c->args, it->args, it->n * sizeof *it->args);
@@ -2735,16 +2748,18 @@ static int inbox_now(void) {
 
 // A process on island k, another, made there, which numbers it itself;
 // the caller waits for its pid, keeping its stack, as join does.
-static rt_value_t place(uint64_t k, rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, int source) {
+static rt_value_t place(uint64_t k, uint64_t n, const rt_value_t *values, const char *site, int source) {
     rt_proc_t  *p = rt_current;
-    rt_value_t  args[RT_MAX_ARGS];
-    rt_chunk_t *c = copy_values_after(&my, values, args, n, 0, site);     // first, as new_child's (D265)
+    rt_value_t  vals[RT_MAX_ARGS + 1];
+    check_fun(n, values, site);
+    rt_chunk_t *c = copy_values_after(&my, values, vals, n, 0, site);     // first, as new_child's (D265)
     item_t     *it = new_item(ITEM_START, 0, p->pid);
     rt_proc_t   child;
     rt_rand_split(p, &child);
-    memcpy(it->args, args, n * sizeof *args);
-    it->code        = code;
-    it->n           = n;
+    memcpy(it->args, vals + 1, (n - 1) * sizeof *vals);
+    it->code        = rt_apply_start;
+    it->fun         = vals[0];
+    it->n           = n - 1;
     it->chunk       = c;
     it->rand_seed   = child.rand_seed;
     it->rand_gamma  = child.rand_gamma;
@@ -2761,11 +2776,11 @@ static rt_value_t place(uint64_t k, rt_code_t code, uint64_t n, const rt_value_t
 
 // (fork/on k expr): a process on island k (D256); on the caller's own,
 // fork's.
-rt_value_t rt_fork_on(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) {
+rt_value_t rt_fork_on(uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) {
     int64_t k = rt_need_int(where, site);
     if (k < 0 || (uint64_t)k >= nislands) rt_fault(RT_FAULT_RANGE, where, site);
-    if ((uint64_t)k == my.island) return rt_fork(rt_current, code, n, values, site);
-    return place((uint64_t)k, code, n, values, site, 0);
+    if ((uint64_t)k == my.island) return rt_fork(rt_current, n, values, site);
+    return place((uint64_t)k, n, values, site, 0);
 }
 
 static inline void events(void);
@@ -3080,9 +3095,9 @@ static int             input_ended;
 
 // The terminal is island 0's (D256): from another, the actor is placed
 // there.
-rt_value_t rt_connect(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
-    if (my.island) return place(0, code, n, values, site, SOURCE_KEYS);
-    rt_value_t pid = rt_fork(rt_current, code, n, values, site);
+rt_value_t rt_connect(uint64_t n, const rt_value_t *values, const char *site) {
+    if (my.island) return place(0, n, values, site, SOURCE_KEYS);
+    rt_value_t pid = rt_fork(rt_current, n, values, site);
     keys_for(slot(pid)->proc);
     return pid;
 }
@@ -4038,10 +4053,10 @@ static int fs_open(rt_proc_t *p, const char *site, rt_value_t path, uint64_t mod
     return 0;
 }
 
-rt_value_t rt_connect_fs(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+rt_value_t rt_connect_fs(uint64_t n, const rt_value_t *values, const char *site,
                          rt_value_t path, uint64_t mode) {
     if (!rt_is_string(path)) rt_fault(RT_FAULT_NOT_STRING, path, site);
-    rt_value_t pid = rt_fork(rt_current, code, n, values, site);
+    rt_value_t pid = rt_fork(rt_current, n, values, site);
     rt_proc_t *p   = slot(pid)->proc;
     int        err = fs_open(p, site, path, mode);
     if (err) {
@@ -4240,7 +4255,7 @@ static int unix_at(rt_proc_t *p, const char *site, rt_value_t where, uint64_t mo
     return mode == RT_UNIX_LISTEN ? unix_listen(p, site, path, len) : unix_connect(p, site, path, len);
 }
 
-rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+rt_value_t rt_connect_tcp(uint64_t n, const rt_value_t *values, const char *site,
                           rt_value_t where, uint64_t mode) {
     if (mode == RT_TCP_LISTEN && !rt_is_string(where)) {
         int64_t port = rt_need_int(where, site);
@@ -4248,7 +4263,7 @@ rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, 
     } else if (!rt_is_string(where)) {
         rt_fault(RT_FAULT_NOT_STRING, where, site);
     }
-    rt_value_t pid = rt_fork(rt_current, code, n, values, site);
+    rt_value_t pid = rt_fork(rt_current, n, values, site);
     rt_proc_t *p   = slot(pid)->proc;
     int        err = mode == RT_TCP_LISTEN  ? listen_at(p, site, where)
                    : mode == RT_TCP_CONNECT ? tcp_connect(p, site, rt_string_bytes(where), rt_string_len(where))
@@ -4260,11 +4275,11 @@ rt_value_t rt_connect_tcp(rt_code_t code, uint64_t n, const rt_value_t *values, 
     return pid;
 }
 
-rt_value_t rt_connect_device(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+rt_value_t rt_connect_device(uint64_t n, const rt_value_t *values, const char *site,
                              rt_value_t dev) {
     rt_device_t *d = entry(dev, site)->device;
     if (!d) rt_fault(RT_FAULT_NOT_DEVICE, dev, site);
-    rt_value_t pid = rt_fork(rt_current, code, n, values, site);
+    rt_value_t pid = rt_fork(rt_current, n, values, site);
     rt_proc_t *p   = slot(pid)->proc;
     unown(d);
     d->owner   = pid;
@@ -4636,10 +4651,10 @@ static int exec_start(rt_proc_t *p, const char *site, rt_value_t cmd, uint64_t l
     return 0;
 }
 
-rt_value_t rt_connect_exec(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site,
+rt_value_t rt_connect_exec(uint64_t n, const rt_value_t *values, const char *site,
                            rt_value_t cmd) {
     uint64_t   len = need_command(cmd, site);
-    rt_value_t pid = rt_fork(rt_current, code, n, values, site);
+    rt_value_t pid = rt_fork(rt_current, n, values, site);
     rt_proc_t *p   = slot(pid)->proc;
     int        err = exec_start(p, site, cmd, len);
     if (err) {
@@ -4861,9 +4876,11 @@ static void share_tables(void) {
     rt_symbol_name(0);
 }
 
-// Where p is (see above), or 0.
+// Where p is (see above), or 0: before its first run, the function it
+// will call (D286).
 static uintptr_t where(const rt_proc_t *p) {
-    return p->stack ? p->at : (uintptr_t)p->code;
+    if (p->stack) return p->at;
+    return p->code == rt_apply_start ? (uintptr_t)rt_box(p->fun)[1] : (uintptr_t)p->code;
 }
 
 static void *grow(void *array, uint64_t *cap, size_t size) {
@@ -5276,9 +5293,9 @@ static void system_told(item_t *it) {
 }
 
 // :system is island 0's too (D256).
-rt_value_t rt_connect_system(rt_code_t code, uint64_t n, const rt_value_t *values, const char *site) {
-    if (my.island) return place(0, code, n, values, site, SOURCE_SYSTEM);
-    rt_value_t pid = rt_fork(rt_current, code, n, values, site);
+rt_value_t rt_connect_system(uint64_t n, const rt_value_t *values, const char *site) {
+    if (my.island) return place(0, n, values, site, SOURCE_SYSTEM);
+    rt_value_t pid = rt_fork(rt_current, n, values, site);
     system_for(slot(pid)->proc, site);
     return pid;
 }

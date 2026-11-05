@@ -10,7 +10,7 @@
 (defun pmap (f xs)
     (let tos (map (lambda (_) (address)) xs))
     (dotimes 0 (length xs)
-        (lambda (i) (fork/on (% i (islands)) (send (nth i tos) (f (nth i xs))))))
+        (lambda (i) (fork/on (% i (islands)) (lambda () (send (nth i tos) (f (nth i xs)))))))
     (map read tos))
 
 (pprint (pmap (lambda (n) (steps n 0)) (range 1 13)))

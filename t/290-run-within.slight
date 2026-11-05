@@ -12,4 +12,4 @@
 (pprint (exec/run-within 100 (list "sh" "-c" "echo quick; exit 2")))
 (pprint (description (tools/run yes)))
 (pprint (description (tools/run-within 300 yes)))
-(pprint (join (fork (tool/call (tools/run-within 100 yes) (list (list "command" "echo hi"))))))
+(pprint (join (fork (lambda () (tool/call (tools/run-within 100 yes) (list (list "command" "echo hi")))))))

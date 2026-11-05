@@ -31,14 +31,14 @@
 (pprint (list (kind (tuple 1 "one" #true () :k)) (kind (tuple 1.0 2 3 4 5)) (kind (tuple 1 "two" #true () :k))))
 
 ; no clause: :no-match, with the tuple
-(pprint (join (fork (match (tuple 1 2) (#(a) a)))))
+(pprint (join (fork (lambda () (match (tuple 1 2) (#(a) a))))))
 
 ; in recv, a message no clause fits is a dead letter
 (defun points (seen)
     (recv
         ((:point #(x y)) (points (cons (+ x y) seen)))
         (:done           (reverse seen))))
-(let p (fork (points ())))
+(let p (fork points ()))
 (send p (list :point (tuple 1 2)))
 (send p (list :point (list 3 4)))
 (send p (list :point (tuple 5 6 7)))
@@ -54,8 +54,8 @@
             (send $$ (tuple :add2 (* x 10)))
             (let y (recv (#(:add2 z) z)))
             (let f (lambda (k) (+ k (+ x y))))
-            (join (fork (f n))))))
-(let tw (fork (twice 1)))
+            (join (fork f n)))))
+(let tw (fork twice 1))
 (send tw (tuple :add 2))
 (pprint (join tw))
 
@@ -69,4 +69,4 @@
 (pprint (map two (list "ab" 2.5 two (lambda () (+ p q)) $$ :ab 12 () (tuple :a :b))))
 (pprint (match (list->tuple (range 0 40))
     (#(a _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ _ z) (list a z))))
-; warns: 34:21 43:9 44:9
+; warns: 34:32 43:9 44:9

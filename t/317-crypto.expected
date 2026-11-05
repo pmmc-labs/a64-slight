@@ -8,9 +8,9 @@
 (("3b7a8d453e76edb519238a515105a57508d0f169f480ebeee120a9e7803289fa" "6ed28c40a2fc6376678d938d10d76973426f6a335d34f614308e84bee1e0825504b4fd8a29ec9e2a4bfef2f8da5c4b39937713a46ef9f1a70bfd7378a062ac34") ("c2d7d4c2256ddb097409ec0c67e1d58fa1a007fc6932cac0d892a525d08af7cc" "004646c6234e37d4677ef416a14488e43eb08e3733d4bc71d39084fcac3b3564892ef9eb8870c2834caadf62b660035904c707aca855e50e87c94cf0f233d129") ("ef699a99d6d629d2b2f2e5e926dd5fa0bc0706e2d3a5961f88ba803ac78a0e6c" "9592ecd80ce4ede3e27656eda4ba50730bb9f3220571039ccd3970f290c3aed45ae9ec0522d64471f8628a1a57e686d758a1881724e54a67a9f8868d425caa02") ("e60a395e9403dbd3a14c852109e7736ce7f0663123870d670d27d097a9226a51" "1a960aeb80731a01e1b88da7d4379138aed9e5778f86ca8d9b1fce9d1f5dea33ac12e8ff60126388cbbd55eae65f426e0aa2a3bbda1a5fc589f61c00a21fbc98"))
 (#true #false #false #true)
 (0 32 300 #false)
-fault in #<pid 2>: out of range: -1 (crypto/random-bytes at t/317-crypto.slight:31:21)
+fault in #<pid 2>: out of range: -1 (crypto/random-bytes at t/317-crypto.slight:31:32)
 out-of-range
-fault in #<pid 3>: out of range: 1048577 (crypto/random-bytes at t/317-crypto.slight:32:21)
+fault in #<pid 3>: out of range: 1048577 (crypto/random-bytes at t/317-crypto.slight:32:32)
 out-of-range
 ("" "Zg==" "Zm8=" "Zm9v" "Zm9vYg==" "Zm9vYmE=" "Zm9vYmFy")
 ("Zg" "Zm8" "Zm9v" "-_8" "-_-_")

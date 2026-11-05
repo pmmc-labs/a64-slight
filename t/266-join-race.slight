@@ -5,8 +5,8 @@
 ; Results are shown by name, (name result), and times in milliseconds on
 ; the virtual clock.
 
-(defun after-ms (ms v) (fork (do (sleep ms) v)))
-(defun fail-ms (ms r) (fork (do (sleep ms) (raise r))))
+(defun after-ms (ms v) (fork (lambda () (do (sleep ms) v))))
+(defun fail-ms (ms r) (fork (lambda () (do (sleep ms) (raise r)))))
 (defun named (names r) (cons (lookup (car r) names) (cdr r)))
 (defun took (t0) (div (- (clock/us) t0) 1000))
 
@@ -37,23 +37,23 @@
 (pprint (named (list (list d :d) (list e :e)) (join/race (list e d))))
 
 ; one that's killed ends with (:error :killed), which wins as any end does
-(let f (fork (sleep 1000)))
+(let f (fork sleep 1000))
 (let g (after-ms 50 :g))
-(fork (do (sleep 1) (kill f)))
+(fork (lambda () (do (sleep 1) (kill f))))
 (pprint (named (list (list f :f) (list g :g)) (join/race (list f g))))
 
 ; a racer that's killed takes its watches with it: h ends later, and wakes
 ; no one
 (let h (after-ms 5 :h))
-(let racer (fork (join/race (list h))))
+(let racer (fork (lambda () (join/race (list h)))))
 (sleep 1)
 (kill racer)
 (pprint (list (join racer) (join h)))
 
 ; racers on the same pid wake in the order they asked
 (let k (after-ms 5 :k))
-(let r1 (fork (do (join/race (list k)) (pprint :first))))
-(let r2 (fork (do (join/race (list k)) (pprint :second))))
+(let r1 (fork (lambda () (do (join/race (list k)) (pprint :first)))))
+(let r2 (fork (lambda () (do (join/race (list k)) (pprint :second)))))
 (join r2)
 
 ; a pool of two: a job starts as soon as one of the two running ends
@@ -71,7 +71,7 @@
 
 ; a timeout: a race against a process that sleeps
 (defun within (ms pid)
-    (let timer (fork (sleep ms)))
+    (let timer (fork sleep ms))
     (match (join/race (list pid timer))
         ((p result) (if (eq? p pid) (do (kill timer) result) (do (kill pid) (list :error :timeout))))))
 (pprint (within 10 (after-ms 5 :quick)))
@@ -85,8 +85,8 @@
     (recv ((:process s2 i) i)))
 (let w1 (after-ms 10 :w1))
 (let w2 (after-ms 20 :w2))
-(let racer2 (fork (racing (list w2 w1))))
+(let racer2 (fork racing (list w2 w1)))
 (sleep 1)
-(let info (cadr (join (connect :system (asking racer2)))))
+(let info (cadr (join (connect :system asking racer2))))
 (pprint (list (lookup :state info) (eq? (lookup :joining info) (list w2 w1)) (lookup :in info) (lookup :stack info)))
 (named (list (list w1 :w1) (list w2 :w2)) (cadr (join racer2)))

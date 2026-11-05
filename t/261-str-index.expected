@@ -19,15 +19,15 @@
 ((97) (98))
 ("aéb")
 "éé"
-fault in #<pid 2>: out of range: 5 (str/at at t/261-str-index.slight:46:21)
+fault in #<pid 2>: out of range: 5 (str/at at t/261-str-index.slight:46:32)
 out-of-range
-fault in #<pid 3>: out of range: -6 (str/at at t/261-str-index.slight:47:21)
+fault in #<pid 3>: out of range: -6 (str/at at t/261-str-index.slight:47:32)
 out-of-range
-fault in #<pid 4>: out of range: 0 (str/code-at at t/261-str-index.slight:48:21)
+fault in #<pid 4>: out of range: 0 (str/code-at at t/261-str-index.slight:48:32)
 out-of-range
-fault in #<pid 5>: not an integer: "1" (str/slice at t/261-str-index.slight:49:21)
+fault in #<pid 5>: not an integer: "1" (str/slice at t/261-str-index.slight:49:32)
 not-an-int
-fault in #<pid 6>: not a string: a (str/index-of at t/261-str-index.slight:50:21)
+fault in #<pid 6>: not a string: a (str/index-of at t/261-str-index.slight:50:32)
 not-a-string
-fault in #<pid 7>: not an integer: "0" (str/last-index-of at t/261-str-index.slight:51:13)
+fault in #<pid 7>: not an integer: "0" (str/last-index-of at t/261-str-index.slight:51:24)
 not-an-int

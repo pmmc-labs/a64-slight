@@ -45,7 +45,7 @@
 
 (let v (list (tuple "a" 1.5 twice) :ok (list 2 3)))
 (let before (hash v))
-(let h (fork (hasher)))
+(let h (fork hasher))
 (pprint (ask-hash h v before))
 (dotimes 0 20 (lambda (i) (length (range 0 100000))))
 (pprint (== (hash v) before))

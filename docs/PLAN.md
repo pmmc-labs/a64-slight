@@ -2576,11 +2576,15 @@ living town now, which needs the simulation decisions first and is
 supervision library first, OTP's shapes, since the way to find what
 repeats is to write the program and look.
 
-### `fork` takes a function and its arguments (proposed, Nov 2026)
+### `fork` takes a function and its arguments (agreed and built, D286, Nov 2026)
 
 From the talk after D285 (Stevan: "Yes this is what I was thinking for
-fork and `$$`. It makes it much more clear."). Nothing is agreed by
-this section; it's the proposal to decide on.
+fork and `$$`. It makes it much more clear."). Agreed and built, D286:
+`(fork f arg ...)`, `(fork/on k f arg ...)` and `(connect ... f arg
+...)`, with `(fork 42)` refused by the compiler ("`fork` should always
+take a function in its first position"), a bad function faulting the
+caller, `fork f(a, b)` and `fork { ... }` in `.sly`, every program
+migrated, golden test 378. What follows is the proposal as it was put.
 
 **The itch.** In `(fork expr)`, `expr` runs in the child, so `$$` in it
 is the child, and a parent that wants the child to know it binds

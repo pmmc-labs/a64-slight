@@ -39,7 +39,7 @@ Three ways, for three sizes of job.
         ((:line f s) (longest (if (> (str/len s) (str/len best)) s best)))
         ((:eof f)    best)))
 
-(join (connect :fs/read path (longest "")))
+(join (connect :fs/read path longest ""))
 ```
 
 <!-- output: ../code/howto-lines.expected -->

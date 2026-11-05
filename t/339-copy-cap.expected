@@ -1,10 +1,10 @@
-fault in #<pid 2>: heap exhausted (fork at t/339-copy-cap.slight:15:45)
+fault in #<pid 2>: heap exhausted (fork at t/339-copy-cap.slight:15:56)
 heap
-fault in #<pid 3>: heap exhausted (send at t/339-copy-cap.slight:16:45)
+fault in #<pid 3>: heap exhausted (send at t/339-copy-cap.slight:16:56)
 heap
-fault in #<pid 5>: heap exhausted (after at t/339-copy-cap.slight:17:45)
+fault in #<pid 5>: heap exhausted (after at t/339-copy-cap.slight:17:56)
 heap
-fault in #<pid 7>: heap exhausted (fork/on at t/339-copy-cap.slight:18:45)
+fault in #<pid 7>: heap exhausted (fork/on at t/339-copy-cap.slight:18:56)
 heap
 fault in #<pid 8>: heap exhausted (its end)
 heap

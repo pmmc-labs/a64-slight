@@ -14,7 +14,7 @@
 (defun scaled (xs k) (map (lambda (y) (* (+ y k) k)) xs))
 (defun chain-20 (x) (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (* x x))))))))))))))))))))))
 (defun chain-30 (x) (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (+ x (* x x))))))))))))))))))))))))))))))))
-(defun failing (thunk) (pprint (join (fork (thunk)))))
+(defun failing (thunk) (pprint (join (fork thunk))))
 
 (pprint (dist 1.0 2.0 2.0))
 (pprint (dist 0.1 0.2 0.3))

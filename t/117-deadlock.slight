@@ -5,4 +5,4 @@
     (pprint :waiting)
     (wait-forever))
 
-(join (fork (top-level)))
+(join (fork top-level))

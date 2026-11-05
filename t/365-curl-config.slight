@@ -15,7 +15,7 @@
                       (str path " " (lookup :query req))))))
 
 (defun fetch (url)
-    (join (fork (tool/call (tools/fetch (lambda (what) #true)) (list (list "url" url))))))
+    (join (fork (lambda () (tool/call (tools/fetch (lambda (what) #true)) (list (list "url" url)))))))
 
 (defun based (fetched base) (match fetched ((:ok text) (list :ok (str/join "BASE" (str/split text base))))))
 
@@ -29,4 +29,4 @@
     (kill srv)
     :done)
 
-(join (fork (top-level)))
+(join (fork top-level))

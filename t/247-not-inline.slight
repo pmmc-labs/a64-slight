@@ -10,7 +10,7 @@
 (pprint (and (not (== 1 2)) (not (cons? ()))))
 (pprint (filter (lambda (x) (not (== x 2))) (list 1 2 3)))
 (pprint (map not (list #true #false)))
-(pprint (kind (fork (not 5))))
-(pprint (kind (fork (if (not 6) 1 2))))
+(pprint (kind (fork (lambda () (not 5)))))
+(pprint (kind (fork (lambda () (if (not 6) 1 2)))))
 :done
-; warns: 13:26 14:30
+; warns: 13:37 14:41

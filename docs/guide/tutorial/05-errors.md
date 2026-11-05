@@ -16,10 +16,10 @@ keeps it running through bugs not yet found.
 ```lisp
 (@include "tut-store.slight")
 
-(let s (fork (store ())))
+(let s (fork store ()))
 (call s (list :put "apple" 3))
 (call s (list :put "color" "red"))
-(pprint (join (fork (call s (list :incr "color")))))
+(pprint (join (fork call s (list :incr "color"))))
 (join s)
 ```
 
@@ -84,12 +84,12 @@ ending of its own with `raise`:
         ((:ok value)     value)
         ((:error reason) (raise (list reason key)))))
 
-(let s (fork (store ())))
+(let s (fork store ()))
 (call s (list :put "color" "red"))
 (pprint (call s (list :incr "color")))
 (pprint (call s (list :incr "hits")))
-(pprint (join (fork (must-get s "hits"))))
-(join (fork (must-get s "plum")))
+(pprint (join (fork must-get s "hits")))
+(join (fork must-get s "plum"))
 ```
 
 <!-- output: ../code/tut-5-checked.expected -->
@@ -119,7 +119,7 @@ message, and starts a fresh one when it ends:
 ; Starts the store and watches it, and passes it every message. When it
 ; ends, it starts another, with an empty table.
 (defun supervise ()
-    (let s (fork (store ())))
+    (let s (fork store ()))
     (monitor s)
     (supervisor s))
 
@@ -146,10 +146,10 @@ This is the store from `tut-store.slight`, bug and all:
 
 <!-- code: ../code/tut-5-supervisor.slight -->
 ```lisp
-(let sup (fork (supervise)))
+(let sup (fork supervise))
 (call sup (list :put "apple" 3))
 (call sup (list :put "color" "red"))
-(pprint (join (fork (ask-within 1000 sup (list :do (list :incr "color"))))))
+(pprint (join (fork ask-within 1000 sup (list :do (list :incr "color")))))
 (pprint (call sup (list :get "apple")))
 (call sup (list :put "apple" 4))
 ```

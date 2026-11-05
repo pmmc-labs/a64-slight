@@ -154,7 +154,7 @@
 (defun rpc/stream (conn name args)
     (let text (rpc/printed name args))
     (let caller $$)
-    (fork (rpc/streaming conn caller text)))
+    (fork rpc/streaming conn caller text))
 
 (defun rpc/streaming (conn caller text)
     (monitor conn)
@@ -210,13 +210,13 @@
 ; at where, which tells told where it listens.
 (defun rpc/dial-to (where handlers told)
     (if (rpc/path? where)
-        (connect :unix where (rpc/opening handlers told))
-        (connect :tcp where (rpc/opening handlers told))))
+        (connect :unix where rpc/opening handlers told)
+        (connect :tcp where rpc/opening handlers told)))
 
 (defun rpc/listen-at (where handlers told most)
     (if (rpc/path? where)
-        (connect :unix/listen where (rpc/accepting handlers told most 0))
-        (connect :tcp/listen where (rpc/accepting handlers told most 0))))
+        (connect :unix/listen where rpc/accepting handlers told most 0)
+        (connect :tcp/listen where rpc/accepting handlers told most 0)))
 
 ; As rpc/connect, over a command's input and output: ssh, say, to a
 ; machine whose program listens at 127.0.0.1 alone,
@@ -224,7 +224,7 @@
 ; The command's stderr comes with its stdout, so it mustn't write
 ; anything but messages there.
 (defun rpc/exec (cmd handlers)
-    (rpc/opened (address) (lambda (to) (connect :exec cmd (rpc/opening handlers to)))))
+    (rpc/opened (address) (lambda (to) (connect :exec cmd rpc/opening handlers to))))
 
 ; (:ok conn) once the connection (dial to) makes tells to it's open, or
 ; (:error why) if it ends first.
@@ -285,7 +285,7 @@
             (if (and (int? most) (>= n most))
                 (do (disconnect c)
                     (rpc/accepting handlers told most n))
-                (do (monitor (connect c (rpc/opening handlers ())))
+                (do (monitor (connect c rpc/opening handlers ()))
                     (rpc/accepting handlers told most (+ n 1)))))
         ((:exit _ _)
             (rpc/accepting handlers told most (- n 1)))))
@@ -304,7 +304,7 @@
 ; with :disconnected. Each time a connection opens, (on-open conn) runs
 ; in a process of its own: to say who this end is, say.
 (defun rpc/keep (where handlers on-open)
-    (fork (rpc/dial where handlers on-open 100)))
+    (fork rpc/dial where handlers on-open 100))
 
 (defun rpc/dial (where handlers on-open delay)
     (let me $$)
@@ -317,7 +317,7 @@
 (defun rpc/keeping (where handlers on-open delay c up)
     (recv
         ((:rpc/open _)
-            (fork (on-open c))
+            (fork on-open c)
             (rpc/keeping where handlers on-open 100 c #true))
         ((:rpc/call text to from)
             (if up
@@ -441,9 +441,9 @@
                             (rpc/send c (list :fail id reason))
                             theirs)
                         ((:ok values)
-                            (let p (fork (rpc/run f values)))
+                            (let p (fork rpc/run f values))
                             (monitor p)
-                            (fork (rpc/watch p))
+                            (fork rpc/watch p)
                             (assoc id p theirs))))))))
 
 ; Stops p, a call from the other end, if the connection, the parent,
