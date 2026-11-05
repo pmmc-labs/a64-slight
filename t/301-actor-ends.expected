@@ -1,10 +1,10 @@
-(ok 5)
-(ok 7)
-ended
-(exit #<pid 3> ended)
-(ok 9)
-(ok 9)
-(exit #<pid 6> (ok b))
-(exit #<pid 7> (ok c))
-(error killed)
-done
+(:ok 5)
+(:ok 7)
+:ended
+(:exit #<pid 3> :ended)
+(:ok 9)
+(:ok 9)
+(:exit #<pid 6> (:ok :b))
+(:exit #<pid 7> (:ok :c))
+(:error :killed)
+:done

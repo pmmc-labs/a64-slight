@@ -125,11 +125,11 @@ boolean.
 
 <!-- output: ../code/tut-7-log.expected -->
 ```
-(put "apple" 3)
-(put "pear" 5)
-(incr "apple")
-(del "pear")
-((ok 4) (ok ("apple")))
+(:put "apple" 3)
+(:put "pear" 5)
+(:incr "apple")
+(:del "pear")
+((:ok 4) (:ok ("apple")))
 ```
 
 `@ARGV` is the program's arguments, a list of strings. The first
@@ -179,9 +179,9 @@ Chapter 5's supervisor, with `start` in place of `fork`:
 <!-- output: ../code/tut-7-supervised.expected -->
 ```
 fault in #<pid 5>: not a number: "red" (+ at docs/guide/code/tut-store.slight:23:40)
-(restarting not-a-number)
-(error (timeout #<pid 3>))
-(ok 3)
+(:restarting :not-a-number)
+(:error (:timeout #<pid 3>))
+(:ok 3)
 ```
 
 The same fault, the same restart, but this time `"apple"` is still 3.

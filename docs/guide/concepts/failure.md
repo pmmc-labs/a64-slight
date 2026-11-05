@@ -35,13 +35,13 @@ go wrong, and what each looks like.
 
 <!-- output: ../code/con-failure.expected -->
 ```
-(ok 2)
+(:ok 2)
 fault in #<pid 3>: division by zero (div at docs/guide/code/con-failure.slight:3:21)
-(error (div-by-zero () "div at docs/guide/code/con-failure.slight:3:21"))
-(error (negative -5))
-(error killed)
-(ok (watched (error (negative -1))))
-error: gave-up
+(:error (:div-by-zero () "div at docs/guide/code/con-failure.slight:3:21"))
+(:error (:negative -5))
+(:error :killed)
+(:ok (:watched (:error (:negative -1))))
+error: :gave-up
 exit: 1
 ```
 

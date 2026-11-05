@@ -1,4 +1,4 @@
 fault in #<pid 5>: not a number: "red" (+ at docs/guide/code/tut-store.slight:23:40)
-(restarting not-a-number)
-(error (timeout #<pid 3>))
-(ok 3)
+(:restarting :not-a-number)
+(:error (:timeout #<pid 3>))
+(:ok 3)

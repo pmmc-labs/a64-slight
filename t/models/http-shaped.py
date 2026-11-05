@@ -24,5 +24,5 @@ for line, body in messages(sent):
     text = line + b" got " + str(len(body)).encode() + b" bytes: " + body
     answers += b"HTTP/1.1 200 OK\r\nContent-Length: " + str(len(text)).encode() + b"\r\n\r\n" + text
 shown = [body.decode().replace("\r", "\\r").replace("\n", "\\n") for _, body in messages(answers)]
-print("(ok (ok (" + " ".join('"%s"' % s for s in shown) + ")))")
+print("(:ok (:ok (" + " ".join('"%s"' % s for s in shown) + ")))")
 print("()")

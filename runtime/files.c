@@ -26,11 +26,11 @@ static rt_value_t pair(rt_value_t a, rt_value_t b, const char *site) {
 }
 
 static rt_value_t ok(rt_value_t x, const char *site) {
-    return pair(rt_symbol(RT_SYM_OK), x, site);
+    return pair(rt_keyword(RT_SYM_OK), x, site);
 }
 
 static rt_value_t failed(int err, rt_value_t path, const char *site) {
-    return pair(rt_symbol(RT_SYM_ERROR), pair(rt_symbol(RT_SYM_ERRS + rt_errno_name(err)), path, site), site);
+    return pair(rt_keyword(RT_SYM_ERROR), pair(rt_keyword(RT_SYM_ERRS + rt_errno_name(err)), path, site), site);
 }
 
 // The path as C has it: a string's bytes end in a NUL already, so only
@@ -77,10 +77,10 @@ rt_value_t rt_fs_stat(rt_value_t path, const char *site) {
     if (err) return failed(err, path, site);
     if (rt_io_stat(p, got) != 0) return failed(errno, path, site);
     rt_value_t info = RT_NIL;
-    info = cell(pair(rt_symbol(RT_SYM_STAT + RT_STAT_MODE), rt_int(got[3]), site), info, site);
-    info = cell(pair(rt_symbol(RT_SYM_STAT + RT_STAT_MODIFIED), rt_int(got[2]), site), info, site);
-    info = cell(pair(rt_symbol(RT_SYM_STAT + RT_STAT_SIZE), rt_int(got[1]), site), info, site);
-    info = cell(pair(rt_symbol(RT_SYM_KIND + RT_KIND_KIND), rt_symbol(RT_SYM_STAT + (uint64_t)got[0]), site), info, site);
+    info = cell(pair(rt_keyword(RT_SYM_STAT + RT_STAT_MODE), rt_int(got[3]), site), info, site);
+    info = cell(pair(rt_keyword(RT_SYM_STAT + RT_STAT_MODIFIED), rt_int(got[2]), site), info, site);
+    info = cell(pair(rt_keyword(RT_SYM_STAT + RT_STAT_SIZE), rt_int(got[1]), site), info, site);
+    info = cell(pair(rt_keyword(RT_SYM_KIND + RT_KIND_KIND), rt_keyword(RT_SYM_STAT + (uint64_t)got[0]), site), info, site);
     return ok(info, site);
 }
 

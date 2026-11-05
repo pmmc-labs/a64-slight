@@ -64,8 +64,9 @@ when the code runs.
 | `int`, `float` | `int`, `float` | the numbers |
 | `num` | `num` | `int \| float` |
 | `str` | `str` | strings |
-| `sym` | `sym` | every symbol, keywords and booleans included |
-| `:ok` | `:ok` | that symbol alone |
+| `sym` | `sym` | every symbol, `'name` |
+| `keyword` | `keyword` | every keyword, `:name` (D287) |
+| `:ok` | `:ok` | that keyword alone |
 | `true`, `false` | `#true`, `#false` | that boolean alone |
 | `bool` | `bool` | `true \| false` |
 | `[]`, `nil` | `()`, `nil` | `()` |
@@ -113,10 +114,11 @@ type Result<T, E> = :ok(T) | :error(E)
 
 What fits where:
 
-- `int` and `float` are each a `num`; a keyword is a `sym`, and so are
-  `true` and `false`; `[]` is a `list<T>` for any `T`.
-- `[A, B]` is a `list<A | B>`; `:tag(A)` is a `[sym, A]` and a
-  `list<sym | A>`.
+- `int` and `float` are each a `num`; `:ok` is a `keyword`; `true` and
+  `false` are each a `bool`, and neither a `sym` nor a `keyword`; `[]`
+  is a `list<T>` for any `T`.
+- `[A, B]` is a `list<A | B>`; `:tag(A)` is a `[keyword, A]` and a
+  `list<keyword | A>`.
 - `A` is an `A | B`. An `A | B` fits where a `C` is wanted if both `A`
   and `B` do.
 - A `fun(A) -> B` fits where a `fun(C) -> D` is wanted if a `C` is an

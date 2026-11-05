@@ -49,7 +49,7 @@ import { link, type Unit, type UnitKind } from './modules.ts';
 import { lowerPattern, NO_MATCH } from './pattern.ts';
 import { read } from './reader.ts';
 import { readSly } from './sly.ts';
-import { NIL, builtinSym, cons, form, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { isKw, kwName, NIL, builtinSym, cons, form, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { MAX_ARGS, RESERVED_SYMBOLS, SPECIAL_FORMS, TOP_PARAMS } from './values.ts';
 
 // The outside world: a key for the file at path that's the same however
@@ -221,8 +221,9 @@ export function relative(from: string, path: string): string {
     return out.join('/');
 }
 
-// The name in (quote name), or null.
+// The name of the keyword x, or null.
 function keyword(x: Sexp): string | null {
+    if (isKw(x)) return kwName(x);
     const items = isForm(x, 'quote') ? toArray(x) : null;
     return items !== null && items.length === 2 && items[1]!.t === 'sym' ? items[1]!.name : null;
 }

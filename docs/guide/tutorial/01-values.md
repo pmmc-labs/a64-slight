@@ -44,9 +44,9 @@ language with nothing to mutate.
 3.5
 3
 "a string"
-apple
+:apple
 #true
-(1 "two" three (4.5))
+(1 "two" :three (4.5))
 ()
 #true
 #false
@@ -62,8 +62,8 @@ ends.
 - Numbers are integers or floats. `/` always gives a float, and `div` is
   integer division.
 - A string is in double quotes, and prints in them.
-- `:apple` is a **keyword**, a symbol that stands for itself. It prints
-  without its colon. Keywords are slight's names for things: tags,
+- `:apple` is a **keyword**, a value that stands for itself, and prints
+  as it's written. Keywords are slight's names for things: tags,
   options, states, kinds of message.
 - `#true` and `#false` are the booleans.
 - `(list ...)` makes a list, which can hold anything, other lists
@@ -175,7 +175,7 @@ Putting a key builds a new table. It doesn't change the old one:
 ```
 (("apple" 4) ("pear" 5))
 4
-not-found
+:not-found
 3
 ("apple")
 ```

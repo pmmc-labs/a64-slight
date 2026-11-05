@@ -41,7 +41,7 @@ for n, line in ((-1, 'crypto/random-bytes -1'), (1048577, 'crypto/random-bytes 1
     col = source[at].index('(' + line) + 1
     pid = 2 if n < 0 else 3
     print(f'fault in #<pid {pid}>: out of range: {n} (crypto/random-bytes at t/317-crypto.slight:{at + 1}:{col})')
-    print('out-of-range')
+    print(':out-of-range')
 print(lst([q(base64.b64encode(m).decode()) for m in (b'', b'f', b'fo', b'foo', b'foob', b'fooba', b'foobar')]))
 print(lst([q(base64.urlsafe_b64encode(m).decode().rstrip('=')) for m in (b'f', b'fo', b'foo', b'\xfb\xff', b'\xfb\xff\xbf')]))
 

@@ -1,4 +1,4 @@
-(processes 576 joins-each 9)
+(:processes 576 :joins-each 9)
 generation 0
 .#......
 ..#.....
@@ -80,4 +80,4 @@ generation 8
 ..##.#..
 .....##.
 ........
-done
+:done

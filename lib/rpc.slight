@@ -342,7 +342,7 @@
     (recv
         ((:open c)
             (send c (list :read :sexp))
-            (rpc/send c (list :helo :rpc (rpc/version)))
+            (rpc/send c (list 'helo 'rpc (rpc/version)))
             (when (pid? told) (send told (list :rpc/open $$)))
             (rpc/loop c 0 () () (append handlers (list (rpc/help handlers))) ()))))
 
@@ -390,31 +390,31 @@
 ; A message from the other end.
 (defun rpc/heard (c seq mine theirs handlers watched msg)
     (match msg
-        ((:call id name & args)
+        (('call id name & args)
             (rpc/loop c seq mine (rpc/called c theirs handlers id name args) handlers watched))
-        ((:stop id)
+        (('stop id)
             (match (lookup id theirs)
                 (:not-found ())
                 (p          (kill p)))
             (rpc/loop c seq mine (rpc/without id theirs) handlers watched))
-        ((:next id v)
+        (('next id v)
             (rpc/tell mine id (list :rpc/next v))
             (rpc/loop c seq mine theirs handlers watched))
-        ((:done id v)
+        (('done id v)
             (rpc/tell mine id (list :rpc/done v))
             (rpc/loop c seq (rpc/without id mine) theirs handlers watched))
-        ((:fail id reason)
+        (('fail id reason)
             (rpc/tell mine id (list :rpc/fail reason))
             (rpc/loop c seq (rpc/without id mine) theirs handlers watched))
-        ((:helo :rpc 1)
+        (('helo 'rpc 1)
             (rpc/loop c seq mine theirs handlers watched))
-        ((:helo & _)
-            (rpc/send c (list :barf (list :unknown-protocol (rpc/echo msg))))
+        (('helo & _)
+            (rpc/send c (list 'barf (list :unknown-protocol (rpc/echo msg))))
             (rpc/hang-up c mine theirs))
-        ((:barf _)
+        (('barf _)
             (rpc/loop c seq mine theirs handlers watched))
         (_
-            (rpc/send c (list :barf (list :bad-message (rpc/echo msg))))
+            (rpc/send c (list 'barf (list :bad-message (rpc/echo msg))))
             (rpc/loop c seq mine theirs handlers watched))))
 
 ; What a barf says of a message the other end sent: the message, if it
@@ -428,17 +428,17 @@
 (defun rpc/called (c theirs handlers id name args)
     (cond
         ((not (eq? (lookup id theirs) :not-found))
-            (rpc/send c (list :barf (list :id-in-use (rpc/echo id))))
+            (rpc/send c (list 'barf (list :id-in-use (rpc/echo id))))
             theirs)
         (#true
             (match (rpc/find (rpc/word name) handlers)
                 (()
-                    (rpc/send c (list :fail id (list :no-such-call name)))
+                    (rpc/send c (list 'fail id (list :no-such-call name)))
                     theirs)
                 ((:rpc/handler hname _ params f)
                     (match (rpc/args hname params args)
                         ((:error reason)
-                            (rpc/send c (list :fail id reason))
+                            (rpc/send c (list 'fail id reason))
                             theirs)
                         ((:ok values)
                             (let p (fork rpc/run f values))
@@ -466,12 +466,12 @@
 (defun rpc/ended (c seq mine theirs handlers watched p result)
     (match (list (rpc/key-of p theirs) (rpc/caller-of p mine) result)
         (((id) _ (:error reason))
-            (rpc/send c (list :fail id (rpc/data reason)))
+            (rpc/send c (list 'fail id (rpc/data reason)))
             (rpc/loop c seq mine (rpc/without id theirs) handlers watched))
         (((id) _ _)
             (rpc/loop c seq mine (rpc/without id theirs) handlers watched))
         ((() (id) _)
-            (rpc/send c (list :stop id))
+            (rpc/send c (list 'stop id))
             (rpc/loop c seq (rpc/without id mine) theirs handlers watched))
         (_
             (rpc/loop c seq mine theirs handlers watched))))
@@ -514,12 +514,12 @@
         ((h & rest) (if (eq? (cadr h) name) h (rpc/find name rest)))))
 
 ; A name or a string argument as it came: a string, or a bare word, a
-; symbol, or (:symbol "name") for one this program doesn't mention; or
-; #false for anything else.
+; symbol, or (:symbol "name") for one this program doesn't mention, or a
+; keyword a caller here gives; or #false for anything else.
 (defun rpc/word (x)
     (cond
         ((str? x) x)
-        ((sym? x) (sym->str x))
+        ((or (sym? x) (keyword? x)) (sym->str x))
         (#true
             (match x
                 ((:symbol s) (if (str? s) s #false))

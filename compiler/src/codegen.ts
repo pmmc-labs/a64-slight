@@ -39,7 +39,7 @@
 // prelude keeps using the prelude's (D80).
 
 import { CompileError } from './errors.ts';
-import { builtinOf, builtinSym, float, form, own, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { isKw, kwName, builtinOf, builtinSym, float, form, own, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
 import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SPECIAL_FORMS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
 import { lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { checkBindable, checkDefunShape, checkParams } from './expand.ts';
@@ -368,6 +368,10 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     if (x.name === '^$$') return [st.t.loadProc('RT_PROC_PARENT'), st];
     if (x.name === '#true') return [st.t.loadConst('RT_TRUE'), st];
     if (x.name === '#false') return [st.t.loadConst('RT_FALSE'), st];
+    if (isKw(x)) {                                                  // a keyword is itself (D287)
+        const [w, st1] = symbolWordOf(st, x.name);
+        return [st.t.loadWord(w, x.name), st1];
+    }
     const si = lookup(cx.env, x.name);
     if (si !== null) return [st.t.loadSlot(si, x.name), st];
     if (TOP_PARAMS.includes(x.name)) throw new CompileError(`${x.name} is only seen at the top level: pass it to the functions that need it`, x.pos);
@@ -464,6 +468,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
                 list(sym('#true'), sym('#false'))), cx, st);
         }
     }
+    if (isKw(head)) throw new CompileError(`${head.name} is a keyword, not a function`, head.pos);
     if (SPECIAL_FORMS.includes(head.name)) throw notYet(x);
     // A builtin by a name no local can hide (pattern.ts), or by its own.
     const known  = head.name.endsWith(ON_CONSES);
@@ -623,7 +628,7 @@ function needFn(x: Pair, form: string, args: readonly Sexp[], i: number, shape: 
 
 // A literal: never a function, so refused where one must be.
 const isLiteral = (x: Sexp): boolean =>
-    x.t === 'int' || x.t === 'float' || x.t === 'str' || x.t === 'nil' || isForm(x, 'quote')
+    x.t === 'int' || x.t === 'float' || x.t === 'str' || x.t === 'nil' || isForm(x, 'quote') || isKw(x)
     || (x.t === 'sym' && (x.name === '#true' || x.name === '#false'));
 
 // (fork f arg ...): f and the arguments are evaluated here, in the
@@ -683,9 +688,8 @@ const SOURCES: Readonly<Record<string, readonly [string, ...string[]]>> = {
 function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     if (args.length === 0) throw new CompileError('connect takes a source or a device, a function, and its arguments', x.pos);
     const source = args[0]!;
-    const quoted = isForm(source, 'quote');
-    const items  = quoted ? toArray(source) : null;
-    const name   = items !== null && items.length === 2 && items[1]!.t === 'sym' ? (items[1] as Sym).name : null;
+    const quoted = isKw(source);
+    const name   = quoted ? kwName(source) : null;
     if (name === 'keypress' || name === 'system') {
         needFn(x, `connect :${name}`, args, 1, `(connect :${name} f arg ...)`);
         return compileFork(x, 'connect', args.slice(1), name === 'keypress' ? 'rt_connect' : 'rt_connect_system', cx, st);
@@ -873,8 +877,8 @@ function compileQuote(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St
         return [st.t.loadTagged(name, 'RT_TAG_LIST'), st1];
     }
     if (datum.t !== 'sym') throw notYet(x);
-    const [id, st1] = symbolId(st, datum.name);
-    return [st.t.loadWord(symbolWord(id), `'${datum.name}`), st1];
+    const [w, st1] = symbolWordOf(st, datum.name);
+    return [st.t.loadWord(w, isKw(datum) ? datum.name : `'${datum.name}`), st1];
 }
 
 // A quoted list's cells, side by side in the constant data, each one's
@@ -906,8 +910,8 @@ function staticWord(x: Pair, item: Sexp, st: St): [string, St] {
             return [`${name}+RT_TAG_BOXED`, st1];
         }
         case 'sym': {
-            const [id, st1] = symbolId(st, item.name);
-            return [`0x${symbolWord(id).toString(16)}`, st1];
+            const [w, st1] = symbolWordOf(st, item.name);
+            return [`0x${w.toString(16)}`, st1];
         }
         case 'pair': {
             const [name, st1] = staticList(x, item, st);
@@ -916,6 +920,13 @@ function staticWord(x: Pair, item: Sexp, st: St): [string, St] {
         default:
             throw notYet(x);
     }
+}
+
+// A symbol's or a keyword's word: one table of names, the kind in a bit (D287).
+function symbolWordOf(st: St, name: string): [bigint, St] {
+    const keyword = name.startsWith(':');
+    const [id, st1] = symbolId(st, keyword ? name.slice(1) : name);
+    return [symbolWord(id, keyword), st1];
 }
 
 function symbolId(st: St, name: string): [number, St] {
@@ -952,7 +963,7 @@ const RT_TAG_LIST = 1;
 
 // Type predicates, inline (the target's predicate). #true and #false are
 // symbols too, so sym? says yes to them.
-const PREDICATES: readonly string[] = ['int?', 'nil?', 'cons?', 'pid?', 'sym?', 'bool?'];
+const PREDICATES: readonly string[] = ['int?', 'nil?', 'cons?', 'pid?', 'sym?', 'keyword?', 'bool?'];
 
 // Builtins written in C (runtime/strings.c, tuples.c, json.c, ...): the C
 // function, and how many arguments it takes. Missing optional arguments
@@ -1003,6 +1014,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'int->str':           fixed('rt_int_to_str', 1, 2),
     'str->float':         fixed('rt_str_to_float', 1),
     'str->sym':           fixed('rt_str_to_sym', 1),
+    'str->keyword':       fixed('rt_str_to_keyword', 1),
     'sym->str':           fixed('rt_sym_to_str', 1),
     'str->bytes':         fixed('rt_str_to_bytes', 1),
     'bytes->str':         fixed('rt_bytes_to_str', 1),
@@ -1424,7 +1436,7 @@ function compileEquality(x: Pair, name: string, args: readonly Sexp[], cx: Cx, s
 
 function isImmediateLiteral(x: Sexp): boolean {
     if (x.t === 'int' || x.t === 'nil') return true;
-    if (x.t === 'sym') return RESERVED_SYMBOLS.includes(x.name);
+    if (x.t === 'sym') return RESERVED_SYMBOLS.includes(x.name) || isKw(x);
     if (!isForm(x, 'quote') || x.t !== 'pair' || x.cdr.t !== 'pair') return false;
     const datum = x.cdr.car;
     return datum.t === 'sym' || datum.t === 'int' || datum.t === 'nil';
@@ -1667,8 +1679,7 @@ function immediateWord(x: Sexp, st: St): [bigint, St] {
     const datum = isForm(x, 'quote') && x.t === 'pair' && x.cdr.t === 'pair' ? x.cdr.car : x;
     if (datum.t === 'int') return [intWord(datum.v), st];
     if (datum.t === 'nil') return [BigInt(RT_TAG_LIST), st];
-    const [id, st1] = symbolId(st, (datum as Sym).name);
-    return [symbolWord(id), st1];
+    return symbolWordOf(st, (datum as Sym).name);
 }
 
 // --- helpers ------------------------------------------------------------------

@@ -86,10 +86,10 @@ def program():
 
 def expected():
     for name, f, xs in UNARY:
-        print(f'({name} {" ".join(show(nearest(f(exact(x)))) for x in xs)})')
+        print(f'(:{name} {" ".join(show(nearest(f(exact(x)))) for x in xs)})')
     for name, f, xys in BINARY:
-        print(f'({name} {" ".join(show(nearest(f(exact(x), exact(y)))) for x, y in xys)})')
-    print('done')
+        print(f'(:{name} {" ".join(show(nearest(f(exact(x), exact(y)))) for x, y in xys)})')
+    print(':done')
 
 
 program() if '--program' in sys.argv else expected()

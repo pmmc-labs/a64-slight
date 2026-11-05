@@ -28,9 +28,9 @@
 
 <!-- output: ../code/howto-commands.expected -->
 ```
-(ok (0 "hello\n"))
-(ok (3 "out\nerr\n"))
-(error (enoent "no-such-command"))
+(:ok (0 "hello\n"))
+(:ok (3 "out\nerr\n"))
+(:error (:enoent "no-such-command"))
 (0 ("apple" "fig" "pear"))
 ```
 

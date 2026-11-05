@@ -206,6 +206,7 @@ test('defun is only allowed at the top level', () => {
 test('calls are checked against the function', () => {
     fails('(defun f (x) x) (f 1 2)', 'test.slight:1:17: f takes 1 argument, not 2');
     fails('(defun f (x y) x) (f)', 'test.slight:1:19: f takes 2 arguments, not 0');
+    fails('(:a 1)', 'test.slight:1:2: :a is a keyword, not a function');
     assert.match(compile('(defun f () 1) f'), /LOADADDR x0, fn_f_closure/);
 });
 
@@ -296,7 +297,8 @@ const symbolTable = (asm: string): string[] => {
 
 // Every program has these, in order; its own symbols come after.
 const BUILT_IN = [...RESERVED_SYMBOLS, ...RUNTIME_SYMBOLS];
-const firstWord = ((BUILT_IN.length << 3) | 5).toString(16);    // the first program symbol's id, shifted and tagged
+const firstWord = ((BUILT_IN.length << 4) | 5).toString(16);    // the first program symbol's id, shifted and tagged
+const firstKeyword = ((BUILT_IN.length << 4) | 13).toString(16);    // the same name as a keyword: the kind bit set (D287)
 
 test('symbols get ids in order of first mention, after #false, #true and the runtime\'s', () => {
     assert.deepEqual(BUILT_IN.slice(0, 4), ['#false', '#true', 'ok', 'error']);
@@ -306,7 +308,8 @@ test('symbols get ids in order of first mention, after #false, #true and the run
 });
 
 test('a symbol is its id, shifted and tagged', () => {
-    assert.match(compile(':a'), new RegExp(`movz x0, #0x${firstWord}, lsl #0 {4}// 'a`));
+    assert.match(compile(':a'), new RegExp(`movz x0, #0x${firstKeyword}, lsl #0 {4}// :a`));
+    assert.match(compile("'a"), new RegExp(`movz x0, #0x${firstWord}, lsl #0 {4}// 'a`));
 });
 
 test('quote takes one thing', () => {
@@ -654,7 +657,7 @@ test('recv clauses and patterns', () => {
     fails('(defun f () (pprint 1) (recv m))', 'test.slight:1:30: a recv clause is (pattern body...), not m');
     fails('(defun f () (recv (m)))', 'test.slight:1:19: a recv clause is (pattern body...), not (m)');
     fails('(defun f () (recv ((:a x x) 1)))', 'test.slight:1:26: x is in the pattern twice');
-    fails('(defun f () (recv ((:a &) 1)))', 'test.slight:1:20: & can only come before the last pattern of a list, not ((quote a) &)');
+    fails('(defun f () (recv ((:a &) 1)))', 'test.slight:1:20: & can only come before the last pattern of a list, not (:a &)');
     fails('(defun f () (recv ((:a $$) 1)))', "test.slight:1:24: can't bind $$");
     fails('(defun f () (recv ((:a cond) 1)))', "test.slight:1:24: can't bind cond");
     // patterns are match's (pattern.ts): literals anywhere, nesting, and a rest
@@ -709,7 +712,7 @@ const G = '(defun g () 1) ';
 test('connect is a fork whose process gets the keys, from :keypress', () => {
     assert.match(compile('(defun f (n) n) (let n 1) (connect :keypress f n)'), /mov {2}x0, #2\n {4}add {2}x1, sp, #\d+\n {4}LOADADDR x2, Lsite_\d+\n {4}bl {3}rt_connect\n/);
     assert.match(compile(G + '(connect :keypress g)'), /\.asciz "connect at test\.slight:1:16"/);
-    fails('42\n  (connect :x g)', "test.slight:2:12: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not (quote x)");
+    fails('42\n  (connect :x g)', "test.slight:2:12: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not :x");
     fails('(connect :keypress)', 'test.slight:1:1: connect :keypress takes a function, and its arguments: (connect :keypress f arg ...)');
     fails('(connect :keypress 1)', 'test.slight:1:20: connect takes a function, not 1');
     fails('(connect)', 'test.slight:1:1: connect takes a source or a device, a function, and its arguments');
@@ -759,7 +762,7 @@ test('connect to a file evaluates the path in the parent, and passes it and the 
     assert.match(compile(G + '(connect :fs/read "a" g)'), /mov {2}x4, #RT_FS_READ\n/);
     assert.match(compile(G + '(connect :fs/append "a" g)'), /mov {2}x4, #RT_FS_APPEND\n/);
     fails('(connect :fs/read "a")', 'test.slight:1:1: connect :fs/read takes a function, and its arguments: (connect :fs/read path f arg ...)');
-    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not (quote fs)");
+    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not :fs");
 });
 
 test('disconnect is a builtin in the runtime', () => {

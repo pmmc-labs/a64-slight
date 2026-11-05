@@ -714,18 +714,26 @@ rt_value_t rt_str_to_float(rt_value_t s, const char *site) {
     return isinf(d) ? RT_FALSE : rt_new_float(d, site);
 }
 
+// A symbol's or a keyword's name, without the colon (D287).
 rt_value_t rt_sym_to_str(rt_value_t sym, const char *site) {
     if ((sym & RT_TAG_MASK) != RT_TAG_SYMBOL) rt_fault(RT_FAULT_NOT_SYMBOL, sym, site);
     const char *name = rt_symbol_name(sym >> RT_SYMBOL_SHIFT);
     return rt_new_string(name, strlen(name), site);
 }
 
-// The symbol with this name, if the program mentions it anywhere; symbols
-// are only made by the compiler. Otherwise #false.
+// The symbol, or the keyword, with this name, if the program mentions
+// it anywhere, as either (D287); names are only made by the compiler.
+// Otherwise #false.
 rt_value_t rt_str_to_sym(rt_value_t s, const char *site) {
     need_string(s, site);
     int64_t id = rt_symbol_find(bytes_of(s), len_of(s));
     return id < 0 ? RT_FALSE : rt_symbol((uint64_t)id);
+}
+
+rt_value_t rt_str_to_keyword(rt_value_t s, const char *site) {
+    need_string(s, site);
+    int64_t id = rt_symbol_find(bytes_of(s), len_of(s));
+    return id < 0 ? RT_FALSE : rt_keyword((uint64_t)id);
 }
 
 // --- bytes ---------------------------------------------------------------------------
@@ -827,9 +835,9 @@ static const spec_t specs[] = {
 // The spec x, or -1 for (:bytes n), with n in *n; anything else faults.
 static int spec_of(rt_value_t x, int64_t *n, const char *site) {
     for (int k = 0; k < (int)(sizeof specs / sizeof *specs); k++) {
-        if (x == rt_symbol(RT_SYM_PACK + (uint64_t)k)) return k;
+        if (x == rt_keyword(RT_SYM_PACK + (uint64_t)k)) return k;
     }
-    if (rt_is_cons(x) && rt_car(x) == rt_symbol(RT_SYM_PACK + RT_PACK_BYTES) && rt_is_cons(rt_cdr(x))
+    if (rt_is_cons(x) && rt_car(x) == rt_keyword(RT_SYM_PACK + RT_PACK_BYTES) && rt_is_cons(rt_cdr(x))
         && rt_cdr(rt_cdr(x)) == RT_NIL) {
         *n = rt_need_int(rt_car(rt_cdr(x)), site);
         if (*n >= 0) return -1;
@@ -909,9 +917,9 @@ rt_value_t rt_bytes_unpack(rt_value_t specs_, rt_value_t s, rt_value_t at, const
         int64_t w = k < 0 ? n : specs[k].width;
         if ((uint64_t)w > len - (uint64_t)i) {
             rt_value_t *why = rt_alloc(32, site);
-            why[0] = rt_symbol(RT_SYM_ERROR);
+            why[0] = rt_keyword(RT_SYM_ERROR);
             why[1] = (rt_value_t)(why + 2) | RT_TAG_LIST;
-            why[2] = rt_symbol(RT_SYM_PACK + RT_PACK_SHORT);
+            why[2] = rt_keyword(RT_SYM_PACK + RT_PACK_SHORT);
             why[3] = RT_NIL;
             return (rt_value_t)why | RT_TAG_LIST;
         }
@@ -950,7 +958,7 @@ rt_value_t rt_bytes_unpack(rt_value_t specs_, rt_value_t s, rt_value_t at, const
         builder_add(&out, v, site);
     }
     rt_value_t *ok = rt_alloc(48, site);
-    ok[0] = rt_symbol(RT_SYM_OK);
+    ok[0] = rt_keyword(RT_SYM_OK);
     ok[1] = (rt_value_t)(ok + 2) | RT_TAG_LIST;
     ok[2] = out.list;
     ok[3] = (rt_value_t)(ok + 4) | RT_TAG_LIST;

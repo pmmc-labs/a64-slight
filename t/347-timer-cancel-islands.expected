@@ -2,5 +2,5 @@
 #true
 #false
 #false
-(mine not-fired)
-done
+(:mine :not-fired)
+:done

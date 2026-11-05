@@ -7300,3 +7300,53 @@ process whose value is `v`, which is two meanings for one form, and
 hides an old-style fork whose function returns a value; and a shorter
 spelling than a lambda for a body that isn't a call. Golden test 378;
 the unit tests; D285's entry on `$$` revised.
+
+**D287. Keywords, a type of their own.** *(Stevan, Nov 2026: "perhaps
+we should have a new type, a 'keyword' which is a symbol which
+evaluates to itself. They would not share the same namespace as `let`
+or `defun` defined symbols, and it would always print the `:` when it
+was serialized. This should decouple the two symbol types and I hope,
+simplify things"; and "lets go with K1 ... and I agree with your
+recommendations for printing it".)* A keyword, `:name`, is a type of
+its own: it evaluates to itself, is `eq?` to no symbol, and prints
+`:name` wherever it's printed, by `pprint`, `str`, `tty/write`,
+`sexp/print` and `log` alike (a field's value; a field's name is a
+key, bare). A symbol, `'name`, the names in a quoted list and a bare
+word in text read as data, is a name as data, printed bare, for
+programs that handle programs and for protocols made of words. `#true`
+and `#false` are neither (`bool?`; `sym?` was true of them, D53). In
+patterns `:tag` matches the keyword and `'name` the symbol. `keyword?`
+beside `sym?`; `str->keyword` beside `str->sym`; `sym->str` gives
+either's name. The reader makes `:name` a keyword datum, not `(quote
+name)` (D52 retired), so `'(:a b)` is the keyword `:a` and the symbol
+`b`; `.sly` spells both as it did. Types: `keyword` beside `sym`, `:ok`
+the type of that keyword, booleans neither. The runtime: one word,
+`id << 4 | kind << 3 | RT_TAG_SYMBOL`, the kind bit set for a keyword,
+so the two share the compiler's table of names and differ in a bit,
+`eq?` is still word equality and a pattern still compares a word;
+every tag the runtime makes is a keyword (`rt_keyword`); `hash` mixes
+the kind in with the name, so `:a` and `'a` hash apart (D209). Names
+the program doesn't mention, K1: `sexp/parse`, `:sexp` and `:source`
+read an unknown keyword as `(:keyword "name")`, as an unknown symbol
+reads as `(:symbol "name")` (D155), and `sexp/print` writes each back
+as it came, so data passes through unchanged and no table grows at
+run time (D14 holds); K2, interning with a cap, waits for a program
+that needs it. `rpc`'s wire words, bare in stupidrpc, are symbols now,
+`(list 'helo 'rpc 1)` sent and `(('helo 'rpc 1) ...)` matched, and
+`rpc/word` takes a keyword too; `http`'s method is a keyword or a
+string; the headers say `keyword` where they said `sym` of a tag.
+Every expected output that printed a keyword gained its colons, 262 of
+them by a patch accepted only where a colon before a keyword was the
+whole change, 21 Python models taught to write the colon and run
+again (and three found stale since D277 and D286, aligned with their
+tests: the root's reply address, a fork's lambda, a join gone), the
+guide's output blocks from the files, and a handful of tests that mixed
+quoted names with keywords, `'((a 1))` looked up with `:a`, write the
+keywords they mean. Rejected: one type still, only printed with its
+colon, which keeps `(eq? :ping 'ping)` true and a bare word in text
+reading as a tag; names in data as strings, which quoted lists and the
+readers of source can't do without; a new fault for `keyword->str`,
+not needed since `sym->str` takes both; and log keys with colons,
+since a key is a name. Golden test 379; t/041, 042, 062, 093, 170,
+181, 214 and 275 reworked; the unit tests; D52, D53, D155 and D163
+superseded in part.

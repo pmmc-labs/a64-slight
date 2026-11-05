@@ -1,3 +1,3 @@
-(998 done)
-(999 saw)
-(ok finished)
+(998 :done)
+(999 :saw)
+(:ok :finished)

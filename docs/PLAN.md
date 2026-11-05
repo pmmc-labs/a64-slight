@@ -2652,15 +2652,18 @@ tutorial and concepts pages) and a decision record.
    short bodies in the repo are `sleep`s and `send`s, which read as
    well as `(fork sleep ms)`.
 
-### Keywords, a type of their own (proposed, Nov 2026)
+### Keywords, a type of their own (agreed and built, D287, Nov 2026)
 
 From the same talk (Stevan: "perhaps we should have a new type, a
 'keyword' which is a symbol which evaluates to itself. They would not
 share the same namespace as `let` or `defun` defined symbols, and it
 would always print the `:` when it was serialized. This should decouple
 the two symbol types and I hope, simplify things. I know these are deep
-changes, but I think they are worthwhile."). Nothing is agreed by this
-section either.
+changes, but I think they are worthwhile."). Agreed and built, D287:
+K1, the colon printed everywhere, `sym?` false of the booleans; the
+keyword type beside `sym`; `rpc`'s words symbols; every expected
+output given its colons, by a verified patch or its model run again;
+golden test 379. What follows is the proposal as it was put.
 
 **The itch** (D284; D285's entry 11, filed under nothing, which this
 revises). `:ok` and `'ok` are one symbol, printed `ok` (D52), so printed

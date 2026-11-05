@@ -32,7 +32,7 @@
 // long enough.
 
 import { CompileError } from './errors.ts';
-import { builtinSym, hidden, int, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { isKw, builtinSym, hidden, int, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pos, type Sexp, type Sym } from './sexp.ts';
 
 export type Lowered = {
     readonly tests: readonly Sexp[];
@@ -87,7 +87,7 @@ function lower(p: Sexp, v: Sexp, steps: readonly Step[], whole: Sexp,
             tests.push(list(prim('nil?'), here));
             return;
         case 'sym':
-            if (p.name === '#true' || p.name === '#false') tests.push(list(prim('eq?'), here, p));
+            if (p.name === '#true' || p.name === '#false' || isKw(p)) tests.push(list(prim('eq?'), here, p));
             else if (p.name === REST) throw bad(`${REST} can only come before the last pattern of a list`, p, whole);
             else if (p.name !== '_') binds.push([p, here]);
             return;

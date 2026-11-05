@@ -5,11 +5,15 @@
 (pprint (nil? ()))
 (pprint (nil? 0))
 (pprint (nil? #false))
-(pprint (sym? :a))
+(pprint (sym? :a))              ; a keyword, not a symbol (D287)
+(pprint (sym? 'a))
 (pprint (sym? 1))
 (pprint (sym? ()))
-; #true and #false are symbols
+; #true and #false are neither symbols nor keywords
 (pprint (sym? #true))
+(pprint (keyword? :a))
+(pprint (keyword? 'a))
+(pprint (keyword? #true))
 (pprint (bool? #true))
 (pprint (bool? #false))
 (pprint (bool? :a))

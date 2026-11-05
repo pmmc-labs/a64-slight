@@ -109,10 +109,10 @@ The messages are s-expressions a line, so a person can take part with
 
 <!-- output: ../code/tut-8-calls.expected -->
 ```
-(ok 3)
-(ok 4)
-(error not-found)
-(error (arity "get" 1))
+(:ok 3)
+(:ok 4)
+(:error :not-found)
+(:error (:arity "get" 1))
 < (helo rpc 1)
 > (helo rpc 1)
 > (call 1 keys)
@@ -122,17 +122,17 @@ The messages are s-expressions a line, so a person can take part with
 > (call 3 incr pear)
 < (done 3 6)
 > (call 4 get plum)
-< (fail 4 not-found)
+< (fail 4 :not-found)
 > (call 5 get)
-< (fail 5 (arity "get" 1))
+< (fail 5 (:arity "get" 1))
 > (call 6 help)
-< (done 6 (("get" "A key's value." (("key" string "The key"))) ("put" "Gives a key a value." (("key" string "The key") ("value" any "Its value"))) ("del" "Takes a key out." (("key" string "The key"))) ("incr" "Adds one to a key's value." (("key" string "The key"))) ("keys" "Every key." ()) ("help" "What can be called here: each call's name, what it does, and its parameters." ())))
+< (done 6 (("get" "A key's value." (("key" :string "The key"))) ("put" "Gives a key a value." (("key" :string "The key") ("value" :any "Its value"))) ("del" "Takes a key out." (("key" :string "The key"))) ("incr" "Adds one to a key's value." (("key" :string "The key"))) ("keys" "Every key." ()) ("help" "What can be called here: each call's name, what it does, and its parameters." ())))
 the log:
-(put "apple" 3)
-(incr "apple")
-(put "pear" 5)
-(incr "pear")
-done
+(:put "apple" 3)
+(:incr "apple")
+(:put "pear" 5)
+(:incr "pear")
+:done
 ```
 
 (That's the whole of the test program's output: the four calls above

@@ -54,11 +54,11 @@ without any processes, and the actor only decides when it runs.
 
 <!-- output: ../code/tut-3-actor.expected -->
 ```
-(ok 3)
-(ok 5)
-dead letter: (put "plum" 7) (recv at docs/guide/code/tut-3-actor.slight:19:5)
-(ok ("pear" "apple"))
-(ok (("pear" 5) ("apple" 3)))
+(:ok 3)
+(:ok 5)
+dead letter: (:put "plum" 7) (recv at docs/guide/code/tut-3-actor.slight:19:5)
+(:ok ("pear" "apple"))
+(:ok (("pear" 5) ("apple" 3)))
 ```
 
 - `(fork f arg ...)` starts a new process that calls `f` with the

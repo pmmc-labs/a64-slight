@@ -35,10 +35,11 @@ src = ["""; float->str (D221): a float as str shows it; or, with digits from 0 t
 for lit, x, f in cases:
     src.append(f'(pprint (float->str {lit}{"" if f is None else " " + str(f)}))')
 src.append("""(defun kind (pid) (car (cadr (join pid))))
-(pprint (kind (fork (float->str 1.5 101))))
-(pprint (kind (fork (float->str 1.5 -1))))
-(pprint (kind (fork (float->str 1.5 2.0))))
-(kind (fork (float->str "1.5")))""")
+(pprint (kind (fork (lambda () (float->str 1.5 101)))))
+(pprint (kind (fork (lambda () (float->str 1.5 -1)))))
+(pprint (kind (fork (lambda () (float->str 1.5 2.0)))))
+(kind (fork (lambda () (float->str "1.5"))))
+; warns: 40:48 41:36""")
 text = '\n'.join(src) + '\n'
 open('t/271-float-to-str.slight', 'w').write(text)
 lines = text.split('\n')
@@ -46,9 +47,9 @@ line = lambda t: next(i + 1 for i, l in enumerate(lines) if t in l)
 site = lambda t, col: f'(float->str at t/271-float-to-str.slight:{line(t)}:{col})'
 string_arg = '(float->str "1.5")'
 out = [m.quote(w.encode()).decode() for w in want] + [
-    f'fault in #<pid 2>: out of range: 101 {site("1.5 101", 21)}', 'out-of-range',
-    f'fault in #<pid 3>: out of range: -1 {site("1.5 -1", 21)}', 'out-of-range',
-    f'fault in #<pid 4>: not an integer: 2.0 {site("1.5 2.0", 21)}', 'not-an-int',
-    f'fault in #<pid 5>: not a number: "1.5" {site(string_arg, 13)}', 'not-a-number']
+    f'fault in #<pid 2>: out of range: 101 {site("1.5 101", 32)}', ':out-of-range',
+    f'fault in #<pid 3>: out of range: -1 {site("1.5 -1", 32)}', ':out-of-range',
+    f'fault in #<pid 4>: not an integer: 2.0 {site("1.5 2.0", 32)}', ':not-an-int',
+    f'fault in #<pid 5>: not a number: "1.5" {site(string_arg, 24)}', ':not-a-number']
 open('t/271-float-to-str.expected', 'w').write('\n'.join(out) + '\n')
 print('V8 agrees on', len(mine), 'cases')

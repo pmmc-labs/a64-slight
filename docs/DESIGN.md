@@ -87,8 +87,8 @@ The reader (`compiler/src/reader.ts`, D37) reads:
 - integers (`42`, `-7`) and floats (`3.14`)
 - strings in double quotes, with escapes: `\"` `\\` `\n` `\t` `\r` `\e`
   `\u{hex}` (a code point up to U+10FFFF that isn't a surrogate)
-- symbols. `:name` is a keyword, a symbol that evaluates to itself.
-  `#true`/`#false` are the booleans.
+- keywords, `:name`, which evaluate to themselves, and symbols, `'name`,
+  names as data, apart (D287). `#true`/`#false` are the booleans.
 - `'x` is `(quote x)`
 - `;` starts a comment
 - doc blocks (D156, D164): between top-level forms, a line `=doc`
@@ -139,7 +139,7 @@ never changes the code.
 | `(let name expr)` | Binds `name` for the rest of the enclosing body. Only allowed directly in a body. As the last form of a body, its value is `expr`'s (D42). |
 | `(cond (test body...) ...)` | The conditional the others become (below). Each test must be `#true` or `#false`, or the process faults; so does running out of clauses. |
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
-| `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
+| `(quote x)`, `'x` | A constant: a symbol, a number, a string, or a list of them. A keyword, `:name`, is itself (D287). |
 | `(fork f arg ...)` | Starts a process that calls `f` with the arguments, worked out by the caller and copied (D286), and returns its pid; `(fork/on k f arg ...)` on island `k` (D256). One kind of process (D277). |
 | `(connect :source [x] f arg ...)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path f arg ...)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" f arg ...)` or `(connect :tcp/listen port f arg ...)`, or a Unix socket, `(connect :unix path f arg ...)` or `(connect :unix/listen path f arg ...)`; a command, `(connect :exec (list "ls" "-l") f arg ...)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
 | `(recv clause...)` | Takes the next message, waiting for one with the stack kept (D276), anywhere (D277). |
@@ -648,9 +648,10 @@ can cut its bytes into messages (D154–D156):
   strings the same way. A device reads them with `(:read :sexp)`, `(:sexp f v)` for
   each top-level datum. The text is the compiler's reader's: lists,
   numbers, strings, symbols, keywords, `#true`, `#false`, `'x`,
-  comments. A symbol the program mentions reads as itself, any other as
-  `(:symbol "name")` (D14 holds: no symbols are made at run time); `:a`
-  and `a` are the same symbol (D52).
+  comments. A name the program mentions reads as the symbol or the
+  keyword it was written as, any other as `(:symbol "name")` or
+  `(:keyword "name")` (D14 holds: no names are made at run time); `:a`
+  is the keyword and `a` the symbol, apart (D287).
 - **Source** (D156, D164): where `:sexp` skips doc blocks, as the
   compiler and `sexp/parse` do, `:source` gives a file's forms and doc
   blocks in order, `(:form f form line)` and `(:doc f text line)`, a doc

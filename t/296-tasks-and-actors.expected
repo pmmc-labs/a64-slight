@@ -1,9 +1,9 @@
-(ok 3)
-(ok 2)
-(ok ())
-(ok set)
-(ok (ok 5))
-to-myself
+(:ok 3)
+(:ok 2)
+(:ok ())
+(:ok :set)
+(:ok (:ok 5))
+:to-myself
 ()
-(ok not-found)
-end
+(:ok :not-found)
+:end

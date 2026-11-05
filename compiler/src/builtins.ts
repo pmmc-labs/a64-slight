@@ -10,7 +10,7 @@
 // it does, its type says so; where it isn't clear, any, since a wrong
 // type here is a warning on a program that works.
 
-import {
+import { KEYWORD,
     ANY, BOOL, CONS_ANY, FLOAT, FUN_ANY, INT, LIST_ANY, NEVER, NIL_T, NUM, PID, STR, SYM, TUPLE_ANY,
     addressOf, arrayOf, consOf, fits, headOf, lit, listOf, meet, shape, tagged, tailOf, tupleElement, tupleOf, union,
     type Defs, type Ty,
@@ -143,7 +143,8 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'int->str': fn([INT, INT], STR),
     'str->float': fn([STR], union(FLOAT, lit('#false'))),
     'str->sym': fn([STR], union(SYM, lit('#false'))),
-    'sym->str': fn([SYM], STR),
+    'str->keyword': fn([STR], union(KEYWORD, lit('#false'))),
+    'sym->str': fn([union(SYM, KEYWORD)], STR),
     'str->bytes': fn([STR], listOf(INT)),
     'bytes->str': fn([listOf(INT)], STR),
     'bytes/len': fn([STR], INT),
@@ -198,7 +199,7 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
     'address': fn([], addressOf(ANY)),
     'read': fn([PID], ANY),
     'read/any': fn([listOf(PID)], shape([PID, ANY])),
-    'open': fn([SYM, ANY], okOr(PID, ANY)),
+    'open': fn([KEYWORD, ANY], okOr(PID, ANY)),
     'monitor': fn([PID, addressOf(ANY)], NIL_T),
     'kill': fn([PID], NIL_T),
     'raise': fn([ANY], NEVER),
@@ -235,7 +236,7 @@ export const BUILTINS: Readonly<Record<string, Builtin>> = {
 // The type predicates, and what each says yes to: in a test, they narrow.
 export const PREDICATES: Readonly<Record<string, Ty>> = {
     'int?': INT, 'float?': FLOAT, 'num?': NUM, 'str?': STR, 'nil?': NIL_T, 'cons?': CONS_ANY,
-    'sym?': SYM, 'bool?': BOOL, 'tuple?': TUPLE_ANY, 'pid?': PID, 'lambda?': FUN_ANY, 'array?': ARRAY,
+    'sym?': SYM, 'keyword?': KEYWORD, 'bool?': BOOL, 'tuple?': TUPLE_ANY, 'pid?': PID, 'lambda?': FUN_ANY, 'array?': ARRAY,
 };
 
 // Names for constants (codegen.ts's CONSTANTS).
@@ -286,7 +287,7 @@ export function faultFor(t: Ty): string | null {
         case 'int':     return 'not-an-int';
         case 'float':   return 'not-a-number';
         case 'str':     return 'not-a-string';
-        case 'sym': case 'lit': return 'not-a-symbol';
+        case 'sym': case 'keyword': case 'lit': return 'not-a-symbol';
         case 'tuple':   return 'not-a-tuple';
         case 'array':   return 'not-an-array';
         case 'list': case 'nil': return 'not-a-list';

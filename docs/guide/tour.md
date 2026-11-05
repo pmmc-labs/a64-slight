@@ -113,8 +113,8 @@ kind of thing it is. `match` takes it apart by shape:
 (9 10 3.141592653589793)
 ```
 
-`:square` is a keyword, a symbol that stands for itself; it prints
-without its colon. A pattern matches a list of exactly its length, with
+`:square` is a keyword, a value that stands for itself, and prints as
+it's written. A pattern matches a list of exactly its length, with
 literals where it has them and names bound to the rest. Patterns nest,
 and `&` takes what's left of a list. A shape that matches no clause is a
 fault. There are no guards: match the shape, then test the rest in the
@@ -142,10 +142,10 @@ slight has two kinds of failure, and keeps them apart:
 
 <!-- output: code/tour-errors.expected -->
 ```
-(ok 5)
-(error div-by-zero)
+(:ok 5)
+(:error :div-by-zero)
 fault in #<pid 2>: not a cons: () (car at docs/guide/code/tour-errors.slight:11:25)
-(error (not-a-cons () "car at docs/guide/code/tour-errors.slight:11:25"))
+(:error (:not-a-cons () "car at docs/guide/code/tour-errors.slight:11:25"))
 ```
 
 An error you expect, such as a file that isn't there or a division you
@@ -192,7 +192,7 @@ and gives its pid, and `join` waits for it to end and gives its result:
 
 <!-- output: code/tour-tasks.expected -->
 ```
-((ok 6765) (ok 10946) (ok 17711))
+((:ok 6765) (:ok 10946) (:ok 17711))
 ```
 
 Processes share nothing. A `fork` copies the arguments it passes into

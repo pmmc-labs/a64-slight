@@ -1,7 +1,7 @@
-(ok (0 ""))
-(error (enxio "build/t/346-fifo-errors"))
-(error (enxio "build/t/346-fifo-errors"))
-(error (enxio "build/t/346-fifo-errors"))
-too-big
-(epipe "build/t/346-fifo-errors")
-done
+(:ok (0 ""))
+(:error (:enxio "build/t/346-fifo-errors"))
+(:error (:enxio "build/t/346-fifo-errors"))
+(:error (:enxio "build/t/346-fifo-errors"))
+:too-big
+(:epipe "build/t/346-fifo-errors")
+:done

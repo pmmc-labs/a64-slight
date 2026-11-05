@@ -2,12 +2,12 @@
 (1 -1 4611686014132420609)
 (8.0 0.5 2.0)
 fault in #<pid 2>: integer overflow (math/pow at t/269-pow-exact.slight:9:32)
-overflow
+:overflow
 fault in #<pid 3>: integer overflow (math/pow at t/269-pow-exact.slight:10:32)
-overflow
+:overflow
 fault in #<pid 4>: integer overflow (math/pow at t/269-pow-exact.slight:11:32)
-overflow
+:overflow
 fault in #<pid 5>: out of range: -1 (math/pow at t/269-pow-exact.slight:12:32)
-out-of-range
+:out-of-range
 fault in #<pid 6>: not a number: "2" (math/pow at t/269-pow-exact.slight:13:24)
-not-a-number
+:not-a-number

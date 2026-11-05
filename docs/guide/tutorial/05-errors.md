@@ -26,8 +26,8 @@ keeps it running through bugs not yet found.
 <!-- output: ../code/tut-5-fault.expected -->
 ```
 fault in #<pid 2>: not a number: "red" (+ at docs/guide/code/tut-store.slight:23:40)
-(error (ended #<pid 2> (error (not-a-number "red" "+ at docs/guide/code/tut-store.slight:23:40"))))
-(error (not-a-number "red" "+ at docs/guide/code/tut-store.slight:23:40"))
+(:error (:ended #<pid 2> (:error (:not-a-number "red" "+ at docs/guide/code/tut-store.slight:23:40"))))
+(:error (:not-a-number "red" "+ at docs/guide/code/tut-store.slight:23:40"))
 ```
 
 Three things happened, one per line:
@@ -94,10 +94,10 @@ ending of its own with `raise`:
 
 <!-- output: ../code/tut-5-checked.expected -->
 ```
-(error (not-an-int "color"))
-(ok 1)
-(ok 1)
-(error (not-found "plum"))
+(:error (:not-an-int "color"))
+(:ok 1)
+(:ok 1)
+(:error (:not-found "plum"))
 ```
 
 `(raise reason)` ends the current process with `(:error reason)`, and
@@ -157,10 +157,10 @@ This is the store from `tut-store.slight`, bug and all:
 <!-- output: ../code/tut-5-supervisor.expected -->
 ```
 fault in #<pid 3>: not a number: "red" (+ at docs/guide/code/tut-store.slight:23:40)
-(restarting (error (not-a-number "red" "+ at docs/guide/code/tut-store.slight:23:40")))
-(error (timeout #<pid 2>))
-(error not-found)
-(ok 4)
+(:restarting (:error (:not-a-number "red" "+ at docs/guide/code/tut-store.slight:23:40")))
+(:error (:timeout #<pid 2>))
+(:error :not-found)
+(:ok 4)
 ```
 
 The store, pid 3, faulted. The supervisor, pid 2, heard, said so, and

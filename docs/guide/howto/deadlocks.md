@@ -67,10 +67,10 @@ function it's in, its mailbox, its heap and its reductions.
 
 <!-- output: ../code/howto-system.expected -->
 ```
-(#<pid 1> running "the top level" 0)
-(#<pid 2> recv "store" 0)
-(#<pid 3> reading "ask/via" 0)
-done
+(#<pid 1> :running "the top level" 0)
+(#<pid 2> :recv "store" 0)
+(#<pid 3> :reading "ask/via" 0)
+:done
 ```
 
 The asking task, pid 3, is `reading`, in `ask/via`; the store, pid 2, is

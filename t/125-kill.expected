@@ -1,11 +1,11 @@
-(server-got one)
+(:server-got :one)
 ()
-(error killed)
-(error killed)
-(error killed)
-(error killed)
-(error killed)
-(error killed)
-(ok finished)
-ended
-end
+(:error :killed)
+(:error :killed)
+(:error :killed)
+(:error :killed)
+(:error :killed)
+(:error :killed)
+(:ok :finished)
+:ended
+:end

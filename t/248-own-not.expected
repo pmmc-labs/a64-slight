@@ -1,4 +1,4 @@
-mine
-own
-(mine mine)
-done
+:mine
+:own
+(:mine :mine)
+:done

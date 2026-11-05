@@ -5,7 +5,7 @@
 # drawing a stage each time. On the virtual clock every key comes before
 # the clock moves, and the faders all go to sleep at time 0 in the order
 # they were forked, so at 1000, 3000 and 6000 ms they draw in that order.
-# The root's value, (ok ()) from joining the chaser, comes last, once the
+# The root's value, (:ok ()) from joining the chaser, comes last, once the
 # faders are done.
 #
 #     python3 t/models/tail-chase-game.py > examples/tail-chase-game.expected
@@ -26,4 +26,4 @@ for key in ['right', 'right', 'down']:
 for stage, (mark, row) in enumerate([('*', h + 3), ('.', h + 4), (' ', h + 5)], 1):
     for (fx, fy), c in faders:
         out.append(f'{E}[{fx};{fy}H{mark}{E}[{row};0Hfade{stage}: {c}\r')
-print(''.join(out) + '(ok ())')
+print(''.join(out) + '(:ok ())')

@@ -79,5 +79,5 @@ generation 8
 ..##.#..
 .....##.
 ........
-(reports 576 retired 64)
-done
+(:reports 576 :retired 64)
+:done

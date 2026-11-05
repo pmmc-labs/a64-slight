@@ -1,4 +1,4 @@
-hello 42 sym (1 "two")
+hello 42 :sym (1 "two")
 no newline
 tab:	end
 ()

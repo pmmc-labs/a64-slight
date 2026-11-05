@@ -1,9 +1,9 @@
 42
 "a string"
 2.5
-sym
+:sym
 (quoted (list))
 (1 (2 "three"))
 11
 (0 1 2 3 4)
-(ok asked)
+(:ok :asked)

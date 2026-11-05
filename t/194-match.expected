@@ -9,19 +9,19 @@
 "the list one two"
 "two and a half"
 "something else: 2"
-"a pair x y"
+"a pair :x :y"
 "a list starting 1"
 "something else: str"
-"a pair point 3"
+"a pair :point 3"
 (1 2)
-two
-int
-both
-(not-a-list () (1))
+:two
+:int
+:both
+(:not-a-list () (1))
 (1 2)
 100
 (1 2 (3))
-still-works
+:still-works
 1000000
-(ok served)
+(:ok :served)
 ()

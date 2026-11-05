@@ -1,6 +1,6 @@
-one
-two
-other
-(#true pair)
-(#true no)
+:one
+:two
+:other
+(#true :pair)
+(#true :no)
 ()

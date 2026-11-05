@@ -34,4 +34,4 @@ while queue:
         else:
             out.append(step)
 print(''.join(out))
-print('(ok b-done)')
+print('(:ok :b-done)')

@@ -1,15 +1,15 @@
-(ok fast)
+(:ok :fast)
 10
-(error (listed-first failed-first))
-(error ())
-(ok done)
+(:error (:listed-first :failed-first))
+(:error ())
+(:ok :done)
 0
-(ok (a b c))
+(:ok (:a :b :c))
 30
-(error first)
+(:error :first)
 10
-(ok slow)
+(:ok :slow)
 100
-(ok ())
-(ok (twice twice))
+(:ok ())
+(:ok (:twice :twice))
 ()

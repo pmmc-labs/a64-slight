@@ -76,11 +76,11 @@ for name in sorted(os.listdir(SUITE), key=lambda s: s.encode()):
     if name.startswith('y_'):
         with open(os.path.join(SUITE, name), 'rb') as f:
             v = json.loads(f.read().decode('utf-8'), parse_int=integer, object_pairs_hook=lambda p: Object((p,)))
-        out.append(name + ' ok ' + dumps(v))
+        out.append(name + ' ok ' + dumps(v))      # the test writes the word as text here
     elif name.startswith('n_') or name in TURNED_DOWN:
-        out.append(name + ' error')
+        out.append(name + ' :error')
     else:
-        out.append(name + ' ok')
-out.append('(devices-agree #true)')
+        out.append(name + ' :ok')
+out.append('(:devices-agree #true)')
 out.append('()')
 sys.stdout.buffer.write(('\n'.join(out) + '\n').encode('utf-8'))

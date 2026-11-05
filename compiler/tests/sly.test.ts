@@ -79,14 +79,14 @@ test('lists', () => {
 });
 
 test('a list of literals is a constant', () => {
-    same('[1, "two", :three, [4.5, true]];', "'(1 \"two\" three (4.5 #true))");
-    same('[:inc];', "'(inc)");
+    same('[1, "two", :three, [4.5, true]];', "'(1 \"two\" :three (4.5 #true))");
+    same('[:inc];', "'(:inc)");
     same('[x, 1];', '(list x 1)');
 });
 
 test('tagged lists', () => {
     same(':on-next(v); :tag(); :tag(1, 2); :tag(a, ...xs);',
-         "(list :on-next v) '(tag) '(tag 1 2) (cons :tag (cons a xs))");
+         "(list :on-next v) '(:tag) '(:tag 1 2) (cons :tag (cons a xs))");
 });
 
 test('tuples', () => {
@@ -270,21 +270,21 @@ test("a parameter's, a result's and an actor's types make a sig before the defun
 });
 
 test('types as .sly writes them', () => {
-    same('let x : int | str | :ok | true | [] = 1;', "(let x (the (or int str 'ok #true ()) 1))");
+    same('let x : int | str | :ok | true | [] = 1;', "(let x (the (or int str :ok #true ()) 1))");
     same('let x : [int, str] = 1;', '(let x (the (shape int str) 1))');
     same('let x : [int, ...list<str>] = 1;', '(let x (the (shape int & (list str)) 1))');
     same('let x : [...list<str>] = 1;', '(let x (the (list str) 1))');
-    same("let x : :ok(int) | :error(str, ...list<any>) = 1;", "(let x (the (or ('ok int) ('error str & (list any))) 1))");
+    same("let x : :ok(int) | :error(str, ...list<any>) = 1;", "(let x (the (or (:ok int) (:error str & (list any))) 1))");
     same('let x : #(int, str) = 1;', '(let x (the (tuple int str) 1))');
     same('let x : fun(int) -> int | str = 1;', '(let x (the (fun (int) (or int str)) 1))');    // as TypeScript has it
     same('let x : (fun(int) -> int) | fun = 1;', '(let x (the (or (fun (int) int) fun) 1))');
     same('let x : list<list<int>> = 1;', '(let x (the (list (list int)) 1))');
     same('let x : Result<int, (str | :none)> = 1;', '(let x (the (Result int (or str :none)) 1))');
-    same('let x : task<int> = 1; let y : actor<:ok> = 2;', "(let x (the (task int) 1)) (let y (the (actor 'ok) 2))");
+    same('let x : task<int> = 1; let y : actor<:ok> = 2;', "(let x (the (task int) 1)) (let y (the (actor :ok) 2))");
 });
 
 test('type declarations, and typed lets and lambdas', () => {
-    same('type Tree = :leaf | :node(Tree, int, Tree);', "(deftype Tree (or 'leaf ('node Tree int Tree)))");
+    same('type Tree = :leaf | :node(Tree, int, Tree);', "(deftype Tree (or :leaf (:node Tree int Tree)))");
     same('type Pair<A, B> = [A, B];', '(deftype (Pair A B) (shape A B))');
     same('fun f() { let [a, b] : Pair<int, str> = g(); a }', '(defun f () (match (the (Pair int str) (g)) ((a b) a)))');
     same('fun(x : int) => x + 1;', '(the (fun (int) any) (lambda (x) (+ x 1)))');
@@ -296,7 +296,7 @@ test("a type's ':' has a space on each side", () => {
     fails('fun f(x: int) { x }', /a type's ':' has a space on each side: write x : int/);
     fails('fun f(x :int) { x }', /a type's ':' has a space on each side: write x : int/);
     fails('let x: int = 1;', /a type's ':' has a space on each side/);
-    same(':ok;', "'ok");
+    same(':ok;', ":ok");
 });
 
 test('a prototype is a sig alone, as a header declares a function (D248)', () => {

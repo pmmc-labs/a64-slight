@@ -1,5 +1,5 @@
 ""
 "HTTP/1.1 200 OK"
 "HTTP/1.1 200 OK"
-(error (bad-option (fewest 1)))
-done
+(:error (:bad-option (:fewest 1)))
+:done

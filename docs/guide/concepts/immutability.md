@@ -50,7 +50,7 @@ it:
 
 <!-- output: ../code/con-versions.expected -->
 ```
-(3 3 not-found)
+(3 3 :not-found)
 (1 2 1)
 3
 ```

@@ -2020,15 +2020,15 @@ void rt_dead_letter(rt_value_t msg, const char *site) {
 // The result in e, (:ok value) or (:error reason), in cells (4 words); or
 // :ended, for an actor that has ended (D243).
 static rt_value_t result_at(rt_value_t *cells, const entry_t *e) {
-    if (e->ended) return rt_symbol(RT_SYM_SYSTEM + RT_SYS_ENDED);
-    return rt_cons_at(cells, rt_symbol(e->ok ? RT_SYM_OK : RT_SYM_ERROR), rt_cons_at(cells + 2, e->value, RT_NIL));
+    if (e->ended) return rt_keyword(RT_SYM_SYSTEM + RT_SYS_ENDED);
+    return rt_cons_at(cells, rt_keyword(e->ok ? RT_SYM_OK : RT_SYM_ERROR), rt_cons_at(cells + 2, e->value, RT_NIL));
 }
 
 // (:exit pid result), about the process that ended at e.
 static rt_msg_t *exit_msg(rt_value_t pid, const entry_t *e) {
     _Alignas(16) rt_value_t cells[10];
     rt_value_t result = result_at(cells, e);
-    return new_msg(rt_cons_at(cells + 4, rt_symbol(RT_SYM_EXIT), rt_cons_at(cells + 6, pid, rt_cons_at(cells + 8, result, RT_NIL))));
+    return new_msg(rt_cons_at(cells + 4, rt_keyword(RT_SYM_EXIT), rt_cons_at(cells + 6, pid, rt_cons_at(cells + 8, result, RT_NIL))));
 }
 
 // Sends it to the process who, or to its address addr, if the monitor
@@ -2535,8 +2535,8 @@ rt_value_t rt_kill(rt_value_t pid, const char *site) {
     }
     rt_proc_t *p = entry(pid, site)->proc;
     if (!p) return RT_NIL;
-    if (p == rt_current) rt_end(0, rt_symbol(RT_SYM_KILLED), 0);
-    end_other(p, rt_symbol(RT_SYM_KILLED));
+    if (p == rt_current) rt_end(0, rt_keyword(RT_SYM_KILLED), 0);
+    end_other(p, rt_keyword(RT_SYM_KILLED));
     return RT_NIL;
 }
 
@@ -2613,7 +2613,7 @@ static void take_item(item_t *it) {
             break;
         case ITEM_KILL:
             if (t && t == rt_current) my.ending = my.ending ? my.ending : ENDING_KILLED;
-            else if (t)               end_other(t, rt_symbol(RT_SYM_KILLED));
+            else if (t)               end_other(t, rt_keyword(RT_SYM_KILLED));
             break;
         case ITEM_WATCH:
             if (t) far_add(&side_of(t)->watched_by, it->from, it->wakes, it->addr);
@@ -3445,7 +3445,7 @@ uint64_t rt_errno_name(int err) {
 
 // (name path), for errno err, in cells (4 words).
 static rt_value_t io_reason(rt_value_t *cells, int err, rt_value_t path) {
-    return rt_cons_at(cells, rt_symbol(RT_SYM_ERRS + rt_errno_name(err)), rt_cons_at(cells + 2, path, RT_NIL));
+    return rt_cons_at(cells, rt_keyword(RT_SYM_ERRS + rt_errno_name(err)), rt_cons_at(cells + 2, path, RT_NIL));
 }
 
 // A string box of len bytes, in space with room for it (len / 8 + 6
@@ -3594,7 +3594,7 @@ static void fail(rt_device_t *d, int err) {
     if (d->opened) {
         // The owner opened the device (D243), so it's told, (:error d
         // reason), where it reads the device, and goes on.
-        rt_value_t error = rt_cons_at(cells + 4, rt_symbol(RT_SYM_ERROR), rt_cons_at(cells + 6, d->pid, rt_cons_at(cells + 8, reason, RT_NIL)));
+        rt_value_t error = rt_cons_at(cells + 4, rt_keyword(RT_SYM_ERROR), rt_cons_at(cells + 6, d->pid, rt_cons_at(cells + 8, reason, RT_NIL)));
         rt_msg_t  *m     = new_msg(error);
         m->device = d->pid;
         deliver(owner, m);
@@ -3625,7 +3625,7 @@ static void end_taken(void) {
     if (!my.ending) return;
     int how = my.ending;
     my.ending = 0;
-    if (how == ENDING_KILLED) rt_end(0, rt_symbol(RT_SYM_KILLED), 0);
+    if (how == ENDING_KILLED) rt_end(0, rt_keyword(RT_SYM_KILLED), 0);
     _Alignas(16) rt_value_t cells[4];
     uint64_t   space[my.ending_len / 8 + 6];
     rt_value_t path = my.ending_path ? string_in(space, my.ending_path, my.ending_len) : my.ending_port;
@@ -3646,7 +3646,7 @@ static void tell_sym(rt_device_t *d, rt_value_t sym, rt_value_t rest, int more) 
 }
 
 static void tell_list(rt_device_t *d, uint64_t word, rt_value_t rest, int more) {
-    tell_sym(d, rt_symbol(RT_SYM_DEVICE + word), rest, more);
+    tell_sym(d, rt_keyword(RT_SYM_DEVICE + word), rest, more);
 }
 
 static void tell(rt_device_t *d, uint64_t word, int more) {
@@ -3922,7 +3922,7 @@ static void read_on(rt_proc_t *p, rt_value_t pid) {
 static int read_as(rt_device_t *d, rt_value_t args) {
     rt_value_t how = rt_is_cons(args) && rt_cdr(args) == RT_NIL ? rt_car(args) : RT_NIL;
     uint64_t ways[] = { RT_DEV_LINES, RT_DEV_CHUNKS, RT_DEV_JSON, RT_DEV_JSON_ITEMS, RT_DEV_SEXP, RT_DEV_SOURCE }, k = 0;
-    while (k < 6 && how != rt_symbol(RT_SYM_DEVICE + ways[k])) k++;
+    while (k < 6 && how != rt_keyword(RT_SYM_DEVICE + ways[k])) k++;
     if (k < 6) {
         d->how   = ways[k];
         d->items = ITEMS_NONE;
@@ -3977,13 +3977,13 @@ static void command(rt_device_t *d, rt_value_t msg) {
         system_command(d, msg);
         return;
     }
-    if (reader && word == rt_symbol(RT_SYM_DEVICE + RT_DEV_READ) && read_as(d, rt_cdr(msg))) return;
-    if (d->mode == DEV_EXEC && word == rt_symbol(RT_SYM_DEVICE + RT_DEV_EOF) && rt_cdr(msg) == RT_NIL) {
+    if (reader && word == rt_keyword(RT_SYM_DEVICE + RT_DEV_READ) && read_as(d, rt_cdr(msg))) return;
+    if (d->mode == DEV_EXEC && word == rt_keyword(RT_SYM_DEVICE + RT_DEV_EOF) && rt_cdr(msg) == RT_NIL) {
         d->in_closing = 1;
         if (d->out_at == d->out_len) close_input(d);
         return;
     }
-    if (d->mode == RT_FS_READ || d->mode == DEV_LISTEN || word != rt_symbol(RT_SYM_DEVICE + RT_DEV_WRITE)) {
+    if (d->mode == RT_FS_READ || d->mode == DEV_LISTEN || word != rt_keyword(RT_SYM_DEVICE + RT_DEV_WRITE)) {
         rt_dead_letter(msg, d->site);
         return;
     }
@@ -4310,7 +4310,7 @@ rt_value_t rt_socket_peer(rt_value_t c, const char *site) {
     int64_t      who[3];
     if (!d || !d->unix_sock || d->mode != DEV_TCP || d->fd < 0 || rt_io_peer(d->fd, who) != 0) return RT_NIL;
     rt_value_t keys[3] = {
-        rt_symbol(RT_SYM_PEER + RT_PEER_UID), rt_symbol(RT_SYM_PEER + RT_PEER_GID), rt_symbol(RT_SYM_SYSTEM + RT_SYS_PID),
+        rt_keyword(RT_SYM_PEER + RT_PEER_UID), rt_keyword(RT_SYM_PEER + RT_PEER_GID), rt_keyword(RT_SYM_SYSTEM + RT_SYS_PID),
     };
     rt_value_t *cells = rt_alloc(9 * 2 * sizeof *cells, site), info = RT_NIL;
     for (int i = 2; i >= 0; i--, cells += 6) {
@@ -4679,10 +4679,10 @@ static int exited(rt_device_t *d) {
     if (WIFSIGNALED(d->status)) {
         int k = 0, nsignals = (int)(sizeof signals / sizeof *signals), sig = WTERMSIG(d->status);
         while (k < nsignals && signals[k] != sig) k++;
-        rt_value_t name = k < nsignals ? rt_symbol(RT_SYM_EXEC + RT_EXEC_HUP + (uint64_t)k) : rt_int(sig);
-        status = rt_cons_at(cells + 2, rt_symbol(RT_SYM_EXEC + RT_EXEC_SIGNAL), rt_cons_at(cells + 4, name, RT_NIL));
+        rt_value_t name = k < nsignals ? rt_keyword(RT_SYM_EXEC + RT_EXEC_HUP + (uint64_t)k) : rt_int(sig);
+        status = rt_cons_at(cells + 2, rt_keyword(RT_SYM_EXEC + RT_EXEC_SIGNAL), rt_cons_at(cells + 4, name, RT_NIL));
     }
-    tell_sym(d, rt_symbol(RT_SYM_EXEC + RT_EXEC_EXITED), rt_cons_at(cells, status, RT_NIL), 0);
+    tell_sym(d, rt_keyword(RT_SYM_EXEC + RT_EXEC_EXITED), rt_cons_at(cells, status, RT_NIL), 0);
     close_device(d);
     return 1;
 }
@@ -4944,7 +4944,7 @@ static snapshot_t *take_all(pids_t *ps, uint64_t *n) {
 static rt_value_t field(rt_value_t **at, uint64_t key, rt_value_t value) {
     rt_value_t *c = *at;
     *at += 4;
-    return rt_cons_at(c, rt_symbol(key), rt_cons_at(c + 2, value, RT_NIL));
+    return rt_cons_at(c, rt_keyword(key), rt_cons_at(c + 2, value, RT_NIL));
 }
 
 // The list of xs[0..n), in 2n words at *at.
@@ -4977,7 +4977,7 @@ static void tell_process(rt_device_t *d, const snapshot_t *r, const rt_value_t *
     rt_value_t fields[PROCESS_FIELDS] = {
         field(&at, SYS(PID), r->pid),
         field(&at, SYS(PARENT), r->parent),
-        field(&at, SYS(STATE), rt_symbol(RT_SYM_SYSTEM + (uint64_t)r->state)),
+        field(&at, SYS(STATE), rt_keyword(RT_SYM_SYSTEM + (uint64_t)r->state)),
         field(&at, SYS(JOINING), joining),
         field(&at, SYS(IN), in),
         field(&at, SYS(MAIL), rt_int((int64_t)r->mail)),
@@ -4990,7 +4990,7 @@ static void tell_process(rt_device_t *d, const snapshot_t *r, const rt_value_t *
         field(&at, ISLE(RECEIVED), received),
     };
     rt_value_t info = list_at(&at, fields, PROCESS_FIELDS);
-    tell_sym(d, rt_symbol(SYS(PROCESS)), rt_cons_at(at, info, RT_NIL), more);
+    tell_sym(d, rt_keyword(SYS(PROCESS)), rt_cons_at(at, info, RT_NIL), more);
     free(space);
 }
 
@@ -5074,7 +5074,7 @@ static void tell_runtime(rt_device_t *d, const counts_t *each) {
         field(&at, ISLE(ISLANDS), islands),
     };
     rt_value_t info = list_at(&at, fields, RUNTIME_FIELDS);
-    tell_sym(d, rt_symbol(SYS(RUNTIME)), rt_cons_at(at, info, RT_NIL), 0);
+    tell_sym(d, rt_keyword(SYS(RUNTIME)), rt_cons_at(at, info, RT_NIL), 0);
     free(space);
 }
 
@@ -5101,14 +5101,14 @@ static void system_next(rt_device_t *d) {
     snapshot_t r    = d->snap[d->snap_at++];
     int        more = d->snap_at < d->snap_len;
     if (r.pid) tell_process(d, &r, d->snap_pids.at, 1);
-    else       tell_sym(d, rt_symbol(SYS(END)), RT_NIL, more);
+    else       tell_sym(d, rt_keyword(SYS(END)), RT_NIL, more);
     if (!more) d->snap_at = d->snap_len = d->snap_pids.n = 0;
 }
 
 // (:ended s pid result).
 static void tell_ended(rt_device_t *d, rt_value_t pid, rt_value_t result) {
     _Alignas(16) rt_value_t cells[4];
-    tell_sym(d, rt_symbol(SYS(ENDED)), rt_cons_at(cells, pid, rt_cons_at(cells + 2, result, RT_NIL)), 0);
+    tell_sym(d, rt_keyword(SYS(ENDED)), rt_cons_at(cells, pid, rt_cons_at(cells + 2, result, RT_NIL)), 0);
 }
 
 // One process's snapshot, told now; its pids aren't kept.
@@ -5139,7 +5139,7 @@ static void ask(rt_device_t *d, uint64_t k, int what, rt_value_t about) {
 // it waits for another island.
 static int answer(rt_device_t *d) {
     asking_t *a = d->asking;
-    if (a->word == rt_symbol(SYS(PROCESSES))) {
+    if (a->word == rt_keyword(SYS(PROCESSES))) {
         uint64_t last = a->arg == RT_NIL ? nislands : (uint64_t)rt_int_value(a->arg) + 1;
         for (; a->next < last; a->next++) {
             uint64_t k = a->next;
@@ -5159,7 +5159,7 @@ static int answer(rt_device_t *d) {
         if (!d->sent) system_next(d);               // else when the owner waits for the next
         return 1;
     }
-    if (a->word == rt_symbol(SYS(PROCESS))) {
+    if (a->word == rt_keyword(SYS(PROCESS))) {
         uint64_t k = rt_pid_island(a->arg);
         if (a->next) return 1;                      // told when the answer came
         if (k == my.island) {
@@ -5176,7 +5176,7 @@ static int answer(rt_device_t *d) {
             return 1;
         }
         if (k >= nislands || !island_started(k)) {  // no process was ever made there
-            tell_ended(d, a->arg, rt_symbol(SYS(ENDED)));
+            tell_ended(d, a->arg, rt_keyword(SYS(ENDED)));
             return 1;
         }
         ask(d, k, ASK_PROCESS, a->arg);
@@ -5201,7 +5201,7 @@ static int answer(rt_device_t *d) {
 static void begin(asking_t *a, rt_value_t word, rt_value_t arg) {
     a->word = word;
     a->arg  = arg;
-    a->next = word == rt_symbol(SYS(PROCESSES)) && arg != RT_NIL ? (uint64_t)rt_int_value(arg) : 0;
+    a->next = word == rt_keyword(SYS(PROCESSES)) && arg != RT_NIL ? (uint64_t)rt_int_value(arg) : 0;
 }
 
 // Answers what it can, in order, till a question waits for another island.
@@ -5222,11 +5222,11 @@ static void system_command(rt_device_t *d, rt_value_t msg) {
     rt_value_t word = rt_is_cons(msg) ? rt_car(msg) : RT_NIL, args = rt_is_cons(msg) ? rt_cdr(msg) : RT_NIL;
     int        one  = rt_is_cons(args) && rt_cdr(args) == RT_NIL;
     rt_value_t arg  = one ? rt_car(args) : RT_NIL;
-    int        ok   = (word == rt_symbol(SYS(PROCESSES)) && args == RT_NIL)
-                   || (word == rt_symbol(SYS(PROCESSES)) && one && (arg & 1) == 0
+    int        ok   = (word == rt_keyword(SYS(PROCESSES)) && args == RT_NIL)
+                   || (word == rt_keyword(SYS(PROCESSES)) && one && (arg & 1) == 0
                        && rt_int_value(arg) >= 0 && (uint64_t)rt_int_value(arg) < nislands)
-                   || (word == rt_symbol(SYS(PROCESS)) && one && (arg & RT_TAG_MASK) == RT_TAG_PID && !rt_is_address(arg))
-                   || (word == rt_symbol(SYS(RUNTIME)) && args == RT_NIL);
+                   || (word == rt_keyword(SYS(PROCESS)) && one && (arg & RT_TAG_MASK) == RT_TAG_PID && !rt_is_address(arg))
+                   || (word == rt_keyword(SYS(RUNTIME)) && args == RT_NIL);
     if (!ok) {
         rt_dead_letter(msg, d->site);
         return;
@@ -5334,13 +5334,13 @@ rt_value_t rt_open(rt_value_t source, rt_value_t arg, const char *site) {
     }
     opening = 0;
     _Alignas(16) rt_value_t cells[8];
-    if (err) return copy_here(rt_cons_at(cells, rt_symbol(RT_SYM_ERROR), rt_cons_at(cells + 2, io_reason(cells + 4, err, where), RT_NIL)));
+    if (err) return copy_here(rt_cons_at(cells, rt_keyword(RT_SYM_ERROR), rt_cons_at(cells + 2, io_reason(cells + 4, err, where), RT_NIL)));
     rt_value_t d = devices_of(p) != had ? devices_of(p)->pid : RT_NIL;   // new_device puts it first
     rt_value_t m = read_from(rt_cons_at(cells, d, RT_NIL), 0, (uintptr_t)__builtin_return_address(0), site);
-    if (rt_car(m) == rt_symbol(RT_SYM_ERROR)) {                        // (:error d reason)
-        return copy_here(rt_cons_at(cells, rt_symbol(RT_SYM_ERROR), rt_cons_at(cells + 2, rt_car(rt_cdr(rt_cdr(m))), RT_NIL)));
+    if (rt_car(m) == rt_keyword(RT_SYM_ERROR)) {                        // (:error d reason)
+        return copy_here(rt_cons_at(cells, rt_keyword(RT_SYM_ERROR), rt_cons_at(cells + 2, rt_car(rt_cdr(rt_cdr(m))), RT_NIL)));
     }
-    return copy_here(rt_cons_at(cells, rt_symbol(RT_SYM_OK), rt_cons_at(cells + 2, d, RT_NIL)));
+    return copy_here(rt_cons_at(cells, rt_keyword(RT_SYM_OK), rt_cons_at(cells + 2, d, RT_NIL)));
 }
 
 // --- the scheduler ------------------------------------------------------------
@@ -5359,7 +5359,7 @@ static void no_stack(rt_proc_t *p) {
     else                   fprintf(stderr, "fault in %s: %s (%s)\n", who, site, strerror(err));
     uint64_t space[sizeof site / 8 + 6];
     _Alignas(16) rt_value_t cells[6] = {
-        rt_symbol(RT_SYM_FAULTS - 1 + RT_FAULT_STACK), (rt_value_t)&cells[2] | RT_TAG_LIST,
+        rt_keyword(RT_SYM_FAULTS - 1 + RT_FAULT_STACK), (rt_value_t)&cells[2] | RT_TAG_LIST,
         RT_NIL,                                         (rt_value_t)&cells[4] | RT_TAG_LIST,
         string_in(space, site, sizeof site - 1),        RT_NIL,
     };

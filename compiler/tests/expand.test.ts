@@ -32,14 +32,14 @@ test('when becomes cond, giving () when its test is #false', () => {
 test('case binds its topic once, compares with eq?, and gives () if nothing matches', () => {
     // eq? by a name no local can hide, as a match's patterns have it
     assert.deepEqual(ex('(case (f) (:a 1) (2 (g) 3))'), [
-        '(do (let case topic test.slight:1:1 (f)) (cond ((eq? (builtin) case topic test.slight:1:1 (quote a)) 1) ((eq? (builtin) case topic test.slight:1:1 2) (g) 3) (#true ())))',
+        '(do (let case topic test.slight:1:1 (f)) (cond ((eq? (builtin) case topic test.slight:1:1 :a) 1) ((eq? (builtin) case topic test.slight:1:1 2) (g) 3) (#true ())))',
     ]);
     // a #true clause is the default, and then there's no need for another
     assert.deepEqual(ex('(case x (:a 1) (#true 2))'), [
-        '(do (let case topic test.slight:1:1 x) (cond ((eq? (builtin) case topic test.slight:1:1 (quote a)) 1) (#true 2)))',
+        '(do (let case topic test.slight:1:1 x) (cond ((eq? (builtin) case topic test.slight:1:1 :a) 1) (#true 2)))',
     ]);
     fails(() => ex('(case)'), 'test.slight:1:1: case takes a topic and clauses, not (case)');
-    fails(() => ex('(case x (:a))'), 'test.slight:1:1: a case clause is (value body...), not ((quote a))');
+    fails(() => ex('(case x (:a))'), 'test.slight:1:1: a case clause is (value body...), not (:a)');
     fails(() => ex('(case x 5)'), 'test.slight:1:1: a case clause is (value body...), not 5');
 });
 
@@ -68,13 +68,13 @@ test('match binds its topic once, and each clause is its pattern\'s tests, then 
     const plain = (x: string): string => x.split(' (builtin)').join('').split(' (on conses)').join('');
     assert.deepEqual(ex('(match (f) ((:add n) (g n)) (x x))').map(plain), [
         `(do (let ${t} (f)) (cond `
-        + `((cond ((cons? ${t}) (cond ((eq? (car ${t}) (quote add)) (cond ((cons? (cdr ${t})) (nil? (cddr ${t}))) (#true #false))) (#true #false))) (#true #false)) `
+        + `((cond ((cons? ${t}) (cond ((eq? (car ${t}) :add) (cond ((cons? (cdr ${t})) (nil? (cddr ${t}))) (#true #false))) (#true #false))) (#true #false)) `
         + `(let n (cadr ${t})) (g n)) `
         + `(#true (let x ${t}) x)))`,
     ]);
     // a last clause that can fail is followed by one that faults (:no-match)
     assert.deepEqual(ex('(match x (5 :five))').map(plain), [
-        `(do (let ${t} x) (cond ((eq? ${t} 5) (quote five)) (#true (no match (match) ${t}))))`,
+        `(do (let ${t} x) (cond ((eq? ${t} 5) :five) (#true (no match (match) ${t}))))`,
     ]);
     fails(() => ex('(match x)'), 'test.slight:1:1: match takes a topic and clauses, not (match x)');
     fails(() => ex('(match x y)'), 'test.slight:1:10: a match clause is (pattern body...), not y');
@@ -88,7 +88,7 @@ test('expansion goes all the way down, and into what an expansion makes', () => 
     assert.deepEqual(ex('(defun f (x) (if x 1 2))'), ['(defun f (x) (cond (x 1) (#true 2)))']);
     assert.deepEqual(ex('(lambda (x) (or x y))'), ['(lambda (x) (cond (x #true) (#true y)))']);
     assert.deepEqual(ex('(cond ((and a b) (if c 1 2)))'), ['(cond ((cond (a b) (#true #false)) (cond (c 1) (#true 2))))']);
-    assert.deepEqual(ex('(defun s () (recv ((:m x) (if x (s) 0))))'), ['(defun s () (recv (((quote m) x) (cond (x (s)) (#true 0)))))']);
+    assert.deepEqual(ex('(defun s () (recv ((:m x) (if x (s) 0))))'), ['(defun s () (recv ((:m x) (cond (x (s)) (#true 0)))))']);
 });
 
 test('quoted data, names, parameters and patterns are left alone', () => {
@@ -98,7 +98,7 @@ test('quoted data, names, parameters and patterns are left alone', () => {
     fails(() => ex('(defun when (if) and)'), "test.slight:1:8: can't bind when");
     assert.deepEqual(ex('(lambda (case) case)'), ['(lambda (case) case)']);
     assert.deepEqual(ex('(let or (and))'), ['(let or #true)']);
-    assert.deepEqual(ex('(defun s () (recv ((:if when) when)))'), ['(defun s () (recv (((quote if) when) when)))']);
+    assert.deepEqual(ex('(defun s () (recv ((:if when) when)))'), ['(defun s () (recv ((:if when) when)))']);
 });
 
 // --- @include ---------------------------------------------------------------

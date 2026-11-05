@@ -12,7 +12,7 @@ import { read } from '../src/reader.ts';
 import { list, show, toArray, type Sexp } from '../src/sexp.ts';
 import { readSly } from '../src/sly.ts';
 import {
-    ANY, BOOL, INT, NEVER, NIL_T, NUM, PID, STR, SYM,
+    ANY, BOOL, INT, KEYWORD, NEVER, NIL_T, NUM, PID, STR, SYM, TRUE_T,
     fits, lit, listOf, meet, members, overlaps, pidOf, readType, shape, showType, tagged, tupleOf, union,
 } from '../src/types.ts';
 
@@ -38,7 +38,8 @@ const ty = (src: string): ReturnType<typeof readType> => readType(read(src, 't')
 
 test('unions flatten, drop what another member holds, and keep one of each', () => {
     assert.equal(showType(union(INT, union(STR, INT)), false), '(or int str)');
-    assert.equal(showType(union(lit('ok'), SYM), false), 'sym');
+    assert.equal(showType(union(lit('ok'), KEYWORD), false), 'keyword');
+    assert.equal(showType(union(lit('ok'), SYM), false), '(or :ok sym)');
     assert.equal(showType(union(NIL_T, listOf(INT)), false), '(list int)');
     assert.equal(showType(union(INT, ANY), false), 'any');
     assert.equal(showType(union(INT, NEVER), false), 'int');
@@ -65,7 +66,9 @@ test('meet is what two types have in common', () => {
 test('fits: every value of one is the other', () => {
     assert.ok(fits(INT, NUM, null));
     assert.ok(!fits(NUM, INT, null));
-    assert.ok(fits(shape([lit('ok'), INT]), listOf(union(SYM, INT)), null));
+    assert.ok(fits(shape([lit('ok'), INT]), listOf(union(KEYWORD, INT)), null));
+    assert.ok(!fits(lit('ok'), SYM, null));
+    assert.ok(!fits(TRUE_T, KEYWORD, null));
     assert.ok(fits(tagged('ok', INT), union(tagged('ok', ANY), tagged('error', ANY)), null));
     assert.ok(fits(shape([BOOL]), union(shape([lit('#true')]), shape([lit('#false')])), null));
     assert.ok(fits(pidOf(ANY), pidOf(INT), null));         // takes more: stands in for one that takes less
@@ -227,7 +230,7 @@ test("a task's value comes out of join and read with its type", () => {
 
 test('the keyboard sends keys', () => {
     assert.deepEqual(warnings(`(defun k () (recv (:quit ())))
-(connect :keypress k)`), ['2:20 the keyboard sends (shape (or str sym) & (list sym)), and k takes :quit: every key would be a dead letter']);
+(connect :keypress k)`), ['2:20 the keyboard sends (shape (or str keyword) & (list keyword)), and k takes :quit: every key would be a dead letter']);
     clean(`(defun k () (recv (("q" & _) ()) (_ (k))))
 (connect :keypress k)`);
 });

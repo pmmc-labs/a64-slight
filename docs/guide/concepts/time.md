@@ -45,7 +45,7 @@ to the next timer. So:
 <!-- output: ../code/con-time.expected -->
 ```
 0
-(ok (now a b c))
+(:ok (:now :a :b :c))
 20000
 ```
 

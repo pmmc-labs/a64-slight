@@ -39,7 +39,7 @@
 (404 "not found")
 (200 "6.5")
 (400 "not JSON")
-done
+:done
 ```
 
 **A server** is a function from a request to a response.

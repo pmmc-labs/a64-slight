@@ -19,32 +19,32 @@
 "λ"
 294
 fault in #<pid 2>: out of range: 0 (str/code-at at t/166-code-points.slight:26:32)
-out-of-range
+:out-of-range
 fault in #<pid 3>: out of range: 2 (str/code-at at t/166-code-points.slight:27:32)
-out-of-range
+:out-of-range
 fault in #<pid 4>: out of range: -3 (str/code-at at t/166-code-points.slight:28:32)
-out-of-range
+:out-of-range
 fault in #<pid 5>: out of range: -1 (codes->str at t/166-code-points.slight:29:32)
-out-of-range
+:out-of-range
 fault in #<pid 6>: out of range: 55296 (codes->str at t/166-code-points.slight:30:32)
-out-of-range
+:out-of-range
 fault in #<pid 7>: out of range: 57343 (codes->str at t/166-code-points.slight:31:32)
-out-of-range
+:out-of-range
 fault in #<pid 8>: out of range: 1114112 (codes->str at t/166-code-points.slight:32:32)
-out-of-range
+:out-of-range
 fault in #<pid 9>: not an integer: "a" (codes->str at t/166-code-points.slight:33:32)
-not-an-int
+:not-an-int
 fault in #<pid 10>: not a list: "a" (codes->str at t/166-code-points.slight:34:32)
-not-a-list
+:not-a-list
 fault in #<pid 11>: not a string: 97 (str/code-at at t/166-code-points.slight:35:32)
-not-a-string
+:not-a-string
 fault in #<pid 12>: not a string: 5 (str/len at t/166-code-points.slight:36:32)
-not-a-string
+:not-a-string
 fault in #<pid 13>: not an integer: "x" (str/slice at t/166-code-points.slight:37:32)
-not-an-int
+:not-an-int
 fault in #<pid 14>: not a string: a (str/index-of at t/166-code-points.slight:38:32)
-not-a-string
+:not-a-string
 fault in #<pid 15>: not a string: () (str/chars at t/166-code-points.slight:39:32)
-not-a-string
+:not-a-string
 fault in #<pid 16>: not a string: 1.5 (str/well-formed? at t/166-code-points.slight:40:24)
-not-a-string
+:not-a-string

@@ -35,6 +35,7 @@ _Static_assert(offsetof(rt_ctx_t, d8_d15)       == RT_CTX_D8,           "RT_CTX_
 _Static_assert(sizeof(rt_ctx_t)                 == RT_CTX_SIZE,         "RT_CTX_SIZE");
 _Static_assert(RT_FALSE == (0 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_FALSE is symbol 0");
 _Static_assert(RT_TRUE  == (1 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_TRUE is symbol 1");
+_Static_assert(RT_TAG_KEYWORD == (RT_TAG_SYMBOL | RT_KEYWORD_BIT), "a keyword is a symbol with the kind bit");
 _Static_assert(RT_SYM_KEYS == RT_SYM_FAULTS + RT_FAULT_COUNT, "the keys follow the fault kinds");
 
 RT_ISLAND rt_proc_t *rt_current;
@@ -252,6 +253,7 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
     if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
         const char *name = rt_symbol_name(v >> RT_SYMBOL_SHIFT);
         if (name) {
+            if (rt_is_keyword(v)) buf_str(b, ":");     // a keyword keeps its colon wherever it's written (D287)
             buf_str(b, name);
             return;
         }
@@ -442,7 +444,7 @@ rt_value_t rt_equal(rt_value_t a, rt_value_t b) {
 // aren't eq? share, functions of one name aside, so two of them hash
 // alike only by chance, about once in 2^62. It isn't seeded, so it's for digests, not for a table whose
 // keys come from someone who'd want them to collide (D209).
-enum { H_INT = 1, H_FLOAT, H_STRING, H_SYMBOL, H_PID, H_FUNCTION, H_LIST, H_END, H_TUPLE, H_OTHER, H_FLOATS, H_INTS };
+enum { H_INT = 1, H_FLOAT, H_STRING, H_SYMBOL, H_PID, H_FUNCTION, H_LIST, H_END, H_TUPLE, H_OTHER, H_FLOATS, H_INTS, H_KEYWORD };
 
 static uint64_t mix(uint64_t h, uint64_t w) {
     uint64_t x = (h ^ w) + 0x9e3779b97f4a7c15;
@@ -484,9 +486,10 @@ static uint64_t hash_atom(uint64_t h, rt_value_t v) {
         return h;
     }
     if (rt_is_string(v)) return mix_bytes(mix(h, H_STRING), rt_string_bytes(v), rt_string_len(v));
-    if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
+    if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {               // by name, and by kind: :a and 'a hash apart (D287)
         const char *name = rt_symbol_name(v >> RT_SYMBOL_SHIFT);
-        return name ? mix_bytes(mix(h, H_SYMBOL), name, strlen(name)) : mix(mix(h, H_SYMBOL), v);
+        uint64_t    kind = rt_is_keyword(v) ? H_KEYWORD : H_SYMBOL;
+        return name ? mix_bytes(mix(h, kind), name, strlen(name)) : mix(mix(h, kind), v);
     }
     if ((v & RT_TAG_MASK) == RT_TAG_PID) return mix(mix(h, H_PID), v >> RT_PID_SHIFT);
     if (rt_is_closure(v)) {                     // eq? only to itself, so its name will do
@@ -589,7 +592,7 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
     str[0] = rt_string_header(site, len);
     memcpy(str + 1, site, len + 1);
     _Alignas(16) rt_value_t cells[6] = {
-        rt_symbol(RT_SYM_FAULTS - 1 + fault), (rt_value_t)&cells[2] | RT_TAG_LIST,
+        rt_keyword(RT_SYM_FAULTS - 1 + fault), (rt_value_t)&cells[2] | RT_TAG_LIST,
         value,                                (rt_value_t)&cells[4] | RT_TAG_LIST,
         (rt_value_t)str | RT_TAG_BOXED,       RT_NIL,
     };

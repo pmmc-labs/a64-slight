@@ -3,5 +3,5 @@
 2
 6
 "one"
-(ok ("2" "*" "héllo"))
-done
+(:ok ("2" "*" "héllo"))
+:done

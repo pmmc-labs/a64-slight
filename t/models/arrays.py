@@ -205,7 +205,7 @@ def lines():
     out.append('')
     first = len(out) + 1
     for expr, _ in CASES:
-        out.append(f'(pprint (try (fork {expr})))')
+        out.append(f'(pprint (try (fork (lambda () {expr}))))')
     out.append(':done')
     return out, first
 
@@ -224,9 +224,9 @@ def expected():
         except tuple(FAULTS) as e:
             what, kind = FAULTS[type(e)]
             op = expr[1:expr.index(' ')]
-            print(f'fault in #<pid {pid}>: {what} ({op} at t/321-array-math.slight:{first + i}:{len("(pprint (try (fork ") + 1})')
-            print(f'(error {kind})')
-    print('done')
+            print(f'fault in #<pid {pid}>: {what} ({op} at t/321-array-math.slight:{first + i}:{len("(pprint (try (fork (lambda () ") + 1})')
+            print(f'(:error :{kind})')
+    print(':done')
 
 
 program() if '--program' in sys.argv else expected()

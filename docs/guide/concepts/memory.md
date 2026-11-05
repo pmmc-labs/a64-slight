@@ -32,8 +32,8 @@ happens when a process grows too big.
 <!-- output: ../code/con-memory.expected -->
 ```
 fault in #<pid 2>: heap exhausted (cons at docs/guide/code/con-memory.slight:4:11)
-(error (heap () "cons at docs/guide/code/con-memory.slight:4:11"))
-(recv #true)
+(:error (:heap () "cons at docs/guide/code/con-memory.slight:4:11"))
+(:recv #true)
 ```
 
 - **Each heap has a cap**: 1 GB, or what `SLIGHT_HEAP_MAX` says (the

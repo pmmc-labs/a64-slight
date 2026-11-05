@@ -21,7 +21,10 @@
 #define RT_ISLAND_SHIFT     55    // a pid's island (D256), in the 8 bits below an address's bit
 #define RT_ISLANDS_MAX     256
 #define RT_ROOT       (1 << RT_PID_SHIFT | RT_TAG_PID)   // the root's pid: 1, on island 0
-#define RT_SYMBOL_SHIFT      3    // a symbol is id << 3 | RT_TAG_SYMBOL
+#define RT_SYMBOL_SHIFT      4    // a symbol is id << 4 | RT_TAG_SYMBOL, and a keyword the same with...
+#define RT_KEYWORD_BIT       8    // ...this bit set (D287): one table of names, two kinds of value
+#define RT_TAG_KEYWORD      13    // RT_TAG_SYMBOL | RT_KEYWORD_BIT
+#define RT_KIND_MASK        15    // the tag and the kind bit
 
 // A boxed value points at a header word: the box's type in the low seven
 // bits, its size above the low byte. A string's size is its length in
@@ -51,7 +54,7 @@
 
 #define RT_NIL               1    // the list tag on a null pointer
 #define RT_FALSE             5    // symbol 0
-#define RT_TRUE             13    // symbol 1
+#define RT_TRUE             21    // symbol 1
 
 // What rt_fault is told went wrong, and the keyword that names it in the
 // process's (:error (kind value site)). compiler/tests/values.test.ts
@@ -204,12 +207,13 @@
 #define RT_SYM_SEXP        107    // RT_SYM_JSON + RT_JSON_COUNT
 #define RT_SEXP_SYMBOL       0    // :symbol        (:symbol "name"), a name the program doesn't mention
 #define RT_SEXP_QUOTE        1    // :quote         'x, (quote x)
-#define RT_SEXP_COUNT        2
+#define RT_SEXP_KEYWORD      2    // :keyword       (:keyword "name"), a keyword the program doesn't mention (D287)
+#define RT_SEXP_COUNT        3
 
 // What :system (process.c, D171) is asked and answers with: RT_SYS_x is
 // symbol RT_SYM_SYSTEM + x. A process's :heap and :stack are the fault
 // kinds' symbols, which have those names already.
-#define RT_SYM_SYSTEM      109    // RT_SYM_SEXP + RT_SEXP_COUNT
+#define RT_SYM_SYSTEM      110    // RT_SYM_SEXP + RT_SEXP_COUNT
 #define RT_SYS_PROCESSES     0    // :processes     asked for every process; and how many there are
 #define RT_SYS_PROCESS       1    // :process       asked for one; and (:process s info) for each
 #define RT_SYS_RUNTIME       2    // :runtime       asked for the runtime's counts, and (:runtime s info)
@@ -240,7 +244,7 @@
 // it, name being one of these (the same on macOS and Linux, where some of
 // their numbers aren't), or the number of any other. RT_EXEC_x is symbol
 // RT_SYM_EXEC + x.
-#define RT_SYM_EXEC        132    // RT_SYM_SYSTEM + RT_SYS_COUNT
+#define RT_SYM_EXEC        133    // RT_SYM_SYSTEM + RT_SYS_COUNT
 #define RT_EXEC_EXITED       0    // :exited
 #define RT_EXEC_SIGNAL       1    // :signal
 #define RT_EXEC_HUP          2    // :hup           the signals' names, without SIG
@@ -263,20 +267,20 @@
 // Who's at the other end of a Unix connection (socket/peer, process.c,
 // D235): ((:uid u) (:gid g) (:pid p)), :pid being RT_SYS_PID's. RT_PEER_x
 // is symbol RT_SYM_PEER + x.
-#define RT_SYM_PEER        149    // RT_SYM_EXEC + RT_EXEC_COUNT
+#define RT_SYM_PEER        150    // RT_SYM_EXEC + RT_EXEC_COUNT
 #define RT_PEER_UID          0    // :uid
 #define RT_PEER_GID          1    // :gid
 #define RT_PEER_COUNT        2
 
 // The word :kind, in fs/stat's info (D254); :system's kind went with the
 // two kinds of process (D277).
-#define RT_SYM_KIND        151    // RT_SYM_PEER + RT_PEER_COUNT
+#define RT_SYM_KIND        152    // RT_SYM_PEER + RT_PEER_COUNT
 #define RT_KIND_KIND         0    // :kind
 #define RT_KIND_COUNT        1
 
 // What open (process.c, D243) opens: RT_SOURCE_x is symbol RT_SYM_SOURCE
 // + x.
-#define RT_SYM_SOURCE      152    // RT_SYM_KIND + RT_KIND_COUNT
+#define RT_SYM_SOURCE      153    // RT_SYM_KIND + RT_KIND_COUNT
 #define RT_SOURCE_FS_READ    0    // :fs/read
 #define RT_SOURCE_FS_WRITE   1    // :fs/write
 #define RT_SOURCE_FS_APPEND  2    // :fs/append
@@ -288,13 +292,13 @@
 
 // What :system's (:runtime s info) says of the process table (D244):
 // RT_TABLE_x is symbol RT_SYM_TABLE + x.
-#define RT_SYM_TABLE       159    // RT_SYM_SOURCE + RT_SOURCE_COUNT
+#define RT_SYM_TABLE       160    // RT_SYM_SOURCE + RT_SOURCE_COUNT
 #define RT_TABLE_RECORDS     0    // :records       entries in use: running, open, or keeping a value
 #define RT_TABLE_COUNT       1
 
 // What fs/stat (files.c, D254) says of a file, (:kind k) among them:
 // RT_STAT_x is symbol RT_SYM_STAT + x.
-#define RT_SYM_STAT        160    // RT_SYM_TABLE + RT_TABLE_COUNT
+#define RT_SYM_STAT        161    // RT_SYM_TABLE + RT_TABLE_COUNT
 #define RT_STAT_FILE         0    // :file
 #define RT_STAT_DIR          1    // :dir
 #define RT_STAT_LINK         2    // :link          a symbolic link, not followed
@@ -307,7 +311,7 @@
 // bytes/pack's and bytes/unpack's specs (strings.c, D254), and :short, an
 // unpack that hasn't the bytes yet: RT_PACK_x is symbol RT_SYM_PACK + x.
 // The first 18 are numbers, a width and an order each.
-#define RT_SYM_PACK        167    // RT_SYM_STAT + RT_STAT_COUNT
+#define RT_SYM_PACK        168    // RT_SYM_STAT + RT_STAT_COUNT
 #define RT_PACK_U8            0    // :u8
 #define RT_PACK_I8            1    // :i8
 #define RT_PACK_U16BE         2    // :u16be
@@ -332,7 +336,7 @@
 
 // log's levels (json.c, D254), below :error, which is RT_SYM_ERROR:
 // RT_LOG_x is symbol RT_SYM_LOG + x.
-#define RT_SYM_LOG         187    // RT_SYM_PACK + RT_PACK_COUNT
+#define RT_SYM_LOG         188    // RT_SYM_PACK + RT_PACK_COUNT
 #define RT_LOG_DEBUG         0    // :debug
 #define RT_LOG_INFO          1    // :info
 #define RT_LOG_WARN          2    // :warn
@@ -340,12 +344,12 @@
 
 // An array's kinds (arrays.c, D253): :float is symbol RT_SYM_ARRAY +
 // RT_ARRAY_FLOAT, and :int is SIGINT's name, RT_SYM_EXEC + RT_EXEC_INT.
-#define RT_SYM_ARRAY       190    // RT_SYM_LOG + RT_LOG_COUNT
+#define RT_SYM_ARRAY       191    // RT_SYM_LOG + RT_LOG_COUNT
 #define RT_ARRAY_FLOAT       0    // :float
 #define RT_ARRAY_COUNT       1
 
 // What :system says of islands (D256): RT_ISLE_x is symbol RT_SYM_ISLE + x.
-#define RT_SYM_ISLE        191    // RT_SYM_ARRAY + RT_ARRAY_COUNT
+#define RT_SYM_ISLE        192    // RT_SYM_ARRAY + RT_ARRAY_COUNT
 #define RT_ISLE_ISLAND       0    // :island        the island a process is on, or an island's number
 #define RT_ISLE_STARTED      1    // :started       whether an island's thread has started
 #define RT_ISLE_SENT         2    // :sent          messages to other islands, and their bytes
@@ -609,6 +613,10 @@ static inline uint64_t rt_box_first_value(uint64_t header) {
 static inline rt_value_t rt_int(int64_t n)        { return (rt_value_t)((uint64_t)n << 1); }
 static inline int64_t    rt_int_value(rt_value_t v) { return (int64_t)v >> 1; }
 static inline rt_value_t rt_symbol(uint64_t id)    { return id << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL; }
+static inline rt_value_t rt_keyword(uint64_t id)   { return id << RT_SYMBOL_SHIFT | RT_TAG_KEYWORD; }
+static inline int        rt_is_keyword(rt_value_t v) { return (v & RT_KIND_MASK) == RT_TAG_KEYWORD; }
+// A symbol as sym? has it: not a keyword, and not #true or #false
+static inline int        rt_is_symbol(rt_value_t v)  { return (v & RT_KIND_MASK) == RT_TAG_SYMBOL && v > RT_TRUE; }
 
 // A cons cell in the two words at cell (16-byte aligned): for a value the
 // runtime builds outside any heap, on the C stack say, and copies before
@@ -835,6 +843,7 @@ rt_value_t rt_str_to_int(rt_value_t s, rt_value_t radix, const char *site) RT_AS
 rt_value_t rt_int_to_str(rt_value_t n, rt_value_t radix, const char *site) RT_ASM(rt_int_to_str);
 rt_value_t rt_str_to_float(rt_value_t s, const char *site) RT_ASM(rt_str_to_float);
 rt_value_t rt_str_to_sym(rt_value_t s, const char *site) RT_ASM(rt_str_to_sym);
+rt_value_t rt_str_to_keyword(rt_value_t s, const char *site) RT_ASM(rt_str_to_keyword);
 rt_value_t rt_sym_to_str(rt_value_t sym, const char *site) RT_ASM(rt_sym_to_str);
 rt_value_t rt_str_to_bytes(rt_value_t s, const char *site) RT_ASM(rt_str_to_bytes);
 rt_value_t rt_bytes_to_str(rt_value_t xs, const char *site) RT_ASM(rt_bytes_to_str);

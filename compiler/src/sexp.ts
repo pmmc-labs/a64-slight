@@ -21,6 +21,11 @@ export type Sexp = Sym | Int | Float | Str | Nil | Pair;
 export const NIL: Nil = { t: 'nil' };
 
 export const sym   = (name: string, pos: Pos | null = null): Sym => ({ t: 'sym', name, pos });
+// A keyword, :name, is a sym whose name starts with the colon, which no
+// name can: it evaluates to itself, apart from the symbol name (D287).
+export const kw    = (name: string, pos: Pos | null = null): Sym => sym(`:${name}`, pos);
+export const isKw  = (x: Sexp): boolean => x.t === 'sym' && x.name.startsWith(':');
+export const kwName = (x: Sexp): string => (x as Sym).name.slice(1);
 export const int   = (v: bigint, pos: Pos | null = null): Int => ({ t: 'int', v, pos });
 export const float = (v: number, pos: Pos | null = null): Float => ({ t: 'float', v, pos });
 export const str   = (v: string, pos: Pos | null = null): Str => ({ t: 'str', v, pos });

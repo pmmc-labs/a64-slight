@@ -11,6 +11,6 @@
 (#true #false #false)
 ("" "Apple" "apple" "pear" "zoo" "äpfel" "été" "日本")
 fault in #<pid 2>: not a string: a (str/upper at t/263-str-case.slight:21:32)
-not-a-string
+:not-a-string
 fault in #<pid 3>: not a string: 1 (str/compare at t/263-str-case.slight:22:24)
-not-a-string
+:not-a-string

@@ -304,10 +304,9 @@ last item of a block: there would be nothing to bind for.
 
 A list or tagged list whose elements are all literals (numbers, strings,
 booleans, keywords, `[]`, and such lists) is read as a quoted constant:
-`[1, 2, [:a, "b"]]` is `'(1 2 (a "b"))`. It means the same as
-`(list ...)`, and is made once rather than each time. It also does
-away with one of the s-expression syntax's traps: `'(:inc)` is
-`((quote inc))`, but `[:inc]` is the list `(inc)`.
+`[1, 2, [:a, "b"]]` is `'(1 2 (:a "b"))`. It means the same as
+`(list ...)`, and is made once rather than each time. A keyword in it
+is the keyword, as it is anywhere (D287).
 
 **Quoted s-expressions.** `'` and what follows it is that datum,
 quoted, read as the s-expression reader reads one: `'((lambda (x y) (+

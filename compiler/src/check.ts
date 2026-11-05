@@ -31,9 +31,9 @@ import { CompileError } from './errors.ts';
 import { expand } from './expand.ts';
 import { displayName, PRELUDE_SUFFIX } from './modules.ts';
 import { patternNames, REST } from './pattern.ts';
-import { NIL, builtinOf, cons, isForm, isSym, list, own, posOf, show, toArray, TUPLE, type Pair, type Pos, type Sexp } from './sexp.ts';
+import { isKw, kwName, NIL, builtinOf, cons, isForm, isSym, list, own, posOf, show, toArray, TUPLE, type Pair, type Pos, type Sexp } from './sexp.ts';
 import { BUILTINS, CONSTANTS, PREDICATES, RESULT_ANY, cxr, cxrSteps, faultOf, resultOf } from './builtins.ts';
-import {
+import { KEYWORD,
     ANY, BOOL, FALSE_T, FLOAT, FUN_ANY, INT, LIST_ANY, NEVER, NIL_T, PID, STR, SYM, TRUE_T, TUPLE_ANY,
     BASE_TYPES, addressOf, consOf, datumType, elementOf, findDef, fits, headOf, lit, listOf, meet, members,
     overlaps, readType, same, shape, showType, pidOf, slyName, subst, tailOf, tupleElement, tupleOf, union, unfold, widen,
@@ -532,7 +532,7 @@ function typeOf(x: Sexp, cx: Cx, expected: Ty | null = null): Ty {
         case 'float': return FLOAT;
         case 'str':   return STR;
         case 'nil':   return NIL_T;
-        case 'sym':   return nameType(x.name, cx);
+        case 'sym':   return isKw(x) ? lit(kwName(x)) : nameType(x.name, cx);
         case 'pair':  return formType(x, cx, expected);
     }
 }
@@ -907,7 +907,7 @@ function literalOf(x: Sexp): Ty | null {
         case 'float': return FLOAT;
         case 'str': return STR;
         case 'nil': return NIL_T;
-        case 'sym': return x.name === '#true' || x.name === '#false' ? lit(x.name) : null;
+        case 'sym': return isKw(x) ? lit(kwName(x)) : x.name === '#true' || x.name === '#false' ? lit(x.name) : null;
         case 'pair': return isForm(x, 'quote') ? datumType(toArray(x)![1] ?? NIL) : null;
     }
 }
@@ -990,7 +990,7 @@ function patternType(p: Sexp): Ty {
         case 'float': return FLOAT;
         case 'str':   return STR;
         case 'nil':   return NIL_T;
-        case 'sym':   return p.name === '#true' || p.name === '#false' ? lit(p.name) : ANY;
+        case 'sym':   return isKw(p) ? lit(kwName(p)) : p.name === '#true' || p.name === '#false' ? lit(p.name) : ANY;
         case 'pair': {
             const items = toArray(p) ?? [];
             if (isForm(p, 'quote')) return datumType(items[1] ?? NIL);
@@ -1015,6 +1015,7 @@ function covers(p: Sexp, m: Ty, defs: Defs): boolean {
         case 'int': case 'float': case 'str': return false;
         case 'nil': return m.k === 'nil';
         case 'sym':
+            if (isKw(p)) return m.k === 'lit' && m.name === kwName(p);
             if (p.name === '#true' || p.name === '#false') return m.k === 'lit' && m.name === p.name;
             return p.name !== REST;
         case 'pair': {
@@ -1055,7 +1056,7 @@ function onlyOne(t: Ty): boolean {
 function bindPattern(p: Sexp, t: Ty, env: Env, defs: Defs): Env {
     switch (p.t) {
         case 'sym':
-            if (p.name === '_' || p.name === '#true' || p.name === '#false' || p.name === REST) return env;
+            if (p.name === '_' || p.name === '#true' || p.name === '#false' || p.name === REST || isKw(p)) return env;
             return bind(env, p.name, t);
         case 'pair': {
             const items = toArray(p) ?? [];
@@ -1197,12 +1198,9 @@ function forkHere(x: Pair): readonly Sexp[] {
 }
 
 // A key, as :keypress sends it: the key, a string or a name, and the mods.
-const KEY: Ty = { k: 'cons', head: union(STR, SYM), tail: listOf(SYM) };
+const KEY: Ty = { k: 'cons', head: union(STR, KEYWORD), tail: listOf(KEYWORD) };
 
-const isKeyword = (x: Sexp, n: string): boolean => {
-    const items = isForm(x, 'quote') ? toArray(x) : null;
-    return items !== null && items.length === 2 && isSym(items[1]!, n);
-};
+const isKeyword = (x: Sexp, n: string): boolean => isKw(x) && kwName(x) === n;
 
 // What the builtins that take processes check, and give, beyond their
 // types: what a process takes, what a join gives, and that an address

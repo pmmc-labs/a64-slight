@@ -115,9 +115,9 @@ Tasks are how slight runs things at once and gathers the results:
 
 <!-- output: ../code/con-tasks.expected -->
 ```
-(ok (1 4 9))
-(ok 25)
-(error timeout)
+(:ok (1 4 9))
+(:ok 25)
+(:error :timeout)
 650000
 ```
 
@@ -198,7 +198,7 @@ that mode, and moves to another by calling it:
 
 <!-- output: ../code/con-states.expected -->
 ```
-(wrong opened already-open closed wrong wrong alarm alarm)
+(:wrong :opened :already-open :closed :wrong :wrong :alarm :alarm)
 ```
 
 This is a state machine with the states as code. No `state` field

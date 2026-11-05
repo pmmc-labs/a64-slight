@@ -75,7 +75,7 @@ def expected():
         for _, a in VALUES:
             cells.append(''.join('t' if holds(f, a, n) else 'f' for n in LITERALS) + ''.join('t' if holds(f, n, a) else 'f' for n in LEFT))
         out.append(f'{op} literals ' + ' '.join(cells))
-    out.append('done')                  # the root's value, a symbol
+    out.append(':done')                  # the root's value, a symbol
     return '\n'.join(out) + '\n'
 
 sys.stdout.write(program() if sys.argv[1:] == ['--program'] else expected())

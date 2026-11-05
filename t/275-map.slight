@@ -5,7 +5,7 @@
 (@include :map)
 
 ; the basics
-(let m (list->map '((a 1) (b 2) (a 3))))
+(let m (list->map '((:a 1) (:b 2) (:a 3))))
 (pprint (list (map/size m) (map/get m :a) (map/get m :b) (map/get m :c) (map/has? m :b) (map/has? m :c)))
 (let m2 (map/update (map/update m :a inc 0) :c inc 0))
 (pprint (list (map/get m2 :a) (map/get m2 :c) (map/size m2) (map/get m :a) (map/size m)))

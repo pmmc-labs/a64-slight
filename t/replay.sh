@@ -107,11 +107,11 @@ printf 'line one\nline two\n' >"$dir/in.txt"
 printf 'abq' | run SLIGHT_REPLAY_TEST=recorded SLIGHT_RECORD="$dir/world.record" world "$dir/in.txt" "$dir/out.txt" >"$dir/world.recorded"
 rm -rf "$dir/in.txt" "$dir/out.txt" "$dir/out.txt.d"
 run SLIGHT_REPLAY="$dir/world.record" world other args </dev/null >"$dir/world.replayed"
-if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(ok ("line one" "line two"))$' "$dir/world.recorded" \
-   && grep -q '^(ok ((kind file) (size 18) (modified [0-9]*) (mode [0-9]*)))$' "$dir/world.recorded" \
-   && grep -q '^(random "[0-9a-f]\{32\}")$' "$dir/world.recorded" \
-   && grep -q '^(env "recorded")$' "$dir/world.recorded" \
-   && grep -q '^(clock #true [0-9]*)$' "$dir/world.recorded" && grep -q '^(now #true [0-9]*)$' "$dir/world.recorded"; then
+if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(:ok ("line one" "line two"))$' "$dir/world.recorded" \
+   && grep -q '^(:ok ((:kind :file) (:size 18) (:modified [0-9]*) (:mode [0-9]*)))$' "$dir/world.recorded" \
+   && grep -q '^(:random "[0-9a-f]\{32\}")$' "$dir/world.recorded" \
+   && grep -q '^(:env "recorded")$' "$dir/world.recorded" \
+   && grep -q '^(:clock #true [0-9]*)$' "$dir/world.recorded" && grep -q '^(:now #true [0-9]*)$' "$dir/world.recorded"; then
     check "world replays as recorded" ok
 else
     diff -u "$dir/world.recorded" "$dir/world.replayed"
@@ -129,8 +129,8 @@ rm -f "$dir/hosts"
 if [ -e "$dir/net.sock" ]; then check "net's socket goes with its listener" no; else check "net's socket goes with its listener" ok; fi
 echo kept >"$dir/net.sock"
 run SLIGHT_REPLAY="$dir/net.record" net other </dev/null >"$dir/net.replayed"
-if cmp -s "$dir/net.recorded" "$dir/net.replayed" && grep -q '^(ok ("echo one" "echo two" "echo three"))$' "$dir/net.recorded" \
-   && grep -q '^(ok ("echo four" "echo five"))$' "$dir/net.recorded" && grep -q '^(ok ((uid [0-9]*) (gid [0-9]*) (pid [0-9]*)))$' "$dir/net.recorded"; then
+if cmp -s "$dir/net.recorded" "$dir/net.replayed" && grep -q '^(:ok ("echo one" "echo two" "echo three"))$' "$dir/net.recorded" \
+   && grep -q '^(:ok ("echo four" "echo five"))$' "$dir/net.recorded" && grep -q '^(:ok ((:uid [0-9]*) (:gid [0-9]*) (:pid [0-9]*)))$' "$dir/net.recorded"; then
     check "net replays as recorded" ok
 else
     diff -u "$dir/net.recorded" "$dir/net.replayed"
@@ -147,9 +147,9 @@ fifo=no
 rm -f "$dir/exec.out" "$dir/exec.out.fifo"
 run SLIGHT_REPLAY="$dir/exec.record" exec other args </dev/null >"$dir/exec.replayed"
 if cmp -s "$dir/exec.recorded" "$dir/exec.replayed" && [ "$written" = written ] \
-   && grep -q '^(ok (3 ("fed in" "[0-9]*")))$' "$dir/exec.recorded" && grep -q '^(ok "first")$' "$dir/exec.recorded" \
-   && grep -q '^(ok (0 ("rec=unset play=unset")))$' "$dir/exec.recorded" \
-   && grep -q '^(fifo ("one" "two"))$' "$dir/exec.recorded" && [ $fifo = yes ]; then
+   && grep -q '^(:ok (3 ("fed in" "[0-9]*")))$' "$dir/exec.recorded" && grep -q '^(:ok "first")$' "$dir/exec.recorded" \
+   && grep -q '^(:ok (0 ("rec=unset play=unset")))$' "$dir/exec.recorded" \
+   && grep -q '^(:fifo ("one" "two"))$' "$dir/exec.recorded" && [ $fifo = yes ]; then
     check "exec replays as recorded" ok
 else
     diff -u "$dir/exec.recorded" "$dir/exec.replayed"
@@ -160,7 +160,7 @@ if [ -e "$dir/exec.out" ] || [ -e "$dir/exec.out.fifo" ]; then check "exec's rep
 # islands: each island's record, replayed together.
 run SLIGHT_ISLANDS=4 SLIGHT_RECORD="$dir/islands.record" islands </dev/null >"$dir/islands.recorded"
 run SLIGHT_ISLANDS=1 SLIGHT_REPLAY="$dir/islands.record" islands </dev/null >"$dir/islands.replayed"
-if cmp -s "$dir/islands.recorded" "$dir/islands.replayed" && grep -q '^(runs [0-9]* -*[0-9]*)$' "$dir/islands.recorded" \
+if cmp -s "$dir/islands.recorded" "$dir/islands.replayed" && grep -q '^(:runs [0-9]* -*[0-9]*)$' "$dir/islands.recorded" \
    && grep -q '^((0 #true) (1 #true) (2 #true) (3 #true))$' "$dir/islands.recorded" \
    && [ -s "$dir/islands.record.1" ] && [ -s "$dir/islands.record.3" ] && [ ! -e "$dir/islands.record.4" ]; then
     check "islands replay as recorded, each from its own record" ok

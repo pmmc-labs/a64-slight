@@ -56,11 +56,11 @@ def index(r, c):
     return r * W + c
 
 def lst(*xs):
-    """pprint's form of a list: keywords without their colon, nested lists."""
+    """pprint's form of a list: a string is a keyword, with its colon (D287); nested lists."""
     def one(x):
         if isinstance(x, (list, tuple)):
             return '(' + ' '.join(one(y) for y in x) + ')'
-        return str(x)
+        return ':' + x if isinstance(x, str) else str(x)
     return one(xs)
 
 def actors():                                   # 367: frames, then the collector's count
@@ -227,7 +227,7 @@ def write_expected():
     here = os.path.dirname(os.path.abspath(__file__))
     for name, f in PORTS.items():
         with open(os.path.join(here, '..', '..', name), 'w') as out:
-            out.write('\n'.join(f() + ['done']) + '\n')
+            out.write('\n'.join(f() + [':done']) + '\n')
 
 if __name__ == '__main__' and len(sys.argv) > 1 and sys.argv[1] == 'write':
     write_expected()

@@ -11,15 +11,15 @@
 [first](https://example.com/docs/first) [second](https://example.com/docs/second) after
 
 end [never closed](https://example.com/docs/open)
-(ok "T\n\nHello, world.")
-(ok "{\"a\": [1, 2]}")
-(ok "line one\nline two\n")
-(ok "not text: image/png, 9 bytes")
-(ok "HTTP 404\nNot Found")
-(ok "HTTP 302: a redirect to BASE/page, which a fetch of its own can get")
-(ok "See [next](BASE/docs/next), [home](BASE/) and here.")
+(:ok "T\n\nHello, world.")
+(:ok "{\"a\": [1, 2]}")
+(:ok "line one\nline two\n")
+(:ok "not text: image/png, 9 bytes")
+(:ok "HTTP 404\nNot Found")
+(:ok "HTTP 302: a redirect to BASE/page, which a fetch of its own can get")
+(:ok "See [next](BASE/docs/next), [home](BASE/) and here.")
 #true
-(error "the URL must start with http:// or https://")
+(:error "the URL must start with http:// or https://")
 #true
-(ok "the user didn't let it be fetched")
-(ok done)
+(:ok "the user didn't let it be fetched")
+(:ok :done)

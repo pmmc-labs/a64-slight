@@ -31,7 +31,7 @@ Run as `GREETING=Hello ./greet --name Ann 3` (the `; args:` and
 Hello, Ann!
 Hello, Ann!
 Hello, Ann!
-not-found
+:not-found
 ```
 
 - **`@ARGV`** is the arguments after the program's name, a list of

@@ -57,9 +57,9 @@ level can ask:
 
 <!-- output: ../code/tut-4-ask.expected -->
 ```
-(ok 3)
-(error not-found)
-(ok ("apple"))
+(:ok 3)
+(:error :not-found)
+(:ok ("apple"))
 ```
 
 The program ends once nothing more can happen. Here that's with the
@@ -123,10 +123,10 @@ step of the store. `tut-store.slight` has one, `:incr`:
 
 <!-- output: ../code/tut-4-race.expected -->
 ```
-((ok (ok 1)) (ok (ok 1)))
-(ok 1)
-((ok (ok 1)) (ok (ok 2)))
-(ok 2)
+((:ok (:ok 1)) (:ok (:ok 1)))
+(:ok 1)
+((:ok (:ok 1)) (:ok (:ok 2)))
+(:ok 2)
 ```
 
 Whenever the right answer depends on a value not changing between two
@@ -164,10 +164,10 @@ words in the store that way:
 
 <!-- output: ../code/tut-4-actor.expected -->
 ```
-("a" (ok 1))
-("b" (ok 1))
-("a" (ok 2))
-(ok (ok ("a" "b")))
+("a" (:ok 1))
+("b" (:ok 1))
+("a" (:ok 2))
+(:ok (:ok ("a" "b")))
 ```
 
 `(let r (recv ...))` waits in the middle of the function, and the

@@ -260,9 +260,8 @@ the function without its body, which is its `sig`:
 - A name is a run of anything but whitespace, parentheses, `'`, `"`,
   `;`, the backquote and the comma. So `str/len`, `str->int`, `nil?`,
   `+` and `==` are all names.
-- `:name` is a keyword: a symbol that stands for itself. The reader makes
-  it `(quote name)`, so `:ping` and `'ping` are the same symbol. `:12`,
-  `::x`, `:#x` and a lone `:` are errors.
+- `:name` is a keyword: a value that stands for itself, apart from the
+  symbol `'name` (D287). `:12`, `::x`, `:#x` and a lone `:` are errors.
 - `#true` and `#false` are the booleans. `#(p ...)` is a tuple pattern,
   which can only be a pattern (Patterns, below). No other `#` word is
   allowed.
@@ -333,10 +332,19 @@ forms in order (Files).
   back as the same double, always with a `.` or an exponent so they
   can't be taken for integers: `3.0`, `0.1`, `1e+21`, `1e-7`, `-0.0`,
   `nan`, `inf`, `-inf`.
-- **Symbols**: `:ping`, `'ping`. They print without the colon. Every
-  symbol is known when the program is compiled; none are made while it
-  runs (`str->sym`, below).
-- **Booleans**: `#true` and `#false`, which are symbols too.
+- **Keywords**: `:ping`. A keyword is a tag: itself, wherever it's
+  written, and printed with its colon wherever it's printed, by
+  `pprint`, `str` and `sexp/print` alike (D287). `(eq? :a :a)` is
+  `#true`, and `(eq? :a 'a)` is `#false`.
+- **Symbols**: `'ping`, the names in a quoted list, and a bare word in
+  text read as data. A symbol is a name as data, for programs that
+  handle programs and protocols made of words; it prints bare. Every
+  keyword and symbol is known when the program is compiled; none are
+  made while it runs (`str->keyword` and `str->sym`, below), and one
+  read from text that the program doesn't mention is `(:keyword
+  "name")` or `(:symbol "name")` (`sexp/parse`, below).
+- **Booleans**: `#true` and `#false`, which are neither keywords nor
+  symbols.
 - **Lists**: `()`, and cons cells. Every list is proper: `cons` faults
   on anything but a list as its second argument.
 - **Strings**: immutable bytes, UTF-8 by convention (Strings, under
@@ -731,7 +739,7 @@ the clauses in order. Their patterns are `match`'s (Patterns, above):
 - `(:tag a b ...)` matches a list of exactly that length headed by the
   symbol `:tag`, and binds the rest of it, by position, to the names.
   `_` in a position matches anything and binds nothing.
-- `:tag` matches that symbol.
+- `:tag` matches that keyword, and `'name` that symbol.
 - A bare name matches any message, and binds it. `_` matches any message
   and binds nothing.
 - Patterns nest, a literal can go anywhere, `&` takes the rest, and
@@ -1722,8 +1730,9 @@ mustn't be guessed.
   later. Two values that aren't `eq?` hash alike only by chance, about
   once in 2^62: a hash can stand in for a big value where that chance
   will do, as git's names for its objects do, to keep and compare
-  digests of a simulation's state, say. A symbol and a function hash by
-  their names, so two closures of one `lambda` hash alike, and a pid by
+  digests of a simulation's state, say. A symbol or a keyword hashes by
+  its name and its kind, so `:a` and `'a` hash apart, a function by its
+  name, so two closures of one `lambda` hash alike, and a pid by
   its number. It isn't seeded, so it's no help against keys picked to
   collide.
 
@@ -1733,7 +1742,7 @@ Each takes one value of any type, and gives `#true` or `#false`.
 
 - `nil?`: `()`.
 - `cons?`: a non-empty list.
-- `sym?`: a symbol, `#true` and `#false` included.
+- `sym?`: a symbol; `keyword?`: a keyword. `#true` and `#false` are neither.
 - `bool?`: `#true` or `#false`.
 - `int?`, `float?`, and `num?` for either.
 - `str?`: a string.
@@ -1980,10 +1989,11 @@ Converting:
   front, maybe a point and more digits, and maybe an exponent; so
   `"1.5"`, `"-2"`, `"1e3"` and `"2.5E-3"`, but not `".5"`, `"1."` or
   `"inf"`. Otherwise, or if it's too big for a float, `#false`.
-- `(sym->str sym)`: the symbol's name, without a colon.
-- `(str->sym s)`: the symbol with that name, if the program mentions it
-  anywhere (as `:name` or `'name`); otherwise `#false`, since symbols
-  are made only by the compiler.
+- `(sym->str sym)`: a symbol's or a keyword's name, without the colon.
+- `(str->sym s)`, `(str->keyword s)`: the symbol, or the keyword, with
+  that name, if the program mentions the name anywhere (as `:name` or
+  `'name`); otherwise `#false`, since names are made only by the
+  compiler (D287).
 - `(str->bytes s)`: the bytes, as a list of integers.
 - `(bytes->str xs)`: a list of integers 0 to 255, as a string.
 
@@ -2098,20 +2108,21 @@ forms, and a program can read slight's own source:
   bits (and which a program can't have in its source), comments, and doc blocks, which it
   skips. So, as in a file, a line that starts with `=` and a letter is a
   doc block's, or an error: `(sexp/parse "=x")` is `(:error (:bad-sexp
-  1))`, but `" =x"` and `"(=x)"` read `=x` as a name. And `:a` reads as
-  the symbol `a`, as `a` does; a symbol the program mentions (as `:name`
-  or `'name`) reads as itself, and any other as `(:symbol "name")`,
-  since symbols are made only by the compiler. An integer past 63 bits
-  reads as a float.
+  1))`, but `" =x"` and `"(=x)"` read `=x` as a name. `:a` reads as the
+  keyword `:a`, and `a` as the symbol `a`; a name the program mentions
+  (as `:name` or `'name`) reads as either, and any other as `(:keyword
+  "name")` or `(:symbol "name")`, since names are made only by the
+  compiler (D287). An integer past 63 bits reads as a float.
 
-      (sexp/parse "(alpha :beta 'zebra 1.5)")
-      ; (:ok (alpha beta (quote (symbol "zebra")) 1.5)), if the
-      ; program mentions alpha and beta but not zebra
+      (sexp/parse "(alpha :beta 'zebra :okapi 1.5)")
+      ; (:ok (alpha :beta (quote (:symbol "zebra")) (:keyword "okapi") 1.5)),
+      ; if the program mentions alpha and beta but not zebra or okapi
 
 - `(sexp/print v)`: `v` as `sexp/parse` reads it back, on one line.
   A string escapes `"`, `\` and the control characters; a float always
-  has digits on both sides of its point (`1.0e+21`); a symbol is its
-  name, without a colon; `(:symbol "name")` is `name`; a tuple is
+  has digits on both sides of its point (`1.0e+21`); a keyword is its
+  name with its colon, a symbol its name alone; `(:keyword "name")` is
+  `:name` and `(:symbol "name")` is `name`; a tuple is
   `#(...)`, and an array `#float(...)` or `#int(...)`. Anything that
   isn't data faults (`:not-sexp`): a pid, a function, `nan` or `inf`
   (in an array of floats too). `pprint` quotes a string the same way.
@@ -2122,8 +2133,8 @@ under Files.
 ### Output
 
 - `(pprint x)`: writes `x` as the program shows values (strings in
-  quotes and escaped, symbols without their colon), and a newline, to
-  stdout. Returns `()`.
+  quotes and escaped, keywords with their colons, symbols bare), and a
+  newline, to stdout. Returns `()`.
 - `(tty/write x ...)`: writes its arguments to stdout, rendered as
   `str` renders them (strings as their bytes), and flushes. Returns
   `()`. `(tty/write "\e[2J")` clears a terminal.
@@ -2140,7 +2151,8 @@ under Files.
 
   `time` is `clock/now`'s, as `time/iso` writes it, and `pid` the
   process's number, followed by `"island":k` for a process on island k
-  other than 0, as a pid prints (D256). A field's value is written as `json/print` writes
+  other than 0, as a pid prints (D256). A field's name is its key, a
+  keyword's without its colon. A field's value is written as `json/print` writes
   it, except that what JSON can't hold, a pid, a function, a keyword
   other than `:null`, a float that isn't finite, is a string, as `str`
   writes it, wherever it is: `(list :error (list :enoent "x"))` is

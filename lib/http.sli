@@ -7,13 +7,13 @@
 
 ; A request as a handler gets it, a keyed list for lookup: (:method m),
 ; (:path p), (:query q), (:headers hs), (:body b).
-(deftype Request (list (shape sym any)))
+(deftype Request (list (shape keyword any)))
 
 ; A response, (status headers body), a handler's and a client's.
 (deftype Response (shape int Headers str))
 
 ; GET, POST, ... as a keyword (:get), or any method as a string.
-(deftype Method (or sym str))
+(deftype Method (or keyword str))
 
 (sig http/get (str) (Result Response any))
 (sig http/request (Method str Headers str) (Result Response any))

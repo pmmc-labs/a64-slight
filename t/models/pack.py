@@ -23,10 +23,10 @@ def unpack(specs, s, at):
     for spec in specs:
         n = spec[1] if isinstance(spec, tuple) else struct.calcsize(CODES[spec])
         if at + n > len(s):
-            return '(error short)'
+            return '(:error :short)'
         got.append(s[at:at + n].decode() if isinstance(spec, tuple) else struct.unpack(CODES[spec], s[at:at + n])[0])
         at += n
-    return f'(ok ({" ".join(show(v) for v in got)}) {at})'
+    return f'(:ok ({" ".join(show(v) for v in got)}) {at})'
 
 
 def show(v):
@@ -63,7 +63,7 @@ faults = [
     ('(bytes/pack (list :u8) (list 256))', 'out of range: 256', 'out-of-range'),
     ('(bytes/pack (list :i8) (list 128))', 'out of range: 128', 'out-of-range'),
     ('(bytes/pack (list (list :bytes 2)) (list "abc"))', 'out of range: "abc"', 'out-of-range'),
-    ('(bytes/pack (list :u7) (list 1))', 'out of range: u7', 'out-of-range'),
+    ('(bytes/pack (list :u7) (list 1))', 'out of range: :u7', 'out-of-range'),
     ('(bytes/pack (list :u8 :u8) (list 1))', 'out of range: (1)', 'out-of-range'),
     ('(bytes/pack (list :u8) (list 1 2))', 'out of range: (1 2)', 'out-of-range'),
     ('(bytes/pack (list :f64le) (list "x"))', 'not a number: "x"', 'not-a-number'),
@@ -74,4 +74,4 @@ for pid, (call, said, kind) in enumerate(faults, start=2):
     line, col = place(call)
     name = call[1:call.index(' ')]
     print(f'fault in #<pid {pid}>: {said} ({name} at t/314-bytes-pack.slight:{line}:{col})')
-    print(kind)
+    print(':' + kind)

@@ -15,9 +15,9 @@ nan
 32.25
 3.0100000000000016
 fault in #<pid 2>: division by zero (/ at t/335-float-trees.slight:12:21)
-(error (div-by-zero () "/ at t/335-float-trees.slight:12:21"))
+(:error (:div-by-zero () "/ at t/335-float-trees.slight:12:21"))
 fault in #<pid 3>: not a number: "a" (- at t/335-float-trees.slight:10:25)
-(error (not-a-number "a" "- at t/335-float-trees.slight:10:25"))
-fault in #<pid 4>: not a number: two (* at t/335-float-trees.slight:9:51)
-(error (not-a-number two "* at t/335-float-trees.slight:9:51"))
-done
+(:error (:not-a-number "a" "- at t/335-float-trees.slight:10:25"))
+fault in #<pid 4>: not a number: :two (* at t/335-float-trees.slight:9:51)
+(:error (:not-a-number :two "* at t/335-float-trees.slight:9:51"))
+:done

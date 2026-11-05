@@ -10,8 +10,11 @@
 (pprint (str->int "-"))
 (pprint (str->int "12a"))
 (pprint (sym->str :abc))
-(pprint (sym->str #true))
-; a symbol the program mentions, and one it doesn't
+(pprint (sym->str 'abc))
+; a name the program mentions, as a symbol and as a keyword, and one it doesn't (D287)
 (pprint (str->sym "abc"))
+(pprint (str->keyword "abc"))
 (pprint (eq? (str->sym "abc") :abc))
+(pprint (eq? (str->keyword "abc") :abc))
+(pprint (str->keyword "nowhere"))
 (str->sym "nowhere")

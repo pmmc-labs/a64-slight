@@ -1,5 +1,5 @@
 ; match: an arm that can't match, and a match no arm of which can.
-(sig sign (int) sym)
+(sig sign (int) keyword)
 (defun sign (n)
     (match n
         (1.0 :float)

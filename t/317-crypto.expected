@@ -9,9 +9,9 @@
 (#true #false #false #true)
 (0 32 300 #false)
 fault in #<pid 2>: out of range: -1 (crypto/random-bytes at t/317-crypto.slight:31:32)
-out-of-range
+:out-of-range
 fault in #<pid 3>: out of range: 1048577 (crypto/random-bytes at t/317-crypto.slight:32:32)
-out-of-range
+:out-of-range
 ("" "Zg==" "Zm8=" "Zm9v" "Zm9vYg==" "Zm9vYmE=" "Zm9vYmFy")
 ("Zg" "Zm8" "Zm9v" "-_8" "-_-_")
 ("" "f" "fo" "foobar" #false #false #false #false #false #false #false)

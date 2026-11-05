@@ -1,7 +1,7 @@
-(100 0 mine)
+(100 0 :mine)
 3
 #<function counter/run>
 #<function step>
 42
 (6 16)
-done
+:done

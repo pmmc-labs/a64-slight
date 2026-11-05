@@ -35,7 +35,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-from hash import hash_of, Sym
+from hash import hash_of, Kw
 
 TURN, CONNECT, START, END = 40, 30, 360, 1440
 EVERY = 30
@@ -342,7 +342,7 @@ class Explorer:
 # a run, or of a run after it, could start from them.
 
 def roll(seed, what, i, n):
-    return hash_of([seed, Sym(what), i]) % n
+    return hash_of([seed, Kw(what), i]) % n
 
 
 def random_branches(day, seed, n):
@@ -382,7 +382,7 @@ def option(name, default):
 
 def shown(change):
     args = ' '.join(f'"{x}"' if isinstance(x, str) else str(x) for x in change[1:])
-    return f'({change[0]} {args})'
+    return f'(:{change[0]} {args})'
 
 
 def main():
@@ -423,11 +423,11 @@ def main():
             print(f'    the same as {parent} till {clock(frm)}, its own till {clock(stop)}, then {rejoined}\'s again')
         print(f"    against base: fuel {signed(d['fuel'])} kg, {signed(d['late'])} passenger-minutes late, "
               f"{signed(d['missed'])} missed, {signed(d['cancelled'])} cancelled")
-        end = '(to-the-end)' if rejoined is None else f'(rejoined "{rejoined}")'
+        end = '(:to-the-end)' if rejoined is None else f'(:rejoined "{rejoined}")'
         until = clock(END) if rejoined is None else clock(stop)
-        history.append(f'(branch "{name}" (from "{parent}") (change {shown(change)}) '
-                       f'(own "{clock(frm)}" "{until}") {end} '
-                       f"(against-base (fuel {d['fuel']}) (late {d['late']}) (missed {d['missed']}) (cancelled {d['cancelled']})))")
+        history.append(f'(:branch "{name}" (:from "{parent}") (:change {shown(change)}) '
+                       f'(:own "{clock(frm)}" "{until}") {end} '
+                       f"(:against-base (:fuel {d['fuel']}) (:late {d['late']}) (:missed {d['missed']}) (:cancelled {d['cancelled']})))")
     print('the history:')
     for h in history:
         print(h)
@@ -646,7 +646,7 @@ def recover(ex, records):
     n, seed = option('--remedies', None), option('--seed', 1)
     sampled = n is not None and n < len(others)
     if sampled:
-        picked = sorted(range(len(others)), key=lambda k: (hash_of([seed, Sym('remedy'), [Sym(others[k][0])] + others[k][1:]]), k))[:n]
+        picked = sorted(range(len(others)), key=lambda k: (hash_of([seed, Kw('remedy'), [Kw(others[k][0])] + others[k][1:]]), k))[:n]
         cands = asked + [others[k] for k in sorted(picked)]
     else:
         cands = made

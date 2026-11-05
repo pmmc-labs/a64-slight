@@ -1,4 +1,4 @@
 #true
 (666 #true)
 #true
-(ok #true)
+(:ok #true)

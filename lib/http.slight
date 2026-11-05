@@ -717,7 +717,7 @@
 ; The method as it goes on the wire: :get is "GET", and a string stays as it is.
 (defun http/method-name (method)
     (cond
-        ((sym? method) (str/upper (sym->str method)))
+        ((keyword? method) (str/upper (sym->str method)))
         (#true         method)))
 
 (defun http/response-of (msg body)

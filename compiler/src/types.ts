@@ -21,7 +21,7 @@
 
 import { CompileError } from './errors.ts';
 import { displayName } from './modules.ts';
-import { isForm, isSym, own, posOf, show as showSexp, toArray, TUPLE, type Sexp } from './sexp.ts';
+import { isKw, kwName, isForm, isSym, own, posOf, show as showSexp, toArray, TUPLE, type Sexp } from './sexp.ts';
 
 export type Ty =
     | { readonly k: 'any' }
@@ -29,8 +29,9 @@ export type Ty =
     | { readonly k: 'int' }
     | { readonly k: 'float' }
     | { readonly k: 'str' }
-    | { readonly k: 'sym' }                                          // every symbol
-    | { readonly k: 'lit'; readonly name: string }                   // one symbol: :ok, #true
+    | { readonly k: 'sym' }                                          // every symbol: a name as data, 'x (D287)
+    | { readonly k: 'keyword' }                                      // every keyword, :x
+    | { readonly k: 'lit'; readonly name: string }                   // one keyword, :ok; or #true or #false
     | { readonly k: 'nil' }
     | { readonly k: 'list'; readonly of: Ty }
     | { readonly k: 'cons'; readonly head: Ty; readonly tail: Ty }
@@ -50,9 +51,11 @@ export const INT: Ty   = { k: 'int' };
 export const FLOAT: Ty = { k: 'float' };
 export const STR: Ty   = { k: 'str' };
 export const SYM: Ty   = { k: 'sym' };
+export const KEYWORD: Ty = { k: 'keyword' };
 export const NIL_T: Ty = { k: 'nil' };
 export const PID: Ty   = { k: 'pid', msg: { k: 'any' } };
 export const lit       = (name: string): Ty => ({ k: 'lit', name });
+export const isBoolName = (name: string): boolean => name === '#true' || name === '#false';
 export const TRUE_T    = lit('#true');
 export const FALSE_T   = lit('#false');
 export const listOf    = (of: Ty): Ty => (of.k === 'never' ? NIL_T : { k: 'list', of });
@@ -157,7 +160,7 @@ export function union(...ts: readonly Ty[]): Ty {
     ];
     const has = (k: Ty['k']): boolean => members.some((t) => t.k === k);
     members = members.filter((t) =>
-        !(t.k === 'lit' && has('sym'))
+        !(t.k === 'lit' && !isBoolName(t.name) && has('keyword'))
         && !(t.k === 'nil' && has('list'))
         && !((t.k === 'address' || (t.k === 'pid' && t.msg.k !== 'any')) && members.some((u) => u.k === 'pid' && u.msg.k === 'any')));
     if (members.length > MAX_MEMBERS) return ANY;
@@ -189,9 +192,11 @@ export function meet(a: Ty, b: Ty, defs: Defs, depth = 0): Ty {
             if (a.k === 'nil' && b.k === 'list') return a;
             return NEVER;
         case 'sym':
-            return b.k === 'sym' || b.k === 'lit' ? b : NEVER;
+            return b.k === 'sym' ? a : NEVER;
+        case 'keyword':
+            return b.k === 'keyword' || (b.k === 'lit' && !isBoolName(b.name)) ? b : NEVER;
         case 'lit':
-            if (b.k === 'sym') return a;
+            if (b.k === 'keyword' && !isBoolName(a.name)) return a;
             return b.k === 'lit' && b.name === a.name ? a : NEVER;
         case 'list':
             if (b.k === 'nil') return b;
@@ -250,12 +255,12 @@ export function fits(a: Ty, b: Ty, defs: Defs, depth = 0): boolean {
     }
     if (b.k === 'never') return false;
     switch (a.k) {
-        case 'int': case 'float': case 'str': case 'sym':
+        case 'int': case 'float': case 'str': case 'sym': case 'keyword':
             return b.k === a.k;
         case 'nil':
             return b.k === 'nil' || b.k === 'list';
         case 'lit':
-            return b.k === 'sym' || (b.k === 'lit' && b.name === a.name);
+            return (b.k === 'keyword' && !isBoolName(a.name)) || (b.k === 'lit' && b.name === a.name);
         case 'list':
             return b.k === 'list' && fits(a.of, b.of, defs, depth + 1);
         case 'cons':
@@ -415,7 +420,7 @@ export function datumType(d: Sexp): Ty {
         case 'float': return FLOAT;
         case 'str':   return STR;
         case 'nil':   return NIL_T;
-        case 'sym':   return lit(d.name);
+        case 'sym':   return isKw(d) ? lit(kwName(d)) : isBoolName(d.name) ? lit(d.name) : SYM;
         case 'pair': {
             const items = toArray(d);
             return items === null ? ANY : shape(items.map(datumType));
@@ -427,7 +432,7 @@ export function datumType(d: Sexp): Ty {
 
 // The names a type can be, other than an alias's or a type variable's.
 const BASE: Readonly<Record<string, Ty>> = {
-    any: ANY, never: NEVER, int: INT, float: FLOAT, num: NUM, str: STR, sym: SYM, bool: BOOL,
+    any: ANY, never: NEVER, int: INT, float: FLOAT, num: NUM, str: STR, sym: SYM, keyword: KEYWORD, bool: BOOL,
     nil: NIL_T, pid: PID, tuple: TUPLE_ANY, fun: FUN_ANY, array: arrayOf(NUM),
 };
 
@@ -449,22 +454,18 @@ export function readType(x: Sexp, vars: readonly string[], defs: Defs): Ty {
         case 'nil': return NIL_T;
         case 'int': case 'float': case 'str': throw bad('a type is a name or a form');
         case 'sym': {
-            if (x.name === '#true' || x.name === '#false') return lit(x.name);
+            if (x.name === '#true' || x.name === '#false' || isKw(x)) return lit(isKw(x) ? kwName(x) : x.name);
             if (vars.includes(x.name)) return { k: 'var', name: x.name };
             const base = own(BASE, x.name);
             if (base !== undefined) return base;
             return aliasType(x.name, [], x, defs);
         }
         case 'pair': {
-            if (isForm(x, 'quote')) {
-                const items = toArray(x)!;
-                if (items.length === 2 && items[1]!.t === 'sym') return lit(items[1]!.name);
-                throw bad('a quoted type is a keyword');
-            }
+            if (isForm(x, 'quote')) throw bad("a quoted name is a symbol, which has no type of its own: sym takes them all, and a keyword's type is :name");
             const items = toArray(x);
             if (items === null) throw bad('a type is a name or a form');
             const [head, ...rest] = items;
-            if (isForm(head!, 'quote')) return listShape([head!, ...rest], vars, defs, x);
+            if (isKw(head!)) return listShape([head!, ...rest], vars, defs, x);
             if (head!.t !== 'sym' || head!.name === TUPLE) throw bad('a type form starts with its name');
             const one = (): Ty => {
                 if (rest.length !== 1) throw bad(`(${head!.name} T) takes one type`);
@@ -529,7 +530,7 @@ export function showType(t: Ty, sly: boolean): string {
     const keyword = (name: string): string =>
         name === '#true' ? (sly ? 'true' : '#true') : name === '#false' ? (sly ? 'false' : '#false') : `:${name}`;
     switch (t.k) {
-        case 'any': case 'never': case 'int': case 'float': case 'str': case 'sym':
+        case 'any': case 'never': case 'int': case 'float': case 'str': case 'sym': case 'keyword':
             return t.k;
         case 'nil':     return sly ? '[]' : '()';
         case 'lit':     return keyword(t.name);

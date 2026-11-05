@@ -1,7 +1,7 @@
-(plan ("Say hello in French" "Add 2 and 3" "Say it in Klingon"))
-(1 done "Bonjour")
-(2 done "The sum is 5")
-(3 failed (model "no Klingon today"))
-(answer "Bonjour; the sum is 5; Klingon failed.")
-(ok "Bonjour.")
-done
+(:plan ("Say hello in French" "Add 2 and 3" "Say it in Klingon"))
+(1 :done "Bonjour")
+(2 :done "The sum is 5")
+(3 :failed (:model "no Klingon today"))
+(:answer "Bonjour; the sum is 5; Klingon failed.")
+(:ok "Bonjour.")
+:done

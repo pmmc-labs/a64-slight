@@ -124,13 +124,13 @@ which. There are no exceptions to forget to catch.
 
 <!-- output: ../code/tut-2-commands.expected -->
 ```
-(ok 3)
-(ok 5)
-(ok 3)
-(ok ())
-(error not-found)
-(ok ("pear"))
-(error (unknown (frobnicate)))
+(:ok 3)
+(:ok 5)
+(:ok 3)
+(:ok ())
+(:error :not-found)
+(:ok ("pear"))
+(:error (:unknown (:frobnicate)))
 (("pear" 5))
 ```
 

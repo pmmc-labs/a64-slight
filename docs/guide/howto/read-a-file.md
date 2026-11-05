@@ -45,9 +45,9 @@ Three ways, for three sizes of job.
 <!-- output: ../code/howto-lines.expected -->
 ```
 7
-(ok 21)
-(error (enoent "no-such-file.txt"))
-(ok "over harbor and city")
+(:ok 21)
+(:error (:enoent "no-such-file.txt"))
+(:ok "over harbor and city")
 ```
 
 **The whole file:** `(slurp path)`, from `(@include :fs)`, gives

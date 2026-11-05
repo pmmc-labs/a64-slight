@@ -9,7 +9,7 @@ BRIEF = 64 << 10
 
 def text(n):
     if n == 0:
-        yield 'leaf'
+        yield ':leaf'
         return
     yield '('
     yield from text(n - 1)
@@ -29,9 +29,9 @@ def prefix(n, size):
 
 
 site = 't/340-brief.slight'
-line = open(site).read().split('\n').index('(pprint (kind (join (fork (+ 1 (double :leaf 30))))))') + 1
-col  = '(pprint (kind (join (fork (+ 1 (double :leaf 30))))))'.index('(+ 1') + 1
+line = open(site).read().split('\n').index('(pprint (kind (join (fork (lambda () (+ 1 (double :leaf 30)))))))') + 1
+col  = '(pprint (kind (join (fork (lambda () (+ 1 (double :leaf 30)))))))'.index('(+ 1') + 1
 print(f'fault in #<pid 2>: not a number: {prefix(30, BRIEF)}... (+ at {site}:{line}:{col})')
 print('fault in #<pid 2>: heap exhausted (its end)')
-print('heap')
-print('done')
+print(':heap')
+print(':done')

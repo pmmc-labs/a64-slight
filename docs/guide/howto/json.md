@@ -38,8 +38,8 @@ The file it reads, `data/events.ndjson`, is a JSON value a line:
 
 <!-- output: ../code/howto-json.expected -->
 ```
-(ok (object ("a" (1 2.5)) ("b" null)))
-(error (bad-json 3))
+(:ok (:object ("a" (1 2.5)) ("b" :null)))
+(:error (:bad-json 3))
 {"total_ms":555,"users":["ann","bob","ann"]}
 555
 ```

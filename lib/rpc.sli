@@ -16,8 +16,8 @@
 (sig rpc/peer () any)
 (sig rpc/system () Handler)
 
-(sig rpc/call (Conn (or str sym) (list any)) (Result any any))
-(sig rpc/stream (Conn (or str sym) (list any)) pid)
+(sig rpc/call (Conn (or str sym keyword) (list any)) (Result any any))
+(sig rpc/stream (Conn (or str sym keyword) (list any)) pid)
 
 (sig rpc/connect (Where (list Handler)) (Result Conn any))
 (sig rpc/exec ((list str) (list Handler)) (Result Conn any))

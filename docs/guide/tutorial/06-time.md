@@ -101,10 +101,10 @@ Here it is in use:
 
 <!-- output: ../code/tut-6-ttl.expected -->
 ```
-(ok ("token" "session"))
-(ok ("session"))
-(ok "def")
-(error not-found)
+(:ok ("token" "session"))
+(:ok ("session"))
+(:ok "def")
+(:error :not-found)
 1800000
 ```
 

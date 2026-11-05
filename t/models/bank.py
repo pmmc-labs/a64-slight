@@ -22,5 +22,5 @@ def bank(n):
 
 r = bank(2000)
 print('(%s)' % r)
-print('(ok (%s))' % r)
-print('done')
+print('(%s)' % r)
+print(':done')

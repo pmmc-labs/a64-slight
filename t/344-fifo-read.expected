@@ -1,6 +1,6 @@
 "ready"
-(reading 0)
-(ticked 0)
+(:reading 0)
+(:ticked 0)
 ("one" "two")
 (0 ("wrote"))
 0

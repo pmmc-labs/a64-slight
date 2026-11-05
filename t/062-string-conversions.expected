@@ -10,7 +10,10 @@
 #false
 #false
 "abc"
-"#true"
+"abc"
 abc
+:abc
+#false
 #true
+#false
 #false

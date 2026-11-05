@@ -13,7 +13,8 @@ export const MAX_ARGS = 8;
 export const TOP_PARAMS: readonly string[] = ['@ARGV', '%ENV'];
 
 export const intWord    = (n: bigint): bigint => n << 1n;
-export const symbolWord = (id: number): bigint => (BigInt(id) << 3n) | 5n;
+// A symbol's word, or a keyword's with the kind bit (D287): rt.h's RT_SYMBOL_SHIFT and RT_KEYWORD_BIT.
+export const symbolWord = (id: number, keyword = false): bigint => (BigInt(id) << 4n) | (keyword ? 8n : 0n) | 5n;
 
 // A box's tag; a tuple's header word, for n elements, which a tuple
 // pattern compares with (D178); and where element i is, from a tagged
@@ -71,7 +72,7 @@ export const ERRNO_NAMES: readonly string[] = [
 export const JSON_WORDS: readonly string[] = ['null', 'object'];
 
 // What the s-expression reader makes, in RT_SEXP_ order.
-export const SEXP_WORDS: readonly string[] = ['symbol', 'quote'];
+export const SEXP_WORDS: readonly string[] = ['symbol', 'quote', 'keyword'];
 
 // What :system is asked and answers with, in RT_SYS_ order (D171).
 export const SYSTEM_WORDS: readonly string[] = [
