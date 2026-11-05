@@ -4,4 +4,3 @@
 (:error (:too-big "/dev/zero"))
 (:error (:too-big "t/data/lines.txt"))
 (:ok (58))
-()

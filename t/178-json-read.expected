@@ -41,4 +41,3 @@
 (:ok (20000 199990000))
 (:ok 20000)
 (:error (:too-big "build/t/178-huge.json"))
-()

@@ -23,7 +23,7 @@
             (let job   (str/join " " words))
             (let model (match (lookup "TEAM_MODEL" env) (:not-found "llama3.2") (m m)))
             (if (eq? job "")
-                (do (tty/write "usage: team [--at-most k] [--ms n] [--yes] [--transcript path] <the job, in words>" \n) :usage)
+                (do (tty/write "usage: team [--at-most k] [--ms n] [--yes] [--transcript path] <the job, in words>" \n) (raise :usage))
                 (do
                     (let me      $$)
                     (let yes     (team/opt opts :yes #false))
@@ -33,7 +33,7 @@
                     (let events (watch t ()))
                     (let path (team/opt opts :transcript ()))
                     (when (str? path) (spew path (map sexp/print (reverse events))))
-                    (if (eq? (car (car events)) :answer) :done :failed))))))
+                    (if (eq? (car (car events)) :answer) () (raise :failed)))))))
 
 ; The options before the job: (opts words).
 (defun flags (args opts)

@@ -19,4 +19,3 @@ alpha
 (alpha)
 (:error (:bad-sexp "build/t/182-quote.sexp"))
 (:error (:too-big "build/t/182-huge.sexp"))
-()

@@ -2564,11 +2564,11 @@ bare. Done here: `tools/string` exported. To propose, each on its own:
   links, or a kill that takes a process's descendants, would do it in
   the runtime; it cost three lines here, so it waits for a second
   program that needs it.
-- **A quiet end for a program people run:** the runtime prints the
-  root's value after the program's own output, so `team` ends with
-  `done` and `chat` with `bye`. A root ending with `()` printing
-  nothing, say; it changes what every program prints, so it's a
-  proposal of its own.
+- **A quiet end for a program people run** (built, D290): the runtime
+  printed the root's value after the program's own output, so `team`
+  ended with `done` and `chat` with `bye`. A root ending with `()`
+  prints nothing now; `chat` says its own goodbye, and `team` ends
+  with `()` or raises. Golden test 382.
 
 **The answer:** yes, for this shape of program, with the reservations
 above; D285 says why, and what the exercise didn't test.

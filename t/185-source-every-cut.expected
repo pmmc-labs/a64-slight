@@ -15,4 +15,3 @@
 (:doc "text\n" 2)
 (:form (beta) 5)
 (:line "")
-()

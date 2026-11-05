@@ -16,4 +16,3 @@ fault in #<pid 6>: not a tuple: (1) (tuple/remove at t/274-tuple-insert-remove.s
 (:error (:not-a-tuple (1) "tuple/remove at t/274-tuple-insert-remove.slight:30:32"))
 fault in #<pid 7>: not an integer: :b (tuple/insert at t/274-tuple-insert-remove.slight:31:32)
 (:error (:not-an-int :b "tuple/insert at t/274-tuple-insert-remove.slight:31:32"))
-()

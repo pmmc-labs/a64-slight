@@ -6,4 +6,3 @@
 (:ok ((:signal :kill) (:eof)))
 (:ok ((:signal 26) (:eof)))
 (:ok ((:ok :done) 7))
-()

@@ -12,4 +12,3 @@
 "((\"a\" 1))"
 (:error (:enoent "build/t/237-notes/no-such-dir/notes.sexp"))
 (:ok "there are no notes yet")
-()

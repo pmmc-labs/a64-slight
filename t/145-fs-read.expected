@@ -8,4 +8,3 @@
 (:ok 4)
 (:got "first")
 (:ok :checked)
-()

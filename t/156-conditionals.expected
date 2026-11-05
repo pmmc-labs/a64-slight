@@ -18,4 +18,3 @@
 (:ok 12)
 fault in #<pid 3>: not a boolean: 5 (cond test at t/156-conditionals.slight:53:37)
 (:error (:not-a-bool 5 "cond test at t/156-conditionals.slight:53:37"))
-()

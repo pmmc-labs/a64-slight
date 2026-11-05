@@ -69,4 +69,3 @@
 (:error (:bad-json 1))
 fault in #<pid 3>: not a string: 5 (json/parse at t/175-json-parse.slight:64:32)
 (:error (:not-a-string 5 "json/parse at t/175-json-parse.slight:64:32"))
-()

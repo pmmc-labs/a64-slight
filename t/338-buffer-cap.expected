@@ -11,4 +11,3 @@ fault in #<pid 6>: heap exhausted (bytes->base64 at t/338-buffer-cap.slight:18:3
 fault in #<pid 7>: out of range: 300 (bytes/pack at t/338-buffer-cap.slight:19:38)
 :out-of-range
 1002000
-()

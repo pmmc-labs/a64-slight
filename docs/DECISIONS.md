@@ -7438,3 +7438,28 @@ reorders a table on every update, so a printed table would churn.
 Golden test 381; the dictionary's `put` and `update`, t/275, t/376 and
 t/377 lose their `remove`; LANGUAGE.md, DESIGN.md's table, the
 tutorial's sentence.
+
+**D290. A quiet end: a root whose value is `()` prints nothing.**
+*(Stevan, Nov 2026: "Do 1 then 3, park 2", of the agent team's three
+candidates, D285.)* The runtime printed the root's value after the
+program's own output, which is right for a golden test, whose root's
+value is its answer, and wrong for a program people run: `team` ended
+with `done` and `chat` with `bye` from the runtime, not from the
+program. Now a root that ends with `()` prints nothing, and every other
+value prints as before. A program for people ends with `()` and says
+its own last word: `chat` writes `bye` itself, and `team` ends with
+`()` when the job was answered and raises `:failed`, or `:usage`,
+otherwise, so a shell sees 1. `()` that is the answer is printed by the
+program, `(pprint ())`, as any value is. Of 396 expected outputs, 75
+ended with `()`, every one a program whose answer was above it, and
+lost it: 71 by a script that checked the line was the last and was
+`()`, and four by their models, told not to write it and run again
+(`even-odd-actors`, `json-suite`, `map`, and `divisions`, whose `()`
+followed its screen on the same line, which the script's scan missed
+and the suite found), whose files then differed by that alone. The
+guide's cores page, `t/live.py`'s ten expectations, LANGUAGE.md,
+DESIGN.md and CLAUDE.md say the rule. Rejected: printing nothing for any
+root's value, which takes the answer from the golden tests and makes
+every program `pprint` it; a builtin to say "print nothing", a second
+way to end a program; and `()` printing nothing only when the program
+had written to stdout, a rule nobody could predict. Golden test 382.

@@ -6,4 +6,3 @@ fault in #<pid 14>: heap exhausted (json/parse at t/252-deep-values.slight:45:40
 fault in #<pid 15>: heap exhausted (sexp/parse at t/252-deep-values.slight:46:40)
 :heap
 (:ok 1023)
-()

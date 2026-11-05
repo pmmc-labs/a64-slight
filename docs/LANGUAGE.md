@@ -44,7 +44,9 @@ if there are none.
 When nothing can run any more, and nothing more can come (no timer is
 pending, no socket can be waited for, and no process is waiting for keys from a
 stdin that's still open), the program prints the root's value and a
-newline, and exits. That isn't the moment the root ends: other processes
+newline, unless it's `()`, and exits (D290): a program for people ends
+with `()` and says its own goodbye, and `(pprint ())` prints one when
+that's the answer. That isn't the moment the root ends: other processes
 keep running after it, and its value comes out last.
 
     (fork pprint :child)
@@ -1070,7 +1072,8 @@ Commands (`:exec`), files and sockets are the island's that opens them.
 Each island's virtual clock (`SLIGHT_CLOCK=virtual`) is its own, moving
 when nothing can run on that island. The program ends once no island can
 do anything more, and no message is on its way to one; the root's value
-is printed then, and a deadlock is told as before, across islands.
+is printed then, unless it's `()`, and a deadlock is told as before,
+across islands.
 
 A computation on one island doesn't slow another: a terminal program on
 island 0 answers keys while islands 1 to 7 work, say, and a big array

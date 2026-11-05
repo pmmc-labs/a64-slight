@@ -1,0 +1,8 @@
+; A root whose value is () prints nothing at the end (D290), so a program
+; for people ends with its own last word; () that is the answer is
+; printed by the program, as any value is. Every other value is printed
+; as before, after the program's own output.
+(pprint ())
+(pprint (list () ()))
+(tty/write "the last word" \n)
+()

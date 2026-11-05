@@ -212,4 +212,3 @@
 ((:IT-IS-ODD!) (:IT-IS-EVEN!) (:IT-IS-ODD!) (:IT-IS-EVEN!))
 (:is-it-even? :got (:STOP))
 (:is-it-odd? :got (:STOP))
-()

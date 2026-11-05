@@ -4,4 +4,3 @@
 (:client-got "echo: world")
 (:ok (:served (:ok :talked)))
 (:echo-opened #true)
-()

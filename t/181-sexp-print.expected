@@ -18,4 +18,3 @@ fault in #<pid 6>: not data: -inf (sexp/print at t/181-sexp-print.slight:36:39)
 #true
 fault in #<pid 7>: not data: #<pid 1> (sexp/print at t/181-sexp-print.slight:36:39)
 (:error (:not-sexp #<pid 1> "sexp/print at t/181-sexp-print.slight:36:39"))
-()

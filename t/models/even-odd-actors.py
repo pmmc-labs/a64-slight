@@ -68,5 +68,4 @@ def root():
 r = P(1, root()); procs[1] = r; queue.append(r)
 while queue:
     p = queue.popleft(); p.state = 'running'; run(p)
-out.append(show(procs[1].result) if procs[1].result != [] else '()')
 print('\n'.join(out))

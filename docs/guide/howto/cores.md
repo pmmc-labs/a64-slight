@@ -33,7 +33,6 @@ on an island in turn, and reads the answers back in order:
 <!-- output: ../code/howto-cores.expected -->
 ```
 (0 1 7 2 5 8 16 3 19 6 14 9)
-()
 ```
 
 Each answer goes to an address of its own, and the addresses are read

@@ -57,7 +57,7 @@
     (let extra  (if (str? expert) (list (expert-tool url expert)) ()))
     (let team   (team-tool (team/new url model (list (tools/read-file) (tools/list-files) (tools/search) (tools/calc)) ())))
     (join (connect :keypress (lambda () (typing (agent/new url model (system keys) (append (chat-tools $$ store) (cons team extra))) "" ()))))
-    :bye)
+    (tty/write "bye" \n))
 
 ; The notes go in the home directory, so every chat has them.
 (defun notes-path (env)

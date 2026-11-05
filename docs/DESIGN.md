@@ -279,7 +279,8 @@ in: one that computes a value, and one that loops through `recv`.
   file:line:col)` in the root, `fault in #<pid N>: ...` anywhere else.
   `raise` and `kill` aren't logged, except in the root, whose error is the
   program's: `error: <reason>`. The program exits 1 if the root ends with
-  an error, and otherwise prints the root's value and exits 0.
+  an error, and otherwise prints the root's value, unless it's `()`,
+  and exits 0 (D290).
 - **Preemption.** Every loop is a tail call, so a reduction counter is
   checked at each function entry and tail call (a reduction is one entry
   into a compiled function: LANGUAGE.md, under Scheduling). When it runs out, the
@@ -303,7 +304,7 @@ in: one that computes a value, and one that loops through `recv`.
   process is connected to `:keypress` or stdin has ended), not when the
   root ends: other
   processes keep running after the root has its value (or its error), and
-  the root's value is printed last. Processes
+  the root's value is printed last, unless it's `()` (D290). Processes
   still waiting in `recv` or `join` at that point are dropped (D93).
 - **Blocking calls.** Since a process can block with its stack, `sleep`
   blocks only the calling process; it can't fail, and returns `()`

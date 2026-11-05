@@ -6,4 +6,3 @@
 (:two "q")
 ((:ok :one) (:ok :two))
 :slept
-()

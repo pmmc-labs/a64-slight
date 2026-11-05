@@ -23,4 +23,3 @@ fault in #<pid 9>: not JSON: ("k" 1 2) (json/print at t/176-json-print.slight:22
 (:error (:not-json ("k" 1 2) "json/print at t/176-json-print.slight:22:39"))
 fault in #<pid 10>: not JSON: "k" (json/print at t/176-json-print.slight:22:39)
 (:error (:not-json "k" "json/print at t/176-json-print.slight:22:39"))
-()

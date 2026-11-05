@@ -5676,6 +5676,7 @@ int main(int argc, char **argv) {
         return 1;
     }
     if (!root->ok) return 1;
+    if (root->value == RT_NIL) return 0;        // a program for people ends quietly (D290)
     rt_buf_t b = { 0 };
     rt_render(&b, root->value, 0);
     fwrite(b.bytes, 1, b.len, stdout);

@@ -59,4 +59,3 @@ min()  =>  error: at byte 5: ) where a number should be
 1e400  =>  error: at byte 1: 1e400 is too big for a number
 (:ok 10)
 (:error "the argument expression is missing")
-()

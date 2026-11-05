@@ -6,4 +6,3 @@ fault in #<pid 4>: not a pid: :someone (after at t/139-timer-faults.slight:7:32)
 (:error (:not-a-pid :someone "after at t/139-timer-faults.slight:7:32"))
 :other
 :back
-()

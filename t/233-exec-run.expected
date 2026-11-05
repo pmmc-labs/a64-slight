@@ -6,4 +6,3 @@
 (:ok (0 "running\n"))
 (:error :killed)
 (:ok (0 "gone\n"))
-()

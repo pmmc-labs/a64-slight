@@ -18,4 +18,3 @@
 ("mixed.test" "echo: hi")
 ("udp.test" :etimedout)
 ("one.test" "cname.test" "short.test" "abs.test" "empty.test" "empty.test.test" "none.test" "none.test.test" "ip6only.test" "ip6only.test.test" "fail.test" "fail.test" "fail.test" "slow.test" "slow.test" "slow.test" "wrong.test" "wrong.test" "wrong.test" "other-a.test" "other-a.test.test" "cname-off.test" "cname-off.test.test" "chain.test" "mixed.test")
-()

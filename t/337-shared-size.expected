@@ -15,4 +15,3 @@ fault in #<pid 8>: heap exhausted (str/pad-start at t/337-shared-size.slight:18:
 fault in #<pid 9>: heap exhausted (str/pad-end at t/337-shared-size.slight:19:38)
 :heap
 4096
-()

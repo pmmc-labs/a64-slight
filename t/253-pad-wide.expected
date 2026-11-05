@@ -5,4 +5,3 @@ fault in #<pid 2>: heap exhausted (str/pad-start at t/253-pad-wide.slight:10:38)
 "12345"
 "7"
 100000
-()

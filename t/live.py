@@ -171,7 +171,7 @@ def keys():
     r = subprocess.run(RUN + [prog], input=b'\x1b' * 4000 + b'x', stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                        env=ENV, timeout=DEADLINE)
     out, status = r.stdout.decode(), r.returncode
-    check('keys after 4000 ESCs, on a stack all but full', status == 0 and out == '("x" :alt)\n(:ok #true)\n()\n',
+    check('keys after 4000 ESCs, on a stack all but full', status == 0 and out == '("x" :alt)\n(:ok #true)\n',
           f'exit {status}, printed {out!r}')
 
 
@@ -199,12 +199,12 @@ def peak_run(prog, args, env=ENV):
 def memory():
     prog = build('memory', 't/live/memory.slight')
     cases = [
-        ('endless', '(:error (:too-big "sh"))\n()\n', 'a JSON value with no end, from a command', PEAK),
-        ('deep', '(:error (:too-big "sh"))\n()\n', '30 million arrays deep, from a command', PEAK),
+        ('endless', '(:error (:too-big "sh"))\n', 'a JSON value with no end, from a command', PEAK),
+        ('deep', '(:error (:too-big "sh"))\n', '30 million arrays deep, from a command', PEAK),
         ('wide', None, 'str/pad-start to a width of 4 GB', PEAK),
-        ('churn', ':done\n()\n', 'a million tasks and actors, each taken as it ends', CHURN),
-        ('shared', '1342177280\n()\n', 'a 32 MB string held by 40 actors, shared (D253)', PEAK),
-        ('dropped', '629145600\n()\n', '600 strings of 1 MB made and dropped, freed (D253)', PEAK),
+        ('churn', ':done\n', 'a million tasks and actors, each taken as it ends', CHURN),
+        ('shared', '1342177280\n', 'a 32 MB string held by 40 actors, shared (D253)', PEAK),
+        ('dropped', '629145600\n', '600 strings of 1 MB made and dropped, freed (D253)', PEAK),
     ]
     for name, expected, what, most in cases:
         out, status, peak = peak_run(prog, [name])
@@ -224,7 +224,7 @@ def memory():
     out1, status1, peak1 = peak_run(prog, ['faults', '8'], capped)
     out8, status8, peak8 = peak_run(prog, ['faults', '24'], capped)
     check(f'24 faults past the heap in str/replace-all, at most {peak8 >> 20} MB, and 8 at most {peak1 >> 20} MB',
-          (status1, out1, status8, out8) == (0, '8\n()\n', 0, '24\n()\n') and peak8 < peak1 + FLAT,
+          (status1, out1, status8, out8) == (0, '8\n', 0, '24\n') and peak8 < peak1 + FLAT,
           f'exit {status1} and {status8}, printed {out1!r} and {out8!r}')
 
 
@@ -338,7 +338,7 @@ def team():
     server.kill()
     told = server.communicate()[0].decode()
     text = open(transcript).read() if os.path.exists(transcript) else ''
-    check('the team answers from the command line', status == 0 and out.endswith('\nhello and goodbye\n:done\n'),
+    check('the team answers from the command line', status == 0 and out.endswith('\nhello and goodbye\n'),
           f'exit {status}, said {out!r}')
     check('its workers report', 'worker 1 done: hello\n' in out and 'worker 2 done: goodbye\n' in out, f'said {out!r}')
     check("a write a worker would do is reported, and not done",
@@ -593,7 +593,7 @@ def wakes():
     cases = [
         ('before', 2, rb'^slight: can\'t start an island: \d+ descriptors are open, and select\(\) takes \d+\n$', b'',
          '1,100 files open before an island starts: the program says the wake pipes are past FD_SETSIZE'),
-        ('after', 0, rb'^$', b'(:echo 3 :ping)\n()\n',
+        ('after', 0, rb'^$', b'(:echo 3 :ping)\n',
          '1,100 files opened after an island starts: a later island\'s wake pipe was opened with the first'),
     ]
     for how, status, err, out, what in cases:
@@ -613,7 +613,7 @@ def inherit():
     what = "300 commands, while other islands make descriptors, have none of the program's"
     try:
         r = subprocess.run(RUN + [prog, '300'], capture_output=True, env=ENV, timeout=DEADLINE)
-        check(what, r.returncode == 0 and r.stdout == b'(0 "0\\n1\\n2\\n")\n()\n', f'exit {r.returncode}, said {r.stdout!r}')
+        check(what, r.returncode == 0 and r.stdout == b'(0 "0\\n1\\n2\\n")\n', f'exit {r.returncode}, said {r.stdout!r}')
     except subprocess.TimeoutExpired:
         check(what, False, f'still running after {DEADLINE} s')
 
@@ -826,7 +826,7 @@ def loopback():
     threading.Thread(target=accept, daemon=True).start()
     prog = build('loopback', 't/live/loopback.slight')
     what = 'a reply crossing loopback comes before a budget pending on the virtual clock'
-    expected = b'(:reply "re: ping 1" 0)\n(:reply "re: ping 2" 0)\n(:reply "re: ping 3" 0)\n(:ok :done)\n()\n'
+    expected = b'(:reply "re: ping 1" 0)\n(:reply "re: ping 2" 0)\n(:reply "re: ping 3" 0)\n(:ok :done)\n'
     try:
         r = subprocess.run(RUN + [prog, str(s.getsockname()[1])], capture_output=True,
                            env={**ENV, 'SLIGHT_CLOCK': 'virtual'}, timeout=DEADLINE)

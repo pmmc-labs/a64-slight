@@ -82,5 +82,4 @@ for name in sorted(os.listdir(SUITE), key=lambda s: s.encode()):
     else:
         out.append(name + ' :ok')
 out.append('(:devices-agree #true)')
-out.append('()')
 sys.stdout.buffer.write(('\n'.join(out) + '\n').encode('utf-8'))
