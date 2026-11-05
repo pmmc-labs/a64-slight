@@ -961,7 +961,10 @@ that serves requests shouldn't stop to (Where a `recv` can go, above).
   milliseconds. Returns `()`.
 
 Both take an integer, and a negative one counts as 0. Timers due at the
-same time fire in the order they were set. A pending timer keeps the
+same time fire in the order they were set; but a timer's message lands
+as it rings, while a process woken by `sleep` at the same instant
+still needs its turn to run, so what it sends comes after (D284). A
+pending timer keeps the
 program running, but not one for a process that has ended, which is
 dropped (D232): a sleeper that's killed, or a timeout sent to a process
 that has gone, doesn't hold up the program's end. An `after` is for an
@@ -2780,6 +2783,9 @@ argument it needs, or with one that isn't a string.
   `[Next](https://example.com/docs/next)`. A link to a place on the same
   page (`#top`), by a scheme a fetch can't follow (`mailto:`,
   `javascript:`), or with no text (an image's) is just its text.
+- `(tools/string args name)`: the argument called `name` in a model's
+  `args`, which must be a string, or it raises why not: for a tool of
+  the program's own (D285).
 - `(tools/read path)`: the file's bytes, as a string, or it raises why
   not; `(tools/save path text)` makes the file hold `text` and nothing
   else, or raises why not. What the tools to read and write files are

@@ -34,5 +34,6 @@
 (sig notes/get (Notes any) any)
 (sig notes/keys (Notes) (list any))
 (sig notes/put (Notes any str) nil)
+(sig tools/string (Args str) str)
 (sig tools/read (str) str)
 (sig tools/save (str str) nil)

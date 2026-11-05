@@ -7170,3 +7170,82 @@ transcript says `(plan ...)` where the live check first looked for
 but a transcript meant for other programs would say so. Nothing else:
 recording and replaying a run with a model, sockets and timers in it
 needed nothing of the program, which is the point of D170.
+
+**D285. The agent team, step 5: what the exercise found, and the
+answer.** *(Stevan, Nov 2026: "Let's proceed to step 5".)* The
+exercise was to find what the language lacks by writing an agent
+harness in it: a lead, workers with tools, budgets, a pool, kills and
+restarts, teammates, a review round, recorded and replayed (D281 to
+D284: `examples/team-agents.slight`, about 300 lines, `examples/
+team.slight`, 80, and tests 375 to 377, 400), in a day's work. The
+friction list, each entry weighed as a library function, a language
+change to propose, or nothing:
+
+1. A test can't print concurrent workers' events in arrival order, so
+   it sorts (D281). Nothing: that's concurrency, and the lead's events
+   are right as they come.
+2. A module's header shows only what it says, so a program using
+   `http/listen` includes `:http` though `:agent` includes it (D281).
+   Nothing: D248 by design, and the compiler's message says what to
+   include.
+3. There's no way to end a process's children with it: killing a worker
+   would leave its agent, the agent's turn and a running command, so the
+   lead makes each agent to hold its pid, and the agent library's
+   monitors do the rest (D282). The one candidate for a language
+   change: Erlang's links, or a kill that takes a process's
+   descendants. Not proposed yet: it cost three lines, and a second
+   program that needs it should ask.
+4. `assoc` adds a pair without removing the old, so an alist's update
+   is `assoc` after `remove`, which `rpc` does with `rpc/without`, and
+   a test got wrong once (D282). To propose: `assoc` replaces the first
+   pair with the key, or adds at the front when there's none; `lookup`
+   sees no difference, and a table walked with `map` or measured with
+   `length` sees the right one. A prelude change and a line of
+   LANGUAGE.md.
+5. `lookup` reads `(key value)` pairs only, so a table of records is
+   `(id (record ...))` (D282). Nothing: a convention LANGUAGE.md
+   states.
+6. A default that changes behaviour, one retry, changed step 1's test
+   (D282). Nothing of the language's: a lesson for options.
+7. A function takes at most 8 parameters, the arguments in registers,
+   and a loop's state reached nine (D283). Nothing: LANGUAGE.md says
+   so, the message is clear, and the state as one value read better.
+8. `tools/string`, which checks that a model's argument is a string,
+   was private to `lib/tools` (D283). Done here: exported, and the
+   chat's `ask_team` uses it.
+9. A tool is a closure, and one over the job's address, given to agents
+   that don't exist yet, is how a worker reaches a teammate through the
+   lead (D283). Nothing: the shape to use.
+10. The runtime prints the root's value after a program's own output,
+    so a program for the command line ends with `done` (D284). To
+    propose: a quiet end, a root's `()` printed as nothing, say; it
+    changes what every program prints, so a proposal of its own.
+11. `sexp/print` writes a keyword without its colon, so a transcript
+    says `(plan ...)` and reads back as the symbol (D284). Nothing: by
+    design, and said in D284.
+
+And the three from the Life ports (D280), which started the list: `/`
+giving a float where an index was wanted, met twice, which the checker
+catches; `$$` in a `fork`'s body being the child's, which the tutorial
+says; and a `sleep`'s wake needing a turn where a timer's message lands
+at once, which LANGUAGE.md's Time section says now. Nothing more.
+
+The answer: is slight a good language to write an agent harness in?
+For this shape of program, yes. Not one entry on the list is the
+process model's: the lead handled a job in the middle of a message,
+asked at addresses of its own, watched its workers, their agents and
+their timers at one address, killed what overran and started again
+what failed, and every piece of it was a `fork`, a `send`, a `read` or
+a `monitor`, with no dance anywhere; the proposal's bet (D277) paid.
+Recording and replaying a run with a model, sockets, commands and
+timers in it needed nothing of the program, and the same job came out
+the same under five schedules, which no other harness language gives.
+What it lacks is at the edges: the prelude's alists first (4), a way
+to end a process's children with it when a program outgrows keeping
+pids (3), and a quiet end for a program people run (10). What the
+exercise didn't test: a real model's latency and a person at the
+terminal, since the live check's model is a fake; and a harness that
+runs for days, which would meet the kept-result rule (D278) in a lead
+that never joins what it starts, as the acceptors did. The three are
+candidates, each to be proposed on its own; nothing is agreed by this
+record.

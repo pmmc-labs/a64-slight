@@ -2446,7 +2446,7 @@ Mac, stackful against today.
   message meant for someone else. A `--strict` warning, when it follows
   a `send` in the same body; not a rule.
 
-### An agent team: a design exercise (agreed, D281; steps 1 to 4 built, Nov 2026)
+### An agent team: a design exercise (agreed, D281; built, D281 to D285, Nov 2026)
 
 Stevan, after the Life ports (D280): "So what would be a good design
 exercise? Should we flesh out an example to a larger app? Or do
@@ -2533,23 +2533,40 @@ the job's end, for its teammates, and reaches them through the lead.*
 live check. *Built (D284): `--transcript`; 375 recorded and replayed,
 375 and 376 under five seeds; the team on t/live.py's model.* 5. The friction list written up in the decision, each entry
 weighed: a library function, a language change to propose, or nothing.
+*Done (D285): below.*
 
-**To settle, with Stevan:**
+**Settled (D281), as recommended:** before the simulation's decisions;
+workers' changing tools off, what they would have done reported, and
+one approval a job; one model, a worker's an argument; the terminal and
+a transcript file.
 
-- Before the simulation's decisions (the living town's clock,
-  "Simulation across islands") or after. Recommended: before, since it
-  needs no runtime change and a few sessions, and what it finds about
-  the language is worth having before the town is written in it.
-- Approvals. A team that asks y/n twenty times isn't a team.
-  Recommended: tools that change something are off for workers; the
-  lead reports what they would have done; the person approves once, for
-  the job.
-- One model for all, or a worker's own, as `CHAT_EXPERT` gives the chat
-  a second. Recommended: one, with a worker's model an argument, so a
-  reviewer can be a bigger one.
-- How far the output goes. Recommended: the terminal as `chat` has it,
-  and the transcript file; a view is "Seeing a simulation"'s business,
-  not this.
+**What it found (D285).** Eleven entries on the friction list, and
+three from the Life ports before it; not one is the process model's.
+Nothing to do for most: a test sorts concurrent workers' events; a
+module's header shows what it says (D248); a table of records is `(id
+(record))`; a function takes 8 parameters, as LANGUAGE.md says; a tool
+is a closure, and one over an address is the capability; keywords print
+bare. Done here: `tools/string` exported. To propose, each on its own:
+
+- **A replacing `assoc`:** today it adds a pair at the front and never
+  removes the old, so an update is `assoc` after `remove`, which `rpc`
+  does with `rpc/without` and a test got wrong. `lookup` would see no
+  difference; a table walked or measured would see the right one. A
+  prelude change and a line of LANGUAGE.md.
+- **Ending a process's children with it:** killing a worker leaves its
+  agent, the agent's turn and a running command, so the lead keeps each
+  agent's pid and the agent library's monitors do the rest. Erlang's
+  links, or a kill that takes a process's descendants, would do it in
+  the runtime; it cost three lines here, so it waits for a second
+  program that needs it.
+- **A quiet end for a program people run:** the runtime prints the
+  root's value after the program's own output, so `team` ends with
+  `done` and `chat` with `bye`. A root ending with `()` printing
+  nothing, say; it changes what every program prints, so it's a
+  proposal of its own.
+
+**The answer:** yes, for this shape of program, with the reservations
+above; D285 says why, and what the exercise didn't test.
 
 **Rejected, for this exercise:** growing `airline`, which is fork-and-join
 shaped and was right under the old model, so it would prove nothing

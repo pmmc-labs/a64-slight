@@ -84,7 +84,7 @@
         "Gives a job to a team of agents, which splits it into tasks, works them at once, and combines their answers: for a job with several independent parts. The team knows nothing of this conversation, so say everything."
         (list (list "job" :string "The job, in full"))
         (lambda (args)
-            (match (team/ask t (lookup "job" args))
+            (match (team/ask t (tools/string args "job"))
                 ((:ok answer)    answer)
                 ((:error reason) (raise reason))))))
 
