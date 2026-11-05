@@ -465,6 +465,10 @@ to get them back from git (`3fd71e0`).
   (D84).
 - Verify a reported misbehavior against an independent implementation
   before calling it a bug.
+- When a change moves an expected output that a model in `t/models/`
+  wrote, rerun the model; don't patch the file. A patched file leaves the
+  model stale, and the next change finds the two disagreeing (D287 found
+  three).
 - When editing with scripts, assert that each replacement matched.
 - Test timing uses a virtual clock; real time is never used in tests.
 
