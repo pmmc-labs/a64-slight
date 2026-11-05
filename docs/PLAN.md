@@ -2576,6 +2576,189 @@ living town now, which needs the simulation decisions first and is
 supervision library first, OTP's shapes, since the way to find what
 repeats is to write the program and look.
 
+### `fork` takes a function and its arguments (proposed, Nov 2026)
+
+From the talk after D285 (Stevan: "Yes this is what I was thinking for
+fork and `$$`. It makes it much more clear."). Nothing is agreed by
+this section; it's the proposal to decide on.
+
+**The itch.** In `(fork expr)`, `expr` runs in the child, so `$$` in it
+is the child, and a parent that wants the child to know it binds
+itself first, `(let me $$)`, thirty times across the repo; and an
+argument that should be worked out once, in the parent, is worked out
+in each child unless it's bound first. The rule is in the tutorial and
+in LANGUAGE.md, and the Life ports still read it wrong (D280). It comes
+of `fork` being the one form whose argument runs somewhere else.
+
+**The proposal.** `fork` takes a function and its arguments, as Erlang's
+`spawn/3` does:
+
+    (fork f arg ...)                 ; was (fork (f arg ...))
+    (fork/on k f arg ...)
+    (connect :keypress f arg ...)
+    (connect :tcp where f arg ...)
+    (connect dev f arg ...)
+
+`f` and the arguments are evaluated in the parent, deep-copied into the
+new process (a closure with what it captured, as a message carries
+one), and the child calls `f` with them; the call's value is the
+process's, as now. So `$$` anywhere in a `fork` form is the parent, and
+`(fork worker $$ job)` tells the worker who started it. A body that
+isn't a call is a lambda: `(fork (lambda () (do (sleep ms) (send p
+:tick))))`. There's nothing else to learn: a fork is a call, made in a
+new process.
+
+**What goes.** The compiler's hidden entry function at each fork site,
+and the free-variable walk that finds its parameters (`compileFork`);
+the rule that a fork takes at most 8 locals into the child (a lambda
+captures what it needs, and arguments are at most 8 as in any call);
+and `$$` meaning two things in one form. The checker types a fork as
+the call of `f` it is, so its arity and arguments are checked as any
+call's are, and the process's messages come from `f`'s recvs, as they
+come from the body's call now (`forkType`). The runtime's `rt_fork`
+takes the function and the argument values where it took a code
+address and the copied locals, and the child's entry applies it, as
+`apply` does; `:system` says a process is in `f`, which already has a
+name. What's copied is what's passed, which is the rule a program wants
+anyway: `(fork worker (part-of big i))`, not `big`.
+
+**Migration.** 682 forks and 149 connects with a body, across lib, the
+examples, the tests and the guide. About 630 are a direct call of a
+function, `(fork (f a b))`, which a script makes `(fork f a b)`,
+asserting each; 33 whose body is a special form (`do`, `match`, `cond`,
+`recv`, ...) and 23 whose body is a bare value become lambdas, by hand;
+the 30 `(let me $$)` before a fork go. An argument that mentions `$$`
+changes meaning, from the child to the parent: the script lists each
+one, to be read. The checker catches an old-style fork that's left:
+`(fork (worker mine))` is then `fork` of what `worker` returns, which is
+no function, and it says so where it can tell. A day, with the docs
+(LANGUAGE.md's fork, fork/on and connect, DESIGN.md's table, the guide's
+tutorial and concepts pages) and a decision record.
+
+**To settle.**
+
+1. `(fork v)` where `v` isn't a function. Recommended: it faults,
+   `:not-a-function`, in the parent, as `(apply v ())` would, and no
+   process starts; the checker warns of it when it can see it. The
+   other way, a value as a process's value, `(join (fork 42))` giving
+   `(:ok 42)`, is one fault fewer and two meanings for `fork`, and it
+   hides an old-style `(fork (f x))` whose `f` returns a value.
+2. Nothing shorter than `(fork (lambda () ...))` for a body that isn't
+   a call. Recommended: nothing; it's the honest spelling, and the
+   short bodies in the repo are `sleep`s and `send`s, which read as
+   well as `(fork sleep ms)`.
+
+### Keywords, a type of their own (proposed, Nov 2026)
+
+From the same talk (Stevan: "perhaps we should have a new type, a
+'keyword' which is a symbol which evaluates to itself. They would not
+share the same namespace as `let` or `defun` defined symbols, and it
+would always print the `:` when it was serialized. This should decouple
+the two symbol types and I hope, simplify things. I know these are deep
+changes, but I think they are worthwhile."). Nothing is agreed by this
+section either.
+
+**The itch** (D284; D285's entry 11, filed under nothing, which this
+revises). `:ok` and `'ok` are one symbol, printed `ok` (D52), so printed
+data can't say which it was: a transcript's `(plan ...)` reads back as
+the symbol `plan`, or as `(:symbol "plan")` when the program doesn't
+mention it (D155), and `:zzz` and `zzz` in text read as one thing. A
+keyword is a tag; a symbol is a name. The language uses the first in
+every message and result, and the second almost nowhere: quoted names
+appear in a dozen tests, and in data read from text, `rpc`'s words and
+handler names, and source read with `:source`.
+
+**The proposal.** A keyword is a type of its own. `:name` evaluates to
+itself and is `eq?` to no symbol, string or anything else. It prints
+`:name` wherever it's printed: `pprint`, `str` and `tty/write`,
+`sexp/print`, and `log`'s fields (`":name"` in the JSON, as `str`
+writes it). It reads back as itself from `sexp/parse`, `:sexp` and
+`:source`. A symbol is a name as data: `'name`, the names in a quoted
+list, and a bare word in text read as data. It prints bare, as now, and
+is for programs that handle programs, and for text protocols made of
+words. In patterns, `:tag` matches the keyword and `'name` the symbol,
+both allowed today. Predicates: `keyword?`, and `sym?` for symbols
+alone; `#true` and `#false` are neither, `bool?` alone, where D53 had
+`sym?` true of them. Conversions: `keyword->str` and `str->keyword`
+beside `sym->str` and `str->sym`. Types (TYPES.md): `keyword` where the
+table has `sym` as "every symbol, keywords and booleans included", `:ok`
+the type of that keyword alone, as now, and `sym` the symbols. The
+reader: `:name` is a keyword literal, not `(quote name)`, so `'(:a b)`
+is the keyword `:a` and the symbol `b`, where today it's `((quote a)
+b)`; `:12`, `::x` and a lone `:` stay errors. `.sly` spells both as it
+does, `:name` and `'name`; its grammar doesn't change.
+
+**How, in the runtime.** One tag, one word: `id << 4 | kind << 3 |
+RT_TAG_SYMBOL`, the kind bit set for a keyword. A keyword and a symbol
+of one name share the compiler's table and differ in that bit, so `eq?`
+is still word equality and a pattern still compares a word; the
+compiler emits every name mentioned as `:name` or `'name` once, as now.
+`#true` and `#false` stay ids 0 and 1, printed as themselves. `hash`
+mixes the kind in with the name (D209), so `:a` and `'a` hash apart,
+and the same on every machine still. `sexp.c` reads `:name` as the
+keyword and `name` as the symbol, and prints each its way.
+
+**Names the program doesn't mention.** Both kinds are compile-time ids
+(D14), so a name read from text that the program never wrote needs a
+value. Two ways:
+
+- *K1, D155's rule, in both namespaces:* an unknown keyword reads as
+  `(:keyword "name")`, as an unknown symbol reads as `(:symbol "name")`,
+  and each prints back as it was read, `:name` and `name`, so data
+  passes through a program unchanged, and a program can only compare or
+  match what it mentions anyway. No table at run time; nothing an input
+  can fill.
+- *K2, interning at run time:* a table of names shared by the islands
+  under a lock, with a cap (a million names, say, past which a reader
+  gives `(:error (:too-many-names))`), so every `:name` read is `eq?` to
+  the program's whether it mentions it or not. It reopens D14 and D155
+  (Erlang's atom table, which untrusted input fills); ids differ between
+  runs, which `hash` by name hides and the collector doesn't see.
+
+Recommended: K1 now. It's the rule we have, in two namespaces where it
+was in one, and a keyword's colon never goes missing again, which was
+the complaint; a program that never looks inside `(:keyword "name")`
+wouldn't notice K2 later, so K2 waits for a program that needs it.
+
+**What changes, and the cost.**
+
+- The runtime: the printers, `sexp.c`'s reader and printer (a
+  `RT_SEXP_KEYWORD` beside `RT_SEXP_SYMBOL`), `str->sym`, `sym?`, the
+  new builtins, `hash`.
+- The compiler: the reader, `values.ts`, the constants codegen emits,
+  the checker's types and `builtins.ts`.
+- `lib/rpc.slight`: stupidrpc's words are bare, so its wire words become
+  symbols, `(list 'helo 'rpc 1)` sent and `('helo 'rpc 1)` matched; a
+  barf's reason, `(:unknown-protocol ...)`, prints with its colons
+  inside. `lib/http.slight` takes a method as a symbol or a string;
+  keywords too, or keywords alone.
+- The golden outputs: about 300 of the 408 print a keyword somewhere,
+  and each gains its colons. The rule for changing them: the 25 Python
+  models print the colons and are run again; for the rest, the new
+  compiler's output is diffed against the old expected, and the diff is
+  read against the program: a colon before a word the program writes
+  as a keyword is the change, and anything else is a bug, in the
+  program or in the compiler. The diff is the review, not a copy. A
+  program that writes a keyword for a person to read, `(tty/write
+  :done)`, bends, and writes a string (D84).
+- The docs: LANGUAGE.md's reader, values, patterns, strings, `sexp/` and
+  output sections; DESIGN.md's values; TYPES.md's table; SYNTAX.md; the
+  guide's tour and `01-values.md`, which say "without its colon", and
+  every output block that shows a keyword; the Sublime syntaxes; D52,
+  D53, D155 and D163 superseded in part, by the decision record.
+
+Two days, after `fork`'s day; each its own decision, with the suite
+green at the end.
+
+**Rejected, or to be:** one type still, only printed with its colon,
+which keeps `(eq? :ping 'ping)` true and a bare word in text reading as
+a tag; no symbols at all, names in data as strings, which quoted lists
+and the readers of source can't do without; and K2 now, above.
+
+**To settle:** K1 or K2; whether `str` and `tty/write` print the colon
+(recommended: yes, as Clojure's `str` does, `keyword->str` giving the
+bare name); and `sym?` false of the booleans (recommended: yes).
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written
