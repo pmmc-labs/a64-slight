@@ -799,6 +799,44 @@ def https():
         server.shutdown()
 
 
+# A server outside the program, on loopback, that answers a line 20 ms
+# after it comes, as macOS's loopback delivers every reply a moment after
+# its send: on the virtual clock, with a budget pending, the reply must
+# come before the budget, and the clock mustn't have moved (D288). Linux
+# delivers loopback within the send, so only a server that waits shows it.
+def loopback():
+    s = socket.socket()
+    s.bind(('127.0.0.1', 0))
+    s.listen(8)
+
+    def serve(c):
+        with c, c.makefile('rb') as lines:
+            for line in lines:
+                time.sleep(0.02)
+                c.sendall(b're: ' + line)
+
+    def accept():
+        while True:
+            try:
+                c, _ = s.accept()
+            except OSError:
+                return
+            threading.Thread(target=serve, args=(c,), daemon=True).start()
+
+    threading.Thread(target=accept, daemon=True).start()
+    prog = build('loopback', 't/live/loopback.slight')
+    what = 'a reply crossing loopback comes before a budget pending on the virtual clock'
+    expected = b'(:reply "re: ping 1" 0)\n(:reply "re: ping 2" 0)\n(:reply "re: ping 3" 0)\n(:ok :done)\n()\n'
+    try:
+        r = subprocess.run(RUN + [prog, str(s.getsockname()[1])], capture_output=True,
+                           env={**ENV, 'SLIGHT_CLOCK': 'virtual'}, timeout=DEADLINE)
+        check(what, r.returncode == 0 and r.stdout == expected, f'exit {r.returncode}, said {r.stdout!r}')
+    except subprocess.TimeoutExpired:
+        check(what, False, f'still running after {DEADLINE} s')
+    finally:
+        s.close()
+
+
 os.makedirs(DIR, exist_ok=True)
 keys()
 memory()
@@ -816,5 +854,6 @@ accept()
 stacks()
 delete_race()
 https()
+loopback()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

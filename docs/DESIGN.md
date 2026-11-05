@@ -1084,13 +1084,19 @@ run (option (b), D256's step 6, put off).
   on its own, is waited for, for real (D185); then a key; then the clock
   moves to the next timer; only when nothing else can happen does it
   wait for real (D139). But before it moves to a lookup's timer, it
-  waits for real, up to 200 ms, for the sockets (D165). It can't tell
-  that a reply is still crossing macOS's loopback, which delivers a
-  moment after a send, so a test mustn't have a timer pending while it
-  waits for one, unless the timer is meant to win (D236). With nothing
-  to look at (no key wanted, no socket or command open) it doesn't call
-  `select()` to look, so a simulation's clock moves at each event without
-  a system call (D242).
+  waits for real, up to 200 ms, for the sockets (D165); and the same
+  before a program's timer while a connection the program made (`:tcp`,
+  `:unix`) has been written to, or is still connecting, with nothing
+  come back since, and is waited on: a reply may be crossing macOS's
+  loopback, which delivers a moment after a send, and a budget pending
+  during a request mustn't beat it (D236, D288). A reply on its way
+  ends the wait as it comes; only a server that stays silent costs the
+  whole of it, once per move of the clock, and a reply that comes in
+  pieces, a byte to a tick, costs nothing after its first. An accepted
+  connection isn't waited for, so a server's idle connections never
+  hold the clock. With nothing to look at (no key wanted, no socket or command
+  open) it doesn't call `select()` to look, so a simulation's clock
+  moves at each event without a system call (D242).
 - **`:keypress`** (`runtime/tty.c`) sends each key as `(key mods...)`
   (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style

@@ -67,7 +67,12 @@ used in a test.
 
 A command run with `:exec` is a special case. While a program waits for
 a command whose input is closed, so that it can only be working on its
-own, the virtual clock stands still and waits for it, for real.
+own, the virtual clock stands still and waits for it, for real. So is
+a reply to a connection the program made: before the clock moves to a
+timer while one has been written to and nothing has come back, it
+waits a little, for real, since on some systems a reply takes a moment
+to cross from one socket to another, and a timer that's only a budget
+mustn't win by that.
 
 ## What a run depends on
 

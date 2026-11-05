@@ -7350,3 +7350,69 @@ not needed since `sym->str` takes both; and log keys with colons,
 since a key is a name. Golden test 379; t/041, 042, 062, 093, 170,
 181, 214 and 275 reworked; the unit tests; D52, D53, D155 and D163
 superseded in part.
+
+**D288. The virtual clock waits for a reply owed to a connection the
+program made.** *(Stevan, Nov 2026: "Go ahead and build it as D288",
+after the M2 Max failed the agent team's golden tests, 375 to 377,
+every worker ending `(:failed (:timeout 120000))`.)* The cause was
+D236's: each worker's task has a budget pending, `(after task-ms to
+(:overrun id))`, while its agent's request crosses loopback to the fake
+model in the same program. On the virtual clock the runtime looked at
+the sockets once, and if none was ready at that instant moved the clock
+to the next timer; macOS's loopback delivers a moment after a send, so
+the clock found nothing and went to the budget. Linux delivers within
+the send, so the cloud machine never saw it; a server outside the
+program that answers 20 ms late shows it on Linux every time. D236 met
+the same with HTTP's 30 s default, withdrew the default, and left the
+rule "a test mustn't have a timer pending while it waits for a reply on
+loopback, unless the timer is meant to win". A budget is that timer, by
+design, so the rule can't hold for an agent harness, and a program with
+budgets could only run on the real clock.
+- **Now:** a connection the program made (`:tcp`, `:unix`; `made` in
+  `rt_device_t`) is owed a reply (`owed`) from its connect, and from
+  each write to it, until anything comes back on it, a byte or its
+  end. Before the virtual clock moves to a program's timer while one
+  that's owed is waited on, it waits for the sockets for real, up to
+  the 200 ms it already allows before a lookup's timer (D165): one
+  condition more in `idle`, `owed_reply`, on `wants`, so a connection
+  nobody waits on holds nothing. A reply on its way ends the wait as it
+  comes, so the cost is loopback's latency; only a server that stays
+  silent, as 211's `/silent` does, pays the whole wait, once per move
+  of the clock, and the timer still wins. An accepted connection isn't
+  flagged, so a server's idle connections never hold the clock, and a
+  command is waited for as before (D185). The HTTP library's
+  connections are one exchange each (`Connection: close`), owed from
+  the request till the reply starts; an `rpc` connection kept up is
+  owed only while a call of its is unanswered.
+- **Why per connection, where D236's first fix was one note:** that
+  note was cleared by the first reply while others were still
+  crossing, and the clock went to their timeouts. A flag on each
+  connection is cleared only by that connection's own reply.
+- **Why cleared when anything comes, not kept while the connection is
+  open:** the first cut kept it, so that a reply in several arrivals
+  was covered to its end; 179, whose server writes a byte to each tick
+  of a timer to a client that only reads, then paid 200 ms a byte, and
+  was killed at 60 s on both targets. Once anything has come back, the
+  rest of a reply that comes in pieces is at the program's own pace,
+  which the clock is for. The limit that leaves: a reply whose later
+  segment is still crossing loopback when its first has been read, and
+  a timer is due, loses the rest to the timer; a write's segments are
+  delivered together as a rule, and read in one pass, so no test shows
+  it, and D236's rule for tests is withdrawn.
+- **Rejected:** waiting before every move of the clock while any socket
+  is open, which costs the airline's and the HTTP tests seconds per
+  run, and a server's idle connections would never let the clock move;
+  keeping D236's rule, which puts the team, and any program with
+  budgets, on the real clock only; and pairing the program's own
+  connections by port to count the bytes in flight between them, D236's
+  80 lines, which still can't see a server outside the program.
+- **Tests:** golden test 380, a client in the program asking an echo
+  three times with a budget of 50 ms it takes back when the reply
+  comes, the clock at 0 at each, then asking for silence, which the
+  budget wins at 50 ms; and t/live.py's loopback, the same client
+  against a Python server that answers 20 ms late, on the virtual
+  clock, which failed on Linux with the runtime as it was, the budget
+  winning at once, and passes now. 375 to 377 are unchanged; their
+  budgets are what the change is for. DESIGN.md's account of the
+  virtual clock, the guide's time page and PLAN.md's timers note say
+  the rule; D236's rule for tests is withdrawn.

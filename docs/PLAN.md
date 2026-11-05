@@ -804,7 +804,10 @@ with Stevan first.
   process has ended no longer keeps the program running, which frees
   `ask-within` (D157), `http/request-within` (D173) and a closed keeper
   (D228). And so the `run` tool's time limit (D187) is in too (D234);
-  HTTP's default timeout (D173) was, and was taken out again (D236).
+  HTTP's default timeout (D173) was, and was taken out again (D236),
+  since the virtual clock moved to it while a reply crossed macOS's
+  loopback; the clock waits for such a reply now (D288), which the
+  agent team's budgets needed.
 - **Processes as data.** A waiting process is a function, its arguments
   and a mailbox (D8), and its data has no cycles, so it can be written
   out, with functions and closures by name. For: saving and restoring a

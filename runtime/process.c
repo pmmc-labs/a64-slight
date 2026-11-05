@@ -3127,6 +3127,7 @@ static int listening(void) {
 }
 
 static int sockets_waiting(void);
+static int owed_reply(void);
 static int working(void);
 static void     socket_fds(fd_set *in, fd_set *out, int *max);
 static int      socket_events(fd_set *in, fd_set *out);
@@ -3250,9 +3251,14 @@ static int idle(void) {
         // A lookup's timer is the runtime's, not the program's, so it
         // mustn't beat an answer on its way: from a name server in the same
         // program, say, which on macOS's loopback arrives a moment after
-        // it's sent, not by the time select() looks. So before the clock
-        // moves to one, the sockets are waited for, for real, a little.
-        if (my.nalarms && !my.alarms[0].msg && slot(my.alarms[0].pid)->device && (saw = wait_for(SETTLE_US))) {
+        // it's sent, not by the time select() looks (D165). Nor may a
+        // program's timer, a budget for a request, beat the reply owed to
+        // a connection the program made (D288). So before the clock moves
+        // to either, the sockets are waited for, for real, a little: a
+        // reply on its way ends the wait as it comes, and only a server
+        // that stays silent costs the whole of it.
+        if (my.nalarms && ((!my.alarms[0].msg && slot(my.alarms[0].pid)->device) || owed_reply())
+            && (saw = wait_for(SETTLE_US))) {
             if ((saw & IO_KEYS) && input_at == input_len) read_input();
             return 1;
         }
@@ -3386,6 +3392,8 @@ typedef struct rt_device {
     int               sent;             // its owner has its last message, and hasn't waited since
     struct rt_device *next_socket;      // in sockets, or graveyard
     int               connecting;       // till connect() has finished
+    int               made;             // a connection the program made (connect :tcp, :unix)...
+    int               owed;             // ...written to, or connecting, and nothing come back since (D288)
     int               waiting;          // accepted, and not yet handed to a process: it reads nothing
     int               eof_sent;
     int               closing;          // closed, but still writing what it has; no longer its pid's
@@ -3715,6 +3723,7 @@ static ssize_t fill(rt_device_t *d) {
     do got = rt_io_read(d->fd, d->buf + d->len, d->cap - d->len); while (got < 0 && errno == EINTR);
     if (got == 0) d->eof = 1;
     if (got > 0)  d->len += (size_t)got;
+    if (got >= 0) d->owed = 0;
     return got;
 }
 
@@ -4015,6 +4024,7 @@ static void command(rt_device_t *d, rt_value_t msg) {
     if (d->mode == DEV_TCP || d->polled) {
         queue(d, b.bytes, b.len);
         rt_buf_free(&b);
+        if (d->made) d->owed = 1;
         if (!d->connecting && flush(d) < 0) fail(d, errno);
         return;
     }
@@ -4150,6 +4160,8 @@ static int tcp_connect(rt_proc_t *p, const char *site, const char *where, size_t
     if (r == RT_LOOKUP_DONE && (err = open_connection(addr, port, &fd)) != 0) return err;
     rt_device_t *d = new_device(p, DEV_TCP, r == RT_LOOKUP_DONE ? fd : -1, site, where, len);
     d->connecting  = 1;
+    d->made        = 1;
+    d->owed        = 1;
     d->port        = port;
     if (r == RT_LOOKUP_ASKED) {
         d->lookup = l;
@@ -4244,6 +4256,8 @@ static int unix_connect(rt_proc_t *p, const char *site, const char *path, size_t
     }
     rt_device_t *d = new_device(p, DEV_TCP, fd, site, path, len);
     d->connecting  = 1;
+    d->made        = 1;
+    d->owed        = 1;
     d->unix_sock   = 1;
     return 0;
 }
@@ -4382,6 +4396,19 @@ static int sockets_waiting(void) {
     int r, w;
     for (rt_device_t *d = my.sockets; d; d = d->next_socket) {
         if (wants(d, &r, &w)) return 1;
+    }
+    return 0;
+}
+
+// Whether a connection the program made has been written to, or is
+// still connecting, with nothing come back since, and is waited on: a
+// reply may be on its way to it (D288). Once anything has come, the rest
+// of a reply that comes in pieces, a byte to each tick of a timer in the
+// same program, say, is the program's own pace, and the clock moves on.
+static int owed_reply(void) {
+    int r, w;
+    for (rt_device_t *d = my.sockets; d; d = d->next_socket) {
+        if (d->owed && !d->closing && !d->dead && wants(d, &r, &w)) return 1;
     }
     return 0;
 }

@@ -99,7 +99,9 @@ A compile error is `prog.slight:line:col: message`, and `slightc` exits
 
 Some environment variables matter when running a program, mainly for
 tests: `SLIGHT_CLOCK=virtual` swaps the real clock for one that starts at
-0 and moves only when nothing can run, straight to the next timer;
+0 and moves only when nothing can run, straight to the next timer (but
+not past a reply on its way to a connection the program made, which it
+waits for a little, for real, D288);
 `SLIGHT_POISON=1` makes the collector fill what it frees with garbage;
 and `SLIGHT_GC_STRESS=n` makes it collect at the entry of every nth
 function called (n from 1, every call, which is slow, to 1,000), and at

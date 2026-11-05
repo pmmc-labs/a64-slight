@@ -1,0 +1,26 @@
+; A reply from a server outside the program, on loopback, a moment after
+; the request, with a budget pending on the virtual clock (D288): what
+; macOS's loopback does to every reply, made to happen on Linux by a
+; server that answers 20 ms after a line comes. The clock mustn't move to
+; the budget while the reply is on its way; and since it waited for real
+; rather than moving, the clock reads 0 when the reply comes.
+(defun ask (c i)
+    (let b (after 50 $$ :budget))
+    (send c (list :write "ping " i \n))
+    (recv
+        ((:line c s)
+            (timer/cancel b)
+            (pprint (list :reply s (clock/us)))
+            (cond
+                ((== i 3) (disconnect c) :done)
+                (#true    (ask c (+ i 1)))))
+        (:budget
+            (pprint (list :budget i (clock/us)))
+            (disconnect c)
+            :beaten)))
+
+(defun client ()
+    (recv ((:open c) (ask c 1))))
+
+(let port (str->int (car @ARGV)))
+(pprint (join (connect :tcp (str "127.0.0.1:" port) client)))
