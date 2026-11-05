@@ -2226,7 +2226,11 @@ Sorting:
 
 Association lists, `((key value) ...)`:
 
-- `(assoc k v table)`: `table` with `(k v)` added at the front.
+- `(assoc k v table)`: `table` with `(k v)` in place of its first pair
+  for `k`, where it was, or added at the front when there's none; so a
+  table has one value for a key however it's walked, and an update is
+  one call (D289). A list of bindings that shadow is `(cons (list k v)
+  table)`.
 - `(lookup k table)`: the value for the first key `eq?` to `k`, or
   `:not-found`.
 

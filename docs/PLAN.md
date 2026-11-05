@@ -2551,12 +2551,14 @@ module's header shows what it says (D248); a table of records is `(id
 is a closure, and one over an address is the capability; keywords print
 bare. Done here: `tools/string` exported. To propose, each on its own:
 
-- **A replacing `assoc`:** today it adds a pair at the front and never
-  removes the old, so an update is `assoc` after `remove`, which `rpc`
-  does with `rpc/without` and a test got wrong. `lookup` would see no
-  difference; a table walked or measured would see the right one. A
-  prelude change and a line of LANGUAGE.md.
-- **Ending a process's children with it:** killing a worker leaves its
+- **A replacing `assoc`** (built, D289): it added a pair at the front
+  and never removed the old, so an update was `assoc` after `remove`,
+  which a test got wrong. Now it replaces the first pair for the key
+  where it was, or adds at the front; `lookup` sees no difference; a
+  table walked or measured sees the right one. The dictionary's `put`
+  and `update`, and two tests, lost their `remove`. Golden test 381.
+- **Ending a process's children with it** (parked, Nov 2026, till a
+  second program needs it): killing a worker leaves its
   agent, the agent's turn and a running command, so the lead keeps each
   agent's pid and the agent library's monitors do the rest. Erlang's
   links, or a kill that takes a process's descendants, would do it in

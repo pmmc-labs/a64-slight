@@ -181,8 +181,19 @@
 
 ; --- association lists: ((key value) ...) -------------------------------------
 
+; table with (k v) in place of its first pair for k, where it was, or
+; at the front when there's none, so a table has one value for a key
+; wherever it's walked (D289). A shadowing list is (cons (list k v) table).
 (defun assoc (k v table)
-    (cons (list k v) table))
+    (assoc-loop k v table ()))
+
+(defun assoc-loop (k v rest acc)
+    (match rest
+        (()               (cons (list k v) (reverse acc)))
+        (((key _) & more)
+            (if (eq? key k)
+                (reverse-onto acc (cons (list k v) more))
+                (assoc-loop k v more (cons (car rest) acc))))))
 
 ; The value for k, or :not-found.
 (defun lookup (k table)

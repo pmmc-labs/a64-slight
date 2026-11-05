@@ -49,9 +49,8 @@
         (#true
             (let op (rand/int 10))
             (let k (key (rand/int 300) (rand/int 2)))
-            (let rest (remove (lambda (e) (eq? (car e) k)) alist))
             (let m2 (if (< op 6) (map/put m k i) (map/delete m k)))
-            (let alist2 (if (< op 6) (assoc k i rest) rest))
+            (let alist2 (if (< op 6) (assoc k i alist) (remove (lambda (e) (eq? (car e) k)) alist)))
             (churn m2 alist2 (inc i) n (and ok (== (map/size m2) (length alist2)) (eq? (map/get m2 k) (lookup k alist2)))))))
 (defun all-found (m alist)
     (match alist

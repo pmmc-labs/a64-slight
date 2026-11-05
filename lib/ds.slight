@@ -67,11 +67,11 @@
 
 (defun dict/loop (table)
     (recv
-        ((:put k v)    (dict/loop (assoc k v (dict/without k table))))
+        ((:put k v)    (dict/loop (assoc k v table)))
         ((:delete k)   (dict/loop (dict/without k table)))
         ((:get k to)   (reply to (lookup k table)) (dict/loop table))
         ((:update k f default)
-            (dict/loop (assoc k (f (dict/value k table default)) (dict/without k table))))
+            (dict/loop (assoc k (f (dict/value k table default)) table)))
         ((:keys to)    (reply to (map car table)) (dict/loop table))
         ((:size to)    (reply to (length table)) (dict/loop table))))
 

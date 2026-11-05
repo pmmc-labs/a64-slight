@@ -7416,3 +7416,25 @@ budgets could only run on the real clock.
   budgets are what the change is for. DESIGN.md's account of the
   virtual clock, the guide's time page and PLAN.md's timers note say
   the rule; D236's rule for tests is withdrawn.
+
+**D289. `assoc` replaces.** *(Stevan, Nov 2026: "Do 1 then 3, park 2",
+of the agent team's three candidates, D285.)* `(assoc k v table)` gave
+`table` with `(k v)` at the front and the old pair for `k` underneath,
+so `lookup` saw the new value but a table walked with `map` or measured
+with `length` saw both, and an update was `assoc` after `remove`, which
+`lib/ds`'s dictionary did in its `put` and `update`, two team tests did
+in a helper, and a test got wrong once (D282). Now it replaces the
+first pair for `k` where it was, or adds at the front when there's
+none: a table has one value for a key however it's walked, and an
+update is one call. Of the 24 uses, none wanted the shadowing; a list
+of bindings that shadow, an interpreter's environment, is `(cons (list
+k v) table)`, which LANGUAGE.md says, and still works with the new
+`assoc` since the outer list is immutable. The cost is a walk to the
+key where it was a cons, which a table pays in `lookup` already. The
+sig is unchanged. Rejected: a second function beside the old, `assoc/put`
+or `update`, two names for what every caller wanted one of; and
+replacing at the front, as the tutorial's `table/put` does, which
+reorders a table on every update, so a printed table would churn.
+Golden test 381; the dictionary's `put` and `update`, t/275, t/376 and
+t/377 lose their `remove`; LANGUAGE.md, DESIGN.md's table, the
+tutorial's sentence.

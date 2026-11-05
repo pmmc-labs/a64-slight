@@ -87,7 +87,7 @@
 
 (defun noted (id event events)
     (let before (match (lookup id events) (:not-found ()) (es es)))
-    (assoc id (cons event before) (remove (lambda (e) (== (car e) id)) events)))
+    (assoc id (cons event before) events))
 
 (match (http/listen 0 handler)
     ((:ok (srv port))

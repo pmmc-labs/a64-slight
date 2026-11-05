@@ -192,9 +192,9 @@ A table that's never changed in place is safe to share, to keep old
 versions of, and to send to another process. The next chapters lean on
 all three.
 
-The prelude has `lookup`, which is `table/get`, and `assoc`, which adds
-a pair to the front without taking out the old one. Writing them here
-was the point.
+The prelude has `lookup`, which is `table/get`, and `assoc`, which is
+`table/put` but for keeping a replaced pair where it was. Writing them
+here was the point.
 
 ---
 

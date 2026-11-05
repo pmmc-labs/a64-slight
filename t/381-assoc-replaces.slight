@@ -1,0 +1,20 @@
+; assoc (D289): a pair for a key that's in the table replaces the first
+; one, where it was; a key that isn't is added at the front. So a table
+; has one value for a key however it's walked, and an update is one
+; call. A list that shadows is (cons (list k v) table).
+
+(let t1 (assoc :c 3 (assoc :b 2 (assoc :a 1 ()))))
+(pprint t1)
+(let t2 (assoc :b 20 t1))
+(pprint t2)
+(pprint (list (lookup :b t2) (length t2) (map car t2)))
+(pprint (assoc :a 10 t2))
+(pprint (assoc :c 30 t2))
+(pprint (assoc :d 4 t2))
+; the first pair is the one replaced in a list that shadows
+(let shadowed (cons (list :b :inner) t1))
+(pprint shadowed)
+(pprint (assoc :b :replaced shadowed))
+(pprint (assoc "s" 1 (assoc "s" 0 ())))
+(pprint (assoc '(1 2) :pair (list (list '(1 2) :old) (list '(3) :keep))))
+(pprint (assoc :x 1 ()))
