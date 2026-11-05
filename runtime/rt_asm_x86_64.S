@@ -56,6 +56,17 @@ FUNC rt_trampoline
     call rt_exit                        // doesn't return
 
 // ---------------------------------------------------------------------------
+// rt_apply_start: a process's code when fork made it (D286). The trampoline
+// has its arguments in the argument registers; this puts its function, a
+// closure, in rax, as a call of a closure does, and jumps to its code,
+// which returns to the trampoline.
+// ---------------------------------------------------------------------------
+
+FUNC rt_apply_start
+    mov  rax, [r15 + RT_PROC_FUN]
+    jmp  qword ptr [rax + RT_CLOSURE_CODE]
+
+// ---------------------------------------------------------------------------
 // rt_value_t rt_apply(rt_value_t f, rt_value_t args, const char *site)
 //
 // Spreads up to 8 elements of args into the argument registers, puts the

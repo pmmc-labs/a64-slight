@@ -1,0 +1,23 @@
+; A one-clause recv's pattern binds its names in its body only (review
+; H2): after it, length and sum are the prelude's again, though the
+; pattern bound them, with the recv's value let or dropped; and a local
+; from before that the pattern hid is the rest's again.
+
+(defun scale (xs)
+    (let k (recv ((:scale length) length)))
+    (pprint (* k (length xs)))
+    (total xs))
+
+(defun total (xs)
+    (recv ((:sum sum) (pprint sum)))
+    (pprint (sum xs))
+    (again 1))
+
+(defun again (n)
+    (let m (recv ((:n n) n)))
+    (pprint (list n m)))
+
+(let p (fork scale (list 1 2 3)))
+(send p (list :scale 10))
+(send p (list :sum 7))
+(send p (list :n 2))

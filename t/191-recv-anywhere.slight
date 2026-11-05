@@ -25,7 +25,7 @@
 (defun top-level (argv)
     ; send is evaluated before the recv, so the recv gets what it sent
     (pprint (list (send $$ :first) (recv)))
-    (let a (spawn (adder)))
+    (let a (fork adder))
     (send a (list :add 1 2 $$))
     (let s1 (recv ((:sum s) s)))
     (send a (list :add s1 10 $$))
@@ -50,7 +50,7 @@
     (do (send $$ :d) (pprint (recv)))
     (pprint (list z argv))
     ; a fork's body waits in the new process
-    (let child (spawn (do (let m (recv)) (send ^$$ (list :child-got m)))))
+    (let child (fork (lambda () (do (let m (recv)) (send ^$$ (list :child-got m))))))
     (send child :ping)
     (pprint (recv ((:child-got m) m)))
     ; nine locals, carried across as a list
@@ -71,4 +71,4 @@
     (send $$ (list :second 2))
     (yes-or-no :asked))
 
-(read (spawn (top-level @ARGV)))
+(join (fork top-level @ARGV))

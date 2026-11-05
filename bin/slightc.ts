@@ -3,8 +3,8 @@
 // slightc: compile .slight files to a native binary, for AArch64 (the
 // default) or x86-64.
 //
-//   node bin/slightc.ts [-o out] [-S] [--target aarch64|x86_64] [--strict] file.slight ...
-//   node bin/slightc.ts --check [--strict] file.slight ...
+//   node bin/slightc.ts [-o out] [-S] [--target aarch64|x86_64] [--strict] [--] file.slight ...
+//   node bin/slightc.ts --check [--strict] [--] file.slight ...
 //   node bin/slightc.ts --runtime [--target aarch64|x86_64]
 //
 //   -o out     the binary to write (default: a.out). The assembly goes next
@@ -17,12 +17,15 @@
 //              and compile nothing
 //   --strict   warn where a type may be wrong as well as where it is, and
 //              make any warning an error
+//   --         the end of the options: what follows is files, even one
+//              whose name starts with -
 //
 // The types are checked every time (docs/TYPES.md, compiler/src/check.ts):
 // warnings go to stderr, and the program is compiled anyway, unless
 // --strict.
 //
-// The runtime is compiled once, and kept under build/runtime/ (D150).
+// The runtime is compiled once, and kept under build/runtime/ (D150), for
+// the compiler command and the version it says it is.
 //
 // When the target is the machine's own architecture it links natively.
 // Otherwise it cross-compiles: on macOS with -arch (an x86-64 binary runs
@@ -31,7 +34,8 @@
 // command.
 //
 // Exit codes: 0 on success, 1 on a compile error (or a warning, with
-// --strict), 2 on bad usage or a failed toolchain step.
+// --strict), 2 on bad usage, a failed toolchain step, a file that can't be
+// written, or a fault in the compiler itself (`slightc: internal error`).
 
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -60,8 +64,8 @@ const CFLAGS      = ['-O2', '-g', '-std=gnu11', '-Wall', '-Wextra', '-ffp-contra
 
 // Each target: its code generator, its part of the runtime in assembly,
 // Node's name for it (process.arch), and clang's.
-type Arch = { readonly target: Target; readonly asm: string; readonly node: string; readonly clang: string };
-const ARCHES: Readonly<Record<string, Arch>> = {
+export type Arch = { readonly target: Target; readonly asm: string; readonly node: string; readonly clang: string };
+export const ARCHES: Readonly<Record<string, Arch>> = {
     aarch64: { target: AARCH64, asm: 'rt_asm_aarch64.S', node: 'arm64', clang: 'aarch64' },
     x86_64:  { target: X86_64, asm: 'rt_asm_x86_64.S', node: 'x64', clang: 'x86_64' },
 };
@@ -78,17 +82,19 @@ const runtimeSources = (arch: Arch): readonly string[] => [
 ];
 
 function usage(message: string): never {
-    process.stderr.write(`slightc: ${message}\nusage: node bin/slightc.ts [-o out] [-S] [--target aarch64|x86_64] [--strict] file.slight ...\n`
-                         + '       node bin/slightc.ts --check [--strict] file.slight ...\n'
+    process.stderr.write(`slightc: ${message}\nusage: node bin/slightc.ts [-o out] [-S] [--target aarch64|x86_64] [--strict] [--] file.slight ...\n`
+                         + '       node bin/slightc.ts --check [--strict] [--] file.slight ...\n'
                          + '       node bin/slightc.ts --runtime [--target aarch64|x86_64]\n');
     process.exit(2);
 }
 
-// Files, for the expander: a file is known by its real path.
+// Files, for the expander: a file is known by its real path, and a
+// directory isn't one.
 const loader: Loader = {
     key: (path) => {
         try {
-            return realpathSync(path);
+            const real = realpathSync(path);
+            return statSync(real).isFile() ? real : null;
         } catch {
             return null;
         }
@@ -96,30 +102,37 @@ const loader: Loader = {
     text: (key) => readFileSync(key, 'utf8'),
 };
 
-type Options = {
+export type Options = {
     readonly out: string | null; readonly asmOnly: boolean; readonly runtimeOnly: boolean;
     readonly arch: string; readonly files: readonly string[];
     readonly check: boolean; readonly strict: boolean;
 };
 
-function parseArgs(args: readonly string[], opts: Options): Options {
+export const DEFAULTS: Options = { out: null, asmOnly: false, runtimeOnly: false, arch: 'aarch64', files: [], check: false, strict: false };
+
+// The options, or what's wrong with them.
+export function parseArgs(args: readonly string[], opts: Options = DEFAULTS): Options | string {
     const [arg, ...rest] = args;
     if (arg === undefined) return opts;
+    if (arg === '--') return { ...opts, files: [...opts.files, ...rest] };
     if (arg === '-S') return parseArgs(rest, { ...opts, asmOnly: true });
     if (arg === '--runtime') return parseArgs(rest, { ...opts, runtimeOnly: true });
     if (arg === '--check') return parseArgs(rest, { ...opts, check: true });
     if (arg === '--strict') return parseArgs(rest, { ...opts, strict: true });
     if (arg === '--target') {
         const [arch, ...more] = rest;
-        if (arch === undefined || !Object.hasOwn(ARCHES, arch)) usage(`--target takes ${Object.keys(ARCHES).join(' or ')}`);
+        if (arch === undefined || !Object.hasOwn(ARCHES, arch)) return `--target takes ${Object.keys(ARCHES).join(' or ')}`;
         return parseArgs(more, { ...opts, arch });
     }
     if (arg === '-o') {
+        // an option there is a mistake, not a file: -o -x would write -x.S,
+        // which clang then takes for an option
         const [out, ...more] = rest;
-        if (out === undefined) usage('-o needs a file name');
+        if (out === undefined || out === '') return '-o needs a file name';
+        if (out.startsWith('-')) return `-o needs a file name, not ${out} (write ./${out} for a file named so)`;
         return parseArgs(more, { ...opts, out });
     }
-    if (arg.startsWith('-')) usage(`unknown option ${arg}`);
+    if (arg.startsWith('-')) return `unknown option ${arg} (-- ends the options, before a file whose name starts with -)`;
     return parseArgs(rest, { ...opts, files: [...opts.files, arg] });
 }
 
@@ -149,21 +162,35 @@ function run(command: readonly string[], cwd?: string): boolean {
     return result.status === 0;
 }
 
-// The runtime's object files, compiled once and kept in build/runtime/, in
-// a directory named for a hash of the compiler command, the flags and
-// every file in runtime/ and vendor/: an edit to any of them, or another compiler,
-// gets a build of its own, so nothing goes stale (D150). Compiles that
-// start at once (the golden tests run in parallel) may each build it: each
-// builds in a directory of its own and renames it into place, and the
-// first rename wins.
-function runtimeObjects(arch: Arch, compiler: Compiler): readonly string[] {
-    const hash = createHash('sha256').update(JSON.stringify([compiler.cc, CFLAGS]));
+// What the compiler says it is: a clang upgraded in place is the same
+// command, and mustn't reuse what the old one built. Empty if it can't
+// say, and then the compile that follows says why.
+function compilerVersion(compiler: Compiler): string {
+    const [cmd, ...args] = compiler.cc;
+    const result = spawnSync(cmd!, [...args, '--version'], { encoding: 'utf8' });
+    return result.status === 0 ? result.stdout : '';
+}
+
+// The name of the runtime's build: a hash of the compiler command, its
+// version, the flags and every file in runtime/ and vendor/.
+export function runtimeKey(arch: Arch, cc: readonly string[], version: string): string {
+    const hash = createHash('sha256').update(JSON.stringify([cc, version, CFLAGS]));
     for (const f of readdirSync(RUNTIME_DIR).sort()) hash.update(f).update(readFileSync(join(RUNTIME_DIR, f)));
     for (const f of readdirSync(VENDOR_DIR, { recursive: true }).map(String).sort()) {
         const path = join(VENDOR_DIR, f);
         if (statSync(path).isFile()) hash.update(f).update(readFileSync(path));
     }
-    const dir     = join(CACHE_DIR, `${arch.clang}-${hash.digest('hex').slice(0, 16)}`);
+    return `${arch.clang}-${hash.digest('hex').slice(0, 16)}`;
+}
+
+// The runtime's object files, compiled once and kept in build/runtime/, in
+// a directory named by runtimeKey: an edit to any of the files, or another
+// compiler or version of it, gets a build of its own, so nothing goes
+// stale (D150). Compiles that start at once (the golden tests run in
+// parallel) may each build it: each builds in a directory of its own and
+// renames it into place, and the first rename wins.
+function runtimeObjects(arch: Arch, compiler: Compiler): readonly string[] {
+    const dir     = join(CACHE_DIR, runtimeKey(arch, compiler.cc, compilerVersion(compiler)));
     const sources = runtimeSources(arch);
     const objects = sources.map((src) => join(dir, basename(src).replace(/\.[cS]$/, '.o')));
     if (existsSync(dir)) return objects;
@@ -187,7 +214,8 @@ function runtimeObjects(arch: Arch, compiler: Compiler): readonly string[] {
 const lowered = (forms: Sexp): Sexp => list(...(toArray(forms) ?? []).map((f) => expand(f)));
 
 function main(): void {
-    const opts = parseArgs(process.argv.slice(2), { out: null, asmOnly: false, runtimeOnly: false, arch: 'aarch64', files: [], check: false, strict: false });
+    const opts = parseArgs(process.argv.slice(2));
+    if (typeof opts === 'string') usage(opts);
     const arch = ARCHES[opts.arch]!;
     if (opts.runtimeOnly) {
         if (opts.files.length > 0 || opts.asmOnly || opts.out !== null || opts.check) usage('--runtime takes only --target');
@@ -201,6 +229,7 @@ function main(): void {
         } catch (e) {
             usage(`couldn't read ${file}: ${(e as Error).message}`);
         }
+        if (!statSync(file).isFile()) usage(`couldn't read ${file}: it isn't a file`);
     }
 
     let asm: string;
@@ -218,12 +247,12 @@ function main(): void {
     }
 
     if (opts.asmOnly) {
-        writeFileSync(opts.out ?? 'a.S', asm);
+        write(opts.out ?? 'a.S', asm);
         return;
     }
     const out     = opts.out ?? 'a.out';
     const asmFile = `${out}.S`;
-    writeFileSync(asmFile, asm);
+    write(asmFile, asm);
 
     const compiler = compilerCommand(arch);
     if (!run([...compiler.cc, ...compiler.link, ...CFLAGS, asmFile, ...runtimeObjects(arch, compiler), '-lm', '-o', out])) {
@@ -231,4 +260,31 @@ function main(): void {
     }
 }
 
-main();
+// A file the compiler writes; failing that, a toolchain-shaped error.
+function write(path: string, text: string): void {
+    try {
+        writeFileSync(path, text);
+    } catch (e) {
+        process.stderr.write(`slightc: couldn't write ${path}: ${(e as Error).message}\n`);
+        process.exit(2);
+    }
+}
+
+// Run when it's the program, not when a test imports it for parseArgs
+// and runtimeKey. Anything thrown that isn't a CompileError is a fault in
+// the compiler: said so, with where, and exit 2, as a toolchain's.
+const entry = (path: string | undefined): string => {
+    try {
+        return path === undefined ? '' : realpathSync(path);
+    } catch {
+        return '';
+    }
+};
+if (entry(process.argv[1]) === entry(fileURLToPath(import.meta.url))) {
+    try {
+        main();
+    } catch (e) {
+        process.stderr.write(`slightc: internal error: ${e instanceof Error ? (e.stack ?? e.message) : String(e)}\n`);
+        process.exit(2);
+    }
+}

@@ -2,5 +2,5 @@
     (recv
         ((:get to) (store n))))
 
-(let s (spawn (store 0)))
+(let s (fork store 0))
 (ask s (list :get))

@@ -206,11 +206,12 @@ test('defun is only allowed at the top level', () => {
 test('calls are checked against the function', () => {
     fails('(defun f (x) x) (f 1 2)', 'test.slight:1:17: f takes 1 argument, not 2');
     fails('(defun f (x y) x) (f)', 'test.slight:1:19: f takes 2 arguments, not 0');
+    fails('(:a 1)', 'test.slight:1:2: :a is a keyword, not a function');
     assert.match(compile('(defun f () 1) f'), /LOADADDR x0, fn_f_closure/);
 });
 
 test("a lambda's or a fork's stack fault says where it is once", () => {
-    const asm = compile('(let f (lambda (x) x)) (fork (pprint 1))');
+    const asm = compile('(let f (lambda (x) x)) (fork pprint 1)');
     assert.match(asm, /\.asciz "lambda at test\.slight:1:8"/);
     assert.match(asm, /\.asciz "fork at test\.slight:1:24"/);
     assert.doesNotMatch(asm, / at test\.slight:\d+:\d+ at /);
@@ -228,7 +229,7 @@ test('@ARGV is the top level\'s parameter: only it sees @ARGV, and nothing can b
     fails('(defun f (@ARGV) 1) (f 1)', "test.slight:1:11: can't bind @ARGV");
     fails('(defun @ARGV () 1)', "test.slight:1:8: can't bind @ARGV");
     assert.match(compile('(car @ARGV)'), /str  x0, \[sp, #0\]    \/\/ @ARGV/);
-    assert.doesNotThrow(() => compile('((lambda () @ARGV)) (fork (pprint @ARGV))'));
+    assert.doesNotThrow(() => compile('((lambda () @ARGV)) (fork pprint @ARGV)'));
 });
 
 test('%ENV is the top level\'s second parameter, and only it sees %ENV', () => {
@@ -238,7 +239,7 @@ test('%ENV is the top level\'s second parameter, and only it sees %ENV', () => {
     fails('(let %ENV 1)', "test.slight:1:6: can't bind %ENV");
     fails('(defun f (%ENV) 1) (f 1)', "test.slight:1:11: can't bind %ENV");
     assert.match(compile('(car %ENV)'), /str  x1, \[sp, #8\]    \/\/ %ENV/);
-    assert.doesNotThrow(() => compile('((lambda () %ENV)) (fork (pprint %ENV))'));
+    assert.doesNotThrow(() => compile('((lambda () %ENV)) (fork pprint %ENV)'));
 });
 
 test('a call in tail position is a jump; any other call returns', () => {
@@ -296,7 +297,8 @@ const symbolTable = (asm: string): string[] => {
 
 // Every program has these, in order; its own symbols come after.
 const BUILT_IN = [...RESERVED_SYMBOLS, ...RUNTIME_SYMBOLS];
-const firstWord = ((BUILT_IN.length << 3) | 5).toString(16);    // the first program symbol's id, shifted and tagged
+const firstWord = ((BUILT_IN.length << 4) | 5).toString(16);    // the first program symbol's id, shifted and tagged
+const firstKeyword = ((BUILT_IN.length << 4) | 13).toString(16);    // the same name as a keyword: the kind bit set (D287)
 
 test('symbols get ids in order of first mention, after #false, #true and the runtime\'s', () => {
     assert.deepEqual(BUILT_IN.slice(0, 4), ['#false', '#true', 'ok', 'error']);
@@ -306,7 +308,8 @@ test('symbols get ids in order of first mention, after #false, #true and the run
 });
 
 test('a symbol is its id, shifted and tagged', () => {
-    assert.match(compile(':a'), new RegExp(`movz x0, #0x${firstWord}, lsl #0 {4}// 'a`));
+    assert.match(compile(':a'), new RegExp(`movz x0, #0x${firstKeyword}, lsl #0 {4}// :a`));
+    assert.match(compile("'a"), new RegExp(`movz x0, #0x${firstWord}, lsl #0 {4}// 'a`));
 });
 
 test('quote takes one thing', () => {
@@ -607,64 +610,46 @@ test("the prelude's not is inline, as a value and as a test; a program's own not
 
 const W = '(defun w () (recv (m m))) ';
 
-test('recv goes anywhere a tail call could (D167), but not in a lambda', () => {
-    assert.doesNotThrow(() => compile('(spawn (recv (m m)))'));
-    assert.doesNotThrow(() => compile('(defun f () (pprint 1) (recv (m m))) (spawn (f))'));
-    assert.doesNotThrow(() => compile('(defun f () (cond (#true (recv (m m))))) (spawn (f))'));
-    assert.doesNotThrow(() => compile('(defun f () (recv (m (recv (n n))))) (spawn (f))'));
-    assert.doesNotThrow(() => compile('(defun f () (recv)) (spawn (f))'));
-    assert.doesNotThrow(() => compile('(spawn (pprint (list (recv) (recv))))'));
-    fails('(lambda () (recv (m m)))', "test.slight:1:12: recv can't be in a lambda: a lambda can't wait for messages");
-    fails('(lambda () (fork 1) (pprint (recv)))', "test.slight:1:29: recv can't be in a lambda: a lambda can't wait for messages");
-    fails('(defun f () (cond ((recv) 1)) 2) (f)',
-        "test.slight:1:13: a recv can only be in a cond that's in tail position; take the message first, with (let m (recv ...))");
-    fails('(defun f () (pprint (cond (#true (recv))))) (f)',
-        "test.slight:1:21: a recv can only be in a cond that's in tail position; take the message first, with (let m (recv ...))");
-    fails('(defun f () (do (let x (recv)) x) 2) (f)',
-        "test.slight:1:13: a recv can only be in a do that's in tail position, or one with no lets; take the message first, with (let m (recv ...))");
-    fails('(defun f () (yield (recv)) 2) (f)',
-        "test.slight:1:13: a recv can only be in a yield that's in tail position; take the message first, with (let m (recv ...))");
-    // a case or a match becomes a do that binds its topic, and is named as written
-    const expanded = (src: string, message: string): void =>
-        assert.throws(() => compileProgram(expand(read(src, 'test.slight'))), (e: unknown) => e instanceof CompileError && e.message === message);
-    expanded('(defun f (x) (let v (case x (1 (recv (m m))) (#true 2))) v) (f 1)',
-        "test.slight:1:21: a recv can only be in a case that's in tail position; take the message first, with (let m (recv ...))");
-    expanded('(defun f (x) (match x (1 (recv (m m))) (_ 2)) 3) (f 1)',
-        "test.slight:1:14: a recv can only be in a match that's in tail position; take the message first, with (let m (recv ...))");
-    expanded('(defun f () (do (let x (recv)) x) 2) (f)',
-        "test.slight:1:13: a recv can only be in a do that's in tail position, or one with no lets; take the message first, with (let m (recv ...))");
+test('recv goes anywhere, and keeps its stack (D276)', () => {
+    assert.doesNotThrow(() => compile('(fork (lambda () (recv (m m))))'));
+    assert.doesNotThrow(() => compile('(defun f () (pprint 1) (recv (m m))) (fork f)'));
+    assert.doesNotThrow(() => compile('(defun f () (cond (#true (recv (m m))))) (fork f)'));
+    assert.doesNotThrow(() => compile('(defun f () (recv (m (recv (n n))))) (fork f)'));
+    assert.doesNotThrow(() => compile('(defun f () (recv)) (fork f)'));
+    assert.doesNotThrow(() => compile('(fork (lambda () (pprint (list (recv) (recv)))))'));
+    // where a tail call couldn't go, which D167 refused
+    assert.doesNotThrow(() => compile('(defun f () (cond ((recv) 1)) 2) (fork f)'));
+    assert.doesNotThrow(() => compile('(defun f () (pprint (cond (#true (recv)))) 2) (fork f)'));
+    assert.doesNotThrow(() => compile('(defun f () (do (let x (recv)) x) 2) (fork f)'));
+    assert.doesNotThrow(() => compile('(defun f () (yield (recv)) 2) (fork f)'));
+    const expanded = (src: string): string => compileProgram(expand(read(src, 'test.slight')));
+    assert.doesNotThrow(() => expanded('(defun f (x) (let v (case x (1 (recv (m m))) (#true 2))) v) (fork f 1)'));
+    assert.doesNotThrow(() => expanded('(defun f (x) (match x (1 (recv (m m))) (_ 2)) 3) (fork f 1)'));
+    // and in a lambda
+    assert.doesNotThrow(() => compile('(lambda () (recv (m m)))'));
+    assert.doesNotThrow(() => compile('(lambda () (fork (lambda () 1)) (pprint (recv)))'));
 });
 
-test('a function with a recv in it waits, so it can only be called in tail position', () => {
-    fails('(defun f () (let m (recv)) m) (defun g () (pprint (f)))', 'test.slight:1:51: f waits for messages (it reaches a recv), so it can only be called in tail position');
+test('a function that waits is called anywhere, and can be a value (D276)', () => {
+    assert.doesNotThrow(() => compile(W + '(defun f () (+ 1 (w)))'));
+    assert.doesNotThrow(() => compile(W + '(defun g () (w)) (defun h () (pprint (g)))'));
+    assert.doesNotThrow(() => compile(W + '(defun h () (cond ((w) 1)))'));
+    assert.doesNotThrow(() => compile(W + '(lambda () (w))'));
+    assert.doesNotThrow(() => compile(W + '(let f w)'));
+    assert.doesNotThrow(() => compile(W + '(fork w)'));
+    assert.doesNotThrow(() => compile(W + '(fork (lambda () (pprint 1) (w)))'));
+    assert.doesNotThrow(() => compile(W + '(connect :keypress w)'));
+    assert.doesNotThrow(() => compile(W + '(defun y () (yield (w))) (fork y)'));
 });
 
-test('a function that waits can only be called in tail position', () => {
-    fails(W + '(defun f () (+ 1 (w)))', 'test.slight:1:44: w waits for messages (it reaches a recv), so it can only be called in tail position');
-    fails(W + '(defun g () (w)) (defun h () (pprint (g)))', 'test.slight:1:64: g waits for messages (it reaches a recv), so it can only be called in tail position');
-    fails(W + '(defun h () (cond ((w) 1)))', 'test.slight:1:46: w waits for messages (it reaches a recv), so it can only be called in tail position');
-});
-
-test('a lambda never waits, and a function that waits is never a value', () => {
-    fails(W + '(lambda () (w))', "test.slight:1:38: a lambda can't call w, which waits for messages (it reaches a recv)");
-    fails(W + '(let f w)', "test.slight:1:34: w waits for messages, so it can't be used as a value");
-});
-
-test('a function that waits can be the body of a spawn, the end of a connect, or after a yield', () => {
-    assert.doesNotThrow(() => compile(W + '(spawn (w))'));
-    assert.doesNotThrow(() => compile(W + '(spawn (do (pprint 1) (w)))'));
-    assert.doesNotThrow(() => compile(W + '(connect :keypress (w))'));
-    assert.doesNotThrow(() => compile(W + '(defun y () (yield (w))) (spawn (y))'));
-    assert.doesNotThrow(() => compile(W + '(lambda () (spawn (w)))'));
-});
-
-test("a task, a fork's body or the top level, can't wait (D243)", () => {
-    const task = "a task (a fork's body, or the top level) can't wait for messages";
-    fails(W + '(fork (w))', `test.slight:1:33: ${task}, and w, which waits for messages (it reaches a recv), would: spawn an actor for it`);
-    fails(W + '(pprint 1) (w)', `test.slight:1:38: ${task}, and w, which waits for messages (it reaches a recv), would: spawn an actor for it`);
-    fails('(recv (m m))', `test.slight:1:1: ${task}, and this recv would: spawn an actor for it`);
-    fails('(fork (do (pprint 1) (recv)))', `test.slight:1:22: ${task}, and this recv would: spawn an actor for it`);
-    fails('(spawn (fork (recv)))', `test.slight:1:14: ${task}, and this recv would: spawn an actor for it`);
+test('a recv goes in a fork\'s body, and at the top level (D277)', () => {
+    assert.doesNotThrow(() => compile('(recv (m m))'));
+    assert.doesNotThrow(() => compile('(fork (lambda () (pprint 1) (recv)))'));
+    assert.doesNotThrow(() => compile(W + '(fork w)'));
+    assert.doesNotThrow(() => compile(W + '(pprint 1) (w)'));
+    assert.doesNotThrow(() => compile('(fork/on 1 (lambda () (recv (m m))))'));
+    fails('(spawn (recv (m m)))', "test.slight:1:1: spawn is fork now: there's one kind of process (D277)");
+    fails('(spawn/on 1 (recv (m m)))', "test.slight:1:1: spawn/on is fork/on now: there's one kind of process (D277)");
 });
 
 test('recv clauses and patterns', () => {
@@ -672,26 +657,37 @@ test('recv clauses and patterns', () => {
     fails('(defun f () (pprint 1) (recv m))', 'test.slight:1:30: a recv clause is (pattern body...), not m');
     fails('(defun f () (recv (m)))', 'test.slight:1:19: a recv clause is (pattern body...), not (m)');
     fails('(defun f () (recv ((:a x x) 1)))', 'test.slight:1:26: x is in the pattern twice');
-    fails('(defun f () (recv ((:a &) 1)))', 'test.slight:1:20: & can only come before the last pattern of a list, not ((quote a) &)');
+    fails('(defun f () (recv ((:a &) 1)))', 'test.slight:1:20: & can only come before the last pattern of a list, not (:a &)');
     fails('(defun f () (recv ((:a $$) 1)))', "test.slight:1:24: can't bind $$");
     fails('(defun f () (recv ((:a cond) 1)))', "test.slight:1:24: can't bind cond");
     // patterns are match's (pattern.ts): literals anywhere, nesting, and a rest
     assert.doesNotThrow(() => compile('(defun f () (recv ((5 a) a) ((:a 1) 1) (#true 2) (((x y) & r) r)))'));
 });
 
-test('a receive function restarts at its own entry with its parameters', () => {
+test('recv is told the slots in use, the frame and its function, as rt_preempt is (D276)', () => {
     const asm = compile('(defun loop (a b) (recv (m (loop b a))))');
-    assert.match(asm, /Lrecv_\d+:\n {4}mov {2}x0, x28\n {4}mov {2}x1, sp\n {4}mov {2}x2, #2\n {4}LOADADDR x3, fn_loop\n {4}bl {3}rt_recv/);
+    assert.match(asm, /Lrecv_\d+:\n {4}mov {2}x0, x28\n {4}mov {2}x3, x29\n {4}mov {2}x1, sp\n {4}mov {2}x2, #2\n {4}LOADADDR x4, fn_loop\n {4}bl {3}rt_recv/);
     assert.match(asm, /bl {3}rt_dead_letter\n {4}b {4}Lrecv_\d+/);
 });
 
-test('fork compiles its body as a function of its own, taking the locals it uses', () => {
-    const asm = compile('(let a 1) (let b "two") (fork (pprint (list b a)))');
-    assert.match(asm, /Lfork_\d+: {4}\/\/ fork at test\.slight:1:25/);
-    assert.match(asm, /mov {2}x0, x28\n {4}LOADADDR x1, Lfork_\d+\n {4}mov {2}x2, #2\n {4}add {2}x3, sp, #\d+\n {4}LOADADDR x4, Lsite_\d+\n {4}bl {3}rt_fork/);
-    fails('(fork)', 'test.slight:1:1: fork takes 1 argument, not 0');
-    fails('(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (fork (list a b c d e f g h i))',
-          'test.slight:1:91: a fork can take at most 8 locals into the new process, and this one uses 9');
+test('fork passes the function and its arguments, evaluated in the parent, to the runtime (D286)', () => {
+    const asm = compile('(defun f (a b) a) (let a 1) (let b "two") (fork f b a)');
+    // f, b and a go to the slots after @ARGV, %ENV, a and b, and the runtime is told how many
+    assert.match(asm, /LOADADDR x0, fn_f_closure\n {4}orr {2}x0, x0, #RT_TAG_BOXED\n {4}str {2}x0, \[sp, #32\]\n {4}ldr {2}x0, \[sp, #24\] {4}\/\/ b\n {4}str {2}x0, \[sp, #40\]\n/);
+    assert.match(asm, /mov {2}x0, x28\n {4}mov {2}x1, #3\n {4}add {2}x2, sp, #32\n {4}LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_fork/);
+    assert.doesNotMatch(asm, /Lfork_\d+/);
+    fails('(fork)', 'test.slight:1:1: fork takes a function, and its arguments: (fork f arg ...)');
+    fails('(fork 42)', 'test.slight:1:7: fork takes a function, not 42');
+    fails('(fork "s" 1)', 'test.slight:1:7: fork takes a function, not "s"');
+    fails('(fork () 1)', 'test.slight:1:1: fork takes a function, not ()');
+    fails('(fork #true)', 'test.slight:1:7: fork takes a function, not #true');
+    fails("(fork '(1 2))", 'test.slight:1:7: fork takes a function, not (quote (1 2))');
+    fails('(defun f (x) x) (fork f 1 2)', 'test.slight:1:17: f takes 1 argument, not 2');
+    fails('(fork pprint)', 'test.slight:1:1: pprint takes 1 argument, not 0');
+    fails('(fork str "a")', "test.slight:1:7: str can't be used as a value: it takes a varying number of arguments");
+    fails('(defun f (a b c d e f g h) a) (fork f 1 2 3 4 5 6 7 8 9)',
+          'test.slight:1:31: a fork passes at most 8 arguments, and this one passes 9');
+    fails('(fork/on 1)', 'test.slight:1:1: fork/on takes a function, and its arguments: (fork/on k f arg ...)');
 });
 
 test('$$ and ^$$ are the process and its parent', () => {
@@ -703,26 +699,30 @@ test('$$ and ^$$ are the process and its parent', () => {
 
 test('join, monitor, kill and raise are builtins in the runtime, and can be values', () => {
     for (const [name, fn] of [['join', 'rt_join'], ['monitor', 'rt_monitor'], ['kill', 'rt_kill'], ['raise', 'rt_raise']]) {
-        assert.match(compile(`(${name} 1)`), new RegExp(`LOADADDR x1, Lsite_\\d+\\n {4}bl {3}${fn}\\n`));
+        const site = name === 'monitor' ? 'x2' : 'x1';          // monitor's address, () when none, comes before the site (D277)
+        assert.match(compile(`(${name} 1)`), new RegExp(`LOADADDR ${site}, Lsite_\\d+\\n {4}bl {3}${fn}\\n`));
         assert.match(compile(`(let f ${name})`), new RegExp(`LOADADDR x0, bi_${name}_closure`));
-        fails(`(${name})`, `test.slight:1:1: ${name} takes 1 argument, not 0`);
+        fails(`(${name})`, `test.slight:1:1: ${name} takes ${name === 'monitor' ? '1 or 2 arguments' : '1 argument'}, not 0`);
         fails(`(defun ${name} (x) x)`, `test.slight:1:8: can't define ${name}: it's a builtin`);
     }
 });
 
+const G = '(defun g () 1) ';
+
 test('connect is a fork whose process gets the keys, from :keypress', () => {
-    assert.match(compile('(defun f (n) n) (let n 1) (connect :keypress (f n))'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_connect\n/);
-    assert.match(compile('(connect :keypress 1)'), /\.asciz "connect at test\.slight:1:1"/);
-    fails('42\n  (connect :x 1)', "test.slight:2:12: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not (quote x)");
-    fails('(connect :keypress)', 'test.slight:1:1: connect takes 2 arguments, not 1');
-    fails('(connect)', 'test.slight:1:1: connect takes 2 arguments, not 0');
-    fails('(let a 1) (let b 2) (let c 3) (let d 4) (let e 5) (let f 6) (let g 7) (let h 8) (let i 9) (connect :keypress (list a b c d e f g h i))',
-          'test.slight:1:91: a connect can take at most 8 locals into the new process, and this one uses 9');
+    assert.match(compile('(defun f (n) n) (let n 1) (connect :keypress f n)'), /mov {2}x0, #2\n {4}add {2}x1, sp, #\d+\n {4}LOADADDR x2, Lsite_\d+\n {4}bl {3}rt_connect\n/);
+    assert.match(compile(G + '(connect :keypress g)'), /\.asciz "connect at test\.slight:1:16"/);
+    fails('42\n  (connect :x g)', "test.slight:2:12: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not :x");
+    fails('(connect :keypress)', 'test.slight:1:1: connect :keypress takes a function, and its arguments: (connect :keypress f arg ...)');
+    fails('(connect :keypress 1)', 'test.slight:1:20: connect takes a function, not 1');
+    fails('(connect)', 'test.slight:1:1: connect takes a source or a device, a function, and its arguments');
+    fails('(defun f (a b c d e f g h) a) (connect :keypress f 1 2 3 4 5 6 7 8 9)',
+          'test.slight:1:31: a connect passes at most 8 arguments, and this one passes 9');
 });
 
 test('connect :system is a fork whose process gets the :system device', () => {
-    assert.match(compile('(defun f (n) n) (let n 1) (connect :system (f n))'), /LOADADDR x3, Lsite_\d+\n {4}bl {3}rt_connect_system\n/);
-    fails('(connect :system)', 'test.slight:1:1: connect takes 2 arguments, not 1');
+    assert.match(compile('(defun f (n) n) (let n 1) (connect :system f n)'), /LOADADDR x2, Lsite_\d+\n {4}bl {3}rt_connect_system\n/);
+    fails('(connect :system)', 'test.slight:1:1: connect :system takes a function, and its arguments: (connect :system f arg ...)');
 });
 
 test('tty/screen/rows and tty/screen/cols are builtins in the runtime', () => {
@@ -755,14 +755,14 @@ test('after, timer/cancel and sleep are builtins in the runtime, and can be valu
 });
 
 test('connect to a file evaluates the path in the parent, and passes it and the mode', () => {
-    const asm = compile('(defun f (n) n) (let n 1) (let p "x.txt") (connect :fs/write p (f n))');
-    // the path goes in the first free slot (after @ARGV, %ENV, n and p), the fork's locals after it
-    assert.match(asm, /\/\/ p\n {4}str {2}x0, \[sp, #32\]\n {4}ldr {2}x16, \[sp, #16\] {4}\/\/ n\n {4}str {2}x16, \[sp, #40\]/);
-    assert.match(asm, /add {2}x2, sp, #40\n {4}LOADADDR x3, Lsite_\d+\n {4}ldr {2}x4, \[sp, #32\]\n {4}mov {2}x5, #RT_FS_WRITE\n {4}bl {3}rt_connect_fs\n/);
-    assert.match(compile('(connect :fs/read "a" 1)'), /mov {2}x5, #RT_FS_READ\n/);
-    assert.match(compile('(connect :fs/append "a" 1)'), /mov {2}x5, #RT_FS_APPEND\n/);
-    fails('(connect :fs/read "a")', 'test.slight:1:1: connect takes 3 arguments, not 2');
-    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not (quote fs)");
+    const asm = compile('(defun f (n) n) (let n 1) (let p "x.txt") (connect :fs/write p f n)');
+    // the path goes in the first free slot (after @ARGV, %ENV, n and p), then f and its argument
+    assert.match(asm, /\/\/ p\n {4}str {2}x0, \[sp, #32\]\n {4}LOADADDR x0, fn_f_closure\n {4}orr {2}x0, x0, #RT_TAG_BOXED\n {4}str {2}x0, \[sp, #40\]\n {4}ldr {2}x0, \[sp, #16\] {4}\/\/ n\n {4}str {2}x0, \[sp, #48\]/);
+    assert.match(asm, /mov {2}x0, #2\n {4}add {2}x1, sp, #40\n {4}LOADADDR x2, Lsite_\d+\n {4}ldr {2}x3, \[sp, #32\]\n {4}mov {2}x4, #RT_FS_WRITE\n {4}bl {3}rt_connect_fs\n/);
+    assert.match(compile(G + '(connect :fs/read "a" g)'), /mov {2}x4, #RT_FS_READ\n/);
+    assert.match(compile(G + '(connect :fs/append "a" g)'), /mov {2}x4, #RT_FS_APPEND\n/);
+    fails('(connect :fs/read "a")', 'test.slight:1:1: connect :fs/read takes a function, and its arguments: (connect :fs/read path f arg ...)');
+    fails('(connect :fs "a" 1)', "test.slight:1:10: connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not :fs");
 });
 
 test('disconnect is a builtin in the runtime', () => {
@@ -772,24 +772,24 @@ test('disconnect is a builtin in the runtime', () => {
 });
 
 test('connect over TCP passes the address or the port, and the mode', () => {
-    assert.match(compile('(connect :tcp "localhost:80" 1)'), /ldr {2}x4, \[sp, #\d+\]\n {4}mov {2}x5, #RT_TCP_CONNECT\n {4}bl {3}rt_connect_tcp\n/);
-    assert.match(compile('(connect :tcp/listen 0 1)'), /mov {2}x5, #RT_TCP_LISTEN\n {4}bl {3}rt_connect_tcp\n/);
-    assert.match(compile('(connect :unix "a.sock" 1)'), /mov {2}x5, #RT_UNIX_CONNECT\n {4}bl {3}rt_connect_tcp\n/);
-    assert.match(compile('(connect :unix/listen "a.sock" 1)'), /mov {2}x5, #RT_UNIX_LISTEN\n {4}bl {3}rt_connect_tcp\n/);
-    fails('(connect :tcp/listen 0)', 'test.slight:1:1: connect takes 3 arguments, not 2');
+    assert.match(compile(G + '(connect :tcp "localhost:80" g)'), /ldr {2}x3, \[sp, #\d+\]\n {4}mov {2}x4, #RT_TCP_CONNECT\n {4}bl {3}rt_connect_tcp\n/);
+    assert.match(compile(G + '(connect :tcp/listen 0 g)'), /mov {2}x4, #RT_TCP_LISTEN\n {4}bl {3}rt_connect_tcp\n/);
+    assert.match(compile(G + '(connect :unix "a.sock" g)'), /mov {2}x4, #RT_UNIX_CONNECT\n {4}bl {3}rt_connect_tcp\n/);
+    assert.match(compile(G + '(connect :unix/listen "a.sock" g)'), /mov {2}x4, #RT_UNIX_LISTEN\n {4}bl {3}rt_connect_tcp\n/);
+    fails('(connect :tcp/listen 0)', 'test.slight:1:1: connect :tcp/listen takes a function, and its arguments: (connect :tcp/listen where f arg ...)');
 });
 
 test('connect :exec passes the command, and no mode', () => {
-    assert.match(compile('(connect :exec (list "ls") 1)'), /LOADADDR x3, Lsite_\d+\n {4}ldr {2}x4, \[sp, #\d+\]\n {4}bl {3}rt_connect_exec\n/);
-    fails('(connect :exec (list "ls"))', 'test.slight:1:1: connect takes 3 arguments, not 2');
+    assert.match(compile(G + '(connect :exec (list "ls") g)'), /LOADADDR x2, Lsite_\d+\n {4}ldr {2}x3, \[sp, #\d+\]\n {4}bl {3}rt_connect_exec\n/);
+    fails('(connect :exec (list "ls"))', 'test.slight:1:1: connect :exec takes a function, and its arguments: (connect :exec command f arg ...)');
 });
 
 test('connect given anything but a :keyword hands that device to the new process', () => {
-    const asm = compile('(let c 5) (connect c (pprint 1))');
+    const asm = compile('(let c 5) (connect c pprint 1)');
     assert.match(asm, /\/\/ c\n {4}str {2}x0, \[sp, #24\]\n/);
-    assert.match(asm, /LOADADDR x3, Lsite_\d+\n {4}ldr {2}x4, \[sp, #24\]\n {4}bl {3}rt_connect_device\n/);
-    fails('(let c 5) (connect c)', 'test.slight:1:11: connect takes 2 arguments, not 1');
-    fails('(let c 5) (connect c 1 2)', 'test.slight:1:11: connect takes 2 arguments, not 3');
+    assert.match(asm, /LOADADDR x2, Lsite_\d+\n {4}ldr {2}x3, \[sp, #24\]\n {4}bl {3}rt_connect_device\n/);
+    fails('(let c 5) (connect c)', 'test.slight:1:11: connect takes a function, and its arguments: (connect dev f arg ...)');
+    fails('(let c 5) (connect c 1 2)', 'test.slight:1:22: connect takes a function, not 1');
 });
 
 test('a long body compiles: its forms are a loop, not a recursion that runs Node out of stack', () => {

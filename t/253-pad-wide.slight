@@ -7,7 +7,7 @@
     (match r
         ((:error (kind _ _)) kind)))
 
-(pprint (kind (join (fork (str/pad-start (str 1) 4000000000 "x")))))
+(pprint (kind (join (fork (lambda () (str/pad-start (str 1) 4000000000 "x"))))))
 (pprint (str/pad-start (str 42) 6 "0"))
 (pprint (str/pad-start (str 3.5) 8 "ab"))
 (pprint (str/pad-start (str 12345) 3))

@@ -5,7 +5,7 @@
 #
 # Each of t/replay/world.slight, net.slight and exec.slight runs once
 # with SLIGHT_RECORD, on the real clock, with what it reads from outside
-# (keys, a file, a hosts file, sockets, commands); then again with
+# (keys, a file, a hosts file, sockets, commands, a FIFO); then again with
 # SLIGHT_REPLAY, with other arguments, no stdin and none of those files.
 # The replay must print what the recorded run did, exit as it did, and
 # leave alone the file the recorded run (or its command) wrote. Nothing here depends on how long anything takes: a
@@ -17,7 +17,9 @@
 # all give one order. A seeded run must replay as it went. And
 # t/267-join-any-all.slight, whose results go by the virtual clock and
 # not by the order processes run in, must print its golden output under
-# five seeds (D220).
+# five seeds (D220); and so must t/374-life-hostile.slight, whose frames
+# don't go by which worker takes which job (D280); and so must the
+# agent team's 375 and 376, and 375 must replay as recorded (D284).
 #
 # t/replay/rand.slight draws random numbers in processes that interleave
 # (D222): with SLIGHT_SEED it must print the same under five SLIGHT_SCHED
@@ -65,6 +67,18 @@ if ! node bin/slightc.ts --target "$TARGET" -o "$dir/joins" t/267-join-any-all.s
     cat "$dir/joins.compile"
     check "joins (compile)" no
 fi
+if ! node bin/slightc.ts --target "$TARGET" -o "$dir/life" t/374-life-hostile.slight >"$dir/life.compile" 2>&1; then
+    cat "$dir/life.compile"
+    check "life (compile)" no
+fi
+if ! node bin/slightc.ts --target "$TARGET" -o "$dir/team" t/375-team.slight >"$dir/team.compile" 2>&1; then
+    cat "$dir/team.compile"
+    check "team (compile)" no
+fi
+if ! node bin/slightc.ts --target "$TARGET" -o "$dir/budget" t/376-team-budget.slight >"$dir/budget.compile" 2>&1; then
+    cat "$dir/budget.compile"
+    check "budget (compile)" no
+fi
 [ $fail -eq 0 ] || exit 1
 
 # run [NAME=value ...] prog [args ...]: runs a program, with those
@@ -93,11 +107,11 @@ printf 'line one\nline two\n' >"$dir/in.txt"
 printf 'abq' | run SLIGHT_REPLAY_TEST=recorded SLIGHT_RECORD="$dir/world.record" world "$dir/in.txt" "$dir/out.txt" >"$dir/world.recorded"
 rm -rf "$dir/in.txt" "$dir/out.txt" "$dir/out.txt.d"
 run SLIGHT_REPLAY="$dir/world.record" world other args </dev/null >"$dir/world.replayed"
-if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(ok ("line one" "line two"))$' "$dir/world.recorded" \
-   && grep -q '^(ok ((kind file) (size 18) (modified [0-9]*) (mode [0-9]*)))$' "$dir/world.recorded" \
-   && grep -q '^(random "[0-9a-f]\{32\}")$' "$dir/world.recorded" \
-   && grep -q '^(env "recorded")$' "$dir/world.recorded" \
-   && grep -q '^(clock #true [0-9]*)$' "$dir/world.recorded" && grep -q '^(now #true [0-9]*)$' "$dir/world.recorded"; then
+if cmp -s "$dir/world.recorded" "$dir/world.replayed" && grep -q '^(:ok ("line one" "line two"))$' "$dir/world.recorded" \
+   && grep -q '^(:ok ((:kind :file) (:size 18) (:modified [0-9]*) (:mode [0-9]*)))$' "$dir/world.recorded" \
+   && grep -q '^(:random "[0-9a-f]\{32\}")$' "$dir/world.recorded" \
+   && grep -q '^(:env "recorded")$' "$dir/world.recorded" \
+   && grep -q '^(:clock #true [0-9]*)$' "$dir/world.recorded" && grep -q '^(:now #true [0-9]*)$' "$dir/world.recorded"; then
     check "world replays as recorded" ok
 else
     diff -u "$dir/world.recorded" "$dir/world.replayed"
@@ -115,8 +129,8 @@ rm -f "$dir/hosts"
 if [ -e "$dir/net.sock" ]; then check "net's socket goes with its listener" no; else check "net's socket goes with its listener" ok; fi
 echo kept >"$dir/net.sock"
 run SLIGHT_REPLAY="$dir/net.record" net other </dev/null >"$dir/net.replayed"
-if cmp -s "$dir/net.recorded" "$dir/net.replayed" && grep -q '^(ok ("echo one" "echo two" "echo three"))$' "$dir/net.recorded" \
-   && grep -q '^(ok ("echo four" "echo five"))$' "$dir/net.recorded" && grep -q '^(ok ((uid [0-9]*) (gid [0-9]*) (pid [0-9]*)))$' "$dir/net.recorded"; then
+if cmp -s "$dir/net.recorded" "$dir/net.replayed" && grep -q '^(:ok ("echo one" "echo two" "echo three"))$' "$dir/net.recorded" \
+   && grep -q '^(:ok ("echo four" "echo five"))$' "$dir/net.recorded" && grep -q '^(:ok ((:uid [0-9]*) (:gid [0-9]*) (:pid [0-9]*)))$' "$dir/net.recorded"; then
     check "net replays as recorded" ok
 else
     diff -u "$dir/net.recorded" "$dir/net.replayed"
@@ -125,24 +139,28 @@ fi
 if [ "$(cat "$dir/net.sock" 2>/dev/null)" = kept ]; then check "net's replay leaves its socket's path alone" ok; else check "net's replay leaves its socket's path alone" no; fi
 
 # exec: commands, recorded; replayed without running them, so the file
-# the first wrote isn't written again.
+# the first wrote isn't written again. The last sees no SLIGHT_RECORD.
 run SLIGHT_RECORD="$dir/exec.record" exec "$dir/exec.out" </dev/null >"$dir/exec.recorded"
 written=$(cat "$dir/exec.out" 2>/dev/null)
-rm -f "$dir/exec.out"
+fifo=no
+[ -p "$dir/exec.out.fifo" ] && fifo=yes
+rm -f "$dir/exec.out" "$dir/exec.out.fifo"
 run SLIGHT_REPLAY="$dir/exec.record" exec other args </dev/null >"$dir/exec.replayed"
 if cmp -s "$dir/exec.recorded" "$dir/exec.replayed" && [ "$written" = written ] \
-   && grep -q '^(ok (3 ("fed in" "[0-9]*")))$' "$dir/exec.recorded" && grep -q '^(ok "first")$' "$dir/exec.recorded"; then
+   && grep -q '^(:ok (3 ("fed in" "[0-9]*")))$' "$dir/exec.recorded" && grep -q '^(:ok "first")$' "$dir/exec.recorded" \
+   && grep -q '^(:ok (0 ("rec=unset play=unset")))$' "$dir/exec.recorded" \
+   && grep -q '^(:fifo ("one" "two"))$' "$dir/exec.recorded" && [ $fifo = yes ]; then
     check "exec replays as recorded" ok
 else
     diff -u "$dir/exec.recorded" "$dir/exec.replayed"
     check "exec replays as recorded" no
 fi
-if [ -e "$dir/exec.out" ]; then check "exec's replay runs no command" no; else check "exec's replay runs no command" ok; fi
+if [ -e "$dir/exec.out" ] || [ -e "$dir/exec.out.fifo" ]; then check "exec's replay runs no command" no; else check "exec's replay runs no command" ok; fi
 
 # islands: each island's record, replayed together.
 run SLIGHT_ISLANDS=4 SLIGHT_RECORD="$dir/islands.record" islands </dev/null >"$dir/islands.recorded"
 run SLIGHT_ISLANDS=1 SLIGHT_REPLAY="$dir/islands.record" islands </dev/null >"$dir/islands.replayed"
-if cmp -s "$dir/islands.recorded" "$dir/islands.replayed" && grep -q '^(runs [0-9]* -*[0-9]*)$' "$dir/islands.recorded" \
+if cmp -s "$dir/islands.recorded" "$dir/islands.replayed" && grep -q '^(:runs [0-9]* -*[0-9]*)$' "$dir/islands.recorded" \
    && grep -q '^((0 #true) (1 #true) (2 #true) (3 #true))$' "$dir/islands.recorded" \
    && [ -s "$dir/islands.record.1" ] && [ -s "$dir/islands.record.3" ] && [ ! -e "$dir/islands.record.4" ]; then
     check "islands replay as recorded, each from its own record" ok
@@ -232,6 +250,43 @@ for seed in 1 2 3 4 5; do
         diff -u t/267-join-any-all.expected "$dir/joins.$seed"
         check "join/any and join/all, seed $seed" no
     fi
+done
+
+# The hostile scheduler's Life (374): the same frames under five seeds, as
+# its golden run under one (D280).
+for seed in 1 2 3 4 5; do
+    run SLIGHT_CLOCK=virtual SLIGHT_SCHED=$seed life >"$dir/life.$seed"
+    if printf 'exit: 0\n' | cat t/374-life-hostile.expected - | cmp -s - "$dir/life.$seed"; then
+        check "the hostile scheduler's Life, seed $seed" ok
+    else
+        diff -u t/374-life-hostile.expected "$dir/life.$seed"
+        check "the hostile scheduler's Life, seed $seed" no
+    fi
+done
+
+# The agent team (375, 376): a run with its fake model inside the program
+# is recorded and replayed with no socket, and prints its golden output;
+# and both print theirs under five seeds, their events in task order
+# (D284).
+run SLIGHT_CLOCK=virtual SLIGHT_RECORD="$dir/team.record" team </dev/null >"$dir/team.recorded"
+run SLIGHT_CLOCK=virtual SLIGHT_REPLAY="$dir/team.record" team </dev/null >"$dir/team.replayed"
+if cmp -s "$dir/team.recorded" "$dir/team.replayed" && printf 'exit: 0\n' | cat t/375-team.expected - | cmp -s - "$dir/team.recorded"; then
+    check "the team replays as recorded" ok
+else
+    diff -u "$dir/team.recorded" "$dir/team.replayed"
+    check "the team replays as recorded" no
+fi
+for seed in 1 2 3 4 5; do
+    for prog in team budget; do
+        case $prog in team) expected=t/375-team.expected ;; budget) expected=t/376-team-budget.expected ;; esac
+        run SLIGHT_CLOCK=virtual SLIGHT_SCHED=$seed $prog </dev/null >"$dir/$prog.$seed"
+        if printf 'exit: 0\n' | cat "$expected" - | cmp -s - "$dir/$prog.$seed"; then
+            check "the team's $prog, seed $seed" ok
+        else
+            diff -u "$expected" "$dir/$prog.$seed"
+            check "the team's $prog, seed $seed" no
+        fi
+    done
 done
 
 # Random numbers: the same, whatever the order, from one seed.

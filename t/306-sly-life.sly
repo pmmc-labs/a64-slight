@@ -44,7 +44,7 @@ fun cell(x, y, state, next, neighbors, root) {
         }
         :count => {
             let me = self;
-            spawn watch(me, neighbors, 0);
+            fork watch(me, neighbors, 0);
             cell(x, y, state, next, neighbors, root)
         }
         :counted(n) => {
@@ -143,7 +143,7 @@ fun gather(root, cells, states, n, gen, left) {
 }
 
 let root = address();
-let cells = grid(6, 8, fun(x, y) => spawn cell(x, y, glider_cell(x, y), [], [], root));
+let cells = grid(6, 8, fun(x, y) => fork cell(x, y, glider_cell(x, y), [], [], root));
 dotimes(0, 6, fun(x) {
     dotimes(0, 8, fun(y) => send(at(cells, x, y), :neighbors(neighbors_of(cells, x, y))))
 });

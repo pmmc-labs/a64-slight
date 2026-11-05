@@ -51,7 +51,7 @@
     ((:ok (l port))
         (let where (str "127.0.0.1:" port))
         (program where)
-        (read (connect :tcp where (person (script))))
+        (join (connect :tcp where (lambda () (person (script)))))
         (kill l)))
 
 (tty/write "the log:" \n)

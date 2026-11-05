@@ -31,7 +31,7 @@
     (let next (recv (m m)))
     (pprint (list head line seen next))
     (let me $$)
-    (spawn (leave me (str base "/chunks")))
+    (fork leave me (str base "/chunks"))
     (pprint (recv ((:left status bytes) (list status bytes))))
     (let seen-too (recv ((:raw what) (list :server what))))
     (kill raw)
@@ -41,4 +41,4 @@
 (defun top-level ()
     (main))
 
-(read (spawn (top-level)))
+(join (fork top-level))

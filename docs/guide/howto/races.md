@@ -14,8 +14,8 @@ first is used:
 (defun fetch (mirror)
     (list mirror (fib 15)))
 
-(let a (fork (fetch "mirror-a")))
-(let b (fork (fetch "mirror-b")))
+(let a (fork fetch "mirror-a"))
+(let b (fork fetch "mirror-b"))
 (match (join/race (list a b))
     ((_ (:ok (mirror _))) mirror))
 ```

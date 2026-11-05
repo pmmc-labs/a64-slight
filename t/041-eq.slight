@@ -1,6 +1,7 @@
 (pprint (eq? :a :a))
 (pprint (eq? :a :b))
-(pprint (eq? :ping 'ping))
+(pprint (eq? :ping 'ping))      ; a keyword and a symbol, apart (D287)
+(pprint (eq? 'ping 'ping))
 (pprint (eq? 1 1))
 (pprint (eq? 1 2))
 (pprint (eq? 1 :a))

@@ -1,21 +1,21 @@
-(b (ok b))
+(:b (:ok :b))
 10
-(c (error c-failed))
+(:c (:error :c-failed))
 20
-(c (error c-failed))
-(b (ok b))
-(b (ok b))
+(:c (:error :c-failed))
+(:b (:ok :b))
+(:b (:ok :b))
 20
-(a (ok a))
+(:a (:ok :a))
 30
-(d (ok d))
-(f (error killed))
-((error killed) (ok h))
-first
-second
+(:d (:ok :d))
+(:f (:error :killed))
+((:error :killed) (:ok :h))
+:first
+:second
 (10 15 30 5 20)
 50
-(ok quick)
-(error timeout)
-(joining #true "racing" #true)
-(w1 (ok w1))
+(:ok :quick)
+(:error :timeout)
+(:joining #true "racing" #true)
+(:w1 (:ok :w1))

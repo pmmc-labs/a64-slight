@@ -4,8 +4,7 @@
 (sig slurp (str) (or (:ok (list str)) (:error any)))
 (sig spew (str (list any)) (or (:ok any) (:error any)))
 
-; Trees (D254): mkdir -p, rm -r, and every path under a directory, none
-; following a link.
+; Trees (D254): mkdir -p, and every path under a directory, neither
+; following a link. rm -r is the builtin fs/delete-all (D275).
 (sig fs/mkdir-all (str) (or (:ok ()) (:error any)))
-(sig fs/delete-all (str) (or (:ok ()) (:error any)))
 (sig fs/walk (str) (or (:ok (list str)) (:error any)))

@@ -1,0 +1,11 @@
+(:started (1 2 3))
+(1 (:done "forty-two"))
+(2 (:done "twice forty-two, as I said: eighty-four"))
+(3 (:done "nobody there: error: there's no teammate on task 9"))
+(:review "Not approved: too long.")
+(:answer "42, 84, void empty.")
+(:started (1))
+(1 (:done "forty-two"))
+(:review "APPROVED")
+(:answer "forty-two it is")
+:done

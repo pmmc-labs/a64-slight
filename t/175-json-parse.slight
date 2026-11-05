@@ -61,5 +61,5 @@
 (show (bytes->str (list 239 187 191 123 125)))
 (show (~ "1" (bytes->str (list 0))))
 
-(pprint (join (fork (json/parse 5))))
-; warns: 64:33
+(pprint (join (fork (lambda () (json/parse 5)))))
+; warns: 64:44

@@ -8,11 +8,11 @@
 (defun spin (n) (if (== n 0) :done (spin (- n 1))))
 
 (defun work (i)
-    (let helper (fork (do (spin (* i 200)) (rand/int 1000000))))
+    (let helper (fork (lambda () (do (spin (* i 200)) (rand/int 1000000)))))
     (let a (rand/int 1000000))
     (spin (* (- 5 i) 300))
     (list i a (rand/int 1000000) (cadr (join helper))))
 
-(let workers (map (lambda (i) (fork (work i))) (range 0 5)))
+(let workers (map (lambda (i) (fork work i)) (range 0 5)))
 (pprint (map (lambda (w) (cadr (join w))) workers))
 (rand/int 1000000)

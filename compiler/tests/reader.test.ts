@@ -131,14 +131,14 @@ test("'x is (quote x)", () => {
     assert.equal(shows("'x '(a b) ''x"), '(quote x) (quote (a b)) (quote (quote x))');
 });
 
-test(':x is (quote x), positioned at the colon', () => {
+test(':x is a keyword, itself, positioned at the colon', () => {
     const x = one('  :ping');
-    assert.equal(show(x), '(quote ping)');
-    assert.deepEqual(x.t === 'pair' && x.pos, { file: 'test.slight', line: 1, col: 3 });
+    assert.equal(show(x), ':ping');
+    assert.deepEqual(x.t === 'sym' && x.pos, { file: 'test.slight', line: 1, col: 3 });
 });
 
 test('keywords can contain colons', () => {
-    assert.equal(show(one(':a::b')), '(quote a::b)');
+    assert.equal(show(one(':a::b')), ':a::b');
 });
 
 test('bad keywords are errors', () => {

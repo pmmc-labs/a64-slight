@@ -1,0 +1,81 @@
+; team: a job for a team of agents on a local ollama (D281).
+;
+;     team Say hello in French and in German.
+;     team --at-most 2 --ms 30000 --yes Tidy the notes in docs/.
+;     TEAM_MODEL=llama3.2 team ...
+;
+; The model is TEAM_MODEL, or llama3.2; ollama is where OLLAMA_HOST
+; says, as chat reads it, or http://localhost:11434. --at-most is how
+; many workers run at once, 4 unless given; --ms how long a task may
+; take, two minutes unless given; --yes lets the workers write files,
+; run commands and fetch pages, which otherwise they may not: what they
+; would have done is reported instead. The team's events are printed as
+; they come, and the answer last; --transcript writes them, as they
+; came, to a file, as s-expressions, one a line, when the job is done.
+
+(@include "team-agents.slight")
+(@include :tools)
+(@include :fs)
+
+(defun main (args env)
+    (match (flags args ())
+        ((opts words)
+            (let job   (str/join " " words))
+            (let model (match (lookup "TEAM_MODEL" env) (:not-found "llama3.2") (m m)))
+            (if (eq? job "")
+                (do (tty/write "usage: team [--at-most k] [--ms n] [--yes] [--transcript path] <the job, in words>" \n) (raise :usage))
+                (do
+                    (let me      $$)
+                    (let yes     (team/opt opts :yes #false))
+                    (let approve (lambda (what) (send me (list (if yes :doing :would) what)) yes))
+                    (let t (team/new (ollama-url env) model (team-tools approve) opts))
+                    (team/say t job)
+                    (let events (watch t ()))
+                    (let path (team/opt opts :transcript ()))
+                    (when (str? path) (spew path (map sexp/print (reverse events))))
+                    (if (eq? (car (car events)) :answer) () (raise :failed)))))))
+
+; The options before the job: (opts words).
+(defun flags (args opts)
+    (match args
+        (("--at-most" k & rest) (flags rest (assoc :at-most (str->int k) opts)))
+        (("--ms" n & rest)      (flags rest (assoc :task-ms (str->int n) opts)))
+        (("--yes" & rest)       (flags rest (assoc :yes #true opts)))
+        (("--transcript" p & rest) (flags rest (assoc :transcript p opts)))
+        (_                      (list opts args))))
+
+(defun team-tools (approve)
+    (list (tools/read-file) (tools/list-files) (tools/search) (tools/calc)
+          (tools/write-file approve) (tools/edit-file approve) (tools/run approve) (tools/fetch approve)))
+
+; The events, printed as they come, and kept, newest first, for the
+; transcript; the answer or the error ends them.
+(defun watch (t events)
+    (recv
+        ((:team/plan _ tasks)
+            (tty/write "plan:" \n)
+            (map (lambda (task) (tty/write "  " task \n)) tasks)
+            (watch t (cons (list :plan tasks) events)))
+        ((:team/task _ id text)   (tty/write "worker " id " starts: " text \n) (watch t (cons (list :task id text) events)))
+        ((:team/done _ id answer) (tty/write "worker " id " done: " answer \n) (watch t (cons (list :done id answer) events)))
+        ((:team/failed _ id why)  (tty/write "worker " id " failed: " (str why) \n) (watch t (cons (list :failed id why) events)))
+        ((:team/retry _ id why)   (tty/write "worker " id " failed: " (str why) "; trying again" \n) (watch t (cons (list :retry id why) events)))
+        ((:team/review _ said)    (tty/write "the reviewer: " said \n) (watch t (cons (list :review said) events)))
+        ((:would what)            (tty/write "a worker would have: " what \n) (watch t (cons (list :would what) events)))
+        ((:doing what)            (tty/write "a worker is: " what \n) (watch t (cons (list :doing what) events)))
+        ((:team/answer _ text)    (tty/write \n text \n) (cons (list :answer text) events))
+        ((:team/error _ reason)   (tty/write "the team failed: " (str reason) \n) (cons (list :error reason) events))))
+
+; Where OLLAMA_HOST says ollama is, as chat reads it: without a scheme
+; it's http, and without a port, ollama's.
+(defun ollama-url (env)
+    (let h (lookup "OLLAMA_HOST" env))
+    (cond
+        ((or (eq? h :not-found) (eq? h "")) "http://localhost:11434")
+        ((>= (bytes/index-of h "://") 0)    (with-port h (+ (bytes/index-of h "://") 3)))
+        (#true                              (with-port (str "http://" h) 7))))
+
+(defun with-port (url at)
+    (if (>= (bytes/index-of (bytes/slice url at) ":") 0) url (str url ":11434")))
+
+(main @ARGV %ENV)

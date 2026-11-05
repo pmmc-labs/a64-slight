@@ -87,8 +87,8 @@ The reader (`compiler/src/reader.ts`, D37) reads:
 - integers (`42`, `-7`) and floats (`3.14`)
 - strings in double quotes, with escapes: `\"` `\\` `\n` `\t` `\r` `\e`
   `\u{hex}` (a code point up to U+10FFFF that isn't a surrogate)
-- symbols. `:name` is a keyword, a symbol that evaluates to itself.
-  `#true`/`#false` are the booleans.
+- keywords, `:name`, which evaluate to themselves, and symbols, `'name`,
+  names as data, apart (D287). `#true`/`#false` are the booleans.
 - `'x` is `(quote x)`
 - `;` starts a comment
 - doc blocks (D156, D164): between top-level forms, a line `=doc`
@@ -139,10 +139,10 @@ never changes the code.
 | `(let name expr)` | Binds `name` for the rest of the enclosing body. Only allowed directly in a body. As the last form of a body, its value is `expr`'s (D42). |
 | `(cond (test body...) ...)` | The conditional the others become (below). Each test must be `#true` or `#false`, or the process faults; so does running out of clauses. |
 | `(do form...)` | Evaluates in order. The last form is in tail position. |
-| `(quote x)`, `'x` | A constant. `:sym` is self-quoting. |
-| `(fork expr)` | Runs `expr` in a new process and returns its pid: a task. `(spawn expr)` starts an actor (D243), and `(spawn/on k expr)` one on island `k` (D256). |
-| `(connect :source [arg] expr)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path expr)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" expr)` or `(connect :tcp/listen port expr)`, or a Unix socket, `(connect :unix path expr)` or `(connect :unix/listen path expr)`; a command, `(connect :exec (list "ls" "-l") expr)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
-| `(recv clause...)` | Takes the next message. Only allowed as the whole body of a receive function. |
+| `(quote x)`, `'x` | A constant: a symbol, a number, a string, or a list of them. A keyword, `:name`, is itself (D287). |
+| `(fork f arg ...)` | Starts a process that calls `f` with the arguments, worked out by the caller and copied (D286), and returns its pid; `(fork/on k f arg ...)` on island `k` (D256). One kind of process (D277). |
+| `(connect :source [x] f arg ...)` | Same as `fork`, and connects the new process to a source: `:keypress`; a file, `(connect :fs/read path f arg ...)` (and `:fs/write`, `:fs/append`); a socket, `(connect :tcp "host:port" f arg ...)` or `(connect :tcp/listen port f arg ...)`, or a Unix socket, `(connect :unix path f arg ...)` or `(connect :unix/listen path f arg ...)`; a command, `(connect :exec (list "ls" "-l") f arg ...)`; or `:system`. `(connect dev expr)` hands the device `dev` to the new process. |
+| `(recv clause...)` | Takes the next message, waiting for one with the stack kept (D276), anywhere (D277). |
 | `(deftype ...)`, `(sig ...)`, `(the type expr)` | Types (D247): a type's name and a function's types, at the top level, and an expression's. The checker reads them; code generation leaves them out (`(the T e)` is `e`). Not counted among the 10, since none does anything when the program runs. |
 | `(yield expr)` | Pauses: goes to the back of the run queue, then evaluates `expr` in tail position. |
 
@@ -187,145 +187,79 @@ but nothing needs that yet.
 A function takes at most 8 parameters, one register each (see the
 register convention below). More could go on the stack later.
 
-### The `recv` rule
+### Waiting, and the stack
 
-This rule is what makes the runtime simple, so it gets its own section.
+A process keeps its stack across every wait: `recv`, `join`,
+`join/race`, `read` and `sleep` alike (D276, which retired D8 and D167:
+till then the stack was empty at every `recv`, which could go only
+where a tail call could, and a waiting process held none). So a `recv`
+goes anywhere, a helper or a lambda included, the top level too (D277),
+and a function that waits gives its value back to its caller
+as any function does. The runtime's `rt_recv` takes the next message,
+or parks the process in state `RT_WAITING`, keeping its stack, and
+returns the message when one comes; the process gets a new slice then,
+and a call is counted, as a receive function started again had, so a
+program is preempted where it was before D276.
 
-- A **receive function** is a top-level `defun` whose body is a single
-  `recv` form. In the code the compiler generates, `recv` appears nowhere
-  else. In a program it can go anywhere a tail call could (D167), and the
-  compiler splits the function there (`compiler/src/split.ts`): the `recv`
-  and what follows it become a receive function of their own, which the
-  function tail-calls with the locals that are still needed. See below.
-- A **state function** is a receive function, or any function that
-  tail-calls a state function (so, after the split, any function with a
-  `recv` in it). The compiler computes this as a fixpoint over the call
-  graph.
-- State functions may only be called **in tail position**, or as the body of
-  `fork`/`connect`.
-- Every other function is **plain**. Plain functions can be called anywhere,
-  and can never reach a `recv`. Lambdas are always plain: a lambda body
-  can't contain `recv` or call a state function. Indirect calls would hide
-  the call graph otherwise.
+There's still no selective receive: whatever `recv` a process is in
+takes the next message, but what's sent to an address of its own, or
+comes from a device it opened, which `read` takes (D277).
 
-The result: **the stack is empty at every `recv`.** A process waiting for a
-message is fully described by (function, arguments, mailbox). Its stack goes
-back to a pool. When a message arrives, the runtime calls the function again
-from the top with the same arguments. That's exact, because the function's
-body is just the `recv`. "All state lives in the loop arguments" is
-literally true at every wait.
-
-Syntax (D85):
-
-```lisp
-(defun counter (n)
-    (recv
-        ((:inc)        (counter (+ n 1)))
-        ((:get from)   (send from (list :count n)) (counter n))
-        ((:stop)       n)
-        (other         (log-unknown other) (counter n))))
-```
-
-- `(:tag a b ...)` matches a list of exactly that length whose head is the
-  symbol `:tag`, and binds the rest by position. `_` in a position matches
-  anything and binds nothing.
-- `:tag` on its own matches exactly that symbol.
-- A bare name matches anything and binds the whole message (`_` binds
-  nothing).
-- Clauses are tried in order. Only the **first** message in the mailbox is
-  considered: there's no selective receive. If no clause matches, the
-  message goes to the **dead-letter log** (a line on stderr,
-  `dead letter: <message> (recv at file:line:col)`) and the function takes
-  the next message, or waits.
-- The patterns are `match`'s (D168, `compiler/src/pattern.ts`): they
-  nest, a literal (a number, a string, `#true`, `#false`, `()`, anything
-  quoted) can go anywhere, `(p ... & rest)` binds the rest of a
-  list, and `#(p ...)` matches a tuple of exactly that many elements
-  (D176). One lowering, to tests and bindings, serves both: the expander
-  makes `match` into `cond` with it, and the code generator compiles
-  `recv`'s clauses with it, branching on each test. No guards: match the
-  shape, and test the rest with `cond` in the body. A tuple pattern's test
-  is one compare of the box's header with the header a tuple of that many
-  elements has, and each element one load, so it costs about what a list
-  pattern does (D178).
-
-Send-then-wait is written in one function, and becomes two:
-
-```lisp
-(defun pinger (target n)
-    (cond
-        ((== n 0) (send target (list :stop $$)) :ping-done)
-        (#true
-            (send target (list :ping $$))
-            (recv ((:pong from) (pprint (list :round n))))
-            (pinger target (- n 1)))))
-```
-
-Where a `recv` can go (D167): a form of a body in tail position (a
-function's, a `cond` or `recv` clause's, or that of a `do` or `yield` in
-tail position), or a `let`'s value there; or inside a call there, or a
-`do` with no `let`s, which is flattened first, in the order things are
-evaluated, so what comes before the `recv` still happens first; or a
-`cond`'s test, when the `cond` is in tail position. As an expression,
-`recv` gives the value of the clause that matched, and `(recv)` takes any
-message. Not in a lambda, and not in a `cond`, `do` (with `let`s) or
-`yield` that isn't in tail position. A `recv` with several clauses and
-something after it gets a generated function for what's after, rather
-than a copy of it in each clause; more than 8 locals go across as one
-list. Generated names have spaces in them, which a program can't write,
-and say where the `recv` is (`ask (recv at f.slight:3:12)`).
-
-A function that waits still can't give a value back to a function that
-called it: that's a process and `join` (as `ask` in `lib/ds.slight` does,
-and `(join (connect :tcp ...))`), which works anywhere, a lambda included.
-
-Request/reply is correlated by the actor's own state: put a counter or the
-request's details in the arguments and match the reply when it arrives
-(run-to-completion style). There's no AWAIT/REQUEST/REPLY machinery and no
-reply refs.
+What it costs: a waiting process holds a stack, 8 MB of address space
+and the pages it touched, and the system maps about 32,000 of them at
+once on default Linux (`vm.max_map_count`), so a million processes
+can't all wait, where they could before (`million-forks` is
+`ten-thousand-forks`). What it buys is the process model's simplicity:
+one kind of wait, no split pass, no state functions, and a call to a
+function that waits is a call.
 
 ### Processes
 
 | | |
 |---|---|
-| `(fork expr)` | Starts a **task** (D243). The compiler turns `expr` into a hidden entry function whose parameters are `expr`'s free variables. Their values are **deep-copied** into the child; at most 8 of them. A task can't wait in `recv` (the compiler refuses a state function in `expr`, or in the top level, which is the root's task), nor be sent to, timed (`after`) or monitor (`:not-an-actor`). Inside `expr`, `$$` is the child. |
-| `(spawn expr)` | As `fork`, but starts an **actor** (D243): `expr` runs at the base of the child's stack, so it may tail-call a state function, and the actor can be sent to. |
-| `(connect :keypress expr)` | `spawn`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
-| `(connect :fs/read path expr)`, `:fs/write`, `:fs/append` | `spawn`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
-| `(connect :tcp "host:port" expr)`, `(connect :tcp/listen port expr)` | `spawn`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
-| `(connect :unix path expr)`, `(connect :unix/listen path expr)` | The same, at a Unix socket's path (D231). |
+| `(fork f arg ...)` | Starts a process (D277: one kind, where D243 had two). `f` and the arguments are evaluated by the caller and **deep-copied** into the child, which calls `f` with them (D286); at most 8 arguments. A literal in `f`'s place is a compile error; what isn't a function of as many arguments faults the caller, as `apply` does, and starts nothing. `f` runs at the base of the child's stack, and may wait in `recv` anywhere (D276). Inside `f`, `$$` is the child; in the fork form, the caller. |
+| `(fork/on k f arg ...)` | As `fork`, on island `k` (D256); `fork` stays on its parent's. |
+| `(connect :keypress f arg ...)` | `fork`, plus the new process gets every key typed, as a message (see `:keypress`, under Scheduler). |
+| `(connect :fs/read path f arg ...)`, `:fs/write`, `:fs/append` | `fork`, plus the new process owns the file at `path`, opened on a device whose first message to it is `(:open f)` (see Files, under Scheduler). `path` is evaluated in the caller, and must be a string. |
+| `(connect :tcp "host:port" f arg ...)`, `(connect :tcp/listen port f arg ...)` | `fork`, plus the new process owns a connection, or a listener on `port` (0 lets the system pick), on a device (see Sockets, under Scheduler). |
+| `(connect :unix path f arg ...)`, `(connect :unix/listen path f arg ...)` | The same, at a Unix socket's path (D231). |
 | `(socket/peer c)` | The uid, gid and pid at the other end of the Unix connection `c`, or `()` (D235). |
-| `(connect :exec cmd expr)` | `spawn`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
-| `(connect :system expr)` | `spawn`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
-| `(connect dev expr)` | `spawn`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
+| `(connect :exec cmd expr)` | `fork`, plus the new process owns a command, `cmd` being a list of strings (its name and arguments), run on a device (see Commands, under Scheduler). `cmd` is evaluated in the caller. |
+| `(connect :system expr)` | `fork`, plus the new process owns a device that tells about the processes and the runtime (see `:system`, under Scheduler). |
+| `(connect dev expr)` | `fork`, plus the new process is handed the open device `dev` (anything that isn't a `:keyword` is taken to be one), which then tells it `(:open f)`. Anything that isn't an open device faults (`:not-a-device`). |
 | `(disconnect f)` | Closes the device `f`. Anything that isn't an open device it ignores. Returns `()`. |
 | `(send pid msg)` | `msg` is any value, conventionally a list headed by a keyword. Deep-copied. Never blocks. Returns `()`. |
 | `$$`, `^$$` | self, parent; the root's parent is `()` |
-| `(join pid)` | **Blocking** wait for `pid`, a task, to end. Returns `(:ok value)` or `(:error reason)`. Works on any task (not just children), anywhere (including inside lambdas, and in an actor), and after the task has already ended, till its parent has had the result: joined or read it, been told by a monitor, or ended; then `:ended` (D244). Joiners wake in the order they joined, each with a copy. `(join $$)` faults (`:join-self`), and so does a running actor's pid (`:not-a-task`, D243): a task reads its end. |
-| `(join/race pids)` | **Blocking** wait for the first of `pids`, tasks, to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
-| `(address)`, `(read src)`, `(read/any srcs)` | A task's (D243): `address` makes a place it can be sent to, an immediate under the pid tag (the task's index and a number), which `send`, `after` and `disconnect` take; `read` waits, keeping the stack, for the next message to one of its open addresses, or for a pid to end (an actor's end is told to those reading it then, a read's watch lasting till the task next reads without it, and is `:ended` after); `read/any` for the first of several, in their order, giving `(src what)`. The messages wait in the task's mailbox, marked with their address. `ask`, `ask-within` and `reply` are prelude functions on them. |
-| `(open source arg)` | A task's (D243): opens a device it owns, with no process started, from `connect`'s sources but the listeners and `:keypress`, and waits till it's open: `(:ok d)`, or `(:error reason)`. `read` gives its messages, its next cut at the `read` after (D158); a failure is `(:error d reason)` there, and the device closes, rather than ending the task (D128's rule is an actor's). |
-| `(monitor pid)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller; at once, if it already has, `result` being `:ended` for an actor (D243). Monitoring twice means two messages. There are no automatic messages to the parent. Returns `()`. |
+| `(join pid)` | **Blocking** wait for `pid` to end, keeping the stack. Returns `(:ok value)` or `(:error reason)`. Works on any process (not just children), on any island (D277), anywhere (including inside lambdas), and after the process has already ended, till its parent has had the result: joined it, been told by a monitor, or ended; then `:ended` (D244). Joiners wake in the order they joined, each with a copy. `(join $$)` faults (`:join-self`), and so does an address (`:not-a-pid`). |
+| `(join/race pids)` | **Blocking** wait for the first of `pids` to end, keeping the stack, as `join` does (D220). Returns `(pid result)`, `result` as `join` gives it. If some have ended already, it's the first of those in the list, as JavaScript's `Promise.race` settles. The others are left running. An empty list faults (`:not-a-pid`), and so does the caller's own pid (`:join-self`); every pid is checked before it waits. `join/any` and `join/all`, JavaScript's `Promise.any` and `Promise.all`, are in the prelude, on top of it. |
+| `(address)`, `(read src)`, `(read/any srcs)` | `address` makes an inbox of the caller's own, which only it reads: an immediate under the pid tag (its island's id for it, never given twice, D273), which `send`, `after`, `monitor` and `disconnect` take; `read` waits, keeping the stack, for the next message to one of its open addresses, or from a device it opened; `read/any` for the first of several, in their order, giving `(src what)`. A process is no source: `read` of a pid faults (`:not-a-pid`), its end being a message, from `monitor`, or a join's (D277). The messages wait in the process's mailbox, marked with their address, and `recv` leaves them. `ask`, `ask-within` and `reply` are prelude functions on them. |
+| `(open source arg)` | Opens a device the caller owns, with no process started (D243, D277), from `connect`'s sources but the listeners and `:keypress`, and waits till it's open: `(:ok d)`, or `(:error reason)`. `read` gives its messages, which `recv` leaves, its next cut at the `read` after (D158); a failure is `(:error d reason)` there, and the device closes, rather than ending the process (D128's rule is `connect`'s). |
+| `(monitor pid)`, `(monitor pid to)` | Opt-in. When `pid` ends, the runtime sends `(:exit pid result)` to the caller, or to its address `to` (D277), so a reply and the end of the process asked come to one place; at once, if it already has, `result` being `:ended` once the value is gone (D244). Monitoring twice means two messages; `disconnect` of `to` drops the monitors told at it. There are no automatic messages to the parent. Returns `()`. |
 | `(kill pid)` | Ends `pid` with `(:error :killed)` (D87), whatever it's doing: waiting in `recv`, in the run queue, blocked in `join`, or asleep. `(kill $$)` ends the caller. Killing a process that has ended does nothing. Returns `()`. |
 | `(after ms pid msg)` | A timer: sends `msg` to `pid` once `ms` milliseconds have passed. `msg` is copied now, as `send` copies it. Returns the timer's number (D232). |
 | `(timer/cancel t)` | Takes back `after`'s timer `t` if it hasn't fired: `#true`, or `#false` (D232). |
 
-**Tasks and actors (D243, with D244 and D245; built).** Two kinds of
-process.
-An actor, started with `(spawn expr)`, has a mailbox and the `recv`
-rule; it can be sent to, monitored and killed, not joined, and read by
-a task. When it ends, monitors and readers are told; its value is kept
-for its parent if that's a task, till the parent reads it (D245), and
-otherwise one that asks later hears `:ended`. A task, started with `(fork expr)`, computes a value: it
-can't `recv` or be sent to, and can be joined. The root is a task. A
-task waits for something other than a process's end through addresses
-it makes, `(address)`, which `send` and `after` take where they take a
-pid, and devices it opens, `(open how ...)`, with `(read src)` for the
-next message from one, or `(read/any srcs)` for the first of several, a
-pid's being its end; each keeps the stack, as `join` does. An address is
-an immediate under the pid tag. `ask` is a prelude function on them. An
-actor makes no address, so it can't `ask`; it may block in `join` and
-`sleep`. `connect` starts an actor that owns a device, as before.
+**One kind of process (D277; D243's two, tasks and actors, with D245,
+are retired).** Every process, started with `(fork f arg ...)`, has a
+mailbox and a value: it can be sent to, and takes its messages with
+`recv`, wherever it is in its code (D276); it can be joined for its
+value, on any island; monitored, timed and killed; and it can make
+addresses, `(address)`, which `send`, `after` and `monitor` take where
+they take a pid, and open devices, `(open how ...)`, with `(read src)`
+for the next message from one, or `(read/any srcs)` for the first of
+several; each wait keeps the stack. The root is one too. A pid is its
+process's inbox: what's sent to it is what `recv` takes. An address is
+an inbox of its own, read only by its maker, an immediate under the
+pid tag: its island and an id the island gives it, once, which a table
+of the island's open addresses maps to its process (D273); `recv`
+leaves what's sent to one, and what comes from a device the process
+opened, for `read`. A process's end is a message: `(monitor pid to)`
+tells the address `to`, so a reply and the end of the process asked
+come to one place, which is how `ask`, a prelude function, waits. A
+process's value is kept for its parent till the parent has it (D244,
+for every process). `connect` starts a process that owns a device, as
+before. Tasks and actors stay as the two shapes a process is written
+in: one that computes a value, and one that loops through `recv`.
 | `(sleep ms)` | **Blocking** wait for `ms` milliseconds, keeping the stack. Works anywhere. Returns `()`. |
 | `(clock/us)` | The microseconds since the program started, on the timers' clock (D208). |
 | `(raise reason)` | Ends the current process with `(:error reason)`. |
@@ -345,15 +279,16 @@ actor makes no address, so it can't `ask`; it may block in `join` and
   file:line:col)` in the root, `fault in #<pid N>: ...` anywhere else.
   `raise` and `kill` aren't logged, except in the root, whose error is the
   program's: `error: <reason>`. The program exits 1 if the root ends with
-  an error, and otherwise prints the root's value and exits 0.
+  an error, and otherwise prints the root's value, unless it's `()`,
+  and exits 0 (D290).
 - **Preemption.** Every loop is a tail call, so a reduction counter is
   checked at each function entry and tail call (a reduction is one entry
   into a compiled function: LANGUAGE.md, under Scheduling). When it runs out, the
   process pauses where it is, *keeping its stack*, and goes to the back of
   the run queue. `yield` is the same pause, chosen by the program.
-- **Stacks exist only while needed.** A process that is running, paused
-  (preempted or yielded), blocked in `join` or `join/race`, or blocked in a syscall holds a
-  stack. A process waiting in `recv` holds none.
+- **A process holds a stack from its first run to its end** (D276),
+  whatever it waits in. One that can't have one ends `:stack` (D267);
+  the pool keeps a few hundred of those that have ended, for the next.
 - **Deadlock** (nothing can run and nothing is pending: no timers, no event
   sources, no blocked I/O) is detected and reported. So far (step 10d): if
   the run queue empties, no timer is pending, no process is connected to
@@ -369,7 +304,7 @@ actor makes no address, so it can't `ask`; it may block in `join` and
   process is connected to `:keypress` or stdin has ended), not when the
   root ends: other
   processes keep running after the root has its value (or its error), and
-  the root's value is printed last. Processes
+  the root's value is printed last, unless it's `()` (D290). Processes
   still waiting in `recv` or `join` at that point are dropped (D93).
 - **Blocking calls.** Since a process can block with its stack, `sleep`
   blocks only the calling process; it can't fail, and returns `()`
@@ -381,9 +316,11 @@ actor makes no address, so it can't `ask`; it may block in `join` and
   number of milliseconds; a negative one counts as 0. Timers due at the
   same time fire in the order they were set, at the scheduler's next
   decision (so `(sleep 0)` lets the processes already waiting go first).
-  `after` gives its timer's number, 1 up, and `timer/cancel` takes one
-  back by it, found in an index of the pending ones, kept as the heap
-  moves them. A timer whose process has ended is dropped when it's due,
+  `after` gives its timer's number, 1 up, with its island above bit 52
+  (D274), and `timer/cancel` takes one back by it, found in an index of
+  the pending ones, kept as the heap moves them; another island's is
+  taken back by that island, the caller waiting for its answer, as
+  `fork/on` waits. A timer whose process has ended is dropped when it's due,
   as a message to it would be, or sooner: when nothing can run, those
   next due whose process has ended are dropped, so the program neither
   waits for them nor moves the clock to them.
@@ -416,9 +353,7 @@ value)` lists of strings, in the environment's order, for `lookup`
 parameter, seen as `@ARGV` is, and for the same reason: the environment is
 the program's input, given to the root, and a key reaches only the code
 it's passed to. The runtime's `main` builds it in the root's heap; an
-entry is cut at its first `=`, and one without an `=` is left out. A
-receive function split from the top level (D167) carries both under
-names no program can write.
+entry is cut at its first `=`, and one without an `=` is left out.
 
 ### Builtins and the prelude
 
@@ -520,7 +455,7 @@ program; it can only define functions.
 | numbers, booleans | `inc dec`; `not` (booleans only; `and` and `or` are expanded forms) |
 | folds | `(fold/l init f xs)` with `(f acc x)`; `(fold/r init f xs)` with `(f x acc)` |
 | lists | `reverse length append sum product map`; `(filter f xs)` keeps what `f` says `#true` to, `(remove f xs)` drops it; `(take n xs)`, `(skip n xs)` stop at the end of the list; `(nth i xs)` and `(find f xs)` give `()` when there's nothing; `member?`; `(range start end)` is `start` up to but not including `end`; `(dotimes start end f)` |
-| association lists | `(assoc k v table)` adds `(k v)`; `(lookup k table)` gives the value or `:not-found` |
+| association lists | `(assoc k v table)` puts `(k v)` in place of `k`'s pair, or at the front (D289); `(lookup k table)` gives the value or `:not-found` |
 | random numbers | `(rand/pick xs)`, an element or `()`; `(rand/shuffle xs)`, each element sorted by a `rand/float` of its own (D222) |
 | processes | `(join/any pids)`, the first to succeed as `(:ok v)`, or `(:error reasons)` once all have failed; `(join/all pids)`, `(:ok values)` in the order of `pids`, or the first `(:error r)` as soon as one fails (D220) |
 
@@ -714,9 +649,10 @@ can cut its bytes into messages (D154–D156):
   strings the same way. A device reads them with `(:read :sexp)`, `(:sexp f v)` for
   each top-level datum. The text is the compiler's reader's: lists,
   numbers, strings, symbols, keywords, `#true`, `#false`, `'x`,
-  comments. A symbol the program mentions reads as itself, any other as
-  `(:symbol "name")` (D14 holds: no symbols are made at run time); `:a`
-  and `a` are the same symbol (D52).
+  comments. A name the program mentions reads as the symbol or the
+  keyword it was written as, any other as `(:symbol "name")` or
+  `(:keyword "name")` (D14 holds: no names are made at run time); `:a`
+  is the keyword and `a` the symbol, apart (D287).
 - **Source** (D156, D164): where `:sexp` skips doc blocks, as the
   compiler and `sexp/parse` do, `:source` gives a file's forms and doc
   blocks in order, `(:form f form line)` and `(:doc f text line)`, a doc
@@ -812,10 +748,11 @@ Lalloc_N:
 
 **Collection** (step 9, step 12b, and D200):
 
-- **It runs when a receive function asks for its next message** (D105),
-  in `rt_recv`, before it takes one. The `recv` rule means the stack is
-  empty then, so the roots are just the receive function's arguments, in
-  its frame. Nothing outside the process's heap points into it.
+- **It runs when a process waits in `recv`** (D105), in `rt_recv`,
+  before it takes a message, and again each time it wakes to one. The
+  roots are as at a function's entry (below), the frame's slots in use
+  so far and the frames below, since the stack is kept (D276). Nothing
+  outside the process's heap points into it.
 - **And at a function's entry** (D166), in `rt_preempt`, so the root and
   a process that never waits collect too, and the cap is on what's
   live. The roots are the frames: the function's parameters and
@@ -987,7 +924,11 @@ RT_EXEC_INT`, since a symbol is its name.
   the target's FIFO mailbox. Static data is not copied, and nor is a
   string of `RT_SHARED_MIN` (4 KB) or more, a buffer off the heap whose
   handle is copied, its references counted (D253, below). Sharing within a
-  message is duplicated (as in the BEAM); that's acceptable at this scale.
+  message is duplicated (as in the BEAM); that's acceptable at this scale,
+  but a copy a process asks for (a send, a fork, its end) is held to the
+  most a heap can hold, past which that process faults `:heap` (D265).
+  What the runtime says of a value, a fault's or a dead letter's, is cut
+  at 64 KB.
   The copy is one walk over the value, into a scratch buffer, which then
   moves into a chunk of just its size; the message's record (its place in
   the mailbox) is at the front of the same chunk, so a send is one malloc
@@ -1005,19 +946,20 @@ RT_EXEC_INT`, since a symbol is its name.
 
 ### Process lifecycle
 
-- `fork`: allocate the process, deep-copy the free variables into its heap,
-  queue it to run the entry function.
+- `fork`: check that the function takes as many arguments as it's given,
+  allocate the process, deep-copy the function and its arguments into
+  its heap, queue it to start in `rt_apply_start`, which calls the
+  function with them (D286).
 - Ending: the Result goes, from the process's own heap, to those
   waiting then: each joiner, and a race it wins, is given a copy to
-  take when it runs; each task with a read's watch on it is sent it,
-  marked with the pid, so it waits for that task's next `read`; and
-  monitors get `(:exit pid result)` (D243, D244). Then a Result isn't
-  kept if the parent was among them, or has ended, nor an actor's whose
-  parent is an actor, which can't read it: the record says only that it
-  ended, and later asks get `:ended`. Else the Result is copied into its
-  small per-pid **exit record**, kept for the parent, which lists it
-  (D244, D245); the parent's `join`, `read` or
-  `monitor` of it, or its end, lets it go. The monitors a process set
+  take when it runs, a joiner on another island as an item to its
+  island (D277); and monitors get `(:exit pid result)`, in their inbox
+  or at the address they named (D243, D244, D277). Then a Result isn't
+  kept if the parent was among them, or has ended: the record says only
+  that it ended, and later asks get `:ended`. Else the Result is copied
+  into its small per-pid **exit record**, kept for the parent, which
+  lists it (D244); the parent's `join` or `monitor` of it, or its end,
+  lets it go. The monitors a process set
   on others are taken off their lists (D183). A `join/race` is a watch
   on each of its pids, as a monitor is, that wakes its process rather
   than sending it a message; the first to end wakes it, and it takes the
@@ -1049,7 +991,7 @@ and record; nothing is shared between islands but an inbox each and
 the shared buffers (D253), which never change. A fixed set, `(islands)`
 of them, one per core unless `SLIGHT_ISLANDS` says; island 0 is the
 main one, and owns the signals, the terminal and `:system`. A program
-places an actor with `(spawn/on k expr)`; nothing moves on its own, and
+places a process with `(fork/on k expr)`; nothing moves on its own, and
 `fork` stays on its parent's island. A pid carries its island in 8 bits
 below the address bit (`#<pid 5@2>`, island 0's printed as now), each
 island numbering its own; a send to another island's pid copies the
@@ -1069,12 +1011,13 @@ reply that comes back quickly needs no wake (two islands' round trip,
 3.4 µs on the cloud machine, where a wake through the pipe took 50).
 What crosses is an item: a message, already copied into its chunk by
 the sender, the item's head in the same chunk, so that crossing is one
-allocation; a start, for `spawn/on`, which the island makes and answers
-with its pid, the spawner waiting, so each island numbers only its own;
+allocation; a start, for `fork/on`, which the island makes and answers
+with its pid, the forker waiting, so each island numbers only its own;
 and kills, watches and ends. A pid not on this island reads as ended
-(`slot`), except where send, kill, monitor and read see to it. An
-actor's end goes to its parent, a task on another island, and is kept
-there apart from its mail, as a record keeps one here (D245). The
+(`slot`), except where send, kill, monitor and join see to it. A
+process's end goes to its parent on another island, and to a joiner
+there, and is kept apart from the mail, as a record keeps one here
+(D244, D277). The
 program ends when `busy`, the islands that may still do something and
 the items not yet handled, comes to 0.
 
@@ -1124,7 +1067,11 @@ run (option (b), D256's step 6, put off).
   exact and take no real time; but a process that sleeps while others stay
   busy never wakes.
 - **Stack pool**: a process takes a stack when it starts running and gives
-  it back when it waits in `recv` or ends.
+  it back when it ends (D276; till then at `recv` too). An island keeps
+  256 given back, and unmaps the rest. With none to be had (about 32,700 held at
+  once reach Linux's default `vm.max_map_count`, two mappings a stack),
+  the process that wanted one faults `:stack`, and the program goes on
+  (D267).
 - **Context switch**: `rt_switch`, 25 instructions on AArch64 (x19–x30,
   sp, d8–d15).
 - **Idle**: when nothing is runnable, wait in `select()` (on macOS and
@@ -1138,13 +1085,19 @@ run (option (b), D256's step 6, put off).
   on its own, is waited for, for real (D185); then a key; then the clock
   moves to the next timer; only when nothing else can happen does it
   wait for real (D139). But before it moves to a lookup's timer, it
-  waits for real, up to 200 ms, for the sockets (D165). It can't tell
-  that a reply is still crossing macOS's loopback, which delivers a
-  moment after a send, so a test mustn't have a timer pending while it
-  waits for one, unless the timer is meant to win (D236). With nothing
-  to look at (no key wanted, no socket or command open) it doesn't call
-  `select()` to look, so a simulation's clock moves at each event without
-  a system call (D242).
+  waits for real, up to 200 ms, for the sockets (D165); and the same
+  before a program's timer while a connection the program made (`:tcp`,
+  `:unix`) has been written to, or is still connecting, with nothing
+  come back since, and is waited on: a reply may be crossing macOS's
+  loopback, which delivers a moment after a send, and a budget pending
+  during a request mustn't beat it (D236, D288). A reply on its way
+  ends the wait as it comes; only a server that stays silent costs the
+  whole of it, once per move of the clock, and a reply that comes in
+  pieces, a byte to a tick, costs nothing after its first. An accepted
+  connection isn't waited for, so a server's idle connections never
+  hold the clock. With nothing to look at (no key wanted, no socket or command
+  open) it doesn't call `select()` to look, so a simulation's clock
+  moves at each event without a system call (D242).
 - **`:keypress`** (`runtime/tty.c`) sends each key as `(key mods...)`
   (D120): the
   key is a string for a printable key (one UTF-8 character) or a DOM-style
@@ -1184,10 +1137,18 @@ run (option (b), D256's step 6, put off).
   sent after that goes nowhere. A file that can't be opened ends the owner
   before it runs, with `(:error (name path))`, `name` being errno's
   (`:enoent`, `:eacces`, `:eisdir`, ..., or `:io-error`); a read or a
-  write that fails ends it the same way then. A file is read when its
-  owner waits for its next message, so a reader is never waited for, and
-  never counts as something that can still happen; one that can keep a
-  read waiting (a FIFO, a terminal) waits with the whole runtime. To
+  write that fails ends it the same way then. A regular file is read
+  when its owner waits for its next message, and written where it's
+  sent to, so a reader is never waited for, and never counts as
+  something that can still happen; the only wait is the disk's. Anything
+  else (a FIFO, a pipe, a terminal, a device such as `/dev/zero`) is
+  opened without waiting, `O_NONBLOCK`, and then read and written as a
+  socket is (D272): read when `select()` says it can be, what it hasn't
+  taken kept and written when it can, up to 64 MB waiting (D270),
+  closing once that's written, and counted as something that can still
+  happen while `select()` waits on it. So no FIFO or terminal holds up
+  its island; and a FIFO opened to write that nothing has open to read
+  fails at once, `(:error (:enxio path))`, where it would wait. To
   `join`, `monitor` and `kill`, a device is a process that ended with
   `(:ok ())`.
 - **Sockets are devices too** (D133–D139). `(connect :tcp "host:port"
@@ -1221,7 +1182,10 @@ run (option (b), D256's step 6, put off).
   names are errno's (`:econnrefused`, `:econnreset`, `:epipe`,
   `:eaddrinuse`, ...), and `:enotfound` (Node's) for a host that can't be
   found, or `:etimedout` when no name server answers; SIGPIPE is ignored, so writing to a closed connection is
-  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets. A Unix
+  `:epipe`. IPv4 only, and `select()` holds about 1,000 sockets (D266).
+  Output a socket, a command or a polled file hasn't taken waits in
+  memory off every heap: a write while 64 MB waits fails the device
+  `:too-big` (D270, D272). A Unix
   socket (`:unix`, `:unix/listen`, D231) is the same device at a path:
   a listener makes the socket there, replacing only one that refuses a
   connection, left by a program that was killed, and removes it when it
@@ -1231,7 +1195,7 @@ run (option (b), D256's step 6, put off).
   client can also give a reply's body to its caller as it comes, in
   messages, as a device does (`http/stream`, D181, D182).
 - **Commands are devices too** (D185). `(connect :exec (list "ls" "-l")
-  expr)` runs a command, a list of strings with no shell unless one is
+  f arg ...)` runs a command, a list of strings with no shell unless one is
   asked for, found in `PATH` by the runtime itself, with `posix_spawn`,
   in a process group of its own, with SIGPIPE back to its default; its
   input is a pipe, and its stdout and stderr are another, one pipe for
@@ -1524,5 +1488,5 @@ step 9: collecting only at `recv` (D105). In step 10a: the virtual clock
 ended (D112), and waiting in `select()` (D113). In step 10b: feeding tests
 keys (D116), Ctrl-C (D117), the end of stdin (D118), and several
 connected processes (D119). In step 12b: collecting at a function's
-entry, with the frames as roots (D166). In Oct 2026: tasks and actors (D243, below
-Processes).
+entry, with the frames as roots (D166). In Oct 2026: tasks and actors (D243), and in Nov 2026 one kind of
+process again (D277, below Processes).

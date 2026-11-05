@@ -21,6 +21,11 @@ export type Sexp = Sym | Int | Float | Str | Nil | Pair;
 export const NIL: Nil = { t: 'nil' };
 
 export const sym   = (name: string, pos: Pos | null = null): Sym => ({ t: 'sym', name, pos });
+// A keyword, :name, is a sym whose name starts with the colon, which no
+// name can: it evaluates to itself, apart from the symbol name (D287).
+export const kw    = (name: string, pos: Pos | null = null): Sym => sym(`:${name}`, pos);
+export const isKw  = (x: Sexp): boolean => x.t === 'sym' && x.name.startsWith(':');
+export const kwName = (x: Sexp): string => (x as Sym).name.slice(1);
 export const int   = (v: bigint, pos: Pos | null = null): Int => ({ t: 'int', v, pos });
 export const float = (v: number, pos: Pos | null = null): Float => ({ t: 'float', v, pos });
 export const str   = (v: string, pos: Pos | null = null): Str => ({ t: 'str', v, pos });
@@ -33,10 +38,39 @@ export const fitsInt = (n: bigint): boolean => n >= INT_MIN && n <= INT_MAX;
 
 export const isSym = (x: Sexp, name: string): boolean => x.t === 'sym' && x.name === name;
 
-// The reader reads a tuple pattern, #(p ...), as (TUPLE p ...) (D176): a
-// head with a space in it, which no program can write, so a list pattern
-// can't be taken for one.
-export const TUPLE = '#( (tuple pattern)';
+// A table's entry for a name a program gave, or undefined: its own, never
+// Object.prototype's, so a function named toString or constructor isn't
+// taken for one of the compiler's.
+export const own = <V>(table: Readonly<Record<string, V>>, name: string): V | undefined =>
+    (Object.hasOwn(table, name) ? table[name] : undefined);
+
+// --- hidden names -----------------------------------------------------------
+//
+// The compiler makes names of its own: a builtin no local can hide, a
+// recv's receive function, a local carried across a recv, a module's
+// private function. Each has a space or a parenthesis in it, which ends a
+// name in the reader, and sly.ts holds a raw name to the same rule, so no
+// program can write one, hide one, or reach one.
+
+export const isSpace     = (ch: string): boolean => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
+export const isDelimiter = (ch: string): boolean => isSpace(ch) || '()\';"`,'.includes(ch);
+
+// Whether a program can write name: whether a reader can make it.
+export const writable = (name: string): boolean => name !== '' && ![...name].some(isDelimiter);
+
+// A name no program can write: base with a note after it, in parentheses.
+// With base '', a suffix that hides whatever it's put after.
+export const hidden = (base: string, note: string): string => `${base} (${note})`;
+
+// A builtin by a name no local can hide: the code generator takes it for
+// the builtin whatever locals there are.
+export const BUILTIN    = hidden('', 'builtin');
+export const builtinSym = (name: string, pos: Pos | null = null): Sym => sym(`${name}${BUILTIN}`, pos);
+export const builtinOf  = (name: string): string | null => (name.endsWith(BUILTIN) ? name.slice(0, -BUILTIN.length) : null);
+
+// The reader reads a tuple pattern, #(p ...), as (TUPLE p ...) (D176), so
+// a list pattern can't be taken for one.
+export const TUPLE = hidden('#(', 'tuple pattern');
 
 // Whether x is a form headed by the symbol name: (name ...).
 export const isForm = (x: Sexp, name: string): boolean => x.t === 'pair' && x.car.t === 'sym' && x.car.name === name;

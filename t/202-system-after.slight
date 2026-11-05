@@ -26,5 +26,5 @@
         ((:process s2 i) (states s (cons (map (lambda (k) (lookup k i)) (list :pid :state :in)) acc)))
         ((:end s2)       (reverse acc))))
 
-(fork (napper))
-(read (connect :system (ticker 3)))
+(fork napper)
+(join (connect :system ticker 3))

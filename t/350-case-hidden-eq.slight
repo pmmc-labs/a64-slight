@@ -1,0 +1,21 @@
+; case compares its topic with the builtin eq?, by a name no local can
+; hide, as a match's patterns do (review L12): a parameter or a let named
+; eq? doesn't change what case does, though a call of eq? by its own name
+; still calls the local.
+
+(defun f (eq? x)
+    (case x
+        (1     :one)
+        ("two" :two)
+        (#true :other)))
+
+(let never (lambda (a b) #false))
+(pprint (f never 1))
+(pprint (f never "two"))
+(pprint (f never 3))
+
+(defun g (x)
+    (let eq? (lambda (a b) #true))
+    (list (eq? x 0) (case x ((list 1 2) :pair) (#true :no))))
+(pprint (g (list 1 2)))
+(pprint (g 5))

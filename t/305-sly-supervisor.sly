@@ -5,7 +5,7 @@
 // Starts the store and watches it, and passes it every message. When it
 // ends, it starts another, with an empty table.
 fun supervise() {
-    let s = spawn store([]);
+    let s = fork store([]);
     monitor(s);
     supervisor(s)
 }
@@ -23,7 +23,7 @@ fun supervisor(s) {
     }
 }
 
-let sup = spawn supervise();
+let sup = fork supervise();
 call(sup, :put("apple", 3));
 call(sup, :put("color", "red"));
 pprint(join(fork ask_within(1000, sup, :do(:incr("color")))));

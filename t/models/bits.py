@@ -43,20 +43,21 @@ src.append("""; as values, and folded
 (pprint (list (fold/l 0 bit/xor (list 1 2 4 8 2)) (fold/l -1 bit/and (list 7 14 28)) (map bit/not (list 0 -1 7))))""")
 out.append(f'({1 ^ 2 ^ 4 ^ 8 ^ 2} {-1 & 7 & 14 & 28} ({~0} {~-1} {~7}))')
 src.append("""(defun kind (pid) (car (cadr (join pid))))
-(pprint (kind (fork (bit/shl 1 -1))))
-(pprint (kind (fork (bit/shr 1 (- 0 5)))))
-(pprint (kind (fork (bit/xor 1 1.0))))
-(pprint (kind (fork (bit/count "1"))))
-(kind (fork (bit/not ())))""")
+(pprint (kind (fork (lambda () (bit/shl 1 -1)))))
+(pprint (kind (fork (lambda () (bit/shr 1 (- 0 5))))))
+(pprint (kind (fork (lambda () (bit/xor 1 1.0)))))
+(pprint (kind (fork (lambda () (bit/count "1")))))
+(kind (fork (lambda () (bit/not ()))))
+; warns: 54:43 55:43 56:24""")
 text = '\n'.join(src) + '\n'
 lines = text.split('\n')
 line = lambda t: next(i + 1 for i, l in enumerate(lines) if t in l)
 site = lambda name, t, col: f'({name} at t/272-bits.slight:{line(t)}:{col})'
 count_string = '(bit/count "1")'
-out += [f'fault in #<pid 2>: out of range: -1 {site("bit/shl", "(bit/shl 1 -1)", 21)}', 'out-of-range',
-        f'fault in #<pid 3>: out of range: -5 {site("bit/shr", "(bit/shr 1 (- 0 5))", 21)}', 'out-of-range',
-        f'fault in #<pid 4>: not an integer: 1.0 {site("bit/xor", "(bit/xor 1 1.0)", 21)}', 'not-an-int',
-        f'fault in #<pid 5>: not an integer: "1" {site("bit/count", count_string, 21)}', 'not-an-int',
-        f'fault in #<pid 6>: not an integer: () {site("bit/not", "(bit/not ())", 13)}', 'not-an-int']
+out += [f'fault in #<pid 2>: out of range: -1 {site("bit/shl", "(bit/shl 1 -1)", 32)}', ':out-of-range',
+        f'fault in #<pid 3>: out of range: -5 {site("bit/shr", "(bit/shr 1 (- 0 5))", 32)}', ':out-of-range',
+        f'fault in #<pid 4>: not an integer: 1.0 {site("bit/xor", "(bit/xor 1 1.0)", 32)}', ':not-an-int',
+        f'fault in #<pid 5>: not an integer: "1" {site("bit/count", count_string, 32)}', ':not-an-int',
+        f'fault in #<pid 6>: not an integer: () {site("bit/not", "(bit/not ())", 24)}', ':not-an-int']
 open('t/272-bits.slight', 'w').write(text)
 open('t/272-bits.expected', 'w').write('\n'.join(out) + '\n')

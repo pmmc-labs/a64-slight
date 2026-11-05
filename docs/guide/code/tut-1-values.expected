@@ -3,9 +3,9 @@
 3.5
 3
 "a string"
-apple
+:apple
 #true
-(1 "two" three (4.5))
+(1 "two" :three (4.5))
 ()
 #true
 #false

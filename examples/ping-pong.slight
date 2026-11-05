@@ -23,5 +23,5 @@
             (pprint (list :round n :reply reply))
             (pinger target (- n 1)))))
 
-(let pong (spawn (ponger)))
-(read (spawn (pinger pong 30)))
+(let pong (fork ponger))
+(join (fork pinger pong 30))

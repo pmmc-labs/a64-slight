@@ -14,13 +14,13 @@ happens when a process grows too big.
 (defun grow (xs)
     (grow (cons 0 xs)))
 
-(pprint (join (fork (grow ()))))
+(pprint (join (fork grow ())))
 
-; A process waiting for a message holds no stack.
+; A process waiting for a message keeps its stack (D276).
 (defun idle ()
     (recv (_ :done)))
 
-(let a (spawn (idle)))
+(let a (fork idle))
 (sleep 1)
 (match (open :system)
     ((:ok s)
@@ -32,8 +32,8 @@ happens when a process grows too big.
 <!-- output: ../code/con-memory.expected -->
 ```
 fault in #<pid 2>: heap exhausted (cons at docs/guide/code/con-memory.slight:4:11)
-(error (heap () "cons at docs/guide/code/con-memory.slight:4:11"))
-(recv #false)
+(:error (:heap () "cons at docs/guide/code/con-memory.slight:4:11"))
+(:recv #true)
 ```
 
 - **Each heap has a cap**: 1 GB, or what `SLIGHT_HEAP_MAX` says (the
@@ -50,11 +50,12 @@ fault in #<pid 2>: heap exhausted (cons at docs/guide/code/con-memory.slight:4:1
   process being collected, and takes time in proportion to what that
   process still holds, so a big process doesn't make the small ones'
   collections slower.
-- **A waiting process holds no stack.** The `:system` device shows the
-  idle actor waiting in `recv`, with no stack. Stacks are pooled, and
-  held only while a process is running, paused, or waiting in `join`,
-  `read` or `sleep` (see [the recv rule](recv-rule.md)). An idle actor is its
-  function, its arguments, its mailbox and its heap.
+- **A waiting process keeps its stack** (D276). The `:system` device
+  shows the idle actor waiting in `recv`, with its stack: 8 MB of
+  address space, of which only the pages it has touched, a few KB, are
+  memory. A process holds a stack from its first run to its end,
+  whatever it waits in (see [Processes and messages](processes.md)). An
+  idle actor is its stack's pages, its mailbox and its heap.
 - **A stack has a limit too**, 8 MB. Recursion that isn't a tail call
   uses it, and too much faults with `:stack`. Loops are tail calls, and
   take none.
@@ -70,10 +71,10 @@ value. The copy is as big as the value, and so is the time it takes.
   copies 100,000 cells. If a process needs a big structure often, it's
   usually better for the process that owns it to answer questions about
   it than to send it whole.
-- **`fork` and `spawn` copy too.** The locals their expression uses
-  are copied into the new process whole. To fork a worker on part of a
-  big list, take the part first, with `(let mine (take n big))`, then
-  `(fork (work mine))`, so only the part is copied.
+- **`fork` copies too.** The arguments a fork passes are copied into
+  the new process whole. To fork a worker on part of a big list, pass
+  the part, `(fork work (take n big))`, not the list, so only the part
+  is copied.
 - **A device's data is the receiver's.** A line from a file arrives
   in the owner's heap. A line, count or value of 64 MB or more ends the
   owner with `:too-big`, so an endless line can't take all the memory.

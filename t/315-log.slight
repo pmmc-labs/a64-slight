@@ -13,11 +13,11 @@
 (pprint :start)
 (log :info "listening" (list (list "port" 8080) (list :host "127.0.0.1")))
 (log :debug "not written" ())
-(read (spawn (later)))
+(join (fork later))
 (log :error "failed" (list (list "why" (list :error (list :enoent "x.txt"))) (list "nan" (- 0.0 math/INF))
                            (list "data" (list :object (list "a" (tuple 1 2)) (list "b" :null))) (list "said" "quote \" tab\t")))
 (pprint :end)
-(pprint (kind (fork (log :fatal "x" ()))))
-(pprint (kind (fork (log :info 3 ()))))
-(kind (fork (log :info "x" (list (list "a")))))
-; warns: 20:26 21:32
+(pprint (kind (fork (lambda () (log :fatal "x" ())))))
+(pprint (kind (fork (lambda () (log :info 3 ())))))
+(kind (fork (lambda () (log :info "x" (list (list "a"))))))
+; warns: 20:37 21:43

@@ -31,8 +31,8 @@ fun player(counter) {
 // them, then collect the two finals, labelled in the order they arrive,
 // and tell to
 fun ping_pong(to, duration) {
-    let p1 = spawn player(0);
-    let p2 = spawn player(0);
+    let p1 = fork player(0);
+    let p2 = fork player(0);
     recv;
     send(p1, :Serve(p2));
     sleep(duration);
@@ -43,7 +43,7 @@ fun ping_pong(to, duration) {
 }
 
 fun setup_tournament(to, n, duration) {
-    if n == 0 { [] } else { [spawn ping_pong(to, duration), ...setup_tournament(to, n - 1, duration)] }
+    if n == 0 { [] } else { [fork ping_pong(to, duration), ...setup_tournament(to, n - 1, duration)] }
 }
 
 fun start_tournament(pids) {

@@ -1,0 +1,13 @@
+:bad-url
+:bad-url
+(:error (:bad-method "GET /admin HTTP/1.1\r\nX:"))
+(:error (:bad-header "X\r\nInjected"))
+(:error (:bad-header "X-Ok"))
+(:error (:bad-header "X-Nul"))
+(:error (:bad-header "a"))
+(200 "fine")
+(500 "")
+(302 "")
+(500 "")
+(500 "")
+:done

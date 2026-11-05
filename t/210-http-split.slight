@@ -1,6 +1,8 @@
 ; A request that comes in pieces, a millisecond apart: the head is cut in
-; the middle of a header name, and the body in the middle of its bytes. The
-; server's reading must not mind where the pieces end.
+; the middle of a header name, and the body in the middle of its bytes; and
+; a chunked one, cut between a \r and its \n, in a chunk's bytes, before
+; the line after them, and in the trailers. The server's reading must not
+; mind where the pieces end.
 
 (@include :http)
 (@include "data/http-raw.slight")
@@ -11,5 +13,7 @@
 (match (http/listen 0 handler)
     ((:ok (server port))
         (let reply (talk port (list "POST /p HTTP/1.1\r\nContent-Le" "ngth: 5\r\n\r\nhel" "lo")))
+        (let chunked (talk port (list "POST /p HTTP/1.1\r\nTransfer-Encoding: chunked\r" "\n\r\n3\r" "\nab" "c" "\r" "\n2;x=1\r\nde\r\n0" "\r\nT: 1\r" "\n\r\n")))
         (kill server)
-        (list (car (str/split reply "\r\n")) (cadr (str/split reply "\r\n\r\n")))))
+        (list (car (str/split reply "\r\n")) (cadr (str/split reply "\r\n\r\n"))
+              (car (str/split chunked "\r\n")) (cadr (str/split chunked "\r\n\r\n")))))

@@ -1,6 +1,5 @@
-; Files, the whole of one at a time, on top of open (D243): not part of
-; the prelude, so a program that wants them says (@include :fs).
-; Each works in a task of its own, which a task or an actor can join.
+; Files, the whole of one at a time, on top of open (D243, D277): not
+; part of the prelude, so a program that wants them says (@include :fs).
 ;
 ;     (slurp "notes.txt")                  (:ok ("first line" "second line"))
 ;     (spew "out.txt" (list "one" "two"))  (:ok ())
@@ -9,27 +8,23 @@
 ; written: (:error (enoent "notes.txt")), say.
 
 ; The lines of the file at path, without their newlines.
-(defun slurp (path) (join (fork (slurp-file path))))
-
-(defun slurp-file (path)
+(defun slurp (path)
     (match (open :fs/read path)
         ((:ok f)         (slurp-lines f ()))
-        ((:error reason) (raise reason))))
+        ((:error reason) (list :error reason))))
 
 (defun slurp-lines (f lines)
     (match (read f)
-        ((:line _ s)      (slurp-lines f (cons s lines)))
-        ((:eof _)         (reverse lines))
-        ((:error _ reason) (raise reason))))
+        ((:line _ s)       (slurp-lines f (cons s lines)))
+        ((:eof _)          (disconnect f) (list :ok (reverse lines)))
+        ((:error _ reason) (list :error reason))))
 
 ; Writes lines to the file at path, each with a newline after it,
 ; replacing what was there.
-(defun spew (path lines) (join (fork (spew-file path lines))))
-
-(defun spew-file (path lines)
+(defun spew (path lines)
     (match (open :fs/write path)
         ((:ok f)         (spew-each f lines))
-        ((:error reason) (raise reason))))
+        ((:error reason) (list :error reason))))
 
 ; A write that fails closes the file, and leaves (:error f reason) to be
 ; read, which closing it here leaves too: or the file's end, ().
@@ -38,16 +33,18 @@
         (()
             (disconnect f)
             (match (read f)
-                ((:error _ reason) (raise reason))
-                (_                 ())))
+                ((:error _ reason) (list :error reason))
+                (_                 (list :ok ()))))
         ((line & rest)
             (send f (list :write line \n))
             (spew-each f rest))))
 
-; Trees, on the fs/ builtins (D254): a directory and those it's in, a
-; tree deleted, and a tree's paths. None follows a link: fs/stat says a
-; link is one, so a walk or a delete stays in its tree. Each gives (:ok x),
-; or the first failure, (:error (name path)).
+; Trees, on the fs/ builtins (D254): a directory and those it's in, and
+; a tree's paths. Neither follows a link: fs/stat says a link is one. But
+; each step finds its path from the top, so a link put in a directory's
+; place while it walks is followed: fs/walk can be led out of its tree,
+; to read, when others can write in it (D275). Each gives (:ok x), or the
+; first failure, (:error (name path)).
 
 ; Makes the directory at path, and any it's in that aren't there yet, as
 ; mkdir -p does. One that's there is no failure, if it's a directory.
@@ -65,25 +62,9 @@
             (failed  failed))
         (fs/mkdir path)))
 
-; Deletes path, and if it's a directory, all in it, as rm -r does. What
-; isn't there is no failure.
-(defun fs/delete-all (path)
-    (match (fs/stat path)
-        ((:ok info)           (if (eq? (lookup :kind info) :dir) (fs/delete-in path (fs/list path)) (fs/delete path)))
-        ((:error (:enoent _)) (list :ok ()))
-        (failed               failed)))
-
-(defun fs/delete-in (path listed)
-    (match listed
-        ((:ok names) (fs/delete-each path names))
-        (failed      failed)))
-
-(defun fs/delete-each (path names)
-    (match names
-        (()            (fs/delete path))
-        ((name & rest) (match (fs/delete-all (str path "/" name))
-                           ((:ok _) (fs/delete-each path rest))
-                           (failed  failed)))))
+; rm -r is the builtin fs/delete-all (D275), in C, so that nothing below
+; the top is found by a path, and a link put in a directory's place while
+; it's deleted is deleted, not followed.
 
 ; Every path in the tree at dir, not dir itself: each directory before
 ; what's in it, the names in a directory in their bytes' order.

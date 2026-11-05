@@ -47,7 +47,7 @@ def dumps(v, ascii):
 # As pprint shows the slight value the parser makes.
 def slight(v):
     if v is None:
-        return 'null'
+        return ':null'
     if v is True or v is False:
         return '#true' if v else '#false'
     if isinstance(v, (int, float)):
@@ -55,7 +55,7 @@ def slight(v):
     if isinstance(v, str):
         return '"' + v + '"'
     if isinstance(v, dict):
-        return '(' + ' '.join(['object'] + ['("' + k + '" ' + slight(x) + ')' for k, x in v.items()]) + ')'
+        return '(' + ' '.join([':object'] + ['("' + k + '" ' + slight(x) + ')' for k, x in v.items()]) + ')'
     return '(' + ' '.join(slight(x) for x in v) + ')'
 
 
@@ -68,12 +68,12 @@ with open('t/data/json.txt', encoding='utf-8') as f:
 backslash = chr(92)
 out.append(slight(json.loads('{"a": [1, 2.5, "' + backslash + 'u00e9"], "b": {"c": null, "d": false}}')))
 out.append(slight(json.loads('\n{\n    "spaced" :\n        [ true ]\n}\n')))
-out.append('(builtins-agree #true)')                 # json/parse and json/print, the same
+out.append('(:builtins-agree #true)')                 # json/parse and json/print, the same
 
 # The bad texts, by hand: what the parser in the test does with them.
-out.append('(error (json "not a value"))')          # [1, 2,]: a ] where a value goes
-out.append('(error (json "expected :"))')           # {"a" 1}
-out.append('(ok "' + chr(0xfffd) + '")')            # a lone surrogate
-out.append('(error (json "text after the value"))') # [1] 2, the root's value
+out.append('(:error (:json "not a value"))')          # [1, 2,]: a ] where a value goes
+out.append('(:error (:json "expected :"))')           # {"a" 1}
+out.append('(:ok "' + chr(0xfffd) + '")')            # a lone surrogate
+out.append('(:error (:json "text after the value"))') # [1] 2, the root's value
 
 sys.stdout.buffer.write(('\n'.join(out) + '\n').encode('utf-8'))

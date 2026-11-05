@@ -9,9 +9,10 @@
 // escapes, symbols and keywords, #true and #false, 'x as (quote x), and
 // comments; and #(...), which the compiler takes only as a pattern, as a
 // tuple (D176); and #float(...) and #int(...), arrays of numbers (D253),
-// which aren't in source at all, an #int's each in 63 bits. Unlike the compiler, :a reads as the symbol a, as a does
-// (D52). A symbol the program mentions reads as itself, and any other as
-// (:symbol "name"), so no symbol is made at run time (D14). Numbers read as
+// which aren't in source at all, an #int's each in 63 bits. :a reads as
+// the keyword and a as the symbol (D287); a name the program mentions
+// reads as either, and any other as (:keyword "name") or (:symbol
+// "name"), so no name is made at run time (D14). Numbers read as
 // JSON's do: an integer past 63 bits is the nearest float, and a float too
 // big for a double is inf.
 
@@ -111,9 +112,12 @@ static int token_ok(const rt_sexp_t *s) {
     return s->state == S_ATOM || (s->state == S_HASH && s->word && !*s->word && !s->array) || (s->state == S_KEYWORD && !is_number(s->num));
 }
 
-// A number's digits, up to just past 63 bits, which is all token_ok needs.
+// A number's digits, up to just past 63 bits, which is all token_ok needs:
+// past that it stays at UINT64_MAX, since another digit could wrap it to
+// a number that fits (H6).
 static void count_digit(rt_sexp_t *s, int c) {
-    if (c >= '0' && c <= '9' && s->mag <= (uint64_t)1 << 62) s->mag = s->mag * 10 + (uint64_t)(c - '0');
+    if (c < '0' || c > '9') return;
+    s->mag = s->mag <= ((uint64_t)1 << 62) / 10 ? s->mag * 10 + (uint64_t)(c - '0') : UINT64_MAX;
 }
 
 static int is_blank(int c)  { return c == ' ' || c == '\t' || c == '\r'; }
@@ -390,13 +394,16 @@ static rt_value_t new_string(const char *bytes, size_t n, rt_build_alloc_t alloc
     return (rt_value_t)box | RT_TAG_BOXED;
 }
 
-// The symbol named by len bytes, or (:symbol "name") if the program has none.
-static rt_value_t symbol(const char *name, size_t len, rt_build_alloc_t alloc, void *cx) {
+// The symbol, or with keyword the keyword, named by len bytes; or
+// (:symbol "name") or (:keyword "name") if the program has no such name
+// (D287).
+static rt_value_t symbol(const char *name, size_t len, int keyword, rt_build_alloc_t alloc, void *cx) {
     int64_t id = rt_symbol_find(name, len);
-    if (id >= 0) return rt_symbol((uint64_t)id);
+    if (id >= 0) return keyword ? rt_keyword((uint64_t)id) : rt_symbol((uint64_t)id);
     rt_value_t  s    = new_string(name, len, alloc, cx);
     rt_value_t *rest = s ? cell(alloc, cx, s, RT_NIL) : NULL;
-    rt_value_t *head = rest ? cell(alloc, cx, rt_symbol(RT_SYM_SEXP + RT_SEXP_SYMBOL), (rt_value_t)rest | RT_TAG_LIST) : NULL;
+    rt_value_t  tag  = rt_keyword(RT_SYM_SEXP + (keyword ? RT_SEXP_KEYWORD : RT_SEXP_SYMBOL));
+    rt_value_t *head = rest ? cell(alloc, cx, tag, (rt_value_t)rest | RT_TAG_LIST) : NULL;
     return head ? (rt_value_t)head | RT_TAG_LIST : 0;
 }
 
@@ -405,8 +412,8 @@ static rt_value_t symbol(const char *name, size_t len, rt_build_alloc_t alloc, v
 static int token(const char *p, size_t len, rt_build_alloc_t alloc, void *cx, rt_value_t *out) {
     int kind = number_kind(p, len);
     if (*p == '#')            *out = len == 5 ? RT_TRUE : RT_FALSE;
-    else if (*p == ':')       *out = symbol(p + 1, len - 1, alloc, cx);
-    else if (!is_number(kind)) *out = symbol(p, len, alloc, cx);
+    else if (*p == ':')       *out = symbol(p + 1, len - 1, 1, alloc, cx);
+    else if (!is_number(kind)) *out = symbol(p, len, 0, alloc, cx);
     if (*p == '#' || *p == ':' || !is_number(kind)) return *out != 0;
     if (kind == N_INT) {                        // as rt_string_to_int: negative has the room
         const int64_t min = -((int64_t)1 << 62);
@@ -459,7 +466,8 @@ static rt_value_t new_tuple(rt_value_t xs, rt_build_alloc_t alloc, void *cx) {
 }
 
 // An array of the numbers in xs, which the validator has said are all
-// numbers, and an #int's all integers.
+// numbers, and an #int's all integers. If it's wrong about an #int, the
+// program stops, rather than store a float's address as a number (H6).
 static rt_value_t new_array(rt_value_t xs, uint64_t type, rt_build_alloc_t alloc, void *cx) {
     uint64_t n = 0;
     for (rt_value_t v = xs; v != RT_NIL; v = rt_cdr(v)) n++;
@@ -468,6 +476,7 @@ static rt_value_t new_array(rt_value_t xs, uint64_t type, rt_build_alloc_t alloc
     box[0] = n << RT_BOX_SIZE_SHIFT | type;
     for (uint64_t i = 1; xs != RT_NIL; xs = rt_cdr(xs), i++) {
         rt_value_t x = rt_car(xs);
+        if (type == RT_BOX_INTS && (x & RT_TAG_INT_MASK)) abort();
         double     d = (x & RT_TAG_INT_MASK) == 0 ? (double)rt_int_value(x) : rt_float_value(x);
         if (type == RT_BOX_INTS) box[i] = (uint64_t)rt_int_value(x);
         else                     memcpy(box + i, &d, sizeof d);
@@ -574,15 +583,15 @@ rt_value_t rt_sexp_parse(rt_value_t s, const char *site) {
     rt_value_t *outer = rt_alloc(32, site), v;
     if (r == RT_SCAN_DONE) {
         rt_sexp_build(text + from, used - from, rt_heap_alloc, (void *)site, &v);  // the heap faults before it gives out
-        outer[0] = rt_symbol(RT_SYM_OK);
+        outer[0] = rt_keyword(RT_SYM_OK);
     } else {
         rt_value_t *why = rt_alloc(32, site);
-        why[0] = rt_symbol(RT_SYM_ERRS + RT_ERR_BADSEXP);
+        why[0] = rt_keyword(RT_SYM_ERRS + RT_ERR_BADSEXP);
         why[1] = (rt_value_t)(why + 2) | RT_TAG_LIST;
         why[2] = rt_int((int64_t)used);
         why[3] = RT_NIL;
         v      = (rt_value_t)why | RT_TAG_LIST;
-        outer[0] = rt_symbol(RT_SYM_ERROR);
+        outer[0] = rt_keyword(RT_SYM_ERROR);
     }
     outer[1] = (rt_value_t)(outer + 2) | RT_TAG_LIST;
     outer[2] = v;
@@ -604,11 +613,13 @@ static int is_name(const char *p, size_t len) {
     return 1;
 }
 
-// (:symbol "name"), as the reader makes it of a name the program doesn't
-// mention.
-static int is_foreign(rt_value_t v) {
-    return rt_car(v) == rt_symbol(RT_SYM_SEXP + RT_SEXP_SYMBOL) && rt_is_cons(rt_cdr(v)) && rt_is_string(rt_car(rt_cdr(v)))
-        && rt_cdr(rt_cdr(v)) == RT_NIL && is_name(rt_string_bytes(rt_car(rt_cdr(v))), rt_string_len(rt_car(rt_cdr(v))));
+// (:symbol "name") or (:keyword "name"), as the reader makes them of a
+// name the program doesn't mention: 1 or 2, or 0 for anything else.
+static int foreign(rt_value_t v) {
+    rt_value_t head = rt_car(v);
+    int kind = head == rt_keyword(RT_SYM_SEXP + RT_SEXP_SYMBOL) ? 1 : head == rt_keyword(RT_SYM_SEXP + RT_SEXP_KEYWORD) ? 2 : 0;
+    if (!kind || !rt_is_cons(rt_cdr(v)) || !rt_is_string(rt_car(rt_cdr(v))) || rt_cdr(rt_cdr(v)) != RT_NIL) return 0;
+    return is_name(rt_string_bytes(rt_car(rt_cdr(v))), rt_string_len(rt_car(rt_cdr(v)))) ? kind : 0;
 }
 
 __attribute__((noreturn))
@@ -637,12 +648,14 @@ static void put_float(rt_buf_t *b, double d) {
 // whether anything has been written in it yet; for each tuple, the tuple,
 // and the index of its next element.
 rt_value_t rt_sexp_print(rt_value_t v, const char *site) {
-    rt_buf_t  b = { 0 };
+    rt_buf_t  b = { .site = site };
     rt_work_t w;
     rt_work_init(&w);
     for (;;) {
-        if (rt_is_cons(v) && is_foreign(v)) {
+        int kind = rt_is_cons(v) ? foreign(v) : 0;
+        if (kind) {
             rt_value_t name = rt_car(rt_cdr(v));
+            if (kind == 2) put(&b, ":");
             rt_buf_add(&b, rt_string_bytes(name), rt_string_len(name));
         } else if (rt_is_cons(v)) {
             put(&b, "(");
@@ -657,6 +670,7 @@ rt_value_t rt_sexp_print(rt_value_t v, const char *site) {
         } else if (rt_is_string(v)) {
             rt_quote(&b, rt_string_bytes(v), rt_string_len(v));
         } else if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
+            if (rt_is_keyword(v)) put(&b, ":");
             put(&b, rt_symbol_name(v >> RT_SYMBOL_SHIFT));
         } else if (!(v & RT_TAG_INT_MASK)) {
             rt_render(&b, v, 0);

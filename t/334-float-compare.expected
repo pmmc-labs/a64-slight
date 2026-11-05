@@ -10,4 +10,4 @@
 <= literals tfttf tfttf ffttf tftff ffftt tttff fffff ffttt ffttt ffttt ffftt tttff
 > literals ftfft ftfft ttfft ftftt tttff ffftt fffff ttfff ttfff ttfff tttff ffftt
 >= literals ttftt ttftt ttfft ftftt tttff ffftt fffff ttfff ttfft tttff tttff ffftt
-done
+:done

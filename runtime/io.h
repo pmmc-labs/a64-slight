@@ -71,7 +71,7 @@ int64_t rt_io_epoch(const char *given);
 int      rt_io_select(int n, fd_set *in, fd_set *out, struct timeval *timeout);
 ssize_t  rt_io_read(int fd, void *buf, size_t len);
 ssize_t  rt_io_write(int fd, const void *buf, size_t len);
-int      rt_io_open(const char *path, int flags);
+int      rt_io_open(const char *path, int flags, int *polled);   // *polled: not a regular file or a directory (D272)
 int      rt_io_close(int fd);
 
 // Sockets, AF_INET or AF_UNIX. rt_io_setup makes one not block, not be
@@ -129,6 +129,9 @@ int     rt_io_stat(const char *path, int64_t got[4]);
 int     rt_io_remove(const char *path);
 int     rt_io_rename(const char *from, const char *to);
 int     rt_io_mkdir(const char *path);
+// rm -r, nothing below path followed or found from the top (D275): 0, or
+// -1 with errno set and *where the path that failed, NUL-ended, malloc'd.
+int     rt_io_remove_tree(const char *path, char **where);
 
 // A text file read a line at a time (the hosts file, resolv.conf).
 FILE *rt_io_fopen(const char *path);

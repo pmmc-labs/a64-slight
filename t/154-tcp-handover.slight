@@ -13,7 +13,7 @@
     (recv
         ((:open c)
             (send c (list :write "early" \n))
-            (connect :tcp where (second-client))
+            (connect :tcp where second-client)
             (first-reply c))))
 
 (defun first-reply (c)
@@ -29,7 +29,7 @@
         ((:open l port)
             (let me $$)
             (let where (str "localhost:" port))
-            (fork (send me (list :client (read (connect :tcp where (first-client where))))))
+            (fork (lambda () (send me (list :client (join (connect :tcp where first-client where))))))
             (holding l))))
 
 (defun holding (l)
@@ -39,12 +39,12 @@
 (defun handing (l held)
     (recv
         ((:accept _ conn)
-            (connect held (echo))
-            (connect conn (echo))
+            (connect held echo)
+            (connect conn echo)
             (serving l))))
 
 (defun serving (l)
     (recv
         ((:client r) (disconnect l) r)))
 
-(pprint (read (connect :tcp/listen 0 (listener))))
+(pprint (join (connect :tcp/listen 0 listener)))

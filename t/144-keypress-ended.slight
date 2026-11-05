@@ -9,6 +9,6 @@
             (pprint (list name key))
             (show-keys name))))
 
-(kill (connect :keypress (show-keys :killed)))
-(connect :keypress (show-keys :kept))
+(kill (connect :keypress show-keys :killed))
+(connect :keypress show-keys :kept)
 :done

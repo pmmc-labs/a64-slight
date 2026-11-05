@@ -1,8 +1,7 @@
-fault in #<pid 2>: heap exhausted (str/pad-start at t/253-pad-wide.slight:10:27)
-heap
+fault in #<pid 2>: heap exhausted (str/pad-start at t/253-pad-wide.slight:10:38)
+:heap
 "000042"
 "ababa3.5"
 "12345"
 "7"
 100000
-()

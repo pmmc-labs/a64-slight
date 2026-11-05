@@ -1,0 +1,4 @@
+INIT with 10000 actors
+READY
+START
+ALL DONE: 10000 at #<pid 2>

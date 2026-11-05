@@ -14,7 +14,7 @@
         ((:exited p n) (list n (reverse out)))))
 
 (defun exec (cmd)
-    (read (connect :exec cmd (run ()))))
+    (join (connect :exec cmd run ())))
 
 (pprint (exec (list "printf" "one\\ntwo\\n")))
 (pprint (exec (list "printf" "%s|" "no shell" "$HOME" "*")))
@@ -30,10 +30,10 @@
         ((and (not (nil? r)) (not (nil? n))) (list r n))
         (#true
             (recv
-                ((:open p)     (send p (list :eof)) (monitor (fork :done)) (both r n))
+                ((:open p)     (send p (list :eof)) (monitor (fork (lambda () :done))) (both r n))
                 ((:line p s)   (both r n))
                 ((:eof p)      (both r n))
                 ((:exit q x)   (both x n))
                 ((:exited p s) (both r s))))))
 
-(pprint (read (connect :exec (list "sh" "-c" "exit 7") (both () ()))))
+(pprint (join (connect :exec (list "sh" "-c" "exit 7") both () ())))

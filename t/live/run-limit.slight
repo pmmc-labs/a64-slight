@@ -7,5 +7,5 @@
 
 (let yes (lambda (what) #true))
 (pprint (exec/run-within 1000 (list "sh" "-c" "echo started; sleep 600")))
-(pprint (join (fork (tool/call (tools/run-within 1000 yes) (list (list "command" "echo started; sleep 600"))))))
+(pprint (join (fork (lambda () (tool/call (tools/run-within 1000 yes) (list (list "command" "echo started; sleep 600")))))))
 :done

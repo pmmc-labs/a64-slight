@@ -29,7 +29,7 @@ fun setup(n, reply_to, next) {
         tty::write("READY\n");
         next
     } else {
-        setup(n - 1, reply_to, spawn test_actor(reply_to, next))
+        setup(n - 1, reply_to, fork test_actor(reply_to, next))
     }
 }
 
@@ -49,6 +49,6 @@ let $self = address();
 let actor_count = if nil?(@ARGV) { 1000 } else { str_to_int(car(@ARGV)) }
 let ping_count  = if nil?(@ARGV) { 3 } else { str_to_int(cadr(@ARGV)) }
 tty::write("INIT with ", actor_count, " actors, sending ", ping_count + 1, " pings\n");
-let last = setup(actor_count, $self, spawn test_actor($self, []));
+let last = setup(actor_count, $self, fork test_actor($self, []));
 tty::write("START\n");
 send_ping($self, last, ping_count)

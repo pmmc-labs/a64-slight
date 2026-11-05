@@ -1,0 +1,2 @@
+t/types/014-prototype-names.slight:14:11: warning: toString's argument is str, not int
+t/types/014-prototype-names.slight:19:9: warning: this actor takes (or (:add any) (:show)), and this is :hasOwnProperty: it would be a dead letter

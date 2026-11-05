@@ -50,7 +50,7 @@ it:
 
 <!-- output: ../code/con-versions.expected -->
 ```
-(3 3 not-found)
+(3 3 :not-found)
 (1 2 1)
 3
 ```
@@ -105,4 +105,4 @@ thin layer of processes around them (tutorial, chapter 6).
 
 ---
 
-[Concepts](README.md) · Next: [The recv rule](recv-rule.md)
+[Concepts](README.md) · Next: [Processes and messages](processes.md)

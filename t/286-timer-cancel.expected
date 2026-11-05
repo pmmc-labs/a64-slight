@@ -1,13 +1,13 @@
 (1 2 3)
 #true
 #false
-a
+:a
 #false
 #false
 #false
-(ok #true)
+(:ok #true)
 4
-fault in #<pid 4>: not an integer: x (timer/cancel at t/286-timer-cancel.slight:21:33)
-(error (not-an-int x "timer/cancel at t/286-timer-cancel.slight:21:33"))
+fault in #<pid 4>: not an integer: :x (timer/cancel at t/286-timer-cancel.slight:21:44)
+(:error (:not-an-int :x "timer/cancel at t/286-timer-cancel.slight:21:44"))
 deadlock: the root process is waiting in the top level for #<pid 2> to end, which is waiting in never for a message, and nothing else can run
 exit: 1

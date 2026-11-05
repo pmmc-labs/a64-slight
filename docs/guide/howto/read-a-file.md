@@ -13,7 +13,7 @@ Three ways, for three sizes of job.
 (match (slurp path)
     ((:ok lines) (pprint (length lines))))
 
-; A file of any size, a line at a time, from a task.
+; A file of any size, a line at a time, with read.
 (defun words (line)
     (remove (lambda (w) (eq? w "")) (str/split line " ")))
 
@@ -31,23 +31,23 @@ Three ways, for three sizes of job.
 (pprint (count-words path))
 (pprint (count-words "no-such-file.txt"))
 
-; The same from an actor, which connects to the file and takes its lines
-; as messages.
+; The same as messages: a process connected to the file takes its lines
+; with recv.
 (defun longest (best)
     (recv
         ((:open f)   (longest best))
         ((:line f s) (longest (if (> (str/len s) (str/len best)) s best)))
         ((:eof f)    best)))
 
-(read (connect :fs/read path (longest "")))
+(join (connect :fs/read path longest ""))
 ```
 
 <!-- output: ../code/howto-lines.expected -->
 ```
 7
-(ok 21)
-(error (enoent "no-such-file.txt"))
-(ok "over harbor and city")
+(:ok 21)
+(:error (:enoent "no-such-file.txt"))
+(:ok "over harbor and city")
 ```
 
 **The whole file:** `(slurp path)`, from `(@include :fs)`, gives
@@ -55,18 +55,19 @@ Three ways, for three sizes of job.
 `(:error (name path))`. It's simplest, and holds the whole file at
 once. `(spew path lines)` writes one.
 
-**A line at a time, from a task:** `(open :fs/read path)` gives
+**A line at a time, with `read`:** `(open :fs/read path)` gives
 `(:ok f)`, and each `(read f)` the next message: `(:line f s)`, then
 `(:eof f)` at the end, or `(:error f reason)` if a read fails. Each
 line is cut as it's asked for, so a file of any size takes the memory of
 a line or so.
-The error is a value: a task's device failing doesn't end the task.
+The error is a value: a device failing doesn't end the process that
+opened it.
 
-**A line at a time, from an actor:** `(connect :fs/read path expr)`
-starts an actor that owns the file, and sends it `(:open f)`, then the
-lines as messages. The next line comes only when the actor waits in
-`recv` again, so they never pile up. A file that can't be opened ends
-the actor with `(:error (name path))`.
+**As messages:** `(connect :fs/read path expr)` starts a process that
+owns the file, and sends it `(:open f)`, then the lines as messages.
+The next line comes only when the process waits in `recv` again, so
+they never pile up. A file that can't be opened ends the process with
+`(:error (name path))`.
 
 Paths are relative to the current directory. The `; args:` line at the
 top gives the guide's test its argument; run by hand, pass a path.

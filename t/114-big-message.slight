@@ -16,7 +16,7 @@
         ((:total t n)
             (pprint (list t n))
             (send s :stop)
-            (fork (builder me))
+            (fork builder me)
             (await-built))))
 
 (defun await-built ()
@@ -24,6 +24,6 @@
 
 ; The top level is a task, which can't wait (D243), so an actor does its work.
 (defun top-level ()
-    (ask (spawn (summer)) $$))
+    (ask (fork summer) $$))
 
-(read (spawn (top-level)))
+(join (fork top-level))

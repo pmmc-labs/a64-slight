@@ -1585,7 +1585,10 @@ agreed.)* `runtime/dns.c`, about 350 lines.
   ID; an answer with another ID is ignored. It goes over UDP, then over
   TCP to the same server if the answer was cut short, or only over TCP
   with `use-vc`. The address is the first A record in the answer, after
-  any CNAMEs the server followed.
+  any CNAMEs the server followed. *(Since the review of 2026-11-02 (L7):
+  an answer whose question isn't the one asked, but for case, is a stray
+  one, and an A record counts only for the name asked or the end of its
+  chain of CNAMEs, read in order, as glibc reads them.)*
 - **Waiting:** the query's socket is waited for in `select()`, as the
   connection's own will be, and its timeout is a timer the device sets
   itself and unsets when the answer comes, so a lookup keeps the program
@@ -6233,7 +6236,10 @@ through `replay.c`, so a run still replays.
   as opening a file is, recorded, and not made in a replay. Trees are
   `lib/fs.slight`'s, in slight. *(Built: `fs/stat` doesn't follow a
   link, `lstat`, its `:kind` then `:link`, so a walk or a delete can't
-  be led out of its tree, where the proposal had it follow one; and the
+  be led out of its tree (*so long as nobody changes the tree while it
+  goes: each step found its path from the top, so a link swapped in
+  between a look and a listing was followed; D275 made `fs/delete-all`
+  a builtin that can't be*), where the proposal had it follow one; and the
   trees are `fs/mkdir-all`, `fs/delete-all` and `fs/walk`. Three errno
   names came with it, `:enotempty`, `:exdev` and `:ebusy`.)* Refines D151: a one-shot call whose wait
   is the disk's may be a builtin, since a device, with no thread, would
@@ -6604,3 +6610,856 @@ no credit. Now `Apache-2.0 WITH LLVM-exception`, LLVM's own licence:
   moved to Apache 2.0); a source-available licence for the core (it
   stops being open source). Proprietary work, such as a customer's
   product, lives in repositories of its own, not here.
+
+**D265. A copy too big for a heap faults the process that asked for it.**
+*(Stevan, Nov 2026, from the review of 2026-11-02, H3(a); Claude's
+recommendation.)* A copy keeps no sharing (D25, D223), so a value built
+by doubling 40 times, 40 cells in a heap, copies as 2^40, and nothing
+held the copy's scratch to anything: one process could end the program
+with `rt: out of memory`. Now a copy a process asks for is held to
+`heap_max`, the most any heap can hold:
+- **A send, an `after`, a `fork` or `spawn`, and a `spawn/on`** whose
+  copy would pass it faults `:heap` in the sender or parent, at that
+  form's site; nothing is delivered or started (a child's values are
+  copied before it's made).
+- **What a process ends with** is copied for each who waits for it and
+  for its record, all copies of the same value but for a few cells
+  around it, so the first of them is held to the cap, and faults the
+  process `:heap` (`its end`) before anyone's told anything. Nothing's
+  copied, or checked, when nobody waits and nothing's kept. A fault
+  whose reason holds such a value, `(+ 1 big)`'s, so ends `:heap` too,
+  after its own line.
+- **The cost** is a compare each time scratch grows, nothing a cell
+  (D240's walk is as it was; a fork and join of lists times the same).
+- **What the runtime says of a value**, a fault's, a dead letter's, the
+  root's error, is cut at 64 KB, then `...`, and the walk stops there,
+  so a fault can't take a terabyte or forever to say. `pprint` and the
+  root's value printed at the end are the program's output, and whole.
+- **Not done:** the runtime's own copies (a join's result, out of a
+  record that fitted) aren't checked; a copy just under the default
+  1 GB cap still takes about a second, and can't be preempted.
+- **Rejected:** keeping sharing in the copy, forwarding as the
+  collector does (every message 30 to 50 per cent dearer, against
+  D240's 41 instructions a cell, for nothing a tree needs); holding a
+  message to the receiver's room (mailboxes stay uncapped, D88, D202).
+  Golden tests 339 and 340 (`t/models/brief.py`).
+
+**D266. The descriptor ceiling stays, as D257 has it.** *(Stevan, Nov
+2026, from the review's H4(b).)* About 1,000 open sockets, files and
+commands in the whole program, from `select()`'s `FD_SETSIZE` (D113).
+Since step 1 of the review's plan, an island's wake pipe past it ends
+the program with a message where it overran the stack (M2), so the
+ceiling is safe, only low. Offered and not taken for now: keeping
+`select()` over a bitmap of our own that grows, with the soft
+`RLIMIT_NOFILE` raised (about 120 lines, D113 kept, thousands of
+descriptors). Simulation comes before servers (D257), and that's there
+for when a program needs it.
+
+**D267. A process with no stack to be had faults `:stack`.** *(Stevan,
+Nov 2026, from the review's M4; Claude's recommendation.)* Every stack
+is an `mmap` of 8 MB with a guard page under it, two of the kernel's
+mappings, so about 32,700 processes holding stacks at once (preempted,
+joining, sleeping or reading; one waiting in `recv` holds none) reach
+Linux's default `vm.max_map_count` of 65,530, and `get_stack` exited
+the program with status 2. Now the scheduler, which takes a stack only
+as it starts a process or runs one again after its `recv`, ends that
+process, which hasn't run, with `(:stack () "no stack to be had")`, its
+line saying the system's reason, and the program goes on. An island
+keeps 256 stacks given back, and unmaps the rest, so a burst doesn't
+keep its mappings. Chosen: `:stack`, which the kind already means,
+the stack ran out, over `:heap`, and over a new `:no-stack` (a new
+fault kind shifts the symbols after it, shared with the compiler).
+Rejected: `MAP_NORESERVE` (the limit is mappings, not memory); no guard
+page, halving the mappings (it's what catches a check that's missed).
+`t/live.py`'s stacks, natively on Linux.
+
+**D268. `eq?` and `hash` walk a value as a tree, as documented.**
+*(Stevan, Nov 2026, from the review of 2026-11-02, H3(b); Claude's
+recommendation, which changed from the plan's.)* A value built with
+sharing, `(list x x)` doubled 40 times, is walked as 2^40, in C, in one
+step nothing preempts. But `eq?` already stops wherever both sides are
+the same value, so it's slow only between two such values built apart,
+and only a program's own code makes one: what's read from outside, JSON,
+`sexp/parse`, a device, is a tree, and a copy is too, capped (D265). So
+it's the program's own exponential work, said in LANGUAGE.md. Offered
+and not taken: `eq?` remembering the pairs it has compared once past
+what a tree in the heap could hold (about 60 lines, a tree never paying);
+and a hash made of its parts' hashes, remembered too, which changes every
+hash value, D209's, `lib/map.slight`'s order and its tests.
+
+**D269. No timeouts in the HTTP and RPC servers; a proxy has them.**
+*(Stevan, Nov 2026, from the review's H4(a).)* A client that connects
+and says nothing, or a byte at a time, holds its connection and its
+process for good. A default would reopen D236 (a pending timer overtakes
+loopback replies on the virtual clock), so only opt-in timeouts were
+offered: a whole request within a time in `http/serve-with` (a 408),
+an idle time in `rpc/listen-with`, and the runtime giving up on a
+closing socket's unwritten output after 30 s, on the real clock alone.
+Not taken: LANGUAGE.md says a server facing the internet goes behind a
+proxy that has timeouts, as it does for TLS (D251).
+
+**D270. Bounds on what connections hold.** *(Stevan, Nov 2026, from the
+review's H4(c) and H4(e); Claude's recommendation.)*
+- **Output waiting** for a socket or a command, off every heap: a write
+  while 64 MB or more waits (`READ_MAX`, the most a read takes) fails
+  the device `:too-big`, as so much read does. Checked when more comes,
+  not on what's waiting, so a single reply of 100 MB still goes, and
+  what waits is at most 64 MB and one message. Stopping reading instead
+  was turned down: it deadlocks `cat` under `:exec`, and peers that
+  echo. And a write whose text would be more than a heap holds, which a
+  value with sharing can print as, fails before it's all made
+  (`rt_render_upto`).
+- **`barf`** sends back a message, or an id, only if it prints in 1 KB,
+  and `too-big` in its place otherwise, so a stream of bad messages, up
+  to 64 MB each, isn't all sent back (revisits D230's text).
+- **`(:most n)`**, an option of `http/serve-with`, `http/listen-with`,
+  `rpc/serve-with` and `rpc/listen-with`, whose options are a list of
+  `(name value)`, any other raising `(:bad-option opt)`: while `n`
+  connections are open, one accepted is closed at once, the listener
+  counting them by monitoring each. `http/serve` and the rest are these
+  with no options.
+- Golden tests 342 and 343, and 278 extended.
+
+**D271. What would put a caller's words on the wire as more than they
+are is refused.** *(Stevan, Nov 2026, from the review's H5; Claude's
+recommendation.)* A CR and an LF in a URL, a method or a header made a
+second request, or a header of the caller's own; nothing checked them.
+Now `http/request`, `http/request-within` and `http/stream` give, before
+anything's sent, over curl as over `:tcp`, `(:error (:bad-url url))`
+for a URL with a space or a control character in it (in
+`http/parse-url`), `(:error (:bad-method m))` for a method that isn't a
+token (RFC 9110), and `(:error (:bad-header name))` for a header whose
+name isn't one, or whose value has a CR, LF or NUL. A handler's response
+with a status outside 100 to 999, or such a header, is a 500, and
+logged as a warning. Rejected: raising rather than a Result, which a
+caller handles less easily than the errors it already gets;
+percent-encoding a URL's bad bytes rather than refusing it, which curl
+doesn't do either. Golden test 341.
+
+
+**D272. A file that isn't a regular one is read and written as a socket
+is.** *(Stevan, Nov 2026, from the review's L4, plan item J; Claude's
+recommendation.)* Files were opened, read and written where they were
+asked for (D254's "a one-shot call whose wait is the disk's"), so
+opening a FIFO with no writer, reading a terminal or `/dev/stdin` when
+it's a pipe, or writing to a FIFO whose reader is slow, held up its
+whole island, not only the agent's tools. Now `fs_open` opens every
+file `O_NONBLOCK` and `fstat`s it (`rt_io_open`, which records which it
+was, so a replay goes the same way):
+- **A regular file, or a directory,** is made to block again, and
+  behaves as before: read when its owner waits, written where it's sent
+  to.
+- **Anything else** (a FIFO, a pipe, a terminal, a character device) is
+  a polled file: a flag on the device, `polled`, which puts it on the
+  sockets' list, so `wants`, `socket_fds` and `socket_events` wait for it
+  in `select()` as for a connection, and it must fit there (D113, D266).
+  It's read when `select()` says it can be, through the same `fill` and
+  `cut` and `(:read how)`; written through `queue` and `flush`, so `send`
+  never blocks, with D270's 64 MB on what waits; and closing it waits
+  till that's written. A flag rather than a mode of its own, since a
+  polled file is still `:fs/read`, `:fs/write` or `:fs/append` in all
+  the rest: its first message, its end at `(:eof f)`, a write to a
+  reader being a dead letter.
+- **A FIFO opened to write that nothing has open to read** fails at once
+  with `(:error (:enxio path))` (a new errno name), where it waited for a
+  reader. Accepted: waiting for one would need polling the open itself.
+- **A FIFO opened to read before any writer** waits, on Linux, till a
+  writer has come and gone (checked); macOS may report it readable, and
+  so `(:eof f)`, at once. That's to be checked on the M2, and not worked
+  around.
+- **What can share its flags isn't left non-blocking.** macOS opens
+  `/dev/stdin` and the rest as copies of descriptors 0 to 2, sharing
+  their flags with the runtime's own output and the shell's terminal.
+  So a polled reader blocks again once open, reading only when
+  `select()` says it can (`fill` reads once each time), and a writer to
+  the file stdin, stdout or stderr is (same device and inode) isn't
+  polled, written as a regular file is, as before; only other writers,
+  a FIFO's, a pipe's, stay `O_NONBLOCK`, as `queue` and `flush` need.
+  (Claude's, on review of the agent's first version.)
+- Rejected: refusing what isn't a regular file, which would break
+  `slurp "/dev/stdin"`; a thread per blocking file, against D113's one
+  thread an island.
+- Golden tests 344 (a FIFO read while another actor on the island runs),
+  345 (a megabyte written to a FIFO nobody reads yet, and closed, while
+  another actor runs) and 346 (`:enxio`, `:too-big` and `:epipe`), and
+  `t/replay/exec.slight` reads a FIFO, recorded and replayed. The record's
+  format is 5 now, since an open records whether it was polled.
+
+**D273. An address is an id its island gives once, and a table says
+whose it is.** *(Stevan, Nov 2026, from the review of 2026-11-02, M5;
+Claude's recommendation.)* An address held its task's pid number in 32
+bits and its number among the task's in 20 (D243, D256). Pids are never
+reused (D244), and an island forks and joins about 4.2 million tasks a
+second, so in about 17 minutes of that a task's address no longer named
+it: `read` faulted `:not-a-pid`, so `ask`, `http/request` and `rpc/call`
+failed, and a message could go to another live task whose pid was the
+same modulo 2^32. And a task's numbers wrapped at 2^20, skipping only
+those open, so a late reply could reach a new address that had taken a
+closed one's number. Now an address is its island and an id of 52 bits,
+the island's next, which it never gives again; each island keeps its
+open addresses in a hash table, id to task (open addressing, at most
+half full, closing by moving back what follows, so no tombstones), and a
+task keeps its own ids so its end closes them. A send to an address is a
+lookup there in place of an index. It prints `#<address 7>` (and
+`#<address 7@2>` on island 2), where it printed the task and number,
+`#<address 1.0>`. Rejected: faulting once a task's pid passes 2^32 (no
+misdelivery, but `ask` and the rest broken in a program that has run a
+while); 40 bits of pid and 12 of number, faulting past 2^40 (about 73
+hours at the most an island can fork, but the numbers wrapping at
+4,096). Golden test 324, which tested the wrap, now tests that ids
+aren't reused, and that a message to a closed address reaches no other.
+
+**D274. A timer's number carries its island, and one set on another
+island is taken back there.** *(Stevan, Nov 2026, from the review of
+2026-11-02, L1; Claude's recommendation.)* Each island numbered its own
+`after` timers from 1, and `timer/cancel` looked a number up on its own
+island alone, so taking back island 1's timer 3 from island 0 took
+island 0's own timer 3, if one was pending, and left island 1's to fire.
+D232's "any process can take a timer back" held on one island only. Now
+island k's timer n is numbered k × 2^52 + n (island 0's are still 1 up,
+so nothing written for one island changes), and `timer/cancel` of
+another island's number sends that island an item, `ITEM_CANCEL`, and
+waits, keeping its stack, for `ITEM_CANCELLED`, with `#true` or
+`#false`, as `spawn/on` waits for its pid (it uses the same state, and
+the inbox's items, so it's recorded and replayed as they are). A number
+for an island there isn't is no timer's, `#false`. Rejected: faulting on
+another island's number (simpler, but D232 narrowed on islands, where
+D256 has sends, kills and reads cross as they are); and `#false` for
+one, which says the timer had fired, so a caller would wait for a
+timeout that never comes. Golden test 347 (in `make tsan` too), whose
+worker keeps island 1 busy while the cancel comes, since an island with
+nothing to run moves its virtual clock to its next timer.
+
+**D275. `fs/delete-all` is a builtin that finds nothing below the top by
+a path.** *(Stevan, Nov 2026, from the review of 2026-11-02, L2; Claude's
+recommendation.)* `lib/fs.slight`'s `fs/delete-all` was `fs/stat`,
+`fs/list` and `fs/delete` on joined paths, each found afresh from the
+top, so a link to `/etc` put where `build/sub` was, between the walk's
+look at it and its listing, had `/etc` emptied: the old `rm -r` race,
+for a program deleting where someone else can write (`/tmp`, a shared
+build directory, a container's volume). Now it's a builtin
+(`runtime/files.c`, on `rt_io_remove_tree` in `replay.c`): the top is
+`lstat`ed, and below it each directory is opened from the one it's in,
+`O_DIRECTORY | O_NOFOLLOW`, after `fstatat` without following says it's
+one (so no device or FIFO is opened), and what's in it is removed with
+`unlinkat` relative to it; a link swapped in fails the open and is
+removed as a link. The open directories are a stack of the runtime's
+own, not C's, which is a process's, and a deep tree would run it out; a
+directory is read again till a pass over it removes nothing, since a
+file system may skip a name where one was removed while it was read
+(APFS can). It gives what the walk gave, `(:ok ())` or the first
+failure naming its path, and the whole delete is recorded as one result,
+so a replay touches no file. `fs/walk` stays in slight, said in
+LANGUAGE.md to be led out of its tree by a swap, since it only reads.
+Rejected: saying so of both and changing nothing (a delete led out of
+its tree destroys); `fs/walk` in C too (about 40 lines more, for a walk
+that reads). Golden test 348 (a tree 200 deep, 500 names in a
+directory, a FIFO, links), and `t/live.py`'s delete race, where
+`t/live/swap.c` swaps the subdirectory with a link to outside, atomically,
+as fast as it can: the walk in slight lost the file outside in 5 runs
+of 5, the builtin in none of 10.
+
+
+**D276. `recv` keeps its stack, and goes anywhere in an actor.**
+*(Stevan, Nov 2026: "Start step 1, recv keeps its stack", the first
+step of PLAN.md's "One kind of process, and an address for every
+message", after going back to ts-slight: "I've struggled with the `recv`
+rule every time I wrote slight, where the join/fork/yield patterns felt
+more intuitive.")* A `recv` can go anywhere in a function that runs in
+an actor: in a helper, in a lambda, in the middle of a body, inside a
+call, and a function that waits gives its value back to its caller. The
+process keeps its stack while it waits, as it does in `join`, `read` and
+`sleep`: `rt_recv` takes the next message or parks the process, stack
+kept, and returns the message when one comes, with a new slice and a
+call counted, as a receive function started again from the top had, so
+a program is preempted where it was. Retired: D8 (`recv` only at the top
+of a receive function), D9's stack given back at `recv`, D167's
+splitting of functions at `recv`, and with them `split.ts` (542 lines),
+`classify.ts` (85), state and receive functions, the rule's compile
+errors, and review H2. The checker finds which functions wait with a
+fixpoint of its own over the program's calls, not tail calls alone, so
+an actor's mailbox is the union of every `recv` it can reach. Left for
+step 2: a task still can't wait (D243), a `recv` written in one a
+compile error and a call from one to a function that waits a fault,
+`:not-an-actor`, when it runs; and a plain `recv` still takes any
+message. What changed in the tests, each worked out from the change:
+the deadlock message names the function a process waits in, not a
+generated one (192, 201); `:system` shows a waiting actor with its
+stack, and eight stacks held where four were (200); the guide's memory
+demo shows a waiting actor with a stack (`con-memory`); and
+`million-forks`, a million waiting at once, meets the system's limit on
+mappings at about 32,700 (D267), so it's `ten-thousand-forks` now, and
+`bench/idle-memory` at a million no longer runs as it is. No other
+output moved: nothing's order of events changed. Rejected: charging the
+stackless path's cost exactly (a reduction at a `recv` that wasn't a
+function's whole body, for the tail call `split.ts` made), since every
+expected output came out the same without it; and keeping a
+compile-time check that a task calls no function that waits, which the
+checker's fixpoint could give as a warning, left for step 2, where
+tasks go.
+
+**D277. One kind of process, and an address for every message.**
+*(Stevan, Nov 2026: "Let's go with step 2", after "fork/join/yield is
+the core process model; address/read/send is the core message model ...
+actors is just a pattern of usage for those two models", PLAN.md's "One
+kind of process, and an address for every message".)* `fork` starts a
+process, on this island, and `fork/on k` on island `k`; `spawn` and
+`spawn/on` are gone, with the actor flag, the two fault kinds
+`:not-a-task` and `:not-an-actor`, and `:system`'s `:kind`. Every
+process can be sent to, and takes its messages with `recv`; can be
+joined for its value, on any island; can make addresses, open devices
+and read them; and can monitor, be monitored, timed and killed. The
+root is one too, so a top level waits for a message itself. A pid is
+its process's inbox: `send` to it fills the mailbox `recv` takes from.
+An address is an inbox of its own, read only by its maker, and `recv`
+leaves what's sent to one, and what comes from a device the process
+opened, for `read`. A process's end is a message: `(monitor pid)` tells
+the caller's inbox `(:exit pid result)`, and `(monitor pid to)` the
+address `to`, so a reply and the end of the process asked come to one
+place; `disconnect` of the address drops the monitors told at it.
+`read` and `read/any` take addresses and devices only: a process is no
+source, live or ended, and `read` of one faults `:not-a-pid`. A
+process's value is kept for its parent till the parent has it, whatever
+started it (D244's rule for every process; D243's point 5 and D245's
+exception go), and a far child's end comes to its parent's island for
+a join (D256). `ask` makes an address, monitors the process to it,
+sends, and reads: one source, in any process. `join` and `join/race`
+work across islands, the end coming as an item, kept apart from the
+mail till joined. The checker's types: `task<T>` and `actor<M>` are
+one, `pid<M>`, what the process takes, written `pid` when it's `any`;
+`join` of a `fork` in view is typed from its body. Its warnings for a
+task sent to, an actor joined, a monitor in a task and an address in an
+actor go; one comes, `read` of a process. Tasks and actors stay as
+words for the two shapes a process is written in. Rejected, as PLAN.md's
+proposal did: pids and addresses disjoint (ts-cpi's); several readers
+on an address; selective receive by pattern; and keeping `spawn` as a
+word for `fork`. Built: the runtime's kinds and `parent_task` went,
+`WATCH_READ` became `WATCH_JOIN`, a device's entry records that it was
+opened, and `rt_recv` skips what's for `read`. Changed by the change,
+each worked out by hand: tests 268, 296, 298, 299, 300, 301 and 325 are
+about one kind now; `:system` has no kind (281, 331); the root joins
+rather than reads (202); sites say `fork/on` (339); and `ask/via` waits
+at one address (the guide's deadlock page). 254 files moved from
+`spawn` to `fork` by a script, and some forty reads of a process to
+`join` by hand; the docs say one kind, the guide's pages each in place.
+Open, for step 3: the fork-and-join dance in `lib/` and the examples,
+which one kind makes needless; and for step 4, the guide's two concept
+pages folded into one.
+
+**D278. The fork-and-join dance comes out of the libraries.** *(Stevan,
+Nov 2026: "Let's move onto step 3", PLAN.md's "One kind of process, and
+an address for every message", step 3.)* A function that waited for an
+answer used to fork a process to hold the address or the device, since
+an actor could have neither (D243), and join it; with one kind of
+process (D277) the caller holds them itself. So `agent/ask` asks at an
+address of its own; `exec/run` and `exec/run-within` open the command in
+the caller, which closes it when the command is done, and whose end
+closes it too, killing the command's group as before (D193); `slurp`,
+`spew`, `tools/read` and `tools/save` open the file in the caller,
+their helpers giving `(:ok ...)` and `(:error ...)` where they raised,
+and closing it at its end, since no process's end closes it now;
+`http/request` joins the connection's process directly, and
+`http/request-within` waits for it at an address; `rpc/connect` and
+`rpc/exec` wait at an address for the connection to open; `rpc/system`'s
+handler opens `:system` in the call's own process; and `rpc/call` waits
+at an address of its own. A connection stops a call whose caller ends
+(D230, test 277), which it knew from the end of the forked process; so
+a call now names its caller beside its address, `(:rpc/call text to
+from)`, and the connection monitors each caller once, however many
+calls it makes, keeping those it has in a list that a caller's end
+takes it off, so a process that calls for good adds no monitor per
+call. `examples/airline.slight` reads its records and starts its
+stand-in servers directly. Found on the way: D277 keeps a result for a
+parent that never joins, every process's where D245 kept an actor's end
+for a task alone, and `http/accept` and `rpc/accepting` monitored a
+connection only when `:most` was set, so a plain server kept a record
+per connection till it ended; both monitor every connection now, and
+the rule is written down, in LANGUAGE.md's Processes and the guide:
+what you start for good, join or monitor. The checker's word, as the
+plan proposed: a bare `(recv)`, with no clause, right after a `send` to
+another process, under `--strict` alone, since the pair is right
+whenever nothing else sends to the process, which the checker can't
+tell; a send to `$$` is left alone (`t/types/015`). What changed in the
+tests, each worked out from the change: a process fewer before a fork
+in 155, 175 and 180, so the fault's pid is one lower; the fs library's
+defuns in 182; the pids in the guide's chapter 7, where `spew` and
+`load` no longer start a process; and 244 and 254 ask from the top
+level, which couldn't before. Kept: `http/stream` and `rpc/stream` a
+process each, since a stream's pid is its handle; `http/respond` and
+`rpc/called` a process per request from the other end, which contains
+a fault and can be stopped; and `agent/start` a process per turn, for
+the same reasons.
+
+**D279. The docs for one kind of process.** *(Stevan, Nov 2026: "Let's
+proceed to step4", PLAN.md's "One kind of process, and an address for
+every message", step 4.)* LANGUAGE.md's Processes and Addresses,
+DESIGN.md's process model and TYPES.md's process types were rewritten
+in place with D277, and read as a whole. The guide's two concept pages,
+"Waiting for a message" (`recv-rule.md`, D276's) and "Tasks and actors"
+(`tasks-and-actors.md`, D243's), are one, "Processes and messages"
+(`concepts/processes.md`): one kind of process and what any can do,
+sending and waiting, what an address buys, tasks and actors as the two
+shapes, a state per function, what a wait costs, and who hears of an
+end; its two programs, `con-tasks` and `con-states`, are as they were.
+The tutorial's chapter 4 answers at an address first, finds the lost
+update, then answers at a pid, and says why `ask` is the usual way.
+Nothing else moved.
+
+**D280. ts-cpi's Games of Life as golden tests.** *(Stevan, Nov 2026:
+"Let's proceed to step 5", PLAN.md's "One kind of process, and an
+address for every message", step 5.)* Eight of ts-cpi's twenty-two
+Games of Life, those that use only processes and messages, are golden
+tests 367 to 374, each on `t/data/life.slight`, the board, the seed, the
+rule and the frames, and each printing the nine frames of
+`t/models/life.py`, which models every port's commentary too and writes
+its expected output. What each shows: 367, a process per cell, where an
+address per generation does the buffering ts-cpi kept a list for, a
+neighbour's state for g+1 waiting at the address for g+1 while the cell
+reads g's eight times; 368, row workers meeting at a barrier that is
+one address read eight times; 369, a metronome on the virtual clock,
+`sleep` and `after`, a player 30 ms late and the conductor's watch a
+timer to its own address; 370, literal death, a live cell a process and
+a dead one none, where an undertaker address hears every end, read
+before the next death, so each obituary's count of neighbours outlived
+is the model's; 371, dataflow by join, 576 processes joining nine each,
+the top level joining each generation for its frame; 372, the board in
+the timer queue, a timer per live cell ringing at a time that is the
+cell; 373, let it crash, a cell raising its own death and the supervisor
+restarting it on the exit notice, from the state in its own hands; and
+374, the hostile scheduler, four workers on one job queue under
+`SLIGHT_SCHED`, whose frames hold under any seed, and which t/replay.sh
+runs under five. Bent to the language, not the other way (D84): `kill`
+carries no reason, so fate tells a cell why and the cell raises it
+(370); ts-cpi's shared mailbox is a queue process (374); and the
+commentary that went by ts-cpi's scheduler, rounds, quotas and who
+computed what, is left out, since a golden test's output is worked out
+by hand. Found on the way: a timer's message lands the instant it rings,
+while a process woken by `sleep` at the same instant still has to run,
+so the conductor's watch grumbles once more than the sketch said (369).
+The other fourteen don't port: traps, parking, checkpoints, pads, tick
+metering, multi-shot continuations and a deliberate deadlock need a
+scheduler with its hands inside a process, and 08's forked timelines are
+"Branching a replay". With this the proposal is built.
+
+**D281. An agent team, as a design exercise: agreed, and step 1 built.**
+*(Stevan, Nov 2026: "Let's start step 1 of the agent team", to PLAN.md's
+"An agent team", which answered his "what would be a good design
+exercise?")* The exercise is on, with its points settled as the plan
+recommended: before the simulation's decisions; workers' changing tools
+off, the lead reporting what they would have done and the person
+approving once a job (step 2's, with the budgets); one model, a
+worker's an argument; the terminal and a transcript file for output.
+Step 1: `examples/team-agents.slight`, a lead actor that, given `(:job
+text from)`, asks a planner agent of its own for the tasks, one a line,
+forks a worker per task, each asking an agent of its own with the
+team's tools and reporting to the lead's address for the job, which the
+lead monitors it to as well, so a worker that faults is a failure;
+then asks the planner to combine, and answers; the asker hears the
+events as an agent's caller hears pieces, and `team/ask` waits for the
+answer at an address of its own, the events passed over. The planner
+is killed and joined when the job is done, and a worker's agent killed
+when it has reported, so nothing is kept (D244). `examples/team.slight`
+runs a job from its arguments on a local ollama. Golden test 375, on a
+fake model answering from a script: a plan written three ways, an
+answer, a tool call, a failure in mid-answer, and the combination; its
+events printed in task order, since the workers' replies come in the
+order the fake's do. Friction so far, for the list: the events of
+concurrent workers can't be printed in arrival order by a test, so the
+test sorts, a shape every such test will have; and the test needed
+`(@include :http)` for `http/listen`, though the team's file includes
+`:agent`, which includes `:http`, since a module's header shows only
+what it says (D248, by design, and a surprise each time). Nothing else,
+in about 200 lines: the lead asks in the middle of handling a message
+and reads its workers at an address of its own with no dance at all,
+which is what the exercise was to find out first.
+
+**D282. The agent team, step 2: a pool, budgets, a kill on overrun, a
+retry on failure.** *(Stevan, Nov 2026: "Let's proceed to step 2".)*
+`team/new` takes options: `(:at-most k)` workers at once, 4 unless
+given; `(:task-ms n)`, two minutes unless given; `(:retries n)`, one
+unless given. The lead's loop starts tasks from its queue while there's
+room, and reads its address for the next report, end or overrun; no
+`join/race`, since the reads are the wait, which the plan's sketch had
+wrong. A task's timer, `after` to the lead's address, rings `(:overrun
+id)`, and the lead kills the worker's agent and the worker: the agent's
+end takes its turn, its stream and its commands, by the agent library's
+own monitors (D182, D193), so the lead makes each worker's agent itself,
+to hold its pid. The task fails with `(:timeout n)`, and isn't retried;
+a failure of any other kind, a model's error, a fault, is tried again
+with why it failed in its new task, `(:team/retry t id why)` to the
+asker, till the retries are spent. A report for a task no longer live,
+after an overrun, say, is dropped, and killing an ended process does
+nothing, so the lead kills both at every settling. Tools that change
+something are the program's to approve, as the chat's: `examples/
+team.slight` reports what a worker would have done unless `--yes` was
+given, and takes `--at-most` and `--ms`. Test 375 asks for no retries,
+so its failure still shows; test 376 has the pool at two over five
+quick tasks (they start in order, and never more than two run), a stall
+killed at 5000 ms on the virtual clock, a failure tried again and
+answered, and a write declined and reported. Friction, for the list:
+(1) there's no way to end a process's children with it: killing the
+worker would have left its agent, the agent's turn and a command
+running, so the lead keeps the agent's pid to kill, and leans on the
+library's monitors from there; Erlang's links do this, and a `kill`
+that takes a tree is a thing to weigh. (2) `assoc` adds a pair without
+removing the old, so an update of an alist is `assoc` after `remove`,
+as `rpc` does with `rpc/without`; a replacing `assoc`, or a `put`, is
+wanted in the prelude, and the bug it cost here was a task listed
+twice. (3) `lookup` reads `(key value)` pairs only, so a table of
+records is `(id (w a timer task tries))`, the record one value; a shape
+to know. (4) A default that changes behaviour, retries at one, changed
+step 1's test, which says `(:retries 0)` now. Nothing of the process
+model's: the pool is the read loop, the overrun a timer to the same
+address, the restart a fork from the queue.
+
+**D283. The agent team, step 3: teammates, a review round, and
+`ask_team` in the chat.** *(Stevan, Nov 2026: "Let's proceed to step
+3".)* A worker's agent has a tool, `ask_teammate`, that asks the worker
+on another task of the job, by its number: the tool sends `(:teammate
+other me r)` to the lead's address for the job, the lead answers at `r`
+with the agent on that task, or `()` for a task that isn't there or is
+the asker's own, and the tool asks that agent and gives its answer, or
+raises. For that, a worker's agent lives till the job is done, killed
+and joined then, rather than at its task's end, so a task finished can
+still be asked about; one that overran is killed at once, and one tried
+again goes with its failure. Two workers asking each other at once wait
+for each other till their budgets end them: the runtime detects a
+deadlock only when the root is in it, and the budgets are the answer. A
+review round, `(:review #true)`, with `(:reviewer model)` for a
+reviewer on another model: a reviewer agent judges the combined answer,
+the asker hears `(:team/review t said)`, and unless the verdict starts
+APPROVED the planner revises its answer once with what the reviewer
+said. And `ask_team` in `examples/chat.slight`: a team on the chat's
+model with the read-only tools, made at the start, for a job with
+several independent parts. Golden test 377: a worker asking a teammate
+what it found and doubling it, one asking a task that isn't there and
+being told so, a reviewer not approving and the planner revising, and a
+job the reviewer approves. Friction, for the list: (5) a function takes
+at most 8 parameters, arguments going in registers, and `lead/settle`
+reached nine; the loop's state became one value, `(queue live done
+verdicts)`, which reads better, but the limit was met by surprise,
+though with a clear message. (6) `tools/string`, which checks that an
+argument from a model is a string, is private to `lib/tools`, so the
+chat's new tool reads its argument itself; the header could export it.
+(7) Not friction, a shape: a tool is a closure, and one over the job's
+address, handed to agents that don't exist yet, is how a worker reaches
+a teammate through the lead; an address in a closure is the capability.
+Still nothing of the process model's.
+
+**D284. The agent team, step 4: record and replay, the seeds, the
+transcript, and the live check.** *(Stevan, Nov 2026: "Let's proceed
+to step 4".)* `examples/team.slight` takes `--transcript path`, and
+writes the run's events, as they came, as s-expressions, one a line,
+when the job is done. In t/replay.sh: a run of test 375, its fake model
+inside the program, is recorded and replayed with no socket, as `net`
+is, and prints its golden output; and 375 and 376 print theirs under
+five `SLIGHT_SCHED` seeds, since their events are printed in task order
+and the pool's bound, the overrun and the retry don't go by the
+schedule. In t/live.py: the team from the command line on
+`t/live/model.slight`, which answers a team's questions now too, a plan
+of two tasks, one of which asks to write a file: the run answers, its
+workers report, the write is reported and not done, the model is told
+it wasn't allowed, and the transcript holds the plan and the answer.
+Friction, for the list: (8) the runtime prints the root's value after
+the program's own output, so a program for the command line ends with
+a `done` line of the runtime's, as `chat` ends with `bye`; harmless,
+and a thing such a program would want to turn off. (9) `sexp/print`
+writes a keyword as `pprint` does, without its colon, so the
+transcript says `(plan ...)` where the live check first looked for
+`(:plan ...)`; reading it back gives the symbol, so nothing is lost,
+but a transcript meant for other programs would say so. Nothing else:
+recording and replaying a run with a model, sockets and timers in it
+needed nothing of the program, which is the point of D170.
+
+**D285. The agent team, step 5: what the exercise found, and the
+answer.** *(Stevan, Nov 2026: "Let's proceed to step 5".)* The
+exercise was to find what the language lacks by writing an agent
+harness in it: a lead, workers with tools, budgets, a pool, kills and
+restarts, teammates, a review round, recorded and replayed (D281 to
+D284: `examples/team-agents.slight`, about 300 lines, `examples/
+team.slight`, 80, and tests 375 to 377, 400), in a day's work. The
+friction list, each entry weighed as a library function, a language
+change to propose, or nothing:
+
+1. A test can't print concurrent workers' events in arrival order, so
+   it sorts (D281). Nothing: that's concurrency, and the lead's events
+   are right as they come.
+2. A module's header shows only what it says, so a program using
+   `http/listen` includes `:http` though `:agent` includes it (D281).
+   Nothing: D248 by design, and the compiler's message says what to
+   include.
+3. There's no way to end a process's children with it: killing a worker
+   would leave its agent, the agent's turn and a running command, so the
+   lead makes each agent to hold its pid, and the agent library's
+   monitors do the rest (D282). The one candidate for a language
+   change: Erlang's links, or a kill that takes a process's
+   descendants. Not proposed yet: it cost three lines, and a second
+   program that needs it should ask.
+4. `assoc` adds a pair without removing the old, so an alist's update
+   is `assoc` after `remove`, which `rpc` does with `rpc/without`, and
+   a test got wrong once (D282). To propose: `assoc` replaces the first
+   pair with the key, or adds at the front when there's none; `lookup`
+   sees no difference, and a table walked with `map` or measured with
+   `length` sees the right one. A prelude change and a line of
+   LANGUAGE.md.
+5. `lookup` reads `(key value)` pairs only, so a table of records is
+   `(id (record ...))` (D282). Nothing: a convention LANGUAGE.md
+   states.
+6. A default that changes behaviour, one retry, changed step 1's test
+   (D282). Nothing of the language's: a lesson for options.
+7. A function takes at most 8 parameters, the arguments in registers,
+   and a loop's state reached nine (D283). Nothing: LANGUAGE.md says
+   so, the message is clear, and the state as one value read better.
+8. `tools/string`, which checks that a model's argument is a string,
+   was private to `lib/tools` (D283). Done here: exported, and the
+   chat's `ask_team` uses it.
+9. A tool is a closure, and one over the job's address, given to agents
+   that don't exist yet, is how a worker reaches a teammate through the
+   lead (D283). Nothing: the shape to use.
+10. The runtime prints the root's value after a program's own output,
+    so a program for the command line ends with `done` (D284). To
+    propose: a quiet end, a root's `()` printed as nothing, say; it
+    changes what every program prints, so a proposal of its own.
+11. `sexp/print` writes a keyword without its colon, so a transcript
+    says `(plan ...)` and reads back as the symbol (D284). Nothing: by
+    design, and said in D284.
+
+And the three from the Life ports (D280), which started the list: `/`
+giving a float where an index was wanted, met twice, which the checker
+catches; `$$` in a `fork`'s body being the child's, which the tutorial
+says; and a `sleep`'s wake needing a turn where a timer's message lands
+at once, which LANGUAGE.md's Time section says now. Nothing more.
+
+The answer: is slight a good language to write an agent harness in?
+For this shape of program, yes. Not one entry on the list is the
+process model's: the lead handled a job in the middle of a message,
+asked at addresses of its own, watched its workers, their agents and
+their timers at one address, killed what overran and started again
+what failed, and every piece of it was a `fork`, a `send`, a `read` or
+a `monitor`, with no dance anywhere; the proposal's bet (D277) paid.
+Recording and replaying a run with a model, sockets, commands and
+timers in it needed nothing of the program, and the same job came out
+the same under five schedules, which no other harness language gives.
+What it lacks is at the edges: the prelude's alists first (4), a way
+to end a process's children with it when a program outgrows keeping
+pids (3), and a quiet end for a program people run (10). What the
+exercise didn't test: a real model's latency and a person at the
+terminal, since the live check's model is a fake; and a harness that
+runs for days, which would meet the kept-result rule (D278) in a lead
+that never joins what it starts, as the acceptors did. The three are
+candidates, each to be proposed on its own; nothing is agreed by this
+record.
+
+**D286. `fork` takes a function and its arguments.** *(Stevan, Nov
+2026: "Yes this is what I was thinking for fork and `$$`. It makes it
+much more clear", and "`fork` should always take a function in its
+first position, so `(fork 42)` should not compile".)* `(fork f arg
+...)`, `(fork/on k f arg ...)` and `(connect source [x] f arg ...)`
+evaluate `f` and the arguments in the caller, deep-copy them into the
+new process, and call `f` with them there, as Erlang's `spawn/3` does.
+So `$$` in a fork form is the caller, `(fork worker $$ job)` tells the
+worker who started it, and the thirty `(let me $$)` dances were for
+nothing; a body that isn't one call is a lambda, `(fork (lambda ()
+...))`; what's copied is what's passed. A literal where the function
+should be is a compile error, a function the compiler knows (the
+program's, the prelude's, a builtin's) given another number of
+arguments is one too, as a call's would be, and anything else that
+isn't a function of as many faults the caller, `:not-a-function` or
+`:arity` as `apply` gives them, and starts nothing; at most 8
+arguments. Gone: the hidden entry function at each fork site and the
+free-variable walk that found its parameters (D22), and the rule that
+a fork takes at most 8 locals (D95). A builtin as the function is the
+builtin's wrapper, with the builtin's name alone as the site of a
+fault in it, as `(map car xs)` has; a test that pins a site forks a
+lambda. The runtime: `rt_fork` and the connects take the values, the
+first the function, checked in the parent; a process record holds it
+(`fun`) and starts in `rt_apply_start`, which puts it in the closure
+register and jumps to its code; `:system` names that code for a
+process that hasn't run. So a process's first reduction is `f`'s
+entry, where it was the hidden function's: t/159 counts to 998 and
+999 where it counted to 997 and 998, and t/190's model makes N + 1
+calls where it made N + 2. The checker types a fork as the call it is,
+of the program's function, the builtin, or the value, "what's forked
+here" in its words, takes the process's mailbox from `f`'s recvs when
+`f` is one of the program's functions, as it took it from the body's
+call, and sees a fork's arguments as the caller's, so a `recv` among
+them counts for the caller. The C-style syntax reads `fork f(a, b)` as
+`(fork f a b)`, `fork f` as `(fork f)` and `fork { ... }` as a lambda,
+and `connect(...)` takes a call or a block the same way; a `fork` of a
+list or a special form is refused. Migration, by a script over every
+`.slight` file and the guide's blocks (t/guide.py holds them to their
+files): 626 forks and connects whose body was a call with simple
+arguments spread, and 367 wrapped in a lambda, 54 special forms, 28
+bare values, 8 variadic heads, 57 whose arguments called something, 4
+that mentioned `$$`, and 216 whose head was a builtin; the `.sly` files
+by hand, two of them. The expected outputs changed only in the columns
+of sites, and in two deadlock messages (t/192, t/297) that name the
+lambda a process waits in where they named the hidden function; the
+`; warns:` columns likewise. Rejected: `(fork v)` of a value as a
+process whose value is `v`, which is two meanings for one form, and
+hides an old-style fork whose function returns a value; and a shorter
+spelling than a lambda for a body that isn't a call. Golden test 378;
+the unit tests; D285's entry on `$$` revised.
+
+**D287. Keywords, a type of their own.** *(Stevan, Nov 2026: "perhaps
+we should have a new type, a 'keyword' which is a symbol which
+evaluates to itself. They would not share the same namespace as `let`
+or `defun` defined symbols, and it would always print the `:` when it
+was serialized. This should decouple the two symbol types and I hope,
+simplify things"; and "lets go with K1 ... and I agree with your
+recommendations for printing it".)* A keyword, `:name`, is a type of
+its own: it evaluates to itself, is `eq?` to no symbol, and prints
+`:name` wherever it's printed, by `pprint`, `str`, `tty/write`,
+`sexp/print` and `log` alike (a field's value; a field's name is a
+key, bare). A symbol, `'name`, the names in a quoted list and a bare
+word in text read as data, is a name as data, printed bare, for
+programs that handle programs and for protocols made of words. `#true`
+and `#false` are neither (`bool?`; `sym?` was true of them, D53). In
+patterns `:tag` matches the keyword and `'name` the symbol. `keyword?`
+beside `sym?`; `str->keyword` beside `str->sym`; `sym->str` gives
+either's name. The reader makes `:name` a keyword datum, not `(quote
+name)` (D52 retired), so `'(:a b)` is the keyword `:a` and the symbol
+`b`; `.sly` spells both as it did. Types: `keyword` beside `sym`, `:ok`
+the type of that keyword, booleans neither. The runtime: one word,
+`id << 4 | kind << 3 | RT_TAG_SYMBOL`, the kind bit set for a keyword,
+so the two share the compiler's table of names and differ in a bit,
+`eq?` is still word equality and a pattern still compares a word;
+every tag the runtime makes is a keyword (`rt_keyword`); `hash` mixes
+the kind in with the name, so `:a` and `'a` hash apart (D209). Names
+the program doesn't mention, K1: `sexp/parse`, `:sexp` and `:source`
+read an unknown keyword as `(:keyword "name")`, as an unknown symbol
+reads as `(:symbol "name")` (D155), and `sexp/print` writes each back
+as it came, so data passes through unchanged and no table grows at
+run time (D14 holds); K2, interning with a cap, waits for a program
+that needs it. `rpc`'s wire words, bare in stupidrpc, are symbols now,
+`(list 'helo 'rpc 1)` sent and `(('helo 'rpc 1) ...)` matched, and
+`rpc/word` takes a keyword too; `http`'s method is a keyword or a
+string; the headers say `keyword` where they said `sym` of a tag.
+Every expected output that printed a keyword gained its colons, 262 of
+them by a patch accepted only where a colon before a keyword was the
+whole change, 21 Python models taught to write the colon and run
+again (and three found stale since D277 and D286, aligned with their
+tests: the root's reply address, a fork's lambda, a join gone), the
+guide's output blocks from the files, and a handful of tests that mixed
+quoted names with keywords, `'((a 1))` looked up with `:a`, write the
+keywords they mean. Rejected: one type still, only printed with its
+colon, which keeps `(eq? :ping 'ping)` true and a bare word in text
+reading as a tag; names in data as strings, which quoted lists and the
+readers of source can't do without; a new fault for `keyword->str`,
+not needed since `sym->str` takes both; and log keys with colons,
+since a key is a name. Golden test 379; t/041, 042, 062, 093, 170,
+181, 214 and 275 reworked; the unit tests; D52, D53, D155 and D163
+superseded in part.
+
+**D288. The virtual clock waits for a reply owed to a connection the
+program made.** *(Stevan, Nov 2026: "Go ahead and build it as D288",
+after the M2 Max failed the agent team's golden tests, 375 to 377,
+every worker ending `(:failed (:timeout 120000))`.)* The cause was
+D236's: each worker's task has a budget pending, `(after task-ms to
+(:overrun id))`, while its agent's request crosses loopback to the fake
+model in the same program. On the virtual clock the runtime looked at
+the sockets once, and if none was ready at that instant moved the clock
+to the next timer; macOS's loopback delivers a moment after a send, so
+the clock found nothing and went to the budget. Linux delivers within
+the send, so the cloud machine never saw it; a server outside the
+program that answers 20 ms late shows it on Linux every time. D236 met
+the same with HTTP's 30 s default, withdrew the default, and left the
+rule "a test mustn't have a timer pending while it waits for a reply on
+loopback, unless the timer is meant to win". A budget is that timer, by
+design, so the rule can't hold for an agent harness, and a program with
+budgets could only run on the real clock.
+- **Now:** a connection the program made (`:tcp`, `:unix`; `made` in
+  `rt_device_t`) is owed a reply (`owed`) from its connect, and from
+  each write to it, until anything comes back on it, a byte or its
+  end. Before the virtual clock moves to a program's timer while one
+  that's owed is waited on, it waits for the sockets for real, up to
+  the 200 ms it already allows before a lookup's timer (D165): one
+  condition more in `idle`, `owed_reply`, on `wants`, so a connection
+  nobody waits on holds nothing. A reply on its way ends the wait as it
+  comes, so the cost is loopback's latency; only a server that stays
+  silent, as 211's `/silent` does, pays the whole wait, once per move
+  of the clock, and the timer still wins. An accepted connection isn't
+  flagged, so a server's idle connections never hold the clock, and a
+  command is waited for as before (D185). The HTTP library's
+  connections are one exchange each (`Connection: close`), owed from
+  the request till the reply starts; an `rpc` connection kept up is
+  owed only while a call of its is unanswered.
+- **Why per connection, where D236's first fix was one note:** that
+  note was cleared by the first reply while others were still
+  crossing, and the clock went to their timeouts. A flag on each
+  connection is cleared only by that connection's own reply.
+- **Why cleared when anything comes, not kept while the connection is
+  open:** the first cut kept it, so that a reply in several arrivals
+  was covered to its end; 179, whose server writes a byte to each tick
+  of a timer to a client that only reads, then paid 200 ms a byte, and
+  was killed at 60 s on both targets. Once anything has come back, the
+  rest of a reply that comes in pieces is at the program's own pace,
+  which the clock is for. The limit that leaves: a reply whose later
+  segment is still crossing loopback when its first has been read, and
+  a timer is due, loses the rest to the timer; a write's segments are
+  delivered together as a rule, and read in one pass, so no test shows
+  it, and D236's rule for tests is withdrawn.
+- **Rejected:** waiting before every move of the clock while any socket
+  is open, which costs the airline's and the HTTP tests seconds per
+  run, and a server's idle connections would never let the clock move;
+  keeping D236's rule, which puts the team, and any program with
+  budgets, on the real clock only; and pairing the program's own
+  connections by port to count the bytes in flight between them, D236's
+  80 lines, which still can't see a server outside the program.
+- **Tests:** golden test 380, a client in the program asking an echo
+  three times with a budget of 50 ms it takes back when the reply
+  comes, the clock at 0 at each, then asking for silence, which the
+  budget wins at 50 ms; and t/live.py's loopback, the same client
+  against a Python server that answers 20 ms late, on the virtual
+  clock, which failed on Linux with the runtime as it was, the budget
+  winning at once, and passes now. 375 to 377 are unchanged; their
+  budgets are what the change is for. DESIGN.md's account of the
+  virtual clock, the guide's time page and PLAN.md's timers note say
+  the rule; D236's rule for tests is withdrawn.
+
+**D289. `assoc` replaces.** *(Stevan, Nov 2026: "Do 1 then 3, park 2",
+of the agent team's three candidates, D285.)* `(assoc k v table)` gave
+`table` with `(k v)` at the front and the old pair for `k` underneath,
+so `lookup` saw the new value but a table walked with `map` or measured
+with `length` saw both, and an update was `assoc` after `remove`, which
+`lib/ds`'s dictionary did in its `put` and `update`, two team tests did
+in a helper, and a test got wrong once (D282). Now it replaces the
+first pair for `k` where it was, or adds at the front when there's
+none: a table has one value for a key however it's walked, and an
+update is one call. Of the 24 uses, none wanted the shadowing; a list
+of bindings that shadow, an interpreter's environment, is `(cons (list
+k v) table)`, which LANGUAGE.md says, and still works with the new
+`assoc` since the outer list is immutable. The cost is a walk to the
+key where it was a cons, which a table pays in `lookup` already. The
+sig is unchanged. Rejected: a second function beside the old, `assoc/put`
+or `update`, two names for what every caller wanted one of; and
+replacing at the front, as the tutorial's `table/put` does, which
+reorders a table on every update, so a printed table would churn.
+Golden test 381; the dictionary's `put` and `update`, t/275, t/376 and
+t/377 lose their `remove`; LANGUAGE.md, DESIGN.md's table, the
+tutorial's sentence.
+
+**D290. A quiet end: a root whose value is `()` prints nothing.**
+*(Stevan, Nov 2026: "Do 1 then 3, park 2", of the agent team's three
+candidates, D285.)* The runtime printed the root's value after the
+program's own output, which is right for a golden test, whose root's
+value is its answer, and wrong for a program people run: `team` ended
+with `done` and `chat` with `bye` from the runtime, not from the
+program. Now a root that ends with `()` prints nothing, and every other
+value prints as before. A program for people ends with `()` and says
+its own last word: `chat` writes `bye` itself, and `team` ends with
+`()` when the job was answered and raises `:failed`, or `:usage`,
+otherwise, so a shell sees 1. `()` that is the answer is printed by the
+program, `(pprint ())`, as any value is. Of 396 expected outputs, 75
+ended with `()`, every one a program whose answer was above it, and
+lost it: 71 by a script that checked the line was the last and was
+`()`, and four by their models, told not to write it and run again
+(`even-odd-actors`, `json-suite`, `map`, and `divisions`, whose `()`
+followed its screen on the same line, which the script's scan missed
+and the suite found), whose files then differed by that alone. The
+guide's cores page, `t/live.py`'s ten expectations, LANGUAGE.md,
+DESIGN.md and CLAUDE.md say the rule. Rejected: printing nothing for any
+root's value, which takes the answer from the golden tests and makes
+every program `pprint` it; a builtin to say "print nothing", a second
+way to end a program; and `()` printing nothing only when the program
+had written to stdout, a rule nobody could predict. Golden test 382.

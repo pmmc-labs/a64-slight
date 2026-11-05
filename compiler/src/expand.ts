@@ -49,7 +49,8 @@ import { link, type Unit, type UnitKind } from './modules.ts';
 import { lowerPattern, NO_MATCH } from './pattern.ts';
 import { read } from './reader.ts';
 import { readSly } from './sly.ts';
-import { NIL, cons, form, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { isKw, kwName, NIL, builtinSym, cons, form, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { MAX_ARGS, RESERVED_SYMBOLS, SPECIAL_FORMS, TOP_PARAMS } from './values.ts';
 
 // The outside world: a key for the file at path that's the same however
 // it's named (its real path), or null if there's no such file; and the
@@ -220,8 +221,9 @@ export function relative(from: string, path: string): string {
     return out.join('/');
 }
 
-// The name in (quote name), or null.
+// The name of the keyword x, or null.
 function keyword(x: Sexp): string | null {
+    if (isKw(x)) return kwName(x);
     const items = isForm(x, 'quote') ? toArray(x) : null;
     return items !== null && items.length === 2 && items[1]!.t === 'sym' ? items[1]!.name : null;
 }
@@ -243,6 +245,51 @@ function after(xs: Sexp, n: number, keep: boolean): Sexp {
     return n > 0 ? cons(xs.car, after(xs.cdr, n - 1, keep), xs.pos) : mapList(xs, (y) => expand(y, keep));
 }
 
+// --- functions' shapes ------------------------------------------------------
+//
+// The expander sees every defun first, so it checks their shapes: then
+// neither the checker nor the code generator meets a malformed one.
+
+// A defun's name, parameters and body.
+export function checkDefunShape(x: Pair): { readonly name: Sym; readonly params: readonly Sym[]; readonly body: Sexp } {
+    const items = toArray(x) ?? [];
+    const [, name, params] = items;
+    if (items.length < 4 || name === undefined || params === undefined) {
+        throw new CompileError('defun is (defun name (params...) body...)', x.pos);
+    }
+    if (name.t !== 'sym') throw new CompileError(`defun needs a name, not ${show(name)}`, posOf(name) ?? x.pos);
+    checkBindable(name);
+    return { name, params: checkParams(name.name, params, x, name.pos), body: list(...items.slice(3)) };
+}
+
+// A defun's or a lambda's parameters: names, each once, at most MAX_ARGS.
+export function checkParams(owner: string, params: Sexp, x: Pair, ownerPos: Pos | null): readonly Sym[] {
+    const ps = toArray(params);
+    if (ps === null) throw new CompileError(`${owner}'s parameters must be a list, not ${show(params)}`, posOf(params) ?? x.pos);
+    const syms = ps.map((p) => {
+        if (p.t !== 'sym') throw new CompileError(`a parameter must be a name, not ${show(p)}`, posOf(p) ?? x.pos);
+        checkBindable(p);
+        return p;
+    });
+    syms.forEach((p, i) => {
+        if (syms.findIndex((q) => q.name === p.name) !== i) throw new CompileError(`${p.name} is a parameter twice`, p.pos);
+    });
+    if (syms.length > MAX_ARGS) {
+        throw new CompileError(`${owner} has ${syms.length} parameters; the most is ${MAX_ARGS}`, ownerPos ?? x.pos);
+    }
+    return syms;
+}
+
+// Names that can't be bound or defined: #true, #false, $$, ^$$, @ARGV,
+// %ENV and the special forms.
+export function checkBindable(name: Sym): void {
+    if (RESERVED_SYMBOLS.includes(name.name) || SPECIAL_FORMS.includes(name.name) || ['$$', '^$$', ...TOP_PARAMS].includes(name.name)) {
+        throw new CompileError(`can't bind ${name.name}`, name.pos);
+    }
+}
+
+// --- expanding --------------------------------------------------------------
+
 // keepMatch: everything but match, which the checker wants as it is
 // (D247); expanding the result again lowers it.
 export function expand(x: Sexp, keepMatch = false): Sexp {
@@ -262,7 +309,7 @@ export function expand(x: Sexp, keepMatch = false): Sexp {
         case 'and':      return ex(expandAnd(x));
         case 'or':       return ex(expandOr(x));
         case 'match':    return keepMatch ? matchKept(x) : ex(expandMatch(x));
-        case 'defun':    return after(x, 3, keepMatch);    // (defun name params body...)
+        case 'defun':    checkDefunShape(x); return after(x, 3, keepMatch);    // (defun name params body...)
         case 'lambda':   return after(x, 2, keepMatch);    // (lambda params body...)
         case 'cond':     return cons(x.car, mapList(x.cdr, (c) => mapList(c, ex)), x.pos);
         case 'recv':     return cons(x.car, mapList(x.cdr, (c) => after(c, 1, keepMatch)), x.pos);
@@ -300,18 +347,11 @@ function expandWhen(x: Pair): Sexp {
 }
 
 // A case's or a match's topic is bound under a name no program can write,
-// which says which of them it was.
+// since it has a space in it (sexp.ts's hidden names), which says which of
+// them it was.
 function topicName(of: 'case' | 'match', x: Pair): Sym {
     const where = x.pos === null ? '' : ` ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
     return sym(`${of} topic${where}`, x.pos);
-}
-
-// The case or match a do was made from, or null: so that a message about
-// it can name what the program has (split.ts), not the do it became.
-export function madeFrom(x: Pair): string | null {
-    const first = x.cdr.t === 'pair' ? toArray(x.cdr.car) : null;
-    const name  = first !== null && first.length === 3 && isSym(first[0]!, 'let') && first[1]!.t === 'sym' ? first[1]!.name : '';
-    return name.startsWith('case topic') ? 'case' : name.startsWith('match topic') ? 'match' : null;
 }
 
 function expandCase(x: Pair): Sexp {
@@ -321,7 +361,8 @@ function expandCase(x: Pair): Sexp {
         const items = toArray(c);
         if (items === null || items.length < 2) throw new CompileError(`a case clause is (value body...), not ${show(c)}`, x.pos);
         const [value, ...body] = items;
-        const test = value!.t === 'sym' && (value!.name === '#true' || value!.name === '#false') ? value! : form(x.pos, sym('eq?'), t, value!);
+        // eq? by a name no local can hide, as a match's patterns have it
+        const test = value!.t === 'sym' && (value!.name === '#true' || value!.name === '#false') ? value! : form(x.pos, builtinSym('eq?'), t, value!);
         return list(test, ...body);
     });
     const last     = clauses.length > 0 ? toArray(clauses[clauses.length - 1]!)![0]! : null;

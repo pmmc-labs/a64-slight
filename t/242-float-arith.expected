@@ -9,12 +9,12 @@
 (1.0 -3.0 -0.0 -0.0 -7.0 -0.0 -0.0)
 (100000.0 1.1051653926032188)
 (5.5 7.5 9.5 3.5 2.0 2.0)
-fault in #<pid 2>: division by zero (/ at t/242-float-arith.slight:31:27)
-div-by-zero
-fault in #<pid 3>: division by zero (/ at t/242-float-arith.slight:32:27)
-div-by-zero
-fault in #<pid 4>: division by zero (/ at t/242-float-arith.slight:33:27)
-div-by-zero
-fault in #<pid 5>: not a number: "a" (+ at t/242-float-arith.slight:34:27)
-not-a-number
-done
+fault in #<pid 2>: division by zero (/ at t/242-float-arith.slight:31:38)
+:div-by-zero
+fault in #<pid 3>: division by zero (/ at t/242-float-arith.slight:32:38)
+:div-by-zero
+fault in #<pid 4>: division by zero (/ at t/242-float-arith.slight:33:38)
+:div-by-zero
+fault in #<pid 5>: not a number: "a" (+ at t/242-float-arith.slight:34:38)
+:not-a-number
+:done

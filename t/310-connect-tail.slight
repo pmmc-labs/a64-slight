@@ -12,6 +12,6 @@
         ((:eof p)      (run out))
         ((:exited p n) (list n (reverse out)))))
 
-(defun started () (connect :exec (command) (run ())))
+(defun started () (connect :exec (command) run ()))
 
-(read (started))
+(join (started))

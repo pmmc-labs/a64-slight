@@ -1,0 +1,297 @@
+; A team of agents: a lead and its workers (D281, PLAN.md's "An agent
+; team"). Included by its path: examples/team.slight, beside it, is the
+; program, and t/375 the test.
+;
+;     (let t (team/new "http://localhost:11434" "llama3.2" tools))
+;     (team/ask t "Say hello in French and in German.")
+;     ; (:ok "Bonjour. Guten Tag.")
+;
+; The lead is an actor. Given a job, it asks a planner, an agent of its
+; own for the job, to split it into tasks, one a line; forks a worker
+; for each, which asks an agent of its own, with the team's tools, and
+; reports (:done id answer) or (:failed id why) to the lead's address
+; for the job, which the lead monitors it to as well, so a worker that
+; faults is a failure too; then it asks the planner to combine the
+; answers, and answers. All of it happens in the middle of handling one
+; message, the lead asking at addresses of its own while the next job
+; waits in its mailbox (D277). Whoever asked hears the team's events as
+; it goes, as an agent's caller hears pieces: (:team/plan t tasks),
+; (:team/task t id text), (:team/done t id answer), (:team/failed t id
+; why), then (:team/answer t text), or (:team/error t reason) in its
+; place.
+;
+; Step 2: a pool and budgets. At most (:at-most k) workers run at once,
+; 4 unless the options say; a task has (:task-ms n) milliseconds, two
+; minutes unless they say, and one that overruns is killed, its agent
+; too, which takes the agent's turn, its stream and its commands with
+; it (D193), and fails with (:timeout n); and a task whose worker fails
+; otherwise, a model error, a fault, is started again, (:retries n)
+; times, once unless they say, with why it failed in its new task. The
+; asker hears (:team/retry t id why) for each. The lead makes each
+; worker's agent itself, so it can kill it. Tools that change something
+; are the program's to approve, as chat's are: the team passes them
+; through (D281: off for workers, reported, or approved once a job).
+;
+; Step 3: workers may ask each other. Every worker's agent has a tool,
+; ask_teammate, which asks the worker on another task of the job, by
+; its number, through the lead, which knows who's on what; a worker's
+; agent lives till the job is done, so a task finished can still be
+; asked about. Two workers asking each other at once wait for each
+; other till their budgets end them. And a review round, (:review
+; #true): a reviewer, an agent on (:reviewer model), the team's model
+; unless given, judges the combined answer, and unless it says APPROVED
+; the planner revises it once with what the reviewer said; the asker
+; hears (:team/review t verdict).
+
+(@include :agent)
+
+; opts is a list of (name value): (:at-most k), (:task-ms n), (:retries n),
+; (:review bool), (:reviewer model).
+(defun team/new (url model tools opts) (fork lead url model tools opts))
+
+(defun team/opt (opts name default)
+    (match (lookup name opts) (:not-found default) (v v)))
+
+; Asks the team to do job; the events come to the caller.
+(defun team/say (t job) (send t (list :job job $$)))
+
+; Asks, and waits for the answer: (:ok text), or (:error reason), the
+; events passed over, at an address of its own (D277).
+(defun team/ask (t job)
+    (let to (address))
+    (monitor t to)
+    (send t (list :job job to))
+    (let answer (team/answer t to))
+    (disconnect to)
+    answer)
+
+(defun team/answer (t to)
+    (match (read to)
+        ((:team/answer _ text)  (list :ok text))
+        ((:team/error _ reason) (list :error reason))
+        ((:exit _ result)       (list :error (list :ended t result)))
+        (_                      (team/answer t to))))
+
+; --- the lead ----------------------------------------------------------
+
+(defun lead (url model tools opts)
+    (recv
+        ((:job job from)
+            (lead/job url model tools opts job from)
+            (lead url model tools opts))))
+
+(defun lead/prompt ()
+    "You lead a team of workers. Given a job, reply with the tasks to give them, one task a line, each complete in itself, and nothing else. Later you'll be given their answers to combine.")
+
+(defun worker/prompt ()
+    "You are a worker on a team. Do the task you're given, using your tools if they help, and reply with your result, briefly. ask_teammate asks the worker on another task of the same job, by its number.")
+
+(defun reviewer/prompt ()
+    "You review a team's answer to a job. Reply APPROVED if it answers the job well, or say what's wrong with it, briefly.")
+
+; One job: plan, work, combine. The planner is the lead's for the job
+; and goes with it, killed, since it would wait for ever, and joined, so
+; nothing is kept (D244).
+(defun lead/job (url model tools opts job from)
+    (let me      $$)
+    (let planner (agent/new url model (lead/prompt) ()))
+    (match (agent/ask planner (str "The job: " job))
+        ((:error reason) (send from (list :team/error me (list :planning reason))))
+        ((:ok plan)
+            (let tasks (lead/tasks plan))
+            (send from (list :team/plan me tasks))
+            (let answers (lead/work (list me url model tools opts from) tasks))
+            (match (agent/ask planner (lead/combine job tasks answers))
+                ((:ok text)
+                    (match (lead/review url model opts job text planner from)
+                        ((:ok final)     (send from (list :team/answer me final)))
+                        ((:error reason) (send from (list :team/error me (list :reviewing reason))))))
+                ((:error reason) (send from (list :team/error me (list :combining reason)))))))
+    (kill planner)
+    (join planner))
+
+; The review round, if the options ask for one: the reviewer's verdict
+; goes to the asker, and unless it's APPROVED the planner revises its
+; answer once with it. The reviewer goes with the round.
+(defun lead/review (url model opts job text planner from)
+    (if (not (team/opt opts :review #false))
+        (list :ok text)
+        (do
+            (let reviewer (agent/new url (team/opt opts :reviewer model) (reviewer/prompt) ()))
+            (let verdict  (agent/ask reviewer (str "Review this. The job: " job "\n\nThe team's answer:\n" text)))
+            (kill reviewer)
+            (join reviewer)
+            (match verdict
+                ((:error reason) (list :error reason))
+                ((:ok said)
+                    (send from (list :team/review $$ said))
+                    (if (str/starts-with? (str/trim said) "APPROVED")
+                        (list :ok text)
+                        (agent/ask planner (str "A reviewer said of your answer: " said "\n\nRevise it, and reply with the whole answer."))))))))
+
+; The plan's lines as tasks: trimmed, without a list's marks, empty ones
+; dropped.
+(defun lead/tasks (plan)
+    (remove (lambda (s) (eq? s "")) (map lead/task-text (str/split plan "\n"))))
+
+(defun lead/task-text (line)
+    (let s (str/trim line))
+    (cond
+        ((str/starts-with? s "- ") (str/trim (str/slice s 2)))
+        ((str/starts-with? s "* ") (str/trim (str/slice s 2)))
+        ((lead/numbered? s)        (str/trim (str/slice s (+ (str/index-of s ".") 1))))
+        (#true                     s)))
+
+(defun lead/numbered? (s)
+    (let dot (str/index-of s "."))
+    (and (> dot 0) (and (< dot 4) (lead/digits? (str/slice s 0 dot)))))
+
+(defun lead/digits? (s)
+    (nil? (find (lambda (c) (not (str/includes? "0123456789" c))) (str/chars s))))
+
+; A job's setting, shared by the lead's helpers: the lead's pid, the
+; url, the model, the tools, the options and who asked.
+(defun job/pid (job) (nth 0 job))
+(defun job/url (job) (nth 1 job))
+(defun job/model (job) (nth 2 job))
+(defun job/tools (job) (nth 3 job))
+(defun job/opts (job) (nth 4 job))
+(defun job/from (job) (nth 5 job))
+
+; The workers, at most (:at-most k) at once; what each task gave, in
+; task order, as (id (:ok answer)) or (id (:error why)). The agents live
+; till here, for teammates' questions, then go, killed and joined, so
+; nothing is kept (D244).
+(defun lead/work (job tasks)
+    (let to    (address))
+    (let ids   (range 1 (+ (length tasks) 1)))
+    (let queue (map (lambda (p) (list (car p) (cadr p) (team/opt (job/opts job) :retries 1))) (zip ids tasks)))
+    (match (lead/loop job to (list queue () () ()) (length tasks))
+        ((verdicts done)
+            (map (lambda (e) (match e ((_ (_ a & _)) (kill a) (join a)))) done)
+            (disconnect to)
+            (map (lambda (id) (list id (lookup id verdicts))) ids))))
+
+; The loop's state, st, is (queue live done verdicts): the tasks not yet
+; started, (id task tries); those running and those settled, (id (worker
+; agent timer task tries)), the newest first; and the tasks' results.
+; Starts tasks while there's room, then waits for the next report, end,
+; overrun or teammate's question. Gives (verdicts done).
+(defun lead/loop (job to st n)
+    (match st
+        ((queue live done verdicts)
+            (cond
+                ((== (length verdicts) n) (list verdicts done))
+                ((and (cons? queue) (< (length live) (team/opt (job/opts job) :at-most 4)))
+                    (match (car queue)
+                        ((id task tries)
+                            (lead/loop job to (list (cdr queue) (cons (lead/start job to id task tries) live) done verdicts) n))))
+                (#true
+                    (match (read to)
+                        ((:done id answer) (lead/settle job to st n id (list :ok answer)))
+                        ((:failed id why)  (lead/settle job to st n id (list :error why)))
+                        ((:overrun id)
+                            (lead/settle job to st n id (list :error (list :timeout (team/opt (job/opts job) :task-ms 120000)))))
+                        ((:teammate other asker r)
+                            (send r (if (== other asker) () (lead/agent-of other (append live done))))
+                            (lead/loop job to st n))
+                        ((:exit p result)
+                            (match (list (lead/of p live) result)
+                                (((id) (:error why)) (lead/settle job to st n id (list :error why)))
+                                (_                   (lead/loop job to st n))))))))))
+
+; A task's worker, with an agent of its own, which can ask its
+; teammates, and its timer.
+(defun lead/start (job to id task tries)
+    (send (job/from job) (list :team/task (job/pid job) id task))
+    (let a (agent/new (job/url job) (job/model job) (worker/prompt) (cons (teammate-tool to id) (job/tools job))))
+    (let w (fork worker a id task to))
+    (monitor a to)
+    (monitor w to)
+    (let timer (after (team/opt (job/opts job) :task-ms 120000) to (list :overrun id)))
+    (list id (list w a timer task tries)))
+
+; The agent on task id, or () if there's none yet.
+(defun lead/agent-of (id entries)
+    (match (lookup id entries)
+        (:not-found      ())
+        ((_ a & _)       a)))
+
+; A worker's tool: it asks the lead, at the job's address, for the
+; agent on the task, and asks that. A worker can't ask itself.
+(defun teammate-tool (to id)
+    (tool/new "ask_teammate" "Asks the worker on another task of this job a question, by the task's number, and gives its answer. It knows only its own task."
+        (list (list "task" :integer "The task's number") (list "question" :string "What to ask, in full"))
+        (lambda (args)
+            (let other (lookup "task" args))
+            (let r     (address))
+            (send to (list :teammate other id r))
+            (let a (read r))
+            (disconnect r)
+            (if (nil? a)
+                (raise (str "there's no teammate on task " other))
+                (match (agent/ask a (lookup "question" args))
+                    ((:ok answer)    answer)
+                    ((:error reason) (raise reason)))))))
+
+; The task whose worker or agent is p, if it's live.
+(defun lead/of (p live)
+    (match (find (lambda (e) (match e ((_ (w a & _)) (or (eq? w p) (eq? a p))))) live)
+        (()      ())
+        ((id _)  (list id))))
+
+; A task's verdict is in: its timer is taken back and its worker ended,
+; and either it's done, or it's tried again, or it has failed. Its agent
+; lives on, for teammates, unless it overran, when it's killed, or the
+; task is tried again, when it goes with its failure. A verdict for a
+; task that isn't live, a report after an overrun, say, is dropped.
+(defun lead/settle (job to st n id verdict)
+    (match st
+        ((queue live done verdicts)
+            (match (lookup id live)
+                (:not-found (lead/loop job to st n))
+                ((w a timer task tries)
+                    (timer/cancel timer)
+                    (kill w)
+                    (let rest  (remove (lambda (e) (== (car e) id)) live))
+                    (let entry (list id (list w a timer task tries)))
+                    (match verdict
+                        ((:ok answer)
+                            (send (job/from job) (list :team/done (job/pid job) id answer))
+                            (lead/loop job to (list queue rest (cons entry done) (assoc id verdict verdicts)) n))
+                        ((:error why)
+                            (cond
+                                ((and (> tries 0) (not (lead/timeout? why)))
+                                    (kill a)
+                                    (join a)
+                                    (send (job/from job) (list :team/retry (job/pid job) id why))
+                                    (lead/loop job to (list (append queue (list (list id (lead/again task why) (- tries 1)))) rest done verdicts) n))
+                                (#true
+                                    (when (lead/timeout? why) (kill a))
+                                    (send (job/from job) (list :team/failed (job/pid job) id why))
+                                    (lead/loop job to (list queue rest (cons entry done) (assoc id verdict verdicts)) n))))))))))
+
+(defun lead/timeout? (why) (match why ((:timeout _) #true) (_ #false)))
+
+(defun lead/again (task why)
+    (str task "\n\n(A previous attempt at this task failed: " why ". Try again.)"))
+
+(defun lead/combine (job tasks answers)
+    (str "The job was: " job "\n\nYour workers' answers, by task:\n"
+         (str/join "" (map (lambda (pair)
+                               (match pair
+                                   ((id verdict)
+                                       (str id ". " (nth (- id 1) tasks) "\n   "
+                                            (match verdict ((:ok a) a) ((:error why) (str "FAILED: " why)))
+                                            "\n"))))
+                           answers))
+         "\nCombine them into one answer to the job, saying what failed, if anything."))
+
+; --- a worker ----------------------------------------------------------
+
+; One task, through the agent the lead made for it, reported to to.
+(defun worker (a id task to)
+    (match (agent/ask a task)
+        ((:ok answer)    (send to (list :done id answer)))
+        ((:error reason) (send to (list :failed id reason))))
+    :reported)

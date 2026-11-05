@@ -9,8 +9,9 @@
 //   - quasiquote and unquote (` , ,@), and dotted pairs, are not part of
 //     slight
 //
-// `:name` reads as (quote name), positioned at the colon; `'x` reads as
-// (quote x). Every atom carries its position, not just lists.
+// `:name` reads as a keyword, a sym named :name, positioned at the colon
+// (D287); `'x` reads as (quote x). Every atom carries its position, not
+// just lists.
 //
 // Documentation (D156, D164): between top-level forms, a line that starts
 // with `=` and a letter begins a doc block, and a line `=cut` ends it, or
@@ -18,7 +19,7 @@
 // now; any other `=word` is kept for later kinds, and is an error.
 
 import { CompileError } from './errors.ts';
-import { NIL, cons, float, fitsInt, int, reverse, str, sym, INT_MAX, INT_MIN, TUPLE, type Pos, type Sexp } from './sexp.ts';
+import { kw, NIL, cons, float, fitsInt, int, isDelimiter, isSpace, reverse, str, sym, INT_MAX, INT_MIN, TUPLE, type Pos, type Sexp } from './sexp.ts';
 
 // ---------------------------------------------------------------------------
 // Tokens
@@ -37,8 +38,6 @@ export const step  = (c: Cursor): Cursor => peek(c) === '\n'
     ? { ...c, i: c.i + 1, line: c.line + 1, col: 1 }
     : { ...c, i: c.i + 1, col: c.col + 1 };
 
-export const isSpace     = (ch: string): boolean => ch === ' ' || ch === '\t' || ch === '\n' || ch === '\r';
-const isDelimiter = (ch: string): boolean => isSpace(ch) || '()\';"`,'.includes(ch);
 export const isDigit     = (ch: string): boolean => ch >= '0' && ch <= '9';
 
 export function skipWhile(c: Cursor, pred: (ch: string) => boolean): Cursor {
@@ -234,8 +233,8 @@ function parseDatum(tokens: readonly Token[], i: number): [Sexp, number] {
             const [quoted, next] = parseDatum(tokens, i + 1);
             return [quote(quoted, t.pos), next];
         }
-        case 'keyword':
-            return [quote(sym(t.text, t.pos), t.pos), i + 1];
+        case 'keyword':                     // :name, a keyword: itself, apart from the symbol name (D287)
+            return [kw(t.text, t.pos), i + 1];
         case 'string':
             return [str(t.text, t.pos), i + 1];
         case 'atom':

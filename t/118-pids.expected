@@ -4,5 +4,5 @@
 #<pid 2>
 #true
 #false
-(child #<pid 2> parent #<pid 1>)
-sent-to-the-dead
+(:child #<pid 2> :parent #<pid 1>)
+:sent-to-the-dead

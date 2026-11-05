@@ -39,13 +39,13 @@
 (1518024071 -1 -1518024072 -1518024072 203745741858930688 11 18)
 (1 3109901739823729 3109901739823728 -2 0 0 1)
 (13 4 (-1 0 -8))
-fault in #<pid 2>: out of range: -1 (bit/shl at t/272-bits.slight:52:21)
-out-of-range
-fault in #<pid 3>: out of range: -5 (bit/shr at t/272-bits.slight:53:21)
-out-of-range
-fault in #<pid 4>: not an integer: 1.0 (bit/xor at t/272-bits.slight:54:21)
-not-an-int
-fault in #<pid 5>: not an integer: "1" (bit/count at t/272-bits.slight:55:21)
-not-an-int
-fault in #<pid 6>: not an integer: () (bit/not at t/272-bits.slight:56:13)
-not-an-int
+fault in #<pid 2>: out of range: -1 (bit/shl at t/272-bits.slight:52:32)
+:out-of-range
+fault in #<pid 3>: out of range: -5 (bit/shr at t/272-bits.slight:53:32)
+:out-of-range
+fault in #<pid 4>: not an integer: 1.0 (bit/xor at t/272-bits.slight:54:32)
+:not-an-int
+fault in #<pid 5>: not an integer: "1" (bit/count at t/272-bits.slight:55:32)
+:not-an-int
+fault in #<pid 6>: not an integer: () (bit/not at t/272-bits.slight:56:24)
+:not-an-int

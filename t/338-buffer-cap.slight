@@ -1,0 +1,20 @@
+; What a builtin builds in C before it's a string is held to the room the
+; heap has (H3): past it, the builtin faults :heap at once, rather than
+; build a terabyte outside the heap, and leaves nothing behind (L8;
+; t/live.py measures that). s with s put before each of its characters
+; and at its end is 10,001 times its 10,000 bytes, past the tests' 64 MB;
+; with a million it's 10^12. Expected output worked out by hand.
+
+(defun kind (r)
+    (match r
+        ((:error (kind _ _)) kind)))
+
+(let s (str/repeat "a" 10000))
+(let t (str/repeat "a" 1000000))
+(pprint (kind (join (fork (lambda () (str/replace-all s "" s))))))
+(pprint (kind (join (fork (lambda () (str/replace-all t "" t))))))
+(pprint (kind (join (fork (lambda () (str/join s (range 0 10000)))))))
+(pprint (kind (join (fork (lambda () (bytes->hex (str/repeat "a" 40000000)))))))
+(pprint (kind (join (fork (lambda () (bytes->base64 (str/repeat "a" 50000000)))))))
+(pprint (kind (join (fork (lambda () (bytes/pack (list (list :bytes 3) :u8) (list "abc" 300)))))))
+(pprint (bytes/len (str/replace-all (str/repeat "a" 1000) "" (str/repeat "b" 1000))))

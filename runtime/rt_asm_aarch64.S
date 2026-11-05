@@ -59,6 +59,18 @@ FUNC rt_trampoline
     bl   rt_exit                        // doesn't return
 
 // ---------------------------------------------------------------------------
+// rt_apply_start: a process's code when fork made it (D286). The trampoline
+// has its arguments in x0..x7; this puts its function, a closure, in x9,
+// as a call of a closure does, and jumps to its code, which returns to
+// the trampoline.
+// ---------------------------------------------------------------------------
+
+FUNC rt_apply_start
+    ldr  x9, [x28, #RT_PROC_FUN]
+    ldur x16, [x9, #RT_CLOSURE_CODE]
+    br   x16
+
+// ---------------------------------------------------------------------------
 // rt_value_t rt_apply(rt_value_t f, rt_value_t args, const char *site)
 //
 // Spreads up to 8 elements of args into x0..x7, puts the closure in x9,

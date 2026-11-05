@@ -14,7 +14,7 @@
 (deftype Approve (fun (str) bool))
 
 ; A store of notes, an actor: notes/open starts one.
-(deftype Notes (actor any))
+(deftype Notes (pid any))
 
 (sig tools/read-file () Tool)
 (sig tools/list-files () Tool)
@@ -34,5 +34,6 @@
 (sig notes/get (Notes any) any)
 (sig notes/keys (Notes) (list any))
 (sig notes/put (Notes any str) nil)
+(sig tools/string (Args str) str)
 (sig tools/read (str) str)
 (sig tools/save (str str) nil)

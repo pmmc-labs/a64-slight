@@ -16,7 +16,7 @@
 (defun server (w)
     (recv
         ((:open l at)  (send w (list :listening at)) (server w))
-        ((:accept l c) (connect c (accepted w)) (server w))))
+        ((:accept l c) (connect c accepted w) (server w))))
 
 ; Each end asks who's at the other while the other is still connected,
 ; since macOS gives a peer's pid only then: the connecting end asks, and
@@ -51,13 +51,13 @@
 
 ; The top level is a task (D243): the listener and the accepted end tell
 ; it at an address.
-(pprint (join (fork (socket/peer 42))))
+(pprint (join (fork (lambda () (socket/peer 42)))))
 (let mine (list (list :uid (number-of "id -u")) (list :gid (number-of "id -g")) (list :pid (number-of "echo $PPID"))))
 (let path "build/t/291-socket-peer.sock")
 (let to (address))
-(let l (connect :unix/listen path (server to)))
+(let l (connect :unix/listen path server to))
 (read to)
-(let connected (read (connect :unix path (client))))
+(let connected (join (connect :unix path client)))
 (let who (cadr (read to)))
 (pprint (list :accepted (eq? who mine)))
 (pprint (list :connected (eq? connected (list :ok mine))))
@@ -81,4 +81,4 @@
                 (rpc/close conn)))
         (kill t)))
 :done
-; warns: 54:34
+; warns: 54:45

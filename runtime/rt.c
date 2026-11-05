@@ -35,6 +35,7 @@ _Static_assert(offsetof(rt_ctx_t, d8_d15)       == RT_CTX_D8,           "RT_CTX_
 _Static_assert(sizeof(rt_ctx_t)                 == RT_CTX_SIZE,         "RT_CTX_SIZE");
 _Static_assert(RT_FALSE == (0 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_FALSE is symbol 0");
 _Static_assert(RT_TRUE  == (1 << RT_SYMBOL_SHIFT | RT_TAG_SYMBOL), "RT_TRUE is symbol 1");
+_Static_assert(RT_TAG_KEYWORD == (RT_TAG_SYMBOL | RT_KEYWORD_BIT), "a keyword is a symbol with the kind bit");
 _Static_assert(RT_SYM_KEYS == RT_SYM_FAULTS + RT_FAULT_COUNT, "the keys follow the fault kinds");
 
 RT_ISLAND rt_proc_t *rt_current;
@@ -49,21 +50,44 @@ void *rt_must(void *p) {
 
 // --- text ---------------------------------------------------------------------
 
+static RT_ISLAND rt_buf_t *held_bufs;           // the builtins' buffers with bytes, freed by rt_fault
+
+// Room for len more bytes. A builtin's buffer can't pass what the heap has
+// room for, nor take more than that from malloc while it doubles.
+__attribute__((noinline))
+static void buf_grow(rt_buf_t *b, size_t len) {
+    size_t cap = (b->len + len) * 2 + 64;
+    if (b->site) {
+        size_t room = rt_heap_room();
+        if (len > room || b->len > room - len) rt_fault(RT_FAULT_HEAP, 0, b->site);
+        if (cap > room) cap = room;
+        if (!b->bytes) {
+            b->next_held = held_bufs;
+            held_bufs    = b;
+        }
+    }
+    b->cap   = cap;
+    b->bytes = rt_must(realloc(b->bytes, cap));
+}
+
 void rt_buf_add(rt_buf_t *b, const char *bytes, size_t len) {
     if (!len) return;                           // so an empty buffer's NULL is never copied to
-    if (b->len + len > b->cap) {
-        b->cap   = (b->len + len) * 2 + 64;
-        b->bytes = rt_must(realloc(b->bytes, b->cap));
-    }
+    if (b->len + len > b->cap) buf_grow(b, len);
     memcpy(b->bytes + b->len, bytes, len);
     b->len += len;
 }
 
 static void buf_str(rt_buf_t *b, const char *s) { rt_buf_add(b, s, strlen(s)); }
 
+// Keeps the site, so a buffer used again is held to the heap again.
 void rt_buf_free(rt_buf_t *b) {
+    if (b->site && b->bytes) {
+        rt_buf_t **link = &held_bufs;
+        while (*link != b) link = &(*link)->next_held;
+        *link = b->next_held;
+    }
     free(b->bytes);
-    *b = (rt_buf_t){ 0 };
+    *b = (rt_buf_t){ .site = b->site };
 }
 
 void rt_work_grow(rt_work_t *w) {
@@ -175,7 +199,7 @@ void rt_pid_text(char *buf, size_t size, rt_value_t v) {
     char     at[8] = "";
     uint64_t island = rt_pid_island(v);
     if (island) snprintf(at, sizeof at, "@%" PRIu64, island);
-    if (rt_is_address(v)) snprintf(buf, size, "#<address %" PRIu64 ".%" PRIu64 "%s>", rt_address_task(v), rt_address_number(v), at);
+    if (rt_is_address(v)) snprintf(buf, size, "#<address %" PRIu64 "%s>", rt_address_id(v), at);
     else                  snprintf(buf, size, "#<pid %" PRIu64 "%s>", rt_pid_number(v), at);
 }
 
@@ -229,6 +253,7 @@ static void render_atom(rt_buf_t *b, rt_value_t v, int raw) {
     if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
         const char *name = rt_symbol_name(v >> RT_SYMBOL_SHIFT);
         if (name) {
+            if (rt_is_keyword(v)) buf_str(b, ":");     // a keyword keeps its colon wherever it's written (D287)
             buf_str(b, name);
             return;
         }
@@ -273,16 +298,21 @@ static cursor_t pop_cursor(rt_work_t *w) {
 // A list or a tuple, element by element, going down into an element
 // that's a list or a tuple with the one around it on the work stack: the
 // stack holds the sequences open around the one being printed. Elements
-// are never raw.
-static void render_seq(rt_buf_t *b, rt_value_t v) {
+// are never raw. It stops once b has stop bytes, and says whether it got
+// to the end.
+static int render_seq(rt_buf_t *b, rt_value_t v, size_t stop) {
     rt_work_t w;
     rt_work_init(&w);
     cursor_t c = { v, 0 };
     buf_str(b, rt_is_tuple(v) ? "#(" : "(");
-    for (;;) {
+    int whole = 0;
+    while (b->len < stop) {
         if (at_end(c)) {                        // the end of this one, and of any it ends
             buf_str(b, ")");
-            if (!w.n) break;
+            if (!w.n) {
+                whole = 1;
+                break;
+            }
             c = pop_cursor(&w);
             if (!at_end(c)) buf_str(b, " ");
             continue;
@@ -298,11 +328,32 @@ static void render_seq(rt_buf_t *b, rt_value_t v) {
         if (!at_end(c)) buf_str(b, " ");
     }
     rt_work_free(&w);
+    return whole;
 }
 
 void rt_render(rt_buf_t *b, rt_value_t v, int raw) {
-    if (is_seq(v)) render_seq(b, v);
+    if (is_seq(v)) render_seq(b, v, SIZE_MAX);
     else           render_atom(b, v, raw);
+}
+
+int rt_render_upto(rt_buf_t *b, rt_value_t v, int raw, size_t stop) {
+    if (is_seq(v)) return render_seq(b, v, stop);
+    render_atom(b, v, raw);
+    return 1;
+}
+
+// What the runtime says of a value, a fault's, a dead letter's, is a
+// line, not the whole of a value that may print as a terabyte (D265).
+#define BRIEF (64 << 10)
+
+void rt_render_brief(rt_buf_t *b, rt_value_t v) {
+    size_t from = b->len;
+    if (is_seq(v)) render_seq(b, v, from + BRIEF + 1);    // past BRIEF, if it stops short
+    else           render_atom(b, v, 0);
+    if (b->len - from <= BRIEF) return;
+    b->len = from + BRIEF;
+    while (b->len > from && (b->bytes[b->len] & 0xc0) == 0x80) b->len--;   // not in the middle of a character
+    buf_str(b, "...");
 }
 
 // In one write, so a line from another island can't come between the
@@ -393,7 +444,7 @@ rt_value_t rt_equal(rt_value_t a, rt_value_t b) {
 // aren't eq? share, functions of one name aside, so two of them hash
 // alike only by chance, about once in 2^62. It isn't seeded, so it's for digests, not for a table whose
 // keys come from someone who'd want them to collide (D209).
-enum { H_INT = 1, H_FLOAT, H_STRING, H_SYMBOL, H_PID, H_FUNCTION, H_LIST, H_END, H_TUPLE, H_OTHER, H_FLOATS, H_INTS };
+enum { H_INT = 1, H_FLOAT, H_STRING, H_SYMBOL, H_PID, H_FUNCTION, H_LIST, H_END, H_TUPLE, H_OTHER, H_FLOATS, H_INTS, H_KEYWORD };
 
 static uint64_t mix(uint64_t h, uint64_t w) {
     uint64_t x = (h ^ w) + 0x9e3779b97f4a7c15;
@@ -435,9 +486,10 @@ static uint64_t hash_atom(uint64_t h, rt_value_t v) {
         return h;
     }
     if (rt_is_string(v)) return mix_bytes(mix(h, H_STRING), rt_string_bytes(v), rt_string_len(v));
-    if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {
+    if ((v & RT_TAG_MASK) == RT_TAG_SYMBOL) {               // by name, and by kind: :a and 'a hash apart (D287)
         const char *name = rt_symbol_name(v >> RT_SYMBOL_SHIFT);
-        return name ? mix_bytes(mix(h, H_SYMBOL), name, strlen(name)) : mix(mix(h, H_SYMBOL), v);
+        uint64_t    kind = rt_is_keyword(v) ? H_KEYWORD : H_SYMBOL;
+        return name ? mix_bytes(mix(h, kind), name, strlen(name)) : mix(mix(h, kind), v);
     }
     if ((v & RT_TAG_MASK) == RT_TAG_PID) return mix(mix(h, H_PID), v >> RT_PID_SHIFT);
     if (rt_is_closure(v)) {                     // eq? only to itself, so its name will do
@@ -512,18 +564,18 @@ static const struct {
     [RT_FAULT_NOT_SEXP]   = { "not data: ", 1 },
     [RT_FAULT_NO_MATCH]   = { "no pattern matched: ", 1 },
     [RT_FAULT_NOT_TUPLE]  = { "not a tuple: ", 1 },
-    [RT_FAULT_NOT_ACTOR]  = { "not an actor: ", 1 },
-    [RT_FAULT_NOT_TASK]   = { "not a task: ", 1 },
     [RT_FAULT_NOT_ARRAY]  = { "not an array: ", 1 },
 };
 
 void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
     if (fault < 1 || fault > RT_FAULT_COUNT) abort();
     if (!faults[fault].shows) value = RT_NIL;   // whatever the caller had in the register
+    for (rt_buf_t *h = held_bufs; h; h = h->next_held) free(h->bytes);   // their frames are below, never to return
+    held_bufs = NULL;
 
     rt_buf_t b = { 0 };
     buf_str(&b, faults[fault].what);
-    if (faults[fault].shows) rt_render(&b, value, 0);
+    if (faults[fault].shows) rt_render_brief(&b, value);
     char who[64];
     rt_pid_text(who, sizeof who, rt_current->pid);
     fflush(stdout);                             // so a fault lands after the output before it
@@ -540,7 +592,7 @@ void rt_fault(uint64_t fault, rt_value_t value, const char *site) {
     str[0] = rt_string_header(site, len);
     memcpy(str + 1, site, len + 1);
     _Alignas(16) rt_value_t cells[6] = {
-        rt_symbol(RT_SYM_FAULTS - 1 + fault), (rt_value_t)&cells[2] | RT_TAG_LIST,
+        rt_keyword(RT_SYM_FAULTS - 1 + fault), (rt_value_t)&cells[2] | RT_TAG_LIST,
         value,                                (rt_value_t)&cells[4] | RT_TAG_LIST,
         (rt_value_t)str | RT_TAG_BOXED,       RT_NIL,
     };

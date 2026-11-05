@@ -47,7 +47,7 @@ fun end_of_chain(painter) {
         :end(total) => send(painter, :end(total)),
         p => {
             send(painter, :prime(p));
-            sieve(p, spawn end_of_chain(painter), painter, 1)
+            sieve(p, fork end_of_chain(painter), painter, 1)
         }
     }
 }
@@ -140,10 +140,10 @@ let fits = math::min(cols, 2 * rows);
 let side = if fits % 2 == 0 { dec(fits) } else { fits }
 let last = side * side;
 tty::write("\e[?25l\e[2J");
-let painter = spawn paint(map::new(), #(cols, div(cols, 2), div(2 * rows, 2), inc(rows)), 0);
+let painter = fork paint(map::new(), #(cols, div(cols, 2), div(2 * rows, 2), inc(rows)), 0);
 send(painter, :caught(1, 1));
-count_up(spawn end_of_chain(painter), 2, last, math::max(1, div(last, 2000)));
-match read(painter) {
+count_up(fork end_of_chain(painter), 2, last, math::max(1, div(last, 2000)));
+match join(painter) {
     :ok([primes, total]) => {
         tty::write("\e[", inc(rows), ";1H\e[0m\e[K\e[?25h",
                    "1 to ", last, ": ", primes, " primes, a process each in a chain that took in ", total, " numbers\n");

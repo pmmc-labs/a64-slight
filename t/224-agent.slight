@@ -55,7 +55,7 @@
 
 ; Each text asked at once, by a caller of its own, and what it heard.
 (defun ask-all (a texts)
-    (cadr (read (spawn (asking a texts)))))
+    (cadr (join (fork asking a texts))))
 
 (defun asking (a texts)
     (map (lambda (text) (agent/say a text)) texts)
@@ -96,6 +96,6 @@
         (pprint (ask-all a (list "after")))
         (pprint (ask-all (agent/new base "missing" "" ()) (list "hi")))
         (pprint (ask-all (agent/new "http://127.0.0.1:1" "fake" "" ()) (list "hi")))
-        (pprint (cadr (read (spawn (story)))))
+        (pprint (cadr (join (fork story))))
         (kill srv)
         :done))

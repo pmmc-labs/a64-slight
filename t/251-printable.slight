@@ -16,6 +16,7 @@
     (shown "C1: \u{9b}31m and \u{85}")
     (shown (bytes->str (list 97 155 98 255 32 226 130 65)))
     (shown "bidi: \u{202a}abc\u{202e}fed\u{2069} \u{2066}x\u{2069}")
+    (shown "marks: \u{200e}l\u{200f}r\u{61c}a, not \u{2010} or \u{60c}")
     ; what it gives is printable already
     (shown (tools/printable "\e[1m"))
     ; a command to run, asked about as it will run
@@ -24,4 +25,4 @@
     (pprint (tool/call (tools/run no) (list (list "command" "echo shown\e[8m; echo hidden\e[28m"))))
     (recv ((:asked what) (pprint what))))
 
-(read (spawn (top-level)))
+(join (fork top-level))

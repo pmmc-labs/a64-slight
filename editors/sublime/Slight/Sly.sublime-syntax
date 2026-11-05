@@ -15,7 +15,7 @@ variables:
   name: '{{ident}}(?:::{{ident}})*'
   # what a keyword is made of: anything but white space and what ends one
   kwchar: '[^\s()\[\]{},;"''`]'
-  reserved: '\b(?:fun|let|if|else|cond|case|match|recv|spawn|fork|connect|yield|true|false|self|parent)\b'
+  reserved: '\b(?:fun|let|if|else|cond|case|match|recv|fork|connect|yield|true|false|self|parent)\b'
   # the process builtins and the prelude's asking, which every program uses
   builtin: '\b(?:send|join|join::race|join::any|join::all|monitor|kill|raise|after|sleep|read|read::any|address|open|disconnect|ask|ask_within|reply|apply|pprint|timer::cancel|clock::us)\b'
 
@@ -270,7 +270,7 @@ contexts:
       scope: keyword.control.conditional.sly
     - match: '\brecv\b'
       scope: keyword.control.receive.sly
-    - match: '\b(?:spawn|fork|connect|yield)\b'
+    - match: '\b(?:fork|connect|yield)\b'
       scope: keyword.control.process.sly
     - match: '\blet\b'
       scope: keyword.declaration.variable.sly

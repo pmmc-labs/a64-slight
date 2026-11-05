@@ -54,8 +54,8 @@ instants = [0, -1, 951782400000000, 1709210096789012, -62135596800000000,
 for us in instants:
     print(f'({q(iso(us))} {q(http(us))})')
 y, t = parts(1709210096789012)
-print(f'((year {y}) (month {t.month}) (day {t.day}) (hour {t.hour}) (minute {t.minute}) (second {t.second}) '
-      f'(us {t.microsecond}) (weekday {t.isoweekday()}))')
+print(f'((:year {y}) (:month {t.month}) (:day {t.day}) (:hour {t.hour}) (:minute {t.minute}) (:second {t.second}) '
+      f'(:us {t.microsecond}) (:weekday {t.isoweekday()}))')
 print('(' + ' '.join('#true' for _ in instants) + ')')
 # 2025, month 14, day 32: February 2026, 32 days in: 2026-03-04.
 print(q(iso(us_of(dt.datetime(2026, 2, 1, tzinfo=dt.timezone.utc) + dt.timedelta(days=31)))))
@@ -81,5 +81,5 @@ print(parsed('2024-02-29t12:34z'))
 print(parsed('1969-12-31T23:59:59.9999999-00:30', '1969-12-31T23:59:59.999999-00:30'))
 for bad in ['2023-02-29', '2024-13-01', '2024-02-29T24:00:00Z', '2024-02-29T12:34:56',
             '2024-02-29T12:34:56.Z', '2024-02-29T12:34:56+0200', '24-02-29']:
-    print(f'(error (bad-time {q(bad)}))')
-print('done')
+    print(f'(:error (:bad-time {q(bad)}))')
+print(':done')

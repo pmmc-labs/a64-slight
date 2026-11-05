@@ -12,13 +12,14 @@ A file, a socket, a running command and the keyboard are all
 **devices**. A device is a pid the runtime serves, not compiled code. It
 talks in messages like any process. There are two ways to have one:
 
-- `(connect source arg expr)` starts an actor, as `spawn` does, to
-  evaluate `expr`, and connects it to the device. The actor gets
+- `(connect source arg f arg ...)` starts a process, as `fork` does,
+  to call `f`, and connects it to the device. The process gets
   `(:open f)` first, `f` being the device's pid, and then whatever the
-  device sends: a reader's lines as `(:line f s)`, then `(:eof f)`.
-- `(open source arg)`, from a task, opens a device the task owns, and
-  gives `(:ok f)` or `(:error reason)`. The task takes the device's
-  messages with `read`.
+  device sends, as messages for `recv`: a reader's lines as `(:line f
+  s)`, then `(:eof f)`.
+- `(open source arg)` opens a device the calling process owns, and
+  gives `(:ok f)` or `(:error reason)`. The process takes the device's
+  messages with `read`, which `recv` leaves for it.
 
 For files, `source` is `:fs/read`, `:fs/write` (which empties the file
 first) or `:fs/append`, and `arg` is the path. A file opened to write
@@ -69,7 +70,7 @@ carried on with half its data would hide it.
 ; Starts a store on the log at path, and gives its pid.
 (defun start (path)
     (let table (load path))
-    (connect :fs/append path (logged-open table)))
+    (connect :fs/append path logged-open table))
 
 (defun logged-open (table)
     (recv
@@ -124,11 +125,11 @@ boolean.
 
 <!-- output: ../code/tut-7-log.expected -->
 ```
-(put "apple" 3)
-(put "pear" 5)
-(incr "apple")
-(del "pear")
-((ok 4) (ok ("apple")))
+(:put "apple" 3)
+(:put "pear" 5)
+(:incr "apple")
+(:del "pear")
+((:ok 4) (:ok ("apple")))
 ```
 
 `@ARGV` is the program's arguments, a list of strings. The first
@@ -146,7 +147,7 @@ are in the file.
 
 ## Back to the supervisor
 
-Chapter 5's supervisor, with `start` in place of `spawn`:
+Chapter 5's supervisor, with `start` in place of `fork`:
 
 <!-- code: ../code/tut-7-supervised.slight -->
 ```lisp
@@ -168,19 +169,19 @@ Chapter 5's supervisor, with `start` in place of `spawn`:
 (let path (if (nil? @ARGV) "store.log" (car @ARGV)))
 (spew path ())
 
-(let sup (spawn (supervise path)))
+(let sup (fork supervise path))
 (call sup (list :put "apple" 3))
 (call sup (list :put "color" "red"))
-(pprint (join (fork (ask-within 1000 sup (list :do (list :incr "color"))))))
+(pprint (join (fork ask-within 1000 sup (list :do (list :incr "color")))))
 (call sup (list :get "apple"))
 ```
 
 <!-- output: ../code/tut-7-supervised.expected -->
 ```
-fault in #<pid 7>: not a number: "red" (+ at docs/guide/code/tut-store.slight:23:40)
-(restarting not-a-number)
-(error (timeout #<pid 4>))
-(ok 3)
+fault in #<pid 5>: not a number: "red" (+ at docs/guide/code/tut-store.slight:23:40)
+(:restarting :not-a-number)
+(:error (:timeout #<pid 3>))
+(:ok 3)
 ```
 
 The same fault, the same restart, but this time `"apple"` is still 3.
@@ -195,9 +196,8 @@ and keeps only the fault's kind. It also matches only an error, so an
 `:exit` of any other shape would be passed on to the store, where it
 would be a dead letter.
 
-The pids are the runtime's, given out in order: `spew`'s task and its
-file are 2 and 3, the supervisor 4, `load`'s task and its file 5 and 6,
-and the store 7.
+The pids are the runtime's, given out in order: `spew`'s file is 2,
+the supervisor 3, `load`'s file 4, and the store 5.
 
 A log grows for ever. A real store would now and then write the whole
 table out (`(spew path (map sexp/print ...))`, as `put` commands) and

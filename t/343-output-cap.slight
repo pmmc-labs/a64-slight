@@ -1,0 +1,41 @@
+; Output waits off every heap till the other end takes it, so more of it
+; for a socket with 64 MB or more waiting, an other end that never
+; reads, fails the device (:too-big), and its owner ends, as so much in
+; fails a read (D270): here a megabyte at a time, 200 times, to a
+; connection the listener keeps and never hands on, so nothing reads it.
+; And a write whose text would be more than a heap can hold, a value
+; built by doubling 30 times, 20 GB as text, fails before it's all made.
+; Where it fails is shown by its kind alone, since the port is the
+; system's pick. Expected output worked out by hand.
+
+(defun holder (to)
+    (recv ((:open _ port) (send to port) (holding ()))))
+
+(defun holding (conns)
+    (recv ((:accept _ c) (holding (cons c conns)))))
+
+(defun flood (s n)
+    (recv ((:open c) (flooding c s n))))
+
+(defun flooding (c s n)
+    (if (== n 0)
+        :all-written
+        (do (send c (list :write s)) (flooding c s (- n 1)))))
+
+(defun double (x n) (if (== n 0) x (double (list x x) (- n 1))))
+
+(defun once (v)
+    (recv ((:open c) (send c (list :write v)) :written)))
+
+(defun kind (r)
+    (match r
+        ((:error (k _)) k)
+        (other          other)))
+
+(let to (address))
+(let l (connect :tcp/listen 0 holder to))
+(let at (str "127.0.0.1:" (read to)))
+(pprint (kind (join (connect :tcp at (lambda () (flood (str/repeat "x" 1000000) 200))))))
+(pprint (kind (join (connect :tcp at (lambda () (once (double "ab" 30)))))))
+(kill l)
+:done

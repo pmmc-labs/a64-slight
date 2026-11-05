@@ -15,7 +15,7 @@
 ; n frames down, then bottom, in the last one's place
 (defun down (n bottom) (if (== n 0) (bottom) (+ 1 (down (- n 1) bottom))))
 
-(defun fits? (n) (match (join (fork (down n (lambda () 0)))) ((:ok _) #true) (_ #false)))
+(defun fits? (n) (match (join (fork (lambda () (down n (lambda () 0))))) ((:ok _) #true) (_ #false)))
 
 (defun most (lo hi)
     (cond
@@ -25,6 +25,6 @@
             (if (fits? mid) (most mid hi) (most lo mid)))))
 
 (let d (most 1 10000000))
-(pprint (match (join (fork (down (- d 100) (lambda () (connect :keypress (listener)) (spin 100000)))))
+(pprint (match (join (fork (lambda () (down (- d 100) (lambda () (connect :keypress listener) (spin 100000))))))
             ((:ok n) (list :ok (> n 0)))
             (other   other)))

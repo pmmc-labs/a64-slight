@@ -38,8 +38,8 @@ The file it reads, `data/events.ndjson`, is a JSON value a line:
 
 <!-- output: ../code/howto-json.expected -->
 ```
-(ok (object ("a" (1 2.5)) ("b" null)))
-(error (bad-json 3))
+(:ok (:object ("a" (1 2.5)) ("b" :null)))
+(:error (:bad-json 3))
 {"total_ms":555,"users":["ann","bob","ann"]}
 555
 ```
@@ -57,8 +57,8 @@ is an association list after its tag, so `lookup` reads a field.
 each message is then `(:json f value)`, one top-level value at a time.
 Whitespace between values doesn't matter, so NDJSON and values one
 after another both work. Bad JSON closes the file after the values
-before it: a task's next `read` gives `(:error f reason)`, and an actor
-that connected ends with `(:error (:bad-json path))`. To go through one
+before it: the next `read` of one opened gives `(:error f reason)`,
+and a process connected to one ends with `(:error (:bad-json path))`. To go through one
 huge array an element at a time, use `:json/items`.
 
 **Writing:** `(json/print v)` gives compact JSON on one line, so it's

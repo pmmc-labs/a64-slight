@@ -14,11 +14,11 @@
             (pprint (timer/cancel a))
             (pprint (timer/cancel 99))
             (pprint (timer/cancel 0))
-            (pprint (join (fork (timer/cancel c))))
+            (pprint (join (fork (lambda () (timer/cancel c)))))
             (sleep 5)
             (let d (after 40 $$ :d))
             (pprint d)
-            (pprint (join (fork (timer/cancel :x))))
+            (pprint (join (fork (lambda () (timer/cancel :x)))))
             (timer/cancel d)
             (never))))
 
@@ -35,4 +35,4 @@
     (pprint (timer/cancel b))
     (after-a a c))
 
-(read (spawn (top-level)))
+(join (fork top-level))

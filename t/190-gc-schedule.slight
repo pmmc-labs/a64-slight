@@ -16,8 +16,8 @@
         (#true       (str big big) (tty/write "b") (b-loop (+ i 1) big))))
 
 (let big (str/repeat "x" 32768))
-(let a (fork (a-loop 0)))
-(let b (fork (b-loop 0 big)))
+(let a (fork a-loop 0))
+(let b (fork b-loop 0 big))
 (join a)
 (let done (join b))
 (tty/write "\n")

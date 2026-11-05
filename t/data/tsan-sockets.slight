@@ -1,0 +1,44 @@
+; For t/tsan.sh: sockets on two islands at once, on the real clock, each
+; island with a process busy beside them, so that each island's events()
+; looks at its sockets every 10 ms as that process is preempted. When it
+; last looked was one variable for every island, which each wrote (L9).
+; On each of islands 1 and 2, a listener and a connection to it, which
+; trade a line back and forth n times, while the actor that started them
+; spins.
+
+(defun spin (n)
+    (if (== n 0) :spun (spin (- n 1))))
+
+(defun echo ()
+    (recv
+        ((:open c)   (echo))
+        ((:line c s) (send c (list :write s \n)) (echo))
+        ((:eof c)    (disconnect c))))
+
+(defun talker (to n)
+    (recv
+        ((:open c)
+            (send c (list :write "hi" \n))
+            (talker to n))
+        ((:line c s)
+            (cond
+                ((== n 0) (disconnect c) (send to :talked))
+                (#true    (send c (list :write s \n)) (talker to (- n 1)))))))
+
+(defun listener (to n)
+    (recv
+        ((:open l port)
+            (connect :tcp (str "127.0.0.1:" port) talker to n)
+            (listener to n))
+        ((:accept l c)
+            (connect c echo)
+            (disconnect l))))
+
+(defun island-work (to n)
+    (connect :tcp/listen 0 listener to n)
+    (send to (spin 20000000)))
+
+(let me (address))
+(fork/on 1 island-work me 2000)
+(fork/on 2 island-work me 2000)
+(pprint (length (map (lambda (_) (read me)) (range 0 4))))

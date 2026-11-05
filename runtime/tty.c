@@ -139,7 +139,7 @@ size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key)) {
     // (key mods...), on the C stack: emit copies it
     _Alignas(16) uint64_t   text[2];    // a string box: the header, then up to 7 bytes and a NUL
     _Alignas(16) rt_value_t cells[8];
-    rt_value_t key = rt_symbol(RT_SYM_KEYS + (uint64_t)k.name);
+    rt_value_t key = rt_keyword(RT_SYM_KEYS + (uint64_t)k.name);
     if (k.len) {
         text[0] = rt_string_header((const char *)k.text, k.len);
         memcpy(&text[1], k.text, k.len);
@@ -147,9 +147,9 @@ size_t rt_key(const unsigned char *in, size_t n, void (*emit)(rt_value_t key)) {
         key = (rt_value_t)text | RT_TAG_BOXED;
     }
     rt_value_t list = RT_NIL;
-    if (k.shift) list = rt_cons_at(cells + 6, rt_symbol(RT_SYM_KEYS + RT_KEY_SHIFT), list);
-    if (k.alt)   list = rt_cons_at(cells + 4, rt_symbol(RT_SYM_KEYS + RT_KEY_ALT), list);
-    if (k.ctrl)  list = rt_cons_at(cells + 2, rt_symbol(RT_SYM_KEYS + RT_KEY_CTRL), list);
+    if (k.shift) list = rt_cons_at(cells + 6, rt_keyword(RT_SYM_KEYS + RT_KEY_SHIFT), list);
+    if (k.alt)   list = rt_cons_at(cells + 4, rt_keyword(RT_SYM_KEYS + RT_KEY_ALT), list);
+    if (k.ctrl)  list = rt_cons_at(cells + 2, rt_keyword(RT_SYM_KEYS + RT_KEY_CTRL), list);
     emit(rt_cons_at(cells, key, list));
     return used;
 }

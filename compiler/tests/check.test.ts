@@ -12,8 +12,8 @@ import { read } from '../src/reader.ts';
 import { list, show, toArray, type Sexp } from '../src/sexp.ts';
 import { readSly } from '../src/sly.ts';
 import {
-    ANY, BOOL, INT, NEVER, NIL_T, NUM, PID, STR, SYM,
-    actorOf, fits, lit, listOf, meet, members, overlaps, readType, shape, showType, tagged, taskOf, tupleOf, union,
+    ANY, BOOL, INT, KEYWORD, NEVER, NIL_T, NUM, PID, STR, SYM, TRUE_T,
+    fits, lit, listOf, meet, members, overlaps, pidOf, readType, shape, showType, tagged, tupleOf, union,
 } from '../src/types.ts';
 
 const kept = (forms: Sexp): Sexp => list(...(toArray(forms) ?? []).map((f) => expand(f, true)));
@@ -38,7 +38,8 @@ const ty = (src: string): ReturnType<typeof readType> => readType(read(src, 't')
 
 test('unions flatten, drop what another member holds, and keep one of each', () => {
     assert.equal(showType(union(INT, union(STR, INT)), false), '(or int str)');
-    assert.equal(showType(union(lit('ok'), SYM), false), 'sym');
+    assert.equal(showType(union(lit('ok'), KEYWORD), false), 'keyword');
+    assert.equal(showType(union(lit('ok'), SYM), false), '(or :ok sym)');
     assert.equal(showType(union(NIL_T, listOf(INT)), false), '(list int)');
     assert.equal(showType(union(INT, ANY), false), 'any');
     assert.equal(showType(union(INT, NEVER), false), 'int');
@@ -54,8 +55,8 @@ test('meet is what two types have in common', () => {
     assert.equal(meet(tagged('ok', INT), tagged('error', ANY), null).k, 'never');
     assert.equal(meet(shape([INT, INT]), shape([INT]), null).k, 'never');
     assert.equal(meet(tupleOf([INT]), tupleOf([INT, INT]), null).k, 'never');
-    assert.equal(meet(taskOf(INT), actorOf(ANY), null).k, 'never');
-    assert.equal(meet(PID, actorOf(ANY), null).k, 'actor');
+    assert.equal(meet(pidOf(INT), pidOf(STR), null).k, 'pid');      // any two processes can be the same pid
+    assert.equal(showType(meet(PID, pidOf(INT), null), false), '(pid int)');
     assert.ok(overlaps(ANY, INT, null) && overlaps(INT, ANY, null));
     assert.equal(showType(meet(ty('array'), ty('(array int)'), null), false), '(array int)');
     assert.equal(meet(ty('(array int)'), ty('(array float)'), null).k, 'never');      // an array is of one kind
@@ -65,11 +66,13 @@ test('meet is what two types have in common', () => {
 test('fits: every value of one is the other', () => {
     assert.ok(fits(INT, NUM, null));
     assert.ok(!fits(NUM, INT, null));
-    assert.ok(fits(shape([lit('ok'), INT]), listOf(union(SYM, INT)), null));
+    assert.ok(fits(shape([lit('ok'), INT]), listOf(union(KEYWORD, INT)), null));
+    assert.ok(!fits(lit('ok'), SYM, null));
+    assert.ok(!fits(TRUE_T, KEYWORD, null));
     assert.ok(fits(tagged('ok', INT), union(tagged('ok', ANY), tagged('error', ANY)), null));
     assert.ok(fits(shape([BOOL]), union(shape([lit('#true')]), shape([lit('#false')])), null));
-    assert.ok(fits(actorOf(ANY), actorOf(INT), null));     // takes more: stands in for one that takes less
-    assert.ok(!fits(actorOf(INT), actorOf(STR), null));
+    assert.ok(fits(pidOf(ANY), pidOf(INT), null));         // takes more: stands in for one that takes less
+    assert.ok(!fits(pidOf(INT), pidOf(STR), null));
     assert.ok(fits(INT, ANY, null) && fits(ANY, INT, null));
     assert.ok(fits(ty('(array float)'), ty('array'), null));
     assert.ok(!fits(ty('array'), ty('(array float)'), null));
@@ -83,7 +86,7 @@ test('members tell a union apart, a list as () or a cons', () => {
 test('types read from their s-expressions, and show in either syntax', () => {
     assert.equal(showType(ty('(or int (:ok str) (shape int & (list str)))'), false), '(or int (:ok str) (shape int & (list str)))');
     assert.equal(showType(ty('(or int (:ok str) (shape int & (list str)))'), true), 'int | :ok(str) | [int, ...list<str>]');
-    assert.equal(showType(ty('(fun (int (tuple str int)) (task #true))'), true), 'fun(int, #(str, int)) -> task<true>');
+    assert.equal(showType(ty('(fun (int (tuple str int)) (pid #true))'), true), 'fun(int, #(str, int)) -> pid<true>');
     assert.equal(showType(ty('(:write & (list str))'), true), ':write(...list<str>)');
     assert.equal(showType(ty('()'), false), '()');
     assert.equal(showType(ty('(array float)'), true), 'array<float>');
@@ -187,7 +190,7 @@ const COUNTER = `(defun counter (n)
         ((:inc)      (counter (+ n 1)))
         ((:get from) (send from n) (counter n))
         (:stop       n)))
-(let c (spawn (counter 0)))
+(let c (fork counter 0))
 `;
 
 test("a message no recv of the actor takes is a dead letter", () => {
@@ -201,43 +204,41 @@ test("a message no recv of the actor takes is a dead letter", () => {
 test('what an actor takes is what every function it can go on to takes', () => {
     clean(`(defun a () (recv (:x (b))))
 (defun b () (recv (:y (a))))
-(let p (spawn (a)))
+(let p (fork a))
 (send p :y)`);
     clean(`(defun any-msg () (recv (m (any-msg))))
-(send (spawn (any-msg)) 42)`);
+(send (fork any-msg) 42)`);
 });
 
-test('tasks and actors are told apart', () => {
-    assert.deepEqual(warnings(`${COUNTER}(join c)`),
-        ["7:7 join of an actor, which can't be joined: it faults :not-a-task (read it, from a task)"]);
-    // read never comes to be called, since address faults first
-    assert.deepEqual(warnings('(defun w () (recv (m (read (address)))))'),
-        ["1:28 address in an actor, which is a task's: it faults :not-a-task"]);
-    assert.deepEqual(warnings('(defun w (a) (recv (m (read a))))'),
-        ['1:23 read in an actor, which takes what comes to it with recv: it faults :not-a-task']);
-    assert.deepEqual(warnings('(monitor (fork 1))'), ["1:1 monitor in a task, which can't be sent the notice: it faults :not-an-actor"]);
-    // a task that has ended takes it, as any ended process does
-    clean('(send (fork 1) :hi)');
-    assert.deepEqual(warnings('(send (fork 1) :hi)', { strict: true }),
-        ["1:7 send to a task, which can't be sent to unless it has ended: it would fault :not-an-actor"]);
+test('one kind of process: joined, sent to, monitored, asked (D277)', () => {
+    clean(`${COUNTER}(join c)`);
+    clean('(defun w () (recv (m (read (address)))))');
+    clean('(monitor (fork (lambda () 1)))');
+    clean('(send (fork (lambda () 1)) :hi)', { strict: true });
+    clean('(defun ask-it (c) (let to (address)) (monitor c to) (send c (list :get to)) (read to))');
+    // a process is no source for read: its end is a message
+    assert.deepEqual(warnings(`${COUNTER}(read c)`),
+        ['7:7 read of a process, which isn\'t a source: it faults :not-a-pid (join it, or monitor it to an address)']);
 });
 
 test("a task's value comes out of join and read with its type", () => {
-    assert.deepEqual(warnings('(match (join (fork 5)) ((:ok v) (str/len v)) (_ 0))'),
-        ["1:42 str/len's argument is int, not str: it faults :not-a-string"]);
+    assert.deepEqual(warnings('(match (join (fork (lambda () 5))) ((:ok v) (str/len v)) (_ 0))'),
+        ["1:54 str/len's argument is int, not str: it faults :not-a-string"]);
+    assert.deepEqual(warnings('(defun five () 5) (match (join (fork five)) ((:ok v) (str/len v)) (_ 0))'),
+        ["1:63 str/len's argument is int, not str: it faults :not-a-string"]);
 });
 
 test('the keyboard sends keys', () => {
     assert.deepEqual(warnings(`(defun k () (recv (:quit ())))
-(connect :keypress (k))`), ['2:20 the keyboard sends (shape (or str sym) & (list sym)), and k takes :quit: every key would be a dead letter']);
+(connect :keypress k)`), ['2:20 the keyboard sends (shape (or str keyword) & (list keyword)), and k takes :quit: every key would be a dead letter']);
     clean(`(defun k () (recv (("q" & _) ()) (_ (k))))
-(connect :keypress (k))`);
+(connect :keypress k)`);
 });
 
 test("a process joined or read where it's started can't have ended for anyone yet", () => {
-    clean('(match (join (fork 5)) ((:ok v) v) ((:error e) 0))', { strict: true });
-    assert.deepEqual(warnings('(let t (fork 5)) (match (join t) ((:ok v) v) ((:error e) 0))', { strict: true }),
-        ['1:18 this match has no arm for :ended: it would fault :no-match']);
+    clean('(match (join (fork (lambda () 5))) ((:ok v) v) ((:error e) 0))', { strict: true });
+    assert.deepEqual(warnings('(let t (fork (lambda () 5))) (match (join t) ((:ok v) v) ((:error e) 0))', { strict: true }),
+        ['1:30 this match has no arm for :ended: it would fault :no-match']);
 });
 
 test('a function that waits runs in an actor, so it has a parent', () => {
@@ -288,7 +289,7 @@ test('a recv type says what an actor takes', () => {
         ((:add k) (acc (+ n k)))
         (:reset   (acc 0))
         (:stop    n)))
-(let a (spawn (acc 0)))
+(let a (fork acc 0))
 (send a (list :add "1"))`), [
         '6:10 this arm takes nothing this actor is sent, which is Msg',
         '9:9 this actor takes Msg, and this is (:add str): it would be a dead letter',
@@ -339,7 +340,7 @@ test('warnings in a .sly file speak its syntax', () => {
         :stop => n,
     }
 }
-let c = spawn counter(0);
+let c = fork counter(0);
 send(c, :inc);
 str::len(5)`, { file: 't.sly' }), [
         '8:9 this actor takes :inc() | :stop, and this is :inc: it would be a dead letter',

@@ -1,0 +1,41 @@
+; args: build/t/346-fifo-errors
+; A FIFO that nothing has open to read can't be opened to write: it fails
+; at once, (:enxio path), where before D272 it waited for a reader, and
+; the island with it; from a task, and from connect. And output to a
+; FIFO waits off every heap, as a socket's does, so more of it while 64
+; MB waits fails the device :too-big (D270): here a megabyte at a time,
+; 100 times, with a reader that's open but never read. And a write to a
+; FIFO whose reader has gone fails it :epipe. Expected output worked out
+; by hand.
+
+(@include :exec)
+
+(let fifo (car @ARGV))
+
+(defun flood (s n)
+    (recv ((:open f) (flooding f s n))))
+
+(defun flooding (f s n)
+    (if (== n 0)
+        :all-written
+        (do (send f (list :write s)) (flooding f s (- n 1)))))
+
+(defun kind (r)
+    (match r
+        ((:error (k _)) k)
+        (other          other)))
+
+(pprint (exec/run (list "sh" "-c" "rm -f $1 && mkfifo $1" "sh" fifo)))
+(pprint (open :fs/write fifo))
+(pprint (open :fs/append fifo))
+(pprint (join (connect :fs/write fifo (lambda () (recv ((:open f) :opened))))))
+
+(match (open :fs/read fifo)
+    ((:ok r)
+        (pprint (kind (join (connect :fs/write fifo (lambda () (flood (str/repeat "x" 1000000) 100))))))
+        (match (open :fs/write fifo)
+            ((:ok w)
+                (disconnect r)
+                (send w (list :write "to no one"))
+                (match (read w) ((:error _ reason) (pprint reason)))))))
+:done

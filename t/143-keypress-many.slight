@@ -11,9 +11,9 @@
                 ("q" name)
                 (_   (listener name))))))
 
-(fork (do (sleep 1) (pprint :slept)))
-(let one (connect :keypress (listener :one)))
-(let two (connect :keypress (listener :two)))
+(fork (lambda () (do (sleep 1) (pprint :slept))))
+(let one (connect :keypress listener :one))
+(let two (connect :keypress listener :two))
 ; Both end on the same key; the second's end is kept for the root, which
 ; started it, till it reads it (D245).
-(pprint (map read (list one two)))
+(pprint (map join (list one two)))

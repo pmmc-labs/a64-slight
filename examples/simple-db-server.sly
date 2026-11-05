@@ -40,7 +40,7 @@ fun db_server(data) {
 
 fun db(pid, cmd, key, value) { ask(pid, [cmd, key, value]) }
 
-let server = spawn db_server([]);
+let server = fork db_server([]);
 
 pprint(db(server, :update, :x, 10));
 pprint(db(server, :update, :y, 20));

@@ -15,5 +15,5 @@
 (pprint (from-b))
 (pprint (map inc (list 1 2)))
 (pprint (slurp "t/data/lines.txt"))
-(pprint (join (fork (d-fault 5))))
+(pprint (join (fork d-fault 5)))
 :main-end

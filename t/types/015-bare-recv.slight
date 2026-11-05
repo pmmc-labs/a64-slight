@@ -1,0 +1,26 @@
+; check: strict
+; A send, then a bare (recv) for the reply, takes the next message,
+; whatever it is: right only while nothing else sends to this process,
+; so --strict says so (D277). A send to $$ is this process's own, and a
+; recv with a pattern says what it wants: neither is a word.
+(defun echo () (recv ((:ping from) (send from :pong) (echo))))
+
+(defun asks (p)
+    (send p (list :ping $$))
+    (recv))
+
+(defun asks-let (p)
+    (send p (list :ping $$))
+    (let r (recv))
+    r)
+
+(defun notes-self ()
+    (send $$ :note)
+    (recv))
+
+(defun asks-matching (p)
+    (send p (list :ping $$))
+    (recv (:pong :pong)))
+
+(let p (fork echo))
+(list (asks p) (asks-let p) (notes-self) (asks-matching p))

@@ -12,7 +12,7 @@
 ; to send the file after a message: ((message how) ...), how being one
 ; (:read how), or a list of them, sent in order.
 (defun read-all (path table)
-    (cadr (read (connect :fs/read path (reading table ())))))
+    (cadr (join (connect :fs/read path reading table ()))))
 
 (defun reading (table seen)
     (recv
@@ -34,25 +34,25 @@
 ; the first message's way: lines, as before; or chunks, here one, as the
 ; file is less than 64 KB
 (pprint (read-all lines ()))
-(pprint (read-all lines '(((open) chunks))))
+(pprint (read-all lines '(((:open) :chunks))))
 
 ; a count is for one message, and then it's lines again, from where the
 ; count ended
-(pprint (read-all lines '(((open) 6) ((line "  second, indented") 5))))
+(pprint (read-all lines '(((:open) 6) ((:line "  second, indented") 5))))
 
 ; a count past the end gives what there is, then (:eof f); and a count of
 ; 0 gives ""
-(pprint (read-all lines '(((line "first") 100))))
-(pprint (read-all lines '(((open) 0))))
+(pprint (read-all lines '(((:line "first") 100))))
+(pprint (read-all lines '(((:open) 0))))
 
 ; a count comes first, whichever was sent first; and a second count
 ; before the first is used replaces it
-(pprint (read-all lines '(((open) (3 chunks)))))
-(pprint (read-all lines '(((open) (chunks 3)))))
-(pprint (read-all lines '(((open) (3 6)))))
+(pprint (read-all lines '(((:open) (3 :chunks)))))
+(pprint (read-all lines '(((:open) (:chunks 3)))))
+(pprint (read-all lines '(((:open) (3 6)))))
 
 ; from chunks back to lines
-(pprint (read-all lines '(((open) (chunks 9)) ((chunk "first\n  s") lines))))
+(pprint (read-all lines '(((:open) (:chunks 9)) ((:chunk "first\n  s") :lines))))
 
 ; a reader takes (:read how) with a how it knows, and nothing else; a
 ; writer doesn't take it
@@ -62,5 +62,5 @@
     (recv
         ((:open f) (map (lambda (m) (send f m)) msgs) (disconnect f) :poked)))
 
-(pprint (read (connect :fs/read lines (poke (list (list :read) (list :read 1 2) :read)))))
-(pprint (read (connect :fs/write "build/t/170-read-chunks.txt" (poke (list (list :read :lines))))))
+(pprint (join (connect :fs/read lines poke (list (list :read) (list :read 1 2) :read))))
+(pprint (join (connect :fs/write "build/t/170-read-chunks.txt" poke (list (list :read :lines)))))

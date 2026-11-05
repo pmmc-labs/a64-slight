@@ -16,16 +16,16 @@
 
 ; The top level is a task, which can't wait (D243), so an actor does its work.
 (defun top-level ()
-    (let a (fork :quick))
+    (let a (fork (lambda () :quick)))
     (yield ())
     (monitor a)
-    (let b (spawn (server)))
+    (let b (fork server))
     (monitor b)
     (monitor b)
-    (let c (fork (car 5)))
+    (let c (fork (lambda () (car 5))))
     (monitor c)
     (kill b)
     (watcher 4))
 
-(read (spawn (top-level)))
-; warns: 25:23
+(join (fork top-level))
+; warns: 25:34

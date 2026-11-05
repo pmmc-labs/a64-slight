@@ -20,7 +20,7 @@
         ((:done n) (send to (list name n)))))
 
 (let to (address))
-(let a (spawn (player :a to)))
-(let b (spawn (player :b to)))
+(let a (fork player :a to))
+(let b (fork player :b to))
 (send a (list :serve b))
 (list (read to) (read to))

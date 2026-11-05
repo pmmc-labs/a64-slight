@@ -13,7 +13,8 @@ export const MAX_ARGS = 8;
 export const TOP_PARAMS: readonly string[] = ['@ARGV', '%ENV'];
 
 export const intWord    = (n: bigint): bigint => n << 1n;
-export const symbolWord = (id: number): bigint => (BigInt(id) << 3n) | 5n;
+// A symbol's word, or a keyword's with the kind bit (D287): rt.h's RT_SYMBOL_SHIFT and RT_KEYWORD_BIT.
+export const symbolWord = (id: number, keyword = false): bigint => (BigInt(id) << 4n) | (keyword ? 8n : 0n) | 5n;
 
 // A box's tag; a tuple's header word, for n elements, which a tuple
 // pattern compares with (D178); and where element i is, from a tagged
@@ -31,12 +32,19 @@ export const FLOAT_VALUE  = 8 - TAG_BOXED;
 // The symbols every program has, in id order (RT_FALSE is symbol 0, RT_TRUE symbol 1).
 export const RESERVED_SYMBOLS: readonly string[] = ['#false', '#true'];
 
+// The special forms, and those the expander turns into others (expand.ts),
+// which it leaves none of: neither kind can be a name.
+export const SPECIAL_FORMS: readonly string[] = [
+    'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'spawn', 'spawn/on', 'connect', 'recv', 'yield',
+    'if', 'when', 'case', 'and', 'or', 'match', '@include', 'deftype', 'sig', 'the',
+];
+
 // The fault kinds, in RT_FAULT_ order (from 1).
 export const FAULT_KINDS: readonly string[] = [
     'not-an-int', 'overflow', 'not-a-bool', 'no-clause', 'stack', 'not-a-cons', 'not-a-list', 'heap',
     'not-a-string', 'not-a-symbol', 'out-of-range', 'not-a-number', 'div-by-zero', 'not-a-function',
     'arity', 'not-a-pid', 'join-self', 'not-a-device', 'not-json', 'not-sexp', 'no-match', 'not-a-tuple',
-    'not-an-actor', 'not-a-task', 'not-an-array',
+    'not-an-array',
 ];
 
 // The names of keys from :keypress, then the modifiers, in RT_KEY_ order.
@@ -57,14 +65,14 @@ export const ERRNO_NAMES: readonly string[] = [
     'enoent', 'eacces', 'eperm', 'eexist', 'eisdir', 'enotdir', 'enametoolong', 'eloop', 'erofs', 'enospc',
     'efbig', 'emfile', 'enfile', 'eio', 'econnrefused', 'econnreset', 'epipe', 'etimedout', 'eaddrinuse',
     'eaddrnotavail', 'ehostunreach', 'enetunreach', 'enotfound', 'too-big', 'bad-json', 'bad-sexp', 'io-error',
-    'enotempty', 'exdev', 'ebusy',
+    'enotempty', 'exdev', 'ebusy', 'enxio',
 ];
 
 // What JSON's values need beyond #true and #false, in RT_JSON_ order.
 export const JSON_WORDS: readonly string[] = ['null', 'object'];
 
 // What the s-expression reader makes, in RT_SEXP_ order.
-export const SEXP_WORDS: readonly string[] = ['symbol', 'quote'];
+export const SEXP_WORDS: readonly string[] = ['symbol', 'quote', 'keyword'];
 
 // What :system is asked and answers with, in RT_SYS_ order (D171).
 export const SYSTEM_WORDS: readonly string[] = [
@@ -82,8 +90,9 @@ export const EXEC_WORDS: readonly string[] = [
 // Who's at the other end of a Unix connection, in RT_PEER_ order (D235).
 export const PEER_WORDS: readonly string[] = ['uid', 'gid'];
 
-// What kind a process is, in :system's info (D243), in RT_KIND_ order.
-export const KIND_WORDS: readonly string[] = ['kind', 'task', 'actor'];
+// :kind, in fs/stat's info (D254), in RT_KIND_ order; :system's kind went
+// with the two kinds of process (D277).
+export const KIND_WORDS: readonly string[] = ['kind'];
 
 // What open opens for a task (D243), in RT_SOURCE_ order.
 export const SOURCE_WORDS: readonly string[] = ['fs/read', 'fs/write', 'fs/append', 'tcp', 'unix', 'exec', 'system'];

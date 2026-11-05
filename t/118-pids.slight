@@ -1,7 +1,7 @@
 (pprint $$)
 (pprint (pid? $$))
 (pprint (pid? 1))
-(let child (fork (pprint (list :child $$ :parent ^$$))))
+(let child (fork (lambda () (pprint (list :child $$ :parent ^$$)))))
 (pprint child)
 (pprint (eq? child child))
 (pprint (eq? child $$))

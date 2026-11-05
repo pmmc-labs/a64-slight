@@ -39,11 +39,10 @@
 // prelude keeps using the prelude's (D80).
 
 import { CompileError } from './errors.ts';
-import { float, form, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
-import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
-import { isReceiveBody, stateFunctions } from './classify.ts';
-import { BUILTIN, lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
-import { splitProgram } from './split.ts';
+import { isKw, kwName, builtinOf, builtinSym, float, form, own, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SPECIAL_FORMS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
+import { lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
+import { checkBindable, checkDefunShape, checkParams } from './expand.ts';
 import { eraseTypes } from './check.ts';
 import { displayName, PRELUDE_SUFFIX } from './modules.ts';
 import { AARCH64 } from './aarch64.ts';
@@ -55,23 +54,19 @@ type Env = { readonly name: string; readonly slot: number; readonly next: Env } 
 
 // The top-level functions: an association list from name to label and arity.
 type Module = 'user' | 'prelude';
-// state: it can reach a recv (classify.ts), so the recv rule applies to it.
-type Fn  = { readonly name: string; readonly label: string; readonly arity: number; readonly module: Module; readonly state: boolean };
+type Fn  = { readonly name: string; readonly label: string; readonly arity: number; readonly module: Module };
 type Fns = { readonly fn: Fn; readonly next: Fns } | null;
 
 // Where an expression is being compiled: the functions and locals it can
 // see, the first free frame slot (anything below si belongs to someone),
-// whether it's in tail position, whether it's in a lambda's body, and, for
-// the recv that is the whole body of a receive function, that function's
-// entry and number of parameters (to start it again when a message comes).
+// whether it's in tail position, and the entry of the function it's in
+// (what a recv says it waits in).
 type Cx = {
     readonly fns: Fns;
     readonly env: Env;
     readonly si: number;
     readonly tail: boolean;
-    readonly inLambda: boolean;
-    readonly task: boolean;          // a fork's body, or the top level: it can't wait (D243)
-    readonly receive: { readonly entry: string; readonly params: number } | null;
+    readonly entry: string;
     readonly noFloatTrees?: true;    // compiling a float expression's way back (D261)
 };
 
@@ -100,13 +95,6 @@ type St = {
     readonly functions: Code;               // every function's entry and name, for the runtime (D171)
 };
 
-// The special forms, and those the expander turns into others (expand.ts),
-// which it leaves none of: neither kind can be a name.
-const SPECIAL_FORMS: readonly string[] = [
-    'defun', 'lambda', 'let', 'cond', 'do', 'quote', 'fork', 'spawn', 'spawn/on', 'connect', 'recv', 'yield',
-    'if', 'when', 'case', 'and', 'or', 'match', '@include', 'deftype', 'sig', 'the',
-];
-
 // --- the program ------------------------------------------------------------
 
 export function compileProgram(typed: Sexp, typedPrelude: Sexp = NIL, t: Target = AARCH64): string {
@@ -118,12 +106,11 @@ export function compileProgram(typed: Sexp, typedPrelude: Sexp = NIL, t: Target 
         if (!isForm(f, 'defun')) throw new CompileError(`the prelude can only define functions, not ${show(f)}`, posOf(f));
     });
     const preludeDefuns = preludeForms.map((f) => checkDefun(f as Pair));
-    const preludeFns    = preludeDefuns.reduce<Fns>((fns, d) => declare(fns, d, 'prelude', false), null);
+    const preludeFns    = preludeDefuns.reduce<Fns>((fns, d) => declare(fns, d, 'prelude'), null);
 
-    const all    = toArray(splitProgram(forms))!;     // every recv the whole body of a receive function (D167)
+    const all    = toArray(forms)!;
     const defuns = all.filter((f) => isForm(f, 'defun')).map((f) => checkDefun(f as Pair));
-    const state  = stateFunctions(defuns.map((d) => ({ name: d.name.name, params: d.params.map((p) => p.name), body: d.body })));
-    const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user', state.includes(d.name.name)), preludeFns);
+    const fns    = defuns.reduce<Fns>((acc, d) => declare(acc, d, 'user'), preludeFns);
     const top    = all.filter((f) => !isForm(f, 'defun'));
     const empty: St = { t, labels: 0, slots: 0, calls: false, symbols: null, stubs: [], data: [], consts: [], lambdas: [], closures: [], functions: [] };
     const st0 = [...RESERVED_SYMBOLS, ...RUNTIME_SYMBOLS].reduce((st, name) => symbolId(st, name)[1], empty);
@@ -137,7 +124,7 @@ export function compileProgram(typed: Sexp, typedPrelude: Sexp = NIL, t: Target 
     const [code, st2]        = compileAll(defuns, fns, 'user', st1);
     const params: Sym[] = TOP_PARAMS.map((name) => ({ t: 'sym', name, pos: null }));
     const main: Defun   = { name: { t: 'sym', name: 'the top level', pos: null }, params, body: list(...top, ...(top.length === 0 ? [NIL] : [])), pos: null };
-    const [mainCode, st3] = compileFunction('slight_main', main, [], fns, 'task', st2);
+    const [mainCode, st3] = compileFunction('slight_main', main, [], fns, 'process', st2);
 
     return flatten([
         '// generated by slightc -- do not edit',
@@ -199,42 +186,22 @@ function symbolTable(symbols: Syms): Code {
 
 type Defun = { readonly name: Sym; readonly params: readonly Sym[]; readonly body: Sexp; readonly pos: Pos | null };
 
+// A defun's shape, as the expander checked it (it checks again here, for
+// what's compiled straight from the reader), and that it doesn't define a
+// builtin, which only the code generator knows.
 function checkDefun(x: Pair): Defun {
-    const items = toArray(x)!;
-    const [, name, params] = items;
-    if (items.length < 4 || name === undefined || params === undefined) {
-        throw new CompileError('defun is (defun name (params...) body...)', x.pos);
-    }
-    if (name.t !== 'sym') throw new CompileError(`defun needs a name, not ${show(name)}`, posOf(name) ?? x.pos);
-    checkBindable(name);
+    const { name, params, body } = checkDefunShape(x);
     if (isBuiltin(name.name)) throw new CompileError(`can't define ${name.name}: it's a builtin`, name.pos);
-    return { name, params: checkParams(name.name, params, x, name.pos), body: list(...items.slice(3)), pos: x.pos };
-}
-
-function checkParams(owner: string, params: Sexp, x: Pair, ownerPos: Pos | null): readonly Sym[] {
-    const ps = toArray(params);
-    if (ps === null) throw new CompileError(`${owner}'s parameters must be a list, not ${show(params)}`, posOf(params) ?? x.pos);
-    const syms = ps.map((p) => {
-        if (p.t !== 'sym') throw new CompileError(`a parameter must be a name, not ${show(p)}`, posOf(p) ?? x.pos);
-        checkBindable(p);
-        return p;
-    });
-    syms.forEach((p, i) => {
-        if (syms.findIndex((q) => q.name === p.name) !== i) throw new CompileError(`${p.name} is a parameter twice`, p.pos);
-    });
-    if (syms.length > MAX_ARGS) {
-        throw new CompileError(`${owner} has ${syms.length} parameters; the most is ${MAX_ARGS}`, ownerPos ?? x.pos);
-    }
-    return syms;
+    return { name, params, body, pos: x.pos };
 }
 
 // A program's functions are declared on top of the prelude's, so they
 // shadow them; only a second definition in the same module is an error.
-function declare(fns: Fns, d: Defun, module: Module, state: boolean): Fns {
+function declare(fns: Fns, d: Defun, module: Module): Fns {
     const existing = lookupFn(fns, d.name.name);
     if (existing !== null && existing.module === module) throw new CompileError(`${d.name.name} is already defined`, d.name.pos);
     const label = module === 'user' ? functionLabel(d.name.name) : `pf_${functionLabel(d.name.name).slice(3)}`;
-    return { fn: { name: d.name.name, label, arity: d.params.length, module, state }, next: fns };
+    return { fn: { name: d.name.name, label, arity: d.params.length, module }, next: fns };
 }
 
 function findFn(fns: Fns, name: string, module: Module): Fn | null {
@@ -250,18 +217,16 @@ function findFn(fns: Fns, name: string, module: Module): Fn | null {
 // its roots are the locals so far, and the frames below. A function that
 // calls another, not in tail position, can be one of those, so it zeroes
 // the rest of its slots first.
-// kind: only a defun can be a receive function, a lambda's body is held
-// to the recv rule (D11), and a task's (a fork's body, or the top level)
-// can't wait at all (D243). at: where the stack fault says it happened, which
-// a lambda or fork leaves out, since its name already says.
-type Kind = 'defun' | 'lambda' | 'task' | 'actor' | 'other';
+// kind: a defun, a lambda, a process's body (a fork's, a connect's, or the
+// top level) or a builtin's wrapper. at: where the stack fault says it
+// happened, which a lambda or fork leaves out, since its name already says.
+type Kind = 'defun' | 'lambda' | 'process' | 'other';
 
 function compileFunction(entry: string, d: Defun, free: readonly string[], fns: Fns, kind: Kind, st: St,
                          at: Pos | null = d.pos): [Code, St] {
     const locals = [...d.params.map((p) => p.name), ...free];
     const env = locals.reduce<Env>((e, name, i) => ({ name, slot: i, next: e }), null);
-    const receive = kind === 'defun' && isReceiveBody(d.body) ? { entry, params: d.params.length } : null;
-    const cx: Cx = { fns, env, si: locals.length, tail: true, inLambda: kind === 'lambda', task: kind === 'task', receive };
+    const cx: Cx = { fns, env, si: locals.length, tail: true, entry };
     const [body, st1] = compileBody(d.body, cx, { ...st, slots: locals.length, calls: false });
     const size = 16 * Math.ceil(st1.slots / 2);
     if (size > 4095) throw new CompileError(`${d.name.name} needs too many frame slots (${st1.slots})`, d.pos);
@@ -285,24 +250,10 @@ function compileFunction(entry: string, d: Defun, free: readonly string[], fns: 
 function compileCall(x: Pair, fn: Fn, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
     checkArity(x, fn.name, args, fn.arity);
     if (isPreludeNot(x, cx)) return compileCond(x, [list(args[0]!, sym('#false')), list(sym('#true'), sym('#true'))], cx, st);
-    if (fn.state && cx.inLambda) {
-        throw new CompileError(`a lambda can't call ${fn.name}, which waits for messages (it reaches a recv)`, x.pos);
-    }
-    if (fn.state && cx.task) throw new CompileError(taskWaits(fn.name), x.pos);
-    if (fn.state && !cx.tail) {
-        throw new CompileError(`${fn.name} waits for messages (it reaches a recv), so it can only be called in tail position`, x.pos);
-    }
     const [code, ops, st1] = callOperands(args, { ...cx, tail: false }, st);
     return [[code, st.t.call(fn.label, ops, cx.tail)], called(st1, cx)];
 }
 
-// A task (a fork's body, or the top level) that would wait: in a recv of
-// its own, which split.ts made a function named for it, or by calling a
-// function that waits.
-function taskWaits(name: string): string {
-    const what = name.includes(' (recv at ') ? 'this recv' : `${name}, which waits for messages (it reaches a recv),`;
-    return `a task (a fork's body, or the top level) can't wait for messages, and ${what} would: spawn an actor for it`;
-}
 
 // A call's arguments, as operands for the target's call: each simple one
 // as it is, read when the call is made; the others worked out in order,
@@ -386,14 +337,6 @@ function checkLet(form: Pair): [Sym, Sexp] {
     return [name, expr];
 }
 
-// Names that can't be bound or defined: #true, #false, $$, ^$$, @ARGV,
-// %ENV and the special forms.
-function checkBindable(name: Sym): void {
-    if (RESERVED_SYMBOLS.includes(name.name) || SPECIAL_FORMS.includes(name.name) || ['$$', '^$$', ...TOP_PARAMS].includes(name.name)) {
-        throw new CompileError(`can't bind ${name.name}`, name.pos);
-    }
-}
-
 function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
     switch (x.t) {
         case 'int':
@@ -425,13 +368,16 @@ function compileName(x: Sym, cx: Cx, st: St): [Code, St] {
     if (x.name === '^$$') return [st.t.loadProc('RT_PROC_PARENT'), st];
     if (x.name === '#true') return [st.t.loadConst('RT_TRUE'), st];
     if (x.name === '#false') return [st.t.loadConst('RT_FALSE'), st];
+    if (isKw(x)) {                                                  // a keyword is itself (D287)
+        const [w, st1] = symbolWordOf(st, x.name);
+        return [st.t.loadWord(w, x.name), st1];
+    }
     const si = lookup(cx.env, x.name);
     if (si !== null) return [st.t.loadSlot(si, x.name), st];
     if (TOP_PARAMS.includes(x.name)) throw new CompileError(`${x.name} is only seen at the top level: pass it to the functions that need it`, x.pos);
-    const constant = CONSTANTS[x.name];
+    const constant = own(CONSTANTS, x.name);
     if (constant !== undefined) return compileExpr(constant, cx, st);
     const fn = lookupFn(cx.fns, x.name);
-    if (fn !== null && fn.state) throw new CompileError(`${fn.name} waits for messages, so it can't be used as a value`, x.pos);
     if (fn !== null) return loadClosure(staticClosure(fn.label, fn.arity, displayName(fn.name), st));
     if (isBuiltin(x.name)) return loadClosure(builtinWrapper(x, st));
     throw new CompileError(`unknown name '${x.name}'`, x.pos);
@@ -487,12 +433,14 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             return compileLambda(x, cx, st);
         case 'recv':
             return compileRecv(x, args, cx, st);
-        case 'fork': case 'spawn':
-            checkArity(x, head.name, args, 1);
-            return compileFork(x, head.name, args[0]!, head.name === 'fork' ? 'rt_fork' : 'rt_spawn', cx, st);
-        case 'spawn/on':                        // (spawn/on k expr): an actor on island k (D256)
-            checkArity(x, 'spawn/on', args, 2);
-            return compileFork(x, 'spawn/on', args[1]!, 'rt_spawn_on', cx, st, [args[0]!]);
+        case 'fork':                            // (fork f arg ...): a process that calls f with the arguments (D286)
+            needFn(x, 'fork', args, 0, '(fork f arg ...)');
+            return compileFork(x, 'fork', args, 'rt_fork', cx, st);
+        case 'spawn': case 'spawn/on':          // till D277, an actor's fork
+            throw new CompileError(`${head.name} is ${head.name === 'spawn' ? 'fork' : 'fork/on'} now: there's one kind of process (D277)`, x.pos);
+        case 'fork/on':                         // (fork/on k f arg ...): the same, on island k (D256)
+            needFn(x, 'fork/on', args, 1, '(fork/on k f arg ...)');
+            return compileFork(x, 'fork/on', args.slice(1), 'rt_fork_on', cx, st, [args[0]!]);
         case 'connect':
             return compileConnect(x, args, cx, st);
         case 'yield': {
@@ -513,22 +461,24 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             return [[code, st.t.tupleRef(Number((args[1] as Int).v))], st1];
         }
         case TUPLE_OF: {
-            const prim = (name: string): Sexp => sym(`${name}${BUILTIN}`, x.pos);
+            const prim = (name: string): Sexp => builtinSym(name, x.pos);
             const [v, n] = args as [Sexp, Sexp];
             return compileExpr(form(x.pos, sym('cond', x.pos),
                 list(list(prim('tuple?'), v), list(prim('eq?'), list(prim('tuple/len'), v), n)),
                 list(sym('#true'), sym('#false'))), cx, st);
         }
     }
+    if (isKw(head)) throw new CompileError(`${head.name} is a keyword, not a function`, head.pos);
     if (SPECIAL_FORMS.includes(head.name)) throw notYet(x);
     // A builtin by a name no local can hide (pattern.ts), or by its own.
     const known  = head.name.endsWith(ON_CONSES);
-    const hidden = known || head.name.endsWith(BUILTIN);
-    const name   = hidden ? head.name.slice(0, -(known ? ON_CONSES : BUILTIN).length) : head.name;
+    const prim   = known ? head.name.slice(0, -ON_CONSES.length) : builtinOf(head.name);
+    const hidden = prim !== null;
+    const name   = prim ?? head.name;
     if (!hidden && lookup(cx.env, name) !== null) return compileClosureCall(x, head, args, cx, st);
     if (name === 'apply') return compileApply(x, args, cx, st);
     const operand: Cx = { ...cx, tail: false };
-    if (cx.noFloatTrees === undefined && (TREE_OPS[name] !== undefined || TREE_UNARY[name] !== undefined)) {
+    if (cx.noFloatTrees === undefined && (own(TREE_OPS, name) !== undefined || own(TREE_UNARY, name) !== undefined)) {
         const tree = floatTree(x, cx);
         if (tree !== null && treeOps(tree) >= 2 && treeRegs(tree) <= st.t.floatRegs && !treeLooksInt(tree)) {
             return compileFloatTree(x, tree, operand, st);
@@ -544,7 +494,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
         const [code, st1] = compileExpr(args[0]!, operand, st);
         return [[code, st.t.predicate(name)], st1];
     }
-    const builtin = C_BUILTINS[name];
+    const builtin = own(C_BUILTINS, name);
     if (builtin !== undefined) return compileCBuiltin(x, name, builtin, args, operand, st);
     if (name === 'eq?' || name === 'ne?') return compileEquality(x, name, args, operand, st);
     if (name === 'cons') return compileCons(x, args, operand, st);
@@ -553,7 +503,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
     if (name === '/') return compileDivide(x, args, operand, st);
     const path = cxrPath(name);
     if (path !== null) return compileCxr(x, name, path, args, operand, st, !known);
-    const arith = ARITH[name];
+    const arith = own(ARITH, name);
     if (arith !== undefined) {
         const op = name as '+' | '-' | '*';
         const float = (s: St, notFloats: string, done: string, n?: bigint): [Code, St] => floatPath(x, op, notFloats, done, n, s);
@@ -568,7 +518,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             return [s.t.arith(op, overflow), s1];
         }, withWord, float);
     }
-    const cmp = COMPARE[name];
+    const cmp = own(COMPARE, name);
     if (cmp !== undefined) {
         const [cond, op] = cmp;
         // two floats inline too (D259), with no box to make
@@ -576,7 +526,7 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
             [[s.t.branchUnlessFloats(notFloats), s.t.floatCompareBool(cond), s.t.jump(done)], s];
         return compileNumeric(x, name, args, operand, st, 'rt_compare', [imm(op)], (s) => [s.t.compareBool(cond), s], undefined, float);
     }
-    const bit = BITS[name];
+    const bit = own(BITS, name);
     if (bit !== undefined) {
         return compileBinary(x, name, args, operand, st, (s) => {
             if (bit !== 'shl' && bit !== 'shr') return [s.t.bits(bit, ''), s];
@@ -605,21 +555,19 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
 
 // --- processes ----------------------------------------------------------------
 
-// (recv clause...), the whole body of a receive function. rt_recv returns
-// the next message; when there's none, it remembers this function and its
-// parameters (the first slots of the frame) and gives up the stack, and
-// the process starts this function again from the top when one comes. So
-// the stack is empty here: nothing has run yet but the prologue. Clause
-// bodies are in tail position. A message no clause matches goes to the
-// dead letters, and recv takes the next.
-function compileRecv(x: Pair, clauses: readonly Sexp[], cx: Cx, st: St): [Code, St] {
-    if (cx.receive === null) throw new CompileError('recv can only be the whole body of a defun', x.pos);
-    if (clauses.length === 0) throw new CompileError('recv needs at least one clause', x.pos);
-    const { entry, params } = cx.receive;
+// (recv clause...): rt_recv gives the next message, waiting for one with
+// the stack kept, as join does (D276); it may collect first, with the
+// slots in use so far and the frames below as the roots. The clauses are
+// tried in order, their bodies where the recv is (in tail position, when
+// it is); a message none matches goes to the dead letters, and recv takes
+// the next. (recv) takes any message, and gives it.
+function compileRecv(x: Pair, clauses0: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+    const any     = sym(RECV_MESSAGE, x.pos);
+    const clauses = clauses0.length > 0 ? clauses0 : [list(any, any)];
     const msg = cx.si;
     const [top, st1]  = label(st, 'recv');
     const [site, st2] = siteLabel(st1, 'recv', x.pos);
-    const inner: Cx   = { ...cx, si: msg + 1, receive: null };
+    const inner: Cx   = { ...cx, si: msg + 1 };
     const [code, st3] = clauses.reduce<[Code, St]>(([acc, s], clause) => {
         const [c, s1] = compileRecvClause(x, clause, msg, `${top}_done`, inner, s);
         return [[acc, c], s1];
@@ -627,7 +575,7 @@ function compileRecv(x: Pair, clauses: readonly Sexp[], cx: Cx, st: St): [Code, 
     const t = st.t;
     return [[
         `${top}:`,
-        t.call('rt_recv', [PROC, FRAME, imm(params), addr(entry)], false),
+        t.call('rt_recv', [PROC, FRAME, imm(msg), FP, addr(cx.entry)], false),
         t.storeSlot(msg),
         code,
         t.call('rt_dead_letter', [inSlot(msg), addr(site)], false),
@@ -672,41 +620,51 @@ function compileRecvClause(x: Pair, clause: Sexp, msg: number, done: string, cx:
     return [[code, bound, body, st.t.jump(done), `${next}:`], st4];
 }
 
-// (fork expr) and (spawn expr): expr becomes the body of a function of its
-// own, whose parameters are the locals it uses; the new process starts
-// there, with those values deep-copied into its heap. The body is at the
-// bottom of the new process's stack, so in an actor it can tail-call a
-// function that waits; a task can't wait (D243). `form` and `fn` say
-// which: fork (rt_fork, a task), spawn (rt_spawn, an actor), or connect
-// (rt_connect, rt_connect_fs, an actor). `extra` is evaluated first, in the parent, and passed
-// after the site, then `flags` (assembler constants).
-function compileFork(x: Pair, form: string, expr: Sexp, fn: string, cx: Cx, st: St,
+// A fork, a fork/on or a connect needs a function after its first `i`
+// arguments.
+function needFn(x: Pair, form: string, args: readonly Sexp[], i: number, shape: string): void {
+    if (args.length <= i) throw new CompileError(`${form} takes a function, and its arguments: ${shape}`, x.pos);
+}
+
+// A literal: never a function, so refused where one must be.
+const isLiteral = (x: Sexp): boolean =>
+    x.t === 'int' || x.t === 'float' || x.t === 'str' || x.t === 'nil' || isForm(x, 'quote') || isKw(x)
+    || (x.t === 'sym' && (x.name === '#true' || x.name === '#false'));
+
+// (fork f arg ...): f and the arguments are evaluated here, in the
+// parent, into slots, and the runtime starts a process that calls f with
+// them, deep-copied into its heap (D286). `form` and `fn` say which: fork
+// (rt_fork), fork/on (rt_fork_on, on another island), or connect
+// (rt_connect, rt_connect_fs, ...). `extra` is evaluated first, in the
+// parent too, and passed after the site, then `flags` (assembler
+// constants). A literal where the function should be is refused here, and
+// one of the program's functions is given as many arguments as it takes;
+// anything else that isn't a function of them faults the parent as it
+// runs, and the checker says what it can see.
+function compileFork(x: Pair, form: string, items: readonly Sexp[], fn: string, cx: Cx, st: St,
                      extra: readonly Sexp[] = [], flags: readonly string[] = []): [Code, St] {
-    const free = freeVars(list(expr), [], cx.env);
-    if (free.length > MAX_ARGS) {
-        throw new CompileError(`a ${form} can take at most ${MAX_ARGS} locals into the new process, and this one uses ${free.length}`, x.pos);
+    const f = items[0]!;
+    if (isLiteral(f)) throw new CompileError(`${form} takes a function, not ${show(f)}`, posOf(f) ?? x.pos);
+    if (items.length - 1 > MAX_ARGS) {
+        throw new CompileError(`a ${form} passes at most ${MAX_ARGS} arguments, and this one passes ${items.length - 1}`, x.pos);
     }
-    const [pre, st0] = extra.reduce<[Code, St]>(([acc, s], e, i) => {
+    if (f.t === 'sym' && lookup(cx.env, f.name) === null) {
+        const known = lookupFn(cx.fns, f.name);
+        const arity = known !== null ? known.arity : builtinArity(f.name);
+        if (arity !== null) checkArity(x, known?.name ?? f.name, items.slice(1), arity);
+    }
+    const [code, st1] = [...extra, ...items].reduce<[Code, St]>(([acc, s], e, i) => {
         const [c, s1] = compileExpr(e, { ...cx, si: cx.si + i, tail: false }, s);
         return [[acc, c, s.t.storeSlot(cx.si + i)], useSlot(s1, cx.si + i)];
     }, [[], st]);
-    const si = cx.si + extra.length;
-    const where = x.pos === null ? form : `${form} at ${x.pos.file}:${x.pos.line}:${x.pos.col}`;
-    const [entry, st1] = label(st0, form.replace('/', '_'));
-    const d: Defun = { name: sym(where, x.pos), params: free.map((n) => sym(n, x.pos)), body: list(expr), pos: x.pos };
-    const [code, st2]  = compileFunction(entry, d, [], cx.fns, form === 'fork' ? 'task' : 'actor', st1, null);
-    const st3: St = { ...st2, slots: st0.slots, lambdas: [st2.lambdas, code] };
-    const [site, st4]  = siteLabel(st3, form, x.pos);
-    const st5 = free.length > 0 ? useSlot(st4, si + free.length - 1) : st4;
-    const t = st.t;
-    // fork and spawn are handed the process, as send is (D256)
-    const proc = fn === 'rt_fork' || fn === 'rt_spawn' ? [PROC] : [];
+    const [site, st2] = siteLabel(st1, form, x.pos);
+    // fork is handed the process, as send is (D256)
+    const proc = fn === 'rt_fork' ? [PROC] : [];
     return [[
-        pre,
-        free.map((name, i) => t.copySlot(lookup(cx.env, name)!, si + i, name)),
-        t.call(fn, [...proc, addr(entry), imm(free.length), slotAddr(si), addr(site),
-                    ...extra.map((_, i) => inSlot(cx.si + i)), ...flags.map(imm)], false),
-    ], st5];
+        code,
+        st.t.call(fn, [...proc, imm(items.length), slotAddr(cx.si + extra.length), addr(site),
+                       ...extra.map((_, i) => inSlot(cx.si + i)), ...flags.map(imm)], false),
+    ], st2];
 }
 
 // connect's sources, past :keypress (every key typed, runtime/tty.c):
@@ -723,31 +681,31 @@ const SOURCES: Readonly<Record<string, readonly [string, ...string[]]>> = {
     'exec':        ['rt_connect_exec'],
 };
 
-// (connect :keypress expr), (connect :fs/read path expr) and the other
-// sources, or (connect dev expr): a fork whose new process is connected
-// to the source, or is handed the device dev (an expression; anything
-// that isn't a :keyword is one).
+// (connect :keypress f arg ...), (connect :fs/read path f arg ...) and the
+// other sources, or (connect dev f arg ...): a fork whose new process is
+// connected to the source, or is handed the device dev (an expression;
+// anything that isn't a :keyword is one).
 function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
-    if (args.length === 0) checkArity(x, 'connect', args, 2);
+    if (args.length === 0) throw new CompileError('connect takes a source or a device, a function, and its arguments', x.pos);
     const source = args[0]!;
-    const quoted = isForm(source, 'quote');
-    const items  = quoted ? toArray(source) : null;
-    const name   = items !== null && items.length === 2 && items[1]!.t === 'sym' ? (items[1] as Sym).name : null;
+    const quoted = isKw(source);
+    const name   = quoted ? kwName(source) : null;
     if (name === 'keypress' || name === 'system') {
-        checkArity(x, 'connect', args, 2);
-        return compileFork(x, 'connect', args[1]!, name === 'keypress' ? 'rt_connect' : 'rt_connect_system', cx, st);
+        needFn(x, `connect :${name}`, args, 1, `(connect :${name} f arg ...)`);
+        return compileFork(x, 'connect', args.slice(1), name === 'keypress' ? 'rt_connect' : 'rt_connect_system', cx, st);
     }
-    if (name !== null && name in SOURCES) {
-        checkArity(x, 'connect', args, 3);
-        const [fn, ...mode] = SOURCES[name]!;
-        return compileFork(x, 'connect', args[2]!, fn, cx, st, [args[1]!], mode);
+    const opener = name === null ? undefined : own(SOURCES, name);
+    if (opener !== undefined) {
+        needFn(x, `connect :${name}`, args, 2, `(connect :${name} ${name === 'exec' ? 'command' : name!.startsWith('fs/') ? 'path' : 'where'} f arg ...)`);
+        const [fn, ...mode] = opener;
+        return compileFork(x, 'connect', args.slice(2), fn, cx, st, [args[1]!], mode);
     }
     if (quoted) {
         throw new CompileError(`connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not ${show(source)}`,
                                posOf(source) ?? x.pos);
     }
-    checkArity(x, 'connect', args, 2);
-    return compileFork(x, 'connect', args[1]!, 'rt_connect_device', cx, st, [source]);
+    needFn(x, 'connect', args, 1, '(connect dev f arg ...)');
+    return compileFork(x, 'connect', args.slice(1), 'rt_connect_device', cx, st, [source]);
 }
 
 // --- closures -----------------------------------------------------------------
@@ -900,10 +858,10 @@ function builtinWrapper(x: Sym, st: St): [string, St] {
 }
 
 function builtinArity(name: string): number | null {
-    if (name in ARITH || name in COMPARE || name in BITS || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply', '/'].includes(name)) return 2;
+    if ([ARITH, COMPARE, BITS].some((t) => Object.hasOwn(t, name)) || DIVISION.includes(name) || ['eq?', 'ne?', 'cons', 'apply', '/'].includes(name)) return 2;
     if (PREDICATES.includes(name) || name === 'pprint' || name === 'bit/not' || cxrPath(name) !== null) return 1;
     // with optional arguments, as a value it takes just the ones it needs (D219)
-    const c = C_BUILTINS[name];
+    const c = own(C_BUILTINS, name);
     return c !== undefined && !c.variadic ? c.min : null;
 }
 
@@ -919,8 +877,8 @@ function compileQuote(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St
         return [st.t.loadTagged(name, 'RT_TAG_LIST'), st1];
     }
     if (datum.t !== 'sym') throw notYet(x);
-    const [id, st1] = symbolId(st, datum.name);
-    return [st.t.loadWord(symbolWord(id), `'${datum.name}`), st1];
+    const [w, st1] = symbolWordOf(st, datum.name);
+    return [st.t.loadWord(w, isKw(datum) ? datum.name : `'${datum.name}`), st1];
 }
 
 // A quoted list's cells, side by side in the constant data, each one's
@@ -952,8 +910,8 @@ function staticWord(x: Pair, item: Sexp, st: St): [string, St] {
             return [`${name}+RT_TAG_BOXED`, st1];
         }
         case 'sym': {
-            const [id, st1] = symbolId(st, item.name);
-            return [`0x${symbolWord(id).toString(16)}`, st1];
+            const [w, st1] = symbolWordOf(st, item.name);
+            return [`0x${w.toString(16)}`, st1];
         }
         case 'pair': {
             const [name, st1] = staticList(x, item, st);
@@ -962,6 +920,13 @@ function staticWord(x: Pair, item: Sexp, st: St): [string, St] {
         default:
             throw notYet(x);
     }
+}
+
+// A symbol's or a keyword's word: one table of names, the kind in a bit (D287).
+function symbolWordOf(st: St, name: string): [bigint, St] {
+    const keyword = name.startsWith(':');
+    const [id, st1] = symbolId(st, keyword ? name.slice(1) : name);
+    return [symbolWord(id, keyword), st1];
 }
 
 function symbolId(st: St, name: string): [number, St] {
@@ -998,7 +963,7 @@ const RT_TAG_LIST = 1;
 
 // Type predicates, inline (the target's predicate). #true and #false are
 // symbols too, so sym? says yes to them.
-const PREDICATES: readonly string[] = ['int?', 'nil?', 'cons?', 'pid?', 'sym?', 'bool?'];
+const PREDICATES: readonly string[] = ['int?', 'nil?', 'cons?', 'pid?', 'sym?', 'keyword?', 'bool?'];
 
 // Builtins written in C (runtime/strings.c, tuples.c, json.c, ...): the C
 // function, and how many arguments it takes. Missing optional arguments
@@ -1049,6 +1014,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'int->str':           fixed('rt_int_to_str', 1, 2),
     'str->float':         fixed('rt_str_to_float', 1),
     'str->sym':           fixed('rt_str_to_sym', 1),
+    'str->keyword':       fixed('rt_str_to_keyword', 1),
     'sym->str':           fixed('rt_sym_to_str', 1),
     'str->bytes':         fixed('rt_str_to_bytes', 1),
     'bytes->str':         fixed('rt_bytes_to_str', 1),
@@ -1140,7 +1106,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'read':               fixed('rt_read', 1),
     'read/any':           fixed('rt_read_any', 1),
     'open':               fixed('rt_open', 1, 2),
-    'monitor':            fixed('rt_monitor', 1),
+    'monitor':            fixed('rt_monitor', 1, 2),
     'kill':               fixed('rt_kill', 1),
     'raise':              fixed('rt_raise', 1),
     'after':              fixed('rt_after', 3),
@@ -1155,6 +1121,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'fs/delete':          fixed('rt_fs_delete', 1),
     'fs/rename':          fixed('rt_fs_rename', 2),
     'fs/mkdir':           fixed('rt_fs_mkdir', 1),
+    'fs/delete-all':      fixed('rt_fs_delete_all', 1),
     'bytes/pack':         fixed('rt_bytes_pack', 2),
     'bytes/unpack':       fixed('rt_bytes_unpack', 3),
     'log':                fixed('rt_log_line', 3),
@@ -1269,16 +1236,16 @@ function floatTree(x: Sexp, cx: Cx): FTree | null {
     }
     if (x.t !== 'pair' || x.car.t !== 'sym') return null;
     const head = x.car.name;
-    const name = head.endsWith(BUILTIN) ? head.slice(0, -BUILTIN.length) : lookup(cx.env, head) === null ? head : null;
+    const name = builtinOf(head) ?? (lookup(cx.env, head) === null ? head : null);
     const args = toArray(x.cdr);
     if (name === null || args === null) return null;
-    const op = TREE_OPS[name];
+    const op = own(TREE_OPS, name);
     if (op !== undefined && args.length === 2) {
         const l = floatTree(args[0]!, cx);
         const r = floatTree(args[1]!, cx);
         return l === null || r === null || (l.t === 'int' && r.t === 'int') ? null : { t: 'op', op, l, r };
     }
-    const u = TREE_UNARY[name];
+    const u = own(TREE_UNARY, name);
     if (u !== undefined && args.length === 1) {
         const a = floatTree(args[0]!, cx);
         return a === null || a.t === 'int' ? null : { t: 'unary', op: u, a };
@@ -1469,7 +1436,7 @@ function compileEquality(x: Pair, name: string, args: readonly Sexp[], cx: Cx, s
 
 function isImmediateLiteral(x: Sexp): boolean {
     if (x.t === 'int' || x.t === 'nil') return true;
-    if (x.t === 'sym') return RESERVED_SYMBOLS.includes(x.name);
+    if (x.t === 'sym') return RESERVED_SYMBOLS.includes(x.name) || isKw(x);
     if (!isForm(x, 'quote') || x.t !== 'pair' || x.cdr.t !== 'pair') return false;
     const datum = x.cdr.car;
     return datum.t === 'sym' || datum.t === 'int' || datum.t === 'nil';
@@ -1700,7 +1667,8 @@ function isPreludeNot(x: Sexp, cx: Cx): boolean {
 // The builtin a call's head names, if it names one: by a name no local can
 // hide, or by its own when no local hides it.
 function builtinName(head: Sym, cx: Cx): string | null {
-    if (head.name.endsWith(BUILTIN)) return head.name.slice(0, -BUILTIN.length);
+    const prim = builtinOf(head.name);
+    if (prim !== null) return prim;
     return lookup(cx.env, head.name) === null && isBuiltin(head.name) ? head.name : null;
 }
 
@@ -1711,8 +1679,7 @@ function immediateWord(x: Sexp, st: St): [bigint, St] {
     const datum = isForm(x, 'quote') && x.t === 'pair' && x.cdr.t === 'pair' ? x.cdr.car : x;
     if (datum.t === 'int') return [intWord(datum.v), st];
     if (datum.t === 'nil') return [BigInt(RT_TAG_LIST), st];
-    const [id, st1] = symbolId(st, (datum as Sym).name);
-    return [symbolWord(id), st1];
+    return symbolWordOf(st, (datum as Sym).name);
 }
 
 // --- helpers ------------------------------------------------------------------

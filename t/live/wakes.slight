@@ -1,0 +1,27 @@
+; For t/live.py: the islands' wake pipes, which every island's select()
+; waits on, and which must be below FD_SETSIZE to be in its set (M2).
+; Each is opened at the first start of another island, all of them
+; together, so an island started later has a pipe as low as the first.
+;
+;   before n  opens n files, then starts an actor on island 1: with
+;             more than about 1,000, the pipes would be past
+;             FD_SETSIZE, and the program says so and ends
+;   after n   starts an actor on island 1, opens n files, then starts
+;             one on island 3, whose pipe was opened with island 1's
+
+(defun echo (to)
+    (recv (x (send to (list :echo (island) x)))))
+
+(defun opens (n)
+    (map (lambda (_) (open :fs/write "/dev/null")) (range 0 n)))
+
+(defun ping (k me)
+    (send (fork/on k echo me) :ping)
+    (read me))
+
+(defun run-case (how n me)
+    (match how
+        ("before" (opens n) (ping 1 me))
+        ("after"  (ping 1 me) (opens n) (ping 3 me))))
+
+(pprint (run-case (car @ARGV) (str->int (car (cdr @ARGV))) (address)))

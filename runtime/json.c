@@ -324,7 +324,7 @@ int rt_json_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
             f->last    = NULL;
             f->head    = RT_NIL;
             if (f->object) {
-                if (!(f->last = cell(alloc, cx, rt_symbol(RT_SYM_JSON + RT_JSON_OBJECT)))) goto too_big;
+                if (!(f->last = cell(alloc, cx, rt_keyword(RT_SYM_JSON + RT_JSON_OBJECT)))) goto too_big;
                 f->head = (rt_value_t)f->last | RT_TAG_LIST;
             }
             continue;
@@ -340,7 +340,7 @@ int rt_json_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx
                 continue;
             }
         } else if (*p == 't' || *p == 'f' || *p == 'n') {
-            v  = *p == 't' ? RT_TRUE : *p == 'f' ? RT_FALSE : rt_symbol(RT_SYM_JSON + RT_JSON_NULL);
+            v  = *p == 't' ? RT_TRUE : *p == 'f' ? RT_FALSE : rt_keyword(RT_SYM_JSON + RT_JSON_NULL);
             p += *p == 'f' ? 5 : 4;
         } else if (!number(&p, text + len, alloc, cx, &v)) {
             goto too_big;
@@ -386,15 +386,15 @@ rt_value_t rt_json_parse(rt_value_t s, const char *site) {
     rt_value_t *outer = rt_alloc(32, site), v;
     if (r == RT_SCAN_DONE) {
         rt_json_build(text, used, rt_heap_alloc, (void *)site, &v);     // the heap faults before it gives out
-        outer[0] = rt_symbol(RT_SYM_OK);
+        outer[0] = rt_keyword(RT_SYM_OK);
     } else {
         rt_value_t *why = rt_alloc(32, site);
-        why[0] = rt_symbol(RT_SYM_ERRS + RT_ERR_BADJSON);
+        why[0] = rt_keyword(RT_SYM_ERRS + RT_ERR_BADJSON);
         why[1] = (rt_value_t)(why + 2) | RT_TAG_LIST;
         why[2] = rt_int((int64_t)used);
         why[3] = RT_NIL;
         v      = (rt_value_t)why | RT_TAG_LIST;
-        outer[0] = rt_symbol(RT_SYM_ERROR);
+        outer[0] = rt_keyword(RT_SYM_ERROR);
     }
     outer[1] = (rt_value_t)(outer + 2) | RT_TAG_LIST;
     outer[2] = v;
@@ -488,12 +488,12 @@ static int put_array(rt_buf_t *b, rt_value_t v, int lenient) {
 // Compact JSON, on one line (D161). What JSON can't hold faults; or, if
 // lenient, as log has it (D254), is written as a string, as str writes it.
 static rt_value_t print_json(rt_value_t v, int lenient, const char *site) {
-    rt_buf_t  b = { 0 };
+    rt_buf_t  b = { .site = site };
     rt_work_t w;
     rt_work_init(&w);
     for (;;) {
         if (rt_is_cons(v)) {
-            int object = rt_car(v) == rt_symbol(RT_SYM_JSON + RT_JSON_OBJECT);
+            int object = rt_car(v) == rt_keyword(RT_SYM_JSON + RT_JSON_OBJECT);
             put(&b, object ? "{" : "[");
             rt_work_push(&w, object ? rt_cdr(v) : v);
             rt_work_push(&w, object ? IN_OBJECT : IN_ARRAY);
@@ -505,7 +505,7 @@ static rt_value_t print_json(rt_value_t v, int lenient, const char *site) {
             put(&b, "[]");
         } else if (v == RT_TRUE || v == RT_FALSE) {
             put(&b, v == RT_TRUE ? "true" : "false");
-        } else if (v == rt_symbol(RT_SYM_JSON + RT_JSON_NULL)) {
+        } else if (v == rt_keyword(RT_SYM_JSON + RT_JSON_NULL)) {
             put(&b, "null");
         } else if (rt_is_string(v)) {
             put_string(&b, v);
@@ -591,9 +591,9 @@ int rt_log_level = 1;                       // :info
 static const char *const level_names[] = { "debug", "info", "warn", "error" };
 
 static int level_of(rt_value_t level, const char *site) {
-    if (level == rt_symbol(RT_SYM_ERROR)) return 3;
+    if (level == rt_keyword(RT_SYM_ERROR)) return 3;
     for (int i = 0; i < RT_LOG_COUNT; i++) {
-        if (level == rt_symbol(RT_SYM_LOG + (uint64_t)i)) return i;
+        if (level == rt_keyword(RT_SYM_LOG + (uint64_t)i)) return i;
     }
     rt_fault(RT_FAULT_RANGE, level, site);
 }
@@ -639,7 +639,7 @@ rt_value_t rt_log_line(rt_value_t level, rt_value_t msg, rt_value_t fields, cons
         }
     }
     if (l < rt_log_level) return RT_NIL;
-    rt_buf_t b = { 0 };
+    rt_buf_t b = { .site = site };
     char     pid[64];
     put(&b, "{\"time\":\"");
     put_time(&b, rt_int_value(rt_clock_now(site)));
@@ -654,7 +654,12 @@ rt_value_t rt_log_line(rt_value_t level, rt_value_t msg, rt_value_t fields, cons
         rt_value_t name = rt_car(rt_car(f)), v = rt_car(rt_cdr(rt_car(f)));
         put(&b, ",");
         if (rt_is_string(name)) put_string(&b, name);
-        else                    put_rendered(&b, name);
+        else {                                  // a keyword's name: a key, so without its colon (D287)
+            const char *bare = rt_symbol_name(name >> RT_SYMBOL_SHIFT);
+            put(&b, "\"");
+            put(&b, bare);
+            put(&b, "\"");
+        }
         put(&b, ":");
         rt_value_t text = print_json(v, 1, site);
         rt_buf_add(&b, rt_string_bytes(text), rt_string_len(text));

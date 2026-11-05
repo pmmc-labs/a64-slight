@@ -102,7 +102,7 @@ itself (or, for `n-body`, against C's).
   pid in a list, as every version keeps them).
 - **`slight-mc`:** slight on every island (D256), one per core:
   `parallel-fib`, `fan-in` and `spectral-norm` again, each as
-  `NAME-mc.slight`, which places its actors with `(spawn/on (% i
+  `NAME-mc.slight`, which places its actors with `(fork/on (% i
   (islands)) ...)`; `spectral-norm`'s on arrays, a band of rows made on
   each island, the vector crossing as a shared buffer, so it's compared
   with `slight-arrays`. And `spawn`, `idle-memory` and `ping-pong`, each

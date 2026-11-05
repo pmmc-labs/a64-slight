@@ -2,7 +2,8 @@
 # ThreadSanitizer over what runs on more than one island (D256): the
 # island golden tests (t/run.sh, so their output must still be what's
 # expected, a race's report being more of it), then the every-island
-# benchmarks and t/replay/islands.slight, which must say nothing. For the
+# benchmarks, t/replay/islands.slight, and t/data/tsan-sockets.slight,
+# sockets on two islands on the real clock, which must say nothing. For the
 # machine's own target alone, built with SLIGHT_CC as the compiler with
 # -fsanitize=thread, which Linux can't link statically. Not part of make
 # test, since it needs clang's sanitizer runtime (Xcode's has it; on
@@ -20,11 +21,11 @@ dir=build/t/$TARGET/tsan
 mkdir -p "$dir"
 
 fail=0
-./t/run.sh t/32[4-9]-*.slight t/33[0-3]-*.slight || fail=1
+./t/run.sh t/32[4-9]-*.slight t/33[0-36]-*.slight t/347-*.slight || fail=1
 
 # n: the size each program is run at, small, since TSan is slow.
 for prog in bench/parallel-fib/parallel-fib-mc.slight:20 bench/fan-in/fan-in-mc.slight:200000 \
-            bench/spectral-norm/spectral-norm-mc.slight:200 t/replay/islands.slight:; do
+            bench/spectral-norm/spectral-norm-mc.slight:200 t/replay/islands.slight: t/data/tsan-sockets.slight:; do
     src=${prog%:*}
     n=${prog##*:}
     name=$(basename "$src" .slight)
@@ -34,7 +35,7 @@ for prog in bench/parallel-fib/parallel-fib-mc.slight:20 bench/fan-in/fan-in-mc.
         fail=1
         continue
     fi
-    SLIGHT_ISLANDS=4 "$dir/$name" $n >"$dir/$name.out" 2>&1
+    env -u SLIGHT_CLOCK SLIGHT_ISLANDS=4 "$dir/$name" $n >"$dir/$name.out" 2>&1
     if grep -q 'ThreadSanitizer' "$dir/$name.out"; then
         cat "$dir/$name.out"
         echo "FAIL $name"

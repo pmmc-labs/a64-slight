@@ -36,6 +36,17 @@ test('names map to slight names', () => {
     same('table::del_loop; str_to_int; Consumer; `str/<`; `go-to-x`;', 'table/del-loop str->int Consumer str/< go-to-x');
 });
 
+// A raw name is a slight name as it is, and no more (D246): the names the
+// compiler makes for itself can't be written, so they can't be reached.
+test('a raw name is only what slight can write', () => {
+    same('`#true`; `a.b`; `@ARGV`; `%ENV`;', '#true a.b @ARGV %ENV');
+    fails('`car (on conses)`(5);', /a raw name is a slight name/, 1, 1);
+    fails('`map/bit (in lib/map.slight)`(37, 0);', /a raw name is a slight name/, 1, 1);
+    fails('`eq? (builtin)`(1, 1);', /a raw name is a slight name/);
+    for (const name of ['a b', 'a\tb', 'f(x)', "a'b", 'a;b', 'a"b', 'a,b']) fails(`\`${name}\`;`, /a raw name is a slight name/);
+    fails('`a\nb`;', /on one line/);
+});
+
 test('keywords keep their spelling', () => {
     same(':on-next; :fs/read; :RECV;', ':on-next :fs/read :RECV');
     fails(':12;', /invalid keyword/);
@@ -68,14 +79,14 @@ test('lists', () => {
 });
 
 test('a list of literals is a constant', () => {
-    same('[1, "two", :three, [4.5, true]];', "'(1 \"two\" three (4.5 #true))");
-    same('[:inc];', "'(inc)");
+    same('[1, "two", :three, [4.5, true]];', "'(1 \"two\" :three (4.5 #true))");
+    same('[:inc];', "'(:inc)");
     same('[x, 1];', '(list x 1)');
 });
 
 test('tagged lists', () => {
     same(':on-next(v); :tag(); :tag(1, 2); :tag(a, ...xs);',
-         "(list :on-next v) '(tag) '(tag 1 2) (cons :tag (cons a xs))");
+         "(list :on-next v) '(:tag) '(:tag 1 2) (cons :tag (cons a xs))");
 });
 
 test('tuples', () => {
@@ -104,6 +115,14 @@ test('the pipe puts its value last', () => {
     same('xs |> filter(even?) |> map(square);', '(map square (filter even? xs))');
     same('x |> f;', '(f x)');
     fails('x |> 1;', /the right of '\|>'/);
+    // a lambda, a list or a tuple would take the left side as one more
+    // element, so each is refused; a call of a call is still a call
+    fails('3 |> fun(y) => y + 1;', /the right of '\|>' is a function or a call, not a lambda/, 1, 6);
+    fails('3 |> (fun(y) => y + 1);', /not a lambda/, 1, 7);
+    fails('3 |> [inc];', /not a list/, 1, 6);
+    fails('3 |> #(inc);', /not a tuple/, 1, 6);
+    same('xs |> list(1);', '(list 1 xs)');
+    same('x |> f(a)(b);', '((f a) b x)');
 });
 
 test('lambdas', () => {
@@ -147,9 +166,15 @@ test('recv', () => {
 });
 
 test('processes', () => {
-    same('spawn counter(0); fork f(x) + 1; yield loop(n);', '(spawn (counter 0)) (fork (+ (f x) 1)) (yield (loop n))');
-    same('connect(:tcp, "h:7000") { echo() };', '(connect :tcp "h:7000" (echo))');
-    same('connect(c) { a; b };', '(connect c (do a b))');
+    // fork f(a, b) spreads the call, so f runs in the new process with the arguments worked out here (D286)
+    same('fork counter(0); fork f(x, 1); fork f; yield loop(n);', '(fork counter 0) (fork f x 1) (fork f) (yield (loop n))');
+    same('fork { a; b }; fork { a }; fork fun() { a };', '(fork (lambda () a b)) (fork (lambda () a)) (fork (lambda () a))');
+    same('connect(:tcp, "h:7000") echo();', '(connect :tcp "h:7000" echo)');
+    same('connect(:tcp, "h:7000") { echo() };', '(connect :tcp "h:7000" (lambda () (echo)))');
+    same('connect(c) { a; b };', '(connect c (lambda () a b))');
+    fails('fork [1, 2];', /: fork takes a function: fork f\(a, b\), fork f, or fork \{ \.\.\. \}$/, 1, 6);
+    fails('fork if a { b } else { c };', /: fork takes a function: /, 1, 6);
+    fails('connect(c) [1];', /: connect\(\.\.\.\) takes a function: connect\(\.\.\.\) f\(a, b\)/, 1, 12);
 });
 
 // --- definitions and lets ---------------------------------------------------
@@ -180,7 +205,7 @@ test("the ';' after a '}' can be left out", () => {
     same('fun f() { let x = match y { _ => 1 }\n x }', '(defun f () (let x (match y (_ 1))) x)');
     same('fun f() { let [a] = if b { c } else { d }\n a }', '(defun f () (match (if b c d) ((a) a)))');
     fails('fun f() { let [a] = g(fun() { 1 })\n a }', /expected ';' after a let/);
-    same('if a { b }\nlet s = connect(:system) { c }\nf(s);', '(if a b) (let s (connect :system c)) (f s)');
+    same('if a { b }\nlet s = connect(:system) { c }\nf(s);', '(if a b) (let s (connect :system (lambda () c))) (f s)');
     same('fun f() { if a { b } else { c }; d }', '(defun f () (if a b c) d)');
     fails('fun f() { g() h() }', /expected ';' between statements/);
 });
@@ -245,21 +270,21 @@ test("a parameter's, a result's and an actor's types make a sig before the defun
 });
 
 test('types as .sly writes them', () => {
-    same('let x : int | str | :ok | true | [] = 1;', "(let x (the (or int str 'ok #true ()) 1))");
+    same('let x : int | str | :ok | true | [] = 1;', "(let x (the (or int str :ok #true ()) 1))");
     same('let x : [int, str] = 1;', '(let x (the (shape int str) 1))');
     same('let x : [int, ...list<str>] = 1;', '(let x (the (shape int & (list str)) 1))');
     same('let x : [...list<str>] = 1;', '(let x (the (list str) 1))');
-    same("let x : :ok(int) | :error(str, ...list<any>) = 1;", "(let x (the (or ('ok int) ('error str & (list any))) 1))");
+    same("let x : :ok(int) | :error(str, ...list<any>) = 1;", "(let x (the (or (:ok int) (:error str & (list any))) 1))");
     same('let x : #(int, str) = 1;', '(let x (the (tuple int str) 1))');
     same('let x : fun(int) -> int | str = 1;', '(let x (the (fun (int) (or int str)) 1))');    // as TypeScript has it
     same('let x : (fun(int) -> int) | fun = 1;', '(let x (the (or (fun (int) int) fun) 1))');
     same('let x : list<list<int>> = 1;', '(let x (the (list (list int)) 1))');
     same('let x : Result<int, (str | :none)> = 1;', '(let x (the (Result int (or str :none)) 1))');
-    same('let x : task<int> = 1; let y : actor<:ok> = 2;', "(let x (the (task int) 1)) (let y (the (actor 'ok) 2))");
+    same('let x : task<int> = 1; let y : actor<:ok> = 2;', "(let x (the (task int) 1)) (let y (the (actor :ok) 2))");
 });
 
 test('type declarations, and typed lets and lambdas', () => {
-    same('type Tree = :leaf | :node(Tree, int, Tree);', "(deftype Tree (or 'leaf ('node Tree int Tree)))");
+    same('type Tree = :leaf | :node(Tree, int, Tree);', "(deftype Tree (or :leaf (:node Tree int Tree)))");
     same('type Pair<A, B> = [A, B];', '(deftype (Pair A B) (shape A B))');
     same('fun f() { let [a, b] : Pair<int, str> = g(); a }', '(defun f () (match (the (Pair int str) (g)) ((a b) a)))');
     same('fun(x : int) => x + 1;', '(the (fun (int) any) (lambda (x) (+ x 1)))');
@@ -271,7 +296,7 @@ test("a type's ':' has a space on each side", () => {
     fails('fun f(x: int) { x }', /a type's ':' has a space on each side: write x : int/);
     fails('fun f(x :int) { x }', /a type's ':' has a space on each side: write x : int/);
     fails('let x: int = 1;', /a type's ':' has a space on each side/);
-    same(':ok;', "'ok");
+    same(':ok;', ":ok");
 });
 
 test('a prototype is a sig alone, as a header declares a function (D248)', () => {

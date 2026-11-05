@@ -46,27 +46,26 @@ def actor(me, kind, other_tag, reply):
     # is-it-<kind>?: wait, reply, loop
     while True:
         msg = yield 'recv'
-        out.append(show([f'is-it-{kind}?', 'got', msg]))
-        if msg[0] != ('IS-EVEN?' if kind == 'even' else 'IS-ODD?'):
+        out.append(show([f':is-it-{kind}?', ':got', msg]))
+        if msg[0] != (':IS-EVEN?' if kind == 'even' else ':IS-ODD?'):
             return []
         n, ask = msg[1], msg[2]
-        if n == 0: send(reply, ['IT-IS-EVEN!' if kind == 'even' else 'IT-IS-ODD!'])
+        if n == 0: send(reply, [':IT-IS-EVEN!' if kind == 'even' else ':IT-IS-ODD!'])
         else:      send(ask[1], [other_tag, n - 1, ('pid', me)])
 
 def root():
-    ev = spawn(2, actor(2, 'even', 'IS-ODD?', 1))
-    od = spawn(3, actor(3, 'odd', 'IS-EVEN?', 1))
-    out.append(pid_str(1))
-    for n in (21, 36, 57, 92): send(2, ['IS-EVEN?', n, od])
+    ev = spawn(2, actor(2, 'even', ':IS-ODD?', 1))
+    od = spawn(3, actor(3, 'odd', ':IS-EVEN?', 1))
+    out.append('#<address 1>')                   # the root's reply address (D277)
+    for n in (21, 36, 57, 92): send(2, [':IS-EVEN?', n, od])
     answers = []
     for _ in range(4):
         answers.append((yield 'recv'))
     out.append(show(answers))
-    send(2, ['STOP']); send(3, ['STOP'])
+    send(2, [':STOP']); send(3, [':STOP'])
     return []
 
 r = P(1, root()); procs[1] = r; queue.append(r)
 while queue:
     p = queue.popleft(); p.state = 'running'; run(p)
-out.append(show(procs[1].result) if procs[1].result != [] else '()')
 print('\n'.join(out))

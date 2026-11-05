@@ -38,6 +38,6 @@
 
 (let debugger (spawn (DEBUG)))
 (let tokens   (spawn (tokenize debugger "")))
-(let chars    (connect :fs/read "tsconfig.json" (char-buffer tokens)))
+(let chars    (connect :fs/read "tsconfig.json" char-buffer tokens))
 
 (pprint (read debugger))

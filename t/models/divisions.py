@@ -4,6 +4,7 @@
 # value, (), comes last.
 #
 #     python3 t/models/divisions.py > examples/divisions.expected
+import sys
 from math import ceil
 E = '\x1b'
 rows, cols = 24 - 10, 80 - 1
@@ -28,4 +29,4 @@ for key in '25':
         draw(mid_h + qua_h + 1, mid_w + 2, qua_h - 1, qua_w - 2, 45)
         draw(mid_h + qua_h + 1, mid_w + qua_w + 2, qua_h - 1, qua_w, 46)
 out.append(f'rows:{rows}cols:{cols}{E}[{rows + 5};0H')
-print(''.join(out) + '()')
+sys.stdout.write(''.join(out))

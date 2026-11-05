@@ -1,0 +1,5 @@
+(:reply "re: ping 1" 0)
+(:reply "re: ping 2" 0)
+(:reply "re: ping 3" 0)
+(:budget 50000)
+(:ok (:served (:ok :hushed)))

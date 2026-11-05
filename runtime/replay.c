@@ -49,7 +49,7 @@
 
 #include "io.h"
 
-#define MAGIC "slight record 4\n"
+#define MAGIC "slight record 5\n"
 
 enum { OFF, RECORD, REPLAY };
 
@@ -57,7 +57,7 @@ enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
     IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER, IO_REALTIME, IO_LIST, IO_STAT, IO_REMOVE,
-    IO_RENAME, IO_MKDIR, IO_RANDOM, IO_SEEN, IO_TOOK, IO_WAKE,
+    IO_RENAME, IO_MKDIR, IO_RANDOM, IO_SEEN, IO_TOOK, IO_WAKE, IO_REMOVE_TREE,
 };
 
 static const char *const names[] = {
@@ -71,6 +71,7 @@ static const char *const names[] = {
     [IO_PEER] = "a socket's peer", [IO_REALTIME] = "the time of day",
     [IO_LIST] = "a directory's names", [IO_STAT] = "a file's stat", [IO_REMOVE] = "a remove",
     [IO_RENAME] = "a rename", [IO_MKDIR] = "a mkdir", [IO_RANDOM] = "random bytes",
+    [IO_REMOVE_TREE] = "a tree removed",
     [IO_SEEN] = "what another island did", [IO_TOOK] = "an inbox's items", [IO_WAKE] = "an inbox's pipe",
 };
 
@@ -392,6 +393,132 @@ int64_t rt_io_epoch(const char *given) {
 
 // --- files (D254) -------------------------------------------------------------
 
+// A directory open in the tree being removed: its descriptor, read
+// through d, its name in the one above it, and whether this pass over it
+// removed anything.
+typedef struct {
+    DIR  *d;
+    char *name;
+    int   removed;
+} level_t;
+
+// "path/a/b/name", for a failure to name.
+static char *where_in(const char *path, const level_t *at, size_t n, const char *name) {
+    rt_buf_t b = { 0 };
+    rt_buf_add(&b, path, strlen(path));
+    for (size_t i = 1; i < n; i++) {
+        rt_buf_add(&b, "/", 1);
+        rt_buf_add(&b, at[i].name, strlen(at[i].name));
+    }
+    if (name) {
+        rt_buf_add(&b, "/", 1);
+        rt_buf_add(&b, name, strlen(name));
+    }
+    rt_buf_add(&b, "", 1);
+    return b.bytes;
+}
+
+// rm -r, nothing below path found by a path from the top: each directory
+// opened relative to the one it's in, O_NOFOLLOW, and what's in it
+// removed relative to it, so a link put where a directory was, while
+// it's removed, is removed as a link, never followed (D275). The levels
+// are a stack of their own, not C's, which is a process's, and a deep
+// tree would run it out. A directory is read again till a pass over it
+// removes nothing, since a file system may skip a name in one where a
+// name was removed while it was read (APFS can).
+static int remove_tree(const char *path, char **where) {
+    struct stat st;
+    *where = NULL;
+    if (fstatat(AT_FDCWD, path, &st, AT_SYMLINK_NOFOLLOW) != 0) return errno == ENOENT ? 0 : -1;
+    if (!S_ISDIR(st.st_mode)) return unlink(path) == 0 || errno == ENOENT ? 0 : -1;
+    int fd = open(path, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+    if (fd < 0) return errno == ENOENT ? 0 : -1;
+    size_t   n = 0, cap = 16;
+    level_t *at = rt_must(malloc(cap * sizeof *at)), *top;
+    int      err = 0;
+    char    *failed = NULL;
+    at[n++] = (level_t){ fdopendir(fd), NULL, 0 };
+    if (!at[0].d) err = errno, close(fd);
+    while (!err && n) {
+        top   = &at[n - 1];
+        errno = 0;
+        struct dirent *e = readdir(top->d);
+        if (!e && errno) {
+            err    = errno;
+            failed = where_in(path, at, n, NULL);
+            break;
+        }
+        if (!e) {
+            if (top->removed) {                 // again, for any a removal hid
+                top->removed = 0;
+                rewinddir(top->d);
+                continue;
+            }
+            closedir(top->d);
+            char *name = top->name;
+            n--;
+            if (n && unlinkat(dirfd(at[n - 1].d), name, AT_REMOVEDIR) != 0 && errno != ENOENT) {
+                err    = errno;
+                failed = where_in(path, at, n, name);
+            } else if (n) {
+                at[n - 1].removed = 1;
+            }
+            free(name);
+            continue;
+        }
+        if (strcmp(e->d_name, ".") == 0 || strcmp(e->d_name, "..") == 0) continue;
+        // Only a directory is opened, so a device isn't, nor a FIFO, which
+        // could wait; one swapped in after this fails O_NOFOLLOW or
+        // O_DIRECTORY, and is removed as it is.
+        struct stat s;
+        int sub = fstatat(dirfd(top->d), e->d_name, &s, AT_SYMLINK_NOFOLLOW) == 0 && !S_ISDIR(s.st_mode)
+                    ? (errno = ENOTDIR, -1)
+                    : openat(dirfd(top->d), e->d_name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC);
+        if (sub >= 0) {
+            DIR *d = fdopendir(sub);
+            if (!d) {
+                err    = errno;
+                failed = where_in(path, at, n, e->d_name);
+                close(sub);
+                break;
+            }
+            if (n == cap) at = rt_must(realloc(at, (cap *= 2) * sizeof *at));
+            at[n++] = (level_t){ d, rt_must(strdup(e->d_name)), 0 };
+        } else if (errno == ENOTDIR || errno == ELOOP) {     // a file, a link, a FIFO...: removed as it is
+            if (unlinkat(dirfd(top->d), e->d_name, 0) == 0) top->removed = 1;
+            else if (errno != ENOENT) err = errno, failed = where_in(path, at, n, e->d_name);
+        } else if (errno != ENOENT) {
+            err    = errno;
+            failed = where_in(path, at, n, e->d_name);
+        }
+    }
+    while (n) {                                 // what's still open, after a failure
+        n--;
+        closedir(at[n].d);
+        free(at[n].name);
+    }
+    free(at);
+    if (!err && rmdir(path) != 0 && errno != ENOENT) err = errno;
+    if (!err) return 0;
+    *where = failed ? failed : rt_must(strdup(path));
+    errno  = err;
+    return -1;
+}
+
+int rt_io_remove_tree(const char *path, char **where) {
+    if (mode == REPLAY) {
+        uint32_t len;
+        int      r = (int)next_alloc(IO_REMOVE_TREE, where, &len);
+        if (r == 0) {
+            free(*where);
+            *where = NULL;
+        }
+        return r;
+    }
+    int r = remove_tree(path, where);
+    return (int)done_with(IO_REMOVE_TREE, r, *where, r ? strlen(*where) + 1 : 0);
+}
+
 int64_t rt_io_list(const char *path, char **names, uint32_t *len) {
     if (mode == REPLAY) return next_alloc(IO_LIST, names, len);
     DIR    *d = opendir(path);
@@ -481,9 +608,51 @@ ssize_t rt_io_write(int fd, const void *buf, size_t len) {
     return (ssize_t)done(IO_WRITE, write(fd, buf, len));
 }
 
-int rt_io_open(const char *path, int flags) {
-    if (mode == REPLAY) return (int)replayed(IO_OPEN);
-    return (int)done(IO_OPEN, open(path, flags | O_CLOEXEC, 0666));
+// Whether st is the file stdin, stdout or stderr is. On macOS /dev/stdin
+// and the rest are copies of those descriptors, their flags shared with
+// the runtime's own output and with the shell after the program, so
+// O_NONBLOCK mustn't stay on one (D272).
+static int standard(const struct stat *st) {
+    struct stat s;
+    for (int fd = 0; fd < 3; fd++) {
+        if (fstat(fd, &s) == 0 && s.st_dev == st->st_dev && s.st_ino == st->st_ino) return 1;
+    }
+    return 0;
+}
+
+// Opened without waiting, since a FIFO with no writer, or a terminal,
+// would hold open() up, and the island with it (D272). A regular file,
+// or a directory, then blocks again, as it always has; anything else is
+// polled, so it must fit in select()'s sets, as a socket must. A polled
+// reader blocks again too, since it reads only once select() says it
+// can; a polled writer can't, or a full pipe would hold the island up,
+// so one to the file stdin, stdout or stderr is, which a shell may
+// share, is written to as a regular file is, as before.
+int rt_io_open(const char *path, int flags, int *polled) {
+    int32_t p = 0;
+    if (mode == REPLAY) {
+        int fd = (int)next(IO_OPEN, &p, sizeof p, NULL);
+        *polled = p;
+        return fd;
+    }
+    int fd = open(path, flags | O_NONBLOCK | O_CLOEXEC, 0666), err = 0, fl;
+    struct stat st;
+    if (fd >= 0) {
+        int reader = (flags & O_ACCMODE) == O_RDONLY, other = 0;
+        if (fstat(fd, &st) < 0) err = errno;
+        else other = !S_ISREG(st.st_mode) && !S_ISDIR(st.st_mode);
+        p = other && (reader || !standard(&st));
+        if (!err && (!p || reader) && ((fl = fcntl(fd, F_GETFL)) < 0 || fcntl(fd, F_SETFL, fl & ~O_NONBLOCK) < 0)) err = errno;
+        if (!err && p && fd >= FD_SETSIZE) err = EMFILE;
+        if (err) {
+            close(fd);
+            fd    = -1;
+            p     = 0;
+            errno = err;
+        }
+    }
+    *polled = p;
+    return (int)done_with(IO_OPEN, fd, &p, sizeof p);
 }
 
 int rt_io_close(int fd) {
@@ -782,6 +951,20 @@ static int runtime_end(int fd) {
     return flags < 0 || fcntl(fd, F_SETFL, flags | O_NONBLOCK) < 0 ? errno : 0;
 }
 
+// The program's environment for a command, but for what records or
+// replays a run: a slight program it ran would record over this one's
+// record, or replay it (L5).
+static char **command_env(void) {
+    size_t n = 0, k = 0;
+    while (environ[n]) n++;
+    char **env = rt_must(malloc((n + 1) * sizeof *env));
+    for (size_t i = 0; i < n; i++) {
+        if (strncmp(environ[i], "SLIGHT_RECORD=", 14) != 0 && strncmp(environ[i], "SLIGHT_REPLAY=", 14) != 0) env[k++] = environ[i];
+    }
+    env[k] = NULL;
+    return env;
+}
+
 static int spawn(char *const argv[], int *child, int *in, int *out) {
     char path[4096];
     int  err = find(argv[0], path, sizeof path), ip[2], op[2];
@@ -802,6 +985,15 @@ static int spawn(char *const argv[], int *child, int *in, int *out) {
         posix_spawn_file_actions_adddup2(&fa, ip[0], STDIN_FILENO);
         posix_spawn_file_actions_adddup2(&fa, op[1], STDOUT_FILENO);
         posix_spawn_file_actions_adddup2(&fa, op[1], STDERR_FILENO);
+        // Nothing else of the program's: a descriptor made on another
+        // island, a moment before its close-on-exec was set, would be the
+        // command's too, a socket held open or a pipe never closed (M7).
+        short flags = POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK;
+#if defined(POSIX_SPAWN_CLOEXEC_DEFAULT)
+        flags |= POSIX_SPAWN_CLOEXEC_DEFAULT;   // macOS: what no action names is closed
+#elif defined(__GLIBC__) && (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 34))
+        posix_spawn_file_actions_addclosefrom_np(&fa, STDERR_FILENO + 1);
+#endif
         sigemptyset(&none);
         sigemptyset(&def);
         sigaddset(&def, SIGPIPE);               // ignored here, and an ignored signal stays so across exec
@@ -809,8 +1001,10 @@ static int spawn(char *const argv[], int *child, int *in, int *out) {
         posix_spawnattr_setsigmask(&at, &none);
         posix_spawnattr_setsigdefault(&at, &def);
         posix_spawnattr_setpgroup(&at, 0);
-        posix_spawnattr_setflags(&at, POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_SETSIGDEF | POSIX_SPAWN_SETSIGMASK);
-        err = posix_spawn(&pid, path, &fa, &at, argv, environ);
+        posix_spawnattr_setflags(&at, flags);
+        char **env = command_env();
+        err = posix_spawn(&pid, path, &fa, &at, argv, env);
+        free(env);
         posix_spawnattr_destroy(&at);
         posix_spawn_file_actions_destroy(&fa);
         *child = (int)pid;

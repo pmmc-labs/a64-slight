@@ -1,8 +1,9 @@
 ; sexp/print (D155): data as the reader reads it back, on one line. A
 ; float has digits on both sides of its point, so 1.0e+21, not 1e+21; a
 ; string escapes " and \ and the control characters; a symbol is its
-; name, without a colon (D52), and (:symbol "name") is name if that reads
-; back as a name; a tuple is #(...) (D176). What isn't data faults,
+; name, a keyword its name with its colon (D287), and (:symbol "name") is
+; name if that reads back as a name, (:keyword "name") :name; a tuple is
+; #(...) (D176). What isn't data faults,
 ; :not-sexp: a pid, a function, nan or inf.
 
 (defun show (v) (tty/write (sexp/print v) "\n"))
@@ -10,7 +11,7 @@
 (show (list 1 -2 0 4611686018427387903 -4611686018427387904))
 (show (list 1.0 -0.0 0.1 100.0 1.0e21 1.5e-7 1.0e-7 123456.789 (/ 1 3) 5.0e-324 1.7976931348623157e308))
 (show (str "q\"b\\" (bytes->str (list 10 9 13 27 0 1 31 127)) "é😀"))
-(show (list :alpha 'beta #true #false (list :quote :gamma) ()))
+(show (list :alpha 'beta #true #false (list 'quote 'gamma) ()))
 (show (list (list :symbol "zebra") (list :symbol "two words") (list :symbol "12") (list :symbol "")
             (list :symbol ":k") (list :symbol "#x") (list :symbol ".") (list :symbol "a(b") (list :symbol "x" "y")))
 
@@ -32,7 +33,7 @@
     ())))
 
 ; what isn't data, each in a process of its own
-(defun try (v) (join (fork (sexp/print v))))
+(defun try (v) (join (fork (lambda () (sexp/print v)))))
 (pprint (try (list 1 $$)))
 (pprint (try (list car)))
 (pprint (try (math/sqrt -1)))

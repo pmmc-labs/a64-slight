@@ -1,0 +1,17 @@
+; check: strict
+; case compares with the builtin eq? by a name no local can hide (review
+; L12), and narrows as eq? does: past :none, x is an int, so nothing is
+; said, even with a local named eq?.
+(sig label ((or :none int)) int)
+(defun label (x)
+    (case x
+        (:none 0)
+        (#true (+ x 1))))
+
+(sig label-with ((or :none int) any) int)
+(defun label-with (x eq?)
+    (case x
+        (:none 0)
+        (#true (+ x 1))))
+
+(list (label :none) (label 1) (label-with 2 (lambda (a b) #false)))

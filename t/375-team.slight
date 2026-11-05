@@ -1,0 +1,80 @@
+; A team of agents on a fake model (D281, PLAN.md's "An agent team",
+; step 1): the fake ollama answers from a script keyed on what it's
+; asked. The job "greet, and add" plans as three tasks, written three
+; ways; the first is answered outright, the second through a tool call,
+; add, and the third fails in the middle of its answer; then the
+; combination. The events are collected and printed in task order,
+; since the workers' answers come in whatever order the fake's replies
+; do, the plan first and the answer last. Then team/ask, which passes
+; the events over. No retries, so the failure shows: step 2's budgets
+; are t/376's. Worked out by hand from the script.
+
+(@include "../examples/team-agents.slight")
+(@include :http)
+
+; --- the fake ollama ---------------------------------------------------
+
+(defun handler (req)
+    (match (json/parse (lookup :body req))
+        ((:ok (:object & fields))
+            (let messages (lookup "messages" fields))
+            (let last     (cdr (car (reverse messages))))
+            (let users    (filter (lambda (m) (eq? (lookup "role" (cdr m)) "user")) (reverse messages)))
+            (let asked    (lookup "content" (cdr (car users))))
+            (list 200 () (lines (reply asked last))))))
+
+(defun reply (asked last)
+    (cond
+        ((eq? asked "The job: greet, and add")        (list (piece "Say hello in French\n2. Add 2 and 3\n- Say it in Klingon") (done)))
+        ((eq? asked "The job: just greet")            (list (piece "Say hello in French") (done)))
+        ((eq? asked "Say hello in French")            (list (piece "Bon") (piece "jour") (done)))
+        ((eq? (lookup "role" last) "tool")            (list (piece (str "The sum is " (lookup "content" last))) (done)))
+        ((eq? asked "Add 2 and 3")                    (list (calls (list (call "add" (list (list "a" 2) (list "b" 3))))) (done)))
+        ((eq? asked "Say it in Klingon")              (list (piece "nuq") (list :object (list "error" "no Klingon today"))))
+        ((str/starts-with? asked "The job was: greet") (list (piece "Bonjour; the sum is 5; Klingon failed.") (done)))
+        ((str/starts-with? asked "The job was: just")  (list (piece "Bonjour.") (done)))
+        (#true                                        (list (piece (str "? " asked)) (done)))))
+
+(defun piece (text)
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" text))) (list "done" #false)))
+
+(defun calls (cs)
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" "") (list "tool_calls" cs))) (list "done" #false)))
+
+(defun call (name args)
+    (list :object (list "function" (list :object (list "name" name) (list "arguments" (cons :object args))))))
+
+(defun done ()
+    (list :object (list "message" (list :object (list "role" "assistant") (list "content" ""))) (list "done" #true)))
+
+(defun lines (values)
+    (str/join "" (map (lambda (v) (str (json/print v) "\n")) values)))
+
+; --- the run -----------------------------------------------------------
+
+(defun add-tool ()
+    (tool/new "add" "Adds two integers." (list (list "a" :integer "the first") (list "b" :integer "the second"))
+        (lambda (args) (+ (lookup "a" args) (lookup "b" args)))))
+
+; The events, printed in task order once the answer has come.
+(defun collect (plan verdicts)
+    (recv
+        ((:team/plan _ tasks)    (collect tasks verdicts))
+        ((:team/task _ _ _)      (collect plan verdicts))
+        ((:team/done _ id a)     (collect plan (assoc id (list :done a) verdicts)))
+        ((:team/failed _ id why) (collect plan (assoc id (list :failed why) verdicts)))
+        ((:team/answer _ text)
+            (pprint (list :plan plan))
+            (map (lambda (id) (pprint (cons id (lookup id verdicts)))) (range 1 (+ (length plan) 1)))
+            (pprint (list :answer text)))
+        ((:team/error _ reason)  (pprint (list :error reason)))))
+
+(match (http/listen 0 handler)
+    ((:ok (srv port))
+        (let t (team/new (str "http://127.0.0.1:" port) "fake" (list (add-tool)) (list (list :retries 0))))
+        (team/say t "greet, and add")
+        (collect () ())
+        (pprint (team/ask t "just greet"))
+        (kill t)
+        (kill srv)
+        :done))

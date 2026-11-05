@@ -25,7 +25,7 @@
 
 import { CompileError } from './errors.ts';
 import { patternNames } from './pattern.ts';
-import { cons, isForm, list, posOf, sym, toArray, type Pair, type Sexp, type Sym } from './sexp.ts';
+import { cons, hidden, isForm, list, posOf, sym, toArray, type Pair, type Sexp, type Sym } from './sexp.ts';
 
 export type UnitKind = 'prelude' | 'program' | 'module';
 
@@ -40,10 +40,10 @@ export type Unit = {
 };
 
 // A name with its unit's file in it, and the name a prelude function has
-// in a library's code.
-const IN = ' (in ';
-export const PRELUDE_SUFFIX = ' (prelude)';
-export const ownName = (name: string, unit: string): string => `${name}${IN}${unit})`;
+// in a library's code: hidden names (sexp.ts).
+const IN = ' (in ';                     // how ownName's note starts
+export const PRELUDE_SUFFIX = hidden('', 'prelude');
+export const ownName = (name: string, unit: string): string => hidden(name, `in ${unit}`);
 
 // A name as people read it: without its file, or (prelude).
 export function displayName(name: string): string {
@@ -134,7 +134,7 @@ export function link(units: readonly Unit[]): { readonly prelude: Sexp; readonly
     const scopeOf = (u: Unit): Scope => {
         const fns = new Map<string, string>();
         if (prelude !== undefined && u !== prelude) {
-            for (const f of exportsOf(prelude)) fns.set(f, u.kind === 'program' ? f : `${f}${PRELUDE_SUFFIX}`);
+            for (const f of exportsOf(prelude)) fns.set(f, u.kind === 'program' ? f : hidden(f, 'prelude'));
         }
         const from = new Map<string, Unit>();
         for (const m of seen(u)) {

@@ -22,9 +22,9 @@
     (after 10 $$ :ten-b)
     (after -5 $$ :now)
     (send $$ :sent)
-    (fork (do
-        (let squares (map (lambda (n) (* n n)) (range 1 6)))
-        (after 15 me (list :from-child squares))))
+    (fork (lambda () (do
+            (let squares (map (lambda (n) (* n n)) (range 1 6)))
+            (after 15 me (list :from-child squares)))))
     (show 7))
 
-(read (spawn (top-level)))
+(join (fork top-level))

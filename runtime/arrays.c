@@ -21,8 +21,8 @@
 #define INT_MIN63 (-((int64_t)1 << 62))
 #define INT_MAX63 (((int64_t)1 << 62) - 1)
 
-static rt_value_t KIND_FLOAT(void) { return rt_symbol(RT_SYM_ARRAY + RT_ARRAY_FLOAT); }
-static rt_value_t KIND_INT(void)   { return rt_symbol(RT_SYM_EXEC + RT_EXEC_INT); }
+static rt_value_t KIND_FLOAT(void) { return rt_keyword(RT_SYM_ARRAY + RT_ARRAY_FLOAT); }
+static rt_value_t KIND_INT(void)   { return rt_keyword(RT_SYM_EXEC + RT_EXEC_INT); }
 
 static uint64_t type_of(rt_value_t a) { return rt_box(a)[0] & RT_BOX_TYPE_MASK; }
 

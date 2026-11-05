@@ -1,0 +1,14 @@
+(:ok ok #false #true #true #false)
+(#true #false #false #true #false #false #false)
+(:a b (c :d) #true)
+":ok ok (:a b)"
+:done done
+(:ok (:ok ok (:keyword "zzz") (:symbol "zzz") (quote ok) #true))
+"(:ok ok :zzz zzz (:symbol \"two words\") (quote x))"
+(:ok (:null #true))
+("ok" "ok" :ok ok #false #false)
+(:keyword-a :symbol-a (:tagged 1) (:headed 2) :other)
+(#true #false #true)
+fault in #<pid 2>: not a function: :a (call at t/379-keywords.slight:36:32)
+(:error (:not-a-function :a "call at t/379-keywords.slight:36:32"))
+:end

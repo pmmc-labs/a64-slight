@@ -1,0 +1,38 @@
+; http/listen-with's (:most n) closes a connection as it's accepted
+; while n are open (D270). With (:most 1), a request held in its handler
+; till the top level says go keeps one open, so a second connection is
+; closed at once, with nothing said; once the first has ended, a third
+; is served. The second says nothing either: a socket closed with a
+; request unread in it is reset by the kernel, not ended, and whether
+; the request had landed by then was a race (seen once, on macOS). No
+; timers: the handler tells the top level it's in by sending it an
+; address to say go to. And an option it doesn't know is raised.
+; Expected output worked out by hand.
+
+(@include :http)
+(@include "data/http-raw.slight")
+
+(defun handler (to)
+    (lambda (req)
+        (match (lookup :path req)
+            ("/held"
+                (let gate (address))
+                (send to gate)
+                (read gate)
+                (list 200 () "held"))
+            (_ (list 200 () "fine")))))
+
+(defun status-line (reply) (car (str/split reply "\r\n")))
+
+(let to (address))
+(match (http/listen-with 0 (handler to) (list (list :most 1)))
+    ((:ok (l port))
+        (let first (fork talk port (list "GET /held HTTP/1.1\r\n\r\n")))
+        (let gate (read to))
+        (pprint (talk port ()))
+        (send gate :go)
+        (pprint (status-line (reply-of (join first))))
+        (pprint (status-line (talk port (list "GET /fine HTTP/1.1\r\n\r\n"))))
+        (kill l)))
+(pprint (join (fork (lambda () (http/listen-with 0 (handler to) (list (list :fewest 1)))))))
+:done

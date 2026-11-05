@@ -117,37 +117,39 @@
 
 ; The file at path, its bytes as they are; or it raises why not.
 (defun tools/read (path)
-    (match (join (fork (tools/reading path)))
+    (match (tools/reading path)
         ((:ok text)      text)
         ((:error reason) (raise reason))))
 
+; (:ok text), or (:error reason): the file, read here (D277).
 (defun tools/reading (path)
     (match (open :fs/read path)
         ((:ok f)         (send f (list :read :chunks)) (tools/chunks f ()))
-        ((:error reason) (raise reason))))
+        ((:error reason) (list :error reason))))
 
 (defun tools/chunks (f acc)
     (match (read f)
         ((:chunk _ s)      (tools/chunks f (cons s acc)))
-        ((:eof _)          (str/join "" (reverse acc)))
-        ((:error _ reason) (raise reason))))
+        ((:eof _)          (disconnect f) (list :ok (str/join "" (reverse acc))))
+        ((:error _ reason) (list :error reason))))
 
 ; Makes the file at path hold text, and nothing else.
 (defun tools/save (path text)
-    (match (join (fork (tools/writing path text)))
+    (match (tools/writing path text)
         ((:ok _)         ())
         ((:error reason) (raise reason))))
 
-; A write that fails leaves (:error f reason) to be read, closed or not.
+; (:ok ()), or (:error reason). A write that fails leaves (:error f
+; reason) to be read, closed or not.
 (defun tools/writing (path text)
     (match (open :fs/write path)
         ((:ok f)
             (send f (list :write text))
             (disconnect f)
             (match (read f)
-                ((:error _ reason) (raise reason))
-                (_                 ())))
-        ((:error reason) (raise reason))))
+                ((:error _ reason) (list :error reason))
+                (_                 (list :ok ()))))
+        ((:error reason) (list :error reason))))
 
 ; What a command printed, and its status if that wasn't 0.
 (defun tools/output (ran)
@@ -221,8 +223,10 @@
 ; text, with what a terminal would take as a command, or would show in
 ; another order, written as an escape a person can read: control
 ; characters but newline and tab, DEL and the C1 controls (U+0080 to
-; U+009F) as \u{1b}, Unicode's bidirectional embeddings, overrides and
-; isolates (U+202A to U+202E, U+2066 to U+2069) the same, and a byte
+; U+009F) as \u{1b}, Unicode's bidirectional controls, its embeddings,
+; overrides and isolates and its marks (U+202A to U+202E, U+2066 to
+; U+2069, U+200E, U+200F and U+061C, all that are Bidi_Control) the
+; same, and a byte
 ; that isn't UTF-8 as \x9b. What it gives is printable already, so it
 ; can be given again.
 (defun tools/printable (text)
@@ -234,6 +238,7 @@
         ((and (== (bytes/len c) 1) (>= (bytes/at c 0) 128)) (str "\\x" (tools/hex-of (bytes/at c 0))))
         ((or (== code 10) (== code 9))                       c)
         ((or (< code 32) (== code 127) (and (>= code 128) (<= code 159))
+             (== code 1564) (== code 8206) (== code 8207)
              (and (>= code 8234) (<= code 8238)) (and (>= code 8294) (<= code 8297)))
             (str "\\u{" (tools/hex-of code) "}"))
         (#true                                              c)))
@@ -253,16 +258,19 @@
 ; A URL must be http or https: curl reads files and much else too, and
 ; --proto holds it to those as well. curl doesn't follow a redirect: the
 ; model is told where it goes, and fetching that is asked about in turn,
-; so a page can't send a fetch where the person didn't agree to. 20
-; seconds and 5 MB at most; and a failure is curl's message, with the
-; trailer and anything it fetched before left out.
+; so a page can't send a fetch where the person didn't agree to; -q,
+; first, keeps a .curlrc from saying otherwise. --globoff makes the URL
+; one URL, [ and { included, not a pattern of many that one approval
+; would let through. 20 seconds and 5 MB at most; and a failure is
+; curl's message, with the trailer and anything it fetched before left
+; out.
 (defun tools/get (approve url)
     (cond
         ((not (or (str/starts-with? url "http://") (str/starts-with? url "https://")))
             (raise "the URL must start with http:// or https://"))
         ((not (tools/allowed? approve (str "fetch " url))) "the user didn't let it be fetched")
         (#true
-            (match (exec/run (list "curl" "-sS" "--proto" "=http,https" "--max-time" "20" "--max-filesize" "5000000"
+            (match (exec/run (list "curl" "-q" "-sS" "--proto" "=http,https" "--globoff" "--max-redirs" "0" "--max-time" "20" "--max-filesize" "5000000"
                                    "-w" (str "\\n" (tools/marker) "%{http_code}\\n%{url_effective}\\n%{content_type}\\n%{redirect_url}") "--" url))
                 ((:ok (0 output))      (tools/fetched output))
                 ((:ok (status output)) (raise (tools/curl-error output status)))
@@ -565,7 +573,7 @@
 ; starts (a file that isn't there, or is empty, is no notes; one that
 ; isn't notes ends the store, rather than be written over), and writes
 ; them all back after each change, so they outlast the program.
-(defun notes/open (path) (spawn (notes/loop path (notes/read path))))
+(defun notes/open (path) (fork (lambda () (notes/loop path (notes/read path)))))
 
 (defun notes/get (store key) (ask store (list :get key)))
 (defun notes/keys (store) (ask store (list :keys)))
@@ -582,7 +590,7 @@
         ((:keys to)    (reply to (map car table)) (notes/loop path table))
         ((:put key text to)
             (let new (cons (list key text) (remove (lambda (n) (eq? (car n) key)) table)))
-            (match (join (fork (tools/save path (str (sexp/print new) \n))))
+            (match (tools/writing path (str (sexp/print new) \n))
                 ((:ok _)
                     (reply to ())
                     (notes/loop path new))
@@ -591,7 +599,7 @@
                     (notes/loop path table))))))
 
 (defun notes/read (path)
-    (match (join (fork (tools/read path)))
+    (match (tools/reading path)
         ((:error (:enoent _)) ())
         ((:error reason)      (raise reason))
         ((:ok text)

@@ -1,2 +1,1 @@
-(ok ("first" ((open) (chunk "  s") (line "econd, indented") (line "") (line "last, with no newline at the end") (eof))))
-()
+(:ok ("first" ((:open) (:chunk "  s") (:line "econd, indented") (:line "") (:line "last, with no newline at the end") (:eof))))

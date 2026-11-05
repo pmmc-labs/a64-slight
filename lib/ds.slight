@@ -20,12 +20,12 @@
 
 ; --- asking ------------------------------------------------------------
 
-; ask, ask-within and reply are the prelude's (D243): a task asks, with
-; an address of its own, and a structure answers with (reply to v).
+; ask, ask-within and reply are the prelude's (D243, D277): a caller asks,
+; with an address of its own, and a structure answers with (reply to v).
 
 ; --- cell: one value ---------------------------------------------------
 
-(defun cell/new (v) (spawn (cell/loop v)))
+(defun cell/new (v) (fork cell/loop v))
 (defun cell/get (c) (ask c (list :get)))
 (defun cell/set (c v) (send c (list :set v)))
 
@@ -51,7 +51,7 @@
 ; Keys are compared with eq?, so any value can be one. The table is an
 ; association list, most recently put first, so a lookup costs the
 ; number of keys.
-(defun dict/new () (spawn (dict/loop ())))
+(defun dict/new () (fork dict/loop ()))
 (defun dict/put (d k v) (send d (list :put k v)))
 (defun dict/delete (d k) (send d (list :delete k)))
 
@@ -67,11 +67,11 @@
 
 (defun dict/loop (table)
     (recv
-        ((:put k v)    (dict/loop (assoc k v (dict/without k table))))
+        ((:put k v)    (dict/loop (assoc k v table)))
         ((:delete k)   (dict/loop (dict/without k table)))
         ((:get k to)   (reply to (lookup k table)) (dict/loop table))
         ((:update k f default)
-            (dict/loop (assoc k (f (dict/value k table default)) (dict/without k table))))
+            (dict/loop (assoc k (f (dict/value k table default)) table)))
         ((:keys to)    (reply to (map car table)) (dict/loop table))
         ((:size to)    (reply to (length table)) (dict/loop table))))
 
@@ -84,7 +84,7 @@
 
 ; --- queue: first in, first out ----------------------------------------
 
-(defun queue/new () (spawn (queue/loop () ())))
+(defun queue/new () (fork queue/loop () ()))
 (defun queue/push (q x) (send q (list :push x)))
 
 ; The oldest item, taken off, or :empty.
@@ -108,7 +108,7 @@
 
 ; --- channel: take waits for an item -----------------------------------
 
-(defun channel/new () (spawn (channel/loop () ())))
+(defun channel/new () (fork channel/loop () ()))
 (defun channel/put (ch x) (send ch (list :put x)))
 
 ; The oldest item, taken off; waits until there is one. Don't take with

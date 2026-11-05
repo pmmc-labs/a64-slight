@@ -28,7 +28,7 @@ fun table::get(key, table) {
     }
 }
 
-let s = spawn store([]);
+let s = fork store([]);
 // <- keyword.declaration.variable
 //    ^ keyword.operator.assignment
 //      ^^^^^ keyword.control.process

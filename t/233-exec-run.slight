@@ -17,7 +17,7 @@
 (let file (str dir "/pid"))
 (exec/run (list "rm" "-rf" dir))
 (exec/run (list "mkdir" "-p" dir))
-(let caller (fork (exec/run (list "sh" "-c" (str "echo $$ > " file "; exec sleep 900")))))
+(let caller (fork exec/run (list "sh" "-c" (str "echo $$ > " file "; exec sleep 900"))))
 (pprint (exec/run (list "sh" "-c" (str "until [ -s " file " ]; do sleep 0.01; done; kill -0 $(cat " file ") && echo running"))))
 (kill caller)
 (pprint (join caller))

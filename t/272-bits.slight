@@ -49,9 +49,9 @@
 ; as values, and folded
 (pprint (list (fold/l 0 bit/xor (list 1 2 4 8 2)) (fold/l -1 bit/and (list 7 14 28)) (map bit/not (list 0 -1 7))))
 (defun kind (pid) (car (cadr (join pid))))
-(pprint (kind (fork (bit/shl 1 -1))))
-(pprint (kind (fork (bit/shr 1 (- 0 5)))))
-(pprint (kind (fork (bit/xor 1 1.0))))
-(pprint (kind (fork (bit/count "1"))))
-(kind (fork (bit/not ())))
-; warns: 54:32 55:32 56:13
+(pprint (kind (fork (lambda () (bit/shl 1 -1)))))
+(pprint (kind (fork (lambda () (bit/shr 1 (- 0 5))))))
+(pprint (kind (fork (lambda () (bit/xor 1 1.0)))))
+(pprint (kind (fork (lambda () (bit/count "1")))))
+(kind (fork (lambda () (bit/not ()))))
+; warns: 54:43 55:43 56:24

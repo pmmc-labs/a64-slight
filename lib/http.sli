@@ -7,13 +7,13 @@
 
 ; A request as a handler gets it, a keyed list for lookup: (:method m),
 ; (:path p), (:query q), (:headers hs), (:body b).
-(deftype Request (list (shape sym any)))
+(deftype Request (list (shape keyword any)))
 
 ; A response, (status headers body), a handler's and a client's.
 (deftype Response (shape int Headers str))
 
 ; GET, POST, ... as a keyword (:get), or any method as a string.
-(deftype Method (or sym str))
+(deftype Method (or keyword str))
 
 (sig http/get (str) (Result Response any))
 (sig http/request (Method str Headers str) (Result Response any))
@@ -23,6 +23,10 @@
 ; port: a number, 0 for the system's pick, or "host:port" (D226)
 (sig http/serve ((or int str) (fun (Request) Response)) pid)
 (sig http/listen ((or int str) (fun (Request) Response)) (Result (shape pid int) any))
+
+; options: (:most n), the most connections open at once (D270)
+(sig http/serve-with ((or int str) (fun (Request) Response) (list any)) pid)
+(sig http/listen-with ((or int str) (fun (Request) Response) (list any)) (Result (shape pid int) any))
 
 (sig http/parse-url (str) (or (:ok str int str) (:error any)))
 

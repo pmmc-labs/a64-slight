@@ -17,13 +17,14 @@
 //   a + b, a == b, a && b      (+ a b), (eq? a b), (and a b)
 //   x |> f(a)                  (f a x)
 //   [a, b], [a, ...xs]         (list a b), (cons a xs)
-//   :tag, :tag(a)              'tag, (list :tag a)
+//   :tag, :tag(a)              :tag, (list :tag a)
 //   [1, :a], :tag()            '(1 a), '(tag): all literals, a constant
 //   #(a, b)                    (tuple a b)
 //   if c { a } else { b }      (if c a b)
 //   match e { p => a, ... }    (match e (p a) ...)
 //   recv { p => a }, recv      (recv (p a)), (recv)
-//   spawn e, fork e, yield e   (spawn e), (fork e), (yield e)
+//   fork f(a, b), fork { e }   (fork f a b), (fork (lambda () e)) (D286)
+//   yield e                    (yield e)
 //   self, parent               $$, ^$$
 //
 // And types (D247, docs/TYPES.md), which the checker reads and the
@@ -47,9 +48,9 @@
 // reads s-expressions: '((lambda (x) x) 1).
 
 import { CompileError } from './errors.ts';
-import { atEnd, isDigit, isLetter, isSpace, numberKind, parseAtom, peek, posOf as cursorPos, readDatumAt, readString,
+import { atEnd, isDigit, isLetter, numberKind, parseAtom, peek, posOf as cursorPos, readDatumAt, readString,
          skipDoc, skipWhile, step, type Cursor } from './reader.ts';
-import { NIL, TUPLE, cons, fitsInt, float, form, int, isForm, isSym, list, posOf, str, sym, INT_MAX, INT_MIN,
+import { kw, isKw, NIL, TUPLE, cons, fitsInt, float, form, int, isForm, isSpace, isSym, list, posOf, str, sym, toArray, writable, INT_MAX, INT_MIN,
          type Pos, type Sexp } from './sexp.ts';
 
 // ---------------------------------------------------------------------------
@@ -66,7 +67,7 @@ type Token =
     | { readonly kind: 'name'; readonly text: string; readonly plain: boolean; readonly pos: Pos }
     | { readonly kind: 'quoted'; readonly text: string; readonly datum: Sexp; readonly pos: Pos };
 
-const RESERVED = ['fun', 'let', 'if', 'else', 'cond', 'case', 'match', 'recv', 'spawn', 'fork', 'connect', 'yield',
+const RESERVED = ['fun', 'let', 'if', 'else', 'cond', 'case', 'match', 'recv', 'fork', 'connect', 'yield',
                   'true', 'false', 'self', 'parent'];
 
 // Longest first, so that `...` isn't read as something shorter.
@@ -137,6 +138,9 @@ function nextToken(c: Cursor): [Token | null, Cursor] {
         const end = skipWhile(step(c), (x) => x !== '`' && x !== '\n');
         const text = s.slice(c.i + 1, end.i);
         if (peek(end) !== '`' || text === '') throw new CompileError('a raw name is a name between backticks, on one line', pos);
+        // a slight name as it is (D246), and no more: a name the reader
+        // can't make is one of the compiler's own (sexp.ts)
+        if (!writable(text)) throw new CompileError(`a raw name is a slight name, with no space or ( ) ' ; " , in it, not \`${text}\``, pos);
         return [{ kind: 'name', text, plain: true, pos }, step(end)];
     }
     if (ch === "'") return readQuoted(c, pos);
@@ -149,7 +153,7 @@ function nextToken(c: Cursor): [Token | null, Cursor] {
         }
         let end    = skipWhile(step(c), isKwChar);
         let text   = s.slice(c.i + 1, end.i);
-        // a keyword doesn't end in >, so that a type's actor<:ok> closes
+        // a keyword doesn't end in >, so that a type's pid<:ok> closes
         let trim = 0;
         while (trim < text.length && text[text.length - 1 - trim] === '>') trim++;
         if (trim > 0 && trim < text.length) {
@@ -415,7 +419,7 @@ function parseTypeOne(ts: Ts, i: number): [Sexp, number] {
             }
             break;
         case 'kw': {
-            const tag = quote(sym(t.text, at), at);
+            const tag = kw(t.text, at);
             if (!isP(ts[i + 1], '(')) return [tag, i + 1];
             const [items, rest, j] = parseTypeItems(ts, i + 2, ')');
             return [form(at, tag, ...items, ...(rest === null ? [] : [sym('&', at), rest])), j];
@@ -447,7 +451,7 @@ function parseInclude(ts: Ts, i: number): [Sexp, number] {
     const t  = ts[j];
     let arg: Sexp;
     if (t?.kind === 'str') arg = str(t.text, t.pos);
-    else if (t?.kind === 'kw') arg = quote(sym(t.text, t.pos), t.pos);
+    else if (t?.kind === 'kw') arg = kw(t.text, t.pos);
     else throw new CompileError(`@include takes a path ("file.sly") or a built-in (:fs), not ${describe(t)}`, t?.pos ?? at);
     return [form(at, sym('@include', at), arg), expect(ts, j + 1, ')', 'after what @include takes')];
 }
@@ -499,6 +503,25 @@ function parseStatements(ts: Ts, i: number): [readonly Sexp[], number] {
 }
 
 // A block's forms as one expression.
+// What a fork or a connect starts, as (f arg ...): a call, f(a, b), spread,
+// so that f runs in the new process with the arguments worked out here; a
+// name or a lambda as it is; and a block as a lambda of nothing (D286).
+// A list or a special form is refused, since neither is a function.
+const NOT_CALLS = ['if', 'cond', 'case', 'match', 'recv', 'do', 'and', 'or', 'quote', 'list', 'fork', 'fork/on', 'connect', 'yield'];
+function parseStart(ts: Ts, i: number, what: string): [readonly Sexp[], number] {
+    const at = ts[i]?.pos ?? ts[i - 1]!.pos;
+    if (isP(ts[i], '{')) {
+        const [body, j] = parseBlock(ts, i);
+        return [[form(at, sym('lambda', at), NIL, ...nonEmpty(body))], j];
+    }
+    const [x, j] = parseExpr(ts, i);
+    if (x.t !== 'pair' || isForm(x, 'lambda') || isForm(x, 'the')) return [[x], j];
+    if (x.car.t === 'sym' && NOT_CALLS.includes(x.car.name)) {
+        throw new CompileError(`${what} takes a function: ${what} f(a, b), ${what} f, or ${what} { ... }`, at);
+    }
+    return [toArray(x) ?? [x], j];
+}
+
 function blockExpr(forms: readonly Sexp[], at: Pos): Sexp {
     if (forms.length === 0) return NIL;
     if (forms.length === 1 && !isForm(forms[0]!, 'let')) return forms[0]!;
@@ -552,6 +575,7 @@ function parseBinary(ts: Ts, i: number, min: number): [Sexp, number] {
         const t  = ts[j];
         const op = opAt(t);
         if (op === null || op.prec < min || (t!.text === '-' && freshLine(ts, j))) return [left, j];
+        if (op.name === '|>') pipeable(ts[j + 1], t!.pos);
         const [right, k] = parseBinary(ts, j + 1, op.prec + 1);
         left = binary(op, left, right, t!.pos);
         j = k;
@@ -562,8 +586,22 @@ function parseBinary(ts: Ts, i: number, min: number): [Sexp, number] {
     }
 }
 
+// The right of |> is a function, which it calls, or a call, which it
+// adds its left side to. A lambda, a list or a tuple there would take it
+// as one more element, quietly, so each is refused by its first token
+// ([f] reads as list(f), the same s-expression), and a lambda in
+// parentheses by its form.
+function pipeable(t: Token | undefined, at: Pos): void {
+    const what = isW(t, 'fun') ? LAMBDA : isP(t, '[') ? 'a list' : isP(t, '#(') ? 'a tuple' : null;
+    if (what !== null) throw notPipeable(what, t?.pos ?? at);
+}
+
+const LAMBDA      = 'a lambda: name it with let first';
+const notPipeable = (what: string, at: Pos): CompileError => new CompileError(`the right of '|>' is a function or a call, not ${what}`, at);
+
 function binary(op: Op, left: Sexp, right: Sexp, at: Pos): Sexp {
     if (op.name !== '|>') return form(at, sym(op.name, at), left, right);
+    if (isForm(right, 'lambda')) throw notPipeable(LAMBDA, posOf(right) ?? at);
     // x |> f is (f x), and x |> f(a) is (f a x)
     if (right.t === 'sym') return form(at, right, left);
     if (right.t === 'pair' && !isForm(right, 'quote')) return cons(right.car, appendOne(right.cdr, left), right.pos);
@@ -620,7 +658,7 @@ function parsePrimary(ts: Ts, i: number): [Sexp, number] {
         case 'quoted': return [quote(t.datum, t.pos), i + 1];
         case 'kw':
             if (isP(ts[i + 1], '(')) return parseTagged(ts, i);
-            return [quote(sym(t.text, t.pos), t.pos), i + 1];
+            return [kw(t.text, t.pos), i + 1];
         case 'word':
             return parseWord(ts, i, t.text, t.pos);
         case 'punct':
@@ -655,8 +693,10 @@ function parseWord(ts: Ts, i: number, w: string, at: Pos): [Sexp, number] {
         case 'parent': return [sym('^$$', at), i + 1];
         case '@ARGV':  return [sym('@ARGV', at), i + 1];
         case '%ENV':   return [sym('%ENV', at), i + 1];
-        case 'spawn':
-        case 'fork':
+        case 'fork': {                          // fork f(a, b), fork f, or fork { ... } (D286)
+            const [parts, j] = parseStart(ts, i + 1, 'fork');
+            return [form(at, sym('fork', at), ...parts), j];
+        }
         case 'yield': {
             const [x, j] = parseExpr(ts, i + 1);
             return [form(at, sym(w, at), x), j];
@@ -683,8 +723,8 @@ function parseWord(ts: Ts, i: number, w: string, at: Pos): [Sexp, number] {
         }
         case 'connect': {
             const [args, j] = parseItems(ts, expect(ts, i + 1, '(', 'after connect'), ')', 'what connect connects to');
-            const [body, k] = parseBlock(ts, j);
-            return [form(at, sym('connect', at), ...args.map((a) => a.x), blockExpr(body, at)), k];
+            const [parts, k] = parseStart(ts, j, 'connect(...)');
+            return [form(at, sym('connect', at), ...args.map((a) => a.x), ...parts), k];
         }
         case 'if':
             return parseIf(ts, i);
@@ -770,7 +810,7 @@ function parseItems(ts: Ts, i: number, close: string, what: string): [readonly I
 function parseTagged(ts: Ts, i: number): [Sexp, number] {
     const t = ts[i]!;
     const [items, j] = parseItems(ts, i + 2, ')', "a tag's elements");
-    return [listOf(items, [quote(sym(t.text, t.pos), t.pos)], t.pos), j];
+    return [listOf(items, [kw(t.text, t.pos)], t.pos), j];
 }
 
 // A list of head and items: a constant if everything in it is a literal,
@@ -793,7 +833,7 @@ function listOf(items: readonly Item[], head: readonly Sexp[], at: Pos): Sexp {
 // and quoted data.
 const isLiteral = (x: Sexp): boolean =>
     x.t === 'int' || x.t === 'float' || x.t === 'str' || x.t === 'nil'
-    || isSym(x, '#true') || isSym(x, '#false') || isForm(x, 'quote');
+    || isSym(x, '#true') || isSym(x, '#false') || isKw(x) || isForm(x, 'quote');
 
 const datum = (x: Sexp): Sexp => isForm(x, 'quote') ? (x as { cdr: { car: Sexp } }).cdr.car : x;
 
@@ -810,8 +850,8 @@ export function parsePattern(ts: Ts, i: number): [Sexp, number] {
         case 'str':  return [str(t.text, t.pos), i + 1];
         case 'quoted': return [quote(t.datum, t.pos), i + 1];
         case 'kw':
-            if (isP(ts[i + 1], '(')) return parseListPattern(ts, i + 2, ')', [quote(sym(t.text, t.pos), t.pos)], t.pos);
-            return [quote(sym(t.text, t.pos), t.pos), i + 1];
+            if (isP(ts[i + 1], '(')) return parseListPattern(ts, i + 2, ')', [kw(t.text, t.pos)], t.pos);
+            return [kw(t.text, t.pos), i + 1];
         case 'word':
             if (t.text === 'true')  return [sym('#true', t.pos), i + 1];
             if (t.text === 'false') return [sym('#false', t.pos), i + 1];

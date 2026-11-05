@@ -1,3 +1,2 @@
-(first-got "echo: early")
-(ok (ok first-done))
-()
+(:first-got "echo: early")
+(:ok (:ok :first-done))

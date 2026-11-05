@@ -115,7 +115,7 @@ contexts:
       captures:
         1: punctuation.section.parens.begin.slight
         2: keyword.control.receive.slight
-    - match: '(\()\s*(spawn|fork|connect|yield){{ends}}'
+    - match: '(\()\s*(fork/on|fork|connect|yield){{ends}}'
       captures:
         1: punctuation.section.parens.begin.slight
         2: keyword.control.process.slight

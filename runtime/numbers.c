@@ -223,7 +223,7 @@ rt_value_t rt_int_to_float(rt_value_t n, const char *site) {
 // Past 1e21, nan and inf, as str shows them, as toFixed does.
 rt_value_t rt_float_to_str(rt_value_t x, rt_value_t digits, const char *site) {
     double d = as_double(x, site);
-    rt_buf_t b = { 0 };
+    rt_buf_t b = { .site = site };
     if (digits == RT_NIL || !(fabs(d) < 1e21)) {
         rt_render(&b, rt_new_float(d, site), 1);
     } else {

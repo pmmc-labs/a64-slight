@@ -1,16 +1,18 @@
 # 4. Asking and answering
 
 The store from chapter 3 prints its replies, which is no use to the code
-that sent the commands. This chapter has it answer, shows the
-difference between asking from a task and from an actor, and finds a
-bug that only shows up when two callers share the store.
+that sent the commands. This chapter has it answer, at an address the
+command carries, finds a bug that only shows up when two callers share
+the store, and then answers at a pid instead, to see what an address
+buys.
 
 ## Answering at an address
 
-A task can't take messages with `recv`, but it can make an **address**,
-a place that messages can be sent to, and wait for the next message
-there. A command carries the address its answer should go to, and the
-store sends its reply there:
+Any process can make an **address**, a place of its own that messages
+can be sent to, and wait for the next message there. What's sent to an
+address is kept apart from the rest of the mail: `recv` leaves it, and
+only `read` at that address takes it. A command carries the address its
+answer should go to, and the store sends its reply there:
 
 <!-- code: ../code/tut-store.slight -->
 ```lisp
@@ -22,7 +24,7 @@ store sends its reply there:
                     (reply to answer)
                     (store next))))))
 
-; A task's way to run a command: send it, and wait for the reply.
+; A caller's way to run a command: send it, and wait for the reply.
 (defun call (s cmd)
     (ask s (list :do cmd)))
 ```
@@ -46,7 +48,7 @@ level can ask:
 ```lisp
 (@include "tut-store.slight")
 
-(let s (spawn (store ())))
+(let s (fork store ()))
 (call s (list :put "apple" 3))
 (pprint (call s (list :get "apple")))
 (pprint (call s (list :get "plum")))
@@ -55,9 +57,9 @@ level can ask:
 
 <!-- output: ../code/tut-4-ask.expected -->
 ```
-(ok 3)
-(error not-found)
-(ok ("apple"))
+(:ok 3)
+(:error :not-found)
+(:ok ("apple"))
 ```
 
 The program ends once nothing more can happen. Here that's with the
@@ -67,8 +69,8 @@ fine: a waiting process holds nothing up.
 ## Two callers, one value
 
 Say two parts of the program each count a hit, by getting a value and
-putting back one more. Each runs in a task of its own, started with
-`fork`. `join` waits for a task to end and gives its result:
+putting back one more. Each runs in a process of its own, started with
+`fork`. `join` waits for a process to end and gives its result:
 
 <!-- code: ../code/tut-4-race.slight -->
 ```lisp
@@ -77,11 +79,11 @@ putting back one more. Each runs in a task of its own, started with
     (match (call s (list :get key))
         ((:ok n) (call s (list :put key (+ n 1))))))
 
-(let s (spawn (store ())))
+(let s (fork store ()))
 (call s (list :put "hits" 0))
 
-(let a (fork (bump s "hits")))
-(let b (fork (bump s "hits")))
+(let a (fork bump s "hits"))
+(let b (fork bump s "hits"))
 (pprint (list (join a) (join b)))
 (pprint (call s (list :get "hits")))
 ```
@@ -113,18 +115,18 @@ step of the store. `tut-store.slight` has one, `:incr`:
 
 <!-- code: ../code/tut-4-race.slight -->
 ```lisp
-(let c (fork (call s (list :incr "views"))))
-(let d (fork (call s (list :incr "views"))))
+(let c (fork call s (list :incr "views")))
+(let d (fork call s (list :incr "views")))
 (pprint (list (join c) (join d)))
 (call s (list :get "views"))
 ```
 
 <!-- output: ../code/tut-4-race.expected -->
 ```
-((ok (ok 1)) (ok (ok 1)))
-(ok 1)
-((ok (ok 1)) (ok (ok 2)))
-(ok 2)
+((:ok (:ok 1)) (:ok (:ok 1)))
+(:ok 1)
+((:ok (:ok 1)) (:ok (:ok 2)))
+(:ok 2)
 ```
 
 Whenever the right answer depends on a value not changing between two
@@ -135,16 +137,16 @@ out. Programs shouldn't depend on it, and `SLIGHT_SCHED=n` runs one
 under other orders to find out whether it does (LANGUAGE.md, "Replaying
 a run, and other orders").
 
-## When an actor asks
+## Answering at a pid
 
-`ask` is a task's, since it makes an address. An actor has a mailbox
-already: it sends its own pid, `$$`, to be answered at, and takes the
-reply with `recv`. Here an actor counts words in the store:
+An address is one place to answer at. A process's own pid is another:
+it sends `$$`, and takes the reply with `recv`. Here an actor counts
+words in the store that way:
 
 <!-- code: ../code/tut-4-actor.slight -->
 ```lisp
-; An actor counts words in the store. It can't ask, which is a task's,
-; so it sends its own pid to be answered at, and waits for the reply.
+; An actor counts words in the store. It sends its own pid to be
+; answered at, and takes the reply with recv.
 (defun tally (s words)
     (match words
         (()
@@ -156,64 +158,41 @@ reply with `recv`. Here an actor counts words in the store:
             (pprint (list word r))
             (tally s rest))))
 
-(let s (spawn (store ())))
-(read (spawn (tally s (list "a" "b" "a"))))
+(let s (fork store ()))
+(join (fork tally s (list "a" "b" "a")))
 ```
 
 <!-- output: ../code/tut-4-actor.expected -->
 ```
-("a" (ok 1))
-("b" (ok 1))
-("a" (ok 2))
-(ok (ok ("a" "b")))
+("a" (:ok 1))
+("b" (:ok 1))
+("a" (:ok 2))
+(:ok (:ok ("a" "b")))
 ```
 
-`(let r (recv ...))` waits in the middle of the function. That's
-allowed because of where it is, and that's the `recv` rule.
-
-## The recv rule
-
-**A `recv` can go only where a tail call could, and a function that can
-reach one can only be called in tail position.** The `let` above is in
-tail position: everything after it in the body is the rest of the loop.
-
-It's natural to pull the asking out into a helper:
+`(let r (recv ...))` waits in the middle of the function, and the
+function goes on from there when the reply comes. A `recv` can go
+anywhere in a process's code (D276), so the asking could be a helper:
 
 ```
 (defun ask-store (s cmd)
     (send s (list :do cmd $$))
     (recv ((:reply r) r)))
-...
-            (pprint (list word (ask-store s (list :incr word))))
 ```
 
-and the compiler turns it down:
+and that works just as well: `ask-store` waits, keeping the process's
+stack, and gives the reply back as its value.
 
-```
-tally.slight:11:32: ask-store waits for messages (it reaches a recv), so it can only be called in tail position
-```
-
-A function that waits can't give a value back to its caller. The rule
-is what lets a waiting process hold no stack at all: the compiler
-splits a function at each `recv`, so when the process waits, there's
-nothing to come back to. It's a function, its arguments and a mailbox,
-and a million of them is cheap.
-
-In practice:
-
-- **Waiting goes inline**, as `(let r (recv ...))` in the function's
-  own body.
-- **A conversation goes in a task.** A task can call a function that
-  asks, as deep as it likes, and get the answer back as a value: `ask`
-  and `join` keep the task's stack while they wait. When an actor needs
-  a conversation with several steps, it can `fork` a task to have it.
-- **An actor waiting for a reply takes the next message, whatever it
-  is.** There's no selective receive: if something else arrives first,
-  `tally`'s `recv` doesn't match it, and it's a dead letter. `tally`
-  gets away with it because nothing else sends to it. An actor that
-  serves requests shouldn't stop to wait for a reply in the middle of
-  one. It's another reason conversations belong in tasks, and state in
-  actors.
+The difference from `call` is what the `recv` takes: the next message,
+whatever it is. There's no selective receive. If something else arrives
+first, the `recv` doesn't match it, and it's a dead letter. `tally`
+gets away with it because nothing else sends to it. An address takes
+only what's sent to it, which is why `ask` is the usual way: the reply
+can't be taken for anything else, and nothing sent to the process
+meanwhile is lost. `tally` could have used `call`, and the store would
+have been none the wiser. Answer at a pid when the process has nothing
+else to hear; ask when it might. The checker says as much, under
+`--strict`, where a bare `recv` follows a `send`.
 
 ---
 

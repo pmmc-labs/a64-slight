@@ -23,9 +23,9 @@
     (pprint (nil? (remove (lambda (e) (and (str? (car e)) (str? (cadr e)) (nil? (cddr e)))) env)))
     (pprint (length (filter (lambda (e) (str/starts-with? (car e) "SLIGHT_TEST_")) env)))
     (pprint ((lambda () (lookup "SLIGHT_TEST_EQ" env))))
-    (pprint (join (fork (lookup "SLIGHT_TEST_HOST" env))))
+    (pprint (join (fork lookup "SLIGHT_TEST_HOST" env)))
     (send $$ :go)
     (recv
         (:go (pprint (list :after-recv (lookup "SLIGHT_TEST_HOST" env) argv)))))
 
-(read (spawn (top-level @ARGV %ENV)))
+(join (fork top-level @ARGV %ENV))

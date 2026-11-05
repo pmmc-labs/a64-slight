@@ -1,0 +1,57 @@
+; A timer pending while a reply crosses loopback (D288). On the virtual
+; clock, before it moves to a program's timer, the runtime waits for
+; real, a little, for the sockets while a connection the program made is
+; open and waited on; so a reply on its way, which macOS's loopback
+; delivers a moment after the send, comes before a budget that would
+; have beaten it, and the clock hasn't moved when it does. The client
+; asks three times, each with a budget of 50 ms it takes back when the
+; reply comes; then asks for silence, and the budget wins, once.
+
+(defun echo ()
+    (recv
+        ((:open c)   (echo))
+        ((:line c s)
+            (cond
+                ((eq? s "hush") (echo))
+                (#true          (send c (list :write "re: " s \n)) (echo))))
+        ((:eof c)    (disconnect c) :echoed)))
+
+(defun ask (c i)
+    (let b (after 50 $$ :budget))
+    (send c (list :write "ping " i \n))
+    (recv
+        ((:line c s)
+            (timer/cancel b)
+            (pprint (list :reply s (clock/us)))
+            (cond
+                ((== i 3) (hush c))
+                (#true    (ask c (+ i 1)))))
+        (:budget
+            (pprint (list :budget i (clock/us)))
+            (disconnect c)
+            :beaten)))
+
+(defun hush (c)
+    (after 50 $$ :budget)
+    (send c (list :write "hush" \n))
+    (recv
+        ((:line c s) (pprint (list :unexpected s)) (disconnect c) :wrong)
+        (:budget     (pprint (list :budget (clock/us))) (disconnect c) :hushed)))
+
+(defun client ()
+    (recv
+        ((:open c) (ask c 1))))
+
+(defun listener ()
+    (recv
+        ((:open l port)
+            (let me $$)
+            (fork (lambda () (send me (list :client (join (connect :tcp (str "localhost:" port) client))))))
+            (serving l))))
+
+(defun serving (l)
+    (recv
+        ((:accept _ conn) (connect conn echo) (serving l))
+        ((:client r)      (disconnect l) (list :served r))))
+
+(pprint (join (connect :tcp/listen 0 listener)))

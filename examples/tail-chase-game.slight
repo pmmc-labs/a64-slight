@@ -14,16 +14,16 @@
     (match to-clear
         (() ())
         (((cx cy) & _)
-            (fork (do
-                (sleep 1000)
-                (tty/write \e "[" cx ";" cy "H" "*")
-                (tty/write \e "[" (+ h 3) ";" 0 "H" "fade1: " count \r)
-                (sleep 2000)
-                (tty/write \e "[" cx ";" cy "H" ".")
-                (tty/write \e "[" (+ h 4) ";" 0 "H" "fade2: " count \r)
-                (sleep 3000)
-                (tty/write \e "[" cx ";" cy "H" " ")
-                (tty/write \e "[" (+ h 5) ";" 0 "H" "fade3: " count \r)))))
+            (fork (lambda () (do
+                    (sleep 1000)
+                    (tty/write \e "[" cx ";" cy "H" "*")
+                    (tty/write \e "[" (+ h 3) ";" 0 "H" "fade1: " count \r)
+                    (sleep 2000)
+                    (tty/write \e "[" cx ";" cy "H" ".")
+                    (tty/write \e "[" (+ h 4) ";" 0 "H" "fade2: " count \r)
+                    (sleep 3000)
+                    (tty/write \e "[" cx ";" cy "H" " ")
+                    (tty/write \e "[" (+ h 5) ";" 0 "H" "fade3: " count \r))))))
     (let tail (trail x y to-clear))
     (match (recv)
         ((:ArrowUp & _)    (tail-chaser h w (if (== x 0) x (dec x)) y (inc count) tail))
@@ -38,8 +38,8 @@
         ((_ & rest) (cons (list x y) rest))))
 
 (tty/write \e "[?25l")
-(read (connect :keypress (tail-chaser
-    40 40
-    10 20
-    0
-    ())))
+(join (connect :keypress tail-chaser
+40 40
+10 20
+0
+()))

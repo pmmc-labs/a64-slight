@@ -53,7 +53,7 @@ fun main(args, env) {
                divider(), prompt());
     let extra = if str?(expert) { [expert_tool(url, expert)] } else { [] }
     // inside the connect, self is the keyboard's process, the agent's caller
-    read(connect(:keypress) {
+    join(connect(:keypress) {
         typing(agent::new(url, model, system(keys), append(chat_tools(self, store), extra)), "", [])
     });
     :bye

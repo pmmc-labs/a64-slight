@@ -14,7 +14,7 @@
 (defun top-level (argv)
     (let n  (str->int (car argv)))
     (let me $$)
-    (dotimes 1 101 (lambda (s) (fork (sender me s (div n 100)))))
+    (dotimes 1 101 (lambda (s) (fork sender me s (div n 100))))
     (gather n 0))
 
-(cadr (read (spawn (top-level @ARGV))))
+(cadr (join (fork top-level @ARGV)))

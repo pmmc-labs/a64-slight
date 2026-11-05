@@ -1,0 +1,38 @@
+; A keyword, :name, is a type of its own (D287): it evaluates to itself,
+; prints with its colon wherever it's printed, and is eq? to no symbol.
+; A symbol, 'name, is a name as data, printed bare. #true and #false
+; are neither. Names the program doesn't mention read from text as
+; (:keyword "name") and (:symbol "name"), and print back as they came.
+
+(pprint (list :ok 'ok (eq? :a 'a) (eq? :a :a) (eq? 'a 'a) (eq? :a "a")))
+(pprint (list (keyword? :a) (keyword? 'a) (keyword? #true) (sym? 'a) (sym? :a) (sym? #true) (bool? :a)))
+(pprint '(:a b (c :d) #true))
+(pprint (str :ok " " 'ok " " (list :a 'b)))
+(tty/write :done " " 'done "\n")
+
+; reading and printing data
+(pprint (sexp/parse "(:ok ok :zzz zzz 'ok #true)"))
+(pprint (sexp/print (list :ok 'ok (list :keyword "zzz") (list :symbol "zzz") (list :symbol "two words") (list 'quote 'x))))
+(pprint (json/parse "[null, true]"))
+
+; the names, as strings, and back
+(pprint (list (sym->str :ok) (sym->str 'ok) (str->keyword "ok") (str->sym "ok") (str->keyword "nowhere") (str->sym "nowhere")))
+
+; patterns: :tag matches the keyword, 'name the symbol
+(defun kind (v)
+    (match v
+        (:a      :keyword-a)
+        ('a      :symbol-a)
+        ((:t x)  (list :tagged x))
+        (('t x)  (list :headed x))
+        (_       :other)))
+(pprint (map kind (list :a 'a (list :t 1) (list 't 2) "a")))
+
+; hashes: by name and by kind
+(pprint (list (== (hash :a) (hash :a)) (== (hash :a) (hash 'a)) (== (hash 'a) (hash 'a))))
+
+; a keyword is a value, not a function: calling one faults
+(let k :a)
+(pprint (join (fork (lambda () (k 1)))))
+:end
+; warns: 36:33

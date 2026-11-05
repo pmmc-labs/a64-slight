@@ -5,7 +5,7 @@
 
 (defun start (i n me)
     (when (< i n)
-        (spawn (send me i))
+        (fork send me i)
         (start (+ i 1) n me)))
 
 ; The share's sum, to the top level's address once it's all come.
@@ -22,5 +22,5 @@
 (let n  (str->int (car @ARGV)))
 (let k  (islands))
 (let me (address))
-(dotimes 0 k (lambda (b) (spawn/on b (share me (div (* b n) k) (div (* (+ b 1) n) k)))))
+(dotimes 0 k (lambda (b) (fork/on b share me (div (* b n) k) (div (* (+ b 1) n) k))))
 (total me k 0)

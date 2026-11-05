@@ -3,5 +3,5 @@
 
 (defun f (x) (match x ((:a) 1) ((:b n) n)))
 
-(pprint (join (fork (f (list :c 1)))))
+(pprint (join (fork f (list :c 1))))
 (f 5)

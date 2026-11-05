@@ -13,35 +13,35 @@ go wrong, and what each looks like.
         ((:div a b) (div a b))
         ((:check n) (if (< n 0) (raise (list :negative n)) n))))
 
-(pprint (join (fork (worker (list :div 6 3)))))
-(pprint (join (fork (worker (list :div 1 0)))))
-(pprint (join (fork (worker (list :check -5)))))
+(pprint (join (fork worker (list :div 6 3))))
+(pprint (join (fork worker (list :div 1 0))))
+(pprint (join (fork worker (list :check -5))))
 
-(let sleeper (fork (sleep 1000)))
+(let sleeper (fork sleep 1000))
 (kill sleeper)
 (pprint (join sleeper))
 
 ; An actor hears of another process's end by monitoring it.
 (defun watcher (job)
-    (let p (fork (worker job)))
+    (let p (fork worker job))
     (monitor p)
     (recv
         ((:exit _ result) (list :watched result))))
 
-(pprint (read (spawn (watcher (list :check -1)))))
+(pprint (join (fork watcher (list :check -1))))
 
 (raise :gave-up)
 ```
 
 <!-- output: ../code/con-failure.expected -->
 ```
-(ok 2)
+(:ok 2)
 fault in #<pid 3>: division by zero (div at docs/guide/code/con-failure.slight:3:21)
-(error (div-by-zero () "div at docs/guide/code/con-failure.slight:3:21"))
-(error (negative -5))
-(error killed)
-(ok (watched (error (negative -1))))
-error: gave-up
+(:error (:div-by-zero () "div at docs/guide/code/con-failure.slight:3:21"))
+(:error (:negative -5))
+(:error :killed)
+(:ok (:watched (:error (:negative -1))))
+error: :gave-up
 exit: 1
 ```
 
@@ -69,15 +69,16 @@ exit: 1
 There's no `catch`. A failure ends a process, and the processes that
 care are told:
 
-- **`join`** or **`read`** gives a task's result, `(:error ...)`
-  included. So `(join (fork (f)))` is how to run `f` and turn its
-  failure into a value: a task is slight's `try`.
+- **`join`** gives a process's result, `(:error ...)` included. So
+  `(join (fork f))` is how to run `f` and turn its failure into a
+  value: a task is slight's `try`.
 - **`ask`** raises `(:ended pid result)` if the actor it asked ends
   before answering, and `ask-within` raises `(:timeout pid)`. The asking
-  task ends too, unless it's in a `fork` of its own.
-- **`monitor`**, from an actor, sends `(:exit pid result)` when the
-  process ends. It's how a supervisor watches what it started (tutorial,
-  chapter 5).
+  process ends too, unless it's in a `fork` of its own.
+- **`monitor`** sends `(:exit pid result)` when the process ends, to
+  the caller's mailbox, or to an address it names. It's how a
+  supervisor watches what it started (tutorial, chapter 5), and how
+  `ask` hears that no answer is coming.
 - **The top level.** If the root ends with an error, the program prints
   `error: reason` and exits 1. A program whose root is left waiting for
   something that can never come prints `deadlock: ...`, saying what it
@@ -100,10 +101,10 @@ the actor goes on. It's a bug in the sender, reported where it shows.
   thrown past a caller that didn't know it might be.
 
 The cost is that containing a failure means a process. `(join (fork
-...))` is cheap, but it's a process, and its expression's locals are
-copied into it. So handle expected errors as values, and keep
+...))` is cheap, but it's a process, and its arguments are copied
+into it. So handle expected errors as values, and keep
 processes for isolation that's worth having.
 
 ---
 
-Previous: [Tasks and actors](tasks-and-actors.md) · Next: [Time](time.md)
+Previous: [Processes and messages](processes.md) · Next: [Time](time.md)

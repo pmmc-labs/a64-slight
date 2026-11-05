@@ -8,6 +8,6 @@
 (pprint (safe-div 1 0))
 
 ; A bug is a fault, which ends only the process it happens in.
-(let t (fork (car ())))
+(let t (fork (lambda () (car ()))))
 (join t)
-; warns: 11:14
+; warns: 11:25

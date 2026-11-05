@@ -3,7 +3,12 @@
 ; record, and none of them runs: the file the first writes, which @ARGV
 ; names, isn't written then. The pid it prints differs from run to run,
 ; but not from its record. The last is stopped before it ends, which
-; kills it, and waits for it.
+; kills it, and waits for it. And a command's environment has neither
+; SLIGHT_RECORD nor SLIGHT_REPLAY (L5), so a slight program it ran
+; wouldn't write over the record. And a FIFO a command makes beside that
+; file, and writes to, which is read as a socket is (D272): what select()
+; and its reads said comes from the record too, and in a replay it's
+; neither made nor opened.
 
 (defun run (out)
     (recv
@@ -17,7 +22,23 @@
         ((:open p)   (first-line))
         ((:line p s) (disconnect p) s)))
 
-(pprint (read (connect :exec (list "sh" "-c" (str "echo written >" (car @ARGV) "; cat; echo $$ >&2; exit 3")) (run ()))))
-(pprint (read (connect :exec (list "sh" "-c" "kill -TERM $$") (run ()))))
-(pprint (read (connect :exec (list "no-such-command") (run ()))))
-(pprint (read (connect :exec (list "sh" "-c" "echo first; exec cat") (first-line))))
+(pprint (join (connect :exec (list "sh" "-c" (str "echo written >" (car @ARGV) "; cat; echo $$ >&2; exit 3")) run ())))
+(pprint (join (connect :exec (list "sh" "-c" "kill -TERM $$") run ())))
+(pprint (join (connect :exec (list "no-such-command") run ())))
+(pprint (join (connect :exec (list "sh" "-c" "echo first; exec cat") first-line)))
+(pprint (join (connect :exec (list "sh" "-c" "echo rec=${SLIGHT_RECORD-unset} play=${SLIGHT_REPLAY-unset}") run ())))
+
+(defun fifo-lines (to lines)
+    (recv
+        ((:open f)   (fifo-lines to lines))
+        ((:line f s) (fifo-lines to (cons s lines)))
+        ((:eof f)    (send to (list :fifo (reverse lines))))))
+
+(let fifo (str (car @ARGV) ".fifo"))
+(match (open :exec (list "sh" "-c" "rm -f $1 && mkfifo $1 && exec 3<>$1 && echo ready && read go && echo one >&3 && echo two >&3" "sh" fifo))
+    ((:ok c)
+        (read c)
+        (let to (address))
+        (connect :fs/read fifo fifo-lines to ())
+        (send c (list :write "go" \n))
+        (pprint (read to))))

@@ -39,11 +39,11 @@
 (404 "not found")
 (200 "6.5")
 (400 "not JSON")
-done
+:done
 ```
 
 **A server** is a function from a request to a response.
-`(http/listen port handler)`, from a task, listens on all interfaces and
+`(http/listen port handler)` listens on all interfaces and
 gives `(:ok (l port))`. Port 0 lets the system pick, which is what a
 test wants. `(kill l)` stops it. From an actor, `(http/serve port
 handler)` does the same and sends `(:listening port)`.
@@ -53,7 +53,7 @@ handler)` does the same and sends `(:listening port)`.
   `:headers` (`(name value)` pairs, names in lower case) and `:body`.
 - A response is `(status headers body)`. Content-Length and
   `Connection: close` are added for you.
-- Each request runs the handler in a task of its own. If it faults or
+- Each request runs the handler in a process of its own. If it faults or
   raises, the client gets a 500, and the server goes on. A handler can
   `call` an actor, or make requests of its own.
 

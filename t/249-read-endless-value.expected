@@ -1,4 +1,3 @@
-(error (too-big "build/t/249-read-endless.txt"))
-(error (too-big "build/t/249-read-endless.txt"))
-(ok ())
-()
+(:error (:too-big "build/t/249-read-endless.txt"))
+(:error (:too-big "build/t/249-read-endless.txt"))
+(:ok ())

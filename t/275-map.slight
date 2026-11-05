@@ -5,7 +5,7 @@
 (@include :map)
 
 ; the basics
-(let m (list->map '((a 1) (b 2) (a 3))))
+(let m (list->map '((:a 1) (:b 2) (:a 3))))
 (pprint (list (map/size m) (map/get m :a) (map/get m :b) (map/get m :c) (map/has? m :b) (map/has? m :c)))
 (let m2 (map/update (map/update m :a inc 0) :c inc 0))
 (pprint (list (map/get m2 :a) (map/get m2 :c) (map/size m2) (map/get m :a) (map/size m)))
@@ -49,9 +49,8 @@
         (#true
             (let op (rand/int 10))
             (let k (key (rand/int 300) (rand/int 2)))
-            (let rest (remove (lambda (e) (eq? (car e) k)) alist))
             (let m2 (if (< op 6) (map/put m k i) (map/delete m k)))
-            (let alist2 (if (< op 6) (assoc k i rest) rest))
+            (let alist2 (if (< op 6) (assoc k i alist) (remove (lambda (e) (eq? (car e) k)) alist)))
             (churn m2 alist2 (inc i) n (and ok (== (map/size m2) (length alist2)) (eq? (map/get m2 k) (lookup k alist2)))))))
 (defun all-found (m alist)
     (match alist

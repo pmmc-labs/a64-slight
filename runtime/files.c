@@ -26,11 +26,11 @@ static rt_value_t pair(rt_value_t a, rt_value_t b, const char *site) {
 }
 
 static rt_value_t ok(rt_value_t x, const char *site) {
-    return pair(rt_symbol(RT_SYM_OK), x, site);
+    return pair(rt_keyword(RT_SYM_OK), x, site);
 }
 
 static rt_value_t failed(int err, rt_value_t path, const char *site) {
-    return pair(rt_symbol(RT_SYM_ERROR), pair(rt_symbol(RT_SYM_ERRS + rt_errno_name(err)), path, site), site);
+    return pair(rt_keyword(RT_SYM_ERROR), pair(rt_keyword(RT_SYM_ERRS + rt_errno_name(err)), path, site), site);
 }
 
 // The path as C has it: a string's bytes end in a NUL already, so only
@@ -77,10 +77,10 @@ rt_value_t rt_fs_stat(rt_value_t path, const char *site) {
     if (err) return failed(err, path, site);
     if (rt_io_stat(p, got) != 0) return failed(errno, path, site);
     rt_value_t info = RT_NIL;
-    info = cell(pair(rt_symbol(RT_SYM_STAT + RT_STAT_MODE), rt_int(got[3]), site), info, site);
-    info = cell(pair(rt_symbol(RT_SYM_STAT + RT_STAT_MODIFIED), rt_int(got[2]), site), info, site);
-    info = cell(pair(rt_symbol(RT_SYM_STAT + RT_STAT_SIZE), rt_int(got[1]), site), info, site);
-    info = cell(pair(rt_symbol(RT_SYM_KIND + RT_KIND_KIND), rt_symbol(RT_SYM_STAT + (uint64_t)got[0]), site), info, site);
+    info = cell(pair(rt_keyword(RT_SYM_STAT + RT_STAT_MODE), rt_int(got[3]), site), info, site);
+    info = cell(pair(rt_keyword(RT_SYM_STAT + RT_STAT_MODIFIED), rt_int(got[2]), site), info, site);
+    info = cell(pair(rt_keyword(RT_SYM_STAT + RT_STAT_SIZE), rt_int(got[1]), site), info, site);
+    info = cell(pair(rt_keyword(RT_SYM_KIND + RT_KIND_KIND), rt_keyword(RT_SYM_STAT + (uint64_t)got[0]), site), info, site);
     return ok(info, site);
 }
 
@@ -99,6 +99,23 @@ rt_value_t rt_fs_rename(rt_value_t from, rt_value_t to, const char *site) {
     if (err) return failed(err, from, site);
     if ((err = path_of(to, site, &t)) != 0) return failed(err, to, site);
     return rt_io_rename(f, t) == 0 ? ok(RT_NIL, site) : failed(errno, from, site);
+}
+
+// rm -r (D275): what's below path is never found by a path from the top,
+// so a link put in a directory's place while it's deleted is deleted as a
+// link, where the walk in slight on fs/stat, fs/list and fs/delete it
+// replaced could be led out of the tree. A failure names the path that
+// failed, as that walk's did.
+rt_value_t rt_fs_delete_all(rt_value_t path, const char *site) {
+    const char *p;
+    char       *where;
+    int         err = path_of(path, site, &p);
+    if (err) return failed(err, path, site);
+    if (rt_io_remove_tree(p, &where) == 0) return ok(RT_NIL, site);
+    err = errno;
+    rt_value_t at = rt_new_string(where, strlen(where), site);
+    free(where);
+    return failed(err, at, site);
 }
 
 rt_value_t rt_fs_mkdir(rt_value_t path, const char *site) {

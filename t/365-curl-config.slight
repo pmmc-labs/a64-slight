@@ -1,0 +1,32 @@
+; env: no_proxy=127.0.0.1 NO_PROXY=127.0.0.1 HOME=t/data/curlrc CURL_HOME=t/data/curlrc XDG_CONFIG_HOME=t/data/curlrc
+; fetch's curl (D205) is the real one, run with -q, so a .curlrc that says
+; location, as t/data/curlrc's does, doesn't make it follow a redirect;
+; and with --globoff, so a URL with [ or { in it is that URL, sent once
+; as it is, not a pattern of many, nor an error, as [a] was.
+
+(@include :tools)
+(@include :http)
+
+; What was asked for, as it came.
+(defun handler (req)
+    (match (lookup :path req)
+        ("/moved" (list 302 (list (list "location" "/echo")) ""))
+        (path     (list 200 (list (list "content-type" "text/plain"))
+                      (str path " " (lookup :query req))))))
+
+(defun fetch (url)
+    (join (fork (lambda () (tool/call (tools/fetch (lambda (what) #true)) (list (list "url" url)))))))
+
+(defun based (fetched base) (match fetched ((:ok text) (list :ok (str/join "BASE" (str/split text base))))))
+
+(defun top-level ()
+    (let srv  (http/serve 0 handler))
+    (let base (recv ((:listening port) (str "http://127.0.0.1:" port))))
+    (pprint (based (fetch (str base "/moved")) base))
+    (pprint (fetch (str base "/echo?filter[a]=b")))
+    (pprint (fetch (str base "/x[1-2]")))
+    (pprint (fetch (str base "/y{a,b}")))
+    (kill srv)
+    :done)
+
+(join (fork top-level))

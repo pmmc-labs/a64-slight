@@ -9,11 +9,11 @@
     (recv
         ((:open c) (pprint :not-reached) ())))
 
-(pprint (join (fork (connect :tcp/listen 70000 (never)))))
-(pprint (join (fork (connect :tcp/listen :eighty (never)))))
-(pprint (join (fork (connect :tcp 80 (never)))))
-(pprint (join (fork (connect 5 (never)))))
-(pprint (join (fork (connect $$ (never)))))
+(pprint (join (fork (lambda () (connect :tcp/listen 70000 never)))))
+(pprint (join (fork (lambda () (connect :tcp/listen :eighty never)))))
+(pprint (join (fork (lambda () (connect :tcp 80 never)))))
+(pprint (join (fork (lambda () (connect 5 never)))))
+(pprint (join (fork (lambda () (connect $$ never)))))
 
 ; (car reason) and whether its where is ours: the port is the system's
 (defun failed (r where)
@@ -24,14 +24,14 @@
     (recv ((:open l port) (send to (list l port)) (never))))
 
 (let to (address))
-(connect :tcp/listen 0 (telling to))
+(connect :tcp/listen 0 telling to)
 (let lp (read to))
 (let l (car lp))
 (let port (cadr lp))
-(pprint (failed (read (connect :tcp/listen port (never))) port))
+(pprint (failed (join (connect :tcp/listen port never)) port))
 (send l (list :write "nope"))
 (disconnect l)
 (let where (str "localhost:" port))
-(pprint (failed (read (connect :tcp where (never))) where))
-(pprint (read (connect :tcp "localhost" (never))))
-(pprint (read (connect :tcp "localhost:notaport" (never))))
+(pprint (failed (join (connect :tcp where never)) where))
+(pprint (join (connect :tcp "localhost" never)))
+(pprint (join (connect :tcp "localhost:notaport" never)))

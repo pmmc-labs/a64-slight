@@ -71,8 +71,8 @@
     (match n
         (0 :served)
         (_ (recv ((:tick) (serve (- n 1)))))))
-(let s (spawn (serve 2)))
+(let s (fork serve 2))
 (send s (list :tick))
 (send s (list :tick))
-(pprint (read s))
+(pprint (join s))
 ; warns: 43:19 44:54 47:25 53:47 54:19

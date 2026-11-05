@@ -23,7 +23,7 @@
     (when (> n 0)
         (let y (draw x))
         (let z (draw y))
-        (spawn (customer bank (+ 1 (math/mod y 5399))))
+        (fork (lambda () (customer bank (+ 1 (math/mod y 5399)))))
         (sleep (+ 1 (math/mod z 1999)))
         (source bank (- n 1) z)))
 
@@ -52,7 +52,7 @@
 (defun top-level (argv)
     (let n  (str->int (car argv)))
     (let me $$)
-    (fork (source me n 1))
+    (fork source me n 1)
     (bank 3 (list () ()) 0 0 0 n))
 
-(cadr (read (spawn (top-level @ARGV))))
+(cadr (join (fork top-level @ARGV)))

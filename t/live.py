@@ -12,7 +12,16 @@ program, or the system to measure the run.
   before D244 every pid's entry was kept, 40 MB of them. And a 32 MB
   string held by 40 actors at once, which shares one buffer (D253), and
   600 strings of 1 MB made and dropped, whose buffers are freed: each
-  under PEAK, where copies, or a leak, would be over it.
+  under PEAK, where copies, or a leak, would be over it. And 24 faults
+  of str/replace-all past a heap of 64 MB peak within FLAT of 8: before
+  H3 and L8, each built its 100 MB outside the heap and left it there.
+  That's Linux's alone: macOS's malloc keeps large blocks it has freed,
+  counted in the peak, by an amount that varies from run to run, so the
+  peak there can't tell a leak; it's skipped.
+- team: examples/team.slight from the command line, on the same model,
+  which plans two tasks: the team answers, its workers report, a write a
+  worker asks for is reported and not done, and the transcript holds
+  the run (D284).
 - chat: examples/chat.slight in a terminal, with t/live/model.slight as
   its model: what the model sends with terminal escapes in it is shown
   escaped, approvals included; a refused command isn't run; and a fetch
@@ -48,6 +57,35 @@ program, or the system to measure the run.
   second program can't take the path from it; killed with SIGKILL, it
   leaves the socket behind, which the next to listen there replaces; and
   ended by SIGTERM, it removes it.
+- wakes: with 1,100 files open before the first island starts, every
+  island's wake pipe would be past FD_SETSIZE, so the program says so
+  and ends, where it overran select()'s fd_set before (M2); with them
+  opened after the first, island 3's pipe, opened with island 1's, is
+  below it, and island 3 answers. It takes a limit on descriptors of
+  4,096 or more, which is set for it; without one, it's skipped.
+- inherit: 300 commands, each listing its shell's descriptors while
+  other islands run commands and open sockets, list 0, 1 and 2 alone:
+  the rest are closed in the command (M7), where before, one made on
+  another island a moment before its close-on-exec was set could be the
+  command's too. It reads /proc, so it's Linux's alone.
+- accept: a listener under a limit of 32 descriptors, with 40
+  connections waiting, takes what it can, and then, with no descriptor
+  for the next (EMFILE), rests a while each time, using under a quarter
+  of the CPU over two seconds, where it used all of it before (H4).
+- stacks: more tasks sleeping at once than the system has mappings for,
+  two a stack, so those it has no stack for end :stack, each with its
+  fault line, and the rest, and the program, go on (D267), where the
+  program exited 2 before. On the virtual clock, so all are asleep at
+  once. It takes Linux's vm.max_map_count, and the
+  target run natively, since qemu maps a program's memory itself;
+  otherwise it's skipped, as it is when the limit's so high that the
+  tasks it would take are too many to run here.
+- delete race: fs/delete-all deletes a tree 2,000 times while
+  t/live/swap.c swaps its subdirectory with a link to a directory
+  outside it, back and forth, atomically (RENAME_EXCHANGE, or macOS's
+  RENAME_SWAP); the file outside is never deleted (D275). The walk in
+  slight it replaced lost it in 5 runs of 5. It takes cc; without it,
+  it's skipped.
 - https: http/request on an https:// URL runs curl (D251), over real TLS
   to a server here with a certificate made for the run: a whole reply
   and a chunked one come as over http, and without the certificate to
@@ -66,6 +104,7 @@ import os
 import platform
 import pty
 import re
+import resource
 import select
 import shlex
 import shutil
@@ -78,11 +117,13 @@ import ssl
 import sys
 import termios
 import threading
+import time
 
 TARGET   = os.environ.get('TARGET', 'aarch64')
 DEADLINE = 120
 PEAK     = 400 << 20
 CHURN    = 16 << 20
+FLAT     = 32 << 20
 DIR      = os.path.join('build', 't', TARGET, 'live')
 PROMPT   = '❯ '.encode()
 
@@ -130,14 +171,14 @@ def keys():
     r = subprocess.run(RUN + [prog], input=b'\x1b' * 4000 + b'x', stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
                        env=ENV, timeout=DEADLINE)
     out, status = r.stdout.decode(), r.returncode
-    check('keys after 4000 ESCs, on a stack all but full', status == 0 and out == '("x" alt)\n(ok #true)\n()\n',
+    check('keys after 4000 ESCs, on a stack all but full', status == 0 and out == '("x" :alt)\n(:ok #true)\n',
           f'exit {status}, printed {out!r}')
 
 
 # A run's stdout, exit status and peak resident set, from wait4, which
 # subprocess would take for itself. An alarm, which exec keeps, ends a run
 # that takes past the deadline.
-def peak_run(prog, args):
+def peak_run(prog, args, env=ENV):
     pid = os.fork()
     if pid == 0:
         signal.alarm(DEADLINE)
@@ -147,7 +188,7 @@ def peak_run(prog, args):
         os.dup2(out, 1)
         os.dup2(devnull, 2)
         try:
-            os.execvpe((RUN + [prog])[0], RUN + [prog] + args, ENV)
+            os.execvpe((RUN + [prog])[0], RUN + [prog] + args, env)
         finally:
             os._exit(127)
     _, status, rusage = os.wait4(pid, 0)
@@ -158,18 +199,33 @@ def peak_run(prog, args):
 def memory():
     prog = build('memory', 't/live/memory.slight')
     cases = [
-        ('endless', '(error (too-big "sh"))\n()\n', 'a JSON value with no end, from a command', PEAK),
-        ('deep', '(error (too-big "sh"))\n()\n', '30 million arrays deep, from a command', PEAK),
+        ('endless', '(:error (:too-big "sh"))\n', 'a JSON value with no end, from a command', PEAK),
+        ('deep', '(:error (:too-big "sh"))\n', '30 million arrays deep, from a command', PEAK),
         ('wide', None, 'str/pad-start to a width of 4 GB', PEAK),
-        ('churn', 'done\n()\n', 'a million tasks and actors, each taken as it ends', CHURN),
-        ('shared', '1342177280\n()\n', 'a 32 MB string held by 40 actors, shared (D253)', PEAK),
-        ('dropped', '629145600\n()\n', '600 strings of 1 MB made and dropped, freed (D253)', PEAK),
+        ('churn', ':done\n', 'a million tasks and actors, each taken as it ends', CHURN),
+        ('shared', '1342177280\n', 'a 32 MB string held by 40 actors, shared (D253)', PEAK),
+        ('dropped', '629145600\n', '600 strings of 1 MB made and dropped, freed (D253)', PEAK),
     ]
     for name, expected, what, most in cases:
         out, status, peak = peak_run(prog, [name])
-        ok_out = out == expected if expected else out.startswith('(error (heap () "str/pad-start at ')
+        ok_out = out == expected if expected else out.startswith('(:error (:heap () "str/pad-start at ')
         check(f'{what}: {out.splitlines()[0] if out else "nothing"}, at most {peak >> 20} MB',
               status == 0 and ok_out and peak < most, f'exit {status}, printed {out!r}')
+    # Linux's alone: glibc gives a freed block this big back to the
+    # system at once, so a leak shows in the peak; macOS's malloc keeps
+    # large blocks it has freed, which count in the peak, by an amount
+    # that varies from run to run (8 faults peaked at 178 MB in one run
+    # on the M2 and 459 in the next), so the peak there can't tell.
+    if platform.system() != 'Linux':
+        print('skip faults past the heap leave nothing behind: only Linux gives freed blocks back at once')
+        return
+    capped = ENV | {'SLIGHT_HEAP_MAX': '64M'}
+    # 8 against 24: a leak grows with the faults.
+    out1, status1, peak1 = peak_run(prog, ['faults', '8'], capped)
+    out8, status8, peak8 = peak_run(prog, ['faults', '24'], capped)
+    check(f'24 faults past the heap in str/replace-all, at most {peak8 >> 20} MB, and 8 at most {peak1 >> 20} MB',
+          (status1, out1, status8, out8) == (0, '8\n', 0, '24\n') and peak8 < peak1 + FLAT,
+          f'exit {status1} and {status8}, printed {out1!r} and {out8!r}')
 
 
 # A terminal, read as it's written to: see waits for text after what's
@@ -263,6 +319,35 @@ def chat():
           f'the model was told {told!r}')
 
 
+def team():
+    model = build('model', 't/live/model.slight')
+    prog  = build('team', 'examples/team.slight')
+    server = subprocess.Popen(RUN + [model], stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, env=ENV)
+    port   = server.stdout.readline().decode().strip()
+    env = dict(ENV, OLLAMA_HOST=f'127.0.0.1:{port}', no_proxy='127.0.0.1', NO_PROXY='127.0.0.1')
+    transcript = os.path.join(DIR, 'team.sexp')
+    for stale in (transcript, 'out.txt'):
+        if os.path.exists(stale):
+            os.remove(stale)
+    try:
+        r = subprocess.run(RUN + [prog, '--transcript', transcript, 'say', 'hello', 'and', 'goodbye'],
+                           stdin=subprocess.DEVNULL, capture_output=True, env=env, timeout=DEADLINE)
+        status, out = r.returncode, r.stdout.decode()
+    except subprocess.TimeoutExpired:
+        status, out = None, ''
+    server.kill()
+    told = server.communicate()[0].decode()
+    text = open(transcript).read() if os.path.exists(transcript) else ''
+    check('the team answers from the command line', status == 0 and out.endswith('\nhello and goodbye\n'),
+          f'exit {status}, said {out!r}')
+    check('its workers report', 'worker 1 done: hello\n' in out and 'worker 2 done: goodbye\n' in out, f'said {out!r}')
+    check("a write a worker would do is reported, and not done",
+          'a worker would have: write out.txt' in out and "told: the user didn't let it be written\n" in told and not os.path.exists('out.txt'),
+          f'said {out!r}; the model was told {told!r}')
+    check('the transcript holds the run', '(:plan ("say hello" "say goodbye"))' in text and '(:answer "hello and goodbye")' in text,
+          f'the transcript is {text!r}')
+
+
 def airline():
     gen  = build('airline-gen', 'examples/airline-gen.slight')
     prog = build('airline', 'examples/airline.slight')
@@ -278,7 +363,7 @@ def airline():
     landed = sum(1 for line in first.splitlines() if line.startswith(b'(:flew '))
     check(f'a day of {legs} legs from airline-gen: {landed} land in the base, the same in a seeded order',
           made.returncode == 0 and all(r.returncode == 0 for r in runs) and legs > 1000 and landed == legs
-          and first.endswith(f'(recorded {legs})\n'.encode()) and first == again,
+          and first.endswith(f'(:recorded {legs})\n'.encode()) and first == again,
           f'made {made.returncode}, recorded {[r.returncode for r in runs]}, the record ends {first[-200:]!r}')
 
     # What-ifs of the test's own, for each way a checkpoint is found: a hub
@@ -325,8 +410,9 @@ def airline():
 
     # Random what-ifs on the small day in two rounds, the second from the
     # history the first kept, come to what they do in one batch (D214):
-    # r3-20 branches from r3-5, whose checkpoints weren't kept, since
-    # nothing in the first round branched from it.
+    # r3-11 branches from r3-2, whose checkpoints weren't kept, since
+    # nothing in the first round branched from it (the draw is the hash
+    # of a seed and a keyword, so it changed with D287).
     rounds = os.path.join(DIR, 'airline-rounds.sexp')
     if os.path.exists(rounds):
         os.remove(rounds)
@@ -338,7 +424,7 @@ def airline():
     check('random what-ifs in two rounds, the second from the history the first kept, come to what they do in one',
           all(status == 0 for status, _ in ran) and len(history(whole)) == 20 and history(second) == history(whole)
           and sum(1 for line in second.splitlines() if line.endswith(', kept')) == 10
-          and 'r3-20, from r3-5: ' in second,
+          and 'r3-11, from r3-2: ' in second,
           f'exits {[status for status, _ in ran]}\n--- the second round\n{second}\n--- in one\n{whole}')
 
     # The same what-ifs in three shares, each run apart, report every
@@ -381,7 +467,7 @@ def started(prog, prefix, line, args=()):
 # whether it said so, and its exit status as subprocess gives it (minus
 # the signal for one that died of it), or None if it didn't end.
 def terminated(prog, prefix):
-    p, ready, target = started(prog, prefix, b'waiting\n')
+    p, ready, target = started(prog, prefix, b':waiting\n')
     os.kill(target, signal.SIGTERM)
     try:
         return ready, p.wait(timeout=DEADLINE)
@@ -418,7 +504,7 @@ def signals():
                 found.append(int(entry))
         return found
 
-    p, ready, target = started(build('orphans', 't/live/orphans.slight'), unshare, b'left\n')
+    p, ready, target = started(build('orphans', 't/live/orphans.slight'), unshare, b':left\n')
     left = zombies(target)
     for _ in range(DEADLINE * 10):
         if not left:
@@ -472,7 +558,7 @@ def memory_limit():
                        capture_output=True, env=ENV, timeout=DEADLINE)
     os.rmdir(path)
     check('in 256 MB, the cap is a quarter, and a runaway process faults on its own',
-          r.returncode == 0 and r.stdout == b'(ok 67108864)\n(error heap)\nsurvived\n',
+          r.returncode == 0 and r.stdout == b'(:ok 67108864)\n(:error :heap)\n:survived\n',
           f'exit {r.returncode}, said {r.stdout!r}')
 
 
@@ -481,7 +567,7 @@ def timers():
     what = "timers of an hour that nothing can come of don't hold up the program's end"
     try:
         r = subprocess.run(RUN + [prog], capture_output=True, env=ENV, timeout=DEADLINE)
-        check(what, r.returncode == 0 and r.stdout == b'(1 done)\n', f'exit {r.returncode}, said {r.stdout!r}')
+        check(what, r.returncode == 0 and r.stdout == b'(1 :done)\n', f'exit {r.returncode}, said {r.stdout!r}')
     except subprocess.TimeoutExpired:
         check(what, False, f'still running after {DEADLINE} s')
 
@@ -489,12 +575,123 @@ def timers():
 def run_limit():
     prog = build('run-limit', 't/live/run-limit.slight')
     what = 'a command still running at its limit is killed, and gives what it printed'
-    expected = b'(ok ((timeout 1000) "started\\n"))\n(ok "started\\n[stopped after 1 s, still running]")\ndone\n'
+    expected = b'(:ok ((:timeout 1000) "started\\n"))\n(:ok "started\\n[stopped after 1 s, still running]")\n:done\n'
     try:
         r = subprocess.run(RUN + [prog], capture_output=True, env=ENV, timeout=DEADLINE)
         check(what, r.returncode == 0 and r.stdout == expected, f'exit {r.returncode}, said {r.stdout!r}')
     except subprocess.TimeoutExpired:
         check(what, False, f'still running after {DEADLINE} s')
+
+
+def wakes():
+    hard = resource.getrlimit(resource.RLIMIT_NOFILE)[1]
+    if hard != resource.RLIM_INFINITY and hard < 4096:
+        print(f'skip wakes: descriptors are limited to {hard}')
+        return
+    prog = build('wakes', 't/live/wakes.slight')
+    more = lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (4096, hard))
+    cases = [
+        ('before', 2, rb'^slight: can\'t start an island: \d+ descriptors are open, and select\(\) takes \d+\n$', b'',
+         '1,100 files open before an island starts: the program says the wake pipes are past FD_SETSIZE'),
+        ('after', 0, rb'^$', b'(:echo 3 :ping)\n',
+         '1,100 files opened after an island starts: a later island\'s wake pipe was opened with the first'),
+    ]
+    for how, status, err, out, what in cases:
+        try:
+            r = subprocess.run(RUN + [prog, how, '1100'], capture_output=True, env=ENV, timeout=DEADLINE, preexec_fn=more)
+            ok = r.returncode == status and re.match(err, r.stderr) and r.stdout.endswith(out)
+            check(what, ok, f'exit {r.returncode}, said {r.stdout!r} and {r.stderr!r}')
+        except subprocess.TimeoutExpired:
+            check(what, False, f'still running after {DEADLINE} s')
+
+
+def inherit():
+    if not sys.platform.startswith('linux'):
+        print('skip inherit: no /proc here')
+        return
+    prog = build('inherit', 't/live/inherit.slight')
+    what = "300 commands, while other islands make descriptors, have none of the program's"
+    try:
+        r = subprocess.run(RUN + [prog, '300'], capture_output=True, env=ENV, timeout=DEADLINE)
+        check(what, r.returncode == 0 and r.stdout == b'(0 "0\\n1\\n2\\n")\n', f'exit {r.returncode}, said {r.stdout!r}')
+    except subprocess.TimeoutExpired:
+        check(what, False, f'still running after {DEADLINE} s')
+
+
+def accept():
+    prog = build('accept', 't/live/accept.slight')
+    what = "a listener out of descriptors rests, rather than spin"
+    few = lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (32, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
+    p = subprocess.Popen(RUN + [prog], stdout=subprocess.PIPE, stderr=subprocess.DEVNULL, env=ENV, preexec_fn=few)
+    clients = []
+    try:
+        ready, _, _ = select.select([p.stdout], [], [], DEADLINE)
+        line = p.stdout.readline() if ready else b''
+        m = re.match(rb'\(:port (\d+)\)', line)
+        if not m:
+            check(what, False, f'said {line!r}')
+            return
+        for _ in range(40):
+            clients.append(socket.create_connection(('127.0.0.1', int(m.group(1))), timeout=DEADLINE))
+        time.sleep(2)                           # a span to measure over, not a wait for anything
+    finally:
+        p.send_signal(signal.SIGTERM)
+        _, status, rusage = os.wait4(p.pid, 0)
+        p.returncode = os.waitstatus_to_exitcode(status)
+        for c in clients:
+            c.close()
+    cpu = rusage.ru_utime + rusage.ru_stime
+    check(f'{what}: {cpu:.2f} s of CPU in 2 s', cpu < 0.5, f'exit {p.returncode}')
+
+
+def stacks():
+    what = 'tasks past the mappings for their stacks end :stack, and the rest go on'
+    try:
+        with open('/proc/sys/vm/max_map_count') as f:
+            limit = int(f.read())
+    except OSError:
+        print(f'skip {what}: no vm.max_map_count')
+        return
+    if RUN or limit > 200000:
+        print(f'skip {what}: ' + ('qemu maps memory itself' if RUN else f'vm.max_map_count is {limit}'))
+        return
+    n    = limit // 2 + 4000
+    prog = build('stacks', 't/live/stacks.slight')
+    # the virtual clock, so that every task is asleep before the first wakes
+    p    = subprocess.run(RUN + [prog, str(n)], capture_output=True, env=ENV | {'SLIGHT_CLOCK': 'virtual'}, timeout=DEADLINE)
+    m    = re.fullmatch(rb'\((\d+) (\d+)\)\n', p.stdout)
+    ok, ended = (int(m.group(1)), int(m.group(2))) if m else (0, 0)
+    lines = p.stderr.decode().splitlines()
+    told  = all(re.fullmatch(r'fault in #<pid \d+(@\d+)?>: no stack to be had \(.*\)', l) for l in lines)
+    check(f'{what}: {ok} ran and {ended} ended :stack, of {n}',
+          p.returncode == 0 and ok + ended == n and ended > 0 and len(lines) == ended and told,
+          f'exit {p.returncode}: {p.stdout[:200]!r} {p.stderr[:400]!r}')
+
+
+def delete_race():
+    what = 'fs/delete-all with a link swapped in for its subdirectory, again and again, deletes nothing outside'
+    prog  = build('delete-race', 't/live/delete-race.slight')
+    swap  = os.path.join(DIR, 'swap')
+    built = subprocess.run(['cc', '-O2', '-o', swap, 't/live/swap.c'], capture_output=True, text=True)
+    if built.returncode != 0:
+        print(f'skip {what}: t/live/swap.c did not compile\n{built.stderr}')
+        return
+    base = os.path.abspath(os.path.join(DIR, 'delete-race.d'))
+    top, outside = os.path.join(base, 'tree'), os.path.join(base, 'outside')
+    shutil.rmtree(base, ignore_errors=True)
+    os.makedirs(outside)
+    os.makedirs(top)
+    kept = os.path.join(outside, 'kept')
+    with open(kept, 'w') as f:
+        f.write('kept')
+    s = subprocess.Popen([swap, os.path.join(top, 'sub'), os.path.join(base, 'link'), outside])
+    try:
+        p = subprocess.run(RUN + [prog, top, '2000'], capture_output=True, env=ENV, timeout=DEADLINE)
+    finally:
+        s.kill()
+        s.wait()
+    check(what, p.returncode == 0 and os.path.exists(kept), f'exit {p.returncode}: {p.stdout[:200]!r} {p.stderr[:400]!r}')
+    shutil.rmtree(base, ignore_errors=True)
 
 
 # What a connection to the socket at path says first, or None.
@@ -520,16 +717,16 @@ def sockets():
     path = os.path.join(DIR, 'listen.sock')
     if os.path.lexists(path):
         os.unlink(path)
-    a, ready, target = started(prog, [], b'listening\n', [path])
+    a, ready, target = started(prog, [], b':listening\n', [path])
     check('a listener at a path answers there', ready and is_socket(path) and hello(path) == b'hello\n')
     second = subprocess.run(RUN + [prog, path], capture_output=True, env=ENV, timeout=DEADLINE)
     check("a second can't take the path from it, which it still answers at",
-          second.stdout == f'(error (eaddrinuse "{path}"))\n'.encode() and hello(path) == b'hello\n',
+          second.stdout == f'(:error (:eaddrinuse "{path}"))\n'.encode() and hello(path) == b'hello\n',
           f'second said {second.stdout!r}')
     os.kill(target, signal.SIGKILL)
     a.wait()
     check('SIGKILL leaves the socket behind', is_socket(path) and hello(path) is None)
-    b, ready, target = started(prog, [], b'listening\n', [path])
+    b, ready, target = started(prog, [], b':listening\n', [path])
     check('the next to listen there replaces it', ready and hello(path) == b'hello\n')
     os.kill(target, signal.SIGTERM)
     status = b.wait(timeout=DEADLINE)
@@ -589,12 +786,12 @@ def https():
         prog = build('https', 't/live/https.slight')
         r = subprocess.run(RUN + [prog, base], capture_output=True, env=trusted, timeout=DEADLINE)
         check('https through curl gives a whole reply, and a chunked one, as http does',
-              r.returncode == 0 and r.stdout == b'(200 ("hello over tls" ""))\n(200 ("sent" "back"))\ndone\n',
+              r.returncode == 0 and r.stdout == b'(200 ("hello over tls" ""))\n(200 ("sent" "back"))\n:done\n',
               f'exit {r.returncode}, said {r.stdout!r}')
         r = subprocess.run(RUN + [prog, base], capture_output=True, env=env, timeout=DEADLINE)
         where = f'"127.0.0.1:{server.server_address[1]}"'
         check("a certificate curl can't check is curl's failure",
-              r.returncode == 0 and re.fullmatch(rf'(\(error \(curl (35|60) {where}\)\)\n){{2}}done\n', r.stdout.decode()) is not None,
+              r.returncode == 0 and re.fullmatch(rf'(\(:error \(:curl (35|60) {where}\)\)\n){{2}}:done\n', r.stdout.decode()) is not None,
               f'exit {r.returncode}, said {r.stdout!r}')
     except subprocess.TimeoutExpired:
         check('https through curl', False, f'still running after {DEADLINE} s')
@@ -602,16 +799,61 @@ def https():
         server.shutdown()
 
 
+# A server outside the program, on loopback, that answers a line 20 ms
+# after it comes, as macOS's loopback delivers every reply a moment after
+# its send: on the virtual clock, with a budget pending, the reply must
+# come before the budget, and the clock mustn't have moved (D288). Linux
+# delivers loopback within the send, so only a server that waits shows it.
+def loopback():
+    s = socket.socket()
+    s.bind(('127.0.0.1', 0))
+    s.listen(8)
+
+    def serve(c):
+        with c, c.makefile('rb') as lines:
+            for line in lines:
+                time.sleep(0.02)
+                c.sendall(b're: ' + line)
+
+    def accept():
+        while True:
+            try:
+                c, _ = s.accept()
+            except OSError:
+                return
+            threading.Thread(target=serve, args=(c,), daemon=True).start()
+
+    threading.Thread(target=accept, daemon=True).start()
+    prog = build('loopback', 't/live/loopback.slight')
+    what = 'a reply crossing loopback comes before a budget pending on the virtual clock'
+    expected = b'(:reply "re: ping 1" 0)\n(:reply "re: ping 2" 0)\n(:reply "re: ping 3" 0)\n(:ok :done)\n'
+    try:
+        r = subprocess.run(RUN + [prog, str(s.getsockname()[1])], capture_output=True,
+                           env={**ENV, 'SLIGHT_CLOCK': 'virtual'}, timeout=DEADLINE)
+        check(what, r.returncode == 0 and r.stdout == expected, f'exit {r.returncode}, said {r.stdout!r}')
+    except subprocess.TimeoutExpired:
+        check(what, False, f'still running after {DEADLINE} s')
+    finally:
+        s.close()
+
+
 os.makedirs(DIR, exist_ok=True)
 keys()
 memory()
 chat()
+team()
 airline()
 signals()
 memory_limit()
 timers()
 run_limit()
 sockets()
+wakes()
+inherit()
+accept()
+stacks()
+delete_race()
 https()
+loopback()
 print(f'live: {failed} failed')
 sys.exit(1 if failed else 0)

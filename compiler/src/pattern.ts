@@ -32,7 +32,7 @@
 // long enough.
 
 import { CompileError } from './errors.ts';
-import { int, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pos, type Sexp, type Sym } from './sexp.ts';
+import { isKw, builtinSym, hidden, int, isForm, isSym, list, posOf, show, sym, toArray, TUPLE, type Pos, type Sexp, type Sym } from './sexp.ts';
 
 export type Lowered = {
     readonly tests: readonly Sexp[];
@@ -42,18 +42,17 @@ export type Lowered = {
 // The rest marker in a list pattern.
 export const REST = '&';
 
-// Names with spaces in them, which no program can write. A builtin's name
-// with BUILTIN after it is that builtin, whatever locals there are; the
-// code generator knows these and NO_MATCH, a match that matched nothing
-// (expand.ts). RECV_MESSAGE is what recv names the message it took.
-export const BUILTIN      = ' (builtin)';
-export const ON_CONSES    = ' (on conses)';
-export const NO_MATCH     = 'no match (match)';
-export const RECV_MESSAGE = 'message (recv)';
-export const TUPLE_OF     = 'tuple-of? (pattern)';
-export const TUPLE_REF    = 'tuple/get (pattern)';
+// Hidden names (sexp.ts). A c[ad]r with ON_CONSES after it is that
+// builtin on what the tests have shown are conses; the code generator
+// knows these and NO_MATCH, a match that matched nothing (expand.ts).
+// RECV_MESSAGE is what recv names the message it took.
+export const ON_CONSES    = hidden('', 'on conses');
+export const NO_MATCH     = hidden('no match', 'match');
+export const RECV_MESSAGE = hidden('message', 'recv');
+export const TUPLE_OF     = hidden('tuple-of?', 'pattern');
+export const TUPLE_REF    = hidden('tuple/get', 'pattern');
 
-const prim = (name: string): Sexp => sym(`${name}${BUILTIN}`);
+const prim = (name: string): Sexp => builtinSym(name);
 
 // The tests and bindings for the value of expression v to match pattern p.
 export function lowerPattern(p: Sexp, v: Sexp): Lowered {
@@ -88,7 +87,7 @@ function lower(p: Sexp, v: Sexp, steps: readonly Step[], whole: Sexp,
             tests.push(list(prim('nil?'), here));
             return;
         case 'sym':
-            if (p.name === '#true' || p.name === '#false') tests.push(list(prim('eq?'), here, p));
+            if (p.name === '#true' || p.name === '#false' || isKw(p)) tests.push(list(prim('eq?'), here, p));
             else if (p.name === REST) throw bad(`${REST} can only come before the last pattern of a list`, p, whole);
             else if (p.name !== '_') binds.push([p, here]);
             return;

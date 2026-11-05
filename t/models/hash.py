@@ -9,9 +9,14 @@ import struct
 
 M = (1 << 64) - 1
 INT, FLOAT, STRING, SYMBOL, PID, FUNCTION, LIST, END, TUPLE = range(1, 10)
+KEYWORD = 13    # after OTHER, FLOATS and INTS: a keyword hashes by its name, apart from the symbol (D287)
 
 
 class Sym:
+    def __init__(self, name): self.name = name
+
+
+class Kw:
     def __init__(self, name): self.name = name
 
 
@@ -62,6 +67,8 @@ def words(v):
             out += text(STRING, x.encode())
         elif isinstance(x, Sym):
             out += text(SYMBOL, x.name.encode())
+        elif isinstance(x, Kw):
+            out += text(KEYWORD, x.name.encode())
         elif isinstance(x, Fn):
             out += text(FUNCTION, x.name.encode())
         elif isinstance(x, Pid):
@@ -91,7 +98,7 @@ def nest(n, v):
 
 if __name__ == '__main__':
     values = [0, -1, 4611686018427387903, -4611686018427387904, 1.5, -0.0, '', 'slight', 'eight by',
-              Sym('ok'), Sym('#true'), [], (), [1, 2, 3], (1, 2, 3), [('a', []), 2.0, 'b'],
+              Kw('ok'), Sym('#true'), [], (), [1, 2, 3], (1, 2, 3), [('a', []), 2.0, 'b'],
               Fn('twice'), Pid(1)]
     for v in values:
         print(hash_of(v))

@@ -18,6 +18,6 @@
 (pprint (sort str/< (list "pear" "Apple" "apple" "été" "zoo" "" "日本" "äpfel")))
 
 (defun kind (pid) (car (cadr (join pid))))
-(pprint (kind (fork (str/upper 'a))))
-(kind (fork (str/compare "a" 1)))
-; warns: 21:32 22:30
+(pprint (kind (fork (lambda () (str/upper 'a)))))
+(kind (fork (lambda () (str/compare "a" 1))))
+; warns: 21:43 22:41

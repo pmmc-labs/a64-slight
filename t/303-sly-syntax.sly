@@ -67,7 +67,7 @@ fun counter(n) {
     }
 }
 
-let c = spawn counter(0);
+let c = fork counter(0);
 send(c, :inc());
 send(c, :inc());
 pprint(ask(c, :get()));
@@ -77,7 +77,7 @@ fun count_down(n) {
 }
 
 pprint(join(fork count_down(3)));
-pprint(join(fork parent) == :ok(self));
+pprint(join(fork { parent }) == :ok(self));
 pprint(@ARGV);
 
 let $n = 5;

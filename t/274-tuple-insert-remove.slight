@@ -23,10 +23,10 @@
 (pprint (map (lambda (f) (f (tuple 1 2) 1 0)) (list tuple/insert tuple/set)))
 
 ; the faults
-(pprint (join (fork (tuple/insert t 4 :x))))
-(pprint (join (fork (tuple/insert t -1 :x))))
-(pprint (join (fork (tuple/remove t 3))))
-(pprint (join (fork (tuple/remove (tuple) 0))))
-(pprint (join (fork (tuple/remove (list 1) 0))))
-(pprint (join (fork (tuple/insert t :b :x))))
-; warns: 30:35 31:37
+(pprint (join (fork (lambda () (tuple/insert t 4 :x)))))
+(pprint (join (fork (lambda () (tuple/insert t -1 :x)))))
+(pprint (join (fork (lambda () (tuple/remove t 3)))))
+(pprint (join (fork (lambda () (tuple/remove (tuple) 0)))))
+(pprint (join (fork (lambda () (tuple/remove (list 1) 0)))))
+(pprint (join (fork (lambda () (tuple/insert t :b :x)))))
+; warns: 30:46 31:48

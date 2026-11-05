@@ -4,7 +4,7 @@
 ; A date in UTC, a keyed list: (:year y) (:month m) (:day d) (:hour h)
 ; (:minute m) (:second s) (:us u) (:weekday w), the month from 1 and the
 ; weekday 1 for Monday to 7 for Sunday.
-(deftype Date (list (shape sym int)))
+(deftype Date (list (shape keyword int)))
 
 (sig time/utc (int) Date)
 (sig time/from-utc (Date) int)

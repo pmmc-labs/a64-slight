@@ -67,7 +67,10 @@ anything (`Consumer` for a function an actor runs, say).
 
 A **raw name**, between backticks, is any slight name as it is:
 `` `str/<` ``, `` `go-to-x` ``. It's for the names the mapping below
-can't carry, and the converter writes one wherever it must.
+can't carry, and the converter writes one wherever it must. It's on one
+line, and has nothing in it that would end a name in slight: no space,
+and none of `( ) ' ; " ,`. The names the compiler makes for itself have
+those in them, so a program can't write one.
 
 **Name mapping.** An identifier means the slight name made by these
 rewrites, in order:
@@ -93,7 +96,7 @@ kchar   = any character but white space and ( ) [ ] { } , ; " ' `
 
 So `:on-next`, `:fs/read`, `:tcp/listen`, `:RECV`. A keyword followed
 by `(` is a tagged list (below). A keyword doesn't end in `>`, so that
-a type's `actor<:ok>` closes (D247); `:>` alone is a keyword.
+a type's `pid<:ok>` closes (D247); `:>` alone is a keyword.
 
 **A type's `:`** has white space on each side (D247): `x : int`. One
 touching a name on its right begins a keyword, and one touching what's
@@ -110,7 +113,7 @@ before it, `x: int`, is an error that says to write `x : int`.
 - `[]` is `()`.
 
 **Reserved words:** `fun`, `let`, `if`, `else`, `cond`, `case`, `match`,
-`recv`, `spawn`, `fork`, `connect`, `yield`, `true`, `false`, `self`,
+`recv`, `fork`, `connect`, `yield`, `true`, `false`, `self`,
 `parent`. A slight name that is one of these is written as a raw name.
 
 **Special names:** `self` is `$$`, `parent` is `^$$`, and `@ARGV`,
@@ -140,8 +143,9 @@ block     = "{" { stmt } [ expr ] "}"
 stmt      = "let" pattern [ ":" type ] "=" expr end | expr end
 end       = ";"            (optional after an expr that ends with "}")
 
-expr      = "spawn" expr | "fork" expr | "yield" expr
-          | "connect" "(" sep(expr, ",") ")" block
+expr      = "fork" start | "yield" expr
+          | "connect" "(" sep(expr, ",") ")" start
+start     = block | expr        (a call spreads: see Processes)
           | pipe
 pipe      = or { "|>" or }
 or        = and { "||" and }
@@ -200,7 +204,7 @@ arms. Write `recv { ... }` itself, or `match (recv) { ... }`.
 
 ```
 type      = one { "|" one }
-one       = name [ "<" sep(type, ",") ">" ]          int, list<T>, task<T>, Tree<int>
+one       = name [ "<" sep(type, ",") ">" ]          int, list<T>, pid<T>, Tree<int>
           | "true" | "false" | keyword
           | keyword "(" sep(type | "..." type, ",") ")"
           | "[" sep(type, ",") [ "," "..." type ] "]" | "[" "..." type "]"
@@ -239,7 +243,7 @@ From tightest to loosest:
 | `&&` | left | `(and a b)` |
 | `\|\|` | left | `(or a b)` |
 | `\|>` | left | `x \|> f(a)` is `(f a x)`; `x \|> f` is `(f x)` |
-| `spawn` `fork` `yield` | prefix, takes the whole expression after it | `(spawn e)` ... |
+| `fork` `yield` | prefix, takes the whole expression after it | `(fork f a b)` from `fork f(a, b)`, `(yield e)` |
 
 `a + b + c` is `(+ (+ a b) c)`, since slight's `+` takes two. `a < b < c`
 is an error, as is `a == b == c`: write `&&`. `/` is slight's `/`, which
@@ -252,7 +256,10 @@ right (the outermost one, if that's a call of a call), which suits the
 prelude, whose functions take their data last:
 `xs |> filter(even?) |> map(square)` is
 `(map square (filter even? xs))`. The `str::` builtins take the string
-first, so the pipe doesn't help with them.
+first, so the pipe doesn't help with them. Its right is a function's name
+or a call: a lambda there (`x |> fun(y) => y + 1`), a list or a tuple
+is an error, since each would take `x` as one more element rather than
+be called with it. Name a lambda with `let` first.
 
 ## What each form becomes
 
@@ -297,10 +304,9 @@ last item of a block: there would be nothing to bind for.
 
 A list or tagged list whose elements are all literals (numbers, strings,
 booleans, keywords, `[]`, and such lists) is read as a quoted constant:
-`[1, 2, [:a, "b"]]` is `'(1 2 (a "b"))`. It means the same as
-`(list ...)`, and is made once rather than each time. It also does
-away with one of the s-expression syntax's traps: `'(:inc)` is
-`((quote inc))`, but `[:inc]` is the list `(inc)`.
+`[1, 2, [:a, "b"]]` is `'(1 2 (:a "b"))`. It means the same as
+`(list ...)`, and is made once rather than each time. A keyword in it
+is the keyword, as it is anywhere (D287).
 
 **Quoted s-expressions.** `'` and what follows it is that datum,
 quoted, read as the s-expression reader reads one: `'((lambda (x y) (+
@@ -333,17 +339,17 @@ front; `[...xs, a]` is an error (write `append(xs, [a])`).
 |---|---|
 | `recv { p => a, ... }` | `(recv (p a) ...)` |
 | `recv` | `(recv)` |
-| `spawn e` | `(spawn e)` |
-| `fork e` | `(fork e)` |
+| `fork f(a, b)` | `(fork f a b)`: `f` runs in the new process with the arguments, worked out here (D286) |
+| `fork f` | `(fork f)` |
+| `fork { body }` | `(fork (lambda () body...))` |
 | `yield e` | `(yield e)` |
-| `connect(:tcp, "h:7000") { body }` | `(connect :tcp "h:7000" body...)` |
-| `connect(conn) { body }` | `(connect conn body...)` |
+| `connect(:tcp, "h:7000") f(a)` | `(connect :tcp "h:7000" f a)` |
+| `connect(conn) { body }` | `(connect conn (lambda () body...))` |
 | `self`, `parent` | `$$`, `^$$` |
 
-The `recv` rule is unchanged, and reads naturally: a `recv`, and a call
-to a function that waits, can go where a tail call could, which is the
-last expression of a block, or the value of a `let` there
-(`let msg = recv;`).
+A `recv`, and a call to a function that waits, go anywhere in an
+actor's code (D276): the last expression of a block, the value of a
+`let` (`let msg = recv;`), an argument, a helper.
 
 **Calls** are `f(a, b)`, whatever `f` is: a function, a builtin, a
 local holding a function, or an expression (`adder(1)(2)`). Builtins
@@ -455,11 +461,11 @@ fun Producer(sub, items) {
     }
 }
 
-let o1 = spawn Consumer(pprint);
-let o2 = spawn Consumer(pprint);
+let o1 = fork Consumer(pprint);
+let o2 = fork Consumer(pprint);
 
-let op1 = spawn Operation(fun(x) => x + 100, o1);
-let op2 = spawn Operation(fun(x) => x + 200, o2);
+let op1 = fork Operation(fun(x) => x + 100, o1);
+let op2 = fork Operation(fun(x) => x + 200, o2);
 
 let p1 = fork Producer(op1, [10, 20, 30, 40, 50, 60]);
 let p2 = fork Producer(op2, [1, 2, 3, 4, 5, 6, 7, 8, 9]);
@@ -545,7 +551,7 @@ fun store(table) {
     }
 }
 
-// A task's way to run a command: send it, and wait for the reply.
+// A caller's way to run a command: send it, and wait for the reply.
 fun call(s, cmd) {
     ask(s, :do(cmd))
 }

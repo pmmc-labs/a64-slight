@@ -9,11 +9,11 @@
         ((== n 0) 0)
         (#true    (+ n (sum-down (- n 1))))))
 
-(pprint (kind (fork (depth 0))))
-(pprint (kind (fork (grow ()))))
-(pprint (kind (fork (/ 1 0))))
-(pprint (kind (fork (bytes/len 5))))
-(pprint (join (fork (sum-down 10000))))
-(pprint (join (fork (length (range 0 100000)))))
+(pprint (kind (fork depth 0)))
+(pprint (kind (fork grow ())))
+(pprint (kind (fork (lambda () (/ 1 0)))))
+(pprint (kind (fork (lambda () (bytes/len 5)))))
+(pprint (join (fork sum-down 10000)))
+(pprint (join (fork (lambda () (length (range 0 100000))))))
 :done
-; warns: 15:32
+; warns: 15:43

@@ -1,13 +1,13 @@
 ; lib/ds.slight's header (D248): what (@include :ds) gives a program,
 ; docs/LANGUAGE.md, "(@include :ds)". The rest of ds.slight is its own.
 ;
-; Each structure is an actor (D243), which a task asks and anyone sends
-; to; its messages are ds.slight's own, so these are the way in.
+; Each structure is an actor (D243), which anything asks or sends to;
+; its messages are ds.slight's own, so these are the way in.
 
-(deftype Cell (actor any))
-(deftype Dict (actor any))
-(deftype Queue (actor any))
-(deftype Channel (actor any))
+(deftype Cell (pid any))
+(deftype Dict (pid any))
+(deftype Queue (pid any))
+(deftype Channel (pid any))
 
 (sig cell/new (any) Cell)
 (sig cell/get (Cell) any)

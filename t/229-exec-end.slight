@@ -17,7 +17,7 @@
 ; Whether the process pid is gone (kill -0 fails), asked of another
 ; command.
 (defun gone (pid)
-    (read (connect :exec (list "sh" "-c" (str "kill -0 " pid " 2>/dev/null || echo gone")) (run () ()))))
+    (join (connect :exec (list "sh" "-c" (str "kill -0 " pid " 2>/dev/null || echo gone")) run () ())))
 
 ; A command that says its pid, then waits for input that never comes.
 (defun waits ()
@@ -52,20 +52,20 @@
 ; what it gets.
 (defun hands (to)
     (recv
-        ((:open p) (connect p (run to ())))))
+        ((:open p) (connect p run to ()))))
 
 ; The top level is a task (D243): it reads how each owner ends, and is
 ; told at an address what an owner says.
-(match (read (connect :exec (waits) (raises)))
+(match (join (connect :exec (waits) raises))
     ((:error (:pid pid)) (pprint (gone pid))))
-(match (read (connect :exec (waits) (disconnects)))
+(match (join (connect :exec (waits) disconnects))
     ((:ok (:pid pid)) (pprint (gone pid)))
     (r                (pprint r)))
 (let to (address))
-(let owner (connect :exec (waits) (tells to)))
+(let owner (connect :exec (waits) tells to))
 (let pid (cadr (read to)))
 (kill owner)
-(pprint (read owner))
+(pprint (join owner))
 (pprint (gone pid))
-(read (connect :exec (list "sh" "-c" "echo handed") (hands to)))
+(join (connect :exec (list "sh" "-c" "echo handed") hands to))
 (pprint (read to))

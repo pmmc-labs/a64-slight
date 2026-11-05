@@ -20,24 +20,23 @@
 //     names the pattern binds get the types of their parts; a cond's
 //     test narrows a local it tests with a type predicate, eq? to a
 //     literal, not, and the and and or made of them (refine);
-//   - a process: fork gives a task<T>, spawn and connect an actor<M>, M
+//   - a process: fork and connect give a pid<M>, M
 //     being what the recvs of the function it starts, and of every
 //     function that one can tail-call that waits, take (mailboxes).
 //
 // The warnings are collected as they're found (report), in the last
 // round only; the rounds before it only work out results.
 
-import { stateFunctions } from './classify.ts';
 import { CompileError } from './errors.ts';
 import { expand } from './expand.ts';
 import { displayName, PRELUDE_SUFFIX } from './modules.ts';
-import { REST } from './pattern.ts';
-import { NIL, cons, isForm, isSym, list, posOf, show, toArray, TUPLE, type Pair, type Pos, type Sexp } from './sexp.ts';
+import { patternNames, REST } from './pattern.ts';
+import { isKw, kwName, NIL, builtinOf, cons, isForm, isSym, list, own, posOf, show, toArray, TUPLE, type Pair, type Pos, type Sexp } from './sexp.ts';
 import { BUILTINS, CONSTANTS, PREDICATES, RESULT_ANY, cxr, cxrSteps, faultOf, resultOf } from './builtins.ts';
-import {
+import { KEYWORD,
     ANY, BOOL, FALSE_T, FLOAT, FUN_ANY, INT, LIST_ANY, NEVER, NIL_T, PID, STR, SYM, TRUE_T, TUPLE_ANY,
-    BASE_TYPES, actorOf, addressOf, consOf, datumType, elementOf, findDef, fits, headOf, lit, listOf, meet, members,
-    overlaps, readType, same, shape, showType, slyName, subst, tailOf, taskOf, tupleElement, tupleOf, union, unfold, widen,
+    BASE_TYPES, addressOf, consOf, datumType, elementOf, findDef, fits, headOf, lit, listOf, meet, members,
+    overlaps, readType, same, shape, showType, pidOf, slyName, subst, tailOf, tupleElement, tupleOf, union, unfold, widen,
     type Defs, type Ty,
 } from './types.ts';
 
@@ -69,7 +68,7 @@ type Fn = {
     readonly body: Sexp;            // its forms, as a list
     readonly pos: Pos | null;
     readonly sig: Sig | null;
-    readonly state: boolean;        // it waits for messages, so it runs in an actor
+    readonly state: boolean;        // it waits for messages
 };
 
 // The functions a module's code can call, by name: the prelude's, and a
@@ -106,7 +105,7 @@ type Cx = {
     readonly module: Module;
     readonly env: Env;
     readonly vars: readonly string[];       // type variables in scope, a generic sig's
-    readonly kind: 'task' | 'actor' | 'unknown';
+    readonly root: boolean;                 // may be the root, whose ^$$ is (): the top level, or a function that doesn't wait (one that does is taken to run in a child, a guess since D277, so ^$$ is a pid there)
     readonly self: Ty;                      // $$
     readonly mailbox: Ty;                   // what a recv here can be sent
 };
@@ -133,10 +132,10 @@ export function checkProgram(prelude: Sexp, program: Sexp, opts: CheckOptions = 
     const uforms = toArray(program) ?? [];
     const defs   = readDeftypes(pforms, uforms);
     const pfns   = readFunctions(pforms, 'prelude', defs, []);
-    const states = stateFunctions(defunsOf(uforms).map((d) => {
+    const states = waitingFunctions(defunsOf(uforms).map((d) => {
         const lowered = toArray(eraseTypes(expand(d, false)))!;
         return { name: (lowered[1] as { name: string }).name, params: paramNames(lowered[2]!), body: list(...lowered.slice(3)) };
-    }), (body) => waits(body));
+    }));
     const ufns  = readFunctions(uforms, 'user', defs, states);
     const fnsP: Fns = Object.fromEntries(pfns.map((f) => [f.name, f]));
     const fnsU: Fns = { ...fnsP, ...Object.fromEntries(ufns.map((f) => [f.name, f])) };
@@ -183,7 +182,7 @@ export function checkProgram(prelude: Sexp, program: Sexp, opts: CheckOptions = 
     if (opts.prelude === true) pfns.forEach((f) => checkFn(f, g, fnsP));
     ufns.forEach((f) => checkFn(f, g, fnsU));
     const top = uforms.filter((f) => !isForm(f, 'defun') && !isForm(f, 'deftype') && !isForm(f, 'sig'));
-    const cx: Cx = { g, fns: fnsU, module: 'user', env: null, vars: [], kind: 'task', self: taskOf(ANY), mailbox: ANY };
+    const cx: Cx = { g, fns: fnsU, module: 'user', env: null, vars: [], root: true, self: PID, mailbox: ANY };
     bodyType(list(...top), cx);
 
     const files = [...new Set(found.map((w) => w.pos?.file ?? ''))];
@@ -212,11 +211,88 @@ function waits(x: Sexp): boolean {
     if (x.car.t === 'sym') {
         switch (x.car.name) {
             case 'recv': return true;
-            case 'quote': case 'lambda': case 'fork': case 'spawn': case 'spawn/on': case 'connect': return false;
+            case 'quote': case 'lambda': return false;
+            case 'fork': case 'fork/on': case 'connect': return forkHere(x).some(waits);
         }
     }
     for (let xs: Sexp = x; xs.t === 'pair'; xs = xs.cdr) if (waits(xs.car)) return true;
     return false;
+}
+
+// The functions that wait: those with a recv in their body (waits), and
+// those that call one, anywhere but in a lambda or a new process's body,
+// since a recv keeps its stack, so a call to a function that waits waits
+// too (D276): the fixpoint over the program's calls.
+type FnSource = { readonly name: string; readonly params: readonly string[]; readonly body: Sexp };
+
+function waitingFunctions(defuns: readonly FnSource[]): readonly string[] {
+    const names = defuns.map((d) => d.name);
+    const calls = defuns.map((d) => callsIn(d.body, d.params, names));
+    let state   = defuns.filter((d) => waits(d.body)).map((d) => d.name);
+    for (;;) {
+        const more = defuns.filter((d, i) => !state.includes(d.name) && calls[i]!.some((c) => state.includes(c)));
+        if (more.length === 0) return state;
+        state = [...state, ...more.map((d) => d.name)];
+    }
+}
+
+// The program's functions (globals) that body calls, outside a lambda or
+// a new process's body. A call through a local of the same name isn't one.
+function callsIn(body: Sexp, params: readonly string[], globals: readonly string[]): readonly string[] {
+    const found: string[] = [];
+    const scanBody = (forms: Sexp, bound: readonly string[]): void => {
+        for (; forms.t === 'pair'; forms = forms.cdr) {
+            const form = forms.car;
+            const [head, name, expr] = toArray(form) ?? [];
+            if (head !== undefined && head.t === 'sym' && head.name === 'let' && expr !== undefined) {
+                scan(expr, bound);
+                if (name !== undefined && name.t === 'sym') bound = [...bound, name.name];
+            } else {
+                scan(form, bound);
+            }
+        }
+    };
+    const scanClauses = (clauses: Sexp, bound: readonly string[], patterns: boolean): void => {
+        for (; clauses.t === 'pair'; clauses = clauses.cdr) {
+            const clause = clauses.car;
+            if (clause.t !== 'pair') continue;
+            if (patterns) scanBody(clause.cdr, [...bound, ...patternNames(clause.car)]);
+            else {
+                scan(clause.car, bound);
+                scanBody(clause.cdr, bound);
+            }
+        }
+    };
+    const scan = (x: Sexp, bound: readonly string[]): void => {
+        if (x.t !== 'pair') return;
+        const head = x.car;
+        if (head.t === 'sym' && !bound.includes(head.name)) {
+            switch (head.name) {
+                case 'quote': case 'lambda': case 'defun':
+                    return;
+                case 'fork': case 'fork/on': case 'connect':
+                    return forkHere(x).forEach((a) => scan(a, bound));
+                case 'cond':
+                    return scanClauses(x.cdr, bound, false);
+                case 'recv':
+                    return scanClauses(x.cdr, bound, true);
+                case 'match':
+                    if (x.cdr.t === 'pair') {
+                        scan(x.cdr.car, bound);
+                        scanClauses(x.cdr.cdr, bound, true);
+                    }
+                    return;
+                case 'do': case 'yield':
+                    return scanBody(x.cdr, bound);
+            }
+            if (globals.includes(head.name) && !found.includes(head.name)) found.push(head.name);
+        } else {
+            scan(head, bound);
+        }
+        for (let args = x.cdr; args.t === 'pair'; args = args.cdr) scan(args.car, bound);
+    };
+    scanBody(body, params);
+    return found;
 }
 
 // The forms with the types taken out, for code generation and split.ts:
@@ -259,7 +335,7 @@ function readDeftypes(pforms: readonly Sexp[], uforms: readonly Sexp[]): Defs {
             throw new CompileError(`a type's name is a name, or (Name A B) for one with parameters, not ${show(head)}`, posOf(head) ?? posOf(f));
         }
         const [name, ...params] = parts.map((p) => (p as { name: string }).name);
-        if (BASE_TYPES.includes(name!) || ['list', 'shape', 'or', 'task', 'actor', 'address', 'array'].includes(name!)) {
+        if (BASE_TYPES.includes(name!) || ['list', 'shape', 'or', 'pid', 'address', 'array'].includes(name!)) {
             throw new CompileError(`${name} is a type already`, posOf(head) ?? posOf(f));
         }
         return { name: name!, params, body: items[2]!, module, pos: posOf(f) };
@@ -327,13 +403,13 @@ function readSig(x: Pair, defs: Defs): { readonly name: string; readonly sig: Si
 // no selective receive, so a message none of them takes is a dead letter.
 function mailboxesOf(fns: readonly Fn[]): Readonly<Record<string, Ty>> {
     const states = fns.filter((f) => f.state);
-    const own: Record<string, Ty> = Object.fromEntries(states.map((f) => [f.name, f.sig?.recv ?? recvsTake(f.body)]));
+    const takes: Record<string, Ty> = Object.fromEntries(states.map((f) => [f.name, f.sig?.recv ?? recvsTake(f.body)]));
     const calls: Record<string, readonly string[]> = Object.fromEntries(states.map((f) =>
-        [f.name, tailCallsIn(f.body).filter((n) => own[n] !== undefined)]));
+        [f.name, tailCallsIn(f.body).filter((n) => own(takes, n) !== undefined)]));
     return Object.fromEntries(states.map((f) => {
         const seen = [f.name];
-        for (let i = 0; i < seen.length; i++) for (const c of calls[seen[i]!] ?? []) if (!seen.includes(c)) seen.push(c);
-        return [f.name, union(...seen.map((n) => own[n]!))];
+        for (let i = 0; i < seen.length; i++) for (const c of own(calls, seen[i]!) ?? []) if (!seen.includes(c)) seen.push(c);
+        return [f.name, union(...seen.map((n) => own(takes, n)!))];
     }));
 }
 
@@ -342,7 +418,8 @@ function recvsTake(x: Sexp): Ty {
     if (x.t !== 'pair') return NEVER;
     if (x.car.t === 'sym') {
         switch (x.car.name) {
-            case 'quote': case 'lambda': case 'fork': case 'spawn': case 'spawn/on': case 'connect': return NEVER;
+            case 'quote': case 'lambda': return NEVER;
+            case 'fork': case 'fork/on': case 'connect': return union(NEVER, ...forkHere(x).map(recvsTake));
             case 'recv': {
                 const clauses = toArray(x.cdr) ?? [];
                 if (clauses.length === 0) return ANY;
@@ -356,11 +433,12 @@ function recvsTake(x: Sexp): Ty {
 }
 
 // The names a body calls, anywhere but in a lambda's or a new process's:
-// the state functions among them are the ones it can tail-call, since a
-// state function can only be tail-called (the recv rule).
+// the functions that wait among them are the ones whose recvs its actor
+// reaches.
 function tailCallsIn(x: Sexp): readonly string[] {
     if (x.t !== 'pair') return [];
-    if (x.car.t === 'sym' && ['quote', 'lambda', 'fork', 'spawn', 'spawn/on', 'connect'].includes(x.car.name)) return [];
+    if (x.car.t === 'sym' && ['quote', 'lambda'].includes(x.car.name)) return [];
+    if (x.car.t === 'sym' && ['fork', 'fork/on', 'connect'].includes(x.car.name)) return forkHere(x).flatMap(tailCallsIn);
     const out: string[] = x.car.t === 'sym' ? [x.car.name] : [];
     for (let xs: Sexp = x; xs.t === 'pair'; xs = xs.cdr) out.push(...tailCallsIn(xs.car));
     return out;
@@ -372,11 +450,11 @@ function tailCallsIn(x: Sexp): readonly string[] {
 function checkFn(f: Fn, g: G, fns: Fns): Ty {
     const ptypes = f.sig?.params ?? f.params.map(() => ANY);
     const env = f.params.reduce<Env>((e, p, i) => bind(e, p, ptypes[i]!), null);
-    const mailbox = f.state ? (g.mailboxes[f.name] ?? ANY) : ANY;
+    const mailbox = f.state ? (own(g.mailboxes, f.name) ?? ANY) : ANY;
     const cx: Cx = {
         g, fns, module: f.module, env, vars: f.sig?.vars ?? [],
-        kind: f.state ? 'actor' : 'unknown',
-        self: f.state ? actorOf(mailbox) : PID,
+        root: !f.state,                     // one that waits runs under a parent, as a rule
+        self: f.state ? pidOf(mailbox) : PID,
         mailbox: f.sig?.recv ?? ANY,
     };
     const t = bodyType(f.body, cx);
@@ -398,7 +476,7 @@ const name = (n: string, sly: boolean): string => (sly ? slyName(displayName(n))
 // A function by the name code calls it: `f (prelude)` is the prelude's
 // f, as a library's code names it (modules.ts, D248).
 const fnNamed = (cx: Cx, n: string): Fn | undefined =>
-    n.endsWith(PRELUDE_SUFFIX) ? cx.g.prelude[n.slice(0, -PRELUDE_SUFFIX.length)] : cx.fns[n];
+    n.endsWith(PRELUDE_SUFFIX) ? own(cx.g.prelude, n.slice(0, -PRELUDE_SUFFIX.length)) : own(cx.fns, n);
 
 function warn(cx: Cx, pos: Pos | null, message: string, certain: boolean): void {
     cx.g.report?.({ pos, message, certain });
@@ -410,20 +488,34 @@ function warn(cx: Cx, pos: Pos | null, message: string, certain: boolean): void 
 function bodyType(forms: Sexp, cx: Cx): Ty {
     let env = cx.env;
     let t: Ty = NIL_T;
+    let sent = false;                           // the form before was a send to another process
     for (; forms.t === 'pair'; forms = forms.cdr) {
         const f = forms.car;
         const here = { ...cx, env };
         if (isForm(f, 'let')) {
             const items = toArray(f) ?? [];
             const value = items[2];
+            if (sent && value !== undefined) bareRecvAfterSend(value, cx);
             t = value === undefined ? ANY : typeOf(value, here);
             if (items[1]?.t === 'sym') env = bind(env, items[1].name, t, aliasOf(value, env));
         } else {
+            if (sent) bareRecvAfterSend(f, cx);
             t = typeOf(f, here);
         }
         if (t.k === 'never') return NEVER;
+        const items = isForm(f, 'send') ? toArray(f) ?? [] : [];
+        sent = items.length === 3 && !(items[1]!.t === 'sym' && items[1]!.name === '$$');
     }
     return t;
+}
+
+// A send, then a bare (recv) for the reply: it takes the next message,
+// whatever it is, so it's right only while nothing else sends to this
+// process. ask reads the reply at an address of its own (D277).
+function bareRecvAfterSend(f: Sexp, cx: Cx): void {
+    if (isForm(f, 'recv') && (toArray(f) ?? []).length === 1) {
+        warn(cx, posOf(f) ?? null, `a bare recv after a send takes the next message, whatever it is: ask, and the reply comes to an address of its own`, false);
+    }
 }
 
 // The binding a let of a plain local is another name for.
@@ -440,7 +532,7 @@ function typeOf(x: Sexp, cx: Cx, expected: Ty | null = null): Ty {
         case 'float': return FLOAT;
         case 'str':   return STR;
         case 'nil':   return NIL_T;
-        case 'sym':   return nameType(x.name, cx);
+        case 'sym':   return isKw(x) ? lit(kwName(x)) : nameType(x.name, cx);
         case 'pair':  return formType(x, cx, expected);
     }
 }
@@ -450,21 +542,21 @@ function nameType(n: string, cx: Cx): Ty {
         case '#true':  return TRUE_T;
         case '#false': return FALSE_T;
         case '$$':     return cx.self;
-        case '^$$':    return cx.kind === 'actor' ? PID : union(PID, NIL_T);    // the root, a task, has none
+        case '^$$':    return cx.root ? union(PID, NIL_T) : PID;    // the root has none
         case '@ARGV':  return listOf(STR);
         case '%ENV':   return listOf(shape([STR, STR]));
     }
     const local = lookup(cx.env, n);
     if (local !== null) return local.ty;
-    const c = CONSTANTS[n];
+    const c = own(CONSTANTS, n);
     if (c !== undefined) return c;
     const f = fnNamed(cx, n);
     if (f !== undefined) return funOfFn(f, cx.g);
     // a builtin as a value takes the arguments it's called with, its
     // optional ones among them (D219): no arity is fixed
-    const b = BUILTINS[n];
+    const b = own(BUILTINS, n);
     if (b !== undefined) return { k: 'fun', params: null, result: typeof b.result === 'function' ? ANY : b.result };
-    if (PREDICATES[n] !== undefined) return { k: 'fun', params: [ANY], result: BOOL };
+    if (own(PREDICATES, n) !== undefined) return { k: 'fun', params: [ANY], result: BOOL };
     if (cxrSteps(n) !== null) return { k: 'fun', params: [ANY], result: ANY };
     return ANY;
 }
@@ -480,6 +572,8 @@ function funOfFn(f: Fn, g: G): Ty {
 function formType(x: Pair, cx: Cx, expected: Ty | null): Ty {
     const head = x.car;
     const args = toArray(x.cdr) ?? [];
+    const prim = head.t === 'sym' ? builtinOf(head.name) : null;
+    if (prim !== null) return builtinType(x, prim, args, cx);
     if (head.t === 'sym' && lookup(cx.env, head.name) === null) {
         switch (head.name) {
             case 'quote':   return args.length === 1 ? datumType(args[0]!) : ANY;
@@ -490,27 +584,30 @@ function formType(x: Pair, cx: Cx, expected: Ty | null): Ty {
             case 'match':   return matchType(x, args, cx);
             case 'recv':    return recvType(x, args, cx);
             case 'yield':   return args.length === 1 ? typeOf(args[0]!, cx) : ANY;
-            case 'fork':    return forkType(args, cx);
-            case 'spawn':   return spawnType(x, [], args[0], cx);
-            case 'connect': return spawnType(x, args.slice(0, -1), args[args.length - 1], cx);
-            case 'spawn/on': {                  // (spawn/on k expr): k an island's number (D256)
-                if (args.length === 2) want(cx, typeOf(args[0]!, cx), INT, posOf(args[0]!) ?? x.pos, (v) => `spawn/on's island ${v}`, 'not-an-int');
-                return spawnType(x, [], args[args.length - 1], cx);
+            case 'fork':    return forkType(x, [], args, cx);
+            case 'connect': return forkType(x, ...connectParts(args), cx);
+            case 'fork/on': {                   // (fork/on k f arg ...): k an island's number (D256)
+                if (args.length >= 2) want(cx, typeOf(args[0]!, cx), INT, posOf(args[0]!) ?? x.pos, (v) => `fork/on's island ${v}`, 'not-an-int');
+                return forkType(x, [], args.slice(1), cx);
             }
             case 'the':     return theType(x, args, cx);
             case 'defun': case 'deftype': case 'sig': return NIL_T;
         }
         const f = fnNamed(cx, head.name);
         if (f !== undefined) return callFn(x, f, args, cx);
-        const b = BUILTINS[head.name];
-        if (b !== undefined) return callBuiltin(x, head.name, args, cx);
-        const p = PREDICATES[head.name];
-        if (p !== undefined) return argsThen(args, cx, BOOL);
-        const steps = cxrSteps(head.name);
-        if (steps !== null) return callCxr(x, head.name, steps, args, cx);
-        return argsThen(args, cx, ANY);
+        return builtinType(x, head.name, args, cx);
     }
     return callValue(x, head, args, cx);
+}
+
+// A call of the builtin n, if it's one; a name nothing knows is the code
+// generator's to report.
+function builtinType(x: Pair, n: string, args: readonly Sexp[], cx: Cx): Ty {
+    if (own(BUILTINS, n) !== undefined) return callBuiltin(x, n, args, cx);
+    if (own(PREDICATES, n) !== undefined) return argsThen(args, cx, BOOL);
+    const steps = cxrSteps(n);
+    if (steps !== null) return callCxr(x, n, steps, args, cx);
+    return argsThen(args, cx, ANY);
 }
 
 // The arguments' types, for what's in them, then t; never if one never
@@ -587,17 +684,21 @@ function callCxr(x: Pair, n: string, steps: readonly ('a' | 'd')[], args: readon
 
 // A call of a value: a local, or what an expression gives.
 function callValue(x: Pair, head: Sexp, args: readonly Sexp[], cx: Cx): Ty {
-    const h = typeOf(head, cx);
+    return callOf(x, typeOf(head, cx), head, args, cx, "what's called here");
+}
+
+// A call of what has the type h, written at head; `who` is what the
+// warnings call it.
+function callOf(x: Pair, h: Ty, head: Sexp, args: readonly Sexp[], cx: Cx, who: string): Ty {
     const fparams = h.k === 'fun' ? h.params : null;
     const ts = args.map((a, i) => typeOf(a, cx, fparams?.[i] ?? null));
     if (h.k === 'never' || ts.some((t) => t.k === 'never')) return NEVER;
-    const sly = isSly(x.pos);
     const pos = posOf(head) ?? x.pos;
-    if (!want(cx, h, FUN_ANY, pos, (v) => `what's called here ${v}`, 'not-a-function')) return NEVER;
+    if (!want(cx, h, FUN_ANY, pos, (v) => `${who} ${v}`, 'not-a-function')) return NEVER;
     const funs = members(h, cx.g.defs).filter((m) => m.k === 'fun') as { params: readonly Ty[] | null }[];
     if (funs.length > 0 && funs.every((f) => f.params !== null && f.params.length !== args.length)) {
         const ns = [...new Set(funs.map((f) => f.params!.length))].join(' or ');
-        warn(cx, pos, `what's called here takes ${ns} argument${ns === '1' ? '' : 's'}, and it's given ${args.length}: it faults :arity`, true);
+        warn(cx, pos, `${who} takes ${ns} argument${ns === '1' ? '' : 's'}, and it's given ${args.length}: it faults :arity`, true);
         return NEVER;
     }
     if (h.k === 'fun' && h.params !== null) {
@@ -682,9 +783,8 @@ function unify(p: Ty, t: Ty, names: readonly string[], vars: readonly (readonly 
                     : unify(q, t.params![i]!, names, acc, defs, depth + 1)), vars);
             return t.result.k === 'any' ? vs : unify(p.result, t.result, names, vs, defs, depth + 1);
         }
-        case 'task':    return t.k === 'task' ? unify(p.of, t.of, names, vars, defs, depth + 1) : vars;
         case 'array':   return t.k === 'array' ? unify(p.of, t.of, names, vars, defs, depth + 1) : vars;
-        case 'actor':   return t.k === 'actor' ? unify(p.msg, t.msg, names, vars, defs, depth + 1) : vars;
+        case 'pid':     return t.k === 'pid' ? unify(p.msg, t.msg, names, vars, defs, depth + 1) : vars;
         case 'address': return t.k === 'address' ? unify(p.msg, t.msg, names, vars, defs, depth + 1) : vars;
         case 'or': {
             // a variable alongside other types takes what of t they don't
@@ -706,8 +806,8 @@ function hasAny(t: Ty): boolean {
         case 'cons': return hasAny(t.head) || hasAny(t.tail);
         case 'tuple': return t.of === null || t.of.some(hasAny);
         case 'or': return t.of.some(hasAny);
-        case 'task': case 'array': return hasAny(t.of);
-        case 'actor': case 'address': return hasAny(t.msg);
+        case 'array': return hasAny(t.of);
+        case 'pid': case 'address': return hasAny(t.msg);
         case 'fun': return true;
         case 'alias': return true;
         default: return false;
@@ -723,7 +823,7 @@ function lambdaType(args: readonly Sexp[], cx: Cx, expected: Ty | null): Ty {
     const ptypes = want !== null && want.k === 'fun' && want.params !== null && want.params.length === names.length
         ? want.params.map((p) => (p.k === 'var' ? ANY : p)) : names.map(() => ANY);
     const env = names.reduce<Env>((e, n, i) => bind(e, n, ptypes[i]!), cx.env);
-    const r = bodyType(list(...args.slice(1)), { ...cx, env, kind: 'unknown', self: PID, mailbox: ANY });
+    const r = bodyType(list(...args.slice(1)), { ...cx, env, root: true, self: PID, mailbox: ANY });
     return { k: 'fun', params: ptypes, result: r.k === 'never' ? ANY : r };
 }
 
@@ -773,12 +873,16 @@ function refine(test: Sexp, cx: Cx, truth: boolean): Facts | null {
     if (isSym(test, '#true')) return truth ? [] : null;
     if (isSym(test, '#false')) return truth ? null : [];
     if (test.t === 'sym') return refineName(test, cx, truth);
-    if (test.t !== 'pair' || test.car.t !== 'sym' || lookup(cx.env, test.car.name) !== null) return [];
+    if (test.t !== 'pair' || test.car.t !== 'sym') return [];
+    // a builtin by its hidden name (a case's eq?) is the builtin whatever
+    // the locals; by its own, only if no local has the name
+    const prim = builtinOf(test.car.name);
+    if (prim === null && lookup(cx.env, test.car.name) !== null) return [];
     const args = toArray(test.cdr) ?? [];
-    const head = test.car.name;
+    const head = prim ?? test.car.name;
     const defs = cx.g.defs;
     if ((head === 'not' || head === `not${PRELUDE_SUFFIX}`) && args.length === 1 && fnNamed(cx, head)?.module === 'prelude') return refine(args[0]!, cx, !truth);
-    const pred = PREDICATES[head];
+    const pred = own(PREDICATES, head);
     if (pred !== undefined && args.length === 1) return narrow(args[0]!, cx, (t) => (truth ? meet(t, pred, defs) : minus(t, pred, defs)));
     if ((head === 'eq?' || head === 'ne?') && args.length === 2) {
         const yes = head === 'eq?' ? truth : !truth;
@@ -803,7 +907,7 @@ function literalOf(x: Sexp): Ty | null {
         case 'float': return FLOAT;
         case 'str': return STR;
         case 'nil': return NIL_T;
-        case 'sym': return x.name === '#true' || x.name === '#false' ? lit(x.name) : null;
+        case 'sym': return isKw(x) ? lit(kwName(x)) : x.name === '#true' || x.name === '#false' ? lit(x.name) : null;
         case 'pair': return isForm(x, 'quote') ? datumType(toArray(x)![1] ?? NIL) : null;
     }
 }
@@ -886,7 +990,7 @@ function patternType(p: Sexp): Ty {
         case 'float': return FLOAT;
         case 'str':   return STR;
         case 'nil':   return NIL_T;
-        case 'sym':   return p.name === '#true' || p.name === '#false' ? lit(p.name) : ANY;
+        case 'sym':   return isKw(p) ? lit(kwName(p)) : p.name === '#true' || p.name === '#false' ? lit(p.name) : ANY;
         case 'pair': {
             const items = toArray(p) ?? [];
             if (isForm(p, 'quote')) return datumType(items[1] ?? NIL);
@@ -911,6 +1015,7 @@ function covers(p: Sexp, m: Ty, defs: Defs): boolean {
         case 'int': case 'float': case 'str': return false;
         case 'nil': return m.k === 'nil';
         case 'sym':
+            if (isKw(p)) return m.k === 'lit' && m.name === kwName(p);
             if (p.name === '#true' || p.name === '#false') return m.k === 'lit' && m.name === p.name;
             return p.name !== REST;
         case 'pair': {
@@ -951,7 +1056,7 @@ function onlyOne(t: Ty): boolean {
 function bindPattern(p: Sexp, t: Ty, env: Env, defs: Defs): Env {
     switch (p.t) {
         case 'sym':
-            if (p.name === '_' || p.name === '#true' || p.name === '#false' || p.name === REST) return env;
+            if (p.name === '_' || p.name === '#true' || p.name === '#false' || p.name === REST || isKw(p)) return env;
             return bind(env, p.name, t);
         case 'pair': {
             const items = toArray(p) ?? [];
@@ -1046,41 +1151,60 @@ function recvType(x: Pair, clauses: readonly Sexp[], cx: Cx): Ty {
 
 // --- processes -------------------------------------------------------------------------------------
 
-function forkType(args: readonly Sexp[], cx: Cx): Ty {
-    if (args.length !== 1) return taskOf(ANY);
-    const t = typeOf(args[0]!, { ...cx, kind: 'task', self: taskOf(ANY), mailbox: ANY });
-    return taskOf(t.k === 'never' ? ANY : t);
-}
-
-// spawn, and connect: an actor, taking what the recvs of the function its
-// body calls take (mailboxesOf).
-function spawnType(x: Pair, devices: readonly Sexp[], body: Sexp | undefined, cx: Cx): Ty {
+// fork, fork/on and connect: a process that calls f, the first of items,
+// with the rest, which are typed here, in the parent, as any call's are
+// (D286); its messages are what the recvs of f take (mailboxesOf) when f
+// is one of the program's functions, and its value, which a join of it
+// gives, the call's (D277).
+function forkType(x: Pair, devices: readonly Sexp[], items: readonly Sexp[], cx: Cx): Ty {
     const ds = devices.map((d) => typeOf(d, cx));
     if (ds.some((t) => t.k === 'never')) return NEVER;
-    const starts = body !== undefined && body.t === 'pair' && body.car.t === 'sym' && lookup(cx.env, body.car.name) === null
-        ? fnNamed(cx, body.car.name) : undefined;
-    const m = starts !== undefined && starts.module === 'user' ? (cx.g.mailboxes[starts.name] ?? ANY) : ANY;
-    if (body !== undefined) typeOf(body, { ...cx, kind: 'actor', self: actorOf(m), mailbox: ANY });
+    const f = items[0];
+    if (f === undefined) return ANY;                // the compiler says what's missing
+    const args = items.slice(1);
+    const starts = f.t === 'sym' && lookup(cx.env, f.name) === null ? fnNamed(cx, f.name) : undefined;
+    const m = starts !== undefined && starts.module === 'user' ? (own(cx.g.mailboxes, starts.name) ?? ANY) : ANY;
     if (isForm(x, 'connect') && devices.length >= 1 && isKeyword(devices[0]!, 'keypress') && m.k !== 'any' && starts !== undefined) {
         const sly = isSly(x.pos);
         if (!overlaps(KEY, m, cx.g.defs)) {
-            warn(cx, posOf(body!) ?? x.pos, `the keyboard sends ${showType(KEY, sly)}, and ${name(starts.name, sly)} takes ${showType(m, sly)}: every key would be a dead letter`, true);
+            warn(cx, posOf(f) ?? x.pos, `the keyboard sends ${showType(KEY, sly)}, and ${name(starts.name, sly)} takes ${showType(m, sly)}: every key would be a dead letter`, true);
         }
     }
-    return actorOf(m);
+    // a lambda's body runs in the new process, so it's typed as there; a
+    // builtin is checked as a call of it would be
+    const child: Cx = { ...cx, root: false, self: pidOf(m), mailbox: ANY };
+    const builtin = f.t === 'sym' && lookup(cx.env, f.name) === null && own(BUILTINS, f.name) !== undefined ? f.name : null;
+    const t = starts !== undefined ? callFn(x, starts, args, cx)
+            : builtin !== null ? callBuiltin(x, builtin, args, cx)
+            : callOf(x, typeOf(f, isForm(f, 'lambda') ? child : cx), f, args, cx, "what's forked here");
+    return pidOf(m, t.k === 'never' ? ANY : t);
+}
+
+// connect's arguments: what it connects to (a source, with a path, an
+// address or a command after some), then the function and its arguments.
+const WITH_ARG = ['fs/read', 'fs/write', 'fs/append', 'tcp', 'tcp/listen', 'unix', 'unix/listen', 'exec'];
+function connectParts(args: readonly Sexp[]): [readonly Sexp[], readonly Sexp[]] {
+    const k = args.length > 0 && WITH_ARG.some((n) => isKeyword(args[0]!, n)) ? 2 : 1;
+    return [args.slice(0, k), args.slice(k)];
+}
+
+// What a fork, fork/on or connect runs in the process it's written in:
+// everything but the function it calls, whose body runs in the new one
+// (D286).
+function forkHere(x: Pair): readonly Sexp[] {
+    const items = toArray(x.cdr) ?? [];
+    const [devices, rest] = isForm(x, 'connect') ? connectParts(items) : isForm(x, 'fork/on') ? [items.slice(0, 1), items.slice(1)] : [[], items];
+    return [...devices, ...rest.slice(1)];
 }
 
 // A key, as :keypress sends it: the key, a string or a name, and the mods.
-const KEY: Ty = { k: 'cons', head: union(STR, SYM), tail: listOf(SYM) };
+const KEY: Ty = { k: 'cons', head: union(STR, KEYWORD), tail: listOf(KEYWORD) };
 
-const isKeyword = (x: Sexp, n: string): boolean => {
-    const items = isForm(x, 'quote') ? toArray(x) : null;
-    return items !== null && items.length === 2 && isSym(items[1]!, n);
-};
+const isKeyword = (x: Sexp, n: string): boolean => isKw(x) && kwName(x) === n;
 
 // What the builtins that take processes check, and give, beyond their
-// types: a task isn't sent to, an actor isn't joined, an address is a
-// task's. null: the builtin's own result.
+// types: what a process takes, what a join gives, and that an address
+// is no process. null: the builtin's own result.
 function processCall(x: Pair, n: string, args: readonly Sexp[], ts: readonly Ty[], cx: Cx): Ty | null {
     const sly = isSly(x.pos);
     const defs = cx.g.defs;
@@ -1092,17 +1216,12 @@ function processCall(x: Pair, n: string, args: readonly Sexp[], ts: readonly Ty[
             const to = ts[i];
             const msg = ts[i + 1];
             if (to === undefined || msg === undefined) return null;
-            if (only(to, 'task')) {
-                // one that has ended takes it as any ended process does
-                warn(cx, at(i), `${name(n, sly)} to a task, which can't be sent to unless it has ended: it would fault :not-an-actor`, false);
-                return null;
-            }
-            if (to.k === 'actor' || to.k === 'address') {
+            if (to.k === 'pid' || to.k === 'address') {
                 if (to.msg.k !== 'any' && msg.k !== 'never' && !overlaps(msg, to.msg, defs)) {
-                    const who = to.k === 'actor' ? 'this actor takes' : 'this address is for';
+                    const who = to.k === 'pid' ? 'this actor takes' : 'this address is for';
                     warn(cx, at(i + 1), `${who} ${showType(to.msg, sly)}, and this is ${showType(msg, sly)}: it would be a dead letter`, true);
                 } else if (to.msg.k !== 'any' && !fits(msg, to.msg, defs)) {
-                    const who = to.k === 'actor' ? 'this actor takes' : 'this address is for';
+                    const who = to.k === 'pid' ? 'this actor takes' : 'this address is for';
                     warn(cx, at(i + 1), `${who} ${showType(to.msg, sly)}, and this may be ${showType(msg, sly)}: it may be a dead letter`, false);
                 }
             }
@@ -1110,10 +1229,6 @@ function processCall(x: Pair, n: string, args: readonly Sexp[], ts: readonly Ty[
         }
         case 'join': {
             const p = ts[0]!;
-            if (only(p, 'actor')) {
-                warn(cx, at(0), `join of an actor, which can't be joined: it faults :not-a-task (read it, from a task)`, true);
-                return NEVER;
-            }
             if (only(p, 'address')) {
                 warn(cx, at(0), `join of an address, which isn't a pid: it faults :not-a-pid`, true);
                 return NEVER;
@@ -1125,25 +1240,13 @@ function processCall(x: Pair, n: string, args: readonly Sexp[], ts: readonly Ty[
                 warn(cx, at(0), `${name(n, sly)} of an address, which isn't a pid: it faults :not-a-pid`, true);
                 return NEVER;
             }
-            if (n === 'monitor' && cx.kind === 'task') {
-                warn(cx, x.pos, `monitor in a task, which can't be sent the notice: it faults :not-an-actor`, true);
-                return NEVER;
-            }
             return null;
         }
         case 'read': {
-            if (cx.kind === 'actor') {
-                warn(cx, x.pos, `read in an actor, which takes what comes to it with recv: it faults :not-a-task`, true);
-                return NEVER;
-            }
             const p = ts[0]!;
             if (p.k === 'address') return p.msg;
-            if (p.k === 'task' || p.k === 'actor') return ended(p, args[0]!);
-            return null;
-        }
-        case 'address': case 'read/any': case 'open': {
-            if (cx.kind === 'actor') {
-                warn(cx, x.pos, `${name(n, sly)} in an actor, which is a task's: it faults :not-a-task`, true);
+            if (p.k === 'pid' && p.msg.k !== 'any') {   // a process, not a device: its end is a message, or a join's (D277)
+                warn(cx, at(0), `read of a process, which isn't a source: it faults :not-a-pid (join it, or monitor it to an address)`, true);
                 return NEVER;
             }
             return null;
@@ -1154,15 +1257,14 @@ function processCall(x: Pair, n: string, args: readonly Sexp[], ts: readonly Ty[
 
 const tagged = (tag: string, ...items: readonly Ty[]): Ty => shape([lit(tag), ...items]);
 
-// What join or read gives for a process of type p, from expression e:
-// its result, or :ended once its parent has had it (D244). A process
-// started right there, (join (fork ...)), can't have ended for anyone
-// yet: its value is kept for its parent, which this is (D245 for an
-// actor, read from a task).
+// What join gives for a process of type p, from expression e: its
+// result, or :ended once its parent has had it (D244). A process started
+// right there, (join (fork ...)), can't have ended for anyone yet: its
+// value is kept for its parent, which this is.
 function ended(p: Ty, e: Sexp): Ty {
-    const value = p.k === 'task' ? p.of : ANY;
+    const value = p.k === 'pid' && p.of !== undefined ? p.of : ANY;
     const result = union(tagged('ok', value), tagged('error', ANY));
-    const fresh = isForm(e, 'fork') || isForm(e, 'spawn') || isForm(e, 'spawn/on') || isForm(e, 'connect');
+    const fresh = isForm(e, 'fork') || isForm(e, 'fork/on') || isForm(e, 'connect');
     return fresh ? result : union(result, lit('ended'));
 }
 

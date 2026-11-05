@@ -11,5 +11,5 @@
 (pprint (str->int (cadr @ARGV)))
 (pprint (bytes/len (cadddr @ARGV)))
 (pprint ((lambda () (car @ARGV))))
-(pprint (join (fork (cdr @ARGV))))
+(pprint (join (fork (lambda () (cdr @ARGV)))))
 :done

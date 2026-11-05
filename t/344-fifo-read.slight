@@ -1,0 +1,44 @@
+; args: build/t/344-fifo-read
+; A FIFO is read as a socket is, when select() says it can be, so a
+; reader waiting on one holds up nothing else on its island (D272). A
+; command makes the FIFO and holds it open both ways, so it has a writer
+; from the start, and writes to it only once it's told to go. The
+; reader, an actor, opens it and waits; meanwhile another actor, spawned
+; on the same island, yields a thousand times, and says so; only then is
+; the command told to go. Before D272 the reader's read() held up the
+; island, so the ticker never finished, and this never ended. No timers:
+; the order is the messages'. Expected output worked out by hand.
+
+(let fifo (car @ARGV))
+(let script "rm -f $1 && mkfifo $1 && exec 3<>$1 && echo ready && read go && echo one >&3 && echo two >&3 && exec 3>&- && echo wrote")
+
+(defun reader (to lines)
+    (recv
+        ((:open f)   (send to (list :reading (island))) (reader to lines))
+        ((:line f s) (reader to (cons s lines)))
+        ((:eof f)    (send to (reverse lines)))))
+
+(defun tick (to n)
+    (if (== n 0)
+        (send to (list :ticked (island)))
+        (yield (tick to (- n 1)))))
+
+; What the command says, to its end.
+(defun said (c out)
+    (match (read c)
+        ((:line _ s)   (said c (cons s out)))
+        ((:eof _)      (said c out))
+        ((:exited _ n) (list n (reverse out)))))
+
+(match (open :exec (list "sh" "-c" script "sh" fifo))
+    ((:ok c)
+        (match (read c) ((:line _ s) (pprint s)))
+        (let to (address))
+        (connect :fs/read fifo reader to ())
+        (pprint (read to))
+        (fork tick to 1000)
+        (pprint (read to))
+        (send c (list :write "go" \n))
+        (pprint (read to))
+        (pprint (said c ()))))
+(island)

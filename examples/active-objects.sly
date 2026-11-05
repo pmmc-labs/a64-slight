@@ -61,7 +61,7 @@ fun ActorRef(obj) {
 }
 
 fun PointActor(oid, x, y) {
-    let ref = spawn ActorRef(Point(oid, x, y));
+    let ref = fork ActorRef(Point(oid, x, y));
     fun(m, o) => match m {
         :EXIT => send(ref, :EXIT),
         _     => ask(ref, [m, o]),

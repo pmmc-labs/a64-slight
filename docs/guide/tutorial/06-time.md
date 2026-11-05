@@ -82,7 +82,7 @@ Here it is in use:
 ```lisp
 (@include "tut-ttl.slight")
 
-(let s (spawn (ttl-store () () 1)))
+(let s (fork ttl-store () () 1))
 (call s (list :put-for "session" "abc" 1000))
 (call s (list :put-for "token" "xyz" 500))
 (pprint (call s (list :keys)))
@@ -101,10 +101,10 @@ Here it is in use:
 
 <!-- output: ../code/tut-6-ttl.expected -->
 ```
-(ok ("token" "session"))
-(ok ("session"))
-(ok "def")
-(error not-found)
+(:ok ("token" "session"))
+(:ok ("session"))
+(:ok "def")
+(:error :not-found)
 1800000
 ```
 
@@ -148,7 +148,7 @@ Perl's `prove` is one.
     (cadr (run-command table cmd)))
 
 (let t1 (car (run-command () (list :put "a" 1))))
-(let s (spawn (ttl-store () () 1)))
+(let s (fork ttl-store () () 1))
 
 (run-tests (list
     (is (reply-of () (list :get "a")) (list :error :not-found) "get of a key that isn't there")

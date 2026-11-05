@@ -1,0 +1,20 @@
+; A string of 4 KB or more is a buffer off the heap (D253), whose size is
+; checked against the heap's cap so that nothing wraps (H1): 4 bytes
+; repeated 2^62 - 1 times is 2^64 - 4 bytes, which once wrapped the
+; check and the size given to malloc, and overran the buffer. Each of
+; these faults :heap, in the process that asked. Expected output worked
+; out by hand.
+
+(defun kind (r)
+    (match r
+        ((:error (kind _ _)) kind)))
+
+(pprint (kind (join (fork (lambda () (str/repeat (str "a") 4611686018427387903))))))
+(pprint (kind (join (fork (lambda () (str/repeat (str "ab") 4611686018427387903))))))
+(pprint (kind (join (fork (lambda () (str/repeat (str "abc") 4611686018427387903))))))
+(pprint (kind (join (fork (lambda () (str/repeat (str "abcd") 4611686018427387903))))))
+(pprint (kind (join (fork (lambda () (str/repeat (str "ab" "cd") 4611686018427387902))))))
+(pprint (kind (join (fork (lambda () (str/pad-start (str "") 4611686018427387903 "😀"))))))
+(pprint (kind (join (fork (lambda () (str/pad-start (str "abcd") 4611686018427387903 "😀"))))))
+(pprint (kind (join (fork (lambda () (str/pad-end (str "x") 4611686018427387903 "😀"))))))
+(pprint (bytes/len (str/repeat (str "abcd") 1024)))

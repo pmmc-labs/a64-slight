@@ -17,15 +17,15 @@
 ("a-b.c" "a-b-c" "ba" "abc")
 ("-abc" "-a-b-c-" "|a|é|" "-")
 "JapanとJapan"
-fault in #<pid 2>: out of range: -1 (str/split at t/262-str-shapes.slight:34:21)
-out-of-range
-fault in #<pid 3>: out of range: -1 (str/repeat at t/262-str-shapes.slight:35:21)
-out-of-range
-fault in #<pid 4>: not a string: 5 (str/pad-start at t/262-str-shapes.slight:36:21)
-not-a-string
-fault in #<pid 5>: not a list: "abc" (str/join at t/262-str-shapes.slight:37:21)
-not-a-list
-fault in #<pid 6>: not a string: 1 (str/replace at t/262-str-shapes.slight:38:21)
-not-a-string
-fault in #<pid 7>: heap exhausted (str/repeat at t/262-str-shapes.slight:39:13)
-heap
+fault in #<pid 2>: out of range: -1 (str/split at t/262-str-shapes.slight:34:32)
+:out-of-range
+fault in #<pid 3>: out of range: -1 (str/repeat at t/262-str-shapes.slight:35:32)
+:out-of-range
+fault in #<pid 4>: not a string: 5 (str/pad-start at t/262-str-shapes.slight:36:32)
+:not-a-string
+fault in #<pid 5>: not a list: "abc" (str/join at t/262-str-shapes.slight:37:32)
+:not-a-list
+fault in #<pid 6>: not a string: 1 (str/replace at t/262-str-shapes.slight:38:32)
+:not-a-string
+fault in #<pid 7>: heap exhausted (str/repeat at t/262-str-shapes.slight:39:24)
+:heap

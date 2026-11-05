@@ -6,9 +6,9 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 
 import { CompileError } from '../src/errors.ts';
-import { BUILTIN, lowerPattern, ON_CONSES, patternNames } from '../src/pattern.ts';
+import { lowerPattern, ON_CONSES, patternNames } from '../src/pattern.ts';
 import { read } from '../src/reader.ts';
-import { show, sym, type Pair, type Sexp } from '../src/sexp.ts';
+import { BUILTIN, show, sym, type Pair, type Sexp } from '../src/sexp.ts';
 
 const pattern = (src: string): Sexp => (read(src, 't.slight') as Pair).car;
 
@@ -34,7 +34,7 @@ test('the names a pattern binds, in order', () => {
 test('a name or _ takes anything, and a literal is compared with eq?', () => {
     assert.deepEqual(lowered('x'), { tests: [], binds: ['x = v'] });
     assert.deepEqual(lowered('_'), { tests: [], binds: [] });
-    assert.deepEqual(lowered(':stop').tests, ['(eq? v (quote stop))']);
+    assert.deepEqual(lowered(':stop').tests, ['(eq? v :stop)']);
     assert.deepEqual(lowered("'(1 2)").tests, ['(eq? v (quote (1 2)))']);
     assert.deepEqual(lowered('5').tests, ['(eq? v 5)']);
     assert.deepEqual(lowered('2.5').tests, ['(eq? v 2.5)']);
@@ -45,7 +45,7 @@ test('a name or _ takes anything, and a literal is compared with eq?', () => {
 
 test('a list pattern tests each cons, then the end', () => {
     assert.deepEqual(lowered('(:add n)'), {
-        tests: ['(cons? v)', '(eq? (car v) (quote add))', '(cons? (cdr v))', '(nil? (cddr v))'],
+        tests: ['(cons? v)', '(eq? (car v) :add)', '(cons? (cdr v))', '(nil? (cddr v))'],
         binds: ['n = (cadr v)'],
     });
 });
@@ -60,7 +60,7 @@ test('patterns nest, and a long path is c[ad]r four steps at a time', () => {
 
 test('& takes the rest of a list, which needs no test unless it is all of it', () => {
     assert.deepEqual(lowered('(:write & xs)'), {
-        tests: ['(cons? v)', '(eq? (car v) (quote write))'],
+        tests: ['(cons? v)', '(eq? (car v) :write)'],
         binds: ['xs = (cdr v)'],
     });
     assert.deepEqual(lowered('(& xs)'), { tests: ['(cond ((nil? v) #true) (#true (cons? v)))'], binds: ['xs = v'] });
@@ -69,12 +69,12 @@ test('& takes the rest of a list, which needs no test unless it is all of it', (
 
 test('a tuple pattern tests that it is a tuple of so many elements, in one test, then each element', () => {
     assert.deepEqual(lowered('#(a :b)'), {
-        tests: ['(tuple-of? v 2)', '(eq? (tuple/get v 1) (quote b))'],
+        tests: ['(tuple-of? v 2)', '(eq? (tuple/get v 1) :b)'],
         binds: ['a = (tuple/get v 0)'],
     });
     assert.deepEqual(lowered('#()').tests, ['(tuple-of? v 0)']);
     assert.deepEqual(lowered('(:at #(x (y)))'), {
-        tests: ['(cons? v)', '(eq? (car v) (quote at))', '(cons? (cdr v))',
+        tests: ['(cons? v)', '(eq? (car v) :at)', '(cons? (cdr v))',
                 '(tuple-of? (cadr v) 2)',
                 '(cons? (tuple/get (cadr v) 1))', '(nil? (cdr (tuple/get (cadr v) 1)))',
                 '(nil? (cddr v))'],

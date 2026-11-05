@@ -1,0 +1,66 @@
+; ts-cpi's 03, row workers (D280): bulk-synchronous. A worker per row,
+; and a superstep per generation in three phases: scatter, the top level
+; sends every worker the three rows it needs; compute, the workers work;
+; and the barrier, one address read eight times, where a new row from
+; every worker must arrive before anything goes on. Nothing crosses the
+; barrier early: a worker can only start generation g+1 once the top
+; level has seen every row of g and scattered them again. Each result is
+; tagged with its row, and put back in place.
+;
+; Worked out by hand: the frames are t/models/life.py's. Every row costs
+; the same reductions, whatever its cells hold (the rule's tests are
+; inline, and nth walks the same columns), so first in, first out, the
+; workers finish in the order they were sent to, 0 to 7, preempted or
+; not, and the barrier sees that order every superstep.
+
+(@include "data/life.slight")
+
+; A work order is (:rows gen above own below); the answer, to the
+; barrier, is (row gen+1 new-row). :stop ends it.
+(defun worker (row barrier)
+    (recv
+        ((:rows gen above own below)
+            (send barrier (list row (+ gen 1) (life/step-row above own below)))
+            (worker row barrier))
+        (:stop (list :rows-done row))))
+
+(defun scatter (workers gen board)
+    (map (lambda (row)
+            (send (nth row workers)
+                (list :rows gen
+                    (nth (life/wrap (- row 1) (life/height)) board)
+                    (nth row board)
+                    (nth (life/wrap (+ row 1) (life/height)) board))))
+        (range 0 (life/height))))
+
+; The barrier: eight reads. got is (row new-row) pairs, and arrivals the
+; rows in the order they came.
+(defun barrier-wait (barrier gen got arrivals)
+    (if (== (length got) (life/height))
+        (list got (reverse arrivals))
+        (match (read barrier)
+            ((row g new-row)
+                (when (not (== g gen)) (raise (list :stale-result row g)))
+                (barrier-wait barrier gen (cons (list row new-row) got) (cons row arrivals))))))
+
+(defun assemble (got)
+    (map (lambda (row) (lookup row got)) (range 0 (life/height))))
+
+(defun superstep (workers barrier gen board)
+    (scatter workers gen board)
+    (match (barrier-wait barrier (+ gen 1) () ())
+        ((got arrivals)
+            (pprint (list :superstep (+ gen 1) :arrived arrivals))
+            (assemble got))))
+
+(defun run (workers barrier gen board)
+    (life/print gen board)
+    (when (< gen (life/generations))
+        (run workers barrier (+ gen 1) (superstep workers barrier gen board))))
+
+(let barrier (address))
+(let workers (map (lambda (row) (fork worker row barrier)) (range 0 (life/height))))
+(run workers barrier 0 (life/seed))
+(map (lambda (w) (send w :stop)) workers)
+(pprint (map join workers))
+:done

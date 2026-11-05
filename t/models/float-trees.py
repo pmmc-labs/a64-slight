@@ -74,7 +74,7 @@ DEFUNS = [
     '(defun scaled (xs k) (map (lambda (y) (* (+ y k) k)) xs))',
     f'(defun chain-20 (x) {chain(20)})',
     f'(defun chain-30 (x) {chain(30)})',
-    '(defun failing (thunk) (pprint (join (fork (thunk)))))',
+    '(defun failing (thunk) (pprint (join (fork thunk))))',
     '',
 ]
 CALLS = [
@@ -167,15 +167,15 @@ def expected():
     ]
     # each fault in a task of its own, pids 2, 3 and 4 on island 0
     s = site('/', 'quot')
-    out += [f'fault in #<pid 2>: division by zero ({s})', f'(error (div-by-zero () "{s}"))']
+    out += [f'fault in #<pid 2>: division by zero ({s})', f'(:error (:div-by-zero () "{s}"))']
     s = site('-', 'pull')
-    out += [f'fault in #<pid 3>: not a number: "a" ({s})', f'(error (not-a-number "a" "{s}"))']
+    out += [f'fault in #<pid 3>: not a number: "a" ({s})', f'(:error (:not-a-number "a" "{s}"))']
     # (* dy dy) is the first operation on :two, after (* dx dx)
     lines = HEAD + DEFUNS
     i = next(i for i, l in enumerate(lines) if l.startswith('(defun dist '))
     s = f'* at {NAME}:{i + 1}:{lines[i].index("(* dy dy)") + 1}'
-    out += [f'fault in #<pid 4>: not a number: two ({s})', f'(error (not-a-number two "{s}"))']
-    out.append('done')
+    out += [f'fault in #<pid 4>: not a number: :two ({s})', f'(:error (:not-a-number :two "{s}"))']
+    out.append(':done')
     return '\n'.join(out) + '\n'
 
 

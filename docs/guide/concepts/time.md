@@ -38,14 +38,14 @@ to the next timer. So:
     (send $$ :now)
     (collect () 4))
 
-(pprint (read (spawn (timed))))
+(pprint (join (fork timed)))
 (clock/us)
 ```
 
 <!-- output: ../code/con-time.expected -->
 ```
 0
-(ok (now a b c))
+(:ok (:now :a :b :c))
 20000
 ```
 
@@ -67,7 +67,12 @@ used in a test.
 
 A command run with `:exec` is a special case. While a program waits for
 a command whose input is closed, so that it can only be working on its
-own, the virtual clock stands still and waits for it, for real.
+own, the virtual clock stands still and waits for it, for real. So is
+a reply to a connection the program made: before the clock moves to a
+timer while one has been written to and nothing has come back, it
+waits a little, for real, since on some systems a reply takes a moment
+to cross from one socket to another, and a timer that's only a budget
+mustn't win by that.
 
 ## What a run depends on
 

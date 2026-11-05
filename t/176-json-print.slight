@@ -19,7 +19,7 @@
 (pprint (map round-trip? (list "{\"a\":[1,2.5,null],\"b\":{}}" "[[],[{}],\"\\u0001\",-0.0,1e+21]" "\"\\\\\"")))
 
 ; what JSON can't hold, each in a process of its own
-(defun try (v) (join (fork (json/print v))))
+(defun try (v) (join (fork (lambda () (json/print v)))))
 (pprint (try :other))
 (pprint (try (list 1 $$)))
 (pprint (try (list :object (list "f" car))))

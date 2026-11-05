@@ -81,7 +81,7 @@
 (send logger (list :log $$ :DEBUG "... Logger Initialized"))
 
 (let wm (spawn (WindowManager screen-rows screen-cols () logger)))
-(let kb (connect :keypress (Keyboard wm logger)))
+(let kb (connect :keypress Keyboard wm logger))
 
 (send wm (list
     :newWindow

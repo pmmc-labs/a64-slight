@@ -5,8 +5,8 @@
 ; one. Neither stops the processes it no longer waits for. Times are in
 ; milliseconds on the virtual clock.
 
-(defun after-ms (ms v) (fork (do (sleep ms) v)))
-(defun fail-ms (ms r) (fork (do (sleep ms) (raise r))))
+(defun after-ms (ms v) (fork (lambda () (do (sleep ms) v))))
+(defun fail-ms (ms r) (fork (lambda () (do (sleep ms) (raise r)))))
 (defun took (t0) (div (- (clock/us) t0) 1000))
 
 ; join/any: the first success, not the first end
@@ -36,5 +36,5 @@
 (pprint (join slow))
 (pprint (took t3))
 (pprint (join/all ()))
-(let twice (fork :twice))
+(let twice (fork (lambda () :twice)))
 (pprint (join/all (list twice twice)))

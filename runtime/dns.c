@@ -243,10 +243,54 @@ static size_t skip_name(const unsigned char *m, size_t len, size_t at) {
     return 0;
 }
 
-// What the answer m says: the address in its first A record, or the next
-// name, server or transport to try.
+static int lower(int c) { return c >= 'A' && c <= 'Z' ? c + 32 : c; }
+
+// Whether m's question is the query's: one, its name the same but for
+// case, and its type and class A and IN. A name in a question is never
+// compressed, since nothing comes before it to point at.
+static int same_question(const rt_lookup_t *l, const unsigned char *m, size_t len) {
+    const unsigned char *q = l->query + 2 + 12;
+    size_t               n = l->query_len - 12;
+    if ((m[4] << 8 | m[5]) != 1 || 12 + n > len) return 0;
+    for (size_t i = 0; i < n; i++) {
+        if (lower(m[12 + i]) != lower(q[i])) return 0;      // a label's length is under 64, so lower leaves it be
+    }
+    return 1;
+}
+
+// The length of the label at *at in m, after any pointers to it, which
+// leave *at at the label; 0 at the name's end, or -1 if the name runs
+// off the message or its pointers go round.
+static int label_at(const unsigned char *m, size_t len, size_t *at, int *hops) {
+    while (*at + 1 < len && (m[*at] & 0xc0) == 0xc0) {
+        if (++*hops > 64) return -1;
+        *at = (size_t)(m[*at] & 0x3f) << 8 | m[*at + 1];
+    }
+    if (*at >= len || (m[*at] & 0xc0) || *at + 1 + m[*at] > len) return -1;
+    return m[*at];
+}
+
+// Whether the names at a and b in m are the same, but for case.
+static int same_name(const unsigned char *m, size_t len, size_t a, size_t b) {
+    int ha = 0, hb = 0;
+    for (;;) {
+        int na = label_at(m, len, &a, &ha), nb = label_at(m, len, &b, &hb);
+        if (na < 0 || na != nb) return 0;
+        if (na == 0)            return 1;
+        for (int i = 1; i <= na; i++) {
+            if (lower(m[a + i]) != lower(m[b + i])) return 0;
+        }
+        a += 1 + (size_t)na;
+        b += 1 + (size_t)na;
+    }
+}
+
+// What the answer m says: the address in the A record for the name asked
+// about, or for the end of the chain of CNAMEs from it, or the next name,
+// server or transport to try.
 static int take_answer(rt_lookup_t *l, const unsigned char *m, size_t len, uint32_t *addr) {
-    if (len < 12 || m[0] != (unsigned char)(l->id >> 8) || m[1] != (unsigned char)l->id || !(m[2] & 0x80)) {
+    if (len < 12 || m[0] != (unsigned char)(l->id >> 8) || m[1] != (unsigned char)l->id || !(m[2] & 0x80)
+        || !same_question(l, m, len)) {
         return l->tcp ? next_server(l) : RT_LOOKUP_WAIT;   // not this query's: a stray datagram, or a broken server
     }
     if ((m[2] & 0x02) && !l->tcp) {             // truncated: ask the same server over TCP
@@ -259,20 +303,27 @@ static int take_answer(rt_lookup_t *l, const unsigned char *m, size_t len, uint3
         return next_name(l);
     }
     if (rcode != 0) return next_server(l);      // the server failed, or refused
-    size_t at = 12, end;
-    int    qd = m[4] << 8 | m[5], an = m[6] << 8 | m[7];
-    for (int i = 0; i < qd && at; i++) at = (end = skip_name(m, len, at)) ? end + 4 : 0;
-    // the first A record, wherever a CNAME before it led
-    for (int i = 0; i < an && at && at + 10 <= len; i++) {
-        at = skip_name(m, len, at);
+    size_t at   = 12 + (l->query_len - 12), owner;
+    size_t want = 12;                           // the name an A record must be for: the question's, then each CNAME's
+    int    an   = m[6] << 8 | m[7];
+    // the records in order, as glibc reads them: a CNAME for the name
+    // wanted moves it on to the CNAME's target, and an A record for it is
+    // the address
+    for (int i = 0; i < an && at + 10 <= len; i++) {
+        owner = at;
+        at    = skip_name(m, len, at);
         if (!at || at + 10 > len) break;
         int    type = m[at] << 8 | m[at + 1], class = m[at + 2] << 8 | m[at + 3];
         size_t rdlen = (size_t)(m[at + 8] << 8 | m[at + 9]);
         at += 10;
         if (at + rdlen > len) break;
-        if (type == 1 && class == 1 && rdlen == 4) {
-            memcpy(addr, m + at, 4);
-            return fail_with(l, RT_LOOKUP_DONE);
+        if (class == 1 && (type == 1 || type == 5) && same_name(m, len, owner, want)) {
+            if (type == 5) {
+                want = at;
+            } else if (rdlen == 4) {
+                memcpy(addr, m + at, 4);
+                return fail_with(l, RT_LOOKUP_DONE);
+            }
         }
         at += rdlen;
     }

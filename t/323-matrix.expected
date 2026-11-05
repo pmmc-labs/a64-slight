@@ -8,10 +8,10 @@
 #true
 ((0 7) (0 0))
 #(0 0 #int())
-(error (out-of-range (2 0)))
-(error (out-of-range (0 3)))
-(error (bad-shape ((2 3) (2 3))))
-(error (bad-shape ((2 3) (3 2))))
-(error (bad-shape (2 1)))
-(error (bad-shape (2 2 3)))
-done
+(:error (:out-of-range (2 0)))
+(:error (:out-of-range (0 3)))
+(:error (:bad-shape ((2 3) (2 3))))
+(:error (:bad-shape ((2 3) (3 2))))
+(:error (:bad-shape (2 1)))
+(:error (:bad-shape (2 2 3)))
+:done

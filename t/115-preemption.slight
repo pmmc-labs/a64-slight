@@ -5,6 +5,6 @@
         ((== n 0) (pprint :spun))
         (#true    (spin (- n 1)))))
 
-(fork (spin 100000))
-(fork (pprint :hello))
+(fork spin 100000)
+(fork pprint :hello)
 :root

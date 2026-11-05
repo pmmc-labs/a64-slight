@@ -9,7 +9,7 @@
 (@include :tools)
 
 (defun try (s)
-    (match (join (fork (calc/eval s)))
+    (match (join (fork calc/eval s))
         ((:ok v)     (str v))
         ((:error e)  (str "error: " e))))
 
@@ -24,5 +24,5 @@
           "" "2 +" "(2 + 3" "2 + 3)" "2 3" "1 / 0" "1 % 0" "log(10)" "sqrt(1, 2)" "min()" "2 $ 3"
           "1,000" "." "1e400"))
 
-(pprint (join (fork (tool/call (tools/calc) (list (list "expression" "(2 + 3) * 4 ^ 2 / 8"))))))
-(pprint (join (fork (tool/call (tools/calc) ()))))
+(pprint (join (fork (lambda () (tool/call (tools/calc) (list (list "expression" "(2 + 3) * 4 ^ 2 / 8")))))))
+(pprint (join (fork (lambda () (tool/call (tools/calc) ())))))

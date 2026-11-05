@@ -19,8 +19,8 @@
 (let path (if (nil? @ARGV) "store.log" (car @ARGV)))
 (spew path ())
 
-(let sup (spawn (supervise path)))
+(let sup (fork supervise path))
 (call sup (list :put "apple" 3))
 (call sup (list :put "color" "red"))
-(pprint (join (fork (ask-within 1000 sup (list :do (list :incr "color"))))))
+(pprint (join (fork ask-within 1000 sup (list :do (list :incr "color")))))
 (call sup (list :get "apple"))

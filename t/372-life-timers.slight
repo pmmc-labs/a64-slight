@@ -1,0 +1,58 @@
+; ts-cpi's 12, the board in the timer queue (D280): between generations
+; the board is stored nowhere but in virtual time. For every live cell
+; of generation g a timer is set, with after, to ring at
+;
+;     (g + 1) * 1000 + the cell's index
+;
+; milliseconds, so the clock's reading when it rings is the cell. (The
+; seed goes at 1000, not 0, so that cell 0 isn't due at once.) A last
+; timer, the sentinel, rings at (g + 1) * 1000 + 999 to end the frame.
+; Every timer says the same thing, :tick; the time says the rest.
+;
+; To see a generation, the top level reads its address: on the virtual
+; clock, each read moves the clock straight to the next timer, and
+; clock/us modulo 1000 is the cell's index. It turns the indices into a
+; board, prints it, computes the next, sets its timers, and forgets
+; everything: the loop that does this takes nothing but the address.
+; Worked out by hand: the frames are t/models/life.py's, and each frame's
+; times are its live cells' indices.
+
+(@include "data/life.slight")
+
+(defun now-ms () (div (clock/us) 1000))
+
+(defun arm (at to) (after (- at (now-ms)) to :tick))
+
+; Writes generation gen into the future: a timer per live cell, then the
+; sentinel.
+(defun schedule (gen board to)
+    (let base (* (+ gen 1) 1000))
+    (map (lambda (p) (arm (+ base (life/index (car p) (cadr p))) to)) (life/live board))
+    (arm (+ base 999) to))
+
+; Reads one generation back out of the timer queue, till the sentinel:
+; (gen indices), the indices ascending, since the timers ring in order.
+(defun read-frame (to acc)
+    (read to)
+    (let t (now-ms))
+    (if (== (% t 1000) 999)
+        (list (- (div t 1000) 1) (reverse acc))
+        (read-frame to (cons (% t 1000) acc))))
+
+; One trip round the wheel; its only state is the timer queue.
+(defun turn (to)
+    (match (read-frame to ())
+        ((gen indices)
+            (let board (life/make (lambda (row col) (if (member? (life/index row col) indices) 1 0))))
+            (pprint (list :t (now-ms) :woke (map (lambda (i) (+ (* (+ gen 1) 1000) i)) indices)))
+            (life/print gen board)
+            (when (< gen (life/generations))
+                (schedule (+ gen 1) (life/step board) to)
+                (turn to)))))
+
+(let to (address))
+(pprint (list :t (now-ms) :writing-the-seed))
+(schedule 0 (life/seed) to)
+(turn to)
+(pprint (list :t (now-ms) :nothing-pending))
+:done

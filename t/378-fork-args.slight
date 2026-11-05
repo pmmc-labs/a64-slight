@@ -1,0 +1,48 @@
+; (fork f arg ...): f and the arguments are worked out by the caller, so
+; $$ among them is the caller, and they're copied into the new process,
+; which calls f with them (D286). Inside f, $$ is the new process. One
+; that isn't a function of as many arguments faults the caller, and
+; starts nothing.
+
+(defun worker (parent n)
+    (send parent (list :from-child n :parent? (eq? parent ^$$)))
+    (* n 2))
+
+(defun reader (n)
+    (recv ((:open f) (send f (list :read :lines)) (recv ((:line _ l) (list n l))))))
+
+(let root $$)
+(let w (fork worker $$ 21))
+(pprint (recv))
+(pprint (join w))
+
+; an address made here is read here, though a child sends to it
+(let to (address))
+(join (fork send to :hello))
+(pprint (read to))
+
+; a lambda, for a body that isn't one call: $$ inside it is the child
+(pprint (join (fork (lambda (a b) (list a b (eq? $$ root) (eq? ^$$ root))) 1 2)))
+
+; a builtin, a closure, and a function passed along as a value
+(pprint (join (fork + 1 2)))
+(let add (lambda (a b) (+ a b)))
+(pprint (join (fork add 40 2)))
+(let f worker)
+(pprint (join (fork f $$ 5)))
+(pprint (recv))
+
+; on another island, and connected to a file
+(let far (fork/on 1 worker $$ 7))
+(pprint (join far))
+(pprint (recv))
+(pprint (join (connect :fs/read "t/378-fork-args.slight" reader 1)))
+
+; what isn't a function, or takes another number of arguments, faults
+; the caller: here a child, so that the test goes on
+(let one 1)
+(pprint (join (fork (lambda () (fork one 2)))))
+(pprint (join (fork (lambda () (fork add 1)))))
+(pprint (join (fork (lambda () (fork (list 1))))))
+:done
+; warns: 44:38 45:38 46:38
