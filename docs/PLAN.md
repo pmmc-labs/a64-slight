@@ -4,16 +4,29 @@ Ghuloum's incremental approach: the compiler works and its tests pass at
 the end of every step, and each step adds one feature. Steps are sized to
 be a session or two each.
 
-**Progress:** steps 0–9 and 10a–10e done (under qemu, and natively on
-macOS: Stevan runs `make test` on his M2 Max after every step), a
-second target, x86-64 (which passes on the M2 too, under Rosetta 2), and
-UTF-8 builtins (both below, after 10e), tooling (11), and of the
-groundwork HTTP needs (12), ways to read a device (12a), collecting
-outside `recv` (12b) and looking up host names (12d), where `recv`
-can go (13), and after it, `match`, tuples, and recording and replaying
-a run (D168–D170). HTTP (14) on plain `:tcp` is done (D172–D174). Next: the rest of 12
-(C libraries; not TLS, which goes to curl and a proxy in front, D251),
-then agents (15).
+**Progress:** steps 0 to 14 are done (under qemu, and natively on macOS:
+Stevan runs `make test` on his M2 Max after every step), all but 12c, C
+libraries, which waits, its TLS withdrawn for curl and a proxy in front
+(D251); with them a second target, x86-64 (which passes on the M2 too,
+under Rosetta 2), and UTF-8 builtins (both after 10e), and after 13
+`match`, tuples, and recording and replaying a run (D168–D170). Agents
+(15) are built as far as their section says (D180–D193, and calls
+between programs, D225–D235), and 16 is taken on as needed. Since then,
+each in its section below: benchmarks (D194–D203, D224, D237–D242);
+strings, waiting for several processes, numbers, random numbers and maps
+(D219–D223); tasks and actors (D243–D245, retired by D277); the C-style
+syntax's reader (D246); types (D247) and modules (D248); toward general
+purpose, steps 1 and 2 (D249, D254, D255), and numbers in bulk (D253);
+more than one core, as islands (D256); floats inline and in registers,
+as far as they went (D259–D262); the review of 2026-11-02's fixes
+(D265–D275, `review-2026-11-02-plan.md`); one kind of process, and an
+address for every message (D276–D280); the agent team (D281–D285);
+`fork` taking a function (D286); keywords (D287); and `assoc` replacing
+and a quiet end (D289, D290). Next: nothing agreed. Proposed, or ideas,
+each to put to Stevan: simulation across islands, a living town (D263),
+branching a replay, a viewer for simulations, and the standard library,
+general purpose's step 3. Self-hosting (17) waits till the language
+settles.
 
 Read [`DESIGN.md`](DESIGN.md) first. Where a step meets an **(open)** item,
 propose options to the user before building (see `CLAUDE.md`).

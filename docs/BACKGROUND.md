@@ -47,8 +47,11 @@ It also found bugs in the Perl code: VM3's `LOAD_ARG` indexed by frame
 depth, and AVM's `*_MSG3` branches were duplicated as `*_MSG2`.
 
 a64-slight then dropped most of that machinery. The `recv` rule (D8 in
-`DECISIONS.md`) means there is no AWAIT, no REQUEST/REPLY and no selective
-receive. What carries over is the native layer the spike proved.
+`DECISIONS.md`) meant there was no AWAIT, no REQUEST/REPLY and no
+selective receive. D276 retired the rule in Nov 2026, so a `recv` goes
+anywhere and a waiting process keeps its stack, which is AWAIT's half
+back as a plain call; REQUEST/REPLY and selective receive stay out.
+What carries over is the native layer the spike proved.
 
 ## Why native
 
@@ -69,10 +72,12 @@ process:
 - **Run-to-completion** (Pony, Active Messages, the J-Machine): no stack
   per actor, but no waiting mid-handler.
 
-a64-slight is a hybrid. The `recv` rule makes every `recv` a
-run-to-completion boundary (no stack), while preemption, `yield`, `join`
-and blocking syscalls use the stackful mechanism (keep the stack). That is
-"option A" (D9).
+a64-slight was a hybrid till Nov 2026. The `recv` rule made every `recv`
+a run-to-completion boundary (no stack), while preemption, `yield`,
+`join` and blocking syscalls used the stackful mechanism (kept the
+stack). That was "option A" (D9). D276 retired the rule and with it
+D9's stack given back at `recv`: every wait keeps its stack now, so
+a64-slight is stackful throughout.
 
 ## The AArch64 spike (in git at `3fd71e0`)
 
@@ -86,9 +91,11 @@ the details. Results on an M2 Max, natively:
   message a `calloc` + `free`; not profiled).
 - **16,851 bytes per idle process**: one 16 KiB stack page plus a 416-byte
   `proc_t`. The deepest suspension in any scenario used ~130 bytes of
-  stack. **The page is the cost**, which is why a64-slight gives stacks
-  back at `recv` (D9): a waiting process should cost about 100 bytes plus
-  its heap.
+  stack. **The page is the cost**, which is why a64-slight gave stacks
+  back at `recv` (D9) till D276: a waiting process was to cost about 100
+  bytes plus its heap. Since D276 a waiting process keeps its stack, and
+  the system's limit on mappings caps how many can hold one at once, at
+  about 32,700 (D267).
 - **1.9 µs per spawn**, mostly `mmap` + `mprotect` and the first page
   fault. A stack pool removes most of that.
 
@@ -124,7 +131,8 @@ runtime calls are a plain `bl`. On top of that: `x28` is always the
 current process, every entry checks the stack and the reduction count, and
 tail calls are branches.
 
-The asynchronous half is gone, removed by the `recv` rule (D8):
+The asynchronous half is gone, removed by the `recv` rule (D8), and
+still gone since D276 retired the rule:
 `REQUEST`/`AWAIT`/`REPLY`/`REPLY_TO`, reply addresses, refs and `PENDING`;
 the mailbox cursor and `MSG_SKIP`; MESSAGE and SIGNAL frames and signal
 handlers; tags owned by modules, with arities; `@state`; the operand
@@ -135,10 +143,12 @@ What survived:
 
 - **The key idea, changed.** The sketch's `YIELD` was a commit point that
   faulted unless the PROCESS frame was the only frame, and a suspended
-  `RECV` simply ran again on waking. The `recv` rule is that check moved
+  `RECV` simply ran again on waking. The `recv` rule was that check moved
   to compile time, and running again became calling the receive function
-  again with its arguments. That's why a waiting process holds no stack,
-  and why the collector needed nothing from the compiler.
+  again with its arguments. That's why a waiting process held no stack,
+  and why the collector needed nothing from the compiler, till D166
+  collected at a function's entry with the frames as roots and D276
+  retired the rule, keeping a waiting process's stack.
 - **The sketch's run-to-completion style** became the only style.
 - **The process semantics.** `%EXIT (pid, reason)` became `monitor`'s
   `(:exit pid result)`, `WATCH` became `monitor`, `WAIT` became `join`;
@@ -659,7 +669,8 @@ Minefield") is the conformance test: its `y_` files must parse, its
   message no pattern takes yet waits; state is a message on a private
   channel. Good at what actors find awkward: barriers, buffers, taking
   two resources together. Not for slight's core: messages that wait are
-  selective receive, which D8 removed; patterns on values (a tick equal
+  selective receive, which D8 removed and D276 kept out when it retired
+  the rest of D8; patterns on values (a tick equal
   to mine) need guards; slight's world is pids and one mailbox; and the
   choice among reactions is nondeterministic where slight promises a run
   it can repeat (D170). As a library it fits: a join object is a process
