@@ -7513,4 +7513,11 @@ whose pages stay in the resident set till the system wants them, so a
 program's memory after a burst would look like a leak; a slab
 unmapped once all its stacks are free, which needs a count per slab
 for little; and keeping every stack warm, which holds a burst's memory
-for good.
+for good. On the M2 Max, `idle-memory 1000000` took 27.6 s where it
+had taken 0.31 before D276, nine tenths of it in `madvise` (Stevan's
+`sample`): macOS walks every page of the range it's given, touched or
+not, and a batch of neighbours was up to 512 MB. So on macOS a freed
+stack gives back its top 256 KB alone, unless `mincore` says the page
+below that is in memory, when it gives back all 8 MB; Linux, which
+skips what a range doesn't hold, keeps the sorted batches
+(`STACK_TRIM_TOPS`, which a build can set to try either on either).

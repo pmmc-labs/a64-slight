@@ -297,7 +297,29 @@ static void *get_stack(void) {
     return s;
 }
 
-static int by_address(const void *a, const void *b) {
+// How a stack's pages go back: on Linux at once, so the resident set
+// says what's held; elsewhere MADV_FREE, the system's to take when it
+// wants them. And on macOS, only a stack's touched part (trim_stacks).
+#ifdef __linux__
+#define STACK_GIVE_BACK MADV_DONTNEED
+#else
+#define STACK_GIVE_BACK MADV_FREE
+#endif
+#ifndef STACK_TRIM_TOPS
+#ifdef __APPLE__
+#define STACK_TRIM_TOPS 1
+#else
+#define STACK_TRIM_TOPS 0
+#endif
+#endif
+#define STACK_TOP_BYTES (256 << 10)     // a stack's top, given back alone unless the page below it was touched
+#ifdef __APPLE__
+typedef char          mincore_vec_t;
+#else
+typedef unsigned char mincore_vec_t;
+#endif
+
+static __attribute__((unused)) int by_address(const void *a, const void *b) {
     uintptr_t x = (uintptr_t)*(void *const *)a, y = (uintptr_t)*(void *const *)b;
     return (x > y) - (x < y);
 }
@@ -309,16 +331,28 @@ static int by_address(const void *a, const void *b) {
 // the memory.
 static void trim_stacks(island_state_t *s) {
     size_t n = s->ntrim_stacks;
+#if STACK_TRIM_TOPS
+    // macOS walks every page of the range it's given, touched or not: a
+    // million stacks given back whole took 25 s of the M2's 27. So each
+    // gives back its top, where nearly every process stays, and all of it
+    // only when the page below that is in memory: a stack is touched from
+    // its top down, so a process that went deeper touched that page.
+    for (size_t i = 0; i < n; i++) {
+        char         *top   = (char *)s->trim_stacks[i] + STACK_BYTES;
+        mincore_vec_t below = 0;
+        int           deep  = mincore(top - STACK_TOP_BYTES - page, page, &below) == 0 && (below & 1);
+        if (deep) madvise(s->trim_stacks[i], STACK_BYTES, STACK_GIVE_BACK);
+        else      madvise(top - STACK_TOP_BYTES, STACK_TOP_BYTES, STACK_GIVE_BACK);
+    }
+#else
+    // Linux skips what a range doesn't hold, so neighbours go back in one call.
     qsort(s->trim_stacks, n, sizeof *s->trim_stacks, by_address);
     for (size_t i = 0, j; i < n; i = j) {
         for (j = i + 1; j < n && (char *)s->trim_stacks[j] == (char *)s->trim_stacks[j - 1] + STACK_SLOT; j++) {}
         size_t len = (size_t)((char *)s->trim_stacks[j - 1] - (char *)s->trim_stacks[i]) + STACK_BYTES;
-#ifdef __linux__
-        madvise(s->trim_stacks[i], len, MADV_DONTNEED);
-#else
-        madvise(s->trim_stacks[i], len, MADV_FREE);
-#endif
+        madvise(s->trim_stacks[i], len, STACK_GIVE_BACK);
     }
+#endif
     if (s->ncold_stacks + n > s->cold_cap) {
         size_t cap  = s->cold_cap ? 2 * s->cold_cap : 1024;
         void **more = realloc(s->cold_stacks, cap * sizeof *more);
