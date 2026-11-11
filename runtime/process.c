@@ -49,7 +49,7 @@
 #define QUOTA          1000             // reductions between preemptions
 #define STACK_BYTES    (8 << 20)        // every process's stack, mapped lazily
 #define STACK_HEADROOM (64 << 10)       // room left below the limit for one frame and a C call
-#define TRIM_BATCH     64               // stacks given back past those kept, whose pages go back together
+#define SPARE_HELD     (64 << 20)       // about how much spare stacks may hold before their pages go back unasked
 #define CHUNK_FIRST    (4 << 10)        // a process's nursery at first, and its first old chunk...
 #define CHUNK_MAX      (1 << 20)        // ...each doubling up to this
 #define HEAP_DEFAULT   (1 << 30)        // all of a process's chunks, both generations, unless SLIGHT_HEAP_MAX says
@@ -107,10 +107,8 @@ typedef struct rt_isle {
     rt_ctx_t           scheduler;
     void              *free_stacks;     // warm stacks, a list through each one's top word (STACK_LINK)...
     uint64_t           nfree_stacks;    // ...this long
-    void              *trim_stacks[TRIM_BATCH];  // past those, stacks whose pages are to go back...
-    size_t             ntrim_stacks;
-    void             **cold_stacks;     // ...and those whose pages have, their addresses kept
-    size_t             ncold_stacks, cold_cap;
+    void             **spares;          // past those, stacks whose pages have gone back, then those whose haven't
+    size_t             nspares, ntrimmed, spares_cap;
     char              *slab_next, *slab_end;    // what's left of the slab stacks are carved from
     uint64_t           stressed;        // the collections SLIGHT_GC_STRESS has made, every eighth a major one
     uint64_t           sched;           // SLIGHT_SCHED's generator, or 0: first in, first out
@@ -272,8 +270,11 @@ static void *get_stack(void) {
         my.nfree_stacks--;
         return s;
     }
-    if (my.ntrim_stacks) return my.trim_stacks[--my.ntrim_stacks];
-    if (my.ncold_stacks) return my.cold_stacks[--my.ncold_stacks];
+    if (my.nspares) {                   // one whose pages haven't gone back first, if there is one
+        void *s = my.spares[--my.nspares];
+        if (my.ntrimmed > my.nspares) my.ntrimmed = my.nspares;
+        return s;
+    }
     if (my.slab_next == my.slab_end) {
         int    flags = MAP_PRIVATE | MAP_ANON;
 #ifdef MAP_NORESERVE
@@ -299,7 +300,7 @@ static void *get_stack(void) {
 
 // How a stack's pages go back: on Linux at once, so the resident set
 // says what's held; elsewhere MADV_FREE, the system's to take when it
-// wants them. And on macOS, only a stack's touched part (trim_stacks).
+// wants them. And on macOS, only a stack's touched part (trim_spares).
 #ifdef __linux__
 #define STACK_GIVE_BACK MADV_DONTNEED
 #else
@@ -324,13 +325,16 @@ static __attribute__((unused)) int by_address(const void *a, const void *b) {
     return (x > y) - (x < y);
 }
 
-// The pages of the stacks waiting to be trimmed go back, a run of
-// neighbouring slots in one call, which a burst of processes ending in
-// the order they started makes most of them; and their addresses are
-// kept, cold. With no room to keep them, the addresses are lost, not
-// the memory.
-static void trim_stacks(island_state_t *s) {
-    size_t n = s->ntrim_stacks;
+// The spare stacks' pages that haven't gone back go back, and they're
+// trimmed. Not as each process ends, a system call or two each, which
+// on macOS cost a waiting process more than all the rest (D291), but
+// when the island has nothing to run and is about to wait, or once
+// they hold about SPARE_HELD: so a program that ends after a burst of
+// processes doesn't pay to give their memory back, a server pays when
+// it's idle, and one that never is holds no more than that.
+static void trim_spares(island_state_t *s) {
+    void **at = s->spares + s->ntrimmed;
+    size_t n  = s->nspares - s->ntrimmed;
 #if STACK_TRIM_TOPS
     // macOS walks every page of the range it's given, touched or not: a
     // million stacks given back whole took 25 s of the M2's 27. So each
@@ -338,37 +342,28 @@ static void trim_stacks(island_state_t *s) {
     // only when the page below that is in memory: a stack is touched from
     // its top down, so a process that went deeper touched that page.
     for (size_t i = 0; i < n; i++) {
-        char         *top   = (char *)s->trim_stacks[i] + STACK_BYTES;
+        char         *top   = (char *)at[i] + STACK_BYTES;
         mincore_vec_t below = 0;
         int           deep  = mincore(top - STACK_TOP_BYTES - page, page, &below) == 0 && (below & 1);
-        if (deep) madvise(s->trim_stacks[i], STACK_BYTES, STACK_GIVE_BACK);
+        if (deep) madvise(at[i], STACK_BYTES, STACK_GIVE_BACK);
         else      madvise(top - STACK_TOP_BYTES, STACK_TOP_BYTES, STACK_GIVE_BACK);
     }
 #else
-    // Linux skips what a range doesn't hold, so neighbours go back in one call.
-    qsort(s->trim_stacks, n, sizeof *s->trim_stacks, by_address);
+    // Linux skips what a range doesn't hold, so neighbours go back in one
+    // call, which a burst of processes ending in the order they started
+    // makes most of them.
+    qsort(at, n, sizeof *at, by_address);
     for (size_t i = 0, j; i < n; i = j) {
-        for (j = i + 1; j < n && (char *)s->trim_stacks[j] == (char *)s->trim_stacks[j - 1] + STACK_SLOT; j++) {}
-        size_t len = (size_t)((char *)s->trim_stacks[j - 1] - (char *)s->trim_stacks[i]) + STACK_BYTES;
-        madvise(s->trim_stacks[i], len, STACK_GIVE_BACK);
+        for (j = i + 1; j < n && (char *)at[j] == (char *)at[j - 1] + STACK_SLOT; j++) {}
+        madvise(at[i], (size_t)((char *)at[j - 1] - (char *)at[i]) + STACK_BYTES, STACK_GIVE_BACK);
     }
 #endif
-    if (s->ncold_stacks + n > s->cold_cap) {
-        size_t cap  = s->cold_cap ? 2 * s->cold_cap : 1024;
-        void **more = realloc(s->cold_stacks, cap * sizeof *more);
-        if (more) {
-            s->cold_stacks = more;
-            s->cold_cap    = cap;
-        }
-    }
-    for (size_t i = 0; i < n && s->ncold_stacks < s->cold_cap; i++) s->cold_stacks[s->ncold_stacks++] = s->trim_stacks[i];
-    s->ntrim_stacks = 0;
+    s->ntrimmed = s->nspares;
 }
 
-// Kept warm for the next process; or, past STACKS_KEPT, kept to have its
-// pages given back with others' (trim_stacks), and taken again first if
-// a process wants one meanwhile, so a burst of processes holding stacks
-// doesn't hold their memory for good.
+// Kept warm for the next process; or, past STACKS_KEPT, a spare, its
+// pages to go back later (trim_spares). With no room to keep it, its
+// pages go back now and its addresses are lost.
 static void release_stack(rt_proc_t *p) {
     island_state_t *s = p->isle;
     if (s->nfree_stacks < STACKS_KEPT) {
@@ -376,8 +371,19 @@ static void release_stack(rt_proc_t *p) {
         s->free_stacks = p->stack;
         s->nfree_stacks++;
     } else {
-        s->trim_stacks[s->ntrim_stacks++] = p->stack;
-        if (s->ntrim_stacks == TRIM_BATCH) trim_stacks(s);
+        if (s->nspares == s->spares_cap) {
+            size_t cap  = s->spares_cap ? 2 * s->spares_cap : 1024;
+            void **more = realloc(s->spares, cap * sizeof *more);
+            if (!more) {
+                madvise(p->stack, STACK_BYTES, STACK_GIVE_BACK);
+                p->stack = NULL;
+                return;
+            }
+            s->spares     = more;
+            s->spares_cap = cap;
+        }
+        s->spares[s->nspares++] = p->stack;
+        if ((s->nspares - s->ntrimmed) * page >= SPARE_HELD) trim_spares(s);
     }
     p->stack = NULL;
 }
@@ -3371,6 +3377,7 @@ static int idle(void) {
     fflush(stdout);                             // so a program stopped as it waits has lost none of it (D229)
     drop_orphans();
     if (!listening() && !my.nalarms && !sockets_waiting()) return 0;
+    if (my.nspares > my.ntrimmed) trim_spares(&my);      // about to wait: a moment to give spare stacks' pages back
     if (virtual_clock) {
         int saw = wait_for(0);
         if ((saw & IO_KEYS) && input_at == input_len) read_input();

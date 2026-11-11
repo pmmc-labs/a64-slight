@@ -7521,3 +7521,12 @@ stack gives back its top 256 KB alone, unless `mincore` says the page
 below that is in memory, when it gives back all 8 MB; Linux, which
 skips what a range doesn't hold, keeps the sorted batches
 (`STACK_TRIM_TOPS`, which a build can set to try either on either).
+That left `madvise` and `mincore` nearly three quarters of the time
+(a second `sample`), a system call or two a stack whatever its size; so
+(Stevan: "yes, build option 2") a freed stack past the 256 kept warm is
+a spare whose pages go back later: when its island has nothing to run
+and is about to wait, or once spares not yet given back hold about 64
+MB (`SPARE_HELD`), and a process takes a spare not yet given back
+first. A program that ends after a burst under that size doesn't give
+its memory back at all, and a server gives it back when it's idle;
+`idle-memory`'s million go far past it, and gain nothing.
