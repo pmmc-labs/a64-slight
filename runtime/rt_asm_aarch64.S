@@ -54,9 +54,29 @@ FUNC rt_trampoline
     ldp  x6, x7, [x28, #RT_PROC_ARGS + 48]
     ldr  x16, [x28, #RT_PROC_CODE]
     blr  x16
+    .globl rt_trampoline_back           // where a process's first frame returns: copy_out (process.c) looks for it
+rt_trampoline_back:
     mov  x1, x0
     mov  x0, x28
     bl   rt_exit                        // doesn't return
+
+// ---------------------------------------------------------------------------
+// rt_recv_again: where a process that was copied off its stack while it
+// waited in recv lands when it next runs (copy_in, process.c), its frames
+// back on a stack, some stack: sp and x29 are its frame's, as they were
+// when it called rt_recv, and x19, x20 and x21 that call's n, at and
+// return address. Calls rt_recv_woken as rt_recv was called, which gives
+// the message to where rt_recv would have.
+// ---------------------------------------------------------------------------
+
+FUNC rt_recv_again
+    mov  x0, x28
+    mov  x1, sp
+    mov  x2, x19
+    mov  x3, x29
+    mov  x4, x20
+    mov  x30, x21
+    b    rt_recv_woken
 
 // ---------------------------------------------------------------------------
 // rt_apply_start: a process's code when fork made it (D286). The trampoline

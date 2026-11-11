@@ -110,6 +110,7 @@ typedef struct rt_isle {
     void             **spares;          // past those, stacks whose pages have gone back, then those whose haven't
     size_t             nspares, ntrimmed, spares_cap;
     char              *slab_next, *slab_end;    // what's left of the slab stacks are carved from
+    uint64_t           waits_held;      // the processes waiting in recv with their stacks kept (copy_out)
     uint64_t           stressed;        // the collections SLIGHT_GC_STRESS has made, every eighth a major one
     uint64_t           sched;           // SLIGHT_SCHED's generator, or 0: first in, first out
     char              *scratch;         // the copy being made, kept from one copy to the next
@@ -170,6 +171,7 @@ static size_t  page;
 static int     poison;                          // SLIGHT_POISON: fill what the collector frees
 static int64_t gc_stress;                       // SLIGHT_GC_STRESS=n: collect at every nth call (n <= QUOTA), and every recv
 static int     gc_verify;                       // SLIGHT_GC_VERIFY: check that nothing old points at anything young
+static int     copy_always;                     // SLIGHT_COPY_OUT: every recv that waits copies its process off its stack
 static size_t  heap_max;                        // the most a process's chunks can hold (D202)
 
 // --- the run queue ------------------------------------------------------------
@@ -406,6 +408,13 @@ static void refill(rt_proc_t *p) {
     p->slice_rest = calls - p->reductions;
 }
 
+// Where a stack's first frame goes: within its slot, its top a few cache
+// lines down, by its place, so that the tops' first lines aren't all in
+// the same few sets.
+static char *stack_top(void *stack) {
+    return (char *)stack + STACK_BYTES - ((uintptr_t)stack / page % COLOURS) * 64;
+}
+
 // A stack, and registers that make the first switch land in rt_trampoline
 // with x28 (r15) = p, which calls p->code with p->args; or 0, if there's
 // no stack to be had.
@@ -415,9 +424,7 @@ static int start(rt_proc_t *p) {
     p->stack_limit = (uintptr_t)p->stack + STACK_HEADROOM;
     refill(p);
     memset(&p->ctx, 0, sizeof p->ctx);
-    // and within its slot, its top a few cache lines down, by its place,
-    // so that the tops' first lines aren't all in the same few sets
-    char *base = (char *)p->stack + STACK_BYTES - ((uintptr_t)p->stack / page % COLOURS) * 64;
+    char *base = stack_top(p->stack);
 #if defined(__x86_64__)
     // x86's ret takes its address from the stack, not a link register: the
     // trampoline's goes in the top word, and popping it leaves rsp 16-aligned.
@@ -432,6 +439,188 @@ static int start(rt_proc_t *p) {
 #endif
     return 1;
 }
+
+// --- a waiting process copied off its stack ------------------------------------
+//
+// A prototype of PLAN.md's proposal of that name, for recv alone. A
+// process that waits keeps its stack (D276), at least a page of it, and
+// what it needs of that page is its frames from the wait down to the
+// stack's top, a hundred bytes or two. So once an island's waiting
+// processes hold WAITS_KEPT stacks (1,024), the next to wait in recv has those
+// frames copied to a buffer of its own, and its stack goes back to the
+// warm ones for whoever runs next; woken, it takes any warm stack, its
+// frames are copied to that one's top, and it starts its recv again there
+// (rt_recv_again, in assembly, and rt_recv_woken). Below WAITS_KEPT
+// nothing's copied, so a few processes talking run as they did.
+//
+// What makes the copy safe is what the collector relies on (below):
+// compiled code keeps nothing in a register across a call but the process
+// and the frame pointer, a slot holds only a value, never an address in
+// the stack, and C never calls compiled code. So from the frame that
+// called rt_recv to the stack's top there are only slight frames, each
+// its slots under a saved frame pointer and a return address, the first
+// of them saving no frame pointer and returning into the trampoline
+// (rt_apply and rt_apply_start jump, and leave no frame); and the only
+// addresses of the stack in them are the saved frame pointers, which
+// copy_in moves by how far the frames moved. rt_recv's own C frames, on
+// top, are dropped: all they held is its arguments, kept here. copy_out
+// checks what can be checked of that before it copies, the frame pointers
+// one above another to the stack's top and the return into the
+// trampoline, and where it finds anything else the process keeps its
+// stack, as before: a mistake here costs memory, not correctness.
+
+// How many stacks an island's processes keep while they wait in recv;
+// past that, they're copied off. Not STACKS_KEPT, 256: on the M2 Max a
+// ring of n waiting processes, each on its own stack, passes its token in
+// 50 ns up to 1,500 of them, and in more than the 68 ns a copied one
+// takes only past 3,000, where the stacks' pages outrun the TLB; on the
+// cloud machine past about 1,000 (BENCHMARKS.md, 11 Nov). And copying
+// from 256 made thread-ring's 503 a fifth slower. A build can set it
+// (SLIGHT_CC="cc -DWAITS_KEPT=256"), to measure another.
+#ifndef WAITS_KEPT
+#define WAITS_KEPT 1024
+#endif
+#define COPY_MAX   (4 << 10)            // the most stack copied, below the wait: a process deeper than that keeps its stack
+
+typedef struct rt_parked {
+    uint32_t  cap, len;                 // room for frames, in bytes; and those held, 0 once they're back on a stack
+    uintptr_t base;                     // the top of the stack they came off, which their frame pointers are still for
+    uintptr_t fp;                       // the waiting frame's frame pointer, on that stack
+    uint64_t  n;                        // its slots in use, the collector's roots
+    uintptr_t ret;                      // where its call of rt_recv returns
+    char      frames[];                 // from the waiting frame's lowest slot up to base
+} parked_t;
+
+// Why copy_out left a process its stack, counted for the prototype's
+// report: built with -DCOPY_TALLY (SLIGHT_CC="cc -DCOPY_TALLY"), a run
+// leaves a file of its counts in the directory SLIGHT_COPY_TALLY names,
+// with the bytes copied out and the time spent copying out and in.
+enum { COPIED, WOKEN, MOVED, NO_ROOM, TOO_DEEP, BAD_FRAME, BAD_RETURN, BAD_CHAIN, BAD_BASE, NO_TRAMPOLINE, NO_MEMORY, TALLIES };
+#ifdef COPY_TALLY
+static _Atomic uint64_t tally[TALLIES], tally_bytes, tally_ns_out, tally_ns_in;
+#define TALLY(what)     atomic_fetch_add_explicit(&tally[what], 1, memory_order_relaxed)
+#define TALLY_BYTES(n)  atomic_fetch_add_explicit(&tally_bytes, n, memory_order_relaxed)
+static uint64_t tally_now(void) {
+    struct timespec t;
+    clock_gettime(CLOCK_MONOTONIC, &t);
+    return (uint64_t)t.tv_sec * 1000000000u + (uint64_t)t.tv_nsec;
+}
+#else
+#define TALLY(what)     ((void)0)
+#define TALLY_BYTES(n)  ((void)0)
+#endif
+#define REFUSE(why)     do { TALLY(why); return 0; } while (0)
+
+// Whether p is off its stack, its frames in its buffer.
+static int parked(const rt_proc_t *p) {
+    return p->parked && p->parked->len;
+}
+
+// p is about to wait in recv, called with frame, n and fp from compiled
+// code that the call returns to at ret. Copies its frames to its buffer
+// and gives its stack back warm, or returns 0, having changed nothing.
+// The caller is still running on that stack, and must switch away before
+// anything else takes it: so it only ever goes to the warm list, never to
+// the spares, whose pages may go back at once.
+static int copy_out(rt_proc_t *p, const rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t ret) {
+    island_state_t *s    = p->isle;
+    uintptr_t       base = (uintptr_t)stack_top(p->stack), lo = (uintptr_t)frame, f = (uintptr_t)fp;
+    if (s->nfree_stacks >= STACKS_KEPT) REFUSE(NO_ROOM);
+    if (lo >= base || lo % 16 || f < lo) REFUSE(BAD_FRAME);
+    if (base - lo > COPY_MAX) REFUSE(TOO_DEEP);
+#if defined(__x86_64__)
+    if (((const uintptr_t *)lo)[-1] != ret) REFUSE(BAD_RETURN);     // the call's own return address, just under the frame
+#endif
+    // Up the frames: each frame pointer above the last, till the one that
+    // saved none, which is the first frame's, right under the stack's top.
+    for (;;) {
+        if (f % 16 || f > base - 16) REFUSE(BAD_CHAIN);
+        uintptr_t up = ((const uintptr_t *)f)[0];
+        if (!up) break;
+        if (up <= f) REFUSE(BAD_CHAIN);
+        f = up;
+    }
+    if (f != base - 16) REFUSE(BAD_BASE);
+    if (((const uintptr_t *)f)[1] != (uintptr_t)rt_trampoline_back) REFUSE(NO_TRAMPOLINE);
+
+    size_t    len = base - lo;
+    parked_t *k   = p->parked;
+    if (!k || k->cap < len) {
+        k = realloc(k, sizeof *k + len);
+        if (!k) REFUSE(NO_MEMORY);
+        k->cap    = (uint32_t)len;
+        p->parked = k;
+    }
+    memcpy(k->frames, (const void *)lo, len);
+    k->len  = (uint32_t)len;
+    k->base = base;
+    k->fp   = (uintptr_t)fp;
+    k->n    = n;
+    k->ret  = ret;
+    STACK_LINK(p->stack) = s->free_stacks;      // the top word, copied by now
+    s->free_stacks = p->stack;
+    s->nfree_stacks++;
+    p->stack = NULL;
+    TALLY(COPIED);
+    TALLY_BYTES(len);
+    return 1;
+}
+
+// p, copied off its stack, is to run: a stack, its frames at that one's
+// top, the frame pointers they saved moved by as far as they have, and
+// registers that make the switch land in rt_recv_again, which starts its
+// recv again; or 0, if there's no stack to be had.
+static int copy_in(rt_proc_t *p) {
+    parked_t *k = p->parked;
+    p->stack = get_stack();
+    if (!p->stack) return 0;
+    p->stack_limit = (uintptr_t)p->stack + STACK_HEADROOM;
+    uintptr_t base = (uintptr_t)stack_top(p->stack), lo = base - k->len, by = base - k->base;
+    memcpy((void *)lo, k->frames, k->len);
+    if (by) {
+        for (uintptr_t *f = (uintptr_t *)(k->fp + by); *f; f = (uintptr_t *)*f) *f += by;
+        TALLY(MOVED);
+    }
+    TALLY(WOKEN);
+    k->len = 0;
+#if defined(__x86_64__)
+    uint64_t *top = (uint64_t *)lo - 1;         // popped by rt_switch's ret, leaving rsp the frame's
+    *top       = (uint64_t)rt_recv_again;
+    p->ctx.rsp = (uint64_t)top;
+    p->ctx.rbp = k->fp + by;
+    p->ctx.rbx = k->n;
+    p->ctx.r12 = p->at;
+    p->ctx.r13 = k->ret;
+    p->ctx.r15 = (uint64_t)p;
+#else
+    p->ctx.sp         = lo;
+    p->ctx.fp         = k->fp + by;
+    p->ctx.lr         = (uint64_t)rt_recv_again;
+    p->ctx.x19_x28[0] = k->n;
+    p->ctx.x19_x28[1] = p->at;
+    p->ctx.x19_x28[2] = k->ret;
+    p->ctx.x19_x28[9] = (uint64_t)p;
+#endif
+    return 1;
+}
+
+#ifdef COPY_TALLY
+static int copy_out_timed(rt_proc_t *p, const rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t ret) {
+    uint64_t t   = tally_now();
+    int      out = copy_out(p, frame, n, fp, ret);
+    atomic_fetch_add_explicit(&tally_ns_out, tally_now() - t, memory_order_relaxed);
+    return out;
+}
+
+static int copy_in_timed(rt_proc_t *p) {
+    uint64_t t  = tally_now();
+    int      in = copy_in(p);
+    atomic_fetch_add_explicit(&tally_ns_in, tally_now() - t, memory_order_relaxed);
+    return in;
+}
+#define copy_out copy_out_timed
+#define copy_in  copy_in_timed
+#endif
 
 // --- heaps --------------------------------------------------------------------
 
@@ -2096,13 +2285,15 @@ rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *sit
 // so whatever the owner did with that one, (:read how) or disconnect,
 // applies to the next (D158). The roots, if it collects, are the frame's
 // slots in use and the frames below, as rt_preempt's are.
-static __attribute__((noinline)) rt_value_t recv_slow(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp,
-                                                      uintptr_t at) {
-    if (p->reading) {
-        rt_value_t device = p->reading;
-        p->reading = 0;
-        read_on(p, device);                     // which may end p, if reading fails
-    }
+//
+// Once its island's waiting processes hold WAITS_KEPT stacks, a process
+// that waits here is copied off its own (copy_out, above) and never comes
+// back from to_scheduler: woken, it starts again in rt_recv_woken, on
+// whatever stack it was given, which does what's done here after the
+// wait and comes back to this loop. ret is where the call from compiled
+// code returns, which the copy needs once the C frames are gone.
+static inline __attribute__((always_inline)) rt_value_t recv_wait(rt_proc_t *p, rt_value_t *frame, uint64_t n,
+                                                                  const uintptr_t *fp, uintptr_t at, uintptr_t ret) {
     for (;;) {
         if (due(p)) collect(p, frame, n, fp);
         rt_msg_t *m = p->mail, *last = NULL;
@@ -2122,10 +2313,43 @@ static __attribute__((noinline)) rt_value_t recv_slow(rt_proc_t *p, rt_value_t *
         }
         p->state = RT_WAITING;
         p->at    = at;
+        island_state_t *s = p->isle;
+        if ((s->waits_held >= WAITS_KEPT || copy_always) && copy_out(p, frame, n, fp, ret)) {
+            to_scheduler(p);                    // for good: these frames are gone
+            __builtin_unreachable();
+        }
+        p->held = 1;
+        s->waits_held++;
         to_scheduler(p);
+        p->held = 0;
+        s->waits_held--;
         refill(p);
         if (--p->reductions <= 0) rt_preempt(p, frame, n, fp, at);
     }
+}
+
+// rt_recv comes here by a jump (musttail, below), so this function's
+// return address is the call's from compiled code.
+static __attribute__((noinline)) rt_value_t recv_slow(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp,
+                                                      uintptr_t at) {
+    uintptr_t ret = (uintptr_t)__builtin_return_address(0);
+    if (p->reading) {
+        rt_value_t device = p->reading;
+        p->reading = 0;
+        read_on(p, device);                     // which may end p, if reading fails
+    }
+    return recv_wait(p, frame, n, fp, at, ret);
+}
+
+// A process copied off its stack as it waited, woken: rt_recv_again calls
+// this as its rt_recv was called, with its frames where they are now, and
+// its return address that call's. The new slice and the call counted are
+// those recv_wait gives a process that kept its stack, in the same order,
+// so nothing runs at another time for having been copied.
+rt_value_t rt_recv_woken(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t at) {
+    refill(p);
+    if (--p->reductions <= 0) rt_preempt(p, frame, n, fp, at);
+    return recv_wait(p, frame, n, fp, at, (uintptr_t)__builtin_return_address(0));
 }
 
 // Most often the first message is for recv, nothing's to be collected,
@@ -2133,7 +2357,7 @@ static __attribute__((noinline)) rt_value_t recv_slow(rt_proc_t *p, rt_value_t *
 // frame, which cost a message as much as the rest of taking it.
 rt_value_t rt_recv(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t at) {
     rt_msg_t *m = p->mail;
-    if (!m || p->reading || for_read(m) || due(p)) return recv_slow(p, frame, n, fp, at);
+    if (!m || p->reading || for_read(m) || due(p)) __attribute__((musttail)) return recv_slow(p, frame, n, fp, at);
     p->mail = m->next;
     if (p->mail_last == m) p->mail_last = NULL;
     rt_value_t v = m->value;
@@ -2386,7 +2610,9 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
 static void retire(rt_proc_t *p) {
     island_state_t *s = p->isle;
     s->retired_calls += calls_of(p);
+    if (p->held) s->waits_held--;               // ended as it waited, by another
     if (p->stack) release_stack(p);
+    if (p->parked) free(p->parked);
     at_on(s, rt_pid_number(p->pid))->proc = NULL;
     settle_on(s, rt_pid_number(p->pid));
 }
@@ -5046,7 +5272,7 @@ static void share_tables(void) {
 // Where p is (see above), or 0: before its first run, the function it
 // will call (D286).
 static uintptr_t where(const rt_proc_t *p) {
-    if (p->stack) return p->at;
+    if (p->stack || parked(p)) return p->at;
     return p->code == rt_apply_start ? (uintptr_t)rt_box(p->fun)[1] : (uintptr_t)p->code;
 }
 
@@ -5546,7 +5772,7 @@ void rt_run(void) {
             if (!idle() && !(atomic_load(&many) && spin()) && !quiesce()) return;
             continue;
         }
-        if (!p->stack && !start(p)) {
+        if (!p->stack && !(parked(p) ? copy_in(p) : start(p))) {
             no_stack(p);
             continue;
         }
@@ -5740,12 +5966,47 @@ static void tell_waiting(const rt_proc_t *p) {
     }
 }
 
+#ifdef COPY_TALLY
+static const char *tally_name;
+
+// A line of the counts, in a file of this run's own in the directory
+// SLIGHT_COPY_TALLY names: the program, then each count by name.
+static void tally_write(void) {
+    static const char *const names[TALLIES] = {
+        "copied", "woken", "moved", "no-room", "too-deep", "bad-frame", "bad-return", "bad-chain", "bad-base",
+        "no-trampoline", "no-memory",
+    };
+    const char *dir = getenv("SLIGHT_COPY_TALLY");
+    char        path[1024];
+    if (!dir) return;
+    const char *slash = strrchr(tally_name, '/');
+    snprintf(path, sizeof path, "%s/%s.%ld", dir, slash ? slash + 1 : tally_name, (long)getpid());
+    FILE *f = fopen(path, "w");
+    if (!f) return;
+    fprintf(f, "%s", slash ? slash + 1 : tally_name);
+    for (int i = 0; i < TALLIES; i++) fprintf(f, " %s=%llu", names[i], (unsigned long long)atomic_load(&tally[i]));
+    // and what reading the clock twice costs, which each timed copy has in it
+    uint64_t t = tally_now(), pairs = 1000000, sink = 0;
+    for (uint64_t i = 0; i < pairs; i++) sink += tally_now() - tally_now();
+    uint64_t clock = (tally_now() - t) / pairs + (sink & 0);
+    fprintf(f, " bytes=%llu ns-out=%llu ns-in=%llu ns-clock=%llu\n", (unsigned long long)atomic_load(&tally_bytes),
+            (unsigned long long)atomic_load(&tally_ns_out), (unsigned long long)atomic_load(&tally_ns_in),
+            (unsigned long long)clock);
+    fclose(f);
+}
+#endif
+
 int main(int argc, char **argv) {
     page   = (size_t)sysconf(_SC_PAGESIZE);
+#ifdef COPY_TALLY
+    tally_name = argv[0];
+    atexit(tally_write);
+#endif
     signal(SIGPIPE, SIG_IGN);                   // writing to a closed connection is EPIPE, not the end
     catch_ends();
     is_init = getpid() == 1;
     poison    = getenv("SLIGHT_POISON") != NULL;
+    copy_always = getenv("SLIGHT_COPY_OUT") != NULL;
     gc_verify = getenv("SLIGHT_GC_VERIFY") != NULL;
     const char *stress = getenv("SLIGHT_GC_STRESS");
     gc_stress = !stress ? 0 : atoll(stress) < 1 ? 1 : atoll(stress) > QUOTA ? QUOTA : atoll(stress);

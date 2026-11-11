@@ -51,9 +51,30 @@ FUNC rt_trampoline
     mov  r10, [r15 + RT_PROC_ARGS + 48]
     mov  r11, [r15 + RT_PROC_ARGS + 56]
     call qword ptr [r15 + RT_PROC_CODE]
+    .globl rt_trampoline_back           // where a process's first frame returns: copy_out (process.c) looks for it
+rt_trampoline_back:
     mov  rsi, rax
     mov  rdi, r15
     call rt_exit                        // doesn't return
+
+// ---------------------------------------------------------------------------
+// rt_recv_again: where a process that was copied off its stack while it
+// waited in recv lands when it next runs (copy_in, process.c), by
+// rt_switch's ret, its frames back on a stack, some stack: rsp and rbp are
+// its frame's, as they were when it called rt_recv, and rbx, r12 and r13
+// that call's n, at and return address, which goes back on the stack as
+// the call put it. Jumps to rt_recv_woken as rt_recv was called, which
+// gives the message to where rt_recv would have.
+// ---------------------------------------------------------------------------
+
+FUNC rt_recv_again
+    mov  rdi, r15
+    mov  rsi, rsp
+    mov  rdx, rbx
+    mov  rcx, rbp
+    mov  r8,  r12
+    push r13
+    jmp  rt_recv_woken
 
 // ---------------------------------------------------------------------------
 // rt_apply_start: a process's code when fork made it (D286). The trampoline

@@ -475,7 +475,8 @@ typedef struct rt_msg {
                                 // device its owner opened, it's for read, not recv (D277)
 } rt_msg_t;
 
-// READY: in the run queue. WAITING: in recv, keeping its stack (D276). JOINING:
+// READY: in the run queue. WAITING: in recv, keeping its stack (D276), or
+// copied off it (process.c, "a waiting process copied off its stack"). JOINING:
 // blocked in join, keeping its stack. RACING: blocked in join/race,
 // keeping its stack, with a watch that wakes it on each of its pids.
 // SLEEPING: in sleep, keeping its stack, until its timer wakes it.
@@ -512,6 +513,7 @@ typedef struct rt_proc {
 
     rt_state_t      state;
     uint8_t         keypress;   // connected to :keypress
+    uint8_t         held;       // waiting in recv with its stack kept, and counted among its island's (process.c)
     void           *stack;      // the bottom of its stack, carved from a slab (process.c), or NULL
     rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c)
     rt_chunk_t     *chunks;     // the old generation, newest first, the messages it's taken among them
@@ -539,6 +541,8 @@ typedef struct rt_proc {
     struct rt_isle *isle;       // its island's state (process.c), the thread-local of the thread
                                 // it runs on, reached through it on the busiest paths, since on
                                 // macOS each use of a thread-local is a call (D256)
+    struct rt_parked *parked;   // its frames while it waits off its stack, and the room for them
+                                // kept after (process.c); NULL till it first waits so
 } rt_proc_t;
 
 // A cons cell is two words with no header; a list value points at it,
@@ -1091,7 +1095,15 @@ void rt_switch(rt_ctx_t *from, rt_ctx_t *to) RT_ASM(rt_switch);
 
 // Where a process's first switch lands: calls code(args...), then rt_exit.
 void rt_trampoline(void) RT_ASM(rt_trampoline);
+void rt_trampoline_back(void) RT_ASM(rt_trampoline_back);    // where what it called returns to, inside it
 void rt_apply_start(void) RT_ASM(rt_apply_start);    // a fork's code: calls proc->fun with proc->args (D286)
+
+// Where a process copied off its stack while it waited in recv lands when
+// it next runs (process.c, "a waiting process copied off its stack"): the
+// stub calls rt_recv_woken as its rt_recv was called, on the frames' new
+// stack, and that returns the message to where rt_recv would have.
+void       rt_recv_again(void) RT_ASM(rt_recv_again);
+rt_value_t rt_recv_woken(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t at) RT_ASM(rt_recv_woken);
 
 // The end of a process, with its result. Doesn't return.
 __attribute__((noreturn))
