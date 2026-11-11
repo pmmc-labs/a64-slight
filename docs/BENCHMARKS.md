@@ -190,6 +190,55 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 11 Nov: one kind of process, what it cost (D276 to D291)
+
+`2026-11-11-1500-macos-apple-m2-max` (`1493d35`) against
+`2026-11-01-1722`, the last run before D276; and `2026-11-11-1213`
+(`9fd007c`), between, before macOS gave back only a stack's top:
+
+| slight on the M2 Max | 1 Nov | 11 Nov, 12:13 | 11 Nov, 15:00 | 15:00 ÷ 1 Nov |
+|---|---:|---:|---:|---:|
+| `idle-memory 1000000` | 0.311 s, 615 MB | 27.6 s, 9,259 MB | 10.5 s, 8,915 MB | 34, and 14 in memory |
+| the same, 12 islands | 0.102 s | 29.4 s | 13.7 s | 134 |
+| `spawn 1000000` | 0.132 s, 50 MB | 0.150 s, 127 MB | 0.158 s, 127 MB | 1.20, and 2.5 in memory |
+| `spawn`, 12 islands | 0.024 s | 0.031 s | 0.031 s | 1.29 |
+| `payload 1000000` | 0.552 s | 0.724 s | 0.725 s | 1.31 |
+| `ping-pong 2000000` | 0.288 s | 0.303 s | 0.308 s | 1.07 |
+| `ping-pong`, 12 islands | 0.065 s | 0.067 s | 0.065 s | 1.00 |
+| `thread-ring 10000000` | 0.517 s, 2.1 MB | 0.483 s, 10.5 MB | 0.493 s, 10.5 MB | 0.95 |
+| `fan-in 10000000` | 0.373 s | 0.371 s | 0.376 s | 1.01 |
+| `bank 1000000` | 0.584 s | | 0.636 s | 1.09 |
+
+The sequential programs are where they were, within 1 per cent.
+
+- **A waiting process is the cost.** 8,913 bytes resident where it
+  was 614, its stack's top page among them: the M2's pages are 16 KB,
+  four times Linux's, so a waiting process holds twice the cloud
+  machine's 4,553. Starting a million of them to wait is 34 times as
+  long, 10 µs each, most of it now the page fault for each stack's
+  first page; on 12 islands longer still, the faults contending in one
+  address space. Before macOS gave back only a stack's top, `madvise`
+  walking all 8 MB of each, it was 89 times as long.
+- **And `payload` is 1.31 times as long, in both runs,** where the
+  cloud machine's is unchanged: not noise, and not yet explained.
+- **What didn't move:** messages among a few processes, `fan-in`, and
+  `thread-ring`, faster than before, its 503 stacks coloured (D291).
+  `ping-pong` on 12 islands is unchanged, so the cloud machine's 1.46
+  there was the VM's.
+- **`spawn`'s memory is its exit records** (D277), a million kept for
+  a parent that never joins.
+- Against the others on the M2, a waiting slight process went from a
+  fifth of a goroutine's or an Erlang process's memory, and half a
+  tokio task's, to three times a goroutine's and eight times a tokio
+  task's; and from the fastest of the four to start a million waiting
+  to the slowest, 7 times Go's time and 14 times tokio's. That's the
+  scale one kind of process gave up; PLAN.md's "A waiting process
+  copied off its stack" proposes taking it back.
+- Node's start-up program, `console.log(0)`, took 0.146 to 0.149 s in
+  every run, longer than Node's whole `n-body` (0.118): something about
+  Node 26.13 on this Mac, not Node's start-up, which was 0.051 s once
+  in the run before. Its ratios in the summary carry it.
+
 ### The cloud machine, 11 Nov, later: stacks carved from slabs (D291)
 
 What the morning's run (below) found D276 costing, taken back where it

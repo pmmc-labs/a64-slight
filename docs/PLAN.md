@@ -2464,6 +2464,120 @@ Mac, stackful against today.
   message meant for someone else. A `--strict` warning, when it follows
   a `send` in the same body; not a rule.
 
+### A waiting process copied off its stack (proposed, Nov 2026)
+
+**Why.** One kind of process (D276) gave up scale: many processes
+waiting at once, the shape of a server's connections and a simulation's
+actors. A waiting process keeps its stack, so it holds at least a page
+of it (4 KB on Linux, 16 KB on the M2 Max), and the first touch of that
+page is a fault. Carving and colouring the stacks (D291) took back the
+ceiling, the system calls and the ring of 503, but not the page.
+Against before D276 (`docs/BENCHMARKS.md`, 11 Nov):
+
+| | before D276 | now |
+|---|---:|---:|
+| A waiting process, resident | 614 B (M2), 441 B (cloud) | 8,913 B (M2), 4,553 B (cloud), and a page table's page |
+| A million started to wait, asked, ended | 0.31 s (M2), 0.78 s (cloud) | 10.5 s (M2), 8.9 s (cloud) |
+| A hop round a ring of 4,000 waiting (cloud) | 63 ns | 294 ns |
+| A hop round a ring of 30,000 (cloud) | 73 ns | 685 ns |
+
+A goroutine waits in about 2.9 KB, an Erlang process 2.7 and a tokio
+task 1.1: slight went from a fifth of the first two to three times
+them on the M2. A process per connection, per person or per thing in a
+simulation (PLAN.md's town, D263) pays it for every one.
+
+**The floor is the page.** No arrangement of stacks gets a waiting
+process below a page while its stack is its own memory; smaller stacks
+would save only the page tables (D291). Go gets under a page by making
+stacks heap memory, several to a page, grown by copying. What a
+waiting slight process needs to keep is far less than a page: its
+frames from the base to the wait, the trampoline's and a few of the
+program's, a few hundred bytes for most (the spike measured about 130).
+
+**What makes it possible.** Three things already true:
+
+1. A slight frame holds only values, the frame pointer of the one below
+   and a return address. Compiled code keeps nothing in a register
+   across a call, and a slot only ever holds a value; the collector
+   relies on both (D166).
+2. C never calls compiled code (`apply` jumps), so below a wait there
+   are only slight frames and the trampoline's: no C frame that might
+   hold a pointer into the stack.
+3. A wait is a call from compiled code into the runtime (`rt_recv`,
+   `rt_join`, `read_from`, `rt_sleep`, ...), whose C frames are on top.
+
+**The proposal.** When a process waits, and the stack below the wait
+is small (a page or less), the runtime copies the slight frames, from
+the wait's caller to the base, into a buffer on the process's side,
+throws away the wait's own C frames, and gives the stack back warm.
+When the process is woken, it takes any warm stack, copies the frames
+back to its top, moves each saved frame pointer by the difference in
+addresses, and starts the wait again from its call site: an assembly
+stub per target, in `rt_asm_*.S`, that calls the wait's C function
+afresh with the moved frame and returns its value to the saved return
+address. A wait is then a function that can be run again: what it needs
+after waking is in the process, not its C locals, which the waits
+nearly are already (`recv_slow` loops, `rt_join` loops on `far_end`).
+A process whose stack below the wait is bigger keeps its stack, as now:
+deep recursion that waits pays the page, nothing else does.
+
+**When.** Not at every wait. Copying out and back is a few hundred
+bytes and a few frame pointers each way, cheap against a page fault and
+dear against `ping-pong`'s 70 ns. So a process copies out only when its
+island holds more than `STACKS_KEPT` stacks of waiting processes;
+below that, waits keep their stacks, and `ping-pong`, `payload` and a
+ring of a few hundred run as now. `idle-memory` and the rings of
+thousands copy out, and should come back near their times before D276.
+
+**Options:**
+
+- **A. Copied-out waits** (above). Gives back most of the scale where
+  it's spent, keeps `recv` anywhere and every wait keeping what it
+  needs, and is contained in the runtime: no compiler change, no change
+  a program can see but `:system`'s `(:stack held)`. Recommended.
+- **B. Growable stacks, Go's:** a small stack from the heap, copied to
+  a bigger one when the entry check finds it full. Gets a waiting
+  process near Go's 2.9 KB, not under it, makes every process pay the
+  copy as it grows, and needs the entry check's failure path to be able
+  to continue (both code generators) and every C call on the stack to
+  be one whose frame can be moved. More machinery for less.
+- **C. Smaller stacks,** packed closer: saves the page tables and some
+  of starting a waiting process (a third, at 256 KB, D291), not the
+  page; and changes how deep a program may recurse (LANGUAGE.md, 8 MB).
+- **D. Accept the cost,** and say so in the guide: a process that waits
+  costs a page.
+
+**Risks, to settle in a prototype:**
+
+- **Every pointer into a stack must be known.** The saved frame
+  pointers, and the process's context; nothing else, if (1) and (2)
+  hold. `rt_apply`'s frame, the trampoline's and the fork entry's
+  (`rt_apply_start`) must be ones the walk recognises; a frame it
+  doesn't recognise makes the process keep its stack, so a mistake
+  costs memory, not correctness.
+- **Each wait restartable.** An inventory of the waits (`recv`, `join`,
+  `join/race`, `read` and `read/any`, `sleep`, `fork/on`'s wait for its
+  pid, `timer/cancel` across islands), each made to keep its state in
+  the process. A wait that can't be is left keeping its stack.
+- **The collector.** A copied-out process's roots are in its buffer
+  while it waits; nothing collects a waiting process's heap now, so
+  nothing changes, but the collector's frame walk must run only on
+  frames back on a stack. `SLIGHT_GC_STRESS` and `SLIGHT_GC_VERIFY`
+  with copying out forced at every wait (a `SLIGHT_` setting for tests)
+  over every golden test.
+- **Two targets.** The resume stub and the frame walk, for AArch64 and
+  x86-64, the context's shape differing (x86's return address on the
+  stack, AArch64's in x30).
+- **Determinism.** No change to what runs when: replay and seeded
+  orders hold as they are.
+
+**To measure before it's agreed,** a prototype for `recv` alone, on
+the M2 Max: `idle-memory 1000000` (time and bytes a process), rings of
+503, 4,000 and 30,000, and `ping-pong`, `payload` and `thread-ring`
+unchanged. If `idle-memory` isn't back within a few times its 0.31 s
+and a few hundred bytes a process, or the gate costs `ping-pong`
+anything, it's not worth its machinery, and D is the answer.
+
 ### An agent team: a design exercise (agreed, D281; built, D281 to D285, Nov 2026)
 
 Stevan, after the Life ports (D280): "So what would be a good design

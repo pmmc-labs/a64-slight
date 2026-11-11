@@ -1000,7 +1000,8 @@ static rt_value_t copy_here(rt_value_t v) {
 // one above (frame pointer and return address) and its own; the frame
 // pointer saved by the first is 0. No C frame comes between them, since C
 // never calls compiled code (apply jumps), so C code never sees anything
-// move. At recv, the recv rule means the stack is empty.
+// move. At recv, the frames below the one that waits are roots too, as at
+// a function's entry, since a process keeps its stack while it waits (D276).
 //
 // Two kinds (D200). A minor collection, once the nursery has overflowed,
 // copies what's young and reachable into the old generation, all of it,
