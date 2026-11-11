@@ -190,6 +190,84 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The cloud machine, 11 Nov, later: stacks carved from slabs (D291)
+
+What the morning's run (below) found D276 costing, taken back where it
+was easy. The harness's run, `2026-11-11-0955`, came on a busier host
+(`deriv`, which nothing here touches, 25 per cent slower than the
+morning's), so the comparison is old, D276 and D291 run in turns, nine
+rounds, the best of each; `deriv` is the control:
+
+| | before D276 | D276 | D291 | D276 ÷ before | D291 ÷ before |
+|---|---:|---:|---:|---:|---:|
+| `deriv 2000000` | 0.431 s | 0.449 s | 0.436 s | 1.04 | 1.01 |
+| `thread-ring 10000000` | 0.614 s | 1.363 s | 0.716 s | 2.22 | 1.17 |
+| `fan-in 10000000` | 0.788 s | 1.006 s | 0.815 s | 1.28 | 1.03 |
+| `spawn 1000000` | 0.193 s, 66 MB | 0.248 s, 114 MB | 0.235 s, 114 MB | 1.29 | 1.22 |
+| `ping-pong 2000000` | 0.420 s | 0.424 s | 0.432 s | 1.01 | 1.03 |
+| `payload 1000000` | 0.926 s | 0.817 s | 0.831 s | 0.88 | 0.90 |
+| `idle-memory 30000` | 0.019 s | 0.371 s | 0.177 s | 19 | 9.1 |
+| `idle-memory 30000`, 4 islands | 0.013 s | 1.289 s | 0.090 s | 100 | 7.0 |
+| `ping-pong-mc 2000000`, 4 islands | 0.131 s | 0.203 s | 0.190 s | 1.56 | 1.46 |
+| `spawn-mc 1000000`, 4 islands | 0.105 s | 0.125 s | 0.119 s | 1.19 | 1.14 |
+
+And `idle-memory 1000000`, which D276 couldn't run: 9.1 s on one
+island and 5.6 on four, 4,550 bytes a process resident, where it was
+0.78 s and 441 bytes before D276.
+
+- **The ceiling is gone.** Each island maps 64 stacks at once, one
+  mapping, with no guard pages (the entry check catches a stack running
+  out), so the system's 65,530 mappings no longer cap waiting processes
+  at 32,700: a million wait at once, and the address space or memory
+  is the limit. Starting one to wait was three system calls; now it's
+  the page fault for its stack's first page, and a page table's page,
+  which the resident set doesn't count (`VmPTE`, about as much again).
+  On four islands, where the calls contended for the one address space,
+  14 times faster than D276.
+- **Colour, or carving is slower than mappings.** Carved exactly 8 MB
+  apart, every stack's top was the same distance from every boundary,
+  so the tops' first lines shared a few cache sets and their page-table
+  entries one place in each table: a ring of 503 took 224 ns a hop,
+  where D276's mappings, staggered by their guard pages, took 147. A
+  slot a page more than 8 MB, and each top 0 to 31 cache lines down by
+  its place:
+
+  | ring of n, ns a hop | 2 | 256 | 503 | 1,000 | 4,000 | 30,000 |
+  |---|---:|---:|---:|---:|---:|---:|
+  | before D276 | 62 | 62 | 63 | 69 | 63 | 73 |
+  | D276 | 65 | 71 | 126 | 186 | 298 | 745 |
+  | carved, not coloured | 61 | 130 | 233 | 264 | 316 | 639 |
+  | D291 | 59 | 75 | 71 | 100 | 294 | 685 |
+
+  `thread-ring`'s 503 are back to their time before D276; past a few
+  thousand processes, each wakes on a page no cache or TLB still holds,
+  as it must once each keeps its stack.
+- **Pages back in batches.** Past 256 stacks kept warm, a stack's pages
+  go back with `madvise`; one call each was a third of `idle-memory`'s
+  time. Gathered 64 at a time and sorted, a run of neighbours is one
+  call: 4,700 calls for 100,000 processes, where there were 101,000.
+- **Two found on the way.** Since D286, `(fork send me i)` copied
+  `send`, a function in static data, with the full walk, 231
+  instructions a fork where 76 did; a value that points only into
+  static data is now copied as one with no pointers (`spawn` 5 per cent
+  fewer instructions). And `rt_recv`, a loop over the mailbox since D277
+  skips what's for `read`, saved six registers and five arguments for
+  every message; its common case, the first message for `recv`, nothing
+  to collect, no device to cut, now runs without that frame, 69
+  instructions a message where it took 101, and `fan-in` is back to its
+  time before D276, with fewer instructions than then.
+- **What's left:** a waiting process is 4.6 KB resident and a page
+  table's page, where it was 470 bytes, and starting one is a page
+  fault, 5 µs on this VM (its page fault, mostly, not the runtime's);
+  `spawn`'s exit records, kept for a parent that never joins (D277),
+  48 MB at a million; and `ping-pong` on four islands, 1.46 times its
+  time before D276 with fewer instructions, which doesn't happen with
+  four separate programs at once, nor with process structs 128 bytes
+  apart, and which this VM has no counters to explain: the M2 Max is to
+  say. Smaller stacks would take more back (256 KB apart, a third off
+  starting a waiting process, and eight stacks to a page table), but
+  change how deep a program may recurse: a proposal, not an easy win.
+
 ### The cloud machine, 11 Nov: one kind of process (D276, D277)
 
 Every program on `3fa502f`, `2026-11-11-0839`, against `c6fe222`, the
@@ -1163,14 +1241,14 @@ to under 2. The M2's runs after each are above.
 ### What slight should look at next
 
 - **A waiting process's stack** (`idle-memory`, `thread-ring`, 11
-  Nov): since D276 a waiting process holds an 8 MB mapping of its own,
-  three system calls and a page each, at most about 32,000 at once on
-  Linux, and a switch among hundreds of them goes to a cold page every
-  time: `thread-ring` twice as slow, a ring of 30,000 ten times. Stacks
-  carved from one region (PLAN.md's option, deferred till a program
-  needed it) would take out the calls and the ceiling, and packed
-  close, the page-table pages; how much of the switches' cost that
-  takes back is to be measured.
+  Nov): since D276 a waiting process holds a stack of its own. Carved
+  from slabs and coloured (D291), the ceiling and the system calls are
+  gone and `thread-ring` is near its old time; left, a page and a page
+  table's page for each waiting process, a page fault to start one,
+  and a switch among thousands going to a cold page. Smaller stacks,
+  packed closer, would take more, at the cost of how deep a program may
+  recurse: to propose if a program needs it. And `ping-pong` on four
+  islands, unexplained here, for the M2 Max.
 - **Lists in the prelude** (`deriv`, `nqueens`): `map`, `append`,
   `filter`, `length` and the rest went through `fold/l` and `reverse`,
   with a closure called for each element, and `not` was a call; about
