@@ -7463,3 +7463,54 @@ root's value, which takes the answer from the golden tests and makes
 every program `pprint` it; a builtin to say "print nothing", a second
 way to end a program; and `()` printing nothing only when the program
 had written to stdout, a rule nobody could predict. Golden test 382.
+
+**D291. Stacks carved from slabs, and what one kind of process cost
+taken back where it was easy.** *(Stevan, Nov 2026: "Let's try some
+stack carving, and see how much we can recover. It is understandable
+things will be slower now, and that is okay, but let's not leave any
+easy wins on the table", after the benchmarks of 11 Nov, BENCHMARKS.md,
+found a waiting process's stack the cost of D276.)* PLAN.md's option,
+"stacks from one region", deferred by D276 till a program needed it:
+`idle-memory` and `thread-ring` did. Each island maps stacks 64 at a
+time, a slab of 512 MB of addresses with `MAP_NORESERVE` and one
+mapping, and carves them in order; there are no guard pages, since the
+check at every function's entry catches a stack running out, with 64 KB
+to spare, and the runtime's C walks keep their work on the heap. A
+stack given back is kept warm, its link in its top word, which its
+next process writes first anyway; past 256 kept, its pages go back with
+`madvise`, 64 stacks at a time, sorted so a run of neighbours is one
+call, and its addresses are kept for the next process; a slab is never
+unmapped. A slab that can't be had is tried as a single stack before
+the process faults `:stack` (D267), which is now where the address
+space or the commit limit runs out rather than at Linux's 65,530
+mappings, two a stack: a million processes wait at once again, and
+t/live.py's check of D267 caps the address space at 1 GB to get there.
+Slots are a page more than 8 MB apart, and a stack's top a few cache
+lines down by its place (`COLOURS`), since 8 MB apart exactly put every
+stack's top at the same distance from every boundary, its first lines
+in the same few cache sets and its page-table entry at the same place
+in each table: carved without that, a ring of 503 was slower than
+D276's mappings, whose guard pages had staggered them by chance; with
+it, as fast as before D276. Two more, found on the way, under the same
+words: a value pointing only into static data is copied without a walk,
+which every `(fork f ...)` of a named function paid since D286; and
+`rt_recv` takes a message for `recv`, with nothing to collect and no
+device to cut, without the frame of its loop, now `recv_slow`, 69
+instructions a message where it took 101 (`fan-in` back to its time
+before D276). What's left, measured on the cloud machine: a waiting
+process is a fresh page, 4.6 KB resident and a page-table page of its
+own, where it was 470 bytes, and starting one is a page fault, about 5
+µs on this VM; a ring of thousands of processes still switches to a
+cold page each time; `spawn`'s exit records (D277); and `ping-pong` on
+four islands 1.5 times its time before D276, with fewer instructions,
+which separate programs at once don't show and the M2 Max is to look at.
+Not built, to propose if wanted: smaller stacks, which would put many
+stacks' tops in one page table and their switches closer to before
+(256 KB apart took a third off starting a waiting process), but change
+how deep a program may recurse, 8 MB (LANGUAGE.md); and a parent's
+records of children it can never join. Rejected: `MADV_FREE` on Linux,
+whose pages stay in the resident set till the system wants them, so a
+program's memory after a burst would look like a leak; a slab
+unmapped once all its stacks are free, which needs a count per slab
+for little; and keeping every stack warm, which holds a burst's memory
+for good.

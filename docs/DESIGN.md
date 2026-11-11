@@ -206,10 +206,12 @@ takes the next message, but what's sent to an address of its own, or
 comes from a device it opened, which `read` takes (D277).
 
 What it costs: a waiting process holds a stack, 8 MB of address space
-and the pages it touched, and the system maps about 32,000 of them at
-once on default Linux (`vm.max_map_count`), so a million processes
-can't all wait, where they could before (`million-forks` is
-`ten-thousand-forks`). What it buys is the process model's simplicity:
+and the pages it touched, a page and a page table's page for most, where
+it held a few hundred bytes before; starting one to wait is a page
+fault; and switching among thousands of them goes to a cold page each
+time. Stacks are carved from slabs (D291), so the ceiling is the
+address space and memory, and a million can wait at once, as before
+D276. What it buys is the process model's simplicity:
 one kind of wait, no split pass, no state functions, and a call to a
 function that waits is a call.
 
@@ -1066,12 +1068,16 @@ run (option (b), D256's step 6, put off).
   straight to the next timer when nothing can (D110). Timer tests are then
   exact and take no real time; but a process that sleeps while others stay
   busy never wakes.
-- **Stack pool**: a process takes a stack when it starts running and gives
-  it back when it ends (D276; till then at `recv` too). An island keeps
-  256 given back, and unmaps the rest. With none to be had (about 32,700 held at
-  once reach Linux's default `vm.max_map_count`, two mappings a stack),
-  the process that wanted one faults `:stack`, and the program goes on
-  (D267).
+- **Stacks**: a process takes a stack when it starts running and gives
+  it back when it ends (D276; till then at `recv` too). An island carves
+  them from slabs of 64, each one mapping of 512 MB of addresses with
+  `MAP_NORESERVE`, a page more than 8 MB apart and each top a few cache
+  lines down by its place, so that tops don't share cache sets, with no
+  guard pages (D291). It keeps 256 given back warm; past that, their
+  pages go back with `madvise`, 64 at a time, and their addresses are
+  kept for the next. With none to be had (the address space, or the
+  commit limit, run out), the process that wanted one faults `:stack`,
+  and the program goes on (D267).
 - **Context switch**: `rt_switch`, 25 instructions on AArch64 (x19–x30,
   sp, d8–d15).
 - **Idle**: when nothing is runnable, wait in `select()` (on macOS and
@@ -1351,9 +1357,10 @@ checks:
 The stack check is Go's: compare `sp` with a limit in the process, rather
 than catch a guard-page `SIGSEGV` on an alternate signal stack (D48). The
 limit sits 64 KB above the bottom, which leaves room for the frame that
-tripped it and a call to `rt_fault`; a guard page under the stack still
-catches anything that slips past. The root process runs on its own 8 MB
-`mmap`ed stack. The quota is 1,000 reductions; when it's used up,
+tripped it and a call to `rt_fault`. There's no guard page under it
+(D291): the runtime's C walks keep their work on the heap, so nothing
+on a process's stack goes deeper than one C call. The root process
+runs on a stack like any other's. The quota is 1,000 reductions; when it's used up,
 `rt_preempt` refills it, and sends the process to the back of the run
 queue if another is ready (D91). The parameters are saved before the
 reduction check because `rt_preempt` is a C call and may clobber

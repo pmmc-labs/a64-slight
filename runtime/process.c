@@ -49,6 +49,7 @@
 #define QUOTA          1000             // reductions between preemptions
 #define STACK_BYTES    (8 << 20)        // every process's stack, mapped lazily
 #define STACK_HEADROOM (64 << 10)       // room left below the limit for one frame and a C call
+#define TRIM_BATCH     64               // stacks given back past those kept, whose pages go back together
 #define CHUNK_FIRST    (4 << 10)        // a process's nursery at first, and its first old chunk...
 #define CHUNK_MAX      (1 << 20)        // ...each doubling up to this
 #define HEAP_DEFAULT   (1 << 30)        // all of a process's chunks, both generations, unless SLIGHT_HEAP_MAX says
@@ -104,8 +105,13 @@ typedef struct rt_isle {
     uint64_t           nrecords;        // entries made and not yet dead, for :system
     rt_proc_t         *ready_head, *ready_tail;
     rt_ctx_t           scheduler;
-    void              *free_stacks;     // a list through each stack's first word...
+    void              *free_stacks;     // warm stacks, a list through each one's top word (STACK_LINK)...
     uint64_t           nfree_stacks;    // ...this long
+    void              *trim_stacks[TRIM_BATCH];  // past those, stacks whose pages are to go back...
+    size_t             ntrim_stacks;
+    void             **cold_stacks;     // ...and those whose pages have, their addresses kept
+    size_t             ncold_stacks, cold_cap;
+    char              *slab_next, *slab_end;    // what's left of the slab stacks are carved from
     uint64_t           stressed;        // the collections SLIGHT_GC_STRESS has made, every eighth a major one
     uint64_t           sched;           // SLIGHT_SCHED's generator, or 0: first in, first out
     char              *scratch;         // the copy being made, kept from one copy to the next
@@ -233,39 +239,111 @@ static void to_scheduler(rt_proc_t *p) {
 
 // --- stacks -------------------------------------------------------------------
 
-#define STACKS_KEPT 256                 // given back stacks an island keeps; past that, they're unmapped
+#define STACKS_KEPT 256                 // given back stacks an island keeps warm; past that, their pages go back
+#define SLAB_STACKS 64                  // stacks mapped at once, 512 MB of addresses and one mapping
+#define COLOURS     32                  // cache lines a stack's top is set below its slot's, by its place
 
-// A stack with a guard page under it, so running off the end crashes
-// instead of corrupting memory. Returns its bottom, above the guard; or
-// NULL if the system has none to give, which is mostly its limit on a
-// program's mappings, two a stack (about 32,000 stacks at once at
-// Linux's default vm.max_map_count), and the process that wanted it
-// faults (D267).
+// A stack's slot: its bytes and a page more, so that no two stacks' tops
+// are the same distance from a boundary of 8 MB, or of a page table's
+// reach (2 MB). A ring of hundreds of waiting processes, each woken on
+// its own stack, had them evicting each other from the caches' few sets
+// for that address, and their page-table entries too (BENCHMARKS.md, 11
+// Nov); the guard page each stack had did this by chance.
+#define STACK_SLOT  (STACK_BYTES + page)
+
+// The link in a warm stack's list: its top word, where its next process
+// writes first anyway, so keeping it touches no page the stack hadn't.
+#define STACK_LINK(s) (*(void **)((char *)(s) + STACK_BYTES - sizeof(void *)))
+
+// Stacks are carved from slabs, each one mapping, with no guard pages
+// between them: running off a stack is caught by the check at every
+// function's entry (STACK_HEADROOM), and the runtime's C walks keep their
+// work on the heap, not the stack. A mapping and a guard page each
+// cost three system calls a stack and two of the system's mappings
+// (about 32,000 stacks at once at Linux's default vm.max_map_count);
+// carved, a stack costs the pages it touches, and the ceiling is the
+// address space, a million stacks 8 TB of it. Returns a stack's bottom,
+// or NULL if the system has no more addresses to give, and the process
+// that wanted it faults (D267).
 static void *get_stack(void) {
     if (my.free_stacks) {
         void *s = my.free_stacks;
-        my.free_stacks = *(void **)s;
+        my.free_stacks = STACK_LINK(s);
         my.nfree_stacks--;
         return s;
     }
-    char *base = mmap(NULL, page + STACK_BYTES, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANON, -1, 0);
-    if (base == MAP_FAILED) return NULL;
-    if (mprotect(base, page, PROT_NONE) != 0) {
-        munmap(base, page + STACK_BYTES);
-        return NULL;
+    if (my.ntrim_stacks) return my.trim_stacks[--my.ntrim_stacks];
+    if (my.ncold_stacks) return my.cold_stacks[--my.ncold_stacks];
+    if (my.slab_next == my.slab_end) {
+        int    flags = MAP_PRIVATE | MAP_ANON;
+#ifdef MAP_NORESERVE
+        flags |= MAP_NORESERVE;     // only what's touched is memory
+#endif
+        size_t n    = SLAB_STACKS;
+        char  *base = mmap(NULL, n * STACK_SLOT, PROT_READ | PROT_WRITE, flags, -1, 0);
+        if (base == MAP_FAILED) {   // short of addresses: one stack, if there's room for that
+            n    = 1;
+            base = mmap(NULL, STACK_SLOT, PROT_READ | PROT_WRITE, flags, -1, 0);
+            if (base == MAP_FAILED) return NULL;
+        }
+#ifdef MADV_NOHUGEPAGE
+        madvise(base, n * STACK_SLOT, MADV_NOHUGEPAGE);    // a stack's top is a page or two, not 2 MB
+#endif
+        my.slab_next = base;
+        my.slab_end  = base + n * STACK_SLOT;
     }
-    return base + page;
+    void *s = my.slab_next;
+    my.slab_next += STACK_SLOT;
+    return s;
 }
 
-// Kept for the next process, or, past STACKS_KEPT, unmapped, so a burst
-// of processes holding stacks doesn't hold its mappings for good.
+static int by_address(const void *a, const void *b) {
+    uintptr_t x = (uintptr_t)*(void *const *)a, y = (uintptr_t)*(void *const *)b;
+    return (x > y) - (x < y);
+}
+
+// The pages of the stacks waiting to be trimmed go back, a run of
+// neighbouring slots in one call, which a burst of processes ending in
+// the order they started makes most of them; and their addresses are
+// kept, cold. With no room to keep them, the addresses are lost, not
+// the memory.
+static void trim_stacks(island_state_t *s) {
+    size_t n = s->ntrim_stacks;
+    qsort(s->trim_stacks, n, sizeof *s->trim_stacks, by_address);
+    for (size_t i = 0, j; i < n; i = j) {
+        for (j = i + 1; j < n && (char *)s->trim_stacks[j] == (char *)s->trim_stacks[j - 1] + STACK_SLOT; j++) {}
+        size_t len = (size_t)((char *)s->trim_stacks[j - 1] - (char *)s->trim_stacks[i]) + STACK_BYTES;
+#ifdef __linux__
+        madvise(s->trim_stacks[i], len, MADV_DONTNEED);
+#else
+        madvise(s->trim_stacks[i], len, MADV_FREE);
+#endif
+    }
+    if (s->ncold_stacks + n > s->cold_cap) {
+        size_t cap  = s->cold_cap ? 2 * s->cold_cap : 1024;
+        void **more = realloc(s->cold_stacks, cap * sizeof *more);
+        if (more) {
+            s->cold_stacks = more;
+            s->cold_cap    = cap;
+        }
+    }
+    for (size_t i = 0; i < n && s->ncold_stacks < s->cold_cap; i++) s->cold_stacks[s->ncold_stacks++] = s->trim_stacks[i];
+    s->ntrim_stacks = 0;
+}
+
+// Kept warm for the next process; or, past STACKS_KEPT, kept to have its
+// pages given back with others' (trim_stacks), and taken again first if
+// a process wants one meanwhile, so a burst of processes holding stacks
+// doesn't hold their memory for good.
 static void release_stack(rt_proc_t *p) {
-    if (p->isle->nfree_stacks < STACKS_KEPT) {
-        *(void **)p->stack = p->isle->free_stacks;
-        p->isle->free_stacks = p->stack;
-        p->isle->nfree_stacks++;
+    island_state_t *s = p->isle;
+    if (s->nfree_stacks < STACKS_KEPT) {
+        STACK_LINK(p->stack) = s->free_stacks;
+        s->free_stacks = p->stack;
+        s->nfree_stacks++;
     } else {
-        munmap((char *)p->stack - page, page + STACK_BYTES);
+        s->trim_stacks[s->ntrim_stacks++] = p->stack;
+        if (s->ntrim_stacks == TRIM_BATCH) trim_stacks(s);
     }
     p->stack = NULL;
 }
@@ -297,15 +375,18 @@ static int start(rt_proc_t *p) {
     p->stack_limit = (uintptr_t)p->stack + STACK_HEADROOM;
     refill(p);
     memset(&p->ctx, 0, sizeof p->ctx);
+    // and within its slot, its top a few cache lines down, by its place,
+    // so that the tops' first lines aren't all in the same few sets
+    char *base = (char *)p->stack + STACK_BYTES - ((uintptr_t)p->stack / page % COLOURS) * 64;
 #if defined(__x86_64__)
     // x86's ret takes its address from the stack, not a link register: the
     // trampoline's goes in the top word, and popping it leaves rsp 16-aligned.
-    uint64_t *top = (uint64_t *)((char *)p->stack + STACK_BYTES) - 1;
+    uint64_t *top = (uint64_t *)base - 1;
     *top       = (uint64_t)rt_trampoline;
     p->ctx.rsp = (uint64_t)top;
     p->ctx.r15 = (uint64_t)p;
 #else
-    p->ctx.sp         = (uint64_t)p->stack + STACK_BYTES;
+    p->ctx.sp         = (uint64_t)base;
     p->ctx.lr         = (uint64_t)rt_trampoline;
     p->ctx.x19_x28[9] = (uint64_t)p;
 #endif
@@ -837,12 +918,13 @@ static rt_chunk_t *copy_walk(island_state_t *s, const rt_value_t *from, rt_value
     return chunk;
 }
 
-// Values with no pointer among them, as fork's and join's often are, and
-// many messages, need no walk.
+// Values with no pointer among them, but into static data, as fork's and
+// join's often are (a function given to fork, since D286), and many
+// messages, need no walk.
 static rt_chunk_t *copy_values_after(island_state_t *s, const rt_value_t *from, rt_value_t *into, uint64_t n, size_t reserve,
                                      const char *site) {
     for (uint64_t i = 0; i < n; i++) {
-        if (rt_is_cons(from[i]) || (from[i] & RT_TAG_MASK) == RT_TAG_BOXED) {
+        if (is_pointer(from[i])) {
             if (!site && s->ending_site) {      // the first copy of what the running process ends with (end)
                 site           = s->ending_site;
                 s->ending_site = NULL;
@@ -1973,7 +2055,8 @@ rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *sit
 // so whatever the owner did with that one, (:read how) or disconnect,
 // applies to the next (D158). The roots, if it collects, are the frame's
 // slots in use and the frames below, as rt_preempt's are.
-rt_value_t rt_recv(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t at) {
+static __attribute__((noinline)) rt_value_t recv_slow(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp,
+                                                      uintptr_t at) {
     if (p->reading) {
         rt_value_t device = p->reading;
         p->reading = 0;
@@ -2002,6 +2085,21 @@ rt_value_t rt_recv(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t 
         refill(p);
         if (--p->reductions <= 0) rt_preempt(p, frame, n, fp, at);
     }
+}
+
+// Most often the first message is for recv, nothing's to be collected,
+// and no device waits to cut its next: taken here, without the loop's
+// frame, which cost a message as much as the rest of taking it.
+rt_value_t rt_recv(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t at) {
+    rt_msg_t *m = p->mail;
+    if (!m || p->reading || for_read(m) || due(p)) return recv_slow(p, frame, n, fp, at);
+    p->mail = m->next;
+    if (p->mail_last == m) p->mail_last = NULL;
+    rt_value_t v = m->value;
+    p->reading = m->device;
+    if (bare(m)) free_msg(m);
+    else         adopt(p, m->chunk);
+    return v;
 }
 
 void rt_dead_letter(rt_value_t msg, const char *site) {

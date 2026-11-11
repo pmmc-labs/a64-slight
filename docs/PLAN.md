@@ -2348,7 +2348,7 @@ trade reversed:
 |---|---|---|
 | Resident | a few hundred bytes | the pages touched, 4 to 16 KB |
 | Virtual | nothing | 8 MB (`STACK_BYTES`) |
-| Ceiling | millions | about 32,000 with a mapping per stack on default Linux; hundreds of thousands if stacks are carved from one region, since the entry check catches overflow without a guard page |
+| Ceiling | millions | about 32,000 with a mapping per stack on default Linux; hundreds of thousands if stacks are carved from one region, since the entry check catches overflow without a guard page (carved, D291: millions, memory allowing) |
 
 `million-forks` and `bank`'s million customers no longer run as they
 are; `ring-benchmark`'s ten thousand do, and so does a town of ten
@@ -2457,7 +2457,9 @@ Mac, stackful against today.
   Recommended.
 - **Stacks from one region,** without a mapping each, so that the
   ceiling is memory rather than the kernel's map count. Only if a
-  program needs it; `ring-benchmark` says whether one does.
+  program needs it; `ring-benchmark` says whether one does. Built
+  (D291), once `bench/idle-memory` and `thread-ring` did: slabs of 64,
+  coloured so their tops don't share cache sets.
 - **A bare `(recv)` inside a handler,** the one way left to take a
   message meant for someone else. A `--strict` warning, when it follows
   a `send` in the same body; not a rule.

@@ -94,8 +94,8 @@ the details. Results on an M2 Max, natively:
   stack. **The page is the cost**, which is why a64-slight gave stacks
   back at `recv` (D9) till D276: a waiting process was to cost about 100
   bytes plus its heap. Since D276 a waiting process keeps its stack, and
-  the system's limit on mappings caps how many can hold one at once, at
-  about 32,700 (D267).
+  the system's limit on mappings capped how many could hold one at once,
+  at about 32,700 (D267), till stacks were carved from slabs (D291).
 - **1.9 µs per spawn**, mostly `mmap` + `mprotect` and the first page
   fault. A stack pool removes most of that.
 

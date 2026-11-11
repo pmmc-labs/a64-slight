@@ -212,11 +212,13 @@ A process takes a stack when it first runs, and keeps it till it ends,
 through every wait: `recv`, `join`, `read` and `sleep` alike. A stack
 is 8 MB of address space, of which only the pages the process has
 touched are memory, a few KB for most actors. So an idle actor is its
-stack's pages, its mailbox and its heap, and how many can wait at once
-is how many stacks the system will map: about 32,000 on Linux as it
-comes (`vm.max_map_count`). Past that, a new process ends with `:stack`
-(D267), and the rest go on. Ten thousand actors are fine; a million
-aren't, where before D276 they were.
+stack's pages, its mailbox and its heap, about 5 KB, and as much again
+for the page table that maps its stack: a million can wait at once in
+9 GB or so. Stacks are carved from big reservations of address space
+(D291); when the system has no more to give, a new process ends with
+`:stack` (D267), and the rest go on. Before D276 an idle actor was
+about 500 bytes: that's what keeping its stack costs, and what makes a
+wait anywhere possible.
 
 A process's heap is collected when it waits in `recv`, if it has grown
 enough, and at a function's entry, with its frames as roots. See

@@ -820,8 +820,9 @@ The fault kinds:
 - `:no-clause`: no `cond` clause matched
 - `:stack`: a call with the stack nearly full; or, with the reason
   `(:stack () "no stack to be had")`, a process the system had no
-  stack for as it was to run, about 32,000 being held at once on Linux,
-  by processes preempted, joining, sleeping or reading (D267)
+  stack for as it was to run, its address space or commit limit spent
+  on the stacks of processes waiting, preempted, joining, sleeping or
+  reading, 8 MB of addresses each (D267, D291)
 - `:not-a-cons`: `car` or `cdr` of something that isn't a cons
 - `:not-a-list`: `cons` onto something that isn't a list
 - `:heap`: the process's heap is full

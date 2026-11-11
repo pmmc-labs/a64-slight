@@ -512,7 +512,7 @@ typedef struct rt_proc {
 
     rt_state_t      state;
     uint8_t         keypress;   // connected to :keypress
-    void           *stack;      // the bottom of its stack (above the guard page), or NULL
+    void           *stack;      // the bottom of its stack, carved from a slab (process.c), or NULL
     rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c)
     rt_chunk_t     *chunks;     // the old generation, newest first, the messages it's taken among them
     uintptr_t       old_ptr;    // where the next promotion goes, in the first of chunks; or 0
