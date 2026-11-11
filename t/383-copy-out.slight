@@ -1,4 +1,4 @@
-; A process copied off its stack while it waits in recv (a prototype of
+; A process copied off its stack while it waits in recv (D292,
 ; PLAN.md's "A waiting process copied off its stack"). SLIGHT_COPY_OUT
 ; makes every recv that waits copy its process's frames to a buffer and
 ; give its stack back, however few are waiting; woken, the process takes

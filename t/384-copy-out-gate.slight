@@ -1,4 +1,4 @@
-; When a waiting process is copied off its stack (a prototype of PLAN.md's
+; When a waiting process is copied off its stack (D292, PLAN.md's
 ; "A waiting process copied off its stack"): only once its island's
 ; processes waiting in recv hold 1,024 stacks. Up to then each keeps its
 ; own, as since D276, so a few processes talking pay nothing; past it, the

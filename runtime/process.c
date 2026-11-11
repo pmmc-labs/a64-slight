@@ -442,16 +442,17 @@ static int start(rt_proc_t *p) {
 
 // --- a waiting process copied off its stack ------------------------------------
 //
-// A prototype of PLAN.md's proposal of that name, for recv alone. A
-// process that waits keeps its stack (D276), at least a page of it, and
-// what it needs of that page is its frames from the wait down to the
-// stack's top, a hundred bytes or two. So once an island's waiting
-// processes hold WAITS_KEPT stacks (1,024), the next to wait in recv has those
-// frames copied to a buffer of its own, and its stack goes back to the
-// warm ones for whoever runs next; woken, it takes any warm stack, its
-// frames are copied to that one's top, and it starts its recv again there
-// (rt_recv_again, in assembly, and rt_recv_woken). Below WAITS_KEPT
-// nothing's copied, so a few processes talking run as they did.
+// PLAN.md's "A waiting process copied off its stack" (D292), for recv; the
+// other waits are to follow. A process that waits keeps its stack (D276),
+// at least a page of it, and what it needs of that page is its frames
+// from the wait down to the stack's top, a hundred bytes or two. So once
+// an island's waiting processes hold WAITS_KEPT stacks (1,024), the next
+// to wait in recv has those frames copied to a buffer of its own, and its
+// stack goes back to the warm ones for whoever runs next; woken, it takes
+// any warm stack, its frames are copied to that one's top, and it starts
+// its recv again there (rt_recv_again, in assembly, and rt_recv_woken).
+// Below WAITS_KEPT nothing's copied, so a few processes talking run as
+// they did.
 //
 // What makes the copy safe is what the collector relies on (below):
 // compiled code keeps nothing in a register across a call but the process
@@ -491,10 +492,10 @@ typedef struct rt_parked {
     char      frames[];                 // from the waiting frame's lowest slot up to base
 } parked_t;
 
-// Why copy_out left a process its stack, counted for the prototype's
-// report: built with -DCOPY_TALLY (SLIGHT_CC="cc -DCOPY_TALLY"), a run
-// leaves a file of its counts in the directory SLIGHT_COPY_TALLY names,
-// with the bytes copied out and the time spent copying out and in.
+// Why copy_out left a process its stack, counted for measuring it: built
+// with -DCOPY_TALLY (SLIGHT_CC="cc -DCOPY_TALLY"), a run leaves a file of
+// its counts in the directory SLIGHT_COPY_TALLY names, with the bytes
+// copied out and the time spent copying out and in.
 enum { COPIED, WOKEN, MOVED, NO_ROOM, TOO_DEEP, BAD_FRAME, BAD_RETURN, BAD_CHAIN, BAD_BASE, NO_TRAMPOLINE, NO_MEMORY, TALLIES };
 #ifdef COPY_TALLY
 static _Atomic uint64_t tally[TALLIES], tally_bytes, tally_ns_out, tally_ns_in;

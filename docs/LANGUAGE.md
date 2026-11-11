@@ -778,10 +778,12 @@ value back to its caller:
         (pprint (list :count (ask-counter c))))
 
 The process keeps its stack while it waits, as it does in `join`, and
-goes on from the `recv` when a message comes. So a process holds its
-stack from its first run to its end, and what a waiting actor costs is
-its stack's touched pages, its mailbox and its heap, which is collected
-at the `recv` if it has grown enough (D105).
+goes on from the `recv` when a message comes. What a waiting actor
+costs is its stack's touched pages, its mailbox and its heap, which is
+collected at the `recv` if it has grown enough (D105); and once more
+than a thousand processes on its island wait in `recv`, its stack goes
+back and only its frames are kept, a few hundred bytes, till a message
+wakes it on another (D292).
 
 A process that waits for a reply in the middle of a handler takes the
 next message, whatever it is: there's no selective receive. So an actor
@@ -1550,8 +1552,9 @@ which `lookup` reads; more keys may come. A process's:
 - `(:heap bytes)`: its heap in use, both generations.
 - `(:reductions n)`: the reductions it has made, the functions it has
   entered (under Scheduling).
-- `(:stack held)`: whether it holds a stack (waiting in `recv`, it gives
-  its back).
+- `(:stack held)`: whether it holds a stack: a process waiting in
+  `recv` gives its back once its island's waiting processes hold 1,024,
+  keeping only its frames (D292).
 - `(:devices pids)`: the devices it owns.
 - `(:island k)`: the island it's on (D256).
 - `(:sent (n bytes))`: the messages it has sent to processes on other

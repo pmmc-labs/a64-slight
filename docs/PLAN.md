@@ -2464,7 +2464,7 @@ Mac, stackful against today.
   message meant for someone else. A `--strict` warning, when it follows
   a `send` in the same body; not a rule.
 
-### A waiting process copied off its stack (proposed, Nov 2026)
+### A waiting process copied off its stack (agreed, D292; built for `recv`, the other waits to follow, Nov 2026)
 
 **Why.** One kind of process (D276) gave up scale: many processes
 waiting at once, the shape of a server's connections and a simulation's

@@ -7530,3 +7530,42 @@ MB (`SPARE_HELD`), and a process takes a spare not yet given back
 first. A program that ends after a burst under that size doesn't give
 its memory back at all, and a server gives it back when it's idle;
 `idle-memory`'s million go far past it, and gain nothing.
+
+**D292. A waiting process copied off its stack, in `recv`; the other
+waits to follow.** *(Stevan, Nov 2026: "Let's go with it", after the
+prototype's numbers on the M2 Max.)* PLAN.md's proposal of that name,
+its option A, agreed, and its prototype for `recv` kept as built
+(`d076751`): once an island's processes waiting in `recv` hold 1,024
+stacks (`WAITS_KEPT`), the next to wait has its slight frames, from the
+wait's caller to the stack's top, copied to a buffer of its own, and
+its stack goes back warm; woken, it takes any warm stack, its frames go
+to that one's top, the frame pointers they saved moved by as far, and
+its `recv` starts again there (`copy_out`, `copy_in`, `rt_recv_woken`,
+and `rt_recv_again` in each target's assembly). A process gets a new
+slice and counts a call on waking whether it was copied or not, so
+nothing runs at another time for it, and replay holds. A frame walk
+that finds anything but slight frames over the trampoline, or more than
+4 KB of them (`COPY_MAX`), leaves the process its stack, as before: a
+mistake costs memory, not correctness. `SLIGHT_COPY_OUT` copies at
+every `recv` that waits, for tests; with it, the golden tests pass on
+both targets under `SLIGHT_GC_STRESS` and `SLIGHT_GC_VERIFY` (but for
+200, 384 and `con-memory`, which say whether a process holds a stack).
+Golden tests 383 and 384. On the M2 Max (`2026-11-11-2017`, and
+`bench/results/2026-11-11-copy-out-m2-max.md`): `idle-memory 1000000`
+0.40 s and 731 bytes a waiting process, where D291 left it at 10.5 s and
+8,915, and before D276 it was 0.31 s and 614; on 12 islands 0.19 s,
+where it was 13.7; a ring of 30,000 at 71 ns a hop, where 149; and
+`ping-pong`, `payload`, `thread-ring` and `fan-in` as they were, the
+gate's count 22 instructions at each wait. A copy out and back is 20 ns
+and 294 instructions. The gate is 1,024, not the proposal's 256: at 256
+`thread-ring`'s 503 were half of them copied at every hop, a fifth
+slower, and on the M2 Max a stack kept is the cheaper up to about 3,000
+waiting. Next, the other waits, each made a function that can be
+started again from its call with what it needs kept in the process, and
+copied out under the same gate: `join`, `join/race`, `read` and
+`read/any`, `sleep`, `fork/on`'s wait for its pid, and `timer/cancel`
+across islands. Rejected, as the proposal had them: growable stacks,
+Go's (B), more machinery for a waiting process still above a page's
+worth of its frames; smaller stacks (C), which save the page tables but
+not the page, and change how deep a program may recurse; and accepting
+the cost (D), which the numbers made unnecessary.

@@ -190,6 +190,37 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 11 Nov, 20:17: a waiting process copied off its stack (D292)
+
+`2026-11-11-2017-macos-apple-m2-max` (`d076751`), every program, against
+`2026-11-11-1500` (`1493d35`), the run before; and
+`bench/results/2026-11-11-copy-out-m2-max.md`, `bench/copy-out.py`'s
+rounds of the same, with rings of every size:
+
+| slight on the M2 Max | before D276 (1 Nov) | 15:00 | 20:17 |
+|---|---:|---:|---:|
+| `idle-memory 1000000` | 0.311 s, 614 B a process | 10.5 s, 8,913 B | 0.401 s, 731 B |
+| the same, 12 islands | 0.102 s | 13.7 s | 0.194 s |
+| `spawn 1000000` | 0.132 s | 0.158 s | 0.144 s |
+| `thread-ring 10000000` | 0.517 s | 0.493 s | 0.495 s |
+| `ping-pong 2000000` | 0.288 s | 0.308 s | 0.293 s |
+| `payload 1000000` | 0.552 s | 0.725 s | 0.725 s |
+
+The other programs moved by 2 per cent or less.
+
+- **A waiting process is back near what it was before D276:** 731
+  bytes and 0.4 µs to start, ask and end, its frames copied off once
+  its island's processes waiting in `recv` hold 1,024 stacks. Against
+  the others on the M2, from the slowest of the four to the fastest
+  again, and the smallest: a tokio task with its channel is 1,105
+  bytes, a goroutine 2,887, an Erlang process 2,741.
+- **Rings of thousands:** 71 ns a hop at 30,000, where it was 149; a
+  copy out and back costs 20 ns and 294 instructions.
+- **Nothing that talks among a few moved,** the gate keeping them off
+  the copy; its count is 22 instructions at each wait.
+- **`payload` is still 1.31 times its time before D276,** unexplained.
+- This run's Python had no SimPy, so `bank` is slight and C alone.
+
 ### The M2 Max, 11 Nov: one kind of process, what it cost (D276 to D291)
 
 `2026-11-11-1500-macos-apple-m2-max` (`1493d35`) against
