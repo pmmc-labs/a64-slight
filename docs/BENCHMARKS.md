@@ -190,6 +190,93 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The cloud machine, 11 Nov: one kind of process (D276, D277)
+
+Every program on `3fa502f`, `2026-11-11-0839`, against `c6fe222`, the
+commit before D276, `2026-11-11-0758`, on the same machine the same
+morning; the old runtime was run again after, and each comparison is
+the better of its two runs, since the two old runs differ by up to 30
+per cent (`n-body`). `latency` faulted at first, a `read` of a process
+D277 left in `bench/latency`, now a `join`. One core:
+
+| | before | after | after ÷ before | instructions |
+|---|---:|---:|---:|---:|
+| `thread-ring 10000000` | 0.673 s, 1.8 MB | 1.430 s, 3.8 MB | 2.1 | 7 per cent fewer |
+| `fan-in 10000000` | 0.856 s | 1.044 s | 1.2 | 3 per cent more |
+| `spawn 1000000` | 0.250 s, 66 MB | 0.278 s, 114 MB | 1.1 to 1.6 | 17 per cent more |
+| `ping-pong 2000000` | 0.458 s | 0.501 s | 1.0 | 5 per cent fewer |
+| `payload 1000000` | 0.991 s | 0.988 s | 1.0 | 1 per cent fewer |
+| `idle-memory 1000000` | 0.776 s, 441 bytes a process | faults at 32,000 | | |
+
+Instructions are callgrind's, at a tenth of the size, on one island.
+The sequential programs, `bank` and `latency` are where they were.
+
+- **A waiting process holds a stack, and the stacks are the cost.**
+  D276 said so (D9's trade reversed): an 8 MB mapping and a guard page
+  each, two of Linux's 65,530 mappings, so at about 32,700 waiting at
+  once a fork faults `:stack` (D267), and `idle-memory` at a million
+  can't run, on one island or four. At 30,000, which fits:
+
+  | | time | bytes a process | time a process |
+  |---|---:|---:|---:|
+  | slight before | 0.027 s | 470 | 0.9 µs |
+  | slight after | 0.442 s | 4,590 | 14.7 µs |
+  | slight after, 4 islands | 1.356 s | 4,600 | 45 µs |
+  | Go, one core | 0.173 s | 2,860 | 5.8 µs |
+  | Erlang, one scheduler | 0.308 s | 2,670 | 4.7 µs |
+  | Rust, tokio | 0.098 s | 1,020 | 3.3 µs |
+
+  Each waiting process is three system calls, `mmap`, `mprotect` and
+  at the end `munmap` (past the 256 stacks an island keeps), and a
+  page touched: 30,012, 30,002 and 29,756 of them under strace. On
+  four islands the calls contend for the one address space, three
+  times slower than one island. A process that runs and ends without
+  waiting (`spawn`) takes a kept stack and gives it back, and costs
+  little more.
+- **And the stacks cost every switch once there are hundreds.** The
+  old runtime gave a waiting process's stack back, so a ring's every
+  hop ran on the same few hot pages; now each process wakes on its own,
+  8 MB from the next, a page and a page-table page of its own to find.
+  `thread-ring`'s instructions went down and its time doubled. A ring
+  of n processes passing a token 5 million times, one island, the best
+  of three:
+
+  | n | 2 | 32 | 128 | 256 | 503 | 1,000 | 4,000 | 16,000 | 30,000 |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | before, ns a hop | 61 | 62 | 70 | 70 | 65 | 70 | 66 | 83 | 73 |
+  | after, ns a hop | 57 | 69 | 70 | 78 | 121 | 170 | 280 | 542 | 721 |
+  | after ÷ before | 0.93 | 1.10 | 1.01 | 1.11 | 1.86 | 2.42 | 4.26 | 6.52 | 9.87 |
+
+  Flat before, at any size; after, the same up to about 256 and then
+  growing with the processes, ten times at 30,000.
+- **`spawn`'s memory is its exit records:** written as an actor so
+  that nothing would keep its value, each of its million now keeps one
+  for a parent that never joins (D277), 48 MB, till the parent ends.
+  Its 17 per cent more instructions are the records too, and the
+  monitor-or-join bookkeeping of one kind.
+- **On four islands,** `ping-pong-mc` is 1.45 times slower (0.154 s to
+  0.224, seven runs each), its instructions 5 per cent fewer: each
+  island's pair now keeps two stacks warm where one did. `spawn-mc` is
+  1.27 times slower and 111 MB where it was 67. `parallel-fib-mc`,
+  `spectral-norm-mc` and `fan-in-mc` are where they were.
+
+Against the others, on one core: slight's `ping-pong` is still the
+fastest (Rust 1.19 times its time, Go 1.61, Erlang 3.02), and its
+`spawn` (Rust 1.37, Erlang 3.1, Go 3.6); its `thread-ring`, twice
+Rust's speed before, is now level with it (Go 1.61 times slower,
+Erlang 2.9); `fan-in` is 2.4 times Go's time, where it was 1.8; and a
+waiting process, once under half Rust's memory and a sixth of Go's,
+is now 1.6 times Go's and 4.5 times Rust's, and the slowest to start
+of the four. So: a few processes talking are as fast as ever, and
+the fastest of these runtimes; many processes each waiting, the shape
+of a server's connections or a town of actors (PLAN.md, "A living
+town", 10,000 people), are what one kind of process made dearer: ten
+times the memory, sixteen times as long to start waiting, a switch up
+to ten times as long, and a ceiling of about 32,000. That's PLAN.md's "stacks
+from one region", deferred till a program needed it: these numbers
+say which program. To be measured on the M2 Max, whose TLB and
+`mmap` differ.
+
 ### The cloud machine, 31 Oct: a message crossing islands, one allocation
 
 A message to another island was two allocations, its chunk and an inbox
@@ -1075,6 +1162,15 @@ to under 2. The M2's runs after each are above.
 
 ### What slight should look at next
 
+- **A waiting process's stack** (`idle-memory`, `thread-ring`, 11
+  Nov): since D276 a waiting process holds an 8 MB mapping of its own,
+  three system calls and a page each, at most about 32,000 at once on
+  Linux, and a switch among hundreds of them goes to a cold page every
+  time: `thread-ring` twice as slow, a ring of 30,000 ten times. Stacks
+  carved from one region (PLAN.md's option, deferred till a program
+  needed it) would take out the calls and the ceiling, and packed
+  close, the page-table pages; how much of the switches' cost that
+  takes back is to be measured.
 - **Lists in the prelude** (`deriv`, `nqueens`): `map`, `append`,
   `filter`, `length` and the rest went through `fold/l` and `reverse`,
   with a closure called for each element, and `not` was a call; about
