@@ -5,6 +5,9 @@ slight is compared with its own family as an actor system, not only as
 a Lisp (where Chez already stands). Research and a proposal: nothing in
 `bench/` or the harness has changed. 11 Nov 2026.
 
+Decided in D293 (`docs/DECISIONS.md`): Gambit, Racket (threads, and
+places on every core) and Swish (opt-in) are in `bench/` now.
+
 The candidates' facts come from their own repositories (cloned and read:
 tags, changelogs, manuals, source), Homebrew's formulae (a clone of
 homebrew-core), and `apt-cache policy` on this container's Ubuntu 24.04.
