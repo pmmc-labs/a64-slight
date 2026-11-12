@@ -13,7 +13,15 @@ tools aren't installed are left out, and said to be. On a Mac, `brew
 install go erlang chezscheme`; Node, Perl and Python are there already
 (Node for the compiler, the others with Xcode's tools). On Debian or
 Ubuntu, `apt-get install chezscheme`. Rust needs cargo and rustc (from
-rustup), and its first build fetches tokio from crates.io.
+rustup), and its first build fetches tokio from crates.io. Gambit and
+Racket: `brew install gambit-scheme minimal-racket` on a Mac, then
+`raco pkg install --auto compiler-lib` for `raco exe`, which minimal
+Racket leaves out (the harness says so if it's missing); if
+Ghostscript's `gsc` is first on `PATH`, the harness looks for Gambit's in
+Homebrew's `opt/gambit-scheme`. On Ubuntu, `apt-get install gambc
+racket`, which are older (Gambit 4.9.3 and Racket 8.10, against
+Homebrew's 4.9.8 and 9.x) but run every program. Swish is opt-in, as
+SimPy is: see "Swish" below.
 
 ## What's measured
 
@@ -30,6 +38,12 @@ Three questions, which need different programs:
    model (per-process heaps, copied messages, preemption by reductions),
    and Go, goroutines and channels; and Rust with tokio, whose tasks are
    stackless, the floor, as C is for the sequential programs (D224).
+   And slight's own family (D293): Gambit, a mailbox per green thread,
+   compiled to native code through C; Racket, threads with mailboxes, and
+   places, a VM each, on every core; and Swish, Erlang's model on Chez
+   (processes, selective receive, links, monitors, preemption by
+   counting calls). All three share one heap among their processes, and
+   pass a message by reference.
 3. **slight against itself, over time:** later, with the examples
    (boids), `html->text`, JSON and HTTP: comparing those across
    languages would mostly compare libraries.
@@ -85,7 +99,9 @@ itself (or, for `n-body`, against C's).
 - **`payload 1000000`:** `ping-pong` with each message carrying the same
   list of 100 integers there and back (D237): what copying a message's
   data costs. slight and Erlang copy it into the receiver's heap; Go
-  passes a slice and tokio moves a `Vec`, neither copying.
+  passes a slice and tokio moves a `Vec`, neither copying, and Gambit's,
+  Racket's and Swish's processes share one heap, so pass the list by
+  reference: the summary marks those five rows "not copied" (D293).
 - **`thread-ring 10000000`:** the Benchmarks Game's: 503 processes in a
   ring pass a token on, 10 million times.
 - **`fan-in 10000000`:** 100 processes each send their number 100,000
@@ -111,7 +127,8 @@ itself (or, for `n-body`, against C's).
   starting its share waiting, all of them waiting at once before any is
   asked; a ping-pong pair per island, its share of the round trips. In
   the every-core table, beside Go's, Erlang's and Rust's (whose
-  `ping-pong` is one pair, so says nothing of spreading).
+  `ping-pong` is one pair, so says nothing of spreading), and
+  `racket-mc`'s, places doing the same five (D293).
 - **`parallel-fib 30`:** 64 processes each work out `fib(30)`: work more
   than one core can share.
 - **`latency 10`:** how long a message waits for its turn while other
@@ -122,7 +139,8 @@ itself (or, for `n-body`, against C's).
   working out `fib(40)` without ever waiting; then beside one holding
   1,000 blocks of 10,000 integers (160 MB in slight) and replacing the
   oldest 10,000 times, yielding after each. Its summary is each phase's
-  percentiles, not times. tokio on every core is left out (D238).
+  percentiles, not times. tokio on every core is left out (D238), and so
+  is `racket-mc`.
 - **`bank 1000000`:** a simulation (D241), SimPy's bank example: 3
   tellers and a million customers, a process for each, the bank a
   process (in SimPy a `Resource`) each asks for a teller and gives it
@@ -134,11 +152,50 @@ itself (or, for `n-body`, against C's).
   process for each customer: the floor under any simulation engine.
 
 The sequential ones are in all eight languages, the actor ones in slight,
-Go, Erlang and Rust (D224), `startup` in all nine, and `bank` in slight,
-C and Python with SimPy. Rust's are on
+Go, Erlang and Rust (D224), and Gambit, Racket and Swish (D293), `startup`
+in all twelve, and `bank` in slight, C and Python with SimPy. Rust's are on
 tokio, each process a task, its mailbox an unbounded channel
 (`tokio::sync::mpsc`); a task waiting in `idle-memory` holds a channel
-of its own, as a process holds its mailbox. Each is written the way its language is usually written,
+of its own, as a process holds its mailbox.
+
+The Schemes' (D293), each `NAME.scm` (Gambit), `NAME.rkt` (Racket) and
+`NAME-swish.ss` (Swish):
+
+- **Gambit's** are threads, each with its mailbox, on plain
+  `thread-send` and `thread-receive`, which takes the next message, as
+  slight's `recv` does. Termite, Gambit's Erlang-like library (`!` and a
+  selective `recv`), is left out: what it adds is selecting, which
+  none of these programs needs. `latency`'s pinger yields with
+  `thread-yield!`; a thread is otherwise preempted every 20 ms. A
+  thread's value is its result, which `thread-join!` gives, so
+  `latency` joins its pingers rather than sending.
+- **Racket's** are threads, with their mailboxes (`thread-send`,
+  `thread-receive`), all on one OS thread; `latency`'s pinger yields with
+  `(sleep 0)`. `racket-mc`, every core, is places (D293): a place for each
+  core, an instance of Racket of its own whose messages are copied, the nearest thing to
+  slight's islands, each doing its share with threads, as `slight-mc`
+  does on islands, in `NAME-mc.rkt`: `parallel-fib`, `fan-in` (each
+  sender a thread on the place its number picks, all sending on one
+  place channel), and `ping-pong`, `spawn` and `idle-memory` (each place
+  its share locally, one answer each). Places can't hold a million
+  processes or pass one a message cheaply, so it's left out of the rest.
+  On Racket CS a place isn't wholly apart: places share one Chez heap,
+  and its collections stop all of them. On the cloud machine (Racket
+  8.10), two places each doing 500,000 round trips at once took 2.5 s
+  each, where one alone took 0.46, so `racket-mc` there is slower than
+  `racket` in every program, `fan-in` 35 times (each of its 10 million
+  messages crossing a place channel). Whether 9.x does better is for the
+  M2 Max to say.
+  Racket 9's parallel threads (`#:pool 'own`), on other OS threads but
+  sharing the heap, are left for later.
+- **Swish's** are processes, `spawn`, `send` and `receive`, Erlang's as
+  Erlang's programs write them (a receive selects, as Erlang's
+  `latency` does). Swish has no yield: a process runs till its quantum,
+  1 ms, is spent (looked at every 1,000 calls), so `latency`'s pinger
+  spins on the clock and its heap churns without yielding, each
+  preempted as any Swish process is.
+
+Each is written the way its language is usually written,
 and does the same work: the same algorithm, the same output. slight's
 bend to slight (D84): nothing was added to the language for them, and
 the Benchmarks Game programs that need what it hasn't got (arrays that
@@ -149,7 +206,11 @@ change, hash tables, bignums, regular expressions) aren't here.
 - Each program is built once (slight's for the machine's own target,
   Chez's with `compile-program`, so its runs don't include compiling,
   Rust's by cargo, `--release --locked`, one package for them all, so
-  the first one's build includes tokio's),
+  the first one's build includes tokio's; Gambit's to native code with
+  `gsc -exe`, Racket's to an executable with `raco exe`, and Swish's to
+  a linked program with `swish-build`, Gambit's and Swish's from a copy
+  under `build/bench/`, since each writes its intermediate files beside
+  its source, and Gambit's `NAME.c` would be C's program),
   run once to check it, then timed 5 times; the programs take turns, so
   the machine's drift falls on all of them alike. One that takes long
   gets fewer runs, never under 3. The summary gives the median, the
@@ -167,6 +228,9 @@ change, hash tables, bignums, regular expressions) aren't here.
   (D237). `bench/rt.rs`
   picks Rust's runtime, by `BENCH_MC`, which the harness sets for
   `rust-mc`. Node's collector has threads of its own either way.
+  Gambit's, Racket's and Swish's threads all run on one OS thread
+  without being told; Racket's every core is places (`racket-mc`), and
+  Gambit and Swish have none to give (D293).
 - **`bank`:** slight's runs with `SLIGHT_CLOCK=virtual`, which the
   harness sets for it alone. Python's needs SimPy (`pip install simpy`),
   whose version the summary gives; without it, Python is left out.
@@ -178,13 +242,34 @@ change, hash tables, bignums, regular expressions) aren't here.
   its work.
 - Erlang allows 262,144 processes unless told otherwise, and a higher
   limit costs memory from the start, so `spawn` and `idle-memory` raise
-  it as far as they need (`+P`), and nothing else does.
+  it as far as they need (`+P`), and nothing else does. Gambit, Racket
+  and Swish have no such limit; their heaps grow as they need.
 - Chez runs at its default optimize level, which is safe (as slight is:
   every operation checks its operands), and its programs use Scheme's
   ordinary arithmetic, as Scheme is usually written, not `fl+` or
   `fx+`.
 - Timings under qemu mean nothing, so AArch64 is measured on a Mac. The
-  cloud machine's x86-64 numbers are noisy, but fine for ratios.
+  cloud machine's x86-64 numbers are noisy, but fine for ratios. Its
+  Erlang is Ubuntu's, OTP 25; the M2 Max's is Homebrew's, OTP 29, and
+  shows the same gap to slight in `ping-pong` (D293).
+
+### Swish
+
+Swish needs a Chez Scheme 10.3 or later built without threads, which
+Homebrew's isn't, so it's opt-in, as SimPy is: `bench/build-swish.sh`
+clones Chez Scheme 10.4.1 and Swish 3.0.0 from GitHub, builds the one on
+the other, and installs both under a prefix (`~/opt/swish` unless given
+one), apart from any other Chez. Put its `bin` on `PATH`, and the harness
+finds `swish` and `swish-build` there; without them it leaves Swish out,
+and says so. On a Mac:
+
+    brew install cmake coreutils make     # GNU make 4.4, as gmake
+    bench/build-swish.sh
+    export PATH="$HOME/opt/swish/bin:$PATH"
+
+On Ubuntu, `apt-get install build-essential cmake uuid-dev
+libsystemd-dev` first (Swish asks for GNU make 4.4; 24.04 has 4.3, which
+the script warns of). A few minutes either way.
 
 ## Results
 

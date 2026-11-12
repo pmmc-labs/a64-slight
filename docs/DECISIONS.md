@@ -7603,3 +7603,68 @@ a fault older than this, D276's: a collection at a `recv` in the middle
 of a function moved the frame's slots in use and left the others, which
 the next collection, under a function called from there, took for
 roots; it zeroes them now, golden test 391.)*
+
+**D293. Gambit, Racket and Swish in the actor benchmarks.** *(Stevan,
+Nov 2026, answering the five questions of
+`docs/research/actor-runtimes-lisp.md`.)* slight compared with its own
+family as an actor system, not only as a Lisp (where Chez stands, D201):
+the nine actor programs but `bank` in each, `bench/NAME/NAME.scm`
+(Gambit), `NAME.rkt` (Racket) and `NAME-swish.ss` (Swish), and
+`startup`, which `idle-memory`'s bytes a process needs.
+
+- **Why these three:** Gambit is the nearest in shape and the fastest
+  the research ran, a mailbox per green thread, preempted, compiled to
+  native code through C; Racket is the Scheme people reach for, its
+  threads with mailboxes in the standard library, and the only one with
+  isolated VMs (places); Swish is Erlang's model on Chez (processes,
+  selective receive, links, monitors, preemption by counting calls),
+  an actor *system* rather than threads with mailboxes. LFE and Clojerl
+  are Erlang's compiler and VM underneath, so would time as Erlang does.
+- **`payload`:** shown, each Scheme marked "not copied", in the summary
+  and BENCHMARKS.md, as Go's and tokio's are: their processes share one
+  heap and a message is a pointer. In Stevan's words: "When we dive into
+  the memory issue, our position on copying may change and this might
+  become a more meaningful comparison." Rejected: `payload` as slight and
+  Erlang alone.
+- **Gambit on plain `thread-send` and `thread-receive`**, the next
+  message, as slight's `recv` takes, not Termite, its Erlang-like
+  library, whose `recv` selects with a cursor; Termite is noted in
+  BENCHMARKS.md as left out. Built with `gsc -exe`, safe, with the
+  declarations Gambit's own benchmarks use (`standard-bindings`,
+  `extended-bindings`, `block`).
+- **Racket:** one core on ordinary threads with their mailboxes, built
+  with `raco exe`; every core on places alone, for now: `racket-mc`, a
+  place (a VM of its own, its messages copied, the nearest thing to
+  slight's islands) for each core, each running its share as threads,
+  as `slight-mc` does on islands, in `NAME-mc.rkt`. So it runs what
+  places can: `parallel-fib` and `fan-in`, and `ping-pong`, `spawn` and
+  `idle-memory`, each place its share locally, one answer each; it's
+  left out of the rest, as tokio's every core is left out of `latency`
+  (D238). Racket 9.0's parallel threads (`#:pool 'own`), sharing one
+  heap, are left for later.
+- **Swish, opt-in, as SimPy is:** it needs a Chez Scheme 10.3 or later
+  built without threads, beside Homebrew's (which is threaded), so
+  `bench/build-swish.sh` builds Chez 10.4.1 and Swish 3.0.0 under a
+  prefix, and `run.py` runs Swish only when `swish` is found, saying so
+  when it isn't. Built with `swish-build`, a linked program. Swish has
+  no yield: `latency`'s pinger spins and its heap churns, each preempted
+  when its quantum, 1 ms, is spent, as any Swish process is.
+- **`bank`** in none of them, as in Go, Erlang and Rust: a port would
+  need a virtual clock written for it.
+- **No cloud run with a newer Erlang:** the research found Erlang 4
+  times slight's `ping-pong` on the cloud machine, whose Erlang is
+  Ubuntu's OTP 25; the M2 Max's OTP 29 shows the same gap, so a newer
+  one there would say nothing new. BENCHMARKS.md notes the version.
+- **Not run here:** Swish, whose build (code fetched from GitHub) this
+  cloud session wasn't allowed to run; its programs were checked on a
+  stand-in for `receive`, `spawn` and `send` on Racket's threads, so
+  their first real run is the M2 Max's.
+- **Found** on the cloud machine (Gambit 4.9.3, Racket 8.10, one
+  full-size run, noisy, not kept): Gambit 1.3 times slight's
+  `ping-pong`, 0.44 its `payload` (not copied), 2.2 its `thread-ring`,
+  3.5 its `spawn`, and 2,150 bytes a waiting thread where slight's
+  process takes 585; Racket 5.2 times slight's `ping-pong`, 7.7 its
+  `thread-ring`, and `idle-memory` 27 times, 3,850 bytes a thread.
+  `racket-mc` slower than `racket` in all five: places share Racket
+  CS's one heap and collector, and two doing ping-pong at once each
+  took 5.5 times as long as one alone. Results are the M2 Max's to give.
