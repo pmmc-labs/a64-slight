@@ -1,0 +1,73 @@
+; join/race, of a process copied off its stack while it waits (D292).
+; SLIGHT_COPY_OUT copies every wait. A racer three frames down holds no
+; stack while it waits for the first of its pids to end, on its island
+; or another; woken, on another stack than it left, it has what its
+; frames held, and says which won, by its place in the list; its
+; watches on the rest are gone, another island's too, so those end
+; unremarked; and one killed while it's off its stack ends as any does.
+; env: SLIGHT_COPY_OUT=1
+
+(defun place (x xs i) (if (eq? x (car xs)) i (place x (cdr xs) (+ i 1))))
+
+(defun inner (ps tag)
+    (let before (list tag "before"))
+    (let r (join/race ps))
+    (list before (place (car r) ps 0) (cadr r) (length (range 0 3000))))
+
+(defun middle (ps tag)
+    (let xs (range 0 5))
+    (let r (inner ps tag))
+    (list :middle xs r))
+
+(defun outer (ps tag to)
+    (let half 1.25)
+    (let r (middle ps tag))
+    (send to (list tag (+ half half) r)))
+
+; Ends with what it's sent.
+(defun held () (recv (m m)))
+
+; 300 frames down, too deep to copy: it keeps the stack it started on,
+; the one its parent left as it waited, so who's woken next gets another.
+(defun squatter (n) (if (== n 0) (recv (m 0)) (+ 1 (squatter (- n 1)))))
+
+(defun facts (s p)
+    (send s (list :process p))
+    (match (read s)
+        ((:process s2 i) (list (lookup :state i) (lookup :in i) (lookup :stack i)))))
+
+(defun main ()
+    (let s (match (open :system) ((:ok s) s)))
+    (let ra (address))
+    (let rb (address))
+    (let rc (address))
+    (let w1 (fork held))
+    (let w2 (fork held))
+    (let w3 (fork held))
+    (let f1 (fork/on 1 held))
+    (let f2 (fork/on 1 held))
+    (let a (fork outer (list w1 w2) :a ra))     ; the second wins
+    (let b (fork outer (list f1 w3) :b rb))     ; the one on another island wins
+    (let c (fork outer (list w3 f2) :c rc))     ; the one here wins, and the watch on the other island's goes
+    (let k (fork outer (list w1 f2) :k ra))
+    (sleep 1)                               ; till each waits
+    (pprint (cons :a (facts s a)))
+    (pprint (cons :b (facts s b)))
+    (kill k)
+    (pprint (join k))
+    (let q (fork squatter 300))             ; takes the stack this process leaves as it waits, and keeps it
+    (send w2 :two)
+    (pprint (read ra))
+    (send f1 :far-one)
+    (pprint (read rb))
+    (send w3 :three)
+    (pprint (read rc))
+    (send w1 :one)                          ; raced by a and k, joined by no one till now
+    (send f2 :far-two)
+    (pprint (join w1))
+    (pprint (join f2))
+    (send q :go)
+    (pprint (join q))
+    :done)
+
+(main)

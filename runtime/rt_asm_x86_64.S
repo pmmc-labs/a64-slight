@@ -58,23 +58,49 @@ rt_trampoline_back:
     call rt_exit                        // doesn't return
 
 // ---------------------------------------------------------------------------
-// rt_recv_again: where a process that was copied off its stack while it
-// waited in recv lands when it next runs (copy_in, process.c), by
-// rt_switch's ret, its frames back on a stack, some stack: rsp and rbp are
-// its frame's, as they were when it called rt_recv, and rbx, r12 and r13
-// that call's n, at and return address, which goes back on the stack as
-// the call put it. Jumps to rt_recv_woken as rt_recv was called, which
-// gives the message to where rt_recv would have.
+// rt_wait_again: where a process that was copied off its stack while it
+// waited lands when it next runs (copy_in, process.c), by rt_switch's
+// ret, its frames back on a stack, some stack: rsp and rbp are its
+// frame's, as they were when it called the wait, rbx is the wait's
+// function for starting again (an again_t) and r12 that call's return
+// address, which goes back on the stack as the call put it. Jumps to the
+// function as the wait was called, with the process, the frame and the
+// frame pointer, and it returns what the wait gives to where the wait
+// would have.
 // ---------------------------------------------------------------------------
 
-FUNC rt_recv_again
+FUNC rt_wait_again
     mov  rdi, r15
     mov  rsi, rsp
-    mov  rdx, rbx
-    mov  rcx, rbp
-    mov  r8,  r12
-    push r13
-    jmp  rt_recv_woken
+    mov  rdx, rbp
+    push r12
+    jmp  rbx
+
+// ---------------------------------------------------------------------------
+// The waits' entries, but recv's: each adds where it was called from, the
+// calling frame's lowest slot (above the return address) and its frame
+// pointer, to the call's arguments, and jumps to the C function,
+// \name\()_from, which may copy the process off its stack while it waits
+// (process.c). The return address is the call's still.
+// ---------------------------------------------------------------------------
+
+.macro WAIT name, frame, fp
+FUNC \name
+    lea  \frame, [rsp + 8]
+    mov  \fp, rbp
+    jmp  \name\()_from
+.endm
+
+WAIT rt_join,           rdx, rcx
+WAIT rt_join_race,      rdx, rcx
+WAIT rt_read,           rdx, rcx
+WAIT rt_read_any,       rdx, rcx
+WAIT rt_sleep,          rdx, rcx
+WAIT rt_timer_cancel,   rdx, rcx
+WAIT rt_open,           rcx, r8
+WAIT rt_connect,        rcx, r8
+WAIT rt_connect_system, rcx, r8
+WAIT rt_fork_on,        r8,  r9
 
 // ---------------------------------------------------------------------------
 // rt_apply_start: a process's code when fork made it (D286). The trampoline

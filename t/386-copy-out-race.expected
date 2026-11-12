@@ -1,0 +1,10 @@
+(:a :joining "inner" #false)
+(:b :joining "inner" #false)
+(:error :killed)
+(:a 2.5 (:middle (0 1 2 3 4) ((:a "before") 1 (:ok :two) 3000)))
+(:b 2.5 (:middle (0 1 2 3 4) ((:b "before") 0 (:ok :far-one) 3000)))
+(:c 2.5 (:middle (0 1 2 3 4) ((:c "before") 0 (:ok :three) 3000)))
+(:ok :one)
+(:ok :far-two)
+(:ok 300)
+:done

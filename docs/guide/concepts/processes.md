@@ -218,13 +218,13 @@ for the page table that maps its stack: a million can wait at once in
 (D291); when the system has no more to give, a new process ends with
 `:stack` (D267), and the rest go on.
 
-That's while few are waiting. Once an island's processes waiting in
-`recv` hold a thousand stacks, the next to wait gives its stack back
-and keeps only its frames, a few hundred bytes, and when a message
-wakes it, it goes on from its `recv` on whatever stack is free (D292).
-So a million actors waiting in `recv` cost about 730 bytes each, where
-they cost about 600 before a wait could go anywhere; the other waits
-keep their stacks for now.
+That's while few are waiting. Once an island's waiting processes hold
+a thousand stacks, the next to wait, in `recv`, `join`, `read`, `sleep`
+or any other wait, gives its stack back and keeps only its frames, a
+few hundred bytes, and when it's woken, it goes on from where it waited
+on whatever stack is free (D292). So a million waiting actors cost
+about 750 bytes each, where one waiting in `recv` cost about 600 before
+a wait could go anywhere.
 
 A process's heap is collected when it waits in `recv`, if it has grown
 enough, and at a function's entry, with its frames as roots. See

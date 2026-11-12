@@ -475,13 +475,14 @@ typedef struct rt_msg {
                                 // device its owner opened, it's for read, not recv (D277)
 } rt_msg_t;
 
-// READY: in the run queue. WAITING: in recv, keeping its stack (D276), or
-// copied off it (process.c, "a waiting process copied off its stack"). JOINING:
-// blocked in join, keeping its stack. RACING: blocked in join/race,
-// keeping its stack, with a watch that wakes it on each of its pids.
-// SLEEPING: in sleep, keeping its stack, until its timer wakes it.
-// READING: in read or read/any, keeping its stack, woken by a message
-// to one of its sources (D243, D277).
+// READY: in the run queue. WAITING: in recv. JOINING: blocked in join.
+// RACING: blocked in join/race, with a watch that wakes it on each of
+// its pids. SLEEPING: in sleep, until its timer wakes it. READING: in
+// read, read/any or open, woken by a message to one of its sources
+// (D243, D277). PLACING: waiting for another island's answer, a pid from
+// fork/on or whether timer/cancel took a timer back. A process in any of
+// these keeps its stack (D276), or is copied off it (D292; process.c, "a
+// waiting process copied off its stack").
 // DONE: ended, about to be freed.
 typedef enum { RT_READY, RT_RUNNING, RT_WAITING, RT_JOINING, RT_RACING, RT_SLEEPING, RT_READING, RT_PLACING, RT_DONE } rt_state_t;
 
@@ -513,7 +514,7 @@ typedef struct rt_proc {
 
     rt_state_t      state;
     uint8_t         keypress;   // connected to :keypress
-    uint8_t         held;       // waiting in recv with its stack kept, and counted among its island's (process.c)
+    uint8_t         held;       // waiting with its stack kept, and counted among its island's (process.c)
     void           *stack;      // the bottom of its stack, carved from a slab (process.c), or NULL
     rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c)
     rt_chunk_t     *chunks;     // the old generation, newest first, the messages it's taken among them
@@ -525,7 +526,8 @@ typedef struct rt_proc {
     struct rt_proc *joiners;    // blocked in join on this one, in the order they joined
     struct rt_proc *next_joiner;
     rt_value_t      joining;    // while JOINING: whom; once a race is woken, the pid that woke it;
-                                // while READING: the list of its sources
+                                // while READING: its source, or read/any's list of them; PLACING: the
+                                // island asked, then its answer
     rt_watch_t     *watchers, *last_watcher; // monitoring this one, in order
     rt_watch_t     *watching;   // the monitors it has set on processes still running
     rt_value_t      reading;    // the reader whose message it took last, to read on at its next recv; or 0
@@ -1098,12 +1100,31 @@ void rt_trampoline(void) RT_ASM(rt_trampoline);
 void rt_trampoline_back(void) RT_ASM(rt_trampoline_back);    // where what it called returns to, inside it
 void rt_apply_start(void) RT_ASM(rt_apply_start);    // a fork's code: calls proc->fun with proc->args (D286)
 
-// Where a process copied off its stack while it waited in recv lands when
-// it next runs (process.c, "a waiting process copied off its stack"): the
-// stub calls rt_recv_woken as its rt_recv was called, on the frames' new
-// stack, and that returns the message to where rt_recv would have.
-void       rt_recv_again(void) RT_ASM(rt_recv_again);
-rt_value_t rt_recv_woken(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t at) RT_ASM(rt_recv_woken);
+// Where a process copied off its stack while it waited lands when it
+// next runs (process.c, "a waiting process copied off its stack"): the
+// stub calls the wait's function for starting again, as the wait was
+// called, on the frames' new stack, and that returns what the wait gives
+// to where it would have.
+void rt_wait_again(void) RT_ASM(rt_wait_again);
+
+// The waits but recv are entered through assembly (WAIT, in rt_asm_*.S):
+// rt_join and the rest, as declared above, add the calling frame's lowest
+// slot and its frame pointer to the call's arguments, and jump to these,
+// which can then copy the process off its stack while it waits.
+rt_value_t rt_join_from(rt_value_t pid, const char *site, const rt_value_t *frame, const uintptr_t *fp) RT_ASM(rt_join_from);
+rt_value_t rt_join_race_from(rt_value_t pids, const char *site, const rt_value_t *frame, const uintptr_t *fp) RT_ASM(rt_join_race_from);
+rt_value_t rt_read_from(rt_value_t src, const char *site, const rt_value_t *frame, const uintptr_t *fp) RT_ASM(rt_read_from);
+rt_value_t rt_read_any_from(rt_value_t srcs, const char *site, const rt_value_t *frame, const uintptr_t *fp) RT_ASM(rt_read_any_from);
+rt_value_t rt_sleep_from(rt_value_t ms, const char *site, const rt_value_t *frame, const uintptr_t *fp) RT_ASM(rt_sleep_from);
+rt_value_t rt_timer_cancel_from(rt_value_t t, const char *site, const rt_value_t *frame, const uintptr_t *fp) RT_ASM(rt_timer_cancel_from);
+rt_value_t rt_open_from(rt_value_t source, rt_value_t arg, const char *site, const rt_value_t *frame,
+                        const uintptr_t *fp) RT_ASM(rt_open_from);
+rt_value_t rt_connect_from(uint64_t n, const rt_value_t *values, const char *site, const rt_value_t *frame,
+                           const uintptr_t *fp) RT_ASM(rt_connect_from);
+rt_value_t rt_connect_system_from(uint64_t n, const rt_value_t *values, const char *site, const rt_value_t *frame,
+                                  const uintptr_t *fp) RT_ASM(rt_connect_system_from);
+rt_value_t rt_fork_on_from(uint64_t n, const rt_value_t *values, const char *site, rt_value_t where,
+                           const rt_value_t *frame, const uintptr_t *fp) RT_ASM(rt_fork_on_from);
 
 // The end of a process, with its result. Doesn't return.
 __attribute__((noreturn))

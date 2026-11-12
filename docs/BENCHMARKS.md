@@ -190,6 +190,33 @@ change, hash tables, bignums, regular expressions) aren't here.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 12 Nov: every wait copied off its stack (D292)
+
+`bench/results/2026-11-12-copy-out-waits-m2-max.md`: `bench/copy-out.py`'s
+rounds, the best of seven, against `9b78cd7`, where only `recv`'s waits
+were copied. `idle-join` and `idle-sleep` are `idle-memory` with its
+processes waiting in `join`, each on the one before it, and asleep, on
+the virtual clock, so that all are at once:
+
+| slight on the M2 Max, a million waiting | `recv`'s alone copied | every wait's |
+|---|---:|---:|
+| in `recv` (`idle-memory 1000000`) | 0.367 s, 713 B a process | 0.350 s, 741 B |
+| in `join` (`idle-join 1000000`) | 10.3 s, 8,242 B | 0.401 s, 699 B |
+| in `sleep` (`idle-sleep 1000000`) | 10.5 s, 9,099 B | 0.440 s, 773 B |
+
+- **A process waiting in `join` or `sleep` costs what one in `recv`
+  does,** 700 to 770 bytes and 0.4 µs to start, wake and end, a sleeper
+  a little more for its timer; each was a page and a fault, as one in
+  `recv` was between D276 and D292.
+- **Nothing else moved.** Rings of 2, 503, 4,000 and 30,000 pass their
+  token in 45, 50, 66 and 71 ns; `payload`, `thread-ring` and `fan-in`
+  are within 1 per cent, and `ping-pong` and `thread-ring` retire the
+  instructions they did (1.0003 and 0.9984 times). `ping-pong`'s time
+  is 2 per cent more, which is where its code landed: with both
+  runtimes' functions aligned, it's the same (1.001 and 1.003 times).
+- **A copy out and back is 20 ns and 302 instructions,** where it was
+  294 with a stub of `recv`'s own in place of the one for every wait.
+
 ### The M2 Max, 11 Nov, 20:17: a waiting process copied off its stack (D292)
 
 `2026-11-11-2017-macos-apple-m2-max` (`d076751`), every program, against

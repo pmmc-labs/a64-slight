@@ -1,0 +1,61 @@
+; sleep, of a process copied off its stack while it waits (D292).
+; SLIGHT_COPY_OUT copies every wait. A sleeper three frames down holds
+; no stack while it sleeps; woken when its timer rings, on another stack
+; than it left, it has what its frames held, and the clock says its
+; time and no later: starting its sleep again sets no second timer, and
+; none is left pending. A sleep of no time is copied and woken at once.
+; One killed while it's off its stack ends as any does, and its timer
+; is dropped when it's next due.
+; env: SLIGHT_COPY_OUT=1
+
+(defun inner (ms tag)
+    (let before (list tag "before"))
+    (sleep ms)
+    (list before (clock/us) (length (range 0 3000))))
+
+(defun middle (ms tag)
+    (let xs (range 0 5))
+    (let r (inner ms tag))
+    (list :middle xs r))
+
+(defun outer (ms tag to)
+    (let half 1.25)
+    (let r (middle ms tag))
+    (send to (list tag (+ half half) r)))
+
+; 300 frames down, too deep to copy: it keeps the stack it started on,
+; the one its parent left as it waited, so who's woken next gets another.
+(defun squatter (n) (if (== n 0) (recv (m 0)) (+ 1 (squatter (- n 1)))))
+
+(defun facts (s p)
+    (send s (list :process p))
+    (match (read s)
+        ((:process s2 i) (list (lookup :state i) (lookup :in i) (lookup :stack i)))))
+
+(defun timers (s)
+    (send s (list :runtime))
+    (match (read s) ((:runtime s2 i) (lookup :timers i))))
+
+(defun main ()
+    (let s (match (open :system) ((:ok s) s)))
+    (let ra (address))
+    (let rb (address))
+    (let a (fork outer 5 :a ra))
+    (let b (fork outer 0 :b rb))
+    (let k (fork outer 3 :k ra))
+    (sleep 1)                               ; b has slept and woken by now, at 0
+    (pprint (cons :a (facts s a)))
+    (kill k)
+    (pprint (join k))
+    (pprint (list :timers (timers s)))      ; a's, and k's, which stays till it's next due
+    (pprint (read rb))
+    (let q (fork squatter 300))             ; takes the stack this process leaves as it waits, and keeps it
+    (pprint (read ra))
+    (pprint (list :timers (timers s) :clock (clock/us)))
+    (sleep 2)
+    (pprint (list :clock (clock/us)))
+    (send q :go)
+    (pprint (join q))
+    :done)
+
+(main)

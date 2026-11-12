@@ -5,7 +5,8 @@
 ; whatever stack is free, and goes on from its recv there. So what a
 ; frame held before the wait it holds after, on another stack; a process
 ; too deep to copy keeps its stack; and one killed while it's off its
-; stack ends as any does.
+; stack ends as any does. The other waits have tests of their own, 385
+; to 390.
 ; env: SLIGHT_COPY_OUT=1
 
 ; Three frames, each with something of its own that it needs after the
@@ -36,10 +37,12 @@
     (fork (lambda (to) (send to (list :applied (apply (lambda (x y) (+ x (+ y (recv (n n))))) (list 1 2))))) to))
 
 ; Runs first once its parent waits, so on the stack the parent left, and
-; keeps it through a sleep: the parent wakes on another.
-(defun squatter (to)
-    (sleep 10)
-    (send to :squatter-woke))
+; 300 frames down, too deep to copy, keeps it through a sleep: the parent
+; wakes on another.
+(defun squatter (n to)
+    (if (== n 0)
+        (do (sleep 10) (send to :squatter-woke) 0)
+        (+ 1 (squatter (- n 1) to))))
 
 (defun facts (s p)
     (send s (list :process p))
@@ -59,7 +62,7 @@
     (pprint (cons :deep (facts s d)))
     (kill k)
     (pprint (join k))
-    (fork squatter me)                      ; takes the stack this process leaves as it waits, and keeps it,
+    (fork squatter 300 me)                  ; takes the stack this process leaves as it waits, and keeps it,
     (send a (list :go 42))                  ; so a wakes on another than it left, and then this process does
     (pprint (recv (m m)))
     (send w :hello)

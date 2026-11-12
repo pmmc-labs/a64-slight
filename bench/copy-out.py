@@ -1,21 +1,26 @@
 #!/usr/bin/env python3
-"""What copying a waiting process off its stack gives and costs: the
-measurements PLAN.md's "A waiting process copied off its stack" asks of
-its prototype, one tree against another.
+"""What copying a waiting process off its stack gives and costs (D292):
+the measurements PLAN.md's "A waiting process copied off its stack" asked
+of its prototype, one tree against another.
 
     bench/copy-out.py OLD [NEW] [--rounds N] [--quick]
 
 OLD and NEW are checkouts of this repository (NEW is this one unless
-given): the runtime before the change and after it. To make OLD:
+given): the runtime before a change and after it. To make OLD, from
+before any process was copied off its stack, or from when only recv's
+were:
 
     git worktree add /tmp/slight-old 36f76d4
+    git worktree add /tmp/slight-recv 9b78cd7
 
 Each program is built by each tree's own slightc, from NEW's source, and
 run in turns, old then new, N rounds (5 unless said), the best of each
 kept, since a machine's noise only ever adds. It prints Markdown tables:
 
 - idle-memory at 30,000 and 1,000,000: its time, and its peak resident
-  set less startup's over n, the bytes a waiting process costs;
+  set less startup's over n, the bytes a waiting process costs; and at
+  1,000,000 its versions whose processes wait in join (idle-join) and
+  in sleep (idle-sleep, on the virtual clock, so all are asleep at once);
 - a ring of m processes passing a token 5 million times (thread-ring
   with its size an argument, bench/thread-ring/ring.slight), m = 2, 503,
   4,000 and 30,000: nanoseconds a hop;
@@ -40,6 +45,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 PROGRAMS = {
     'startup':     'startup/startup.slight',
     'idle-memory': 'idle-memory/idle-memory.slight',
+    'idle-join':   'idle-memory/idle-join.slight',
+    'idle-sleep':  'idle-memory/idle-sleep.slight',
     'ring':        'thread-ring/ring.slight',
     'thread-ring': 'thread-ring/thread-ring.slight',
     'ping-pong':   'ping-pong/ping-pong.slight',
@@ -47,6 +54,9 @@ PROGRAMS = {
     'fan-in':      'fan-in/fan-in.slight',
 }
 HOPS = 5000000
+
+# What a program is run with, besides its arguments.
+ENV = {'idle-sleep': {'SLIGHT_CLOCK': 'virtual'}}
 
 
 def fail(msg):
@@ -76,7 +86,7 @@ def clean_env(extra=None):
 def run(out, tag, name, args, env=None):
     report = os.path.join(out, 'report')
     cmd = [os.path.join(out, 'rusage'), report, os.path.join(out, tag + '-' + name)] + [str(a) for a in args]
-    done = subprocess.run(cmd, capture_output=True, text=True, env=clean_env(env))
+    done = subprocess.run(cmd, capture_output=True, text=True, env=clean_env({**ENV.get(name, {}), **(env or {})}))
     if done.returncode != 0:
         fail('%s-%s %s exited %d:\n%s' % (tag, name, args, done.returncode, done.stdout + done.stderr))
     wall, _cpu, rss = open(report).read().split()
@@ -131,6 +141,7 @@ def main():
     hops = HOPS // scale
     runs = [('startup', [0])]
     runs += [('idle-memory', [n // scale]) for n in (30000, 1000000)]
+    runs += [('idle-join', [1000000 // scale]), ('idle-sleep', [1000000 // scale])]
     runs += [('ring', [hops, m]) for m in (2, 503, 4000, 30000)]
     runs += [('ping-pong', [2000000 // scale]), ('payload', [1000000 // scale]),
              ('thread-ring', [10000000 // scale]), ('fan-in', [10000000 // scale])]
@@ -155,15 +166,15 @@ def main():
     print('Best of %d rounds, old and new in turns; %s, %s.\n' % (rounds, platform.platform(), target()))
     print('| | old | new | new ÷ old |')
     print('|---|---:|---:|---:|')
-    for name, a in runs[1:3]:
+    for name, a in runs[1:5]:
         o, n = got('old', name, a), got('new', name, a)
         print('| `%s %d`, seconds | %.3f | %.3f | %.2f |' % (name, a[0], o[0], n[0], n[0] / o[0]))
         ob, nb = (o[1] - base['old']) / a[0], (n[1] - base['new']) / a[0]
         print('| `%s %d`, bytes a process | %.0f | %.0f | %.2f |' % (name, a[0], ob, nb, nb / ob))
-    for name, a in runs[3:7]:
+    for name, a in runs[5:9]:
         o, n = got('old', name, a), got('new', name, a)
         print('| ring of %d, ns a hop | %.0f | %.0f | %.2f |' % (a[1], o[0] / a[0] * 1e9, n[0] / a[0] * 1e9, n[0] / o[0]))
-    for name, a in runs[7:]:
+    for name, a in runs[9:]:
         o, n = got('old', name, a), got('new', name, a)
         print('| `%s %d`, seconds | %.3f | %.3f | %.2f |' % (name, a[0], o[0], n[0], n[0] / o[0]))
 

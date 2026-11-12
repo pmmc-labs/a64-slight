@@ -7569,3 +7569,37 @@ Go's (B), more machinery for a waiting process still above a page's
 worth of its frames; smaller stacks (C), which save the page tables but
 not the page, and change how deep a program may recurse; and accepting
 the cost (D), which the numbers made unnecessary.
+*(Built for the other waits, Nov 2026: `join`, `join/race`, `read`,
+`read/any`, `sleep`, `fork/on`'s wait for its pid and `timer/cancel`
+across islands; and with them `open`, which waits as `read` does, and a
+`connect` of `:keypress` or `:system` from another island, which waits
+as `fork/on` does. Only `recv` was passed its caller's frame, so each
+of the others is entered through three instructions of assembly
+(`WAIT`, in `rt_asm_*.S`) that add the caller's stack pointer and frame
+pointer to its arguments, and the compiler is unchanged. One stub,
+`rt_wait_again`, in place of `rt_recv_again`, starts any wait again, by
+a function of the wait's own (an `again_t`) that goes on from what the
+process holds: a joiner takes the result it was given, or its process's
+end from another island; a racer who won, and its result; a reader
+looks at its sources again, which the process holds (`read`'s one
+source as itself, where it was a list on the C stack); a sleeper
+returns, its timer set once; and `fork/on` and `timer/cancel` give the
+answer their island's item left. A race's pids and a `read`'s site are
+kept beside the frames. `WAITS_KEPT` counts every waiting stack. Golden
+tests 385 to 390, a wait each, copied out and woken with what three
+frames held: in 385 to 388 on another stack than it left, with one
+killed while off its stack; and where the wait is for another island's
+answer and can't be looked at while it lasts (389, 390), an observer
+sees the process woken and not yet run, holding no stack. With
+`SLIGHT_COPY_OUT` the golden tests pass on both targets, alone and under
+`SLIGHT_GC_STRESS` and `SLIGHT_GC_VERIFY`, but for 200, 266, 384 and
+`con-memory`, which say whether a process holds a stack, and under
+stress those that take too long without it.
+On the M2 Max (`bench/results/2026-11-12-copy-out-waits-m2-max.md`): a
+million waiting in `join` 0.40 s and 699 bytes each, where 10.3 s and
+8,242; asleep, 0.44 s and 773, where 10.5 s and 9,099; the rings and
+the programs that talk among a few as they were. The stress run found
+a fault older than this, D276's: a collection at a `recv` in the middle
+of a function moved the frame's slots in use and left the others, which
+the next collection, under a function called from there, took for
+roots; it zeroes them now, golden test 391.)*

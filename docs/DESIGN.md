@@ -211,13 +211,13 @@ it held a few hundred bytes before; starting one to wait is a page
 fault; and switching among thousands of them goes to a cold page each
 time. Stacks are carved from slabs (D291), so the ceiling is the
 address space and memory, and a million can wait at once, as before
-D276. And once an island's processes waiting in `recv` hold 1,024
-stacks, the next to wait is copied off its own: its frames, a few
-hundred bytes from the wait down, go to a buffer, its stack back to the
-warm ones, and when it's woken its frames go onto any free stack and
-its `recv` starts again there (D292). So a million waiting in `recv`
-cost about 730 bytes each on the M2 Max, near the 614 before D276; the
-other waits keep their stacks, till they're made to start again too.
+D276. And once an island's waiting processes hold 1,024 stacks, the
+next to wait, whatever it waits in, is copied off its own: its frames,
+a few hundred bytes from the wait down, go to a buffer, its stack back
+to the warm ones, and when it's woken its frames go onto any free stack
+and its wait starts again there (D292). So a million waiting cost 700
+to 770 bytes each on the M2 Max, in `recv`, `join` or `sleep`, near the
+614 one waiting in `recv` cost before D276.
 What it buys is the process model's simplicity:
 one kind of wait, no split pass, no state functions, and a call to a
 function that waits is a call.
@@ -1088,14 +1088,23 @@ run (option (b), D256's step 6, put off).
   pages go back with `madvise`, 64 at a time, and their addresses are
   kept for the next. With none to be had (the address space, or the
   commit limit, run out), the process that wanted one faults `:stack`,
-  and the program goes on (D267). A process waiting in `recv` gives its
-  stack back once its island's waiting processes hold 1,024 (`WAITS_KEPT`),
-  its frames, from the wait's caller to the trampoline and at most 4 KB,
-  copied to a buffer of its own; woken, it takes any warm stack, the
-  frames go to its top with their saved frame pointers moved, and
-  `rt_recv_again` starts its `recv` again there (D292). The frame walk
-  refuses anything it doesn't recognise, and that process keeps its
-  stack.
+  and the program goes on (D267). A process that waits (`recv`, `join`,
+  `join/race`, `read`, `read/any`, `open`, `sleep`, `fork/on`'s wait
+  for its pid, `timer/cancel`'s for another island's answer) gives its
+  stack back once its island's waiting processes hold 1,024
+  (`WAITS_KEPT`), its frames, from the wait's caller to the trampoline
+  and at most 4 KB, copied to a buffer of its own; woken, it takes any
+  warm stack, the frames go to its top with their saved frame pointers
+  moved, and `rt_wait_again` starts its wait again there, by a function
+  of the wait's own (an `again_t`) that goes on from what the process
+  holds: whom it joins or reads, the result it was given, the answer
+  another island sent, its timer set already (D292). So no wait keeps
+  anything it needs after waking in its C frames, which are dropped.
+  `recv` is told its caller's frame by compiled code, for the
+  collector; the other waits are entered through a few instructions of
+  assembly each (`WAIT`), which add the caller's stack pointer and frame
+  pointer to the call's arguments. The frame walk refuses anything it
+  doesn't recognise, and that process keeps its stack.
 - **Context switch**: `rt_switch`, 25 instructions on AArch64 (x19–x30,
   sp, d8–d15).
 - **Idle**: when nothing is runnable, wait in `select()` (on macOS and

@@ -442,36 +442,48 @@ static int start(rt_proc_t *p) {
 
 // --- a waiting process copied off its stack ------------------------------------
 //
-// PLAN.md's "A waiting process copied off its stack" (D292), for recv; the
-// other waits are to follow. A process that waits keeps its stack (D276),
-// at least a page of it, and what it needs of that page is its frames
-// from the wait down to the stack's top, a hundred bytes or two. So once
-// an island's waiting processes hold WAITS_KEPT stacks (1,024), the next
-// to wait in recv has those frames copied to a buffer of its own, and its
-// stack goes back to the warm ones for whoever runs next; woken, it takes
-// any warm stack, its frames are copied to that one's top, and it starts
-// its recv again there (rt_recv_again, in assembly, and rt_recv_woken).
-// Below WAITS_KEPT nothing's copied, so a few processes talking run as
-// they did.
+// PLAN.md's "A waiting process copied off its stack" (D292). A process
+// that waits keeps its stack (D276), at least a page of it, and what it
+// needs of that page is its frames from the wait down to the stack's
+// top, a hundred bytes or two. So once an island's waiting processes
+// hold WAITS_KEPT stacks (1,024), the next to wait, in recv, join,
+// join/race, read, read/any, open, sleep, fork/on or timer/cancel, has
+// those frames copied to a buffer of its own, and its stack goes back to
+// the warm ones for whoever runs next; woken, it takes any warm stack,
+// its frames are copied to that one's top, and it starts its wait again
+// there (rt_wait_again, in assembly, which calls the wait's own function
+// for that, an again_t). Below WAITS_KEPT nothing's copied, so a few
+// processes talking run as they did.
+//
+// So a wait is written to be started again: what it needs once it's
+// woken is in the process (whom it joins or reads, the result it was
+// given, its timer set already) or kept beside its frames (kept, below),
+// never in the C frames it waited in, which are gone.
 //
 // What makes the copy safe is what the collector relies on (below):
 // compiled code keeps nothing in a register across a call but the process
 // and the frame pointer, a slot holds only a value, never an address in
 // the stack, and C never calls compiled code. So from the frame that
-// called rt_recv to the stack's top there are only slight frames, each
+// called the wait to the stack's top there are only slight frames, each
 // its slots under a saved frame pointer and a return address, the first
 // of them saving no frame pointer and returning into the trampoline
 // (rt_apply and rt_apply_start jump, and leave no frame); and the only
 // addresses of the stack in them are the saved frame pointers, which
-// copy_in moves by how far the frames moved. rt_recv's own C frames, on
-// top, are dropped: all they held is its arguments, kept here. copy_out
-// checks what can be checked of that before it copies, the frame pointers
-// one above another to the stack's top and the return into the
-// trampoline, and where it finds anything else the process keeps its
-// stack, as before: a mistake here costs memory, not correctness.
+// copy_in moves by how far the frames moved. The wait's own C frames, on
+// top, are dropped. copy_out checks what can be checked of that before
+// it copies, the frame pointers one above another to the stack's top and
+// the return into the trampoline, and where it finds anything else the
+// process keeps its stack, as before: a mistake here costs memory, not
+// correctness.
+//
+// Where the calling frame is, a wait is told: recv by compiled code,
+// which passes it for the collector, and the others by their entries in
+// assembly (WAIT, in rt_asm_*.S), which add the stack pointer and the
+// frame pointer of the call to its arguments and jump to the C function,
+// rt_join to rt_join_from and so on.
 
-// How many stacks an island's processes keep while they wait in recv;
-// past that, they're copied off. Not STACKS_KEPT, 256: on the M2 Max a
+// How many stacks an island's processes keep while they wait; past
+// that, they're copied off. Not STACKS_KEPT, 256: on the M2 Max a
 // ring of n waiting processes, each on its own stack, passes its token in
 // 50 ns up to 1,500 of them, and in more than the 68 ns a copied one
 // takes only past 3,000, where the stacks' pages outrun the TLB; on the
@@ -483,19 +495,47 @@ static int start(rt_proc_t *p) {
 #endif
 #define COPY_MAX   (4 << 10)            // the most stack copied, below the wait: a process deeper than that keeps its stack
 
+// How a wait starts again, for a process copied off its stack as it
+// waited and now woken: called by rt_wait_again as the wait was called
+// from compiled code, with the calling frame where it is now, and
+// returning what the wait gives to where it would have.
+typedef rt_value_t again_t(rt_proc_t *p, rt_value_t *frame, const uintptr_t *fp);
+
+#ifdef COPY_TALLY
+// The copies by wait: each wait's again_t, as it's first seen, and its
+// count; tally_write names them.
+#define TALLY_WAITS 8
+static _Atomic(again_t *) tally_wait[TALLY_WAITS];
+static _Atomic uint64_t   tally_wait_n[TALLY_WAITS];
+
+static void tally_by_wait(again_t *again) {
+    for (int i = 0; i < TALLY_WAITS; i++) {
+        again_t *had = NULL;
+        if (atomic_compare_exchange_strong(&tally_wait[i], &had, again) || had == again) {
+            atomic_fetch_add_explicit(&tally_wait_n[i], 1, memory_order_relaxed);
+            return;
+        }
+    }
+}
+#define TALLY_WAIT(how) tally_by_wait(how)
+#endif
+
 typedef struct rt_parked {
     uint32_t  cap, len;                 // room for frames, in bytes; and those held, 0 once they're back on a stack
     uintptr_t base;                     // the top of the stack they came off, which their frame pointers are still for
     uintptr_t fp;                       // the waiting frame's frame pointer, on that stack
-    uint64_t  n;                        // its slots in use, the collector's roots
-    uintptr_t ret;                      // where its call of rt_recv returns
+    uintptr_t ret;                      // where its call of the wait returns
+    again_t  *again;                    // how the wait starts again
+    uint64_t  kept[2];                  // what that needs of the call: recv's slots in use, read's site,
+                                        // a race's pids and site
     char      frames[];                 // from the waiting frame's lowest slot up to base
 } parked_t;
 
 // Why copy_out left a process its stack, counted for measuring it: built
 // with -DCOPY_TALLY (SLIGHT_CC="cc -DCOPY_TALLY"), a run leaves a file of
-// its counts in the directory SLIGHT_COPY_TALLY names, with the bytes
-// copied out and the time spent copying out and in.
+// its counts in the directory SLIGHT_COPY_TALLY names, with the copies
+// by the wait that was copied, the bytes copied out and the time spent
+// copying out and in.
 enum { COPIED, WOKEN, MOVED, NO_ROOM, TOO_DEEP, BAD_FRAME, BAD_RETURN, BAD_CHAIN, BAD_BASE, NO_TRAMPOLINE, NO_MEMORY, TALLIES };
 #ifdef COPY_TALLY
 static _Atomic uint64_t tally[TALLIES], tally_bytes, tally_ns_out, tally_ns_in;
@@ -509,6 +549,7 @@ static uint64_t tally_now(void) {
 #else
 #define TALLY(what)     ((void)0)
 #define TALLY_BYTES(n)  ((void)0)
+#define TALLY_WAIT(how) ((void)0)
 #endif
 #define REFUSE(why)     do { TALLY(why); return 0; } while (0)
 
@@ -517,13 +558,15 @@ static int parked(const rt_proc_t *p) {
     return p->parked && p->parked->len;
 }
 
-// p is about to wait in recv, called with frame, n and fp from compiled
-// code that the call returns to at ret. Copies its frames to its buffer
-// and gives its stack back warm, or returns 0, having changed nothing.
-// The caller is still running on that stack, and must switch away before
-// anything else takes it: so it only ever goes to the warm list, never to
-// the spares, whose pages may go back at once.
-static int copy_out(rt_proc_t *p, const rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t ret) {
+// p is about to wait, called with frame and fp from compiled code that
+// the call returns to at ret. Copies its frames to its buffer, with how
+// the wait starts again and what that needs, and gives its stack back
+// warm; or returns 0, having changed nothing. The caller is still running
+// on that stack, and must switch away before anything else takes it: so
+// it only ever goes to the warm list, never to the spares, whose pages
+// may go back at once.
+static int copy_out(rt_proc_t *p, const rt_value_t *frame, const uintptr_t *fp, uintptr_t ret, again_t *again,
+                    uint64_t k0, uint64_t k1) {
     island_state_t *s    = p->isle;
     uintptr_t       base = (uintptr_t)stack_top(p->stack), lo = (uintptr_t)frame, f = (uintptr_t)fp;
     if (s->nfree_stacks >= STACKS_KEPT) REFUSE(NO_ROOM);
@@ -553,24 +596,27 @@ static int copy_out(rt_proc_t *p, const rt_value_t *frame, uint64_t n, const uin
         p->parked = k;
     }
     memcpy(k->frames, (const void *)lo, len);
-    k->len  = (uint32_t)len;
-    k->base = base;
-    k->fp   = (uintptr_t)fp;
-    k->n    = n;
-    k->ret  = ret;
+    k->len     = (uint32_t)len;
+    k->base    = base;
+    k->fp      = (uintptr_t)fp;
+    k->ret     = ret;
+    k->again   = again;
+    k->kept[0] = k0;
+    k->kept[1] = k1;
     STACK_LINK(p->stack) = s->free_stacks;      // the top word, copied by now
     s->free_stacks = p->stack;
     s->nfree_stacks++;
     p->stack = NULL;
     TALLY(COPIED);
+    TALLY_WAIT(again);
     TALLY_BYTES(len);
     return 1;
 }
 
 // p, copied off its stack, is to run: a stack, its frames at that one's
 // top, the frame pointers they saved moved by as far as they have, and
-// registers that make the switch land in rt_recv_again, which starts its
-// recv again; or 0, if there's no stack to be had.
+// registers that make the switch land in rt_wait_again, which starts its
+// wait again; or 0, if there's no stack to be had.
 static int copy_in(rt_proc_t *p) {
     parked_t *k = p->parked;
     p->stack = get_stack();
@@ -586,29 +632,28 @@ static int copy_in(rt_proc_t *p) {
     k->len = 0;
 #if defined(__x86_64__)
     uint64_t *top = (uint64_t *)lo - 1;         // popped by rt_switch's ret, leaving rsp the frame's
-    *top       = (uint64_t)rt_recv_again;
+    *top       = (uint64_t)rt_wait_again;
     p->ctx.rsp = (uint64_t)top;
     p->ctx.rbp = k->fp + by;
-    p->ctx.rbx = k->n;
-    p->ctx.r12 = p->at;
-    p->ctx.r13 = k->ret;
+    p->ctx.rbx = (uint64_t)k->again;
+    p->ctx.r12 = k->ret;
     p->ctx.r15 = (uint64_t)p;
 #else
     p->ctx.sp         = lo;
     p->ctx.fp         = k->fp + by;
-    p->ctx.lr         = (uint64_t)rt_recv_again;
-    p->ctx.x19_x28[0] = k->n;
-    p->ctx.x19_x28[1] = p->at;
-    p->ctx.x19_x28[2] = k->ret;
+    p->ctx.lr         = (uint64_t)rt_wait_again;
+    p->ctx.x19_x28[0] = (uint64_t)k->again;
+    p->ctx.x19_x28[1] = k->ret;
     p->ctx.x19_x28[9] = (uint64_t)p;
 #endif
     return 1;
 }
 
 #ifdef COPY_TALLY
-static int copy_out_timed(rt_proc_t *p, const rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t ret) {
+static int copy_out_timed(rt_proc_t *p, const rt_value_t *frame, const uintptr_t *fp, uintptr_t ret, again_t *again,
+                          uint64_t k0, uint64_t k1) {
     uint64_t t   = tally_now();
-    int      out = copy_out(p, frame, n, fp, ret);
+    int      out = copy_out(p, frame, fp, ret, again, k0, k1);
     atomic_fetch_add_explicit(&tally_ns_out, tally_now() - t, memory_order_relaxed);
     return out;
 }
@@ -622,6 +667,27 @@ static int copy_in_timed(rt_proc_t *p) {
 #define copy_out copy_out_timed
 #define copy_in  copy_in_timed
 #endif
+
+// p waits, its state set, called with frame and fp from compiled code
+// that the call returns to at ret. While its island's waiting processes
+// hold fewer than WAITS_KEPT stacks it keeps its own, is counted among
+// them, and this returns when it's woken. Past that it's copied off its
+// stack, and this never returns: woken, it starts in `again`, which is
+// given k0 and k1 back in its buffer's kept. A process that couldn't be
+// copied keeps its stack, as below the gate.
+static inline __attribute__((always_inline)) void wait_from(rt_proc_t *p, const rt_value_t *frame, const uintptr_t *fp,
+                                                            uintptr_t ret, again_t *again, uint64_t k0, uint64_t k1) {
+    island_state_t *s = p->isle;
+    if ((s->waits_held >= WAITS_KEPT || copy_always) && copy_out(p, frame, fp, ret, again, k0, k1)) {
+        to_scheduler(p);                        // for good: these frames are gone
+        __builtin_unreachable();
+    }
+    p->held = 1;
+    s->waits_held++;
+    to_scheduler(p);
+    p->held = 0;
+    s->waits_held--;
+}
 
 // --- heaps --------------------------------------------------------------------
 
@@ -2244,11 +2310,17 @@ static int for_read(const rt_msg_t *m) {
     return rt_is_address(m->device) || slot(m->device)->opened;
 }
 
+// Whether src is one of what p, reading, waits for: read's one source,
+// or among read/any's list of them.
+static int reads(const rt_proc_t *p, rt_value_t src) {
+    return rt_is_cons(p->joining) ? among(p->joining, src) : p->joining == src;
+}
+
 static void deliver(rt_proc_t *p, rt_msg_t *m) {
     if (p->mail_last) p->mail_last->next = m;
     else              p->mail = m;
     p->mail_last = m;
-    if ((p->state == RT_WAITING && !for_read(m)) || (p->state == RT_READING && among(p->joining, m->device))) enqueue(p);
+    if ((p->state == RT_WAITING && !for_read(m)) || (p->state == RT_READING && reads(p, m->device))) enqueue(p);
 }
 
 static void command(struct rt_device *d, rt_value_t msg);
@@ -2296,11 +2368,13 @@ rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *sit
 // slots in use and the frames below, as rt_preempt's are.
 //
 // Once its island's waiting processes hold WAITS_KEPT stacks, a process
-// that waits here is copied off its own (copy_out, above) and never comes
-// back from to_scheduler: woken, it starts again in rt_recv_woken, on
-// whatever stack it was given, which does what's done here after the
-// wait and comes back to this loop. ret is where the call from compiled
-// code returns, which the copy needs once the C frames are gone.
+// that waits here is copied off its own (wait_from, above) and never comes
+// back from it: woken, it starts again in recv_again, on whatever stack
+// it was given, which does what's done here after the wait and comes
+// back to this loop. ret is where the call from compiled code returns,
+// which the copy needs once the C frames are gone.
+static again_t recv_again;
+
 static inline __attribute__((always_inline)) rt_value_t recv_wait(rt_proc_t *p, rt_value_t *frame, uint64_t n,
                                                                   const uintptr_t *fp, uintptr_t at, uintptr_t ret) {
     for (;;) {
@@ -2322,16 +2396,7 @@ static inline __attribute__((always_inline)) rt_value_t recv_wait(rt_proc_t *p, 
         }
         p->state = RT_WAITING;
         p->at    = at;
-        island_state_t *s = p->isle;
-        if ((s->waits_held >= WAITS_KEPT || copy_always) && copy_out(p, frame, n, fp, ret)) {
-            to_scheduler(p);                    // for good: these frames are gone
-            __builtin_unreachable();
-        }
-        p->held = 1;
-        s->waits_held++;
-        to_scheduler(p);
-        p->held = 0;
-        s->waits_held--;
+        wait_from(p, frame, fp, ret, recv_again, n, 0);
         refill(p);
         if (--p->reductions <= 0) rt_preempt(p, frame, n, fp, at);
     }
@@ -2350,12 +2415,13 @@ static __attribute__((noinline)) rt_value_t recv_slow(rt_proc_t *p, rt_value_t *
     return recv_wait(p, frame, n, fp, at, ret);
 }
 
-// A process copied off its stack as it waited, woken: rt_recv_again calls
-// this as its rt_recv was called, with its frames where they are now, and
-// its return address that call's. The new slice and the call counted are
-// those recv_wait gives a process that kept its stack, in the same order,
-// so nothing runs at another time for having been copied.
-rt_value_t rt_recv_woken(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t at) {
+// A process copied off its stack as it waited in recv, woken. The new
+// slice and the call counted are those recv_wait gives a process that
+// kept its stack, in the same order, so nothing runs at another time for
+// having been copied.
+static __attribute__((noinline)) rt_value_t recv_again(rt_proc_t *p, rt_value_t *frame, const uintptr_t *fp) {
+    uint64_t  n  = p->parked->kept[0];
+    uintptr_t at = p->at;
     refill(p);
     if (--p->reductions <= 0) rt_preempt(p, frame, n, fp, at);
     return recv_wait(p, frame, n, fp, at, (uintptr_t)__builtin_return_address(0));
@@ -2679,20 +2745,40 @@ static void watch_far(rt_proc_t *p, rt_value_t pid, int wakes, rt_value_t addr) 
     far_add(&side_of(p)->watches, pid, wakes, addr);
 }
 
-rt_value_t rt_join(rt_value_t pid, const char *site) {
-    rt_proc_t *p = rt_current;
-    if (rt_is_address(pid)) rt_fault(RT_FAULT_NOT_PID, pid, site);
-    if (far(pid)) {                             // its end comes as an item, kept in far_ends till it's joined (D277)
-        for (;;) {
-            rt_value_t v = far_end(p, pid);
-            if (v) return v;
-            watch_far(p, pid, WATCH_JOIN, 0);
-            p->joining = pid;
-            p->state   = RT_JOINING;
-            p->at      = (uintptr_t)__builtin_return_address(0);
-            to_scheduler(p);                    // till its end comes
-        }
+// The waits from here on are entered through assembly (WAIT, in
+// rt_asm_*.S), which adds where the call came from: frame and fp, the
+// calling frame's lowest slot and its frame pointer, for copying the
+// process off its stack while it waits ("a waiting process copied off its
+// stack", above). Each has an again_t, how it goes on when a process
+// that was copied off is woken, from what the process holds.
+static again_t join_again;
+
+// The end of pid, on another island: it comes as an item, kept in
+// far_ends till it's joined (D277).
+static rt_value_t join_far(rt_proc_t *p, rt_value_t pid, const rt_value_t *frame, const uintptr_t *fp, uintptr_t ret) {
+    for (;;) {
+        rt_value_t v = far_end(p, pid);
+        if (v) return v;
+        watch_far(p, pid, WATCH_JOIN, 0);
+        p->joining = pid;
+        p->state   = RT_JOINING;
+        p->at      = ret;
+        wait_from(p, frame, fp, ret, join_again, 0, 0);    // till its end comes
     }
+}
+
+// Whom it joined is in the process, and the result where a joiner that
+// kept its stack finds it: given by finish, or among far_ends.
+static __attribute__((noinline)) rt_value_t join_again(rt_proc_t *p, rt_value_t *frame, const uintptr_t *fp) {
+    if (far(p->joining)) return join_far(p, p->joining, frame, fp, (uintptr_t)__builtin_return_address(0));
+    return take_given(p);
+}
+
+rt_value_t rt_join_from(rt_value_t pid, const char *site, const rt_value_t *frame, const uintptr_t *fp) {
+    rt_proc_t *p   = rt_current;
+    uintptr_t  ret = (uintptr_t)__builtin_return_address(0);
+    if (rt_is_address(pid)) rt_fault(RT_FAULT_NOT_PID, pid, site);
+    if (far(pid)) return join_far(p, pid, frame, fp, ret);
     entry_t   *e = entry(pid, site);
     rt_proc_t *t = e->proc;
     if (pid == p->pid) rt_fault(RT_FAULT_JOIN_SELF, pid, site);
@@ -2703,8 +2789,8 @@ rt_value_t rt_join(rt_value_t pid, const char *site) {
         p->next_joiner = NULL;
         p->joining     = pid;
         p->state       = RT_JOINING;
-        p->at          = (uintptr_t)__builtin_return_address(0);
-        to_scheduler(p);                        // until t ends, and finish wakes us with its result
+        p->at          = ret;
+        wait_from(p, frame, fp, ret, join_again, 0, 0);    // until t ends, and finish wakes us with its result
         return take_given(p);
     }
     _Alignas(16) rt_value_t cells[4];
@@ -2733,13 +2819,41 @@ static const rt_watch_t *race_last(const rt_proc_t *p) {
     return w;
 }
 
+// A racer, woken by the first of pids to end: who that was is in the
+// process, and its result given. The watches on the rest go.
+static rt_value_t raced(rt_proc_t *p, rt_value_t pids, const char *site) {
+    rt_value_t won = p->joining;
+    for (rt_watch_t *w = p->watching, *next; w; w = next) {
+        next = w->next_held;
+        if (w->wakes == WATCH_RACE) unwatch(w);
+    }
+    for (rt_value_t xs = pids; xs != RT_NIL; xs = rt_cdr(xs)) {   // the far ones' go too; the winner's went with it
+        rt_value_t pid = rt_car(xs);
+        if (!far(pid) || pid == won) continue;
+        far_drop(&side_of(p)->watches, pid);
+        cross(ITEM_UNWATCH, pid, p->pid, NULL);
+    }
+    rt_value_t  result = take_given(p);
+    rt_value_t *cells  = rt_alloc(4 * sizeof *cells, site);
+    return rt_cons_at(cells, won, rt_cons_at(cells + 2, result, RT_NIL));
+}
+
+// The pids and the site were kept with its frames: the list is in its
+// heap, which nothing has collected while it waited.
+static __attribute__((noinline)) rt_value_t race_again(rt_proc_t *p, rt_value_t *frame, const uintptr_t *fp) {
+    (void)frame;
+    (void)fp;
+    return raced(p, (rt_value_t)p->parked->kept[0], (const char *)p->parked->kept[1]);
+}
+
 // The first of pids to end, as (pid result). If some have ended already,
 // it's the first of those in the list, as JavaScript's Promise.race
 // settles; else a watch on each wakes the caller when the first of them
 // ends (D220). The pids are all checked before it waits, so a bad one
 // faults whichever ends first.
-rt_value_t rt_join_race(rt_value_t pids, const char *site) {
+rt_value_t rt_join_race_from(rt_value_t pids, const char *site, const rt_value_t *frame, const uintptr_t *fp) {
     rt_proc_t *p   = rt_current;
+    uintptr_t  ret = (uintptr_t)__builtin_return_address(0);
     rt_value_t won = 0;
     if (pids == RT_NIL) rt_fault(RT_FAULT_NOT_PID, pids, site);   // nothing to wait for, ever
     for (rt_value_t xs = pids; xs != RT_NIL; xs = rt_cdr(xs)) {
@@ -2765,22 +2879,9 @@ rt_value_t rt_join_race(rt_value_t pids, const char *site) {
             else          watch(slot(pid)->proc, p, WATCH_RACE, 0);
         }
         p->state = RT_RACING;
-        p->at    = (uintptr_t)__builtin_return_address(0);
-        to_scheduler(p);                        // until the first ends, and finish wakes us
-        won = p->joining;
-        for (rt_watch_t *w = p->watching, *next; w; w = next) {
-            next = w->next_held;
-            if (w->wakes == WATCH_RACE) unwatch(w);
-        }
-        for (rt_value_t xs = pids; xs != RT_NIL; xs = rt_cdr(xs)) {   // the far ones' go too; the winner's went with it
-            rt_value_t pid = rt_car(xs);
-            if (!far(pid) || pid == won) continue;
-            far_drop(&side_of(p)->watches, pid);
-            cross(ITEM_UNWATCH, pid, p->pid, NULL);
-        }
-        rt_value_t  result = take_given(p);
-        rt_value_t *cells  = rt_alloc(4 * sizeof *cells, site);
-        return rt_cons_at(cells, won, rt_cons_at(cells + 2, result, RT_NIL));
+        p->at    = ret;
+        wait_from(p, frame, fp, ret, race_again, pids, (uint64_t)site);    // until the first ends, and finish wakes us
+        return raced(p, pids, site);
     }
     // A race doesn't take a value: join/all and join/any join what they race.
     _Alignas(16) rt_value_t cells[8];
@@ -2790,75 +2891,108 @@ rt_value_t rt_join_race(rt_value_t pids, const char *site) {
 
 static int owns(const rt_proc_t *p, const struct rt_device *d);
 
-// The first of srcs with something for the calling process: a message
-// to one of its addresses, or from a device it opened, taken in the order
-// of srcs; as (src what) if pair is set, or just what. A device closed,
-// or a pid that has ended, gives :ended, or what's kept of it. A live
-// process is no source: its end is a message, from monitor, or a join's
-// (D277). Waits, keeping the stack, till one has something: a message to
-// one of them, or its device's closing, wakes it (D243).
-static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char *site) {
+// Whether p may read src: an address of its own that's open, or a device
+// it opened, open or closed. A process is no source (D277).
+static void check_source(rt_proc_t *p, rt_value_t src, const char *site) {
+    if (rt_is_address(src)) {
+        if (!address_open(p, src)) rt_fault(RT_FAULT_NOT_PID, src, site);
+        return;
+    }
+    if (far(src)) rt_fault(RT_FAULT_NOT_PID, src, site);
+    const entry_t *e = entry(src, site);
+    if (!e->opened || (e->device && !owns(p, e->device))) rt_fault(RT_FAULT_NOT_PID, src, site);
+}
+
+// The device p took a message from last cuts its next (D158).
+static void read_ahead(rt_proc_t *p) {
+    if (!p->reading) return;
+    rt_value_t device = p->reading;
+    p->reading = 0;
+    read_on(p, device);
+}
+
+// What src has for p, into *v, as (src what) if pair is set, or just
+// what: the first message waiting for an address, or from a device,
+// closed since or not; or, of a device closed or handed on, :ended, or
+// what's kept of it. 0 if it has nothing yet.
+static int read_one(rt_proc_t *p, rt_value_t src, int pair, const char *site, rt_value_t *v) {
+    const entry_t *e    = rt_is_address(src) ? NULL : slot(src);
+    rt_msg_t      *last = NULL;
+    for (rt_msg_t **link = &p->mail; *link; link = &(*link)->next) {
+        rt_msg_t *m = *link;
+        if (m->device != src) {
+            last = m;
+            continue;
+        }
+        *link = m->next;
+        if (p->mail_last == m) p->mail_last = last;
+        *v = m->value;
+        if (!rt_is_address(src)) p->reading = src;
+        if (bare(m)) free_msg(m);
+        else         adopt(p, m->chunk);
+        if (pair) {
+            rt_value_t *cells = rt_alloc(4 * sizeof *cells, site);
+            *v = rt_cons_at(cells, src, rt_cons_at(cells + 2, *v, RT_NIL));
+        }
+        return 1;
+    }
+    if (e && !owns(p, e->device)) {             // a device closed, or handed on
+        _Alignas(16) rt_value_t cells[8];
+        rt_value_t result = result_at(cells, e);
+        *v = copy_here(pair ? rt_cons_at(cells + 4, src, rt_cons_at(cells + 6, result, RT_NIL)) : result);
+        taken(p, src);
+        return 1;
+    }
+    return 0;
+}
+
+// The first of srcs with something for p: read's one source, giving
+// what it has, or read/any's list of them, taken in its order, giving
+// (src what). A device closed gives :ended, or what's kept of it. Waits
+// till one has something: a message to one of them, or its device's
+// closing, wakes it (D243). While it waits its sources are in the
+// process, for deliver, and for starting again if it was copied off its
+// stack, with `again`, the reader's own (read's, or open's).
+static rt_value_t read_wait(rt_proc_t *p, rt_value_t srcs, const char *site, const rt_value_t *frame,
+                            const uintptr_t *fp, uintptr_t ret, again_t *again) {
+    for (;;) {
+        rt_value_t v;
+        if (!rt_is_cons(srcs) && read_one(p, srcs, 0, site, &v)) return v;
+        for (rt_value_t xs = srcs; rt_is_cons(xs); xs = rt_cdr(xs)) {
+            if (read_one(p, rt_car(xs), 1, site, &v)) return v;
+        }
+        p->joining = srcs;
+        p->state   = RT_READING;
+        p->at      = ret;
+        wait_from(p, frame, fp, ret, again, (uint64_t)site, 0);   // till a message, or a device's closing, wakes it
+    }
+}
+
+static __attribute__((noinline)) rt_value_t read_again(rt_proc_t *p, rt_value_t *frame, const uintptr_t *fp) {
+    const char *site = (const char *)p->parked->kept[0];
+    return read_wait(p, p->joining, site, frame, fp, (uintptr_t)__builtin_return_address(0), read_again);
+}
+
+// What src has for the calling process: a message to an address of its
+// own, or from a device it opened. A live process is no source: its end
+// is a message, from monitor, or a join's (D277).
+rt_value_t rt_read_from(rt_value_t src, const char *site, const rt_value_t *frame, const uintptr_t *fp) {
+    rt_proc_t *p = rt_current;
+    check_source(p, src, site);
+    read_ahead(p);
+    return read_wait(p, src, site, frame, fp, (uintptr_t)__builtin_return_address(0), read_again);
+}
+
+// The first of srcs with something, as (src what).
+rt_value_t rt_read_any_from(rt_value_t srcs, const char *site, const rt_value_t *frame, const uintptr_t *fp) {
     rt_proc_t *p = rt_current;
     if (srcs == RT_NIL) rt_fault(RT_FAULT_NOT_PID, srcs, site);  // nothing to wait for, ever
     for (rt_value_t xs = srcs; xs != RT_NIL; xs = rt_cdr(xs)) {
         if (!rt_is_cons(xs)) rt_fault(RT_FAULT_NOT_LIST, srcs, site);
-        rt_value_t src = rt_car(xs);
-        if (rt_is_address(src)) {
-            if (!address_open(p, src)) rt_fault(RT_FAULT_NOT_PID, src, site);
-            continue;
-        }
-        if (far(src)) rt_fault(RT_FAULT_NOT_PID, src, site);
-        const entry_t *e = entry(src, site);     // a device it opened, open or closed: a process is no source (D277)
-        if (!e->opened || (e->device && !owns(p, e->device))) rt_fault(RT_FAULT_NOT_PID, src, site);
+        check_source(p, rt_car(xs), site);
     }
-    if (p->reading) {                           // the device it took a message from last cuts its next (D158)
-        rt_value_t device = p->reading;
-        p->reading = 0;
-        read_on(p, device);
-    }
-    for (;;) {
-        for (rt_value_t xs = srcs; xs != RT_NIL; xs = rt_cdr(xs)) {
-            rt_value_t     src  = rt_car(xs);
-            const entry_t *e    = rt_is_address(src) ? NULL : slot(src);
-            rt_msg_t      *last = NULL;             // what waits for an address, or from a device, closed since or not
-            for (rt_msg_t **link = &p->mail; *link; link = &(*link)->next) {
-                rt_msg_t *m = *link;
-                if (m->device != src) {
-                    last = m;
-                    continue;
-                }
-                *link = m->next;
-                if (p->mail_last == m) p->mail_last = last;
-                rt_value_t v = m->value;
-                if (!rt_is_address(src)) p->reading = src;
-                if (bare(m)) free_msg(m);
-                else         adopt(p, m->chunk);
-                if (!pair) return v;
-                rt_value_t *cells = rt_alloc(4 * sizeof *cells, site);
-                return rt_cons_at(cells, src, rt_cons_at(cells + 2, v, RT_NIL));
-            }
-            if (e && !owns(p, e->device)) {         // a device closed, or handed on
-                _Alignas(16) rt_value_t cells[8];
-                rt_value_t result = result_at(cells, e);
-                result = copy_here(pair ? rt_cons_at(cells + 4, src, rt_cons_at(cells + 6, result, RT_NIL)) : result);
-                taken(p, src);
-                return result;
-            }
-        }
-        p->joining = srcs;
-        p->state   = RT_READING;
-        p->at      = at;
-        to_scheduler(p);                        // till a message, or a device's closing, wakes it
-    }
-}
-
-rt_value_t rt_read(rt_value_t src, const char *site) {
-    _Alignas(16) rt_value_t cell[2];
-    return read_from(rt_cons_at(cell, src, RT_NIL), 0, (uintptr_t)__builtin_return_address(0), site);
-}
-
-rt_value_t rt_read_any(rt_value_t srcs, const char *site) {
-    return read_from(srcs, 1, (uintptr_t)__builtin_return_address(0), site);
+    read_ahead(p);
+    return read_wait(p, srcs, site, frame, fp, (uintptr_t)__builtin_return_address(0), read_again);
 }
 
 // (monitor pid), or (monitor pid to): (:exit pid result) comes to the
@@ -3122,7 +3256,20 @@ static int inbox_now(void) {
 
 // A process on island k, another, made there, which numbers it itself;
 // the caller waits for its pid, keeping its stack, as join does.
-static rt_value_t place(uint64_t k, uint64_t n, const rt_value_t *values, const char *site, int source) {
+static rt_value_t placed(rt_proc_t *p) {
+    far_add(&side_of(p)->watches, p->joining, WATCH_CHILD, 0);   // its end comes here, for a join (D244)
+    return p->joining;
+}
+
+// ITEM_PLACED left the pid in the process.
+static __attribute__((noinline)) rt_value_t place_again(rt_proc_t *p, rt_value_t *frame, const uintptr_t *fp) {
+    (void)frame;
+    (void)fp;
+    return placed(p);
+}
+
+static rt_value_t place(uint64_t k, uint64_t n, const rt_value_t *values, const char *site, int source,
+                        const rt_value_t *frame, const uintptr_t *fp, uintptr_t ret) {
     rt_proc_t  *p = rt_current;
     rt_value_t  vals[RT_MAX_ARGS + 1];
     check_fun(n, values, site);
@@ -3142,19 +3289,19 @@ static rt_value_t place(uint64_t k, uint64_t n, const rt_value_t *values, const 
     push(k, it);
     p->state   = RT_PLACING;
     p->joining = rt_int((int64_t)k);
-    p->at      = (uintptr_t)__builtin_return_address(0);
-    to_scheduler(p);                            // till ITEM_PLACED says the pid
-    far_add(&side_of(p)->watches, p->joining, WATCH_CHILD, 0);   // its end comes here, for a join (D244)
-    return p->joining;
+    p->at      = ret;
+    wait_from(p, frame, fp, ret, place_again, 0, 0);    // till ITEM_PLACED says the pid
+    return placed(p);
 }
 
 // (fork/on k expr): a process on island k (D256); on the caller's own,
 // fork's.
-rt_value_t rt_fork_on(uint64_t n, const rt_value_t *values, const char *site, rt_value_t where) {
+rt_value_t rt_fork_on_from(uint64_t n, const rt_value_t *values, const char *site, rt_value_t where,
+                           const rt_value_t *frame, const uintptr_t *fp) {
     int64_t k = rt_need_int(where, site);
     if (k < 0 || (uint64_t)k >= nislands) rt_fault(RT_FAULT_RANGE, where, site);
     if ((uint64_t)k == my.island) return rt_fork(rt_current, n, values, site);
-    return place((uint64_t)k, n, values, site, 0);
+    return place((uint64_t)k, n, values, site, 0, frame, fp, (uintptr_t)__builtin_return_address(0));
 }
 
 static inline void events(void);
@@ -3384,8 +3531,15 @@ static int cancel_here(uint64_t id) {
 // Another island's timer is taken back there, and the caller waits for
 // the answer, keeping its stack, as spawn/on waits for its pid, so that
 // any process can take back any timer, wherever it was set (D232, D274).
-rt_value_t rt_timer_cancel(rt_value_t t, const char *site) {
-    int64_t id = rt_need_int(t, site);
+static __attribute__((noinline)) rt_value_t cancel_again(rt_proc_t *p, rt_value_t *frame, const uintptr_t *fp) {
+    (void)frame;
+    (void)fp;
+    return p->joining;                          // as ITEM_CANCELLED left it
+}
+
+rt_value_t rt_timer_cancel_from(rt_value_t t, const char *site, const rt_value_t *frame, const uintptr_t *fp) {
+    uintptr_t ret = (uintptr_t)__builtin_return_address(0);
+    int64_t   id  = rt_need_int(t, site);
     if (id <= 0) return RT_FALSE;
     uint64_t k = (uint64_t)id >> TIMER_ISLAND;
     if (k == my.island) return cancel_here((uint64_t)id) ? RT_TRUE : RT_FALSE;
@@ -3396,8 +3550,8 @@ rt_value_t rt_timer_cancel(rt_value_t t, const char *site) {
     push(k, it);
     p->state   = RT_PLACING;
     p->joining = rt_int((int64_t)k);
-    p->at      = (uintptr_t)__builtin_return_address(0);
-    to_scheduler(p);                            // till ITEM_CANCELLED says
+    p->at      = ret;
+    wait_from(p, frame, fp, ret, cancel_again, 0, 0);   // till ITEM_CANCELLED says
     return p->joining;
 }
 
@@ -3421,12 +3575,21 @@ static void drop_orphans(void) {
     }
 }
 
-rt_value_t rt_sleep(rt_value_t ms, const char *site) {
-    rt_proc_t *p = rt_current;
+// Its timer was set before it waited, and has rung: nothing's set again.
+static __attribute__((noinline)) rt_value_t sleep_again(rt_proc_t *p, rt_value_t *frame, const uintptr_t *fp) {
+    (void)p;
+    (void)frame;
+    (void)fp;
+    return RT_NIL;
+}
+
+rt_value_t rt_sleep_from(rt_value_t ms, const char *site, const rt_value_t *frame, const uintptr_t *fp) {
+    rt_proc_t *p   = rt_current;
+    uintptr_t  ret = (uintptr_t)__builtin_return_address(0);
     set_alarm(due_in(ms, site), p->pid, NULL, 0);
     p->state = RT_SLEEPING;
-    p->at    = (uintptr_t)__builtin_return_address(0);
-    to_scheduler(p);                            // until ring wakes it
+    p->at    = ret;
+    wait_from(p, frame, fp, ret, sleep_again, 0, 0);    // until ring wakes it
     return RT_NIL;
 }
 
@@ -3469,8 +3632,9 @@ static int             input_ended;
 
 // The terminal is island 0's (D256): from another, the actor is placed
 // there.
-rt_value_t rt_connect(uint64_t n, const rt_value_t *values, const char *site) {
-    if (my.island) return place(0, n, values, site, SOURCE_KEYS);
+rt_value_t rt_connect_from(uint64_t n, const rt_value_t *values, const char *site, const rt_value_t *frame,
+                           const uintptr_t *fp) {
+    if (my.island) return place(0, n, values, site, SOURCE_KEYS, frame, fp, (uintptr_t)__builtin_return_address(0));
     rt_value_t pid = rt_fork(rt_current, n, values, site);
     keys_for(slot(pid)->proc);
     return pid;
@@ -3948,7 +4112,7 @@ static void close_all(rt_proc_t *p) {
 // A task reading d, which closes or is handed on, looks at its sources
 // again, and finds it ended (D243).
 static void wake_reader(rt_proc_t *owner, const rt_device_t *d) {
-    if (owner->state == RT_READING && among(owner->joining, d->pid)) enqueue(owner);
+    if (owner->state == RT_READING && reads(owner, d->pid)) enqueue(owner);
 }
 
 static void unown(rt_device_t *d) {
@@ -5317,7 +5481,8 @@ static snapshot_t take(pids_t *ps, const rt_proc_t *p) {
     if (p->state == RT_RACING) {
         for (const rt_watch_t *w = race_last(p); w; w = w->prev_held) if (w->wakes == WATCH_RACE) snap_pid(ps, w->watched->pid);
     } else if (p->state == RT_READING) {
-        for (rt_value_t xs = p->joining; xs != RT_NIL; xs = rt_cdr(xs)) snap_pid(ps, rt_car(xs));
+        if (!rt_is_cons(p->joining)) snap_pid(ps, p->joining);
+        for (rt_value_t xs = p->joining; rt_is_cons(xs); xs = rt_cdr(xs)) snap_pid(ps, rt_car(xs));
     }
     r.nracing = ps->n - r.racing;
     return r;
@@ -5695,8 +5860,9 @@ static void system_told(item_t *it) {
 }
 
 // :system is island 0's too (D256).
-rt_value_t rt_connect_system(uint64_t n, const rt_value_t *values, const char *site) {
-    if (my.island) return place(0, n, values, site, SOURCE_SYSTEM);
+rt_value_t rt_connect_system_from(uint64_t n, const rt_value_t *values, const char *site, const rt_value_t *frame,
+                                  const uintptr_t *fp) {
+    if (my.island) return place(0, n, values, site, SOURCE_SYSTEM, frame, fp, (uintptr_t)__builtin_return_address(0));
     rt_value_t pid = rt_fork(rt_current, n, values, site);
     system_for(slot(pid)->proc, site);
     return pid;
@@ -5710,10 +5876,25 @@ static void system_for(rt_proc_t *p, const char *site) {
 // to own it (D243), opened as connect opens one, then read till it's
 // open: (:ok d), or (:error reason). A listener, and the keyboard, are
 // connect's: something that waits for whatever comes is a process.
-static rt_value_t read_from(rt_value_t srcs, int pair, uintptr_t at, const char *site);
+static rt_value_t opened(rt_value_t d, rt_value_t m) {
+    _Alignas(16) rt_value_t cells[4];
+    if (rt_car(m) == rt_keyword(RT_SYM_ERROR)) {                        // (:error d reason)
+        return copy_here(rt_cons_at(cells, rt_keyword(RT_SYM_ERROR), rt_cons_at(cells + 2, rt_car(rt_cdr(rt_cdr(m))), RT_NIL)));
+    }
+    return copy_here(rt_cons_at(cells, rt_keyword(RT_SYM_OK), rt_cons_at(cells + 2, d, RT_NIL)));
+}
 
-rt_value_t rt_open(rt_value_t source, rt_value_t arg, const char *site) {
-    rt_proc_t *p = rt_current;
+// The device is what the process reads.
+static __attribute__((noinline)) rt_value_t open_again(rt_proc_t *p, rt_value_t *frame, const uintptr_t *fp) {
+    rt_value_t  d    = p->joining;
+    const char *site = (const char *)p->parked->kept[0];
+    return opened(d, read_wait(p, d, site, frame, fp, (uintptr_t)__builtin_return_address(0), open_again));
+}
+
+rt_value_t rt_open_from(rt_value_t source, rt_value_t arg, const char *site, const rt_value_t *frame,
+                        const uintptr_t *fp) {
+    rt_proc_t *p   = rt_current;
+    uintptr_t  ret = (uintptr_t)__builtin_return_address(0);
     uint64_t which = (source & RT_TAG_MASK) == RT_TAG_SYMBOL ? (source >> RT_SYMBOL_SHIFT) - RT_SYM_SOURCE : RT_SOURCE_COUNT;
     if (which >= RT_SOURCE_COUNT) rt_fault(RT_FAULT_NOT_DEVICE, source, site);
     if (which == RT_SOURCE_EXEC) {
@@ -5738,11 +5919,9 @@ rt_value_t rt_open(rt_value_t source, rt_value_t arg, const char *site) {
     _Alignas(16) rt_value_t cells[8];
     if (err) return copy_here(rt_cons_at(cells, rt_keyword(RT_SYM_ERROR), rt_cons_at(cells + 2, io_reason(cells + 4, err, where), RT_NIL)));
     rt_value_t d = devices_of(p) != had ? devices_of(p)->pid : RT_NIL;   // new_device puts it first
-    rt_value_t m = read_from(rt_cons_at(cells, d, RT_NIL), 0, (uintptr_t)__builtin_return_address(0), site);
-    if (rt_car(m) == rt_keyword(RT_SYM_ERROR)) {                        // (:error d reason)
-        return copy_here(rt_cons_at(cells, rt_keyword(RT_SYM_ERROR), rt_cons_at(cells + 2, rt_car(rt_cdr(rt_cdr(m))), RT_NIL)));
-    }
-    return copy_here(rt_cons_at(cells, rt_keyword(RT_SYM_OK), rt_cons_at(cells + 2, d, RT_NIL)));
+    check_source(p, d, site);
+    read_ahead(p);
+    return opened(d, read_wait(p, d, site, frame, fp, ret, open_again));
 }
 
 // --- the scheduler ------------------------------------------------------------
@@ -5953,6 +6132,11 @@ static void tell_waiting(const rt_proc_t *p) {
         }
         if (p->state == RT_READING) {
             rt_value_t xs = p->joining;
+            if (!rt_is_cons(xs)) {              // read's one source
+                fprintf(stderr, "a message to");
+                tell_pid(" ", xs, "");
+                return;
+            }
             fprintf(stderr, rt_cdr(xs) == RT_NIL ? "a message to" : "the first of");
             for (const char *sep = " "; xs != RT_NIL; xs = rt_cdr(xs), sep = ", ") {
                 rt_value_t v = rt_car(xs);
@@ -5994,6 +6178,15 @@ static void tally_write(void) {
     if (!f) return;
     fprintf(f, "%s", slash ? slash + 1 : tally_name);
     for (int i = 0; i < TALLIES; i++) fprintf(f, " %s=%llu", names[i], (unsigned long long)atomic_load(&tally[i]));
+    static const struct { again_t *again; const char *name; } waits[TALLY_WAITS] = {
+        { recv_again, "recv" }, { join_again, "join" }, { race_again, "join/race" }, { read_again, "read" },
+        { open_again, "open" }, { sleep_again, "sleep" }, { place_again, "fork/on" }, { cancel_again, "timer/cancel" },
+    };
+    for (int i = 0; i < TALLY_WAITS; i++) {
+        uint64_t n = 0;
+        for (int j = 0; j < TALLY_WAITS; j++) if (atomic_load(&tally_wait[j]) == waits[i].again) n = atomic_load(&tally_wait_n[j]);
+        fprintf(f, " %s=%llu", waits[i].name, (unsigned long long)n);
+    }
     // and what reading the clock twice costs, which each timed copy has in it
     uint64_t t = tally_now(), pairs = 1000000, sink = 0;
     for (uint64_t i = 0; i < pairs; i++) sink += tally_now() - tally_now();

@@ -1,0 +1,71 @@
+; join, of a process copied off its stack while it waits (D292): what
+; 383 has of recv. SLIGHT_COPY_OUT copies every wait. A joiner three
+; frames down, each with something of its own to keep, holds no stack
+; while it waits, here or for a process on another island; woken with
+; the result, on another stack than it left, it has what its frames
+; held; two that join the same process each get its result; one whose
+; process is killed gets that; and one killed while it's off its stack
+; ends as any does, and is out of the way of the others.
+; env: SLIGHT_COPY_OUT=1
+
+(defun inner (p tag)
+    (let before (list tag "before"))
+    (let r (join p))
+    (list before r (length (range 0 3000))))
+
+(defun middle (p tag)
+    (let xs (range 0 5))
+    (let r (inner p tag))
+    (list :middle xs r))
+
+(defun outer (p tag to)
+    (let half 1.25)
+    (let r (middle p tag))
+    (send to (list tag (+ half half) r)))
+
+; Ends with what it's sent.
+(defun held () (recv (m m)))
+
+; 300 frames down, too deep to copy: it keeps the stack it started on,
+; the one its parent left as it waited, so who's woken next gets another.
+(defun squatter (n) (if (== n 0) (recv (m 0)) (+ 1 (squatter (- n 1)))))
+
+(defun facts (s p whom)
+    (send s (list :process p))
+    (match (read s)
+        ((:process s2 i) (list (lookup :state i) (eq? (lookup :joining i) whom) (lookup :in i) (lookup :stack i)))))
+
+(defun main ()
+    (let s (match (open :system) ((:ok s) s)))
+    (let ra (address))
+    (let rb (address))
+    (let rc (address))
+    (let rf (address))
+    (let t (fork held))
+    (let v (fork held))
+    (let far (fork/on 1 held))
+    (let a (fork outer t :a ra))
+    (let b (fork outer t :b rb))
+    (let k (fork outer t :k ra))
+    (let c (fork outer v :c rc))
+    (let f (fork outer far :far rf))
+    (sleep 1)                               ; till each waits
+    (pprint (cons :a (facts s a t)))
+    (pprint (cons :far (facts s f far)))
+    (kill k)
+    (pprint (join k))
+    (kill v)
+    (pprint (read rc))
+    (let q (fork squatter 300))             ; takes the stack this process leaves as it waits, and keeps it
+    (send t :done)
+    (pprint (read ra))
+    (pprint (read rb))
+    (send far (list 1 2))
+    (pprint (read rf))
+    (pprint (join t))                       ; kept for its parent, whoever else joined it
+    (pprint (join far))
+    (send q :go)
+    (pprint (join q))
+    :done)
+
+(main)
