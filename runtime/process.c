@@ -1191,7 +1191,10 @@ static rt_value_t copy_here(rt_value_t v) {
 // pointer saved by the first is 0. No C frame comes between them, since C
 // never calls compiled code (apply jumps), so C code never sees anything
 // move. At recv, the frames below the one that waits are roots too, as at
-// a function's entry, since a process keeps its stack while it waits (D276).
+// a function's entry, since a process keeps its stack while it waits (D276);
+// and there the frame's slots past those in use, which may hold anything
+// by then, are zeroed, since the next collection may find that frame under
+// another, and take them all for roots.
 //
 // Two kinds (D200). A minor collection, once the nursery has overflowed,
 // copies what's young and reachable into the old generation, all of it,
@@ -1565,6 +1568,11 @@ static int due(const rt_proc_t *p) {
 }
 
 static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+    // The calling frame's slots past the n in use hold whatever they last
+    // did, which nothing here moves; and once that frame is under another,
+    // a collection takes all its slots for roots. At a function's entry
+    // they're zero already; at a recv they're not, so they're zeroed.
+    for (rt_value_t *s = roots + n; s < (const rt_value_t *)fp; s++) *s = 0;
     int whole = old_in_use(p) + shared_bytes(p, 1) >= p->gc_at || (gc_stress && ++my.stressed % 8 == 0);
     if (!whole && p->nursery) {
         if (gc_verify) check(p, roots, n, fp);

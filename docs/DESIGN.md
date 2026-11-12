@@ -771,7 +771,11 @@ Lalloc_N:
   only ever holds a value, and C never calls compiled code, so no C frame
   comes between. A function that calls another other than in tail
   position zeroes its slots at entry, so none holds a stale word; one
-  that only tail-calls is never under a collection, and doesn't.
+  that only tail-calls is never under a collection, and doesn't. A
+  collection at a `recv` in the middle of a function moves only the
+  slots in use, so it zeroes the frame's others, which hold what they
+  last did: the next collection may find that frame under another
+  (golden test 391).
 - **Nothing old points at anything young**, which is what the two kinds
   of collection rest on. Elsewhere that's the hard part of a
   generational collector, an old object changed to point at a young one,
