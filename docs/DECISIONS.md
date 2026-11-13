@@ -7668,3 +7668,44 @@ the nine actor programs but `bank` in each, `bench/NAME/NAME.scm`
   `racket-mc` slower than `racket` in all five: places share Racket
   CS's one heap and collector, and two doing ping-pong at once each
   took 5.5 times as long as one alone. Results are the M2 Max's to give.
+
+**D294. `:system` says what's held: `(:memory info)`.** *(Stevan, 13 Nov
+2026: "start with A, then B", of the directions in
+`docs/memory-review-2026-11-13.md`; the fields are Claude's, by
+default.)* The review found that nothing it measured could be seen from
+inside a program: `:system` gave a heap's bytes in use, not what the
+heap holds. So a process's info, an island's and the runtime's each
+gain one field, `(:memory info)`, an info of its own in which every
+number is bytes: `(:nursery n)` and `(:old n)`, the heap's chunks by
+generation, in use or not; `(:mail n)`, the waiting messages' chunks;
+`(:stack n)`, the stack's pages in memory and the buffer its frames
+wait in off it (D292); `(:shared n)`, the shared buffers held, each
+counted whole; and, in the runtime's alone, `(:resident n)`, the
+program's resident set. The heap's and the mailbox's are the runtime's
+own counts, the same on every machine, so a golden test asserts on them
+(test 392), which is what the changes to the heap's policy that follow
+need. The stack's pages and the resident set are the system's to say
+(`mincore`, and `/proc/self/statm` or Mach's `task_info`), so they're
+asked through `replay.c` and replay as recorded (t/replay.sh's memory
+check); they're asked only when `:system` is.
+- **One nested info, not flat fields:** `:mail` and `:stack` are a
+  count and a flag at the top of a process's info already; inside
+  `:memory` every key is bytes, and nothing that reads the old fields
+  changes.
+- **A stack's pages from the system, not its depth:** how deep a
+  process is now costs nothing to say, but what it holds is how deep it
+  has ever been (the review's finding 6), which only the system knows.
+  The cost is a call for each process on a stack when `:system` is
+  asked, a few thousand at most on an island (D292).
+- **`memory.c`, a file of its own:** Mach's headers, which macOS's
+  answer needs, are kept away from the runtime's names (as `<sys/types.h>`'s
+  `major` and `minor` taught). It can't be compiled on the cloud
+  machine: the Mac's first build is its first test.
+- **Not counted, and said so in LANGUAGE.md:** the process's struct,
+  warm and spare stacks, the runtime's tables, and what `malloc` keeps;
+  `:resident` less the rest is those together.
+- **Rejected:** a builtin (`(memory)`), when a device that answers
+  questions about the runtime is there already; changing `(:mail n)`
+  and `(:stack held)` to carry bytes, which would break what reads
+  them; a per-process total, which would add a shared buffer once for
+  each holder.

@@ -1,0 +1,57 @@
+; What :system says a process, an island and the program hold (D294):
+; (:memory info), every number in it bytes: the heap's chunks by
+; generation, in use or not, the waiting messages, the stack and the
+; shared buffers. Only what's the same however often a heap is collected
+; is shown exactly (SLIGHT_GC_STRESS collects at every recv, and a major
+; collection moves what's old into a chunk of 4 KB), and a stack's pages
+; are the system's to count, so they're only compared.
+
+(defun ask (s q) (send s q) (match (read s) ((:process _ i) i) ((:runtime _ i) i)))
+(defun memory (s p) (lookup :memory (ask s (list :process p))))
+(defun facts (m keys) (map (lambda (k) (list k (lookup k m))) keys))
+
+; Allocates nothing: its messages wait while it sleeps.
+(defun sleeper () (sleep 1000) (recv (x x)))
+; Starts with a list, which its fork copied into a chunk of its own.
+(defun holder (xs) (recv (:go (length xs))))
+; Allocates one cell, and so has a nursery.
+(defun maker (n) (holder (list n)))
+
+(let s  (cadr (open :system)))
+(let a  (fork sleeper))
+(let b  (fork holder (list 1 2 3)))
+(let c  (fork maker 1))
+(let big (str/repeat "x" 5000))
+(let d  (fork holder (list big)))
+(sleep 10)
+(send a 7)
+(send a (list 1 2 3))
+
+; a: no heap; an integer waiting is its record, 32 bytes, and a list of
+; three its record and three cells, 80.
+(let ma (memory s a))
+(pprint (cons :sleeper (facts ma (list :nursery :old :mail :shared))))
+(pprint (list :sleeper-stack (> (lookup :stack ma) 0)))
+
+; b: no nursery, and the three cells it was forked with, 48 bytes, or the
+; chunk a major collection moved them to.
+(let mb (memory s b))
+(pprint (list :holder (lookup :nursery mb) (>= (lookup :old mb) 48) (lookup :mail mb)))
+
+; c: a nursery of 4 KB for its one cell.
+(pprint (list :maker (lookup :nursery (memory s c))))
+
+; d and the root each hold the string, 5,000 bytes off both heaps, and
+; each counts it whole.
+(pprint (list :shared (lookup :shared (memory s d)) (lookup :shared (memory s $$))))
+
+; The program's: every process's added up, and what the system says it
+; holds; and each island's, island 1 having nothing.
+(let rt (ask s (list :runtime)))
+(let m  (lookup :memory rt))
+(pprint (cons :program (facts m (list :mail :shared))))
+(pprint (list :program-more (>= (lookup :nursery m) 4096) (> (lookup :stack m) 0) (> (lookup :resident m) 0)))
+(pprint (map car m))
+(pprint (cons :island-1 (lookup :memory (nth 1 (lookup :islands rt)))))
+(map kill (list a b c d))
+:done

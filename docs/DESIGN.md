@@ -1267,6 +1267,16 @@ run (option (b), D256's step 6, put off).
   `at`, the entry `rt_preempt` was passed or the return address of the
   `join`, `sleep`, `yield` or device `send` it stopped in; one without
   is at its `code`. The deadlock message uses the same table.
+  What's held (D294) is `(:memory info)`, in a process's info, an
+  island's and the runtime's: the chunks of each generation
+  (`young_bytes`, and `heap_bytes` less that), the mailbox's chunks,
+  the stack's pages in memory and the `parked_t`, and the shared
+  buffers; the runtime's adds `(:resident n)`. The stack's pages and
+  the resident set are the system's to say (`mincore`; `/proc/self/statm`,
+  or Mach's `task_info`), asked in `memory.c`, a file with none of the
+  runtime's names in it since it includes Mach's headers, and through
+  `replay.c` (`rt_io_in_memory`, `rt_io_resident`), so a replay has the
+  numbers its run had. They're asked only when `:system` is.
 - **C libraries** (D151, D152; planned, step 12c). A pure function bounded
   by its input may be a builtin, called on the process's stack; anything
   with state or I/O is a device, its state in the runtime behind a pid,

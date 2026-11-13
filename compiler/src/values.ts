@@ -118,10 +118,13 @@ export const ARRAY_WORDS: readonly string[] = ['float'];
 // What :system says of islands (D256), in RT_ISLE_ order.
 export const ISLAND_WORDS: readonly string[] = ['island', 'started', 'sent', 'received', 'shared', 'islands'];
 
+// What :system says is held (D294), in RT_MEM_ order.
+export const MEMORY_WORDS: readonly string[] = ['memory', 'nursery', 'old', 'resident'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
     ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS, ...STAT_WORDS, ...PACK_WORDS, ...LOG_WORDS,
-    ...ARRAY_WORDS, ...ISLAND_WORDS,
+    ...ARRAY_WORDS, ...ISLAND_WORDS, ...MEMORY_WORDS,
 ];

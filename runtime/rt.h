@@ -358,6 +358,17 @@
 #define RT_ISLE_ISLANDS      5    // :islands       each island's counts, in (:runtime s info)
 #define RT_ISLE_COUNT        6
 
+// What :system says a process, an island and the program hold (D294), in
+// (:memory info), every number bytes: RT_MEM_x is symbol RT_SYM_MEM + x.
+// Its :mail, :stack and :shared are RT_SYS_MAIL's, the fault kind's and
+// RT_ISLE_SHARED's.
+#define RT_SYM_MEM         198    // RT_SYM_ISLE + RT_ISLE_COUNT
+#define RT_MEM_MEMORY        0    // :memory        what's held, in bytes, by what holds it
+#define RT_MEM_NURSERY       1    // :nursery       the young generation's chunks
+#define RT_MEM_OLD           2    // :old           the old generation's chunks
+#define RT_MEM_RESIDENT      3    // :resident      the program's memory, as the system has it
+#define RT_MEM_COUNT         4
+
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it

@@ -35,6 +35,10 @@
 # t/replay/now.slight reads the time of day on the virtual clock (D254):
 # without SLIGHT_EPOCH, from the real time of day, so a recorded run must
 # replay the same, its start after 2026; with it, from there.
+#
+# t/replay/memory.slight asks :system what the program and a stack hold
+# (D294), which the system says: a recorded run must replay the same,
+# though the replay holds 100 KB more.
 cd "$(dirname "$0")/.." || exit 2
 TARGET=${TARGET-aarch64}
 case "$TARGET-$(uname -m)" in
@@ -57,7 +61,7 @@ check() {                               # check what ok-or-not
     fi
 }
 
-for name in world net exec order rand now islands; do
+for name in world net exec order rand now islands memory; do
     if ! node bin/slightc.ts --target "$TARGET" -o "$dir/$name" "t/replay/$name.slight" >"$dir/$name.compile" 2>&1; then
         cat "$dir/$name.compile"
         check "$name (compile)" no
@@ -331,6 +335,18 @@ if [ "$(cat "$dir/now.epoch")" = "$(printf '(86400000000 1500000)\nexit: 0')" ];
 else
     cat "$dir/now.epoch"
     check "the virtual clock's time of day starts at SLIGHT_EPOCH" no
+fi
+
+# What the system says of memory: replayed as recorded, whatever the
+# replay holds.
+run SLIGHT_ISLANDS=2 SLIGHT_RECORD="$dir/memory.record" memory >"$dir/memory.recorded"
+run SLIGHT_REPLAY="$dir/memory.record" PAD="$(printf '%0100000d' 0)" memory >"$dir/memory.replayed"
+if cmp -s "$dir/memory.recorded" "$dir/memory.replayed" && grep -q '^([1-9][0-9]* [1-9][0-9]* [0-9]*)$' "$dir/memory.recorded" \
+   && grep -q '^exit: 0$' "$dir/memory.recorded"; then
+    check "what the system says of memory replays as recorded" ok
+else
+    diff -u "$dir/memory.recorded" "$dir/memory.replayed"
+    check "what the system says of memory replays as recorded" no
 fi
 
 echo "replay: $fail failed"

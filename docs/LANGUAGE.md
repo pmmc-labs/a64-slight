@@ -1565,6 +1565,18 @@ which `lookup` reads; more keys may come. A process's:
   which may have ended by then.
 - `(:received (n bytes))`: the messages from other islands given to it,
   to it or to one of its addresses.
+- `(:memory info)`: what it holds, an info of its own, every number in
+  it bytes (D294). `(:nursery n)` and `(:old n)`: its heap's chunks, by
+  generation (The heap), whatever's in use of them, where `:heap` above
+  is what's in use; together they're what its heap has from the system.
+  `(:mail n)`: its waiting messages, each a record of 32 bytes and its
+  copy. `(:stack n)`: its stack's pages in memory, as the system says,
+  which is as deep as it has ever been, not as deep as it is, since a
+  stack keeps its pages till its process ends; and the buffer its
+  frames wait in off the stack (D292), which it keeps once it has one.
+  `(:shared n)`: the big strings and arrays it holds that are off every
+  heap (The heap), each counted whole by every process that holds it.
+  Not counted: the process itself, a few hundred bytes.
 
 The runtime's, every island's added up: `(:processes n)` that haven't
 ended; `(:pids n)` made, processes and devices, ended or not;
@@ -1577,9 +1589,18 @@ program started; `(:reductions n)`, made by every process, ended or not;
 and `(:islands infos)`, an info for each island, started or not, in
 order: `(:island k)`, `(:started b)`, `(:processes n)`, `(:ready n)`,
 `(:timers n)`, `(:devices n)`, `(:heap bytes)`, `(:shared bytes)` (the
-shared buffers its processes hold, D253), `(:reductions n)`, and
+shared buffers its processes hold, D253), `(:reductions n)`,
 `(:sent (n bytes))` and `(:received (n bytes))`, its messages to and
-from other islands.
+from other islands, and `(:memory info)`, its processes' added up. The
+runtime's has `(:memory info)` too, every island's added up, and in it
+`(:resident n)`: the memory the program has, as the system says (its
+resident set), which is more than the rest together, since it counts
+the program's code, the runtime's own tables, stacks kept warm for the
+next process, and memory that has been freed and not gone back to the
+system. Asking for a `:memory` walks every mailbox and asks the system
+about each stack held, so `(:runtime)` and `(:processes)` take longer
+the more there is; what the system says is recorded, and replays
+(D170).
 
 A timer's message to the device is answered when it's due, so this
 shows where every process is, once a second (`examples/top.slight` is a

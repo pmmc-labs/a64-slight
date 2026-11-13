@@ -153,4 +153,12 @@ uint64_t rt_io_random_seed(const char *given);
 // The terminal's size: 0, or -1 if stdout isn't one.
 int rt_io_winsize(int *rows, int *cols);
 
+// What the system says the program holds (memory.c, D294), for :system:
+// its resident set, in bytes, and how many of the len bytes at `at` are in
+// memory. rt_resident and rt_in_memory ask; these record what they said.
+int64_t rt_resident(void);
+int64_t rt_in_memory(void *at, size_t len);
+int64_t rt_io_resident(void);
+int64_t rt_io_in_memory(void *at, size_t len);
+
 #endif

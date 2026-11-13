@@ -57,7 +57,7 @@ enum {
     IO_CLOCK = 1, IO_SELECT, IO_READ, IO_WRITE, IO_OPEN, IO_CLOSE, IO_SOCKET, IO_SETUP, IO_CONNECT,
     IO_LISTEN, IO_ACCEPT, IO_SOCKET_ERROR, IO_SEND, IO_RECV, IO_FOPEN, IO_FGETS, IO_SEED, IO_WINSIZE,
     IO_SPAWN, IO_WAIT, IO_KILL, IO_PIPE, IO_LISTEN_UNIX, IO_PEER, IO_REALTIME, IO_LIST, IO_STAT, IO_REMOVE,
-    IO_RENAME, IO_MKDIR, IO_RANDOM, IO_SEEN, IO_TOOK, IO_WAKE, IO_REMOVE_TREE,
+    IO_RENAME, IO_MKDIR, IO_RANDOM, IO_SEEN, IO_TOOK, IO_WAKE, IO_REMOVE_TREE, IO_RESIDENT, IO_IN_MEMORY,
 };
 
 static const char *const names[] = {
@@ -73,6 +73,7 @@ static const char *const names[] = {
     [IO_RENAME] = "a rename", [IO_MKDIR] = "a mkdir", [IO_RANDOM] = "random bytes",
     [IO_REMOVE_TREE] = "a tree removed",
     [IO_SEEN] = "what another island did", [IO_TOOK] = "an inbox's items", [IO_WAKE] = "an inbox's pipe",
+    [IO_RESIDENT] = "the memory the program holds", [IO_IN_MEMORY] = "the memory a stack holds",
 };
 
 static int                mode;
@@ -864,6 +865,18 @@ uint64_t rt_io_random_seed(const char *given) {
     if (given) bits = strtoull(given, NULL, 10);
     else if (getentropy(&bits, sizeof bits) != 0) bits = (uint64_t)time(NULL) << 32 ^ (uint64_t)getpid() << 16 ^ (uint64_t)(uintptr_t)&here;
     return (uint64_t)done(IO_SEED, (int64_t)bits);
+}
+
+// --- memory (D294) --------------------------------------------------------------
+
+int64_t rt_io_resident(void) {
+    if (mode == REPLAY) return replayed(IO_RESIDENT);
+    return done(IO_RESIDENT, rt_resident());
+}
+
+int64_t rt_io_in_memory(void *at, size_t len) {
+    if (mode == REPLAY) return replayed(IO_IN_MEMORY);
+    return done(IO_IN_MEMORY, rt_in_memory(at, len));
 }
 
 int rt_io_winsize(int *rows, int *cols) {

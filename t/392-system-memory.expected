@@ -1,0 +1,10 @@
+(:sleeper (:nursery 0) (:old 0) (:mail 112) (:shared 0))
+(:sleeper-stack #true)
+(:holder 0 #true 0)
+(:maker 4096)
+(:shared 5000 5000)
+(:program (:mail 112) (:shared 10000))
+(:program-more #true #true #true)
+(:nursery :old :mail :stack :shared :resident)
+(:island-1 (:nursery 0) (:old 0) (:mail 0) (:stack 0) (:shared 0))
+:done

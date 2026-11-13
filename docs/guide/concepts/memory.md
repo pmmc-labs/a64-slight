@@ -83,7 +83,10 @@ value. The copy is as big as the value, and so is the time it takes.
 
 The `:system` device tells each process's `(:heap bytes)`,
 `(:reductions n)`, `(:mail n)` (messages waiting) and `(:stack held)`,
-and the runtime's totals. `examples/top.slight` shows them live, like
+and the runtime's totals; and `(:memory info)`, what each holds in
+bytes, which is more than what it uses: its heap's chunks, its waiting
+messages, its stack, and for the program, what the system says it has.
+`examples/top.slight` shows them live, like
 `top`. A process whose mail keeps growing is being sent more than it
 can take. A process whose heap keeps growing is keeping more than it
 needs, often in a `let` at the top of a long-running function, which

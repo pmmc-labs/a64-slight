@@ -1,0 +1,17 @@
+; What :system has from the system about memory (D294): the program's
+; resident set, and the pages of a stack that are in memory, one of them
+; another island's. They're the world's to say, so a recorded run must
+; replay with the numbers it had, whatever the replay itself holds:
+; t/replay.sh replays it with 100 KB more in its environment.
+
+(defun ask (s q) (send s q) (match (read s) ((:process _ i) i) ((:runtime _ i) i)))
+(defun deep (d) (if (== d 0) 0 (+ 1 (deep (- d 1)))))
+(defun waiter (d) (let x (deep d)) (recv (:go x)))
+
+(let s (cadr (open :system)))
+(let p (fork/on 1 waiter 2000))
+(sleep 20)
+(let m  (lookup :memory (ask s (list :runtime))))
+(let mp (lookup :memory (ask s (list :process p))))
+(kill p)
+(list (lookup :resident m) (lookup :stack m) (lookup :stack mp))

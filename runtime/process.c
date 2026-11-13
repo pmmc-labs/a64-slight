@@ -5368,6 +5368,18 @@ static int working(void) {
 
 #define ISLE(word) (RT_SYM_ISLE + RT_ISLE_##word)
 
+#define MEM(word) (RT_SYM_MEM + RT_MEM_##word)
+
+// What a process holds, or an island's or the program's processes do, in
+// bytes (D294): its heap's chunks, by generation, in use or not; its
+// waiting messages' chunks; its stack's pages in memory, as the system
+// says, and the buffer its frames wait in off the stack (D292); and the
+// shared buffers its handles keep, each counted whole by every process
+// that holds it.
+typedef struct {
+    uint64_t nursery, old, mail, stack, shared;
+} memory_t;
+
 typedef struct snapshot {
     rt_value_t pid, parent, joining;    // pid 0: the end of a (:processes)
     uintptr_t  in;                      // where it is in compiled code, or 0
@@ -5376,12 +5388,14 @@ typedef struct snapshot {
     uint64_t   racing, nracing;         // the pids it races, after them
     int        state, stack;            // an RT_SYS_ state; whether it holds a stack
     crossed_t  sent, received;          // its messages to and from other islands (D256)
+    memory_t   memory;
 } snapshot_t;
 
 // An island's counts, for (:runtime).
 typedef struct {
     uint64_t  processes, pids, records, ready, timers, devices, heap, shared, stacks, reductions;
     crossed_t sent, received;
+    memory_t  memory;
     int       started;
 } counts_t;
 
@@ -5459,6 +5473,25 @@ static void snap_pid(pids_t *ps, rt_value_t pid) {
     ps->at[ps->n++] = pid;
 }
 
+// What p holds. Its stack's pages are the system's to count, a call for
+// each process on a stack, recorded for a replay.
+static memory_t memory_of(const rt_proc_t *p) {
+    size_t   young = young_bytes(p);
+    memory_t m = { .nursery = young, .old = p->heap_bytes - young, .shared = shared_bytes(p, 0) + shared_bytes(p, 1) };
+    for (const rt_msg_t *msg = p->mail; msg; msg = msg->next) m.mail += msg->chunk->size;
+    if (p->stack)  m.stack += (uint64_t)rt_io_in_memory(p->stack, STACK_BYTES);
+    if (p->parked) m.stack += sizeof *p->parked + p->parked->cap;
+    return m;
+}
+
+static void memory_add(memory_t *all, const memory_t *m) {
+    all->nursery += m->nursery;
+    all->old     += m->old;
+    all->mail    += m->mail;
+    all->stack   += m->stack;
+    all->shared  += m->shared;
+}
+
 static snapshot_t take(pids_t *ps, const rt_proc_t *p) {
     static const int states[] = {
         [RT_READY] = RT_SYS_READY, [RT_RUNNING] = RT_SYS_RUNNING, [RT_WAITING] = RT_SYS_RECV,
@@ -5469,6 +5502,7 @@ static snapshot_t take(pids_t *ps, const rt_proc_t *p) {
         .pid   = p->pid, .parent = p->parent, .joining = p->state == RT_JOINING ? p->joining : RT_NIL,
         .in    = where(p), .heap = in_use(p), .calls = calls_of(p),
         .state = states[p->state], .stack = p->stack != NULL, .devices = ps->n,
+        .memory = memory_of(p),
     };
     if (p->side) {
         r.sent     = p->side->sent;
@@ -5527,20 +5561,38 @@ static rt_value_t crossed_at(rt_value_t **at, crossed_t c) {
     return list_at(at, xs, 2);
 }
 
-#define PROCESS_FIELDS 13
+#define MEMORY_FIELDS  5
+#define MEMORY_WORDS   (6 * (MEMORY_FIELDS + 1))        // the fields, :resident with them, and the list's cells
+
+// m as (:memory info)'s info, at *at; with (:resident bytes) last if
+// resident isn't negative.
+static rt_value_t memory_info(rt_value_t **at, const memory_t *m, int64_t resident) {
+    rt_value_t fields[MEMORY_FIELDS + 1] = {
+        field(at, MEM(NURSERY), rt_int((int64_t)m->nursery)),
+        field(at, MEM(OLD), rt_int((int64_t)m->old)),
+        field(at, SYS(MAIL), rt_int((int64_t)m->mail)),
+        field(at, RT_SYM_FAULTS - 1 + RT_FAULT_STACK, rt_int((int64_t)m->stack)),
+        field(at, ISLE(SHARED), rt_int((int64_t)m->shared)),
+    };
+    if (resident >= 0) fields[MEMORY_FIELDS] = field(at, MEM(RESIDENT), rt_int(resident));
+    return list_at(at, fields, MEMORY_FIELDS + (resident >= 0));
+}
+
+#define PROCESS_FIELDS 14
 
 // (:process s info), its devices and races in pids.
 static void tell_process(rt_device_t *d, const snapshot_t *r, const rt_value_t *pids, int more) {
     const char *name  = r->in ? function_name(r->in) : NULL;
     size_t      len   = name ? strlen(name) : 0;
     uint64_t    words = (len / 8 + 7) & ~(uint64_t)1;     // the name's string, then cells
-    rt_value_t *space = rt_must(malloc((words + 6 * PROCESS_FIELDS + 10 + 2 * (r->ndevices + r->nracing)) * sizeof *space));
+    rt_value_t *space = rt_must(malloc((words + 6 * PROCESS_FIELDS + MEMORY_WORDS + 10 + 2 * (r->ndevices + r->nracing)) * sizeof *space));
     rt_value_t *at    = space + words;
     rt_value_t  in    = name ? string_in(space, name, len) : RT_NIL;
     rt_value_t  devices = RT_NIL;                          // they're newest first: the list is oldest first
     for (uint64_t i = 0; i < r->ndevices; i++, at += 2) devices = rt_cons_at(at, pids[r->devices + i], devices);
     rt_value_t  joining = r->nracing ? list_at(&at, pids + r->racing, r->nracing) : r->joining;
     rt_value_t  sent = crossed_at(&at, r->sent), received = crossed_at(&at, r->received);
+    rt_value_t  memory = memory_info(&at, &r->memory, -1);
     rt_value_t fields[PROCESS_FIELDS] = {
         field(&at, SYS(PID), r->pid),
         field(&at, SYS(PARENT), r->parent),
@@ -5555,6 +5607,7 @@ static void tell_process(rt_device_t *d, const snapshot_t *r, const rt_value_t *
         field(&at, ISLE(ISLAND), rt_int((int64_t)rt_pid_island(r->pid))),
         field(&at, ISLE(SENT), sent),
         field(&at, ISLE(RECEIVED), received),
+        field(&at, MEM(MEMORY), memory),
     };
     rt_value_t info = list_at(&at, fields, PROCESS_FIELDS);
     tell_sym(d, rt_keyword(SYS(PROCESS)), rt_cons_at(at, info, RT_NIL), more);
@@ -5575,17 +5628,20 @@ static counts_t count_here(void) {
         c.shared     += shared_bytes(p, 0) + shared_bytes(p, 1);
         c.stacks     += p->stack != NULL;
         c.reductions += calls_of(p);
+        memory_t m = memory_of(p);
+        memory_add(&c.memory, &m);
     }
     for (const rt_proc_t *p = my.ready_head; p; p = p->next_ready) c.ready++;
     return c;
 }
 
-#define ISLAND_FIELDS  11
-#define RUNTIME_FIELDS 12
+#define ISLAND_FIELDS  12
+#define RUNTIME_FIELDS 13
 
 // Island k's info, in (:islands ...).
 static rt_value_t island_info(rt_value_t **at, uint64_t k, const counts_t *c) {
     rt_value_t sent = crossed_at(at, c->sent), received = crossed_at(at, c->received);
+    rt_value_t memory = memory_info(at, &c->memory, -1);
     rt_value_t fields[ISLAND_FIELDS] = {
         field(at, ISLE(ISLAND), rt_int((int64_t)k)),
         field(at, ISLE(STARTED), c->started ? RT_TRUE : RT_FALSE),
@@ -5598,6 +5654,7 @@ static rt_value_t island_info(rt_value_t **at, uint64_t k, const counts_t *c) {
         field(at, SYS(REDUCTIONS), rt_int((int64_t)c->reductions)),
         field(at, ISLE(SENT), sent),
         field(at, ISLE(RECEIVED), received),
+        field(at, MEM(MEMORY), memory),
     };
     return list_at(at, fields, ISLAND_FIELDS);
 }
@@ -5617,15 +5674,17 @@ static void tell_runtime(rt_device_t *d, const counts_t *each) {
         all.heap       += c->heap;
         all.stacks     += c->stacks;
         all.reductions += c->reductions;
+        memory_add(&all.memory, &c->memory);
     }
-    uint64_t    per   = 6 * ISLAND_FIELDS + 8 + 2;      // an island's info, its pairs, and its cell in the list
-    rt_value_t *space = rt_must(malloc((per * nislands + 6 * RUNTIME_FIELDS + 2) * sizeof *space)), *at = space;
+    uint64_t    per   = 6 * ISLAND_FIELDS + MEMORY_WORDS + 8 + 2;   // an island's info, its memory, its pairs, and its cell in the list
+    rt_value_t *space = rt_must(malloc((per * nislands + 6 * RUNTIME_FIELDS + MEMORY_WORDS + 2) * sizeof *space)), *at = space;
     rt_value_t  islands = RT_NIL;
     for (uint64_t k = nislands; k-- > 0; ) {
         rt_value_t info = island_info(&at, k, &each[k]);
         islands = rt_cons_at(at, info, islands);
         at += 2;
     }
+    rt_value_t memory = memory_info(&at, &all.memory, rt_io_resident());
     rt_value_t fields[RUNTIME_FIELDS] = {
         field(&at, SYS(PROCESSES), rt_int((int64_t)all.processes)),
         field(&at, SYS(PIDS), rt_int((int64_t)all.pids)),
@@ -5639,6 +5698,7 @@ static void tell_runtime(rt_device_t *d, const counts_t *each) {
         field(&at, SYS(CLOCK), rt_int((int64_t)((now() - started) / 1000000))),
         field(&at, SYS(REDUCTIONS), rt_int((int64_t)all.reductions)),
         field(&at, ISLE(ISLANDS), islands),
+        field(&at, MEM(MEMORY), memory),
     };
     rt_value_t info = list_at(&at, fields, RUNTIME_FIELDS);
     tell_sym(d, rt_keyword(SYS(RUNTIME)), rt_cons_at(at, info, RT_NIL), 0);
