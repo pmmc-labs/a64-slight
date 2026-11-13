@@ -1,0 +1,56 @@
+; A process that waits holds about what it has live (D295), which
+; :system's (:memory info) shows (D294). The first time a process waits
+; in recv with more than a first nursery, and after that whenever its
+; heap has doubled, past 32 KB, what's live is copied into a chunk that
+; fits it. And a nursery grows past 16 KB only for a run that fills it,
+; not for a thousand small ones. Before, a nursery only grew, to 1 MB,
+; and an old generation under 256 KB was never collected: the worker
+; here held about 200 KB, and the builder its 1.6 MB.
+
+(defun ask (s q) (send s q) (match (read s) ((:process _ i) i)))
+(defun held (s p)
+    (let m (lookup :memory (ask s (list :process p))))
+    (list (lookup :nursery m) (lookup :old m)))
+
+; Holds a list of 100 integers, 1,600 bytes, built in a nursery of 1 KB
+; that it outgrew.
+(defun holder (n) (hold (range 0 n)))
+(defun hold (xs) (recv (:go (length xs))))
+
+; Builds 100,000 cells, drops them, and waits.
+(defun builder (n) (let k (length (range 0 n))) (recv (:go k)))
+
+; Takes messages for good, each a list, keeping three cells from one to
+; the next.
+(defun worker (st)
+    (recv
+        ((:work x) (worker (list x (+ x 1) (car st))))
+        ((:stop to) (send to (car st)))))
+
+(defun work (w n) (when (> n 0) (send w (list :work n)) (work w (- n 1))))
+
+(let s (cadr (open :system)))
+(let h (fork holder 100))
+(let b (fork builder 100000))
+(let w (fork worker (list 0)))
+(sleep 1)
+
+; The holder: no nursery, and a chunk of just its list.
+(pprint (cons :holder (held s h)))
+
+; The builder: nothing.
+(pprint (cons :builder (held s b)))
+
+; The worker, after 2,000 messages, about 140 KB of them: a nursery of
+; 16 KB at the most, and less than 32 KB old; and still after 2,000 more.
+(work w 2000)
+(sleep 1)
+(let h1 (held s w))
+(work w 2000)
+(sleep 1)
+(let h2 (held s w))
+(pprint (list :worker (<= (car h1) 16384) (< (cadr h1) 32768) (<= (car h2) 16384) (< (cadr h2) 32768)))
+(send w (list :stop $$))
+(pprint (recv (x x)))
+(map kill (list h b))
+:done

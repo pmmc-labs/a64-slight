@@ -523,11 +523,15 @@ typedef struct rt_proc {
     rt_value_t  fun;            // a fork's: the function rt_apply_start calls with args (D286)
     rt_ctx_t    ctx;
 
-    rt_state_t      state;
+    uint8_t         state;      // an rt_state_t, in a byte, so those after it cost a waiting process nothing
     uint8_t         keypress;   // connected to :keypress
     uint8_t         held;       // waiting with its stack kept, and counted among its island's (process.c)
+    uint8_t         waited;     // it has waited in recv since its nursery last started again (process.c)
+    uint8_t         settle_log2;    // its heap is settled when it waits in recv holding 2^this bytes or more
+    uint8_t         nursery_log2;   // the nursery it's to have when it next allocates is 2^this bytes; 0, the first size
     void           *stack;      // the bottom of its stack, carved from a slab (process.c), or NULL
-    rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c)
+    rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c);
+                                // NULL till it next allocates, if it's to be another size
     rt_chunk_t     *chunks;     // the old generation, newest first, the messages it's taken among them
     uintptr_t       old_ptr;    // where the next promotion goes, in the first of chunks; or 0
     size_t          heap_bytes; // in all its chunks, both generations

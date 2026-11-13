@@ -7709,3 +7709,81 @@ check); they're asked only when `:system` is.
   and `(:stack held)` to carry bytes, which would break what reads
   them; a per-process total, which would add a shared buffer once for
   each holder.
+
+**D295. A heap sized to what's live: a process that waits is settled.**
+*(Stevan, 13 Nov 2026: "start with A, then B", of the directions in
+`docs/memory-review-2026-11-13.md`; the rules and their numbers are
+Claude's, by measurement, for Stevan to confirm or change.)* The review
+found a process's heap following what it had ever allocated, not what
+it held: a nursery that only doubled, to 1 MB, and an old generation
+never collected under 256 KB (D106), so a worker holding 48 bytes sat
+at 640 KB to 1 MB; one allocation cost a waiting process a 4 KB
+nursery; and a process that went quiet never collected. Four changes,
+all in when and into what the collector copies; its walks are as they
+were:
+- **Settling.** A process about to wait in `recv`, with nothing to
+  take, whose heap's chunks have reached a threshold has a major
+  collection there, and if what's live came to less than the chunks it
+  went into (and to 1 MB or less), a second, into one chunk of just
+  that size. The threshold is 2 KB the first time a process waits, and
+  after that twice what its old generation then held, and never under
+  32 KB. So a process that builds and drops gives the memory back the
+  first time it waits; one that only holds what it started with holds
+  exactly that; and a worker holds its state, a nursery and under 32 KB
+  of what its messages left. A settling copies what's live, and comes
+  only when the heap has doubled, so it's paid for as a major collection
+  is. The test where a process blocks is a shift and a branch.
+- **A nursery's size is a run's need.** It still doubles when it
+  overflows, but past 16 KB only if the process hasn't waited, in
+  anything, since it last started again; and a resized one is made
+  when the process next allocates, so one that waits first holds none.
+  A process that never waits is as before, to 1 MB.
+- **Smaller firsts:** a first nursery of 1 KB, not 4, and a major
+  collection's chunks from 512 bytes, doubling, so what's kept fits.
+- **`GC_MIN` 64 KB, not 256**, for what waits only in `read`, `join` or
+  `sleep`, which isn't settled.
+- **Measured** (cloud machine, x86-64, one island; instructions are
+  callgrind's): resident memory, 1,000 workers holding 48 bytes after
+  10,000 messages each, 640 MB to 46; the same sent bare integers, 246
+  to 25; 100,000 waiting processes holding one cell, 453 MB to 160, and
+  holding 100, 453 to 216; a process that built 64 MB and dropped it,
+  67 MB to 1.6; `examples/airline.slight` on its made-up day, 124 MB to
+  31 and 1.85 s to 1.47. Instructions: within 1 per cent on `ping-pong`,
+  `thread-ring`, `fan-in`, `spawn`, `idle-memory`, `binary-trees`,
+  `deriv`, `nqueens`, `n-body`, `tak` and `bank`; `payload` 2.2 per cent
+  more (a list of 100 survives a collection every ten messages, where a
+  1 MB nursery made that every 600); ten workers over 300,000 messages
+  13 per cent fewer. Time, 1,000 workers: over their first 3,000
+  messages each, 0.88 s to 1.07, since before, nothing was collected
+  that early and every message's chunk was fresh memory; over 10,000,
+  4.5 s to 3.7, and over 30,000, 12.8 to 11.4.
+- **Found on the way, glibc's:** a request of 1 KB or more makes
+  `malloc` gather up every freed small chunk first (`malloc_consolidate`),
+  and after that small requests take its slow path. Freeing and making
+  a nursery at each settling cost `ping-pong` 18 per cent of its
+  instructions, and a first to-space chunk of 1 KB cost ten workers 13;
+  hence a nursery kept after the first settling, and to-space from 512
+  bytes. The numbers above are fitted round an allocator that isn't
+  slight's, which is the review's direction C.
+- **Not done, and why:** settling in `read`, `join` and `sleep`, which
+  haven't the frame's slots in use, and `read` holds its sources in C,
+  where a collection can't move them; a process that drops what it
+  held across a wait without allocating as much again, which nothing
+  that counts allocation can see (only time can: a collection of what's
+  been quiet a while, from the scheduler, which needs a waiting
+  process's roots kept); a nursery freed while its process waits
+  between heavy runs (a run's nursery, up to 1 MB, is kept by a process
+  that fills one each time and gone at its first quiet settling).
+- **Rejected:** settling at every wait (a collection a message); a
+  floor of 64 KB for settling (87 KB a worker where 32 KB makes it 46,
+  and no time saved); a nursery for the asking of 4 KB, not 16 (the
+  workers taking lists held 51 MB, not 46, since more is promoted);
+  settling every process the first time it waits, whatever it holds
+  (`bank` 11 per cent more instructions: each customer allocates a
+  little, waits, and ends); freeing every nursery at every settling
+  (glibc, above); a threshold kept as a word in the process (a byte,
+  its log, beside the state, so a waiting process is no bigger).
+- Golden test 393 (`t/393-heap-settles`), on D294's `(:memory info)`;
+  test 392's first nursery. `SLIGHT_GC_STRESS` settles at every `recv`
+  that waits, as if for the first time, so `SLIGHT_GC_STRESS=7 make
+  golden` checks it against every test.

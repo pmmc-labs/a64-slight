@@ -726,9 +726,12 @@ REPL and line editing are slight code over key events.
 Each process has its own heap, in two generations (D200), each made of
 `malloc`ed chunks (D89), with bump allocation and ordinary absolute
 pointers. Everything is allocated in the young one, a **nursery**: one
-chunk, 4 KB at first, which comes with the first allocation (so a
-process that allocates nothing has no heap), and twice the size at each
-collection that finds it overflowed, up to 1 MB. Once it's full, what's
+chunk, 1 KB at first, which comes with the first allocation (so a
+process that allocates nothing has no heap), and twice the size after a
+collection that finds it overflowed, up to 1 MB: for the asking up to
+16 KB, and past that only if the process filled it without waiting
+(D295, below). The bigger one is made when the process next allocates,
+so one that waits first holds none. Once it's full, what's
 allocated goes into overflow chunks, listed after it, till the next
 function's entry, where it's collected. The **old generation** is a list
 of chunks too: what collections have kept, the messages taken, a fork's
@@ -801,8 +804,8 @@ Lalloc_N:
   adopted chunks go in behind it.
 - **A major collection** runs once the old generation in use (its
   chunks, less what's free in the one promoted into) reaches twice what
-  was live after the last major one, and never below 256 KB, so a small
-  process's old generation is never collected (D106); but never within
+  was live after the last major one, and never below 64 KB (D106, which
+  had 256 KB till D295); but never within
   an eighth of the cap (128 MB at 1 GB, 8 at 64), so a process with more
   than half the cap live still collects before it reaches the cap,
   rather than failing there with a heap of garbage (D196). The eighth is
@@ -813,7 +816,36 @@ Lalloc_N:
   A major collection copies everything live, in both generations, into
   fresh chunks, and frees the old ones; it comes right after a minor
   one when what that promoted takes the old generation to its
-  threshold.
+  threshold. The fresh chunks start at 512 bytes and double to 1 MB, so
+  what's kept is in chunks that fit it, whatever the heap was before
+  (512, so that glibc takes the first from its small bins: a request
+  of 1 KB or more makes it gather up every freed message first, which
+  cost a process that takes many small ones a seventh of its
+  instructions).
+- **A process that waits is settled** (D295; `settle_heap`), so that it
+  holds about what it has live, not what it allocated to get there.
+  When it's about to wait in `recv` with nothing to take, and its
+  heap's chunks, both generations, have reached 2^`settle_log2` bytes:
+  a major collection; then, if what's live came to less than the
+  chunks it was copied into and to no more than 1 MB, a second, into
+  one chunk of just that size, which only the first could say; and the
+  next time is at the power of two past twice what the old generation
+  then holds, with the nursery it keeps, and never under 32 KB (a
+  power of two, so the threshold is a byte in the process, its log). The first time a process waits, 2 KB is enough (more
+  than a first nursery), and its nursery goes too, till it next
+  allocates: what a process built to start with may be all it ever
+  holds. After that a nursery of 16 KB or less is kept (freeing and
+  making it each time set glibc to gathering, as above), and a bigger
+  one goes, to come back at 16 KB. Each settling copies what's live
+  and comes only once the heap has doubled, so it's paid for by the
+  allocating that doubled it, as a major collection is; the test, a
+  shift and a branch, is on the path where a process blocks, not where
+  it takes a message. A nursery's size is one run's need because
+  `restart` grows one past 16 KB only if the process hasn't waited (in
+  anything: `waited`, set in `wait_from`) since it last started again.
+  Waits other than `recv` don't settle: they haven't the frame's slots
+  in use, and `read` holds its sources in C. `SLIGHT_GC_STRESS` settles
+  at every `recv` that waits, as if for the first time.
 - **The cap** is checked as the heap grows, in `rt_heap_grow`, and not
   as a collection promotes; so a heap that's past it after a collection
   gets no room in its nursery, and its next allocation faults (D202).
@@ -843,12 +875,15 @@ Lalloc_N:
   stack maps, no write barrier.
 - **A frame keeps everything in its slots** until it returns, so a `let`
   in the root's body lives till the program ends.
-- **A waiting process keeps its nursery**, as it keeps its old chunks;
+- **A waiting process keeps its nursery**, if it has one of 16 KB or
+  less and has waited before (above), as it keeps its old chunks;
   one that has never allocated has neither. The process struct holds as
   few fields for the generations as will do (the overflow chunks are
   listed after the nursery, one count of bytes covers both generations,
-  and only how far the chunk promoted into is filled is kept), since a
-  waiting process costs its struct: 352 bytes, as before them.
+  and only how far the chunk promoted into is filled is kept; `waited`,
+  `settle_log2` and `nursery_log2` are bytes beside its state, itself a
+  byte for that), since a waiting process costs its struct: 392 bytes
+  on x86-64, 504 on AArch64.
 - `SLIGHT_POISON=1` in the environment fills what the collector frees, a
   nursery started again included, with garbage, so a pointer it missed
   fails at once; `t/run.sh` sets it. `SLIGHT_GC_STRESS=n` makes every nth
@@ -879,7 +914,9 @@ kernel's limit on mappings); growing the heap to three times what's live
 (D196, for the memory); mark-sweep or mark-compact for the old
 generation (copying it is the code there was); and a pool of nurseries
 that waiting processes give back, as they do their stacks (later, if
-processes that allocate and then wait turn out to hold too much).
+processes that allocate and then wait turn out to hold too much; they
+did, and D295 answers it by settling a heap as its process waits, with
+no pool).
 
 ### The libm (D253)
 

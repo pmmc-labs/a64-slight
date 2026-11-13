@@ -1101,13 +1101,27 @@ its own and the kernel doesn't kill the program. That caps each
 process, not all of them together. It's collected when the process
 waits in `recv`, or at the entry of the next function called (D166,
 D276), in two generations (D200): what's new is allocated in a nursery
-(from 4 KB, growing to 1 MB), and once that's full, what's still
+(from 1 KB, growing to 1 MB), and once that's full, what's still
 reachable in it is moved to the old generation and the nursery starts
-again; the old generation is collected once it's at least 256 KB and
+again; the old generation is collected once it's at least 64 KB and
 twice what survived its last collection. So what dies young costs
 little, and what lives long is copied rarely. Every loop is a call, so
 any process collects, the root included, whether it waits for messages
 or not.
+
+A process that waits holds about what it has live (D295). A nursery
+grows past 16 KB only for a process that fills it without waiting, so
+its size is what one run of the process needs, not a count of what it
+has ever allocated. And when a process waits in `recv` with nothing to
+take, the first time with more than a first nursery, and after that
+whenever its heap has doubled and is over 32 KB, its heap is settled:
+what's live is copied into chunks that fit it, and the rest goes. So a
+process that builds something big, drops it and waits gives it back
+then; one that keeps a little state and takes messages for good holds
+its state, a nursery of 16 KB at most, and under 32 KB of what its
+messages left; and one that only holds what it was started with holds
+just that. What waits only in `read`, `join` or `sleep` isn't settled;
+its heap is collected as it grows, as any process's is.
 
 What's live is what the process can still reach, and that includes
 whatever a function that hasn't returned has bound with `let`, until it

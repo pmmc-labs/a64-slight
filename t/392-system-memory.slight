@@ -38,8 +38,9 @@
 (let mb (memory s b))
 (pprint (list :holder (lookup :nursery mb) (>= (lookup :old mb) 48) (lookup :mail mb)))
 
-; c: a nursery of 4 KB for its one cell.
-(pprint (list :maker (lookup :nursery (memory s c))))
+; c: a first nursery, 1 KB, for its one cell (or none, when the collector
+; is stressed, which settles its heap each time it waits, D295).
+(pprint (list :maker (<= (lookup :nursery (memory s c)) 1024)))
 
 ; d and the root each hold the string, 5,000 bytes off both heaps, and
 ; each counts it whole.
@@ -50,7 +51,7 @@
 (let rt (ask s (list :runtime)))
 (let m  (lookup :memory rt))
 (pprint (cons :program (facts m (list :mail :shared))))
-(pprint (list :program-more (>= (lookup :nursery m) 4096) (> (lookup :stack m) 0) (> (lookup :resident m) 0)))
+(pprint (list :program-more (> (lookup :stack m) 0) (> (lookup :resident m) 0)))
 (pprint (map car m))
 (pprint (cons :island-1 (lookup :memory (nth 1 (lookup :islands rt)))))
 (map kill (list a b c d))

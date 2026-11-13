@@ -1464,6 +1464,42 @@ did (1,590 million to 450), fib 30 40 per cent fewer (131 to 79),
 are too noisy to say more than that `binary-trees 18` went from 3.8 s
 to under 2. The M2's runs after each are above.
 
+### What the memory review changed (13 Nov)
+
+A heap sized to what's live (D295): a process that waits in `recv` is
+settled, its heap copied into chunks that fit what's live, the first
+time it waits and then whenever the heap has doubled past 32 KB; a
+nursery grows past 16 KB only for a run that fills it; a first nursery
+is 1 KB; and the old generation's floor is 64 KB. On the cloud machine,
+x86-64, one island, resident memory read from `/proc` while the program
+sleeps (the programs are the review's):
+
+| | Before | After |
+|---|---|---|
+| 1,000 workers holding 48 bytes, after 10,000 messages each | 640 MB | 46 MB |
+| The same, sent bare integers | 246 MB | 25 MB |
+| 100,000 waiting processes holding one cell | 453 MB | 160 MB |
+| 100,000 holding a list of 100 | 453 MB | 216 MB |
+| 100,000 that never allocated | 59 MB | 59 MB |
+| A process that built 64 MB, dropped it, and waits | 67 MB | 1.6 MB |
+| After 20,000 processes of 16 KB each have ended | 554 MB | 335 MB |
+| `examples/airline.slight`, its made-up day, 10 what-ifs: peak | 124 MB | 31 MB |
+
+The airline also runs in 1.47 s where it took 1.85. Instructions, under
+callgrind at a tenth of the size: within 1 per cent on `ping-pong`,
+`thread-ring`, `fan-in`, `spawn`, `idle-memory`, `binary-trees`,
+`deriv`, `nqueens`, `n-body`, `tak` and `bank`; `payload` 2.2 per cent
+more; ten workers over 300,000 messages 13 per cent fewer. A thousand
+workers are slower over their first 3,000 messages each (0.88 s to
+1.07), where the old policy collected nothing and every message's
+chunk was fresh memory, and faster after: 4.5 s to 3.7 over 10,000
+each, 12.8 to 11.4 over 30,000. Not yet measured on the M2 Max.
+
+What's left of the review: memory that's freed stays with the program
+(the last row; an allocator of slight's own, its direction C), exit
+records (`spawn`, `bank`), the pauses beside a big heap, and what D295
+lists as not done.
+
 ### What slight should look at next
 
 - **A waiting process's stack** (`idle-memory`, `thread-ring`, 11
@@ -1489,7 +1525,9 @@ to under 2. The M2's runs after each are above.
   settles at 640 KB to 1 MB (a nursery that only grows, an old
   generation never collected under 256 KB), one allocation costs a
   waiting process 4 KB, a quiet process never collects, and freed
-  memory stays with the program.
+  memory stays with the program. Its first two steps are built:
+  `:system` says what's held (D294), and a heap is sized to what's
+  live (D295), below.
 - **Lists in the prelude** (`deriv`, `nqueens`): `map`, `append`,
   `filter`, `length` and the rest went through `fold/l` and `reverse`,
   with a closure called for each element, and `not` was a call; about
@@ -1525,13 +1563,12 @@ to under 2. The M2's runs after each are above.
   `binary-trees 14` with pairs in place of tuples takes 30 per cent
   fewer instructions (318 million to 453); objects in multiples of 8
   bytes would make a two-element tuple 24.
-- **A busy process's garbage:** a heap under 256 KB (`GC_MIN`) is never
+- **A busy process's garbage:** a heap under 256 KB (`GC_MIN`) was never
   collected, so each of `thread-ring`'s 503 processes kept up to that
   much of its messages' chunks: 266 MB, where Erlang needs 37. Done for
-  messages with nothing to copy (D199): 2.6 MB. Not for messages with
-  something in them, nor for what minor collections promote and is
-  dropped after: the airline's 300 aircraft, ticked with `(:tick t)`
-  each minute, hold 84 MB, 61 with bare integers (D210).
+  messages with nothing to copy (D199): 2.6 MB. And for the rest
+  (D295, above): the airline's 300 aircraft, ticked with `(:tick t)`
+  each minute, held 84 MB (D210), and the whole run now peaks at 31.
 - **One structure's size:** done (D202). A heap's cap is 1 GB, or what
   `SLIGHT_HEAP_MAX` says, where it was 64 MB, which held a structure of
   about 56 MB at most. The cost: a major collection takes 0.5 to 1 ms

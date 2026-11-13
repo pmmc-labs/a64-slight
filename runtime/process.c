@@ -50,10 +50,26 @@
 #define STACK_BYTES    (8 << 20)        // every process's stack, mapped lazily
 #define STACK_HEADROOM (64 << 10)       // room left below the limit for one frame and a C call
 #define SPARE_HELD     (64 << 20)       // about how much spare stacks may hold before their pages go back unasked
-#define CHUNK_FIRST    (4 << 10)        // a process's nursery at first, and its first old chunk...
+#ifndef CHUNK_FIRST
+#define CHUNK_FIRST    (1 << 10)        // a process's nursery at first, and its first old chunk...
+#endif
 #define CHUNK_MAX      (1 << 20)        // ...each doubling up to this
+#ifndef TOSPACE_FIRST
+#define TOSPACE_FIRST  512              // a major collection's first chunk, which doubles: small enough that glibc
+#endif                                  // takes it from its small bins, without gathering every freed message up first
+#ifndef NURSERY_FREE
+#define NURSERY_FREE   (16 << 10)       // a nursery grows to this for the asking; past it, only for a run that filled it
+#endif
+#ifndef SETTLE_LOG2
+#define SETTLE_LOG2    15               // a heap smaller than 2^this, 32 KB, isn't settled when its process waits...
+#endif
+#ifndef SETTLE_FIRST
+#define SETTLE_FIRST   11               // ...but the first time it waits, where 2^this, more than a first nursery, is enough
+#endif
 #define HEAP_DEFAULT   (1 << 30)        // all of a process's chunks, both generations, unless SLIGHT_HEAP_MAX says
-#define GC_MIN         (256 << 10)      // an old generation smaller than this is never collected whole
+#ifndef GC_MIN
+#define GC_MIN         (64 << 10)       // an old generation smaller than this is never collected whole
+#endif
 #define READ_MAX       (64 << 20)       // a line, a count or a value read from a device must be less (D160)
 
 // A pid's entry in the table: the process while it runs, then its exit
@@ -678,6 +694,7 @@ static int copy_in_timed(rt_proc_t *p) {
 static inline __attribute__((always_inline)) void wait_from(rt_proc_t *p, const rt_value_t *frame, const uintptr_t *fp,
                                                             uintptr_t ret, again_t *again, uint64_t k0, uint64_t k1) {
     island_state_t *s = p->isle;
+    p->waited = 1;                              // whatever it waits in: its nursery is no longer one run's (restart)
     if ((s->waits_held >= WAITS_KEPT || copy_always) && copy_out(p, frame, fp, ret, again, k0, k1)) {
         to_scheduler(p);                        // for good: these frames are gone
         __builtin_unreachable();
@@ -819,12 +836,13 @@ static inline void adopt(rt_proc_t *p, rt_chunk_t *c) {
 void rt_heap_grow(uint64_t bytes, const char *site) {
     rt_proc_t *p = rt_current;
     if (!p->nursery) {
-        if (held(p) + CHUNK_FIRST > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
-        p->nursery     = new_chunk(CHUNK_FIRST);
-        p->heap_bytes += CHUNK_FIRST;
+        size_t first = p->nursery_log2 ? (size_t)1 << p->nursery_log2 : CHUNK_FIRST;
+        if (held(p) + first > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
+        p->nursery     = new_chunk(first);
+        p->heap_bytes += first;
         p->heap_ptr    = (uintptr_t)(p->nursery + 1);
-        p->heap_limit  = p->heap_ptr + CHUNK_FIRST;
-        if (bytes <= CHUNK_FIRST) return;
+        p->heap_limit  = p->heap_ptr + first;
+        if (bytes <= first) return;
     }
     size_t young = young_bytes(p), size = young < CHUNK_MAX ? young : CHUNK_MAX;
     if (size < bytes) size = (bytes + 15) & ~(size_t)15;
@@ -1498,9 +1516,13 @@ static void collect_young(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uin
     }
 }
 
-static void collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
-    gc_t g = { .size = chunk_size(p->heap_bytes) };
+// To-space starts at `first` bytes and doubles, a chunk at a time, so
+// that what's kept is in chunks that fit it, more or less, whatever the
+// heap was before. Returns the bytes it copied.
+static size_t collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp, size_t first) {
+    gc_t g = { .size = first };
     trace(&g, roots, n, fp);
+    size_t copied = g.live;
     // Every live handle has moved, the young and the old, before what they
     // were in is poisoned and freed.
     if (p->side) {
@@ -1532,24 +1554,38 @@ static void collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintp
     size_t half    = g.live < heap_max ? g.live + (heap_max - g.live) / 2 : heap_max;
     size_t ceiling = heap_max - heap_max / 8 > half ? heap_max - heap_max / 8 : half;
     p->gc_at       = next < ceiling ? next : ceiling;
+    return copied;
+}
+
+// The nursery goes, and the process is to have one of `size` bytes when
+// it next allocates: so one that waits before then holds none.
+static void nursery_later(rt_proc_t *p, size_t size) {
+    p->heap_bytes  -= p->nursery->size;
+    free(p->nursery);
+    p->nursery      = NULL;
+    p->heap_ptr     = p->heap_limit = 0;
+    p->nursery_log2 = (uint8_t)(63 - __builtin_clzll(size));
 }
 
 // The young generation starts again, empty: its overflow chunks are freed,
-// and the nursery is allocated in from its beginning, and is twice the size
-// if it overflowed, up to 1 MB.
+// and the nursery is allocated in from its beginning. If it overflowed
+// it's to be twice the size, up to 1 MB: for the asking up to
+// NURSERY_FREE, and past that only if the process filled it without
+// waiting for a message, so that a nursery's size is what a run of the
+// process needs, not a count of what it has ever allocated (D295). The
+// bigger one is made when the process next allocates.
 static void restart(rt_proc_t *p) {
     if (!p->nursery) return;
     size_t size = p->nursery->size;
-    int    grow = p->nursery->next && size < CHUNK_MAX;
+    int    grow = p->nursery->next && size < CHUNK_MAX && (size < NURSERY_FREE || !p->waited);
+    p->waited = 0;
     for (rt_chunk_t *c = p->nursery; c && poison; c = c->next) memset(c + 1, 0xab, c->size);
     for (rt_chunk_t *c = p->nursery->next; c; c = c->next) p->heap_bytes -= c->size;
     free_chunks(p->nursery->next);
     p->nursery->next = NULL;
     if (grow && held(p) + size <= heap_max) {
-        free(p->nursery);
-        p->nursery     = new_chunk(2 * size);
-        p->heap_bytes += size;
-        size          *= 2;
+        nursery_later(p, 2 * size);
+        return;
     }
     // What's promoted isn't checked against the cap as it's copied, and
     // under SLIGHT_GC_STRESS the nursery may never overflow, where the cap
@@ -1645,8 +1681,51 @@ static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t
         collect_young(p, roots, n, fp);
         whole = old_in_use(p) + shared_bytes(p, 1) >= p->gc_at;
     }
-    if (whole && (p->chunks || p->nursery)) collect_all(p, roots, n, fp);
+    if (whole && (p->chunks || p->nursery)) collect_all(p, roots, n, fp, TOSPACE_FIRST);
     restart(p);
+}
+
+// A process about to wait in recv, with nothing to take, whose heap's
+// chunks have reached 2^settle_log2 bytes, is settled (D295): everything
+// live is copied into chunks that fit it, and the next time is at twice
+// what the old generation then holds, and never under 2^SETTLE_LOG2. So a
+// process that waits holds about what it has live, however much it
+// allocated to get there: one that built a big structure and dropped it
+// gives it back the first time it waits, and one that takes a message,
+// does a little and waits again, for good, holds a nursery and at most
+// as much garbage as SETTLE_LOG2 allows. Each time copies what's live,
+// and comes only once the heap has doubled since the last, so it's paid
+// for by the allocating that doubled it, as a major collection is. The
+// first time a process waits is the exception (SETTLE_FIRST): what it
+// built to start with is all it may ever hold, so it's made to fit then,
+// once.
+//
+// A heap that comes to under a chunk's most is copied twice, the second
+// time into one chunk of just its size, which only the first copy can
+// say; a bigger one is in chunks of that most already, all but the last
+// full.
+static __attribute__((noinline)) void settle_heap(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+    for (rt_value_t *s = roots + n; s < (const rt_value_t *)fp; s++) *s = 0;     // as collect does
+    if (p->chunks || p->nursery) {
+        size_t live = collect_all(p, roots, n, fp, TOSPACE_FIRST);
+        size_t old  = p->heap_bytes - young_bytes(p);
+        if (live && live < old && live <= CHUNK_MAX) collect_all(p, roots, n, fp, live);
+    }
+    restart(p);
+    // The nursery goes the first time, when the process may never allocate
+    // again, and when it's bigger than a process gets for the asking. Not
+    // each time: a process that settles again is one that allocates, and
+    // freeing and making its nursery set glibc to gathering up every
+    // freed message (ping-pong took 18 per cent more instructions).
+    int    first = p->settle_log2 < SETTLE_LOG2;
+    size_t size  = p->nursery ? p->nursery->size : 0;
+    if (size && (first || size > NURSERY_FREE)) nursery_later(p, size < NURSERY_FREE ? size : NURSERY_FREE);
+    // Next at twice the old generation, and past what it holds now with
+    // the nursery it keeps, or it would be settled every time it waits.
+    size_t young = young_bytes(p), next = 2 * (p->heap_bytes - young) + young;
+    p->settle_log2 = SETTLE_LOG2;
+    while (p->settle_log2 < 63 && ((size_t)1 << p->settle_log2) <= next) p->settle_log2++;
+    if (gc_stress) p->settle_log2 = 0;          // every time it waits, and as the first time
 }
 
 // --- islands (D256) -----------------------------------------------------------
@@ -1992,6 +2071,7 @@ static rt_proc_t *new_process_on(island_state_t *s, rt_code_t code, rt_value_t p
     p->parent   = parent;
     p->code     = code;
     p->gc_at    = GC_MIN;
+    p->settle_log2 = gc_stress ? 0 : SETTLE_FIRST;
     p->isle     = s;
     enqueue(p);
     return p;
@@ -2394,6 +2474,7 @@ static inline __attribute__((always_inline)) rt_value_t recv_wait(rt_proc_t *p, 
             else         adopt(p, m->chunk);
             return v;
         }
+        if (p->heap_bytes >> p->settle_log2) settle_heap(p, frame, n, fp);
         p->state = RT_WAITING;
         p->at    = at;
         wait_from(p, frame, fp, ret, recv_again, n, 0);

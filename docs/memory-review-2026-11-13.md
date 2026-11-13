@@ -9,6 +9,13 @@ D291, D292). Nothing is changed by this document; it ends with
 directions to choose among, each to be proposed properly before it's
 built.
 
+**Since (13 Nov):** Stevan chose A, then B. A is built (D294):
+`:system`'s `(:memory info)`. B is built (D295): a process that waits
+is settled, and findings 1 to 3 are, for the most part, answered; the
+numbers after are in `docs/BENCHMARKS.md`, "What the memory review
+changed", and what B left is in D295. The measurements below are as
+they were before both.
+
 The numbers are from the cloud machine: x86-64 Linux, one island,
 static glibc, 4 KB pages, resident memory read from `/proc` while the
 program sleeps (the programs are in the appendix). The M2 Max will
