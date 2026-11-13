@@ -1,0 +1,4 @@
+(:woken :stack #false)
+(:c 2.5 (:middle (0 1 2 3 4) ((:c "before") #true #false 3000)))
+:not-fired
+:done

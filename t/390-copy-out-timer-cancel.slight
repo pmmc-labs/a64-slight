@@ -1,0 +1,64 @@
+; timer/cancel of another island's timer, by a process copied off its
+; stack while it waits for the answer (D292). SLIGHT_COPY_OUT copies
+; every wait. As with fork/on (389), the answer may come at any moment,
+; so an observer that yields while the canceller waits looks at it once
+; it's woken and before it runs: ready, and holding no stack. Three
+; frames down, the canceller then has what its frames held, and the
+; answer, #true; asking again, off its stack again, #false. The timer
+; never rings. Its island is kept busy while the cancel comes, as in
+; test 347, so that its clock doesn't move to the timer first.
+; env: SLIGHT_COPY_OUT=1
+
+(defun spin (n) (if (== n 0) () (do (yield ()) (spin (- n 1)))))
+
+(defun worker (to)
+    (let t (after 100 $$ :late))
+    (send to (list :timer t))
+    (after 200 $$ :check)
+    (spin 1000000)
+    (recv
+        (:late  (send to :fired))
+        (:check (send to :not-fired))))
+
+(defun inner (t tag)
+    (let before (list tag "before"))
+    (let took (timer/cancel t))
+    (list before took (timer/cancel t) (length (range 0 3000))))
+
+(defun middle (t tag)
+    (let xs (range 0 5))
+    (let r (inner t tag))
+    (list :middle xs r))
+
+(defun outer (t tag to)
+    (let half 1.25)
+    (let r (middle t tag))
+    (send to (list tag (+ half half) r)))
+
+; p's :stack once it's been woken and hasn't run: #false if it waited
+; off its stack.
+(defun woken (s p)
+    (send s (list :process p))
+    (match (read s)
+        ((:process s2 i)
+            (if (eq? (lookup :state i) :ready)
+                (list :woken :stack (lookup :stack i))
+                (do (yield ()) (woken s p))))))
+
+(defun observer (p to)
+    (match (open :system) ((:ok s) (send to (woken s p)))))
+
+(defun main ()
+    (let me (address))
+    (let rc (address))
+    (let ro (address))
+    (fork/on 1 worker me)
+    (let t (match (read me) ((:timer t) t)))
+    (let c (fork outer t :c rc))
+    (fork observer c ro)
+    (pprint (read ro))
+    (pprint (read rc))
+    (pprint (read me))
+    :done)
+
+(main)

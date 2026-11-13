@@ -51,7 +51,7 @@
     (cond
         ((== i n)
             (send p (list :done (clock/us)))
-            (list (result (read p)) (sum (map car blocks))))
+            (list (result (join p)) (sum (map car blocks))))
         (#true
             (let b (range (+ 1000000 i) (+ (+ 1000000 i) size)))
             (yield (churn p (cons b (take (- (length blocks) 1) blocks)) (+ i 1) n size)))))

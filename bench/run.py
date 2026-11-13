@@ -32,6 +32,18 @@ and spectral-norm (on arrays, so compared with slight-arrays), and
 spawn, idle-memory and ping-pong, each island doing its share locally.
 It's in the every-core table, beside Go's, Erlang's and Rust's.
 
+Gambit, Racket and Swish are in the actor programs but bank, each
+process a thread (Swish's processes), its mailbox the thread's, all on
+one core (D293). Gambit's are compiled to native code with gsc -exe,
+Racket's to an executable with raco exe, Swish's with swish-build.
+racket-mc is Racket on places, a place (an instance of Racket of its own,
+copying what it's sent) for each core, its program NAME-mc.rkt, in the programs
+slight-mc runs but spectral-norm; it's in the every-core table. Swish
+needs a Chez Scheme built without threads, which bench/build-swish.sh
+builds; without swish on PATH, it's left out. In payload, the Schemes,
+Go and tokio pass the list by reference, which the summary marks "not
+copied".
+
 The results go to bench/results/, as JSON and as a Markdown summary, named
 for the date and the machine.
 """
@@ -59,7 +71,7 @@ BUILD = os.path.join(ROOT, 'build', 'bench')
 # --- what's run --------------------------------------------------------------
 
 ALL    = ('slight', 'c', 'go', 'erlang', 'node', 'perl', 'python', 'chez')
-ACTORS = ('slight', 'go', 'erlang', 'rust')
+ACTORS = ('slight', 'go', 'erlang', 'rust', 'gambit', 'racket', 'swish')
 
 Benchmark = collections.namedtuple('Benchmark', 'langs quick full expected')
 
@@ -144,7 +156,7 @@ def bank(n):
 # whatever C prints (or, without C, what most print), since there's no
 # shorter way to them.
 BENCHMARKS = {
-    'startup':       Benchmark(ALL + ('rust',), '0',     '0',        lambda n: [0]),
+    'startup':       Benchmark(ALL + ('rust', 'gambit', 'racket', 'swish'), '0', '0', lambda n: [0]),
     'fib':           Benchmark(ALL,    '25',    '38',       lambda n: [fib(n)]),
     'tak':           Benchmark(ALL,    '6',     '10',       tak),
     'binary-trees':  Benchmark(ALL,    '12',    '18',       binary_trees),
@@ -152,13 +164,13 @@ BENCHMARKS = {
     'deriv':         Benchmark(ALL,    '1000',  '2000000',  deriv),
     'n-body':        Benchmark(ALL,    '1000',  '1000000',  None),
     'spectral-norm': Benchmark(ALL + ('slight-arrays', 'slight-mc'), '100', '1000', None),
-    'ping-pong':     Benchmark(ACTORS + ('slight-mc',), '10000', '2000000', lambda n: [n]),
+    'ping-pong':     Benchmark(ACTORS + ('slight-mc', 'racket-mc'), '10000', '2000000', lambda n: [n]),
     'payload':       Benchmark(ACTORS, '10000', '1000000',  lambda n: [n, 5050]),
     'thread-ring':   Benchmark(ACTORS, '10000', '10000000', lambda n: [n % 503 + 1]),
-    'fan-in':        Benchmark(ACTORS + ('slight-mc',), '10000', '10000000', lambda n: [n // 100 * 5050]),
-    'spawn':         Benchmark(ACTORS + ('slight-mc',), '10000', '1000000', lambda n: [n * (n - 1) // 2]),
-    'idle-memory':   Benchmark(ACTORS + ('slight-mc',), '10000', '1000000', lambda n: [n]),
-    'parallel-fib':  Benchmark(ACTORS + ('slight-mc',), '15', '30', lambda k: [64 * fib(k)]),
+    'fan-in':        Benchmark(ACTORS + ('slight-mc', 'racket-mc'), '10000', '10000000', lambda n: [n // 100 * 5050]),
+    'spawn':         Benchmark(ACTORS + ('slight-mc', 'racket-mc'), '10000', '1000000', lambda n: [n * (n - 1) // 2]),
+    'idle-memory':   Benchmark(ACTORS + ('slight-mc', 'racket-mc'), '10000', '1000000', lambda n: [n]),
+    'parallel-fib':  Benchmark(ACTORS + ('slight-mc', 'racket-mc'), '15', '30', lambda k: [64 * fib(k)]),
     'latency':       Benchmark(ACTORS, '1',     '10',       latency),
     'bank':          Benchmark(('slight', 'c', 'python'), '10000', '1000000', bank),
 }
@@ -180,6 +192,10 @@ IMPLS = {
     'chez':      Impl('chez', {}, []),
     'rust':      Impl('rust', {}, []),
     'rust-mc':   Impl('rust', {'BENCH_MC': '1'}, []),
+    'gambit':    Impl('gambit', {}, []),
+    'racket':    Impl('racket', {}, []),
+    'racket-mc': Impl('racket-mc', {}, []),
+    'swish':     Impl('swish', {}, []),
 }
 
 
@@ -200,6 +216,25 @@ def chez():
 
 CHEZ = chez()
 
+
+# Gambit's compiler, gsc. Ghostscript has a gsc too, and Homebrew won't
+# link Gambit's over it, so Homebrew's own place for Gambit is tried as
+# well; a gsc counts only if it says it's Gambit, whose -v starts with
+# its version.
+def gambit():
+    for path in (shutil.which('gsc'), '/opt/homebrew/opt/gambit-scheme/bin/gsc', '/usr/local/opt/gambit-scheme/bin/gsc'):
+        if path and os.path.exists(path):
+            try:
+                done = subprocess.run([path, '-v'], capture_output=True, text=True, timeout=10)
+            except (OSError, subprocess.SubprocessError):
+                continue
+            if re.match(r'v\d+\.\d+', done.stdout.strip()):
+                return path
+    return 'gsc'
+
+
+GSC = gambit()
+
 # The commands each language needs, and the one that says its version.
 TOOLS = {
     'slight': (['node', 'clang'], ['clang', '--version']),
@@ -214,10 +249,14 @@ TOOLS = {
     'python': (['python3'], ['python3', '--version']),
     'chez':   ([CHEZ], [CHEZ, '--version']),
     'rust':   (['cargo', 'rustc'], ['rustc', '--version']),
+    'gambit': ([GSC], [GSC, '-v']),
+    'racket': (['racket', 'raco'], ['racket', '--version']),
+    'racket-mc': (['racket', 'raco'], ['racket', '--version']),
+    'swish':  (['swish', 'swish-build'], ['swish', '--version']),
 }
 
 EXT = {'slight': 'slight', 'slight-arrays': 'slight', 'slight-mc': 'slight', 'c': 'c', 'go': 'go', 'erlang': 'erl', 'node': 'js', 'perl': 'pl', 'python': 'py', 'chez': 'ss',
-       'rust': 'rs'}
+       'rust': 'rs', 'gambit': 'scm', 'racket': 'rkt', 'racket-mc': 'rkt', 'swish': 'ss'}
 
 
 # The tokio that bench/Cargo.lock pins.
@@ -232,8 +271,18 @@ def slight_target():
 
 def source(bench, lang):
     name = (bench.replace('-', '_') if lang == 'erlang' else bench + '-arrays' if lang == 'slight-arrays'
-            else bench + '-mc' if lang == 'slight-mc' else bench)
+            else bench + '-mc' if lang in ('slight-mc', 'racket-mc') else bench + '-swish' if lang == 'swish' else bench)
     return os.path.join(ROOT, 'bench', bench, name + '.' + EXT[lang])
+
+
+# gsc writes its C beside the Scheme, as NAME.c, and deletes it after,
+# which in bench/NAME/ would be C's program; swish-build writes its object
+# files beside the source too. So each compiles a copy, under build/.
+STAGED = ('gambit', 'swish')
+
+
+def staged(bench, lang):
+    return os.path.join(BUILD, lang, bench + '.' + EXT[lang])
 
 
 def output_of(bench, lang):
@@ -253,6 +302,12 @@ def build_command(bench, lang):
         return ['erlc', '-o', os.path.join(BUILD, 'erlang'), src]
     if lang == 'chez':
         return [CHEZ, '--script', os.path.join(ROOT, 'bench', 'chez-compile.ss'), src, out]
+    if lang == 'gambit':
+        return [GSC, '-exe', '-o', out, staged(bench, lang)]
+    if lang in ('racket', 'racket-mc'):
+        return ['raco', 'exe', '-o', out, src]
+    if lang == 'swish':
+        return ['swish-build', '-o', out, staged(bench, lang)]
     if lang == 'rust':
         return ['cargo', 'build', '--release', '--locked', '--quiet', '--manifest-path', os.path.join(ROOT, 'bench', 'Cargo.toml'),
                 '--target-dir', os.path.join(BUILD, 'rust'), '--bin', bench]
@@ -284,7 +339,7 @@ def process_limit(n):
 
 def run_command(bench, name, arg):
     impl = IMPLS[name]
-    if impl.lang in ('slight', 'slight-arrays', 'slight-mc', 'c', 'go', 'rust'):
+    if impl.lang in ('slight', 'slight-arrays', 'slight-mc', 'c', 'go', 'rust', 'gambit', 'racket', 'racket-mc', 'swish'):
         return [output_of(bench, impl.lang), arg]
     if impl.lang == 'chez':
         return [CHEZ, '--program', output_of(bench, 'chez'), arg]
@@ -424,6 +479,18 @@ def main():
         versions['chez'] = 'Chez Scheme ' + versions['chez']
     if 'rust' in versions:
         versions['rust'] += ', tokio ' + tokio_version()
+    if 'gambit' in versions:
+        versions['gambit'] = 'Gambit ' + versions['gambit'].split()[0]
+    for lang in ('racket', 'racket-mc'):
+        if lang in versions:
+            versions[lang] = re.sub(r'^Welcome to |\.$', '', versions[lang])
+    # raco exe is in compiler-lib, which minimal Racket (Homebrew's
+    # minimal-racket) leaves out.
+    if found['racket'] and subprocess.run(['raco', 'exe', '--help'], capture_output=True).returncode != 0:
+        print('raco exe not found, so racket is left out: raco pkg install --auto compiler-lib')
+        found['racket'] = found['racket-mc'] = False
+    if 'swish' in names and not found['swish']:
+        print('swish not found, so left out: bench/build-swish.sh builds it (docs/BENCHMARKS.md)')
     if found['python'] and 'bank' in benches and 'python' in names:
         simpy = capture(['python3', '-c', 'import simpy; print(simpy.__version__)'])
         if re.match(r'\d+\.', simpy):
@@ -431,7 +498,7 @@ def main():
         else:
             print('SimPy not found, so bank leaves out python')
             SKIP.add(('bank', 'python'))
-    missing  = sorted({IMPLS[n].lang for n in names if not found[IMPLS[n].lang]})
+    missing  = sorted({IMPLS[n].lang for n in names if not found[IMPLS[n].lang] and n != 'swish'})
     if missing:
         print('not found, so left out: ' + ', '.join(missing))
     names = [n for n in names if found[IMPLS[n].lang]]
@@ -448,6 +515,8 @@ def main():
             if cmd is None:
                 continue
             os.makedirs(os.path.dirname(output_of(b, lang)), exist_ok=True)
+            if lang in STAGED:
+                shutil.copyfile(source(b, lang), staged(b, lang))
             start = time.perf_counter()
             done  = subprocess.run(cmd, cwd=ROOT, capture_output=True, text=True)
             took  = time.perf_counter() - start
@@ -541,13 +610,22 @@ def megabytes(b):
 
 # Each implementation on every core, and the one-core one it's compared
 # with: one core is the comparison, every core a table of its own (D237).
-MC = {'slight-mc': 'slight', 'go-mc': 'go', 'erlang-mc': 'erlang', 'rust-mc': 'rust'}
+MC = {'slight-mc': 'slight', 'go-mc': 'go', 'erlang-mc': 'erlang', 'rust-mc': 'rust', 'racket-mc': 'racket'}
 
 
 # The one-core implementation n is compared with in bench: slight-mc's
 # spectral-norm is on arrays, so slight-arrays.
 def one_core(bench, n, impls):
     return 'slight-arrays' if n == 'slight-mc' and 'slight-arrays' in impls else MC[n]
+
+
+# Those whose payload passes its list by reference, copying nothing: Go's
+# slice, tokio's Vec, and the Schemes' processes, which share one heap.
+NOT_COPIED = ('go', 'rust', 'gambit', 'racket', 'swish')
+
+
+def label(bench, n):
+    return n + (' (not copied)' if bench == 'payload' and IMPLS[n].lang in NOT_COPIED else '') if n in IMPLS else n
 
 
 def median(r, key='wall'):
@@ -563,8 +641,9 @@ def summary(report):
                 '(see startup: Erlang\'s VM takes about a seventh of a second). CPU is user and system time '
                 'together, which goes past the time taken when more than one core works; memory is the peak '
                 'resident set, in MB. "÷ slight" is the median over slight\'s, so under 1 is faster than slight. '
-                'Go, Erlang and Rust are on one core here, as slight is; their defaults, every core, are in a table '
-                'of their own, at the end.', '']
+                'Go, Erlang and Rust are on one core here, as slight is, and so are Gambit\'s, Racket\'s and Swish\'s '
+                'threads; their defaults, and Racket\'s places, every core, are in a table of their own, at the end. '
+                '"Not copied" marks a payload that passes its list by reference.', '']
     startup = report['results'].get('startup', {}).get('impls', {})
     for b, entry in report['results'].items():
         impls = entry['impls']
@@ -581,13 +660,13 @@ def summary(report):
             if n in MC:
                 continue
             if not r['ok'] or not r['runs']:
-                rows.append((float('inf'), '| %s | wrong output or failed | | | | |%s' % (n, ' |' if extra else '')))
+                rows.append((float('inf'), '| %s | wrong output or failed | | | | |%s' % (label(b, n), ' |' if extra else '')))
                 continue
             wall = statistics.median(x['wall'] for x in r['runs'])
             cpu  = statistics.median(x['cpu'] for x in r['runs'])
             rss  = statistics.median(x['rss'] for x in r['runs'])
             row  = '| %s | %s | %s | %s | %s | %s |' % (
-                n, seconds(wall), seconds(min(x['wall'] for x in r['runs'])), seconds(cpu), megabytes(rss),
+                label(b, n), seconds(wall), seconds(min(x['wall'] for x in r['runs'])), seconds(cpu), megabytes(rss),
                 '%.2f' % (wall / base) if base else '')
             if extra:
                 s    = startup.get(n)
@@ -649,18 +728,18 @@ def every_core(report):
             one = one_core(b, n, impls)
             r   = impls[n]
             if not r['ok'] or not r['runs']:
-                rows.append('| %s | %s | wrong output or failed | | | | |' % (b if first else '', n))
+                rows.append('| %s | %s | wrong output or failed | | | | |' % (b if first else '', label(b, n)))
             else:
                 wall, solo, base = median(r), median(impls.get(one)), median(impls.get('slight'))
                 rows.append('| %s | %s | %s | %s | %s | %s | %s |' % (
-                    b if first else '', n, seconds(wall), seconds(median(r, 'cpu')), megabytes(median(r, 'rss')),
+                    b if first else '', label(b, n), seconds(wall), seconds(median(r, 'cpu')), megabytes(median(r, 'rss')),
                     '%.2f' % (wall / solo) if solo else '', '%.2f' % (wall / base) if base else ''))
             first = False
     if not rows:
         return []
     return (['## Every core', '',
-             'slight on every island, one per core (D256), and Go, Erlang and Rust with their defaults, every '
-             'core. "÷ one core" is the median over the same language\'s on one core (slight-arrays\' for '
+             'slight on every island, one per core (D256), Go, Erlang and Rust with their defaults, every '
+             'core, and Racket on places, one per core, each an instance of Racket of its own. "÷ one core" is the median over the same language\'s on one core (slight-arrays\' for '
              'slight-mc\'s spectral-norm), so under 1 is what every core gains, over 1 what it costs; "÷ slight" is '
              'the median over slight\'s, on its one core.', '',
              '| | | time | CPU | memory | ÷ one core | ÷ slight |', '|---|---|---:|---:|---:|---:|---:|']

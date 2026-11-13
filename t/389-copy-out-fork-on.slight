@@ -1,0 +1,56 @@
+; fork/on, of a process copied off its stack while it waits for its new
+; process's pid (D292). SLIGHT_COPY_OUT copies every wait. The other
+; island may answer at any moment, so there's no looking at the forker
+; while it waits; but once it's woken, it's ready, and holds a stack
+; again only when it next runs. An observer, started behind it and
+; yielding while it waits, is ahead of it in the run queue whenever the
+; answer comes, and sees it then: ready, and holding no stack. Three
+; frames down, the forker then has what its frames held, and the pid,
+; which it sends to and joins, another wait off its stack.
+; env: SLIGHT_COPY_OUT=1
+
+; Ends with what it's sent, and the island it's on.
+(defun child () (recv (m (list m (island)))))
+
+(defun inner (k tag)
+    (let before (list tag "before"))
+    (let c (fork/on k child))
+    (send c tag)
+    (list before (join c) (length (range 0 3000))))
+
+(defun middle (k tag)
+    (let xs (range 0 5))
+    (let r (inner k tag))
+    (list :middle xs r))
+
+(defun outer (k tag to)
+    (let half 1.25)
+    (let r (middle k tag))
+    (send to (list tag (+ half half) r)))
+
+; p's :stack once it's been woken and hasn't run: #false if it waited
+; off its stack.
+(defun woken (s p)
+    (send s (list :process p))
+    (match (read s)
+        ((:process s2 i)
+            (if (eq? (lookup :state i) :ready)
+                (list :woken :stack (lookup :stack i))
+                (do (yield ()) (woken s p))))))
+
+(defun observer (p to)
+    (match (open :system) ((:ok s) (send to (woken s p)))))
+
+(defun main ()
+    (let rp (address))
+    (let ro (address))
+    (let p (fork outer 1 :p rp))
+    (fork observer p ro)
+    (pprint (read ro))
+    (pprint (read rp))
+    (let c (fork/on 2 child))               ; and this process's own
+    (send c :root)
+    (pprint (join c))
+    :done)
+
+(main)

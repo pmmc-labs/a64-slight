@@ -1,0 +1,77 @@
+; A process copied off its stack while it waits in recv (D292,
+; PLAN.md's "A waiting process copied off its stack"). SLIGHT_COPY_OUT
+; makes every recv that waits copy its process's frames to a buffer and
+; give its stack back, however few are waiting; woken, the process takes
+; whatever stack is free, and goes on from its recv there. So what a
+; frame held before the wait it holds after, on another stack; a process
+; too deep to copy keeps its stack; and one killed while it's off its
+; stack ends as any does. The other waits have tests of their own, 385
+; to 390.
+; env: SLIGHT_COPY_OUT=1
+
+; Three frames, each with something of its own that it needs after the
+; wait, and enough allocated after it that the collector walks the frames
+; where they are then.
+(defun inner (tag)
+    (let before (list tag "before"))
+    (let m (recv ((:go x) x)))
+    (list before m (length (range 0 3000))))
+
+(defun middle (tag)
+    (let xs (range 0 5))
+    (let r (inner tag))
+    (list :middle xs r))
+
+(defun outer (tag to)
+    (let half 1.25)
+    (let r (middle tag))
+    (send to (list tag (+ half half) r)))
+
+(defun waiter () (recv (m (list :got m))))
+
+; 300 frames down, more than is copied: it keeps its stack.
+(defun deep (n) (if (== n 0) (recv (m m)) (+ 1 (deep (- n 1)))))
+
+; A recv in a lambda that apply called, under a fork's lambda.
+(defun applied (to)
+    (fork (lambda (to) (send to (list :applied (apply (lambda (x y) (+ x (+ y (recv (n n))))) (list 1 2))))) to))
+
+; Runs first once its parent waits, so on the stack the parent left, and
+; 300 frames down, too deep to copy, keeps it through a sleep: the parent
+; wakes on another.
+(defun squatter (n to)
+    (if (== n 0)
+        (do (sleep 10) (send to :squatter-woke) 0)
+        (+ 1 (squatter (- n 1) to))))
+
+(defun facts (s p)
+    (send s (list :process p))
+    (match (read s)
+        ((:process s2 i) (map (lambda (k) (list k (lookup k i))) (list :state :in :stack)))))
+
+(defun main ()
+    (let me $$)
+    (let s (match (open :system) ((:ok s) s)))
+    (let a (fork outer :a me))
+    (let w (fork waiter))
+    (let d (fork deep 300))
+    (let k (fork waiter))
+    (let ap (applied me))
+    (sleep 1)                               ; till each waits: d on the stack a and w left, and keeping it
+    (pprint (cons :a (facts s a)))
+    (pprint (cons :deep (facts s d)))
+    (kill k)
+    (pprint (join k))
+    (fork squatter 300 me)                  ; takes the stack this process leaves as it waits, and keeps it,
+    (send a (list :go 42))                  ; so a wakes on another than it left, and then this process does
+    (pprint (recv (m m)))
+    (send w :hello)
+    (send d 7)
+    (send ap 10)
+    (pprint (join w))
+    (pprint (join d))
+    (pprint (recv (m m)))
+    (pprint (recv (m m)))
+    :done)
+
+(main)

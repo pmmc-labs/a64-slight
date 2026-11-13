@@ -1,0 +1,5476 @@
+{
+    "date": "2026-11-11T12:13:51",
+    "machine": {
+        "os": "macOS 15.7.9",
+        "arch": "arm64",
+        "cpu": "Apple M2 Max",
+        "cores": 12,
+        "memory": 34359738368
+    },
+    "versions": {
+        "slight": "9fd007c, its runtime built by Apple clang version 17.0.0 (clang-1700.6.3.2)",
+        "slight-arrays": "Apple clang version 17.0.0 (clang-1700.6.3.2)",
+        "slight-mc": "Apple clang version 17.0.0 (clang-1700.6.3.2)",
+        "c": "Apple clang version 17.0.0 (clang-1700.6.3.2)",
+        "go": "go version go1.27.2 darwin/arm64",
+        "erlang": "OTP 29, erts 17.1.1",
+        "node": "v26.13.0",
+        "perl": "perl v5.42.2",
+        "python": "Python 3.14.3, SimPy 4.1.2",
+        "chez": "Chez Scheme 10.4.1",
+        "rust": "rustc 1.98.1 (48a229cea 2026-09-01) (Homebrew), tokio 1.54.0"
+    },
+    "args": {
+        "quick": false,
+        "runs": 5,
+        "budget": 60
+    },
+    "builds": {
+        "c/startup": {
+            "seconds": 0.043,
+            "bytes": 33432
+        },
+        "chez/startup": {
+            "seconds": 0.035,
+            "bytes": 1412
+        },
+        "erlang/startup": {
+            "seconds": 0.148,
+            "bytes": 764
+        },
+        "go/startup": {
+            "seconds": 0.096,
+            "bytes": 2429698
+        },
+        "rust/startup": {
+            "seconds": 1.597,
+            "bytes": 708464
+        },
+        "slight/startup": {
+            "seconds": 3.028,
+            "bytes": 716712
+        },
+        "c/fib": {
+            "seconds": 0.05,
+            "bytes": 33472
+        },
+        "chez/fib": {
+            "seconds": 0.038,
+            "bytes": 2166
+        },
+        "erlang/fib": {
+            "seconds": 0.163,
+            "bytes": 928
+        },
+        "go/fib": {
+            "seconds": 0.099,
+            "bytes": 2430130
+        },
+        "slight/fib": {
+            "seconds": 0.274,
+            "bytes": 716784
+        },
+        "c/tak": {
+            "seconds": 0.049,
+            "bytes": 33472
+        },
+        "chez/tak": {
+            "seconds": 0.036,
+            "bytes": 2582
+        },
+        "erlang/tak": {
+            "seconds": 0.155,
+            "bytes": 996
+        },
+        "go/tak": {
+            "seconds": 0.098,
+            "bytes": 2430130
+        },
+        "slight/tak": {
+            "seconds": 0.276,
+            "bytes": 716784
+        },
+        "c/binary-trees": {
+            "seconds": 0.052,
+            "bytes": 33632
+        },
+        "chez/binary-trees": {
+            "seconds": 0.037,
+            "bytes": 4089
+        },
+        "erlang/binary-trees": {
+            "seconds": 0.16,
+            "bytes": 1516
+        },
+        "go/binary-trees": {
+            "seconds": 0.095,
+            "bytes": 2430210
+        },
+        "slight/binary-trees": {
+            "seconds": 0.284,
+            "bytes": 733696
+        },
+        "c/nqueens": {
+            "seconds": 0.054,
+            "bytes": 33720
+        },
+        "chez/nqueens": {
+            "seconds": 0.036,
+            "bytes": 3418
+        },
+        "erlang/nqueens": {
+            "seconds": 0.156,
+            "bytes": 1200
+        },
+        "go/nqueens": {
+            "seconds": 0.094,
+            "bytes": 2430130
+        },
+        "slight/nqueens": {
+            "seconds": 0.277,
+            "bytes": 716904
+        },
+        "c/deriv": {
+            "seconds": 0.056,
+            "bytes": 50440
+        },
+        "chez/deriv": {
+            "seconds": 0.037,
+            "bytes": 4237
+        },
+        "erlang/deriv": {
+            "seconds": 0.161,
+            "bytes": 1612
+        },
+        "go/deriv": {
+            "seconds": 0.098,
+            "bytes": 2430482
+        },
+        "slight/deriv": {
+            "seconds": 0.286,
+            "bytes": 717032
+        },
+        "c/n-body": {
+            "seconds": 0.062,
+            "bytes": 50008
+        },
+        "chez/n-body": {
+            "seconds": 0.04,
+            "bytes": 11318
+        },
+        "erlang/n-body": {
+            "seconds": 0.174,
+            "bytes": 4064
+        },
+        "go/n-body": {
+            "seconds": 0.097,
+            "bytes": 2430274
+        },
+        "slight/n-body": {
+            "seconds": 0.31,
+            "bytes": 767448
+        },
+        "c/spectral-norm": {
+            "seconds": 0.059,
+            "bytes": 33584
+        },
+        "chez/spectral-norm": {
+            "seconds": 0.038,
+            "bytes": 5509
+        },
+        "erlang/spectral-norm": {
+            "seconds": 0.161,
+            "bytes": 2228
+        },
+        "go/spectral-norm": {
+            "seconds": 0.096,
+            "bytes": 2430338
+        },
+        "slight/spectral-norm": {
+            "seconds": 0.28,
+            "bytes": 733792
+        },
+        "slight-arrays/spectral-norm": {
+            "seconds": 0.279,
+            "bytes": 733536
+        },
+        "slight-mc/spectral-norm": {
+            "seconds": 0.292,
+            "bytes": 733936
+        },
+        "erlang/ping-pong": {
+            "seconds": 0.16,
+            "bytes": 1196
+        },
+        "go/ping-pong": {
+            "seconds": 0.097,
+            "bytes": 2430210
+        },
+        "rust/ping-pong": {
+            "seconds": 0.292,
+            "bytes": 787280
+        },
+        "slight/ping-pong": {
+            "seconds": 0.275,
+            "bytes": 717096
+        },
+        "slight-mc/ping-pong": {
+            "seconds": 0.279,
+            "bytes": 717176
+        },
+        "erlang/payload": {
+            "seconds": 0.159,
+            "bytes": 1268
+        },
+        "go/payload": {
+            "seconds": 0.1,
+            "bytes": 2430226
+        },
+        "rust/payload": {
+            "seconds": 0.307,
+            "bytes": 789632
+        },
+        "slight/payload": {
+            "seconds": 0.274,
+            "bytes": 717096
+        },
+        "erlang/thread-ring": {
+            "seconds": 0.159,
+            "bytes": 1572
+        },
+        "go/thread-ring": {
+            "seconds": 0.095,
+            "bytes": 2430242
+        },
+        "rust/thread-ring": {
+            "seconds": 0.345,
+            "bytes": 810560
+        },
+        "slight/thread-ring": {
+            "seconds": 0.279,
+            "bytes": 717112
+        },
+        "erlang/fan-in": {
+            "seconds": 0.159,
+            "bytes": 1468
+        },
+        "go/fan-in": {
+            "seconds": 0.096,
+            "bytes": 2430258
+        },
+        "rust/fan-in": {
+            "seconds": 0.305,
+            "bytes": 788208
+        },
+        "slight/fan-in": {
+            "seconds": 0.275,
+            "bytes": 717096
+        },
+        "slight-mc/fan-in": {
+            "seconds": 0.279,
+            "bytes": 717112
+        },
+        "erlang/spawn": {
+            "seconds": 0.158,
+            "bytes": 1264
+        },
+        "go/spawn": {
+            "seconds": 0.098,
+            "bytes": 2430210
+        },
+        "rust/spawn": {
+            "seconds": 0.321,
+            "bytes": 785104
+        },
+        "slight/spawn": {
+            "seconds": 0.273,
+            "bytes": 717192
+        },
+        "slight-mc/spawn": {
+            "seconds": 0.277,
+            "bytes": 717272
+        },
+        "erlang/idle-memory": {
+            "seconds": 0.158,
+            "bytes": 1312
+        },
+        "go/idle-memory": {
+            "seconds": 0.096,
+            "bytes": 2430178
+        },
+        "rust/idle-memory": {
+            "seconds": 0.333,
+            "bytes": 817760
+        },
+        "slight/idle-memory": {
+            "seconds": 0.275,
+            "bytes": 717192
+        },
+        "slight-mc/idle-memory": {
+            "seconds": 0.279,
+            "bytes": 733896
+        },
+        "erlang/parallel-fib": {
+            "seconds": 0.159,
+            "bytes": 1412
+        },
+        "go/parallel-fib": {
+            "seconds": 0.096,
+            "bytes": 2430194
+        },
+        "rust/parallel-fib": {
+            "seconds": 0.31,
+            "bytes": 787920
+        },
+        "slight/parallel-fib": {
+            "seconds": 0.272,
+            "bytes": 716864
+        },
+        "slight-mc/parallel-fib": {
+            "seconds": 0.271,
+            "bytes": 717056
+        },
+        "erlang/latency": {
+            "seconds": 0.169,
+            "bytes": 3776
+        },
+        "go/latency": {
+            "seconds": 0.145,
+            "bytes": 2482354
+        },
+        "rust/latency": {
+            "seconds": 0.452,
+            "bytes": 887648
+        },
+        "slight/latency": {
+            "seconds": 0.286,
+            "bytes": 734472
+        },
+        "c/bank": {
+            "seconds": 0.056,
+            "bytes": 33592
+        },
+        "slight/bank": {
+            "seconds": 0.274,
+            "bytes": 733976
+        }
+    },
+    "results": {
+        "startup": {
+            "size": "0",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.004224,
+                            "cpu": 0.002044,
+                            "rss": 1490944
+                        },
+                        {
+                            "wall": 0.003448,
+                            "cpu": 0.001986,
+                            "rss": 1572864
+                        },
+                        {
+                            "wall": 0.003788,
+                            "cpu": 0.001953,
+                            "rss": 1572864
+                        },
+                        {
+                            "wall": 0.003822,
+                            "cpu": 0.001888,
+                            "rss": 1572864
+                        },
+                        {
+                            "wall": 0.002087,
+                            "cpu": 0.001637,
+                            "rss": 1490944
+                        }
+                    ]
+                },
+                "c": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.001852,
+                            "cpu": 0.001174,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.001897,
+                            "cpu": 0.001166,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.001897,
+                            "cpu": 0.001202,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.001971,
+                            "cpu": 0.001143,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.001512,
+                            "cpu": 0.001089,
+                            "rss": 1196032
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.006483,
+                            "cpu": 0.002773,
+                            "rss": 3604480
+                        },
+                        {
+                            "wall": 0.006538,
+                            "cpu": 0.002787,
+                            "rss": 3538944
+                        },
+                        {
+                            "wall": 0.00656,
+                            "cpu": 0.002754,
+                            "rss": 3538944
+                        },
+                        {
+                            "wall": 0.006594,
+                            "cpu": 0.002723,
+                            "rss": 3522560
+                        },
+                        {
+                            "wall": 0.002079,
+                            "cpu": 0.001682,
+                            "rss": 3506176
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.002056,
+                            "cpu": 0.001744,
+                            "rss": 3964928
+                        },
+                        {
+                            "wall": 0.002106,
+                            "cpu": 0.001729,
+                            "rss": 3981312
+                        },
+                        {
+                            "wall": 0.002038,
+                            "cpu": 0.00169,
+                            "rss": 3981312
+                        },
+                        {
+                            "wall": 0.002092,
+                            "cpu": 0.001678,
+                            "rss": 3964928
+                        },
+                        {
+                            "wall": 0.002106,
+                            "cpu": 0.001762,
+                            "rss": 3981312
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.091238,
+                            "cpu": 0.084628,
+                            "rss": 48054272
+                        },
+                        {
+                            "wall": 0.089865,
+                            "cpu": 0.083046,
+                            "rss": 48627712
+                        },
+                        {
+                            "wall": 0.090207,
+                            "cpu": 0.084978,
+                            "rss": 48447488
+                        },
+                        {
+                            "wall": 0.089244,
+                            "cpu": 0.082599,
+                            "rss": 48185344
+                        },
+                        {
+                            "wall": 0.088612,
+                            "cpu": 0.082333,
+                            "rss": 48332800
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.088815,
+                            "cpu": 0.231408,
+                            "rss": 60243968
+                        },
+                        {
+                            "wall": 0.084938,
+                            "cpu": 0.245015,
+                            "rss": 59916288
+                        },
+                        {
+                            "wall": 0.086199,
+                            "cpu": 0.222125,
+                            "rss": 60145664
+                        },
+                        {
+                            "wall": 0.085142,
+                            "cpu": 0.231776,
+                            "rss": 60145664
+                        },
+                        {
+                            "wall": 0.085435,
+                            "cpu": 0.237294,
+                            "rss": 59572224
+                        }
+                    ]
+                },
+                "node": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.147008,
+                            "cpu": 0.071307,
+                            "rss": 40796160
+                        },
+                        {
+                            "wall": 0.146841,
+                            "cpu": 0.069544,
+                            "rss": 40828928
+                        },
+                        {
+                            "wall": 0.147731,
+                            "cpu": 0.069995,
+                            "rss": 40779776
+                        },
+                        {
+                            "wall": 0.153555,
+                            "cpu": 0.069757,
+                            "rss": 40665088
+                        },
+                        {
+                            "wall": 0.051152,
+                            "cpu": 0.051235,
+                            "rss": 40878080
+                        }
+                    ]
+                },
+                "perl": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.009081,
+                            "cpu": 0.003758,
+                            "rss": 3457024
+                        },
+                        {
+                            "wall": 0.009294,
+                            "cpu": 0.003793,
+                            "rss": 3457024
+                        },
+                        {
+                            "wall": 0.009264,
+                            "cpu": 0.003699,
+                            "rss": 3457024
+                        },
+                        {
+                            "wall": 0.009789,
+                            "cpu": 0.003708,
+                            "rss": 3457024
+                        },
+                        {
+                            "wall": 0.002777,
+                            "cpu": 0.002396,
+                            "rss": 3276800
+                        }
+                    ]
+                },
+                "python": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.016741,
+                            "cpu": 0.015667,
+                            "rss": 12009472
+                        },
+                        {
+                            "wall": 0.016776,
+                            "cpu": 0.015757,
+                            "rss": 12042240
+                        },
+                        {
+                            "wall": 0.016754,
+                            "cpu": 0.015747,
+                            "rss": 12042240
+                        },
+                        {
+                            "wall": 0.016393,
+                            "cpu": 0.015366,
+                            "rss": 12042240
+                        },
+                        {
+                            "wall": 0.016364,
+                            "cpu": 0.015508,
+                            "rss": 12009472
+                        }
+                    ]
+                },
+                "chez": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.037916,
+                            "cpu": 0.034556,
+                            "rss": 51855360
+                        },
+                        {
+                            "wall": 0.037997,
+                            "cpu": 0.034512,
+                            "rss": 51888128
+                        },
+                        {
+                            "wall": 0.038153,
+                            "cpu": 0.034592,
+                            "rss": 51871744
+                        },
+                        {
+                            "wall": 0.037481,
+                            "cpu": 0.034076,
+                            "rss": 51871744
+                        },
+                        {
+                            "wall": 0.03475,
+                            "cpu": 0.034327,
+                            "rss": 51806208
+                        }
+                    ]
+                },
+                "rust": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.002921,
+                            "cpu": 0.001801,
+                            "rss": 1572864
+                        },
+                        {
+                            "wall": 0.002826,
+                            "cpu": 0.001718,
+                            "rss": 1572864
+                        },
+                        {
+                            "wall": 0.002849,
+                            "cpu": 0.00171,
+                            "rss": 1572864
+                        },
+                        {
+                            "wall": 0.002962,
+                            "cpu": 0.001752,
+                            "rss": 1572864
+                        },
+                        {
+                            "wall": 0.001805,
+                            "cpu": 0.001433,
+                            "rss": 1572864
+                        }
+                    ]
+                },
+                "rust-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.002096,
+                            "cpu": 0.002798,
+                            "rss": 2195456
+                        },
+                        {
+                            "wall": 0.001917,
+                            "cpu": 0.002565,
+                            "rss": 2179072
+                        },
+                        {
+                            "wall": 0.001991,
+                            "cpu": 0.002529,
+                            "rss": 2195456
+                        },
+                        {
+                            "wall": 0.002092,
+                            "cpu": 0.002742,
+                            "rss": 2244608
+                        },
+                        {
+                            "wall": 0.002027,
+                            "cpu": 0.00254,
+                            "rss": 2260992
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "0"
+            ]
+        },
+        "fib": {
+            "size": "38",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.201118,
+                            "cpu": 0.199429,
+                            "rss": 1622016
+                        },
+                        {
+                            "wall": 0.201478,
+                            "cpu": 0.199655,
+                            "rss": 1622016
+                        },
+                        {
+                            "wall": 0.201433,
+                            "cpu": 0.199708,
+                            "rss": 1622016
+                        },
+                        {
+                            "wall": 0.201169,
+                            "cpu": 0.199286,
+                            "rss": 1622016
+                        },
+                        {
+                            "wall": 0.199159,
+                            "cpu": 0.198786,
+                            "rss": 1556480
+                        }
+                    ]
+                },
+                "c": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.10744,
+                            "cpu": 0.106592,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.110341,
+                            "cpu": 0.109668,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.110114,
+                            "cpu": 0.10944,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.110235,
+                            "cpu": 0.10942,
+                            "rss": 1228800
+                        },
+                        {
+                            "wall": 0.109844,
+                            "cpu": 0.109428,
+                            "rss": 1196032
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.128452,
+                            "cpu": 0.12457,
+                            "rss": 3506176
+                        },
+                        {
+                            "wall": 0.127753,
+                            "cpu": 0.123877,
+                            "rss": 3522560
+                        },
+                        {
+                            "wall": 0.127431,
+                            "cpu": 0.123597,
+                            "rss": 3506176
+                        },
+                        {
+                            "wall": 0.127494,
+                            "cpu": 0.123614,
+                            "rss": 3538944
+                        },
+                        {
+                            "wall": 0.123023,
+                            "cpu": 0.122649,
+                            "rss": 3538944
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.122982,
+                            "cpu": 0.122745,
+                            "rss": 3964928
+                        },
+                        {
+                            "wall": 0.123562,
+                            "cpu": 0.123203,
+                            "rss": 3932160
+                        },
+                        {
+                            "wall": 0.124131,
+                            "cpu": 0.123825,
+                            "rss": 3948544
+                        },
+                        {
+                            "wall": 0.124257,
+                            "cpu": 0.123919,
+                            "rss": 4096000
+                        },
+                        {
+                            "wall": 0.123087,
+                            "cpu": 0.122856,
+                            "rss": 3981312
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.678895,
+                            "cpu": 0.397275,
+                            "rss": 48250880
+                        },
+                        {
+                            "wall": 0.664259,
+                            "cpu": 0.381551,
+                            "rss": 48513024
+                        },
+                        {
+                            "wall": 0.720871,
+                            "cpu": 0.432948,
+                            "rss": 48971776
+                        },
+                        {
+                            "wall": 0.731557,
+                            "cpu": 0.443039,
+                            "rss": 48611328
+                        },
+                        {
+                            "wall": 0.660817,
+                            "cpu": 0.380048,
+                            "rss": 48611328
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.361721,
+                            "cpu": 0.502486,
+                            "rss": 60538880
+                        },
+                        {
+                            "wall": 0.360599,
+                            "cpu": 0.522572,
+                            "rss": 60178432
+                        },
+                        {
+                            "wall": 0.366878,
+                            "cpu": 0.520542,
+                            "rss": 60637184
+                        },
+                        {
+                            "wall": 0.36349,
+                            "cpu": 0.516161,
+                            "rss": 60030976
+                        },
+                        {
+                            "wall": 0.365784,
+                            "cpu": 0.517025,
+                            "rss": 60456960
+                        }
+                    ]
+                },
+                "node": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.320944,
+                            "cpu": 0.32128,
+                            "rss": 43319296
+                        },
+                        {
+                            "wall": 0.320048,
+                            "cpu": 0.320262,
+                            "rss": 43483136
+                        },
+                        {
+                            "wall": 0.321843,
+                            "cpu": 0.321203,
+                            "rss": 43548672
+                        },
+                        {
+                            "wall": 0.320863,
+                            "cpu": 0.319238,
+                            "rss": 43302912
+                        },
+                        {
+                            "wall": 0.316193,
+                            "cpu": 0.316396,
+                            "rss": 43728896
+                        }
+                    ]
+                },
+                "perl": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 12.84011,
+                            "cpu": 12.838236,
+                            "rss": 4177920
+                        },
+                        {
+                            "wall": 12.801795,
+                            "cpu": 12.799821,
+                            "rss": 4407296
+                        },
+                        {
+                            "wall": 12.760989,
+                            "cpu": 12.758875,
+                            "rss": 4505600
+                        },
+                        {
+                            "wall": 12.894479,
+                            "cpu": 12.892004,
+                            "rss": 4472832
+                        }
+                    ]
+                },
+                "python": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 4.636153,
+                            "cpu": 4.634559,
+                            "rss": 11747328
+                        },
+                        {
+                            "wall": 4.628513,
+                            "cpu": 4.62704,
+                            "rss": 11780096
+                        },
+                        {
+                            "wall": 4.635416,
+                            "cpu": 4.633914,
+                            "rss": 11780096
+                        },
+                        {
+                            "wall": 4.654348,
+                            "cpu": 4.650916,
+                            "rss": 11780096
+                        },
+                        {
+                            "wall": 4.646454,
+                            "cpu": 4.636724,
+                            "rss": 12009472
+                        }
+                    ]
+                },
+                "chez": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.220081,
+                            "cpu": 0.219186,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.224399,
+                            "cpu": 0.223586,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.231195,
+                            "cpu": 0.229876,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.224684,
+                            "cpu": 0.223947,
+                            "rss": 51806208
+                        },
+                        {
+                            "wall": 0.223977,
+                            "cpu": 0.223244,
+                            "rss": 51789824
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "39088169"
+            ]
+        },
+        "tak": {
+            "size": "10",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.143326,
+                            "cpu": 0.141749,
+                            "rss": 1654784
+                        },
+                        {
+                            "wall": 0.143361,
+                            "cpu": 0.141602,
+                            "rss": 1556480
+                        },
+                        {
+                            "wall": 0.146283,
+                            "cpu": 0.144515,
+                            "rss": 1622016
+                        },
+                        {
+                            "wall": 0.145159,
+                            "cpu": 0.142008,
+                            "rss": 1622016
+                        },
+                        {
+                            "wall": 0.141741,
+                            "cpu": 0.141274,
+                            "rss": 1556480
+                        }
+                    ]
+                },
+                "c": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.082617,
+                            "cpu": 0.081815,
+                            "rss": 1228800
+                        },
+                        {
+                            "wall": 0.082553,
+                            "cpu": 0.081729,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.083861,
+                            "cpu": 0.08305,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.082609,
+                            "cpu": 0.081759,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.082147,
+                            "cpu": 0.081766,
+                            "rss": 1196032
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.106698,
+                            "cpu": 0.102805,
+                            "rss": 3538944
+                        },
+                        {
+                            "wall": 0.106578,
+                            "cpu": 0.102807,
+                            "rss": 3506176
+                        },
+                        {
+                            "wall": 0.110448,
+                            "cpu": 0.103915,
+                            "rss": 3538944
+                        },
+                        {
+                            "wall": 0.106602,
+                            "cpu": 0.102664,
+                            "rss": 3522560
+                        },
+                        {
+                            "wall": 0.10207,
+                            "cpu": 0.10177,
+                            "rss": 3506176
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.102499,
+                            "cpu": 0.102292,
+                            "rss": 3981312
+                        },
+                        {
+                            "wall": 0.10229,
+                            "cpu": 0.102002,
+                            "rss": 3964928
+                        },
+                        {
+                            "wall": 0.102679,
+                            "cpu": 0.102413,
+                            "rss": 4046848
+                        },
+                        {
+                            "wall": 0.102102,
+                            "cpu": 0.101798,
+                            "rss": 3948544
+                        },
+                        {
+                            "wall": 0.102189,
+                            "cpu": 0.101942,
+                            "rss": 3850240
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.50418,
+                            "cpu": 0.293252,
+                            "rss": 48496640
+                        },
+                        {
+                            "wall": 0.528615,
+                            "cpu": 0.309724,
+                            "rss": 48578560
+                        },
+                        {
+                            "wall": 0.507295,
+                            "cpu": 0.296513,
+                            "rss": 47988736
+                        },
+                        {
+                            "wall": 0.502625,
+                            "cpu": 0.292255,
+                            "rss": 48463872
+                        },
+                        {
+                            "wall": 0.564334,
+                            "cpu": 0.348697,
+                            "rss": 48594944
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.279951,
+                            "cpu": 0.425251,
+                            "rss": 60456960
+                        },
+                        {
+                            "wall": 0.287496,
+                            "cpu": 0.439468,
+                            "rss": 60456960
+                        },
+                        {
+                            "wall": 0.531178,
+                            "cpu": 0.479491,
+                            "rss": 59998208
+                        },
+                        {
+                            "wall": 0.282946,
+                            "cpu": 0.445394,
+                            "rss": 60735488
+                        },
+                        {
+                            "wall": 0.280947,
+                            "cpu": 0.443741,
+                            "rss": 60243968
+                        }
+                    ]
+                },
+                "node": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.290481,
+                            "cpu": 0.290177,
+                            "rss": 43122688
+                        },
+                        {
+                            "wall": 0.292756,
+                            "cpu": 0.291293,
+                            "rss": 43515904
+                        },
+                        {
+                            "wall": 0.289333,
+                            "cpu": 0.288204,
+                            "rss": 43008000
+                        },
+                        {
+                            "wall": 0.290293,
+                            "cpu": 0.289436,
+                            "rss": 43565056
+                        },
+                        {
+                            "wall": 0.288394,
+                            "cpu": 0.288736,
+                            "rss": 43302912
+                        }
+                    ]
+                },
+                "perl": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 13.894114,
+                            "cpu": 13.893086,
+                            "rss": 4194304
+                        },
+                        {
+                            "wall": 13.858581,
+                            "cpu": 13.857556,
+                            "rss": 4227072
+                        },
+                        {
+                            "wall": 13.893622,
+                            "cpu": 13.892576,
+                            "rss": 4292608
+                        },
+                        {
+                            "wall": 13.839099,
+                            "cpu": 13.838047,
+                            "rss": 4308992
+                        }
+                    ]
+                },
+                "python": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 3.60258,
+                            "cpu": 3.601267,
+                            "rss": 11862016
+                        },
+                        {
+                            "wall": 3.602815,
+                            "cpu": 3.6015,
+                            "rss": 11796480
+                        },
+                        {
+                            "wall": 3.602942,
+                            "cpu": 3.601429,
+                            "rss": 11796480
+                        },
+                        {
+                            "wall": 3.603724,
+                            "cpu": 3.602358,
+                            "rss": 11796480
+                        },
+                        {
+                            "wall": 3.605585,
+                            "cpu": 3.604202,
+                            "rss": 11796480
+                        }
+                    ]
+                },
+                "chez": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.186574,
+                            "cpu": 0.185688,
+                            "rss": 51806208
+                        },
+                        {
+                            "wall": 0.189556,
+                            "cpu": 0.188658,
+                            "rss": 51806208
+                        },
+                        {
+                            "wall": 0.189197,
+                            "cpu": 0.188242,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.188878,
+                            "cpu": 0.187997,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.189486,
+                            "cpu": 0.188728,
+                            "rss": 51806208
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "11"
+            ]
+        },
+        "binary-trees": {
+            "size": "18",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.82645,
+                            "cpu": 0.824428,
+                            "rss": 105938944
+                        },
+                        {
+                            "wall": 0.816967,
+                            "cpu": 0.814646,
+                            "rss": 105971712
+                        },
+                        {
+                            "wall": 0.822634,
+                            "cpu": 0.820362,
+                            "rss": 105938944
+                        },
+                        {
+                            "wall": 0.823004,
+                            "cpu": 0.820646,
+                            "rss": 105938944
+                        },
+                        {
+                            "wall": 0.81895,
+                            "cpu": 0.818012,
+                            "rss": 105873408
+                        }
+                    ]
+                },
+                "c": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.994416,
+                            "cpu": 0.993242,
+                            "rss": 20070400
+                        },
+                        {
+                            "wall": 0.990999,
+                            "cpu": 0.989677,
+                            "rss": 20037632
+                        },
+                        {
+                            "wall": 0.987748,
+                            "cpu": 0.986732,
+                            "rss": 20037632
+                        },
+                        {
+                            "wall": 0.992203,
+                            "cpu": 0.99126,
+                            "rss": 20037632
+                        },
+                        {
+                            "wall": 0.990972,
+                            "cpu": 0.99036,
+                            "rss": 20037632
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.391787,
+                            "cpu": 1.385555,
+                            "rss": 57425920
+                        },
+                        {
+                            "wall": 1.365645,
+                            "cpu": 1.359769,
+                            "rss": 73760768
+                        },
+                        {
+                            "wall": 1.375085,
+                            "cpu": 1.369315,
+                            "rss": 73842688
+                        },
+                        {
+                            "wall": 1.360946,
+                            "cpu": 1.355188,
+                            "rss": 73957376
+                        },
+                        {
+                            "wall": 1.367911,
+                            "cpu": 1.365532,
+                            "rss": 74792960
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.665892,
+                            "cpu": 1.870672,
+                            "rss": 41697280
+                        },
+                        {
+                            "wall": 0.658444,
+                            "cpu": 1.836087,
+                            "rss": 39747584
+                        },
+                        {
+                            "wall": 0.658885,
+                            "cpu": 1.831961,
+                            "rss": 41091072
+                        },
+                        {
+                            "wall": 0.656159,
+                            "cpu": 1.843122,
+                            "rss": 41041920
+                        },
+                        {
+                            "wall": 0.657261,
+                            "cpu": 1.843735,
+                            "rss": 42418176
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.849617,
+                            "cpu": 0.532344,
+                            "rss": 172113920
+                        },
+                        {
+                            "wall": 0.873972,
+                            "cpu": 0.552784,
+                            "rss": 172146688
+                        },
+                        {
+                            "wall": 0.901668,
+                            "cpu": 0.579122,
+                            "rss": 172736512
+                        },
+                        {
+                            "wall": 0.877882,
+                            "cpu": 0.55679,
+                            "rss": 172408832
+                        },
+                        {
+                            "wall": 0.892206,
+                            "cpu": 0.572371,
+                            "rss": 172474368
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.494756,
+                            "cpu": 0.640411,
+                            "rss": 173588480
+                        },
+                        {
+                            "wall": 0.495985,
+                            "cpu": 0.658601,
+                            "rss": 170049536
+                        },
+                        {
+                            "wall": 0.494833,
+                            "cpu": 0.668691,
+                            "rss": 171786240
+                        },
+                        {
+                            "wall": 0.493148,
+                            "cpu": 0.649978,
+                            "rss": 173228032
+                        },
+                        {
+                            "wall": 0.497844,
+                            "cpu": 0.627595,
+                            "rss": 171540480
+                        }
+                    ]
+                },
+                "node": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.729856,
+                            "cpu": 0.994076,
+                            "rss": 295354368
+                        },
+                        {
+                            "wall": 0.703337,
+                            "cpu": 0.95024,
+                            "rss": 306757632
+                        },
+                        {
+                            "wall": 0.704838,
+                            "cpu": 0.960415,
+                            "rss": 291422208
+                        },
+                        {
+                            "wall": 0.695301,
+                            "cpu": 0.962799,
+                            "rss": 288391168
+                        },
+                        {
+                            "wall": 0.550802,
+                            "cpu": 0.688403,
+                            "rss": 357056512
+                        }
+                    ]
+                },
+                "perl": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 17.775327,
+                            "cpu": 17.77227,
+                            "rss": 142098432
+                        },
+                        {
+                            "wall": 17.991559,
+                            "cpu": 17.988128,
+                            "rss": 142360576
+                        },
+                        {
+                            "wall": 17.712873,
+                            "cpu": 17.710573,
+                            "rss": 142065664
+                        }
+                    ]
+                },
+                "python": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 5.901971,
+                            "cpu": 5.900542,
+                            "rss": 45563904
+                        },
+                        {
+                            "wall": 5.8704,
+                            "cpu": 5.869032,
+                            "rss": 45563904
+                        },
+                        {
+                            "wall": 5.876203,
+                            "cpu": 5.87471,
+                            "rss": 45563904
+                        },
+                        {
+                            "wall": 5.875917,
+                            "cpu": 5.874621,
+                            "rss": 45727744
+                        },
+                        {
+                            "wall": 5.871926,
+                            "cpu": 5.870723,
+                            "rss": 45465600
+                        }
+                    ]
+                },
+                "chez": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.344497,
+                            "cpu": 0.342776,
+                            "rss": 65798144
+                        },
+                        {
+                            "wall": 0.341571,
+                            "cpu": 0.339951,
+                            "rss": 65798144
+                        },
+                        {
+                            "wall": 0.342254,
+                            "cpu": 0.340611,
+                            "rss": 65814528
+                        },
+                        {
+                            "wall": 0.340364,
+                            "cpu": 0.338773,
+                            "rss": 65798144
+                        },
+                        {
+                            "wall": 0.340226,
+                            "cpu": 0.339042,
+                            "rss": 65798144
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "1048575",
+                "8126464",
+                "8323072",
+                "8372224",
+                "8384512",
+                "8387584",
+                "8388352",
+                "8388544",
+                "8388592",
+                "524287"
+            ]
+        },
+        "nqueens": {
+            "size": "13",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.710981,
+                            "cpu": 0.709026,
+                            "rss": 3833856
+                        },
+                        {
+                            "wall": 0.707875,
+                            "cpu": 0.705766,
+                            "rss": 3833856
+                        },
+                        {
+                            "wall": 0.706933,
+                            "cpu": 0.705226,
+                            "rss": 3833856
+                        },
+                        {
+                            "wall": 0.707296,
+                            "cpu": 0.705457,
+                            "rss": 3833856
+                        },
+                        {
+                            "wall": 0.705246,
+                            "cpu": 0.704717,
+                            "rss": 3751936
+                        }
+                    ]
+                },
+                "c": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.300788,
+                            "cpu": 0.299807,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.315968,
+                            "cpu": 0.314872,
+                            "rss": 1228800
+                        },
+                        {
+                            "wall": 0.309701,
+                            "cpu": 0.308797,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.308855,
+                            "cpu": 0.308009,
+                            "rss": 1196032
+                        },
+                        {
+                            "wall": 0.309671,
+                            "cpu": 0.309131,
+                            "rss": 1196032
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.580071,
+                            "cpu": 0.570864,
+                            "rss": 8732672
+                        },
+                        {
+                            "wall": 0.597744,
+                            "cpu": 0.582234,
+                            "rss": 9011200
+                        },
+                        {
+                            "wall": 0.578926,
+                            "cpu": 0.569924,
+                            "rss": 8503296
+                        },
+                        {
+                            "wall": 0.581476,
+                            "cpu": 0.571887,
+                            "rss": 8978432
+                        },
+                        {
+                            "wall": 0.575857,
+                            "cpu": 0.569814,
+                            "rss": 8814592
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.541126,
+                            "cpu": 0.586474,
+                            "rss": 10600448
+                        },
+                        {
+                            "wall": 0.54632,
+                            "cpu": 0.592971,
+                            "rss": 11042816
+                        },
+                        {
+                            "wall": 0.548542,
+                            "cpu": 0.594244,
+                            "rss": 10960896
+                        },
+                        {
+                            "wall": 0.548303,
+                            "cpu": 0.595791,
+                            "rss": 11304960
+                        },
+                        {
+                            "wall": 0.547624,
+                            "cpu": 0.593805,
+                            "rss": 11141120
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.685012,
+                            "cpu": 0.514238,
+                            "rss": 48201728
+                        },
+                        {
+                            "wall": 0.651661,
+                            "cpu": 0.482932,
+                            "rss": 49463296
+                        },
+                        {
+                            "wall": 0.653239,
+                            "cpu": 0.483229,
+                            "rss": 48545792
+                        },
+                        {
+                            "wall": 0.644076,
+                            "cpu": 0.474449,
+                            "rss": 48463872
+                        },
+                        {
+                            "wall": 0.747657,
+                            "cpu": 0.576787,
+                            "rss": 48037888
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.466072,
+                            "cpu": 0.605815,
+                            "rss": 60227584
+                        },
+                        {
+                            "wall": 0.478037,
+                            "cpu": 0.598349,
+                            "rss": 59064320
+                        },
+                        {
+                            "wall": 0.473482,
+                            "cpu": 0.642953,
+                            "rss": 60309504
+                        },
+                        {
+                            "wall": 0.474269,
+                            "cpu": 0.627432,
+                            "rss": 60751872
+                        },
+                        {
+                            "wall": 0.471283,
+                            "cpu": 0.61417,
+                            "rss": 60325888
+                        }
+                    ]
+                },
+                "node": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 2.304592,
+                            "cpu": 2.313921,
+                            "rss": 61718528
+                        },
+                        {
+                            "wall": 2.300526,
+                            "cpu": 2.31221,
+                            "rss": 61734912
+                        },
+                        {
+                            "wall": 2.280957,
+                            "cpu": 2.291829,
+                            "rss": 61898752
+                        },
+                        {
+                            "wall": 2.276277,
+                            "cpu": 2.287972,
+                            "rss": 61865984
+                        },
+                        {
+                            "wall": 2.295396,
+                            "cpu": 2.306393,
+                            "rss": 61833216
+                        }
+                    ]
+                },
+                "perl": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 13.856508,
+                            "cpu": 13.837474,
+                            "rss": 5652480
+                        },
+                        {
+                            "wall": 13.741508,
+                            "cpu": 13.740601,
+                            "rss": 5029888
+                        },
+                        {
+                            "wall": 13.739996,
+                            "cpu": 13.73858,
+                            "rss": 5242880
+                        },
+                        {
+                            "wall": 13.802637,
+                            "cpu": 13.784336,
+                            "rss": 5537792
+                        }
+                    ]
+                },
+                "python": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 6.951847,
+                            "cpu": 6.950464,
+                            "rss": 11845632
+                        },
+                        {
+                            "wall": 6.984329,
+                            "cpu": 6.976418,
+                            "rss": 11845632
+                        },
+                        {
+                            "wall": 6.952277,
+                            "cpu": 6.950603,
+                            "rss": 11845632
+                        },
+                        {
+                            "wall": 6.969103,
+                            "cpu": 6.966936,
+                            "rss": 11845632
+                        },
+                        {
+                            "wall": 6.961824,
+                            "cpu": 6.959535,
+                            "rss": 11845632
+                        }
+                    ]
+                },
+                "chez": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.378873,
+                            "cpu": 0.377445,
+                            "rss": 51806208
+                        },
+                        {
+                            "wall": 0.388156,
+                            "cpu": 0.387068,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.388806,
+                            "cpu": 0.387464,
+                            "rss": 51806208
+                        },
+                        {
+                            "wall": 0.387841,
+                            "cpu": 0.386575,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.387152,
+                            "cpu": 0.386074,
+                            "rss": 51789824
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "73712"
+            ]
+        },
+        "deriv": {
+            "size": "2000000",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.381744,
+                            "cpu": 0.380063,
+                            "rss": 3866624
+                        },
+                        {
+                            "wall": 0.382117,
+                            "cpu": 0.380175,
+                            "rss": 3866624
+                        },
+                        {
+                            "wall": 0.380934,
+                            "cpu": 0.378915,
+                            "rss": 3784704
+                        },
+                        {
+                            "wall": 0.383474,
+                            "cpu": 0.381332,
+                            "rss": 3866624
+                        },
+                        {
+                            "wall": 0.379912,
+                            "cpu": 0.379247,
+                            "rss": 4440064
+                        }
+                    ]
+                },
+                "c": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.133577,
+                            "cpu": 0.132698,
+                            "rss": 1261568
+                        },
+                        {
+                            "wall": 0.133602,
+                            "cpu": 0.132656,
+                            "rss": 1261568
+                        },
+                        {
+                            "wall": 0.134044,
+                            "cpu": 0.133053,
+                            "rss": 1228800
+                        },
+                        {
+                            "wall": 0.133801,
+                            "cpu": 0.132841,
+                            "rss": 1261568
+                        },
+                        {
+                            "wall": 0.133014,
+                            "cpu": 0.132497,
+                            "rss": 1228800
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.064532,
+                            "cpu": 1.045271,
+                            "rss": 8798208
+                        },
+                        {
+                            "wall": 1.048801,
+                            "cpu": 1.04494,
+                            "rss": 8536064
+                        },
+                        {
+                            "wall": 1.07468,
+                            "cpu": 1.055224,
+                            "rss": 8962048
+                        },
+                        {
+                            "wall": 1.072086,
+                            "cpu": 1.052633,
+                            "rss": 8765440
+                        },
+                        {
+                            "wall": 1.060594,
+                            "cpu": 1.044263,
+                            "rss": 8716288
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.797684,
+                            "cpu": 0.910658,
+                            "rss": 11190272
+                        },
+                        {
+                            "wall": 0.799418,
+                            "cpu": 0.914671,
+                            "rss": 11501568
+                        },
+                        {
+                            "wall": 0.802707,
+                            "cpu": 0.917096,
+                            "rss": 11173888
+                        },
+                        {
+                            "wall": 0.79523,
+                            "cpu": 0.903713,
+                            "rss": 11223040
+                        },
+                        {
+                            "wall": 0.79922,
+                            "cpu": 0.913157,
+                            "rss": 11616256
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.495878,
+                            "cpu": 0.323786,
+                            "rss": 48611328
+                        },
+                        {
+                            "wall": 0.508662,
+                            "cpu": 0.337976,
+                            "rss": 48168960
+                        },
+                        {
+                            "wall": 0.495196,
+                            "cpu": 0.323723,
+                            "rss": 48726016
+                        },
+                        {
+                            "wall": 0.497044,
+                            "cpu": 0.325951,
+                            "rss": 48594944
+                        },
+                        {
+                            "wall": 0.550499,
+                            "cpu": 0.380988,
+                            "rss": 49315840
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.312561,
+                            "cpu": 0.462704,
+                            "rss": 61145088
+                        },
+                        {
+                            "wall": 0.318459,
+                            "cpu": 0.486828,
+                            "rss": 60850176
+                        },
+                        {
+                            "wall": 0.315595,
+                            "cpu": 0.457513,
+                            "rss": 59899904
+                        },
+                        {
+                            "wall": 0.310804,
+                            "cpu": 0.466564,
+                            "rss": 61128704
+                        },
+                        {
+                            "wall": 0.31015,
+                            "cpu": 0.458818,
+                            "rss": 60096512
+                        }
+                    ]
+                },
+                "node": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.619935,
+                            "cpu": 0.668065,
+                            "rss": 55214080
+                        },
+                        {
+                            "wall": 0.618979,
+                            "cpu": 0.667188,
+                            "rss": 56360960
+                        },
+                        {
+                            "wall": 0.615223,
+                            "cpu": 0.662884,
+                            "rss": 55721984
+                        },
+                        {
+                            "wall": 0.667522,
+                            "cpu": 0.714741,
+                            "rss": 56016896
+                        },
+                        {
+                            "wall": 0.662449,
+                            "cpu": 0.711954,
+                            "rss": 56049664
+                        }
+                    ]
+                },
+                "perl": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 8.096302,
+                            "cpu": 8.09534,
+                            "rss": 4620288
+                        },
+                        {
+                            "wall": 8.09822,
+                            "cpu": 8.096721,
+                            "rss": 4554752
+                        },
+                        {
+                            "wall": 8.169929,
+                            "cpu": 8.153912,
+                            "rss": 4702208
+                        },
+                        {
+                            "wall": 8.113491,
+                            "cpu": 8.112589,
+                            "rss": 4505600
+                        },
+                        {
+                            "wall": 8.080103,
+                            "cpu": 8.079457,
+                            "rss": 4259840
+                        }
+                    ]
+                },
+                "python": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 4.07491,
+                            "cpu": 4.073387,
+                            "rss": 12173312
+                        },
+                        {
+                            "wall": 4.086193,
+                            "cpu": 4.084748,
+                            "rss": 11927552
+                        },
+                        {
+                            "wall": 4.080062,
+                            "cpu": 4.077043,
+                            "rss": 11927552
+                        },
+                        {
+                            "wall": 4.047021,
+                            "cpu": 4.045483,
+                            "rss": 11894784
+                        },
+                        {
+                            "wall": 4.062354,
+                            "cpu": 4.060985,
+                            "rss": 11927552
+                        }
+                    ]
+                },
+                "chez": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.184133,
+                            "cpu": 0.183172,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.184167,
+                            "cpu": 0.183175,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.18498,
+                            "cpu": 0.184203,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.184144,
+                            "cpu": 0.18293,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.183115,
+                            "cpu": 0.18231,
+                            "rss": 51789824
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "10000000",
+                "43"
+            ]
+        },
+        "n-body": {
+            "size": "1000000",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.848891,
+                            "cpu": 0.84686,
+                            "rss": 4685824
+                        },
+                        {
+                            "wall": 0.851835,
+                            "cpu": 0.848662,
+                            "rss": 5636096
+                        },
+                        {
+                            "wall": 0.84938,
+                            "cpu": 0.846976,
+                            "rss": 4997120
+                        },
+                        {
+                            "wall": 0.845333,
+                            "cpu": 0.843146,
+                            "rss": 3997696
+                        },
+                        {
+                            "wall": 0.848798,
+                            "cpu": 0.848301,
+                            "rss": 3915776
+                        }
+                    ]
+                },
+                "c": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.038326,
+                            "cpu": 0.037361,
+                            "rss": 1294336
+                        },
+                        {
+                            "wall": 0.03821,
+                            "cpu": 0.037486,
+                            "rss": 1294336
+                        },
+                        {
+                            "wall": 0.038606,
+                            "cpu": 0.037582,
+                            "rss": 1294336
+                        },
+                        {
+                            "wall": 0.038212,
+                            "cpu": 0.037468,
+                            "rss": 1294336
+                        },
+                        {
+                            "wall": 0.03779,
+                            "cpu": 0.037377,
+                            "rss": 1212416
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.052576,
+                            "cpu": 0.048831,
+                            "rss": 3473408
+                        },
+                        {
+                            "wall": 0.05265,
+                            "cpu": 0.048816,
+                            "rss": 3489792
+                        },
+                        {
+                            "wall": 0.052598,
+                            "cpu": 0.048781,
+                            "rss": 3473408
+                        },
+                        {
+                            "wall": 0.052687,
+                            "cpu": 0.048799,
+                            "rss": 3457024
+                        },
+                        {
+                            "wall": 0.047888,
+                            "cpu": 0.047584,
+                            "rss": 3489792
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.0481,
+                            "cpu": 0.047812,
+                            "rss": 3948544
+                        },
+                        {
+                            "wall": 0.048054,
+                            "cpu": 0.04774,
+                            "rss": 3997696
+                        },
+                        {
+                            "wall": 0.048203,
+                            "cpu": 0.047867,
+                            "rss": 3948544
+                        },
+                        {
+                            "wall": 0.04816,
+                            "cpu": 0.047814,
+                            "rss": 3964928
+                        },
+                        {
+                            "wall": 0.047841,
+                            "cpu": 0.047566,
+                            "rss": 3948544
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.301498,
+                            "cpu": 1.206798,
+                            "rss": 48562176
+                        },
+                        {
+                            "wall": 1.328809,
+                            "cpu": 1.234831,
+                            "rss": 48283648
+                        },
+                        {
+                            "wall": 1.299681,
+                            "cpu": 1.206126,
+                            "rss": 48513024
+                        },
+                        {
+                            "wall": 1.301029,
+                            "cpu": 1.207041,
+                            "rss": 48234496
+                        },
+                        {
+                            "wall": 1.347303,
+                            "cpu": 1.254787,
+                            "rss": 48578560
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.197071,
+                            "cpu": 1.340294,
+                            "rss": 60211200
+                        },
+                        {
+                            "wall": 1.207362,
+                            "cpu": 1.356918,
+                            "rss": 59834368
+                        },
+                        {
+                            "wall": 1.195695,
+                            "cpu": 1.357609,
+                            "rss": 60751872
+                        },
+                        {
+                            "wall": 1.211342,
+                            "cpu": 1.370845,
+                            "rss": 59113472
+                        },
+                        {
+                            "wall": 1.203553,
+                            "cpu": 1.357907,
+                            "rss": 60751872
+                        }
+                    ]
+                },
+                "node": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.118681,
+                            "cpu": 0.121069,
+                            "rss": 46923776
+                        },
+                        {
+                            "wall": 0.116582,
+                            "cpu": 0.119557,
+                            "rss": 47316992
+                        },
+                        {
+                            "wall": 0.119665,
+                            "cpu": 0.121524,
+                            "rss": 46825472
+                        },
+                        {
+                            "wall": 0.118448,
+                            "cpu": 0.120628,
+                            "rss": 47169536
+                        },
+                        {
+                            "wall": 0.116395,
+                            "cpu": 0.119708,
+                            "rss": 47284224
+                        }
+                    ]
+                },
+                "perl": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 7.332087,
+                            "cpu": 7.328757,
+                            "rss": 6291456
+                        },
+                        {
+                            "wall": 7.212944,
+                            "cpu": 7.209604,
+                            "rss": 5947392
+                        },
+                        {
+                            "wall": 7.401508,
+                            "cpu": 7.398192,
+                            "rss": 6029312
+                        },
+                        {
+                            "wall": 7.362109,
+                            "cpu": 7.358205,
+                            "rss": 6307840
+                        },
+                        {
+                            "wall": 7.405327,
+                            "cpu": 7.404577,
+                            "rss": 5947392
+                        }
+                    ]
+                },
+                "python": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 5.732605,
+                            "cpu": 5.731022,
+                            "rss": 12238848
+                        },
+                        {
+                            "wall": 5.752629,
+                            "cpu": 5.750795,
+                            "rss": 12255232
+                        },
+                        {
+                            "wall": 5.725316,
+                            "cpu": 5.723833,
+                            "rss": 12255232
+                        },
+                        {
+                            "wall": 5.736313,
+                            "cpu": 5.734864,
+                            "rss": 12255232
+                        },
+                        {
+                            "wall": 5.736961,
+                            "cpu": 5.735354,
+                            "rss": 12255232
+                        }
+                    ]
+                },
+                "chez": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.157221,
+                            "cpu": 1.155654,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 1.172408,
+                            "cpu": 1.170997,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 1.15612,
+                            "cpu": 1.154639,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 1.156314,
+                            "cpu": 1.154732,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 1.157352,
+                            "cpu": 1.156034,
+                            "rss": 51789824
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "-169075164",
+                "-169086185"
+            ]
+        },
+        "spectral-norm": {
+            "size": "1000",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.47302,
+                            "cpu": 0.471106,
+                            "rss": 4538368
+                        },
+                        {
+                            "wall": 0.480481,
+                            "cpu": 0.478376,
+                            "rss": 5160960
+                        },
+                        {
+                            "wall": 0.473867,
+                            "cpu": 0.471909,
+                            "rss": 3866624
+                        },
+                        {
+                            "wall": 0.471979,
+                            "cpu": 0.469918,
+                            "rss": 3866624
+                        },
+                        {
+                            "wall": 0.471648,
+                            "cpu": 0.470986,
+                            "rss": 3801088
+                        }
+                    ]
+                },
+                "slight-arrays": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.085983,
+                            "cpu": 0.083891,
+                            "rss": 43368448
+                        },
+                        {
+                            "wall": 0.087217,
+                            "cpu": 0.085229,
+                            "rss": 43466752
+                        },
+                        {
+                            "wall": 0.085471,
+                            "cpu": 0.08332,
+                            "rss": 43466752
+                        },
+                        {
+                            "wall": 0.084769,
+                            "cpu": 0.082588,
+                            "rss": 43466752
+                        },
+                        {
+                            "wall": 0.083237,
+                            "cpu": 0.082682,
+                            "rss": 43368448
+                        }
+                    ]
+                },
+                "slight-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.019516,
+                            "cpu": 0.14305,
+                            "rss": 70516736
+                        },
+                        {
+                            "wall": 0.020516,
+                            "cpu": 0.138523,
+                            "rss": 67076096
+                        },
+                        {
+                            "wall": 0.020477,
+                            "cpu": 0.141532,
+                            "rss": 73154560
+                        },
+                        {
+                            "wall": 0.019135,
+                            "cpu": 0.139671,
+                            "rss": 70090752
+                        },
+                        {
+                            "wall": 0.017955,
+                            "cpu": 0.14121,
+                            "rss": 70336512
+                        }
+                    ]
+                },
+                "c": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.046201,
+                            "cpu": 0.045505,
+                            "rss": 1212416
+                        },
+                        {
+                            "wall": 0.046498,
+                            "cpu": 0.045812,
+                            "rss": 1212416
+                        },
+                        {
+                            "wall": 0.047312,
+                            "cpu": 0.046617,
+                            "rss": 1212416
+                        },
+                        {
+                            "wall": 0.047359,
+                            "cpu": 0.046623,
+                            "rss": 1212416
+                        },
+                        {
+                            "wall": 0.045725,
+                            "cpu": 0.045367,
+                            "rss": 1212416
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.051094,
+                            "cpu": 0.047444,
+                            "rss": 3588096
+                        },
+                        {
+                            "wall": 0.053675,
+                            "cpu": 0.04838,
+                            "rss": 3588096
+                        },
+                        {
+                            "wall": 0.051219,
+                            "cpu": 0.047483,
+                            "rss": 3588096
+                        },
+                        {
+                            "wall": 0.051048,
+                            "cpu": 0.04739,
+                            "rss": 3571712
+                        },
+                        {
+                            "wall": 0.046759,
+                            "cpu": 0.046415,
+                            "rss": 3588096
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.046869,
+                            "cpu": 0.046545,
+                            "rss": 4046848
+                        },
+                        {
+                            "wall": 0.046887,
+                            "cpu": 0.046557,
+                            "rss": 4030464
+                        },
+                        {
+                            "wall": 0.047677,
+                            "cpu": 0.047429,
+                            "rss": 4046848
+                        },
+                        {
+                            "wall": 0.046662,
+                            "cpu": 0.04639,
+                            "rss": 3915776
+                        },
+                        {
+                            "wall": 0.046774,
+                            "cpu": 0.046524,
+                            "rss": 3932160
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.684991,
+                            "cpu": 0.528905,
+                            "rss": 48578560
+                        },
+                        {
+                            "wall": 0.712432,
+                            "cpu": 0.556954,
+                            "rss": 48644096
+                        },
+                        {
+                            "wall": 0.661323,
+                            "cpu": 0.505844,
+                            "rss": 48332800
+                        },
+                        {
+                            "wall": 0.741684,
+                            "cpu": 0.586231,
+                            "rss": 48807936
+                        },
+                        {
+                            "wall": 0.740815,
+                            "cpu": 0.585766,
+                            "rss": 48939008
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.475095,
+                            "cpu": 0.63091,
+                            "rss": 61079552
+                        },
+                        {
+                            "wall": 0.485207,
+                            "cpu": 0.62127,
+                            "rss": 60604416
+                        },
+                        {
+                            "wall": 0.494474,
+                            "cpu": 0.668798,
+                            "rss": 60407808
+                        },
+                        {
+                            "wall": 0.484401,
+                            "cpu": 0.629306,
+                            "rss": 61014016
+                        },
+                        {
+                            "wall": 0.48621,
+                            "cpu": 0.642636,
+                            "rss": 61210624
+                        }
+                    ]
+                },
+                "node": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.119153,
+                            "cpu": 0.120417,
+                            "rss": 46153728
+                        },
+                        {
+                            "wall": 0.120895,
+                            "cpu": 0.123097,
+                            "rss": 46219264
+                        },
+                        {
+                            "wall": 0.120942,
+                            "cpu": 0.124717,
+                            "rss": 46120960
+                        },
+                        {
+                            "wall": 0.119102,
+                            "cpu": 0.121344,
+                            "rss": 46743552
+                        },
+                        {
+                            "wall": 0.117335,
+                            "cpu": 0.121058,
+                            "rss": 45711360
+                        }
+                    ]
+                },
+                "perl": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 7.573989,
+                            "cpu": 7.573014,
+                            "rss": 6209536
+                        },
+                        {
+                            "wall": 7.555432,
+                            "cpu": 7.554469,
+                            "rss": 6406144
+                        },
+                        {
+                            "wall": 7.585362,
+                            "cpu": 7.584462,
+                            "rss": 6193152
+                        },
+                        {
+                            "wall": 7.578455,
+                            "cpu": 7.577187,
+                            "rss": 6373376
+                        },
+                        {
+                            "wall": 7.565715,
+                            "cpu": 7.564422,
+                            "rss": 6209536
+                        }
+                    ]
+                },
+                "python": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 5.156732,
+                            "cpu": 5.15528,
+                            "rss": 12419072
+                        },
+                        {
+                            "wall": 5.136682,
+                            "cpu": 5.135231,
+                            "rss": 12337152
+                        },
+                        {
+                            "wall": 5.131994,
+                            "cpu": 5.130375,
+                            "rss": 12238848
+                        },
+                        {
+                            "wall": 5.123316,
+                            "cpu": 5.121836,
+                            "rss": 12419072
+                        },
+                        {
+                            "wall": 5.132213,
+                            "cpu": 5.131043,
+                            "rss": 12304384
+                        }
+                    ]
+                },
+                "chez": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.572995,
+                            "cpu": 0.571512,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.57549,
+                            "cpu": 0.574057,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.572397,
+                            "cpu": 0.571107,
+                            "rss": 51789824
+                        },
+                        {
+                            "wall": 0.572937,
+                            "cpu": 0.571618,
+                            "rss": 51806208
+                        },
+                        {
+                            "wall": 0.573245,
+                            "cpu": 0.572116,
+                            "rss": 51806208
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "1274224148"
+            ]
+        },
+        "ping-pong": {
+            "size": "2000000",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.29884,
+                            "cpu": 0.297101,
+                            "rss": 2981888
+                        },
+                        {
+                            "wall": 0.307574,
+                            "cpu": 0.305606,
+                            "rss": 2949120
+                        },
+                        {
+                            "wall": 0.302938,
+                            "cpu": 0.30105,
+                            "rss": 2818048
+                        },
+                        {
+                            "wall": 0.307581,
+                            "cpu": 0.305612,
+                            "rss": 2932736
+                        },
+                        {
+                            "wall": 0.293965,
+                            "cpu": 0.293462,
+                            "rss": 2818048
+                        }
+                    ]
+                },
+                "slight-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.066411,
+                            "cpu": 0.671622,
+                            "rss": 18481152
+                        },
+                        {
+                            "wall": 0.067108,
+                            "cpu": 0.63941,
+                            "rss": 17973248
+                        },
+                        {
+                            "wall": 0.067608,
+                            "cpu": 0.644239,
+                            "rss": 17530880
+                        },
+                        {
+                            "wall": 0.070457,
+                            "cpu": 0.660924,
+                            "rss": 17350656
+                        },
+                        {
+                            "wall": 0.062174,
+                            "cpu": 0.608297,
+                            "rss": 17678336
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.388713,
+                            "cpu": 0.38506,
+                            "rss": 3522560
+                        },
+                        {
+                            "wall": 0.389436,
+                            "cpu": 0.385764,
+                            "rss": 3506176
+                        },
+                        {
+                            "wall": 0.38945,
+                            "cpu": 0.385509,
+                            "rss": 3489792
+                        },
+                        {
+                            "wall": 0.388625,
+                            "cpu": 0.384681,
+                            "rss": 3489792
+                        },
+                        {
+                            "wall": 0.385264,
+                            "cpu": 0.384871,
+                            "rss": 3538944
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.522697,
+                            "cpu": 0.751069,
+                            "rss": 4079616
+                        },
+                        {
+                            "wall": 0.519892,
+                            "cpu": 0.750771,
+                            "rss": 3981312
+                        },
+                        {
+                            "wall": 0.533684,
+                            "cpu": 0.770731,
+                            "rss": 4079616
+                        },
+                        {
+                            "wall": 0.527754,
+                            "cpu": 0.760248,
+                            "rss": 4161536
+                        },
+                        {
+                            "wall": 0.527329,
+                            "cpu": 0.762894,
+                            "rss": 4063232
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 3.600731,
+                            "cpu": 1.420117,
+                            "rss": 48660480
+                        },
+                        {
+                            "wall": 3.499667,
+                            "cpu": 1.365178,
+                            "rss": 48857088
+                        },
+                        {
+                            "wall": 3.504815,
+                            "cpu": 1.341012,
+                            "rss": 48283648
+                        },
+                        {
+                            "wall": 3.45942,
+                            "cpu": 1.338007,
+                            "rss": 48480256
+                        },
+                        {
+                            "wall": 3.465629,
+                            "cpu": 1.341904,
+                            "rss": 48496640
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.983307,
+                            "cpu": 1.130725,
+                            "rss": 60456960
+                        },
+                        {
+                            "wall": 0.983915,
+                            "cpu": 1.128964,
+                            "rss": 60063744
+                        },
+                        {
+                            "wall": 0.983804,
+                            "cpu": 1.133675,
+                            "rss": 59375616
+                        },
+                        {
+                            "wall": 1.026557,
+                            "cpu": 1.163758,
+                            "rss": 60702720
+                        },
+                        {
+                            "wall": 1.038154,
+                            "cpu": 1.169732,
+                            "rss": 59375616
+                        }
+                    ]
+                },
+                "rust": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.291528,
+                            "cpu": 0.289515,
+                            "rss": 1703936
+                        },
+                        {
+                            "wall": 0.293273,
+                            "cpu": 0.29129,
+                            "rss": 1703936
+                        },
+                        {
+                            "wall": 0.292517,
+                            "cpu": 0.290574,
+                            "rss": 1703936
+                        },
+                        {
+                            "wall": 0.292736,
+                            "cpu": 0.29072,
+                            "rss": 1818624
+                        },
+                        {
+                            "wall": 0.300311,
+                            "cpu": 0.299845,
+                            "rss": 1687552
+                        }
+                    ]
+                },
+                "rust-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 11.660466,
+                            "cpu": 14.727497,
+                            "rss": 2408448
+                        },
+                        {
+                            "wall": 11.798519,
+                            "cpu": 14.908227,
+                            "rss": 2359296
+                        },
+                        {
+                            "wall": 11.57313,
+                            "cpu": 14.720789,
+                            "rss": 2424832
+                        },
+                        {
+                            "wall": 11.470151,
+                            "cpu": 14.607039,
+                            "rss": 2441216
+                        },
+                        {
+                            "wall": 11.729335,
+                            "cpu": 14.80642,
+                            "rss": 2342912
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "2000000"
+            ]
+        },
+        "payload": {
+            "size": "1000000",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.725299,
+                            "cpu": 0.723659,
+                            "rss": 2490368
+                        },
+                        {
+                            "wall": 0.724322,
+                            "cpu": 0.722597,
+                            "rss": 2490368
+                        },
+                        {
+                            "wall": 0.723406,
+                            "cpu": 0.721576,
+                            "rss": 2490368
+                        },
+                        {
+                            "wall": 0.725745,
+                            "cpu": 0.723656,
+                            "rss": 2490368
+                        },
+                        {
+                            "wall": 0.717472,
+                            "cpu": 0.716877,
+                            "rss": 3145728
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.201431,
+                            "cpu": 0.197639,
+                            "rss": 3522560
+                        },
+                        {
+                            "wall": 0.201103,
+                            "cpu": 0.197364,
+                            "rss": 3489792
+                        },
+                        {
+                            "wall": 0.202088,
+                            "cpu": 0.198495,
+                            "rss": 3522560
+                        },
+                        {
+                            "wall": 0.202793,
+                            "cpu": 0.198787,
+                            "rss": 3555328
+                        },
+                        {
+                            "wall": 0.197221,
+                            "cpu": 0.196864,
+                            "rss": 3489792
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.266439,
+                            "cpu": 0.383634,
+                            "rss": 4145152
+                        },
+                        {
+                            "wall": 0.266722,
+                            "cpu": 0.383413,
+                            "rss": 4194304
+                        },
+                        {
+                            "wall": 0.269111,
+                            "cpu": 0.388251,
+                            "rss": 4030464
+                        },
+                        {
+                            "wall": 0.271805,
+                            "cpu": 0.39317,
+                            "rss": 4210688
+                        },
+                        {
+                            "wall": 0.271015,
+                            "cpu": 0.389022,
+                            "rss": 4014080
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 2.816546,
+                            "cpu": 1.754262,
+                            "rss": 47677440
+                        },
+                        {
+                            "wall": 2.833211,
+                            "cpu": 1.764657,
+                            "rss": 48660480
+                        },
+                        {
+                            "wall": 2.667794,
+                            "cpu": 1.611168,
+                            "rss": 48431104
+                        },
+                        {
+                            "wall": 2.833121,
+                            "cpu": 1.766537,
+                            "rss": 48218112
+                        },
+                        {
+                            "wall": 2.566144,
+                            "cpu": 1.515194,
+                            "rss": 48594944
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.387285,
+                            "cpu": 1.608245,
+                            "rss": 61456384
+                        },
+                        {
+                            "wall": 1.391604,
+                            "cpu": 1.556392,
+                            "rss": 61014016
+                        },
+                        {
+                            "wall": 1.354114,
+                            "cpu": 1.57563,
+                            "rss": 61112320
+                        },
+                        {
+                            "wall": 1.353778,
+                            "cpu": 1.560801,
+                            "rss": 60948480
+                        },
+                        {
+                            "wall": 1.367085,
+                            "cpu": 1.564248,
+                            "rss": 60391424
+                        }
+                    ]
+                },
+                "rust": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.15949,
+                            "cpu": 0.157171,
+                            "rss": 1622016
+                        },
+                        {
+                            "wall": 0.159941,
+                            "cpu": 0.157475,
+                            "rss": 1720320
+                        },
+                        {
+                            "wall": 0.15968,
+                            "cpu": 0.157311,
+                            "rss": 1720320
+                        },
+                        {
+                            "wall": 0.159748,
+                            "cpu": 0.157388,
+                            "rss": 1720320
+                        },
+                        {
+                            "wall": 0.157933,
+                            "cpu": 0.157541,
+                            "rss": 1622016
+                        }
+                    ]
+                },
+                "rust-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 5.972693,
+                            "cpu": 7.502626,
+                            "rss": 2457600
+                        },
+                        {
+                            "wall": 6.022315,
+                            "cpu": 7.541946,
+                            "rss": 2441216
+                        },
+                        {
+                            "wall": 5.857313,
+                            "cpu": 7.383809,
+                            "rss": 2392064
+                        },
+                        {
+                            "wall": 5.897527,
+                            "cpu": 7.448835,
+                            "rss": 2424832
+                        },
+                        {
+                            "wall": 5.86487,
+                            "cpu": 7.419217,
+                            "rss": 2392064
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "1000000",
+                "5050"
+            ]
+        },
+        "thread-ring": {
+            "size": "10000000",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.488495,
+                            "cpu": 0.485995,
+                            "rss": 10485760
+                        },
+                        {
+                            "wall": 0.482945,
+                            "cpu": 0.480044,
+                            "rss": 10485760
+                        },
+                        {
+                            "wall": 0.482716,
+                            "cpu": 0.479485,
+                            "rss": 10534912
+                        },
+                        {
+                            "wall": 0.482248,
+                            "cpu": 0.479358,
+                            "rss": 10485760
+                        },
+                        {
+                            "wall": 0.485868,
+                            "cpu": 0.484513,
+                            "rss": 10338304
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.047386,
+                            "cpu": 1.043839,
+                            "rss": 5193728
+                        },
+                        {
+                            "wall": 1.072539,
+                            "cpu": 1.068827,
+                            "rss": 5046272
+                        },
+                        {
+                            "wall": 1.064741,
+                            "cpu": 1.061152,
+                            "rss": 5160960
+                        },
+                        {
+                            "wall": 1.069471,
+                            "cpu": 1.065636,
+                            "rss": 5177344
+                        },
+                        {
+                            "wall": 1.039838,
+                            "cpu": 1.039493,
+                            "rss": 5177344
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.439562,
+                            "cpu": 2.047956,
+                            "rss": 5816320
+                        },
+                        {
+                            "wall": 1.449056,
+                            "cpu": 2.066806,
+                            "rss": 5914624
+                        },
+                        {
+                            "wall": 1.450183,
+                            "cpu": 2.077791,
+                            "rss": 5881856
+                        },
+                        {
+                            "wall": 1.438741,
+                            "cpu": 2.048101,
+                            "rss": 5652480
+                        },
+                        {
+                            "wall": 1.444048,
+                            "cpu": 2.050599,
+                            "rss": 5799936
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 8.359833,
+                            "cpu": 3.161108,
+                            "rss": 49348608
+                        },
+                        {
+                            "wall": 8.350335,
+                            "cpu": 3.167171,
+                            "rss": 49217536
+                        },
+                        {
+                            "wall": 8.19642,
+                            "cpu": 3.032974,
+                            "rss": 49315840
+                        },
+                        {
+                            "wall": 8.199647,
+                            "cpu": 3.031068,
+                            "rss": 49037312
+                        },
+                        {
+                            "wall": 8.152071,
+                            "cpu": 3.012511,
+                            "rss": 49332224
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 2.304202,
+                            "cpu": 2.461434,
+                            "rss": 61374464
+                        },
+                        {
+                            "wall": 2.404971,
+                            "cpu": 2.576174,
+                            "rss": 60096512
+                        },
+                        {
+                            "wall": 2.391655,
+                            "cpu": 2.552853,
+                            "rss": 60735488
+                        },
+                        {
+                            "wall": 2.391256,
+                            "cpu": 2.550415,
+                            "rss": 61210624
+                        },
+                        {
+                            "wall": 3.156652,
+                            "cpu": 2.66737,
+                            "rss": 61210624
+                        }
+                    ]
+                },
+                "rust": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.691293,
+                            "cpu": 0.689531,
+                            "rss": 2506752
+                        },
+                        {
+                            "wall": 0.691706,
+                            "cpu": 0.689877,
+                            "rss": 2408448
+                        },
+                        {
+                            "wall": 0.691671,
+                            "cpu": 0.689931,
+                            "rss": 2506752
+                        },
+                        {
+                            "wall": 0.696792,
+                            "cpu": 0.694967,
+                            "rss": 2686976
+                        },
+                        {
+                            "wall": 0.690185,
+                            "cpu": 0.689718,
+                            "rss": 2408448
+                        }
+                    ]
+                },
+                "rust-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.169617,
+                            "cpu": 1.922067,
+                            "rss": 3244032
+                        },
+                        {
+                            "wall": 1.176824,
+                            "cpu": 1.935757,
+                            "rss": 3276800
+                        },
+                        {
+                            "wall": 1.172944,
+                            "cpu": 1.921675,
+                            "rss": 3276800
+                        },
+                        {
+                            "wall": 1.183332,
+                            "cpu": 1.936153,
+                            "rss": 3162112
+                        },
+                        {
+                            "wall": 1.205938,
+                            "cpu": 1.978728,
+                            "rss": 3375104
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "361"
+            ]
+        },
+        "fan-in": {
+            "size": "10000000",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.373007,
+                            "cpu": 0.361304,
+                            "rss": 479838208
+                        },
+                        {
+                            "wall": 0.369644,
+                            "cpu": 0.361774,
+                            "rss": 479838208
+                        },
+                        {
+                            "wall": 0.376635,
+                            "cpu": 0.37455,
+                            "rss": 479854592
+                        },
+                        {
+                            "wall": 0.370889,
+                            "cpu": 0.364669,
+                            "rss": 479838208
+                        },
+                        {
+                            "wall": 0.365381,
+                            "cpu": 0.360459,
+                            "rss": 479690752
+                        }
+                    ]
+                },
+                "slight-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.707878,
+                            "cpu": 7.161398,
+                            "rss": 138280960
+                        },
+                        {
+                            "wall": 0.690336,
+                            "cpu": 6.970766,
+                            "rss": 144572416
+                        },
+                        {
+                            "wall": 0.708081,
+                            "cpu": 6.995015,
+                            "rss": 135299072
+                        },
+                        {
+                            "wall": 0.707238,
+                            "cpu": 7.249438,
+                            "rss": 132022272
+                        },
+                        {
+                            "wall": 0.706961,
+                            "cpu": 7.118156,
+                            "rss": 135102464
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.291015,
+                            "cpu": 0.287267,
+                            "rss": 3833856
+                        },
+                        {
+                            "wall": 0.290357,
+                            "cpu": 0.286441,
+                            "rss": 3833856
+                        },
+                        {
+                            "wall": 0.291456,
+                            "cpu": 0.287561,
+                            "rss": 3833856
+                        },
+                        {
+                            "wall": 0.291386,
+                            "cpu": 0.287482,
+                            "rss": 3817472
+                        },
+                        {
+                            "wall": 0.285723,
+                            "cpu": 0.285397,
+                            "rss": 3817472
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 3.505642,
+                            "cpu": 11.73153,
+                            "rss": 5210112
+                        },
+                        {
+                            "wall": 3.467011,
+                            "cpu": 11.657277,
+                            "rss": 5242880
+                        },
+                        {
+                            "wall": 3.499717,
+                            "cpu": 11.793081,
+                            "rss": 5259264
+                        },
+                        {
+                            "wall": 3.448637,
+                            "cpu": 11.561075,
+                            "rss": 5160960
+                        },
+                        {
+                            "wall": 3.532043,
+                            "cpu": 11.810488,
+                            "rss": 5259264
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.790836,
+                            "cpu": 1.745639,
+                            "rss": 650248192
+                        },
+                        {
+                            "wall": 1.676007,
+                            "cpu": 1.630875,
+                            "rss": 650051584
+                        },
+                        {
+                            "wall": 1.839807,
+                            "cpu": 1.794826,
+                            "rss": 650592256
+                        },
+                        {
+                            "wall": 1.723008,
+                            "cpu": 1.67807,
+                            "rss": 649658368
+                        },
+                        {
+                            "wall": 1.882601,
+                            "cpu": 1.838107,
+                            "rss": 649920512
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.091182,
+                            "cpu": 8.555775,
+                            "rss": 659324928
+                        },
+                        {
+                            "wall": 1.097951,
+                            "cpu": 8.755916,
+                            "rss": 668155904
+                        },
+                        {
+                            "wall": 1.059483,
+                            "cpu": 8.270949,
+                            "rss": 673595392
+                        },
+                        {
+                            "wall": 1.102429,
+                            "cpu": 8.531866,
+                            "rss": 672743424
+                        },
+                        {
+                            "wall": 1.113,
+                            "cpu": 8.83588,
+                            "rss": 663240704
+                        }
+                    ]
+                },
+                "rust": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.277033,
+                            "cpu": 0.275342,
+                            "rss": 93061120
+                        },
+                        {
+                            "wall": 0.272323,
+                            "cpu": 0.270395,
+                            "rss": 93061120
+                        },
+                        {
+                            "wall": 0.271498,
+                            "cpu": 0.269511,
+                            "rss": 93061120
+                        },
+                        {
+                            "wall": 0.269636,
+                            "cpu": 0.267987,
+                            "rss": 93061120
+                        },
+                        {
+                            "wall": 0.267957,
+                            "cpu": 0.267498,
+                            "rss": 93061120
+                        }
+                    ]
+                },
+                "rust-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 4.042479,
+                            "cpu": 46.686125,
+                            "rss": 25116672
+                        },
+                        {
+                            "wall": 4.112651,
+                            "cpu": 47.725481,
+                            "rss": 46776320
+                        },
+                        {
+                            "wall": 4.173561,
+                            "cpu": 48.390513,
+                            "rss": 49823744
+                        },
+                        {
+                            "wall": 4.379095,
+                            "cpu": 49.843223,
+                            "rss": 45432832
+                        },
+                        {
+                            "wall": 4.080605,
+                            "cpu": 46.186362,
+                            "rss": 19447808
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "505000000"
+            ]
+        },
+        "spawn": {
+            "size": "1000000",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.150159,
+                            "cpu": 0.147905,
+                            "rss": 126631936
+                        },
+                        {
+                            "wall": 0.152362,
+                            "cpu": 0.150104,
+                            "rss": 126615552
+                        },
+                        {
+                            "wall": 0.149843,
+                            "cpu": 0.147192,
+                            "rss": 126468096
+                        },
+                        {
+                            "wall": 0.148153,
+                            "cpu": 0.145577,
+                            "rss": 126631936
+                        },
+                        {
+                            "wall": 0.150309,
+                            "cpu": 0.149264,
+                            "rss": 126468096
+                        }
+                    ]
+                },
+                "slight-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.031306,
+                            "cpu": 0.249877,
+                            "rss": 131858432
+                        },
+                        {
+                            "wall": 0.034866,
+                            "cpu": 0.255699,
+                            "rss": 128155648
+                        },
+                        {
+                            "wall": 0.030324,
+                            "cpu": 0.255812,
+                            "rss": 130678784
+                        },
+                        {
+                            "wall": 0.031002,
+                            "cpu": 0.216903,
+                            "rss": 113328128
+                        },
+                        {
+                            "wall": 0.027965,
+                            "cpu": 0.208588,
+                            "rss": 112132096
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.47438,
+                            "cpu": 0.467743,
+                            "rss": 436862976
+                        },
+                        {
+                            "wall": 0.443017,
+                            "cpu": 0.434882,
+                            "rss": 392118272
+                        },
+                        {
+                            "wall": 0.432101,
+                            "cpu": 0.423828,
+                            "rss": 404242432
+                        },
+                        {
+                            "wall": 0.43029,
+                            "cpu": 0.423149,
+                            "rss": 402636800
+                        },
+                        {
+                            "wall": 0.425934,
+                            "cpu": 0.421688,
+                            "rss": 390561792
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.391586,
+                            "cpu": 1.908271,
+                            "rss": 27639808
+                        },
+                        {
+                            "wall": 0.387341,
+                            "cpu": 1.825805,
+                            "rss": 27410432
+                        },
+                        {
+                            "wall": 0.388715,
+                            "cpu": 1.84872,
+                            "rss": 27213824
+                        },
+                        {
+                            "wall": 0.385038,
+                            "cpu": 1.827989,
+                            "rss": 28442624
+                        },
+                        {
+                            "wall": 0.381752,
+                            "cpu": 1.829504,
+                            "rss": 27328512
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.242678,
+                            "cpu": 0.708066,
+                            "rss": 113868800
+                        },
+                        {
+                            "wall": 1.297217,
+                            "cpu": 0.755003,
+                            "rss": 114458624
+                        },
+                        {
+                            "wall": 1.226696,
+                            "cpu": 0.686595,
+                            "rss": 113803264
+                        },
+                        {
+                            "wall": 1.228791,
+                            "cpu": 0.689929,
+                            "rss": 114065408
+                        },
+                        {
+                            "wall": 1.208384,
+                            "cpu": 0.67748,
+                            "rss": 114589696
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.904393,
+                            "cpu": 5.652726,
+                            "rss": 195379200
+                        },
+                        {
+                            "wall": 0.90585,
+                            "cpu": 5.453677,
+                            "rss": 192823296
+                        },
+                        {
+                            "wall": 0.900743,
+                            "cpu": 5.597073,
+                            "rss": 196427776
+                        },
+                        {
+                            "wall": 0.911964,
+                            "cpu": 5.599399,
+                            "rss": 198033408
+                        },
+                        {
+                            "wall": 0.914088,
+                            "cpu": 5.832134,
+                            "rss": 202031104
+                        }
+                    ]
+                },
+                "rust": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 2.096547,
+                            "cpu": 2.094803,
+                            "rss": 181190656
+                        },
+                        {
+                            "wall": 1.336796,
+                            "cpu": 1.33429,
+                            "rss": 180912128
+                        },
+                        {
+                            "wall": 2.567626,
+                            "cpu": 2.565721,
+                            "rss": 181747712
+                        },
+                        {
+                            "wall": 1.383329,
+                            "cpu": 1.381367,
+                            "rss": 181190656
+                        },
+                        {
+                            "wall": 0.286963,
+                            "cpu": 0.286346,
+                            "rss": 182763520
+                        }
+                    ]
+                },
+                "rust-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.619278,
+                            "cpu": 1.955995,
+                            "rss": 12009472
+                        },
+                        {
+                            "wall": 0.623997,
+                            "cpu": 1.965938,
+                            "rss": 12042240
+                        },
+                        {
+                            "wall": 0.605542,
+                            "cpu": 1.896809,
+                            "rss": 11976704
+                        },
+                        {
+                            "wall": 0.600589,
+                            "cpu": 1.896324,
+                            "rss": 11943936
+                        },
+                        {
+                            "wall": 0.612751,
+                            "cpu": 1.946537,
+                            "rss": 12025856
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "499999500000"
+            ]
+        },
+        "idle-memory": {
+            "size": "1000000",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 27.732418,
+                            "cpu": 26.611407,
+                            "rss": 9137242112
+                        },
+                        {
+                            "wall": 27.598079,
+                            "cpu": 26.609536,
+                            "rss": 9258795008
+                        },
+                        {
+                            "wall": 27.251857,
+                            "cpu": 26.285474,
+                            "rss": 9305718784
+                        }
+                    ]
+                },
+                "slight-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 29.396459,
+                            "cpu": 50.681484,
+                            "rss": 9054388224
+                        },
+                        {
+                            "wall": 29.56253,
+                            "cpu": 50.06492,
+                            "rss": 9102917632
+                        },
+                        {
+                            "wall": 28.941521,
+                            "cpu": 49.189896,
+                            "rss": 9295495168
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.466391,
+                            "cpu": 1.463423,
+                            "rss": 2899968000
+                        },
+                        {
+                            "wall": 1.490723,
+                            "cpu": 1.483524,
+                            "rss": 2899050496
+                        },
+                        {
+                            "wall": 1.486653,
+                            "cpu": 1.475506,
+                            "rss": 2890498048
+                        },
+                        {
+                            "wall": 1.486863,
+                            "cpu": 1.483367,
+                            "rss": 2899935232
+                        },
+                        {
+                            "wall": 1.443954,
+                            "cpu": 1.442487,
+                            "rss": 2901065728
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.002875,
+                            "cpu": 6.191389,
+                            "rss": 2914861056
+                        },
+                        {
+                            "wall": 0.93884,
+                            "cpu": 4.946918,
+                            "rss": 2902130688
+                        },
+                        {
+                            "wall": 0.971142,
+                            "cpu": 5.798155,
+                            "rss": 2915401728
+                        },
+                        {
+                            "wall": 1.072394,
+                            "cpu": 6.341865,
+                            "rss": 2919432192
+                        },
+                        {
+                            "wall": 1.027677,
+                            "cpu": 6.086825,
+                            "rss": 2877997056
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 2.879208,
+                            "cpu": 1.790242,
+                            "rss": 2789212160
+                        },
+                        {
+                            "wall": 2.864606,
+                            "cpu": 1.786326,
+                            "rss": 2789081088
+                        },
+                        {
+                            "wall": 2.954711,
+                            "cpu": 1.868034,
+                            "rss": 2789146624
+                        },
+                        {
+                            "wall": 2.840033,
+                            "cpu": 1.805421,
+                            "rss": 2792357888
+                        },
+                        {
+                            "wall": 2.972852,
+                            "cpu": 1.921836,
+                            "rss": 2789834752
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.909635,
+                            "cpu": 6.419543,
+                            "rss": 2795520000
+                        },
+                        {
+                            "wall": 1.907216,
+                            "cpu": 6.324004,
+                            "rss": 2795749376
+                        },
+                        {
+                            "wall": 1.892097,
+                            "cpu": 6.273732,
+                            "rss": 2795536384
+                        },
+                        {
+                            "wall": 1.987181,
+                            "cpu": 6.58394,
+                            "rss": 2794897408
+                        },
+                        {
+                            "wall": 1.884919,
+                            "cpu": 6.252923,
+                            "rss": 2794307584
+                        }
+                    ]
+                },
+                "rust": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.753349,
+                            "cpu": 0.750696,
+                            "rss": 1106182144
+                        },
+                        {
+                            "wall": 0.750789,
+                            "cpu": 0.748417,
+                            "rss": 1106182144
+                        },
+                        {
+                            "wall": 0.754683,
+                            "cpu": 0.752152,
+                            "rss": 1106182144
+                        },
+                        {
+                            "wall": 0.74182,
+                            "cpu": 0.740649,
+                            "rss": 1106182144
+                        },
+                        {
+                            "wall": 0.739929,
+                            "cpu": 0.7388,
+                            "rss": 1106182144
+                        }
+                    ]
+                },
+                "rust-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 1.3745,
+                            "cpu": 7.38829,
+                            "rss": 1097498624
+                        },
+                        {
+                            "wall": 1.384813,
+                            "cpu": 7.4445,
+                            "rss": 1097285632
+                        },
+                        {
+                            "wall": 1.381467,
+                            "cpu": 7.552609,
+                            "rss": 1099071488
+                        },
+                        {
+                            "wall": 1.384193,
+                            "cpu": 7.458108,
+                            "rss": 1097170944
+                        },
+                        {
+                            "wall": 1.389383,
+                            "cpu": 7.372322,
+                            "rss": 1096695808
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "1000000"
+            ]
+        },
+        "parallel-fib": {
+            "size": "30",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.283396,
+                            "cpu": 0.281549,
+                            "rss": 2883584
+                        },
+                        {
+                            "wall": 0.282713,
+                            "cpu": 0.280867,
+                            "rss": 2883584
+                        },
+                        {
+                            "wall": 0.283166,
+                            "cpu": 0.281108,
+                            "rss": 2883584
+                        },
+                        {
+                            "wall": 0.280859,
+                            "cpu": 0.280295,
+                            "rss": 2670592
+                        },
+                        {
+                            "wall": 0.281925,
+                            "cpu": 0.28126,
+                            "rss": 2670592
+                        }
+                    ]
+                },
+                "slight-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.040403,
+                            "cpu": 0.346794,
+                            "rss": 4784128
+                        },
+                        {
+                            "wall": 0.036924,
+                            "cpu": 0.3471,
+                            "rss": 4816896
+                        },
+                        {
+                            "wall": 0.037448,
+                            "cpu": 0.346821,
+                            "rss": 4784128
+                        },
+                        {
+                            "wall": 0.040152,
+                            "cpu": 0.337902,
+                            "rss": 4685824
+                        },
+                        {
+                            "wall": 0.03877,
+                            "cpu": 0.33976,
+                            "rss": 4636672
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.170922,
+                            "cpu": 0.16721,
+                            "rss": 3866624
+                        },
+                        {
+                            "wall": 0.171095,
+                            "cpu": 0.167456,
+                            "rss": 3719168
+                        },
+                        {
+                            "wall": 0.1706,
+                            "cpu": 0.166984,
+                            "rss": 3735552
+                        },
+                        {
+                            "wall": 0.16658,
+                            "cpu": 0.166254,
+                            "rss": 3735552
+                        },
+                        {
+                            "wall": 0.166637,
+                            "cpu": 0.166256,
+                            "rss": 3719168
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.021324,
+                            "cpu": 0.196641,
+                            "rss": 5029888
+                        },
+                        {
+                            "wall": 0.021059,
+                            "cpu": 0.197633,
+                            "rss": 5046272
+                        },
+                        {
+                            "wall": 0.021262,
+                            "cpu": 0.19387,
+                            "rss": 5095424
+                        },
+                        {
+                            "wall": 0.021112,
+                            "cpu": 0.194757,
+                            "rss": 4915200
+                        },
+                        {
+                            "wall": 0.021299,
+                            "cpu": 0.196068,
+                            "rss": 5029888
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.961126,
+                            "cpu": 0.585376,
+                            "rss": 48857088
+                        },
+                        {
+                            "wall": 0.894256,
+                            "cpu": 0.519115,
+                            "rss": 48594944
+                        },
+                        {
+                            "wall": 0.860915,
+                            "cpu": 0.491687,
+                            "rss": 48283648
+                        },
+                        {
+                            "wall": 0.857015,
+                            "cpu": 0.486917,
+                            "rss": 49659904
+                        },
+                        {
+                            "wall": 0.860578,
+                            "cpu": 0.492116,
+                            "rss": 48824320
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.133513,
+                            "cpu": 0.719772,
+                            "rss": 60571648
+                        },
+                        {
+                            "wall": 0.13482,
+                            "cpu": 0.742561,
+                            "rss": 60080128
+                        },
+                        {
+                            "wall": 0.135772,
+                            "cpu": 0.721368,
+                            "rss": 59949056
+                        },
+                        {
+                            "wall": 0.1351,
+                            "cpu": 0.733335,
+                            "rss": 61014016
+                        },
+                        {
+                            "wall": 0.135931,
+                            "cpu": 0.714853,
+                            "rss": 59981824
+                        }
+                    ]
+                },
+                "rust": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.151578,
+                            "cpu": 0.150244,
+                            "rss": 1638400
+                        },
+                        {
+                            "wall": 0.151551,
+                            "cpu": 0.150206,
+                            "rss": 1638400
+                        },
+                        {
+                            "wall": 0.151291,
+                            "cpu": 0.149919,
+                            "rss": 1638400
+                        },
+                        {
+                            "wall": 0.150121,
+                            "cpu": 0.149726,
+                            "rss": 1638400
+                        },
+                        {
+                            "wall": 0.149946,
+                            "cpu": 0.149568,
+                            "rss": 1638400
+                        }
+                    ]
+                },
+                "rust-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.018622,
+                            "cpu": 0.172358,
+                            "rss": 2539520
+                        },
+                        {
+                            "wall": 0.019009,
+                            "cpu": 0.17086,
+                            "rss": 2473984
+                        },
+                        {
+                            "wall": 0.019068,
+                            "cpu": 0.169381,
+                            "rss": 2457600
+                        },
+                        {
+                            "wall": 0.018259,
+                            "cpu": 0.17207,
+                            "rss": 2555904
+                        },
+                        {
+                            "wall": 0.019123,
+                            "cpu": 0.17115,
+                            "rss": 2572288
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "53250560"
+            ]
+        },
+        "latency": {
+            "size": "10",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 2.205021,
+                            "cpu": 2.199604,
+                            "rss": 745324544,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    3,
+                                    16,
+                                    500
+                                ],
+                                "busy": [
+                                    4,
+                                    5,
+                                    10,
+                                    534
+                                ],
+                                "heap": [
+                                    110,
+                                    42621,
+                                    48259,
+                                    1029
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 2.182945,
+                            "cpu": 2.181334,
+                            "rss": 531562496,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    3,
+                                    17,
+                                    500
+                                ],
+                                "busy": [
+                                    4,
+                                    6,
+                                    13,
+                                    537
+                                ],
+                                "heap": [
+                                    109,
+                                    39791,
+                                    42994,
+                                    1006
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 2.195073,
+                            "cpu": 2.191818,
+                            "rss": 532021248,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    2,
+                                    14,
+                                    500
+                                ],
+                                "busy": [
+                                    4,
+                                    5,
+                                    6,
+                                    534
+                                ],
+                                "heap": [
+                                    114,
+                                    42426,
+                                    46927,
+                                    1016
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 2.237782,
+                            "cpu": 2.235941,
+                            "rss": 531857408,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    2,
+                                    3,
+                                    500
+                                ],
+                                "busy": [
+                                    4,
+                                    4,
+                                    13,
+                                    534
+                                ],
+                                "heap": [
+                                    109,
+                                    41375,
+                                    45440,
+                                    1054
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 2.265412,
+                            "cpu": 2.263235,
+                            "rss": 531873792,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    2,
+                                    3,
+                                    500
+                                ],
+                                "busy": [
+                                    4,
+                                    5,
+                                    7,
+                                    534
+                                ],
+                                "heap": [
+                                    131,
+                                    42480,
+                                    45349,
+                                    1082
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "go": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.905188,
+                            "cpu": 0.899002,
+                            "rss": 166313984,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    0,
+                                    9,
+                                    500
+                                ],
+                                "busy": [
+                                    14506,
+                                    29537,
+                                    29580,
+                                    316
+                                ],
+                                "heap": [
+                                    4,
+                                    30,
+                                    30,
+                                    67
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.903947,
+                            "cpu": 0.897729,
+                            "rss": 166313984,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    0,
+                                    8,
+                                    500
+                                ],
+                                "busy": [
+                                    14085,
+                                    29105,
+                                    29142,
+                                    315
+                                ],
+                                "heap": [
+                                    4,
+                                    41,
+                                    41,
+                                    66
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.904773,
+                            "cpu": 0.898697,
+                            "rss": 166641664,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    0,
+                                    2,
+                                    500
+                                ],
+                                "busy": [
+                                    14467,
+                                    29486,
+                                    29519,
+                                    316
+                                ],
+                                "heap": [
+                                    4,
+                                    11,
+                                    11,
+                                    66
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.897959,
+                            "cpu": 0.896274,
+                            "rss": 165756928,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    0,
+                                    1,
+                                    500
+                                ],
+                                "busy": [
+                                    14046,
+                                    29073,
+                                    29103,
+                                    315
+                                ],
+                                "heap": [
+                                    3,
+                                    12,
+                                    12,
+                                    66
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.89781,
+                            "cpu": 0.896148,
+                            "rss": 165789696,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    0,
+                                    1,
+                                    500
+                                ],
+                                "busy": [
+                                    14035,
+                                    29963,
+                                    29998,
+                                    316
+                                ],
+                                "heap": [
+                                    4,
+                                    11,
+                                    11,
+                                    66
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "go-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.975655,
+                            "cpu": 1.846858,
+                            "rss": 167886848,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    9,
+                                    20,
+                                    500
+                                ],
+                                "busy": [
+                                    1,
+                                    12,
+                                    30,
+                                    375
+                                ],
+                                "heap": [
+                                    1,
+                                    12,
+                                    12,
+                                    85
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.978596,
+                            "cpu": 1.879027,
+                            "rss": 167936000,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    8,
+                                    15,
+                                    500
+                                ],
+                                "busy": [
+                                    1,
+                                    9,
+                                    18,
+                                    377
+                                ],
+                                "heap": [
+                                    1,
+                                    18,
+                                    18,
+                                    86
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.974586,
+                            "cpu": 1.853121,
+                            "rss": 167903232,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    8,
+                                    12,
+                                    500
+                                ],
+                                "busy": [
+                                    1,
+                                    10,
+                                    14,
+                                    373
+                                ],
+                                "heap": [
+                                    1,
+                                    46,
+                                    46,
+                                    86
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.97564,
+                            "cpu": 1.859023,
+                            "rss": 168181760,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    7,
+                                    13,
+                                    500
+                                ],
+                                "busy": [
+                                    1,
+                                    11,
+                                    44,
+                                    376
+                                ],
+                                "heap": [
+                                    1,
+                                    11,
+                                    11,
+                                    84
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.977501,
+                            "cpu": 1.865523,
+                            "rss": 168198144,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    6,
+                                    8,
+                                    500
+                                ],
+                                "busy": [
+                                    1,
+                                    8,
+                                    11,
+                                    377
+                                ],
+                                "heap": [
+                                    1,
+                                    15,
+                                    15,
+                                    85
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "erlang": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 3.41012,
+                            "cpu": 2.177994,
+                            "rss": 1747927040,
+                            "latency": {
+                                "idle": [
+                                    6,
+                                    27,
+                                    50,
+                                    500
+                                ],
+                                "busy": [
+                                    30,
+                                    43,
+                                    48,
+                                    1942
+                                ],
+                                "heap": [
+                                    8,
+                                    73,
+                                    151,
+                                    666
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 3.358791,
+                            "cpu": 2.142698,
+                            "rss": 1750532096,
+                            "latency": {
+                                "idle": [
+                                    5,
+                                    13,
+                                    16,
+                                    500
+                                ],
+                                "busy": [
+                                    29,
+                                    43,
+                                    55,
+                                    1872
+                                ],
+                                "heap": [
+                                    8,
+                                    68,
+                                    78,
+                                    677
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 3.176439,
+                            "cpu": 1.957278,
+                            "rss": 1747910656,
+                            "latency": {
+                                "idle": [
+                                    6,
+                                    13,
+                                    14,
+                                    500
+                                ],
+                                "busy": [
+                                    28,
+                                    39,
+                                    42,
+                                    1705
+                                ],
+                                "heap": [
+                                    8,
+                                    77,
+                                    348,
+                                    665
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 3.179315,
+                            "cpu": 1.952352,
+                            "rss": 1748516864,
+                            "latency": {
+                                "idle": [
+                                    5,
+                                    14,
+                                    33,
+                                    500
+                                ],
+                                "busy": [
+                                    27,
+                                    39,
+                                    51,
+                                    1722
+                                ],
+                                "heap": [
+                                    8,
+                                    71,
+                                    204,
+                                    657
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 3.21952,
+                            "cpu": 2.018415,
+                            "rss": 1748205568,
+                            "latency": {
+                                "idle": [
+                                    5,
+                                    14,
+                                    21,
+                                    500
+                                ],
+                                "busy": [
+                                    28,
+                                    42,
+                                    61,
+                                    1769
+                                ],
+                                "heap": [
+                                    8,
+                                    69,
+                                    216,
+                                    653
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "erlang-mc": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 2.157843,
+                            "cpu": 3.659497,
+                            "rss": 1708130304,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    3,
+                                    5,
+                                    500
+                                ],
+                                "busy": [
+                                    0,
+                                    4,
+                                    10,
+                                    747
+                                ],
+                                "heap": [
+                                    0,
+                                    3,
+                                    38,
+                                    608
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 2.240143,
+                            "cpu": 3.378585,
+                            "rss": 1708785664,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    3,
+                                    9,
+                                    500
+                                ],
+                                "busy": [
+                                    0,
+                                    12,
+                                    14,
+                                    812
+                                ],
+                                "heap": [
+                                    0,
+                                    13,
+                                    60,
+                                    625
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 2.146732,
+                            "cpu": 3.643408,
+                            "rss": 1708851200,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    2,
+                                    2,
+                                    500
+                                ],
+                                "busy": [
+                                    0,
+                                    1,
+                                    6,
+                                    744
+                                ],
+                                "heap": [
+                                    0,
+                                    3,
+                                    42,
+                                    603
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 2.151971,
+                            "cpu": 3.632716,
+                            "rss": 1708687360,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    4,
+                                    5,
+                                    500
+                                ],
+                                "busy": [
+                                    0,
+                                    1,
+                                    8,
+                                    744
+                                ],
+                                "heap": [
+                                    0,
+                                    4,
+                                    37,
+                                    605
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 2.424906,
+                            "cpu": 3.269754,
+                            "rss": 1758511104,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    4,
+                                    6,
+                                    500
+                                ],
+                                "busy": [
+                                    3,
+                                    13,
+                                    15,
+                                    998
+                                ],
+                                "heap": [
+                                    0,
+                                    13,
+                                    27,
+                                    628
+                                ]
+                            }
+                        }
+                    ]
+                },
+                "rust": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.823895,
+                            "cpu": 0.821048,
+                            "rss": 83804160,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    0,
+                                    0,
+                                    500
+                                ],
+                                "busy": [
+                                    142110,
+                                    281075,
+                                    283074,
+                                    284
+                                ],
+                                "heap": [
+                                    1,
+                                    3,
+                                    3,
+                                    20
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.824536,
+                            "cpu": 0.821588,
+                            "rss": 83804160,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    0,
+                                    0,
+                                    500
+                                ],
+                                "busy": [
+                                    142262,
+                                    281230,
+                                    283229,
+                                    284
+                                ],
+                                "heap": [
+                                    2,
+                                    3,
+                                    3,
+                                    20
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.823295,
+                            "cpu": 0.820475,
+                            "rss": 83804160,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    0,
+                                    0,
+                                    500
+                                ],
+                                "busy": [
+                                    141968,
+                                    280938,
+                                    282938,
+                                    283
+                                ],
+                                "heap": [
+                                    2,
+                                    8,
+                                    8,
+                                    20
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.819108,
+                            "cpu": 0.818417,
+                            "rss": 83673088,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    0,
+                                    1,
+                                    500
+                                ],
+                                "busy": [
+                                    141888,
+                                    280863,
+                                    282863,
+                                    283
+                                ],
+                                "heap": [
+                                    1,
+                                    3,
+                                    3,
+                                    19
+                                ]
+                            }
+                        },
+                        {
+                            "wall": 0.820412,
+                            "cpu": 0.819678,
+                            "rss": 83673088,
+                            "latency": {
+                                "idle": [
+                                    0,
+                                    0,
+                                    0,
+                                    500
+                                ],
+                                "busy": [
+                                    142916,
+                                    281890,
+                                    283889,
+                                    284
+                                ],
+                                "heap": [
+                                    2,
+                                    3,
+                                    3,
+                                    20
+                                ]
+                            }
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "102334155",
+                "1009499500"
+            ]
+        },
+        "bank": {
+            "size": "1000000",
+            "impls": {
+                "slight": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.632359,
+                            "cpu": 0.630073,
+                            "rss": 80756736
+                        },
+                        {
+                            "wall": 0.632035,
+                            "cpu": 0.629061,
+                            "rss": 78479360
+                        },
+                        {
+                            "wall": 0.635681,
+                            "cpu": 0.633609,
+                            "rss": 76333056
+                        },
+                        {
+                            "wall": 0.629636,
+                            "cpu": 0.629023,
+                            "rss": 77119488
+                        },
+                        {
+                            "wall": 0.628726,
+                            "cpu": 0.62781,
+                            "rss": 76185600
+                        }
+                    ]
+                },
+                "c": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 0.025022,
+                            "cpu": 0.024223,
+                            "rss": 2310144
+                        },
+                        {
+                            "wall": 0.025259,
+                            "cpu": 0.024426,
+                            "rss": 2342912
+                        },
+                        {
+                            "wall": 0.025061,
+                            "cpu": 0.024276,
+                            "rss": 2310144
+                        },
+                        {
+                            "wall": 0.024462,
+                            "cpu": 0.024095,
+                            "rss": 2310144
+                        },
+                        {
+                            "wall": 0.024436,
+                            "cpu": 0.024062,
+                            "rss": 2310144
+                        }
+                    ]
+                },
+                "python": {
+                    "ok": true,
+                    "runs": [
+                        {
+                            "wall": 6.348555,
+                            "cpu": 6.330939,
+                            "rss": 20119552
+                        },
+                        {
+                            "wall": 6.374521,
+                            "cpu": 6.35681,
+                            "rss": 20103168
+                        },
+                        {
+                            "wall": 6.360799,
+                            "cpu": 6.334594,
+                            "rss": 20168704
+                        },
+                        {
+                            "wall": 6.330713,
+                            "cpu": 6.329455,
+                            "rss": 19775488
+                        },
+                        {
+                            "wall": 6.317079,
+                            "cpu": 6.315889,
+                            "rss": 20004864
+                        }
+                    ]
+                }
+            },
+            "expected": [
+                "1000000",
+                "2284826450",
+                "719568"
+            ]
+        }
+    }
+}

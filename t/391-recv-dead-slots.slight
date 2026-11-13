@@ -1,0 +1,27 @@
+; A collection at a recv in the middle of a function moves the frame's
+; slots in use; the ones past them hold what they last did, here the
+; lists that waited there while a call's other arguments were worked out.
+; Once the frame is under another, a collection takes every slot of it
+; for a root: so the one at the recv zeroes those it doesn't move. Till
+; it did, the next collection under spin followed a slot's stale word
+; into memory the first had freed, and the program crashed, with the
+; collector at every call (SLIGHT_GC_STRESS=1) and filling what it frees
+; (SLIGHT_POISON, which t/run.sh sets) every time, and without them now
+; and then.
+; env: SLIGHT_GC_STRESS=1
+
+(defun id (x) x)
+
+(defun three (a b c) (+ (length a) (+ (length b) (length c))))
+
+(defun spin (n) (if (== n 0) 0 (spin (- n 1))))
+
+(defun f ()
+    (pprint (three (range 0 10) (range 0 20) (range 0 30)))
+    (send $$ :go)
+    (recv
+        (:go
+            (spin 50)
+            (id 1))))
+
+(pprint (join (fork f)))

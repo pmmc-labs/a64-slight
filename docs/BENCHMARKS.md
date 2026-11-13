@@ -13,7 +13,15 @@ tools aren't installed are left out, and said to be. On a Mac, `brew
 install go erlang chezscheme`; Node, Perl and Python are there already
 (Node for the compiler, the others with Xcode's tools). On Debian or
 Ubuntu, `apt-get install chezscheme`. Rust needs cargo and rustc (from
-rustup), and its first build fetches tokio from crates.io.
+rustup), and its first build fetches tokio from crates.io. Gambit and
+Racket: `brew install gambit-scheme minimal-racket` on a Mac, then
+`raco pkg install --auto compiler-lib` for `raco exe`, which minimal
+Racket leaves out (the harness says so if it's missing); if
+Ghostscript's `gsc` is first on `PATH`, the harness looks for Gambit's in
+Homebrew's `opt/gambit-scheme`. On Ubuntu, `apt-get install gambc
+racket`, which are older (Gambit 4.9.3 and Racket 8.10, against
+Homebrew's 4.9.8 and 9.x) but run every program. Swish is opt-in, as
+SimPy is: see "Swish" below.
 
 ## What's measured
 
@@ -30,6 +38,12 @@ Three questions, which need different programs:
    model (per-process heaps, copied messages, preemption by reductions),
    and Go, goroutines and channels; and Rust with tokio, whose tasks are
    stackless, the floor, as C is for the sequential programs (D224).
+   And slight's own family (D293): Gambit, a mailbox per green thread,
+   compiled to native code through C; Racket, threads with mailboxes, and
+   places, a VM each, on every core; and Swish, Erlang's model on Chez
+   (processes, selective receive, links, monitors, preemption by
+   counting calls). All three share one heap among their processes, and
+   pass a message by reference.
 3. **slight against itself, over time:** later, with the examples
    (boids), `html->text`, JSON and HTTP: comparing those across
    languages would mostly compare libraries.
@@ -85,7 +99,9 @@ itself (or, for `n-body`, against C's).
 - **`payload 1000000`:** `ping-pong` with each message carrying the same
   list of 100 integers there and back (D237): what copying a message's
   data costs. slight and Erlang copy it into the receiver's heap; Go
-  passes a slice and tokio moves a `Vec`, neither copying.
+  passes a slice and tokio moves a `Vec`, neither copying, and Gambit's,
+  Racket's and Swish's processes share one heap, so pass the list by
+  reference: the summary marks those five rows "not copied" (D293).
 - **`thread-ring 10000000`:** the Benchmarks Game's: 503 processes in a
   ring pass a token on, 10 million times.
 - **`fan-in 10000000`:** 100 processes each send their number 100,000
@@ -111,7 +127,8 @@ itself (or, for `n-body`, against C's).
   starting its share waiting, all of them waiting at once before any is
   asked; a ping-pong pair per island, its share of the round trips. In
   the every-core table, beside Go's, Erlang's and Rust's (whose
-  `ping-pong` is one pair, so says nothing of spreading).
+  `ping-pong` is one pair, so says nothing of spreading), and
+  `racket-mc`'s, places doing the same five (D293).
 - **`parallel-fib 30`:** 64 processes each work out `fib(30)`: work more
   than one core can share.
 - **`latency 10`:** how long a message waits for its turn while other
@@ -122,7 +139,8 @@ itself (or, for `n-body`, against C's).
   working out `fib(40)` without ever waiting; then beside one holding
   1,000 blocks of 10,000 integers (160 MB in slight) and replacing the
   oldest 10,000 times, yielding after each. Its summary is each phase's
-  percentiles, not times. tokio on every core is left out (D238).
+  percentiles, not times. tokio on every core is left out (D238), and so
+  is `racket-mc`.
 - **`bank 1000000`:** a simulation (D241), SimPy's bank example: 3
   tellers and a million customers, a process for each, the bank a
   process (in SimPy a `Resource`) each asks for a teller and gives it
@@ -134,11 +152,50 @@ itself (or, for `n-body`, against C's).
   process for each customer: the floor under any simulation engine.
 
 The sequential ones are in all eight languages, the actor ones in slight,
-Go, Erlang and Rust (D224), `startup` in all nine, and `bank` in slight,
-C and Python with SimPy. Rust's are on
+Go, Erlang and Rust (D224), and Gambit, Racket and Swish (D293), `startup`
+in all twelve, and `bank` in slight, C and Python with SimPy. Rust's are on
 tokio, each process a task, its mailbox an unbounded channel
 (`tokio::sync::mpsc`); a task waiting in `idle-memory` holds a channel
-of its own, as a process holds its mailbox. Each is written the way its language is usually written,
+of its own, as a process holds its mailbox.
+
+The Schemes' (D293), each `NAME.scm` (Gambit), `NAME.rkt` (Racket) and
+`NAME-swish.ss` (Swish):
+
+- **Gambit's** are threads, each with its mailbox, on plain
+  `thread-send` and `thread-receive`, which takes the next message, as
+  slight's `recv` does. Termite, Gambit's Erlang-like library (`!` and a
+  selective `recv`), is left out: what it adds is selecting, which
+  none of these programs needs. `latency`'s pinger yields with
+  `thread-yield!`; a thread is otherwise preempted every 20 ms. A
+  thread's value is its result, which `thread-join!` gives, so
+  `latency` joins its pingers rather than sending.
+- **Racket's** are threads, with their mailboxes (`thread-send`,
+  `thread-receive`), all on one OS thread; `latency`'s pinger yields with
+  `(sleep 0)`. `racket-mc`, every core, is places (D293): a place for each
+  core, an instance of Racket of its own whose messages are copied, the nearest thing to
+  slight's islands, each doing its share with threads, as `slight-mc`
+  does on islands, in `NAME-mc.rkt`: `parallel-fib`, `fan-in` (each
+  sender a thread on the place its number picks, all sending on one
+  place channel), and `ping-pong`, `spawn` and `idle-memory` (each place
+  its share locally, one answer each). Places can't hold a million
+  processes or pass one a message cheaply, so it's left out of the rest.
+  On Racket CS a place isn't wholly apart: places share one Chez heap,
+  and its collections stop all of them. On the cloud machine (Racket
+  8.10), two places each doing 500,000 round trips at once took 2.5 s
+  each, where one alone took 0.46, so `racket-mc` there is slower than
+  `racket` in every program, `fan-in` 35 times (each of its 10 million
+  messages crossing a place channel). Whether 9.x does better is for the
+  M2 Max to say.
+  Racket 9's parallel threads (`#:pool 'own`), on other OS threads but
+  sharing the heap, are left for later.
+- **Swish's** are processes, `spawn`, `send` and `receive`, Erlang's as
+  Erlang's programs write them (a receive selects, as Erlang's
+  `latency` does). Swish has no yield: a process runs till its quantum,
+  1 ms, is spent (looked at every 1,000 calls), so `latency`'s pinger
+  spins on the clock and its heap churns without yielding, each
+  preempted as any Swish process is.
+
+Each is written the way its language is usually written,
 and does the same work: the same algorithm, the same output. slight's
 bend to slight (D84): nothing was added to the language for them, and
 the Benchmarks Game programs that need what it hasn't got (arrays that
@@ -149,7 +206,11 @@ change, hash tables, bignums, regular expressions) aren't here.
 - Each program is built once (slight's for the machine's own target,
   Chez's with `compile-program`, so its runs don't include compiling,
   Rust's by cargo, `--release --locked`, one package for them all, so
-  the first one's build includes tokio's),
+  the first one's build includes tokio's; Gambit's to native code with
+  `gsc -exe`, Racket's to an executable with `raco exe`, and Swish's to
+  a linked program with `swish-build`, Gambit's and Swish's from a copy
+  under `build/bench/`, since each writes its intermediate files beside
+  its source, and Gambit's `NAME.c` would be C's program),
   run once to check it, then timed 5 times; the programs take turns, so
   the machine's drift falls on all of them alike. One that takes long
   gets fewer runs, never under 3. The summary gives the median, the
@@ -167,6 +228,9 @@ change, hash tables, bignums, regular expressions) aren't here.
   (D237). `bench/rt.rs`
   picks Rust's runtime, by `BENCH_MC`, which the harness sets for
   `rust-mc`. Node's collector has threads of its own either way.
+  Gambit's, Racket's and Swish's threads all run on one OS thread
+  without being told; Racket's every core is places (`racket-mc`), and
+  Gambit and Swish have none to give (D293).
 - **`bank`:** slight's runs with `SLIGHT_CLOCK=virtual`, which the
   harness sets for it alone. Python's needs SimPy (`pip install simpy`),
   whose version the summary gives; without it, Python is left out.
@@ -178,17 +242,344 @@ change, hash tables, bignums, regular expressions) aren't here.
   its work.
 - Erlang allows 262,144 processes unless told otherwise, and a higher
   limit costs memory from the start, so `spawn` and `idle-memory` raise
-  it as far as they need (`+P`), and nothing else does.
+  it as far as they need (`+P`), and nothing else does. Gambit, Racket
+  and Swish have no such limit; their heaps grow as they need.
 - Chez runs at its default optimize level, which is safe (as slight is:
   every operation checks its operands), and its programs use Scheme's
   ordinary arithmetic, as Scheme is usually written, not `fl+` or
   `fx+`.
 - Timings under qemu mean nothing, so AArch64 is measured on a Mac. The
-  cloud machine's x86-64 numbers are noisy, but fine for ratios.
+  cloud machine's x86-64 numbers are noisy, but fine for ratios. Its
+  Erlang is Ubuntu's, OTP 25; the M2 Max's is Homebrew's, OTP 29, and
+  shows the same gap to slight in `ping-pong` (D293).
+
+### Swish
+
+Swish needs a Chez Scheme 10.3 or later built without threads, which
+Homebrew's isn't, so it's opt-in, as SimPy is: `bench/build-swish.sh`
+clones Chez Scheme 10.4.1 and Swish 3.0.0 from GitHub, builds the one on
+the other, and installs both under a prefix (`~/opt/swish` unless given
+one), apart from any other Chez. Put its `bin` on `PATH`, and the harness
+finds `swish` and `swish-build` there; without them it leaves Swish out,
+and says so. On a Mac:
+
+    brew install cmake coreutils make     # GNU make 4.4, as gmake
+    bench/build-swish.sh
+    export PATH="$HOME/opt/swish/bin:$PATH"
+
+On Ubuntu, `apt-get install build-essential cmake uuid-dev
+libsystemd-dev` first (Swish asks for GNU make 4.4; 24.04 has 4.3, which
+the script warns of). A few minutes either way.
 
 ## Results
 
 Each run's full tables are in `bench/results/`. What they say:
+
+### The M2 Max, 13 Nov: every wait copied, and slight's own family (D292, D293)
+
+`2026-11-13-1102-macos-apple-m2-max` (`3dedbf4`): every program, every
+wait copied off its stack past 1,024 waiting (D292), the collector's fix
+for a frame's dead slots at a `recv` (golden test 391), and Gambit,
+Racket and Swish in the actor programs for the first time, every
+output checked. On one core, but Racket's places:
+
+| | `ping-pong` | `thread-ring` | `spawn` | a waiting process | a million waiting |
+|---|---:|---:|---:|---:|---:|
+| slight | 0.302 s | 0.495 s | 0.144 s | 731 B | 0.392 s |
+| Gambit | 0.288 s | 1.398 s | 0.429 s | 2,056 B | 1.109 s |
+| tokio | 0.293 s | 0.697 s | 2.121 s | 1,106 B | 0.745 s |
+| Go | 0.390 s | 1.044 s | 0.431 s | 2,899 B | 1.470 s |
+| Racket | 2.087 s | 5.295 s | 2.135 s | 3,635 B | 13.955 s |
+| Erlang | 3.410 s | 8.291 s | 1.251 s | 2,790 B | 2.933 s |
+| Swish | 49.0 s | 122.4 s | 0.782 s | 5,023 B | 4.262 s |
+
+- **slight leads at processes** against all seven: the smallest and
+  quickest million waiting, the fastest `spawn` and `thread-ring`.
+- **Gambit is the nearest rival,** level at `ping-pong` and 4.5 times
+  faster at `payload` (0.161 s to 0.722), its threads sharing one heap
+  and passing the list by reference ("not copied"); beside a busy
+  thread its messages wait up to 21 ms, where slight's wait 8 µs.
+- **Racket's places,** its every core, are dear: `ping-pong` 6.3 s,
+  a million waiting 27 s and 7 GB.
+- **Swish's times are not to be trusted yet:** `ping-pong` 49 s,
+  `thread-ring` 122 s, a ping waiting up to 1.7 s beside the big heap,
+  far from what Erlang's model on Chez should cost. Its build or how
+  its programs run is to be looked at before its rows are quoted.
+- `payload` is still 0.722 s, 1.31 times its time before D276, on this
+  machine alone; and `spawn`'s 127 MB is its million exit records
+  (D277), kept for a parent that never joins.
+
+### The M2 Max, 12 Nov: every wait copied off its stack (D292)
+
+`bench/results/2026-11-12-copy-out-waits-m2-max.md`: `bench/copy-out.py`'s
+rounds, the best of seven, against `9b78cd7`, where only `recv`'s waits
+were copied. `idle-join` and `idle-sleep` are `idle-memory` with its
+processes waiting in `join`, each on the one before it, and asleep, on
+the virtual clock, so that all are at once:
+
+| slight on the M2 Max, a million waiting | `recv`'s alone copied | every wait's |
+|---|---:|---:|
+| in `recv` (`idle-memory 1000000`) | 0.367 s, 713 B a process | 0.350 s, 741 B |
+| in `join` (`idle-join 1000000`) | 10.3 s, 8,242 B | 0.401 s, 699 B |
+| in `sleep` (`idle-sleep 1000000`) | 10.5 s, 9,099 B | 0.440 s, 773 B |
+
+- **A process waiting in `join` or `sleep` costs what one in `recv`
+  does,** 700 to 770 bytes and 0.4 µs to start, wake and end, a sleeper
+  a little more for its timer; each was a page and a fault, as one in
+  `recv` was between D276 and D292.
+- **Nothing else moved.** Rings of 2, 503, 4,000 and 30,000 pass their
+  token in 45, 50, 66 and 71 ns; `payload`, `thread-ring` and `fan-in`
+  are within 1 per cent, and `ping-pong` and `thread-ring` retire the
+  instructions they did (1.0003 and 0.9984 times). `ping-pong`'s time
+  is 2 per cent more, which is where its code landed: with both
+  runtimes' functions aligned, it's the same (1.001 and 1.003 times).
+- **A copy out and back is 20 ns and 302 instructions,** where it was
+  294 with a stub of `recv`'s own in place of the one for every wait.
+
+### The M2 Max, 11 Nov, 20:17: a waiting process copied off its stack (D292)
+
+`2026-11-11-2017-macos-apple-m2-max` (`d076751`), every program, against
+`2026-11-11-1500` (`1493d35`), the run before; and
+`bench/results/2026-11-11-copy-out-m2-max.md`, `bench/copy-out.py`'s
+rounds of the same, with rings of every size:
+
+| slight on the M2 Max | before D276 (1 Nov) | 15:00 | 20:17 |
+|---|---:|---:|---:|
+| `idle-memory 1000000` | 0.311 s, 614 B a process | 10.5 s, 8,913 B | 0.401 s, 731 B |
+| the same, 12 islands | 0.102 s | 13.7 s | 0.194 s |
+| `spawn 1000000` | 0.132 s | 0.158 s | 0.144 s |
+| `thread-ring 10000000` | 0.517 s | 0.493 s | 0.495 s |
+| `ping-pong 2000000` | 0.288 s | 0.308 s | 0.293 s |
+| `payload 1000000` | 0.552 s | 0.725 s | 0.725 s |
+
+The other programs moved by 2 per cent or less.
+
+- **A waiting process is back near what it was before D276:** 731
+  bytes and 0.4 µs to start, ask and end, its frames copied off once
+  its island's processes waiting in `recv` hold 1,024 stacks. Against
+  the others on the M2, from the slowest of the four to the fastest
+  again, and the smallest: a tokio task with its channel is 1,105
+  bytes, a goroutine 2,887, an Erlang process 2,741.
+- **Rings of thousands:** 71 ns a hop at 30,000, where it was 149; a
+  copy out and back costs 20 ns and 294 instructions.
+- **Nothing that talks among a few moved,** the gate keeping them off
+  the copy; its count is 22 instructions at each wait.
+- **`payload` is still 1.31 times its time before D276,** unexplained.
+- This run's Python had no SimPy, so `bank` is slight and C alone.
+
+### The M2 Max, 11 Nov: one kind of process, what it cost (D276 to D291)
+
+`2026-11-11-1500-macos-apple-m2-max` (`1493d35`) against
+`2026-11-01-1722`, the last run before D276; and `2026-11-11-1213`
+(`9fd007c`), between, before macOS gave back only a stack's top:
+
+| slight on the M2 Max | 1 Nov | 11 Nov, 12:13 | 11 Nov, 15:00 | 15:00 ÷ 1 Nov |
+|---|---:|---:|---:|---:|
+| `idle-memory 1000000` | 0.311 s, 615 MB | 27.6 s, 9,259 MB | 10.5 s, 8,915 MB | 34, and 14 in memory |
+| the same, 12 islands | 0.102 s | 29.4 s | 13.7 s | 134 |
+| `spawn 1000000` | 0.132 s, 50 MB | 0.150 s, 127 MB | 0.158 s, 127 MB | 1.20, and 2.5 in memory |
+| `spawn`, 12 islands | 0.024 s | 0.031 s | 0.031 s | 1.29 |
+| `payload 1000000` | 0.552 s | 0.724 s | 0.725 s | 1.31 |
+| `ping-pong 2000000` | 0.288 s | 0.303 s | 0.308 s | 1.07 |
+| `ping-pong`, 12 islands | 0.065 s | 0.067 s | 0.065 s | 1.00 |
+| `thread-ring 10000000` | 0.517 s, 2.1 MB | 0.483 s, 10.5 MB | 0.493 s, 10.5 MB | 0.95 |
+| `fan-in 10000000` | 0.373 s | 0.371 s | 0.376 s | 1.01 |
+| `bank 1000000` | 0.584 s | | 0.636 s | 1.09 |
+
+The sequential programs are where they were, within 1 per cent.
+
+- **A waiting process is the cost.** 8,913 bytes resident where it
+  was 614, its stack's top page among them: the M2's pages are 16 KB,
+  four times Linux's, so a waiting process holds twice the cloud
+  machine's 4,553. Starting a million of them to wait is 34 times as
+  long, 10 µs each, most of it now the page fault for each stack's
+  first page; on 12 islands longer still, the faults contending in one
+  address space. Before macOS gave back only a stack's top, `madvise`
+  walking all 8 MB of each, it was 89 times as long.
+- **And `payload` is 1.31 times as long, in both runs,** where the
+  cloud machine's is unchanged: not noise, and not yet explained.
+- **What didn't move:** messages among a few processes, `fan-in`, and
+  `thread-ring`, faster than before, its 503 stacks coloured (D291).
+  `ping-pong` on 12 islands is unchanged, so the cloud machine's 1.46
+  there was the VM's.
+- **`spawn`'s memory is its exit records** (D277), a million kept for
+  a parent that never joins.
+- Against the others on the M2, a waiting slight process went from a
+  fifth of a goroutine's or an Erlang process's memory, and half a
+  tokio task's, to three times a goroutine's and eight times a tokio
+  task's; and from the fastest of the four to start a million waiting
+  to the slowest, 7 times Go's time and 14 times tokio's. That's the
+  scale one kind of process gave up; PLAN.md's "A waiting process
+  copied off its stack" proposes taking it back.
+- Node's start-up program, `console.log(0)`, took 0.146 to 0.149 s in
+  every run, longer than Node's whole `n-body` (0.118): something about
+  Node 26.13 on this Mac, not Node's start-up, which was 0.051 s once
+  in the run before. Its ratios in the summary carry it.
+
+### The cloud machine, 11 Nov, later: stacks carved from slabs (D291)
+
+What the morning's run (below) found D276 costing, taken back where it
+was easy. The harness's run, `2026-11-11-0955`, came on a busier host
+(`deriv`, which nothing here touches, 25 per cent slower than the
+morning's), so the comparison is old, D276 and D291 run in turns, nine
+rounds, the best of each; `deriv` is the control:
+
+| | before D276 | D276 | D291 | D276 ÷ before | D291 ÷ before |
+|---|---:|---:|---:|---:|---:|
+| `deriv 2000000` | 0.431 s | 0.449 s | 0.436 s | 1.04 | 1.01 |
+| `thread-ring 10000000` | 0.614 s | 1.363 s | 0.716 s | 2.22 | 1.17 |
+| `fan-in 10000000` | 0.788 s | 1.006 s | 0.815 s | 1.28 | 1.03 |
+| `spawn 1000000` | 0.193 s, 66 MB | 0.248 s, 114 MB | 0.235 s, 114 MB | 1.29 | 1.22 |
+| `ping-pong 2000000` | 0.420 s | 0.424 s | 0.432 s | 1.01 | 1.03 |
+| `payload 1000000` | 0.926 s | 0.817 s | 0.831 s | 0.88 | 0.90 |
+| `idle-memory 30000` | 0.019 s | 0.371 s | 0.177 s | 19 | 9.1 |
+| `idle-memory 30000`, 4 islands | 0.013 s | 1.289 s | 0.090 s | 100 | 7.0 |
+| `ping-pong-mc 2000000`, 4 islands | 0.131 s | 0.203 s | 0.190 s | 1.56 | 1.46 |
+| `spawn-mc 1000000`, 4 islands | 0.105 s | 0.125 s | 0.119 s | 1.19 | 1.14 |
+
+And `idle-memory 1000000`, which D276 couldn't run: 9.1 s on one
+island and 5.6 on four, 4,550 bytes a process resident, where it was
+0.78 s and 441 bytes before D276.
+
+- **The ceiling is gone.** Each island maps 64 stacks at once, one
+  mapping, with no guard pages (the entry check catches a stack running
+  out), so the system's 65,530 mappings no longer cap waiting processes
+  at 32,700: a million wait at once, and the address space or memory
+  is the limit. Starting one to wait was three system calls; now it's
+  the page fault for its stack's first page, and a page table's page,
+  which the resident set doesn't count (`VmPTE`, about as much again).
+  On four islands, where the calls contended for the one address space,
+  14 times faster than D276.
+- **Colour, or carving is slower than mappings.** Carved exactly 8 MB
+  apart, every stack's top was the same distance from every boundary,
+  so the tops' first lines shared a few cache sets and their page-table
+  entries one place in each table: a ring of 503 took 224 ns a hop,
+  where D276's mappings, staggered by their guard pages, took 147. A
+  slot a page more than 8 MB, and each top 0 to 31 cache lines down by
+  its place:
+
+  | ring of n, ns a hop | 2 | 256 | 503 | 1,000 | 4,000 | 30,000 |
+  |---|---:|---:|---:|---:|---:|---:|
+  | before D276 | 62 | 62 | 63 | 69 | 63 | 73 |
+  | D276 | 65 | 71 | 126 | 186 | 298 | 745 |
+  | carved, not coloured | 61 | 130 | 233 | 264 | 316 | 639 |
+  | D291 | 59 | 75 | 71 | 100 | 294 | 685 |
+
+  `thread-ring`'s 503 are back to their time before D276; past a few
+  thousand processes, each wakes on a page no cache or TLB still holds,
+  as it must once each keeps its stack.
+- **Pages back in batches.** Past 256 stacks kept warm, a stack's pages
+  go back with `madvise`; one call each was a third of `idle-memory`'s
+  time. Gathered 64 at a time and sorted, a run of neighbours is one
+  call: 4,700 calls for 100,000 processes, where there were 101,000.
+- **Two found on the way.** Since D286, `(fork send me i)` copied
+  `send`, a function in static data, with the full walk, 231
+  instructions a fork where 76 did; a value that points only into
+  static data is now copied as one with no pointers (`spawn` 5 per cent
+  fewer instructions). And `rt_recv`, a loop over the mailbox since D277
+  skips what's for `read`, saved six registers and five arguments for
+  every message; its common case, the first message for `recv`, nothing
+  to collect, no device to cut, now runs without that frame, 69
+  instructions a message where it took 101, and `fan-in` is back to its
+  time before D276, with fewer instructions than then.
+- **What's left:** a waiting process is 4.6 KB resident and a page
+  table's page, where it was 470 bytes, and starting one is a page
+  fault, 5 µs on this VM (its page fault, mostly, not the runtime's);
+  `spawn`'s exit records, kept for a parent that never joins (D277),
+  48 MB at a million; and `ping-pong` on four islands, 1.46 times its
+  time before D276 with fewer instructions, which doesn't happen with
+  four separate programs at once, nor with process structs 128 bytes
+  apart, and which this VM has no counters to explain: the M2 Max is to
+  say. Smaller stacks would take more back (256 KB apart, a third off
+  starting a waiting process, and eight stacks to a page table), but
+  change how deep a program may recurse: a proposal, not an easy win.
+
+### The cloud machine, 11 Nov: one kind of process (D276, D277)
+
+Every program on `3fa502f`, `2026-11-11-0839`, against `c6fe222`, the
+commit before D276, `2026-11-11-0758`, on the same machine the same
+morning; the old runtime was run again after, and each comparison is
+the better of its two runs, since the two old runs differ by up to 30
+per cent (`n-body`). `latency` faulted at first, a `read` of a process
+D277 left in `bench/latency`, now a `join`. One core:
+
+| | before | after | after ÷ before | instructions |
+|---|---:|---:|---:|---:|
+| `thread-ring 10000000` | 0.673 s, 1.8 MB | 1.430 s, 3.8 MB | 2.1 | 7 per cent fewer |
+| `fan-in 10000000` | 0.856 s | 1.044 s | 1.2 | 3 per cent more |
+| `spawn 1000000` | 0.250 s, 66 MB | 0.278 s, 114 MB | 1.1 to 1.6 | 17 per cent more |
+| `ping-pong 2000000` | 0.458 s | 0.501 s | 1.0 | 5 per cent fewer |
+| `payload 1000000` | 0.991 s | 0.988 s | 1.0 | 1 per cent fewer |
+| `idle-memory 1000000` | 0.776 s, 441 bytes a process | faults at 32,000 | | |
+
+Instructions are callgrind's, at a tenth of the size, on one island.
+The sequential programs, `bank` and `latency` are where they were.
+
+- **A waiting process holds a stack, and the stacks are the cost.**
+  D276 said so (D9's trade reversed): an 8 MB mapping and a guard page
+  each, two of Linux's 65,530 mappings, so at about 32,700 waiting at
+  once a fork faults `:stack` (D267), and `idle-memory` at a million
+  can't run, on one island or four. At 30,000, which fits:
+
+  | | time | bytes a process | time a process |
+  |---|---:|---:|---:|
+  | slight before | 0.027 s | 470 | 0.9 µs |
+  | slight after | 0.442 s | 4,590 | 14.7 µs |
+  | slight after, 4 islands | 1.356 s | 4,600 | 45 µs |
+  | Go, one core | 0.173 s | 2,860 | 5.8 µs |
+  | Erlang, one scheduler | 0.308 s | 2,670 | 4.7 µs |
+  | Rust, tokio | 0.098 s | 1,020 | 3.3 µs |
+
+  Each waiting process is three system calls, `mmap`, `mprotect` and
+  at the end `munmap` (past the 256 stacks an island keeps), and a
+  page touched: 30,012, 30,002 and 29,756 of them under strace. On
+  four islands the calls contend for the one address space, three
+  times slower than one island. A process that runs and ends without
+  waiting (`spawn`) takes a kept stack and gives it back, and costs
+  little more.
+- **And the stacks cost every switch once there are hundreds.** The
+  old runtime gave a waiting process's stack back, so a ring's every
+  hop ran on the same few hot pages; now each process wakes on its own,
+  8 MB from the next, a page and a page-table page of its own to find.
+  `thread-ring`'s instructions went down and its time doubled. A ring
+  of n processes passing a token 5 million times, one island, the best
+  of three:
+
+  | n | 2 | 32 | 128 | 256 | 503 | 1,000 | 4,000 | 16,000 | 30,000 |
+  |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|
+  | before, ns a hop | 61 | 62 | 70 | 70 | 65 | 70 | 66 | 83 | 73 |
+  | after, ns a hop | 57 | 69 | 70 | 78 | 121 | 170 | 280 | 542 | 721 |
+  | after ÷ before | 0.93 | 1.10 | 1.01 | 1.11 | 1.86 | 2.42 | 4.26 | 6.52 | 9.87 |
+
+  Flat before, at any size; after, the same up to about 256 and then
+  growing with the processes, ten times at 30,000.
+- **`spawn`'s memory is its exit records:** written as an actor so
+  that nothing would keep its value, each of its million now keeps one
+  for a parent that never joins (D277), 48 MB, till the parent ends.
+  Its 17 per cent more instructions are the records too, and the
+  monitor-or-join bookkeeping of one kind.
+- **On four islands,** `ping-pong-mc` is 1.45 times slower (0.154 s to
+  0.224, seven runs each), its instructions 5 per cent fewer: each
+  island's pair now keeps two stacks warm where one did. `spawn-mc` is
+  1.27 times slower and 111 MB where it was 67. `parallel-fib-mc`,
+  `spectral-norm-mc` and `fan-in-mc` are where they were.
+
+Against the others, on one core: slight's `ping-pong` is still the
+fastest (Rust 1.19 times its time, Go 1.61, Erlang 3.02), and its
+`spawn` (Rust 1.37, Erlang 3.1, Go 3.6); its `thread-ring`, twice
+Rust's speed before, is now level with it (Go 1.61 times slower,
+Erlang 2.9); `fan-in` is 2.4 times Go's time, where it was 1.8; and a
+waiting process, once under half Rust's memory and a sixth of Go's,
+is now 1.6 times Go's and 4.5 times Rust's, and the slowest to start
+of the four. So: a few processes talking are as fast as ever, and
+the fastest of these runtimes; many processes each waiting, the shape
+of a server's connections or a town of actors (PLAN.md, "A living
+town", 10,000 people), are what one kind of process made dearer: ten
+times the memory, sixteen times as long to start waiting, a switch up
+to ten times as long, and a ceiling of about 32,000. That's PLAN.md's "stacks
+from one region", deferred till a program needed it: these numbers
+say which program. To be measured on the M2 Max, whose TLB and
+`mmap` differ.
 
 ### The cloud machine, 31 Oct: a message crossing islands, one allocation
 
@@ -1075,6 +1466,23 @@ to under 2. The M2's runs after each are above.
 
 ### What slight should look at next
 
+- **A waiting process's stack** (`idle-memory`, `thread-ring`, 11
+  to 13 Nov): done. Carved from slabs and coloured (D291), and copied
+  off its stack in any wait once 1,024 are waiting (D292), a waiting
+  process is 731 bytes on the M2 Max, where D276 had made it 8,913 and
+  before it was 614. `ping-pong` on four islands, slower on the cloud
+  machine, isn't on the M2 Max: the VM's.
+- **Memory, next (Stevan, 13 Nov):** three things from the runs since
+  D276. `payload` 1.31 times its time before D276 on the M2 Max alone
+  (0.552 s to 0.722, in every run since), with fewer instructions per
+  message on the cloud machine, where it's unchanged: a profile on the
+  Mac, of the copy's chunk and its malloc and free, is the place to
+  start. `spawn`'s 127 MB where it was 50, a million exit records kept
+  for a parent that never joins (D277): what the rule costs, and
+  whether a record nobody can join need be kept is a language
+  question. And the pauses beside a big heap, 45 ms beside 160 MB, a
+  major collection copying everything live (D200's next steps, a bigger
+  nursery or an old generation not copied whole).
 - **Lists in the prelude** (`deriv`, `nqueens`): `map`, `append`,
   `filter`, `length` and the rest went through `fold/l` and `reverse`,
   with a closure called for each element, and `not` was a call; about

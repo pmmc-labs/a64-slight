@@ -7463,3 +7463,208 @@ root's value, which takes the answer from the golden tests and makes
 every program `pprint` it; a builtin to say "print nothing", a second
 way to end a program; and `()` printing nothing only when the program
 had written to stdout, a rule nobody could predict. Golden test 382.
+
+**D291. Stacks carved from slabs, and what one kind of process cost
+taken back where it was easy.** *(Stevan, Nov 2026: "Let's try some
+stack carving, and see how much we can recover. It is understandable
+things will be slower now, and that is okay, but let's not leave any
+easy wins on the table", after the benchmarks of 11 Nov, BENCHMARKS.md,
+found a waiting process's stack the cost of D276.)* PLAN.md's option,
+"stacks from one region", deferred by D276 till a program needed it:
+`idle-memory` and `thread-ring` did. Each island maps stacks 64 at a
+time, a slab of 512 MB of addresses with `MAP_NORESERVE` and one
+mapping, and carves them in order; there are no guard pages, since the
+check at every function's entry catches a stack running out, with 64 KB
+to spare, and the runtime's C walks keep their work on the heap. A
+stack given back is kept warm, its link in its top word, which its
+next process writes first anyway; past 256 kept, its pages go back with
+`madvise`, 64 stacks at a time, sorted so a run of neighbours is one
+call, and its addresses are kept for the next process; a slab is never
+unmapped. A slab that can't be had is tried as a single stack before
+the process faults `:stack` (D267), which is now where the address
+space or the commit limit runs out rather than at Linux's 65,530
+mappings, two a stack: a million processes wait at once again, and
+t/live.py's check of D267 caps the address space at 1 GB to get there.
+Slots are a page more than 8 MB apart, and a stack's top a few cache
+lines down by its place (`COLOURS`), since 8 MB apart exactly put every
+stack's top at the same distance from every boundary, its first lines
+in the same few cache sets and its page-table entry at the same place
+in each table: carved without that, a ring of 503 was slower than
+D276's mappings, whose guard pages had staggered them by chance; with
+it, as fast as before D276. Two more, found on the way, under the same
+words: a value pointing only into static data is copied without a walk,
+which every `(fork f ...)` of a named function paid since D286; and
+`rt_recv` takes a message for `recv`, with nothing to collect and no
+device to cut, without the frame of its loop, now `recv_slow`, 69
+instructions a message where it took 101 (`fan-in` back to its time
+before D276). What's left, measured on the cloud machine: a waiting
+process is a fresh page, 4.6 KB resident and a page-table page of its
+own, where it was 470 bytes, and starting one is a page fault, about 5
+µs on this VM; a ring of thousands of processes still switches to a
+cold page each time; `spawn`'s exit records (D277); and `ping-pong` on
+four islands 1.5 times its time before D276, with fewer instructions,
+which separate programs at once don't show and the M2 Max is to look at.
+Not built, to propose if wanted: smaller stacks, which would put many
+stacks' tops in one page table and their switches closer to before
+(256 KB apart took a third off starting a waiting process), but change
+how deep a program may recurse, 8 MB (LANGUAGE.md); and a parent's
+records of children it can never join. Rejected: `MADV_FREE` on Linux,
+whose pages stay in the resident set till the system wants them, so a
+program's memory after a burst would look like a leak; a slab
+unmapped once all its stacks are free, which needs a count per slab
+for little; and keeping every stack warm, which holds a burst's memory
+for good. On the M2 Max, `idle-memory 1000000` took 27.6 s where it
+had taken 0.31 before D276, nine tenths of it in `madvise` (Stevan's
+`sample`): macOS walks every page of the range it's given, touched or
+not, and a batch of neighbours was up to 512 MB. So on macOS a freed
+stack gives back its top 256 KB alone, unless `mincore` says the page
+below that is in memory, when it gives back all 8 MB; Linux, which
+skips what a range doesn't hold, keeps the sorted batches
+(`STACK_TRIM_TOPS`, which a build can set to try either on either).
+That left `madvise` and `mincore` nearly three quarters of the time
+(a second `sample`), a system call or two a stack whatever its size; so
+(Stevan: "yes, build option 2") a freed stack past the 256 kept warm is
+a spare whose pages go back later: when its island has nothing to run
+and is about to wait, or once spares not yet given back hold about 64
+MB (`SPARE_HELD`), and a process takes a spare not yet given back
+first. A program that ends after a burst under that size doesn't give
+its memory back at all, and a server gives it back when it's idle;
+`idle-memory`'s million go far past it, and gain nothing.
+
+**D292. A waiting process copied off its stack, in `recv`; the other
+waits to follow.** *(Stevan, Nov 2026: "Let's go with it", after the
+prototype's numbers on the M2 Max.)* PLAN.md's proposal of that name,
+its option A, agreed, and its prototype for `recv` kept as built
+(`d076751`): once an island's processes waiting in `recv` hold 1,024
+stacks (`WAITS_KEPT`), the next to wait has its slight frames, from the
+wait's caller to the stack's top, copied to a buffer of its own, and
+its stack goes back warm; woken, it takes any warm stack, its frames go
+to that one's top, the frame pointers they saved moved by as far, and
+its `recv` starts again there (`copy_out`, `copy_in`, `rt_recv_woken`,
+and `rt_recv_again` in each target's assembly). A process gets a new
+slice and counts a call on waking whether it was copied or not, so
+nothing runs at another time for it, and replay holds. A frame walk
+that finds anything but slight frames over the trampoline, or more than
+4 KB of them (`COPY_MAX`), leaves the process its stack, as before: a
+mistake costs memory, not correctness. `SLIGHT_COPY_OUT` copies at
+every `recv` that waits, for tests; with it, the golden tests pass on
+both targets under `SLIGHT_GC_STRESS` and `SLIGHT_GC_VERIFY` (but for
+200, 384 and `con-memory`, which say whether a process holds a stack).
+Golden tests 383 and 384. On the M2 Max (`2026-11-11-2017`, and
+`bench/results/2026-11-11-copy-out-m2-max.md`): `idle-memory 1000000`
+0.40 s and 731 bytes a waiting process, where D291 left it at 10.5 s and
+8,915, and before D276 it was 0.31 s and 614; on 12 islands 0.19 s,
+where it was 13.7; a ring of 30,000 at 71 ns a hop, where 149; and
+`ping-pong`, `payload`, `thread-ring` and `fan-in` as they were, the
+gate's count 22 instructions at each wait. A copy out and back is 20 ns
+and 294 instructions. The gate is 1,024, not the proposal's 256: at 256
+`thread-ring`'s 503 were half of them copied at every hop, a fifth
+slower, and on the M2 Max a stack kept is the cheaper up to about 3,000
+waiting. Next, the other waits, each made a function that can be
+started again from its call with what it needs kept in the process, and
+copied out under the same gate: `join`, `join/race`, `read` and
+`read/any`, `sleep`, `fork/on`'s wait for its pid, and `timer/cancel`
+across islands. Rejected, as the proposal had them: growable stacks,
+Go's (B), more machinery for a waiting process still above a page's
+worth of its frames; smaller stacks (C), which save the page tables but
+not the page, and change how deep a program may recurse; and accepting
+the cost (D), which the numbers made unnecessary.
+*(Built for the other waits, Nov 2026: `join`, `join/race`, `read`,
+`read/any`, `sleep`, `fork/on`'s wait for its pid and `timer/cancel`
+across islands; and with them `open`, which waits as `read` does, and a
+`connect` of `:keypress` or `:system` from another island, which waits
+as `fork/on` does. Only `recv` was passed its caller's frame, so each
+of the others is entered through three instructions of assembly
+(`WAIT`, in `rt_asm_*.S`) that add the caller's stack pointer and frame
+pointer to its arguments, and the compiler is unchanged. One stub,
+`rt_wait_again`, in place of `rt_recv_again`, starts any wait again, by
+a function of the wait's own (an `again_t`) that goes on from what the
+process holds: a joiner takes the result it was given, or its process's
+end from another island; a racer who won, and its result; a reader
+looks at its sources again, which the process holds (`read`'s one
+source as itself, where it was a list on the C stack); a sleeper
+returns, its timer set once; and `fork/on` and `timer/cancel` give the
+answer their island's item left. A race's pids and a `read`'s site are
+kept beside the frames. `WAITS_KEPT` counts every waiting stack. Golden
+tests 385 to 390, a wait each, copied out and woken with what three
+frames held: in 385 to 388 on another stack than it left, with one
+killed while off its stack; and where the wait is for another island's
+answer and can't be looked at while it lasts (389, 390), an observer
+sees the process woken and not yet run, holding no stack. With
+`SLIGHT_COPY_OUT` the golden tests pass on both targets, alone and under
+`SLIGHT_GC_STRESS` and `SLIGHT_GC_VERIFY`, but for 200, 266, 384 and
+`con-memory`, which say whether a process holds a stack, and under
+stress those that take too long without it.
+On the M2 Max (`bench/results/2026-11-12-copy-out-waits-m2-max.md`): a
+million waiting in `join` 0.40 s and 699 bytes each, where 10.3 s and
+8,242; asleep, 0.44 s and 773, where 10.5 s and 9,099; the rings and
+the programs that talk among a few as they were. The stress run found
+a fault older than this, D276's: a collection at a `recv` in the middle
+of a function moved the frame's slots in use and left the others, which
+the next collection, under a function called from there, took for
+roots; it zeroes them now, golden test 391.)*
+
+**D293. Gambit, Racket and Swish in the actor benchmarks.** *(Stevan,
+Nov 2026, answering the five questions of
+`docs/research/actor-runtimes-lisp.md`.)* slight compared with its own
+family as an actor system, not only as a Lisp (where Chez stands, D201):
+the nine actor programs but `bank` in each, `bench/NAME/NAME.scm`
+(Gambit), `NAME.rkt` (Racket) and `NAME-swish.ss` (Swish), and
+`startup`, which `idle-memory`'s bytes a process needs.
+
+- **Why these three:** Gambit is the nearest in shape and the fastest
+  the research ran, a mailbox per green thread, preempted, compiled to
+  native code through C; Racket is the Scheme people reach for, its
+  threads with mailboxes in the standard library, and the only one with
+  isolated VMs (places); Swish is Erlang's model on Chez (processes,
+  selective receive, links, monitors, preemption by counting calls),
+  an actor *system* rather than threads with mailboxes. LFE and Clojerl
+  are Erlang's compiler and VM underneath, so would time as Erlang does.
+- **`payload`:** shown, each Scheme marked "not copied", in the summary
+  and BENCHMARKS.md, as Go's and tokio's are: their processes share one
+  heap and a message is a pointer. In Stevan's words: "When we dive into
+  the memory issue, our position on copying may change and this might
+  become a more meaningful comparison." Rejected: `payload` as slight and
+  Erlang alone.
+- **Gambit on plain `thread-send` and `thread-receive`**, the next
+  message, as slight's `recv` takes, not Termite, its Erlang-like
+  library, whose `recv` selects with a cursor; Termite is noted in
+  BENCHMARKS.md as left out. Built with `gsc -exe`, safe, with the
+  declarations Gambit's own benchmarks use (`standard-bindings`,
+  `extended-bindings`, `block`).
+- **Racket:** one core on ordinary threads with their mailboxes, built
+  with `raco exe`; every core on places alone, for now: `racket-mc`, a
+  place (a VM of its own, its messages copied, the nearest thing to
+  slight's islands) for each core, each running its share as threads,
+  as `slight-mc` does on islands, in `NAME-mc.rkt`. So it runs what
+  places can: `parallel-fib` and `fan-in`, and `ping-pong`, `spawn` and
+  `idle-memory`, each place its share locally, one answer each; it's
+  left out of the rest, as tokio's every core is left out of `latency`
+  (D238). Racket 9.0's parallel threads (`#:pool 'own`), sharing one
+  heap, are left for later.
+- **Swish, opt-in, as SimPy is:** it needs a Chez Scheme 10.3 or later
+  built without threads, beside Homebrew's (which is threaded), so
+  `bench/build-swish.sh` builds Chez 10.4.1 and Swish 3.0.0 under a
+  prefix, and `run.py` runs Swish only when `swish` is found, saying so
+  when it isn't. Built with `swish-build`, a linked program. Swish has
+  no yield: `latency`'s pinger spins and its heap churns, each preempted
+  when its quantum, 1 ms, is spent, as any Swish process is.
+- **`bank`** in none of them, as in Go, Erlang and Rust: a port would
+  need a virtual clock written for it.
+- **No cloud run with a newer Erlang:** the research found Erlang 4
+  times slight's `ping-pong` on the cloud machine, whose Erlang is
+  Ubuntu's OTP 25; the M2 Max's OTP 29 shows the same gap, so a newer
+  one there would say nothing new. BENCHMARKS.md notes the version.
+- **Not run here:** Swish, whose build (code fetched from GitHub) this
+  cloud session wasn't allowed to run; its programs were checked on a
+  stand-in for `receive`, `spawn` and `send` on Racket's threads, so
+  their first real run is the M2 Max's.
+- **Found** on the cloud machine (Gambit 4.9.3, Racket 8.10, one
+  full-size run, noisy, not kept): Gambit 1.3 times slight's
+  `ping-pong`, 0.44 its `payload` (not copied), 2.2 its `thread-ring`,
+  3.5 its `spawn`, and 2,150 bytes a waiting thread where slight's
+  process takes 585; Racket 5.2 times slight's `ping-pong`, 7.7 its
+  `thread-ring`, and `idle-memory` 27 times, 3,850 bytes a thread.
+  `racket-mc` slower than `racket` in all five: places share Racket
+  CS's one heap and collector, and two doing ping-pong at once each
+  took 5.5 times as long as one alone. Results are the M2 Max's to give.

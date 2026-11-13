@@ -1,0 +1,9 @@
+(:a (:state :recv) (:in "inner") (:stack #false))
+(:deep (:state :recv) (:in "deep") (:stack #true))
+(:error :killed)
+(:a 2.5 (:middle (0 1 2 3 4) ((:a "before") 42 3000)))
+(:ok (:got :hello))
+(:ok 307)
+(:applied 13)
+:squatter-woke
+:done

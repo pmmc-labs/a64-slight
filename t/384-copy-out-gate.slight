@@ -1,0 +1,76 @@
+; When a waiting process is copied off its stack (D292): only once its
+; island's waiting processes hold 1,024 stacks. Up to then each keeps
+; its own, as since D276, so a few processes talking pay nothing; past
+; it, the next to wait gives its stack back, and :system says it holds
+; none. Every wait counts, recv, sleep and join here; and a process that
+; stops waiting, or is killed as it waits, is counted out again.
+
+(defun waiter () (recv ((:ping from) (send from 1))))
+
+(defun napper (to) (sleep 5) (send to 1))
+
+(defun joiner (p to) (join p) (send to 1))
+
+(defun gather (n acc) (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
+
+; n processes, each made by make and waiting by the time this returns,
+; in the order they were started: this one yields, so it goes behind
+; them all, and, since it doesn't wait, holds none of the 1,024 itself.
+(defun start (n make)
+    (let ps (map (lambda (i) (make)) (range 0 n)))
+    (yield ())
+    ps)
+
+; How many of ps hold a stack.
+(defun held (s ps n)
+    (if (nil? ps)
+        n
+        (do
+            (send s (list :process (car ps)))
+            (match (read s)
+                ((:process s2 i) (held s (cdr ps) (if (lookup :stack i) (+ n 1) n)))))))
+
+(defun stacks (s)
+    (send s (list :runtime))
+    (match (read s) ((:runtime s2 i) (lookup :stacks i))))
+
+(defun ping (ps to) (map (lambda (p) (send p (list :ping to))) ps))
+
+(defun main ()
+    (let me $$)
+    (let s (match (open :system) ((:ok s) s)))
+    (let waiting (lambda () (fork waiter)))
+
+    ; The first 1,024 keep their stacks; the other 76 are copied off
+    ; theirs. With this process's, which waits for nothing, 1,025.
+    (let ps (start 1100 waiting))
+    (pprint (list :first-1024 (held s (take 1024 ps) 0) :last-76 (held s (skip 1024 ps) 0) :stacks (stacks s)))
+    (ping ps me)
+    (pprint (list :answered (gather 1100 0) :stacks (stacks s)))
+
+    ; All ended, none is counted: three more keep their stacks.
+    (let few (start 3 waiting))
+    (pprint (list :few (held s few 0)))
+
+    ; And of 1,097 more, 1,021 keep theirs, 1,024 again with those three,
+    ; and 76 don't. Ten that do are killed: so of twenty started after, ten
+    ; keep theirs, which makes 1,024 once more, and ten are copied off.
+    (let more (start 1097 waiting))
+    (map kill (take 10 more))
+    (let late (start 20 waiting))
+    (pprint (list :more (held s (skip 10 more) 0) :late-first-10 (held s (take 10 late) 0)
+                  :late-last-10 (held s (skip 10 late) 0)))
+    (ping (append few (append (skip 10 more) late)) me)
+    (pprint (list :answered (gather 1110 0) :stacks (stacks s)))
+
+    ; The other waits count as recv's do: a thousand asleep keep their
+    ; stacks, and of thirty that then join the first of them, 24 keep
+    ; theirs and six are copied off. Woken, each of the 1,030 answers.
+    (let naps (start 1000 (lambda () (fork napper me))))
+    (let js (start 30 (lambda () (fork joiner (car naps) me))))
+    (pprint (list :asleep (held s naps 0) :joining-first-24 (held s (take 24 js) 0)
+                  :joining-last-6 (held s (skip 24 js) 0)))
+    (pprint (list :answered (gather 1030 0) :stacks (stacks s)))
+    :done)
+
+(main)

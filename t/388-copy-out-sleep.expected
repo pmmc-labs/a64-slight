@@ -1,0 +1,9 @@
+(:a :sleeping "inner" #false)
+(:error :killed)
+(:timers 2)
+(:b 2.5 (:middle (0 1 2 3 4) ((:b "before") 0 3000)))
+(:a 2.5 (:middle (0 1 2 3 4) ((:a "before") 5000 3000)))
+(:timers 0 :clock 5000)
+(:clock 7000)
+(:ok 300)
+:done

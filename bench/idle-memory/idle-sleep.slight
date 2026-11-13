@@ -1,0 +1,22 @@
+; idle-sleep: idle-memory with its n processes asleep, not waiting in
+; recv: each sleeps a millisecond, answers 1, and ends; the answers
+; summed. Run on the virtual clock (SLIGHT_CLOCK=virtual), which moves
+; only once nothing can run, so all n are asleep at once however long
+; they took to start, and the run takes no time but its work. Its peak
+; memory, less startup's, over n is what a sleeping process costs, its
+; timer with it. For bench/copy-out.py.
+
+(defun idle (from) (sleep 1) (send from 1))
+
+(defun start (n from)
+    (if (== n 0) () (do (fork idle from) (start (- n 1) from))))
+
+(defun gather (n acc)
+    (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
+
+(defun top-level (argv)
+    (let n (str->int (car argv)))
+    (start n $$)
+    (gather n 0))
+
+(cadr (join (fork top-level @ARGV)))

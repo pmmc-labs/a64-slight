@@ -1,0 +1,115 @@
+; read and read/any, of a process copied off its stack while it waits
+; (D292). SLIGHT_COPY_OUT copies every wait. A reader four frames down
+; holds no stack while it waits: for a message to an address of its own,
+; which one sent to its pid doesn't wake; for the first of two addresses;
+; for a line from a command; and for a device that's closed under it.
+; Woken, on another stack than it left, it has what its frames held.
+; One killed while it's off its stack ends as any does.
+; env: SLIGHT_COPY_OUT=1
+
+; The wait itself, tidied of pids and addresses, which are numbered.
+(defun await (how src)
+    (case how
+        (:read (read src))
+        (:line (match (read src) ((kind d text) (list kind text))))
+        (:any  (match (read/any src) ((from what) (list (if (eq? from (car src)) :first :second) what))))))
+
+(defun inner (how src tag)
+    (let before (list tag "before"))
+    (let m (await how src))
+    (list before m (length (range 0 3000))))
+
+(defun middle (how src tag)
+    (let xs (range 0 5))
+    (let r (inner how src tag))
+    (list :middle xs r))
+
+(defun outer (how src tag to)
+    (let half 1.25)
+    (let r (middle how src tag))
+    (send to (list tag (+ half half) r)))
+
+; Reads an address of its own, which it tells `to` of first; then takes
+; what came to its pid meanwhile, which waited for recv.
+(defun one (tag to)
+    (let a (address))
+    (send to a)
+    (outer :read a tag to)
+    (send to (list tag :then (recv (m m)))))
+
+; Reads two, and is sent to at the second.
+(defun any (tag to)
+    (let a (address))
+    (let b (address))
+    (send to b)
+    (outer :any (list a b) tag to))
+
+; Reads a command's output: a line, when it's written one; then its end.
+(defun command (tag to)
+    (match (open :exec (list "cat"))
+        ((:ok d)
+            (send to d)
+            (outer :line d tag to)
+            (send d (list :eof))
+            (let ended (car (read d)))
+            (send to (list tag :then ended (car (read d)))))))
+
+; Reads a device that says nothing till it's closed.
+(defun closing (tag to)
+    (match (open :system)
+        ((:ok d)
+            (send to d)
+            (outer :read d tag to))))
+
+; 300 frames down, too deep to copy: it keeps the stack it started on,
+; the one its parent left as it waited, so who's woken next gets another.
+(defun squatter (n) (if (== n 0) (recv (m 0)) (+ 1 (squatter (- n 1)))))
+
+(defun facts (s p)
+    (send s (list :process p))
+    (match (read s)
+        ((:process s2 i) (list (lookup :state i) (lookup :in i) (lookup :stack i)))))
+
+(defun main ()
+    (let s (match (open :system) ((:ok s) s)))
+    (let r1 (address))
+    (let r2 (address))
+    (let r3 (address))
+    (let r4 (address))
+    (let rk (address))
+    (let p1 (fork one :one r1))
+    (let a1 (read r1))
+    (let p2 (fork any :any r2))
+    (let b2 (read r2))
+    (let p3 (fork command :cat r3))
+    (let d3 (read r3))
+    (let p4 (fork closing :closed r4))
+    (let d4 (read r4))
+    (let k (fork one :k rk))
+    (read rk)
+    (sleep 1)                               ; till each waits
+    (pprint (cons :one (facts s p1)))
+    (pprint (cons :any (facts s p2)))
+    (pprint (cons :cat (facts s p3)))
+    (pprint (cons :closed (facts s p4)))
+    (kill k)
+    (pprint (join k))
+    (let q (fork squatter 300))             ; takes the stack this process leaves as it waits, and keeps it
+    (send p1 :to-its-pid)                   ; for its recv: its read waits on
+    (sleep 1)
+    (pprint (cons :one (facts s p1)))
+    (send a1 :to-its-address)
+    (pprint (read r1))
+    (pprint (read r1))
+    (send b2 (list 1 2))
+    (pprint (read r2))
+    (send d3 (list :write "hello" \n))
+    (pprint (read r3))
+    (pprint (read r3))
+    (disconnect d4)
+    (pprint (read r4))
+    (send q :go)
+    (pprint (join q))
+    :done)
+
+(main)

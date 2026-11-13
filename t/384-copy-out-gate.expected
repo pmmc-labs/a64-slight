@@ -1,0 +1,8 @@
+(:first-1024 1024 :last-76 0 :stacks 1025)
+(:answered 1100 :stacks 1)
+(:few 3)
+(:more 1011 :late-first-10 10 :late-last-10 0)
+(:answered 1110 :stacks 1)
+(:asleep 1000 :joining-first-24 24 :joining-last-6 0)
+(:answered 1030 :stacks 1)
+:done

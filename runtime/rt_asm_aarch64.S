@@ -54,9 +54,54 @@ FUNC rt_trampoline
     ldp  x6, x7, [x28, #RT_PROC_ARGS + 48]
     ldr  x16, [x28, #RT_PROC_CODE]
     blr  x16
+    .globl rt_trampoline_back           // where a process's first frame returns: copy_out (process.c) looks for it
+rt_trampoline_back:
     mov  x1, x0
     mov  x0, x28
     bl   rt_exit                        // doesn't return
+
+// ---------------------------------------------------------------------------
+// rt_wait_again: where a process that was copied off its stack while it
+// waited lands when it next runs (copy_in, process.c), its frames back on
+// a stack, some stack: sp and x29 are its frame's, as they were when it
+// called the wait, x19 is the wait's function for starting again (an
+// again_t) and x20 that call's return address. Jumps to the function as
+// the wait was called, with the process, the frame and the frame pointer,
+// and it returns what the wait gives to where the wait would have.
+// ---------------------------------------------------------------------------
+
+FUNC rt_wait_again
+    mov  x0, x28
+    mov  x1, sp
+    mov  x2, x29
+    mov  x30, x20
+    br   x19
+
+// ---------------------------------------------------------------------------
+// The waits' entries, but recv's: each adds where it was called from, the
+// calling frame's lowest slot (sp) and its frame pointer, to the call's
+// arguments, and jumps to the C function, \name\()_from, which may copy
+// the process off its stack while it waits (process.c). The return
+// address is the call's still.
+// ---------------------------------------------------------------------------
+
+.macro WAIT name, frame, fp
+FUNC \name
+    mov  \frame, sp
+    mov  \fp, x29
+    b    \name\()_from
+.endm
+
+WAIT rt_join,           x2, x3
+WAIT rt_join_race,      x2, x3
+WAIT rt_read,           x2, x3
+WAIT rt_read_any,       x2, x3
+WAIT rt_sleep,          x2, x3
+WAIT rt_timer_cancel,   x2, x3
+WAIT rt_open,           x3, x4
+WAIT rt_connect,        x3, x4
+WAIT rt_connect_system, x3, x4
+WAIT rt_fork_on,        x4, x5
 
 // ---------------------------------------------------------------------------
 // rt_apply_start: a process's code when fork made it (D286). The trampoline

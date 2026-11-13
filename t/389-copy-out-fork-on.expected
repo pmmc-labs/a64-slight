@@ -1,0 +1,4 @@
+(:woken :stack #false)
+(:p 2.5 (:middle (0 1 2 3 4) ((:p "before") (:ok (:p 1)) 3000)))
+(:ok (:root 2))
+:done

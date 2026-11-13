@@ -1,0 +1,25 @@
+; idle-join: idle-memory with its n processes waiting in join, not recv:
+; each joins the one started before it, the first a process that waits
+; for a message, so all n wait at once; that one is then sent to, and as
+; each ends the next wakes, answers 1, and ends; the answers summed. Its
+; peak memory, less startup's, over n is what a process waiting in join
+; costs. For bench/copy-out.py.
+
+(defun gate () (recv (m m)))
+
+(defun idle (before from) (join before) (send from 1))
+
+(defun start (n before from)
+    (if (== n 0) before (start (- n 1) (fork idle before from) from)))
+
+(defun gather (n acc)
+    (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
+
+(defun top-level (argv)
+    (let n (str->int (car argv)))
+    (let first (fork gate))
+    (start n first $$)
+    (send first :go)
+    (gather n 0))
+
+(cadr (join (fork top-level @ARGV)))

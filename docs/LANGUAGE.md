@@ -778,10 +778,12 @@ value back to its caller:
         (pprint (list :count (ask-counter c))))
 
 The process keeps its stack while it waits, as it does in `join`, and
-goes on from the `recv` when a message comes. So a process holds its
-stack from its first run to its end, and what a waiting actor costs is
-its stack's touched pages, its mailbox and its heap, which is collected
-at the `recv` if it has grown enough (D105).
+goes on from the `recv` when a message comes. What a waiting actor
+costs is its stack's touched pages, its mailbox and its heap, which is
+collected at the `recv` if it has grown enough (D105); and once the
+processes waiting on its island, in `recv` or anything else, hold a
+thousand stacks, its stack goes back and only its frames are kept, a
+few hundred bytes, till a message wakes it on another (D292).
 
 A process that waits for a reply in the middle of a handler takes the
 next message, whatever it is: there's no selective receive. So an actor
@@ -820,8 +822,9 @@ The fault kinds:
 - `:no-clause`: no `cond` clause matched
 - `:stack`: a call with the stack nearly full; or, with the reason
   `(:stack () "no stack to be had")`, a process the system had no
-  stack for as it was to run, about 32,000 being held at once on Linux,
-  by processes preempted, joining, sleeping or reading (D267)
+  stack for as it was to run, its address space or commit limit spent
+  on the stacks of processes waiting, preempted, joining, sleeping or
+  reading, 8 MB of addresses each (D267, D291)
 - `:not-a-cons`: `car` or `cdr` of something that isn't a cons
 - `:not-a-list`: `cons` onto something that isn't a list
 - `:heap`: the process's heap is full
@@ -1549,8 +1552,10 @@ which `lookup` reads; more keys may come. A process's:
 - `(:heap bytes)`: its heap in use, both generations.
 - `(:reductions n)`: the reductions it has made, the functions it has
   entered (under Scheduling).
-- `(:stack held)`: whether it holds a stack (waiting in `recv`, it gives
-  its back).
+- `(:stack held)`: whether it holds a stack: a process that waits, in
+  `recv`, `join`, `read`, `sleep` or any other wait, gives its back
+  once its island's waiting processes hold 1,024, keeping only its
+  frames (D292).
 - `(:devices pids)`: the devices it owns.
 - `(:island k)`: the island it's on (D256).
 - `(:sent (n bytes))`: the messages it has sent to processes on other
