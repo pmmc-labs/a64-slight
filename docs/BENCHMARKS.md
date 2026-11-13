@@ -1491,12 +1491,17 @@ to under 2. The M2's runs after each are above.
   instructions. What's left there is mostly the call, through a
   closure, to what `map` is given; folds the compiler specialises to
   their lambdas (PLAN.md, D203's B) are for later.
-- **Floats** (`n-body`): now the widest gap by far, 20 to 36 times the
-  compiled languages. PLAN.md's "Faster floats", with this as a second
-  benchmark beside boids. Their arithmetic is inline (D198); each
-  result is still a 16-byte box, allocated and later collected, and
-  comparisons and `sqrt` are still C. Erlang, which boxes them too, is
-  only 1.2 times faster.
+- **Floats** (`n-body`): still the widest gap, though narrower. Their
+  arithmetic is inline (D198), their comparisons too (D259), and a tree
+  of float operations on locals and literals, `math/sqrt` and
+  `math/abs` among them, is worked in float registers and boxed once
+  (D261, `n-body` 1.4 times faster). On the M2 Max on 13 Nov, 0.849 s:
+  C 22 times faster, Go 16, Node 7; Chez 1.36 times slower and Erlang
+  1.54, where Erlang was 1.2 times faster. What's left is a box for
+  every value that leaves a tree, a local or an argument. Raw float
+  locals were worth about 6 per cent and stopped (D262); the way on is
+  types in code generation (TYPES.md's step 5), to propose if floats
+  need it.
 - **Allocating and collecting** (`binary-trees`): 2.6 times Erlang on
   the M2, whose heaps are per-process and copied as slight's are (1.9
   times Erlang on every core, and level with it on one scheduler, since
@@ -1564,18 +1569,29 @@ to under 2. The M2's runs after each are above.
   does keeping a process's heap small.
 - **Simulation** (`bank`, D241): slight is 11 times faster than SimPy
   on the cloud machine, and 27 times slower than an event list in C. A
-  customer is a process, three messages and two timers, each a malloc;
-  and every process that ends keeps its exit record, 40 MB a million,
-  for good (D88), which a long simulation can't afford. And the virtual
+  customer is a process, three messages and two timers, each a malloc.
+  Exit records are no longer kept for good: D244 lets one go once its
+  parent has it, and measured `bank` at 2.1 MB a million customers.
+  But D277 keeps every process's result for a parent that never joins,
+  and `bank`'s customers are forked by `source`, which never joins
+  them: its peak is 76 MB on the M2 Max on 13 Nov, and on the cloud
+  machine on 13 Nov 14 MB at 250,000 customers, 49 at a million and 96
+  at two, growing with the customers as `spawn`'s does. The question
+  is the one in "Memory, next", above. And the virtual
   clock is a switch for the whole program, so a simulation that also
   talks to the world (the airline's services) keeps its own time.
 - **A mailbox under many senders** (`fan-in`, D201): nothing slows a
   sender whose receiver is behind, so on one core nearly every message
   waits at once, 640 MB at ten million, as in Erlang; Go's channel
   blocks its senders. And a mailbox isn't counted in the heap's cap.
-- **One core** (`parallel-fib`): Go on every core is 15 times faster,
-  Erlang 5.6. Running on more than one is a design question of its own
-  (BACKGROUND.md, multiple cores), not a fix.
+- **More than one core** (`parallel-fib`): done, as islands (D256).
+  On the M2 Max's 12 cores, `parallel-fib` is 7.9 times as fast on
+  every island, 0.036 s (0.037 on 13 Nov), as Go's is 8.0 times and
+  Rust's 8.2 (30 Oct); still about 1.7 times their time, as on one
+  core, so what's left is `fib`'s calls (above). Starting and freeing
+  processes and messages lean on malloc and spread less, 3 to 5 times
+  on 12 cores; and `fan-in`, every island sending to one mailbox, is
+  3.6 times slower than on one core, as Go's is 12 and Rust's 16.
 - **Memory on macOS** (above): whether the collector should keep and
   reuse its chunks rather than free them, which might also make
   `binary-trees` faster.
