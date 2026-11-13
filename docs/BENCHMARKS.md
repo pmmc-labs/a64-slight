@@ -275,6 +275,40 @@ the script warns of). A few minutes either way.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 13 Nov: every wait copied, and slight's own family (D292, D293)
+
+`2026-11-13-1102-macos-apple-m2-max` (`3dedbf4`): every program, every
+wait copied off its stack past 1,024 waiting (D292), the collector's fix
+for a frame's dead slots at a `recv` (golden test 391), and Gambit,
+Racket and Swish in the actor programs for the first time, every
+output checked. On one core, but Racket's places:
+
+| | `ping-pong` | `thread-ring` | `spawn` | a waiting process | a million waiting |
+|---|---:|---:|---:|---:|---:|
+| slight | 0.302 s | 0.495 s | 0.144 s | 731 B | 0.392 s |
+| Gambit | 0.288 s | 1.398 s | 0.429 s | 2,056 B | 1.109 s |
+| tokio | 0.293 s | 0.697 s | 2.121 s | 1,106 B | 0.745 s |
+| Go | 0.390 s | 1.044 s | 0.431 s | 2,899 B | 1.470 s |
+| Racket | 2.087 s | 5.295 s | 2.135 s | 3,635 B | 13.955 s |
+| Erlang | 3.410 s | 8.291 s | 1.251 s | 2,790 B | 2.933 s |
+| Swish | 49.0 s | 122.4 s | 0.782 s | 5,023 B | 4.262 s |
+
+- **slight leads at processes** against all seven: the smallest and
+  quickest million waiting, the fastest `spawn` and `thread-ring`.
+- **Gambit is the nearest rival,** level at `ping-pong` and 4.5 times
+  faster at `payload` (0.161 s to 0.722), its threads sharing one heap
+  and passing the list by reference ("not copied"); beside a busy
+  thread its messages wait up to 21 ms, where slight's wait 8 µs.
+- **Racket's places,** its every core, are dear: `ping-pong` 6.3 s,
+  a million waiting 27 s and 7 GB.
+- **Swish's times are not to be trusted yet:** `ping-pong` 49 s,
+  `thread-ring` 122 s, a ping waiting up to 1.7 s beside the big heap,
+  far from what Erlang's model on Chez should cost. Its build or how
+  its programs run is to be looked at before its rows are quoted.
+- `payload` is still 0.722 s, 1.31 times its time before D276, on this
+  machine alone; and `spawn`'s 127 MB is its million exit records
+  (D277), kept for a parent that never joins.
+
 ### The M2 Max, 12 Nov: every wait copied off its stack (D292)
 
 `bench/results/2026-11-12-copy-out-waits-m2-max.md`: `bench/copy-out.py`'s
@@ -1433,14 +1467,22 @@ to under 2. The M2's runs after each are above.
 ### What slight should look at next
 
 - **A waiting process's stack** (`idle-memory`, `thread-ring`, 11
-  Nov): since D276 a waiting process holds a stack of its own. Carved
-  from slabs and coloured (D291), the ceiling and the system calls are
-  gone and `thread-ring` is near its old time; left, a page and a page
-  table's page for each waiting process, a page fault to start one,
-  and a switch among thousands going to a cold page. Smaller stacks,
-  packed closer, would take more, at the cost of how deep a program may
-  recurse: to propose if a program needs it. And `ping-pong` on four
-  islands, unexplained here, for the M2 Max.
+  to 13 Nov): done. Carved from slabs and coloured (D291), and copied
+  off its stack in any wait once 1,024 are waiting (D292), a waiting
+  process is 731 bytes on the M2 Max, where D276 had made it 8,913 and
+  before it was 614. `ping-pong` on four islands, slower on the cloud
+  machine, isn't on the M2 Max: the VM's.
+- **Memory, next (Stevan, 13 Nov):** three things from the runs since
+  D276. `payload` 1.31 times its time before D276 on the M2 Max alone
+  (0.552 s to 0.722, in every run since), with fewer instructions per
+  message on the cloud machine, where it's unchanged: a profile on the
+  Mac, of the copy's chunk and its malloc and free, is the place to
+  start. `spawn`'s 127 MB where it was 50, a million exit records kept
+  for a parent that never joins (D277): what the rule costs, and
+  whether a record nobody can join need be kept is a language
+  question. And the pauses beside a big heap, 45 ms beside 160 MB, a
+  major collection copying everything live (D200's next steps, a bigger
+  nursery or an old generation not copied whole).
 - **Lists in the prelude** (`deriv`, `nqueens`): `map`, `append`,
   `filter`, `length` and the rest went through `fold/l` and `reverse`,
   with a closure called for each element, and `not` was a call; about
