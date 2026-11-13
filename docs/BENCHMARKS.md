@@ -1483,6 +1483,13 @@ to under 2. The M2's runs after each are above.
   question. And the pauses beside a big heap, 45 ms beside 160 MB, a
   major collection copying everything live (D200's next steps, a bigger
   nursery or an old generation not copied whole).
+  Before any of the three, a review of everything that holds memory
+  (`docs/memory-review-2026-11-13.md`, asked for by Stevan), which
+  found bigger things than these: a long-lived worker holding 48 bytes
+  settles at 640 KB to 1 MB (a nursery that only grows, an old
+  generation never collected under 256 KB), one allocation costs a
+  waiting process 4 KB, a quiet process never collects, and freed
+  memory stays with the program.
 - **Lists in the prelude** (`deriv`, `nqueens`): `map`, `append`,
   `filter`, `length` and the rest went through `fold/l` and `reverse`,
   with a closure called for each element, and `not` was a call; about

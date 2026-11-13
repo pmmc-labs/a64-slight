@@ -86,12 +86,13 @@ Sizes are x86-64's; AArch64's where it differs.
 
 - The state (`island_state_t`, 512 bytes) and the inbox (128), static.
 - The process table's page directory; the open addresses (16 bytes
-  each, a table at most half full); the timers (40 bytes each, and 16
-  more in the index for one `after` set, plus its message).
+  each, a table at most half full); the timers (40 bytes each, and
+  for one `after` set an entry in an index at most half full, and its
+  message).
 - The copy's scratch buffer and its slots: kept up to 1 MB each.
 - Up to 256 warm stacks, each with whatever pages its last process
   touched.
-- Items in flight between islands: a message's is 96 bytes in the
+- Items in flight between islands: a message's is 64 bytes in the
   message's own chunk; the others 224 bytes each.
 
 **Per device** (`rt_device_t`): 536 bytes, a read buffer that grows to
@@ -129,6 +130,8 @@ string is 8, its bytes and a NUL, rounded to 16. Everything is
 | ... after 1,000 messages each | 129 MB: 128 KB each |
 | ... after 10,000 | 640 MB: 640 KB each |
 | ... after 100,000 | 652 MB: 652 KB each |
+| The same workers sent bare integers, after 10,000 each | 246 MB: 246 KB each |
+| ... after 100,000 | 1,019 MB: 1 MB each |
 | One process, a list of 1 million integers (16 MB live), built once | 33 MB |
 | ... rebuilt 5 times | 63 MB |
 | One process, 64 MB live, rebuilt 5 times | 266 MB |
@@ -169,14 +172,15 @@ with its record, header and `malloc`'s own.
 The worker measured holds a three-cell list and takes `(:work n)`. Its
 old generation fills with 4,000 dead messages (384 KB as malloc sees
 them) before the first major collection; that collection also starts
-the nursery again, so the nursery stops growing at 256 KB. 640 KB, for
-48 bytes. With bare messages (D199) the old generation would stay
-empty and the nursery would go on to 1 MB.
+the nursery again, so the nursery stops growing at 256 KB: 640 KB, for
+48 bytes. Sent bare integers instead (D199), the old generation stays
+empty, nothing starts the nursery again early, and it goes on to its
+full 1 MB: measured, 1,019 MB for the thousand.
 
 This is the airline's 84 MB for 300 aircraft (D210), and
 `thread-ring`'s 266 MB before D199, seen each time as a benchmark's
 oddity. It's the model: **a long-lived process that does anything
-settles at somewhere between 0.5 and 1.25 MB, whatever it holds.**
+settles at somewhere between 0.6 and 1.25 MB, whatever it holds.**
 Erlang's process starts at 233 words, grows its heap in steps as what
 survives grows, and shrinks it when a collection finds it mostly
 empty.
@@ -225,14 +229,12 @@ when the same run maps each chunk of 4 KB or more (`GLIBC_TUNABLES`).
 The stacks do go back (D291); the heaps were never looked at.
 
 This is the Linux side of BENCHMARKS.md's "Memory on macOS" (whether
-the collector should keep and reuse its chunks), and it's likely the
-place `payload`'s time on the M2 Max is going too: a chunk of 1.7 KB
-allocated and freed for each message, by an allocator slight doesn't
-control.
-
-Since D256 it also means memory allocated on one island and freed on
-another (a message's chunk) goes back to the first island's arena,
-which is why starting and freeing spread only 3 to 5 times on 12 cores.
+the collector should keep and reuse its chunks). It's a candidate for
+`payload`'s time on the M2 Max too, not yet profiled: a chunk of 1.7
+KB allocated and freed for each message, by an allocator slight
+doesn't control. And BENCHMARKS.md already has starting and freeing
+processes and messages spreading only 3 to 5 times across 12 islands
+because they lean on `malloc`.
 
 ### 5. A big heap costs two to four times what's live, and a pause
 
@@ -254,9 +256,10 @@ D257; findings 1 to 4 matter to a program with many small ones.
   full, the copy is refused (`NO_ROOM`) and the process keeps its
   stack till it next waits. It happens when processes are preempted
   before their first wait (a start that makes more than 1,000 calls),
-  so all of them hold stacks before any waits: the 20,000 processes
-  above each kept one. A page each, so 80 MB there, 16 KB each on
-  macOS.
+  so all of them hold stacks before any waits. Of 5,000 such
+  processes, counted with `COPY_TALLY`, 1,024 kept their stacks under
+  the gate, 1,025 were copied off, and 2,951 were refused. A page
+  each at the least, 16 KB on macOS.
 - **A stack never gets shallower.** A process that recursed 20,000
   frames once holds those 610 KB while it lives, and a warm stack keeps
   them for the next process. The prelude's list functions are loops
@@ -268,11 +271,24 @@ D257; findings 1 to 4 matter to a program with many small ones.
 
 ### 7. Exit records
 
-Measured in the first look: about 45 bytes a child whose parent never
-joins it (the entry, which pins its page, and the parent's list), and
-a quarter of `spawn`'s time. The options are in the first reply (a
-fork whose pid is discarded keeps nothing; or a smaller record); they
-stand, and are a language question apart from the rest.
+About 45 bytes a child whose parent never joins it (D277): the entry,
+which pins its page, and the parent's list of ids; and a quarter of
+`spawn`'s time. `spawn` holds 108 MB at a million where it would hold
+63, and `bank` 49 where it would hold 12, flat. Both fork in statement
+position and throw the pid away. The options, a language question
+apart from the rest:
+
+- a fork whose pid is discarded keeps no result, which the compiler
+  can see, and both programs go flat with no change to them; the catch
+  is a child that sends its own `$$` to someone who joins it after it
+  has ended, who gets `:ended`;
+- keep the rule and shrink the record, to about 24 bytes, by moving a
+  kept result out of the table into the parent's list, so the pages
+  go: still a cost per child;
+- turned down as they stand: dropping a record when the parent's heap
+  no longer holds the pid (a test in the collector's walk, and a pid in
+  a mailbox is a hole), keeping nothing as Erlang does (undoes D244),
+  and a cap with the oldest dropped (arbitrary, and silent).
 
 ### 8. Messages
 
@@ -378,8 +394,8 @@ of a send. It's the most code of the first three, and the stacks'
 allocator (D291) is the pattern. It fits after B, since B decides
 which sizes matter.
 
-**D. Exit records.** The language question from the first reply,
-whenever you like; it doesn't interact with the others.
+**D. Exit records.** The language question of finding 7, whenever you
+like; it doesn't interact with the others.
 
 **E. An old generation that isn't copied whole.** Finding 5: marked
 in slices, with no write barrier, and its chunks freed or kept whole.
