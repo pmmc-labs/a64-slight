@@ -55,8 +55,8 @@
 #endif
 #define CHUNK_MAX      (1 << 20)        // ...each doubling up to this
 #ifndef TOSPACE_FIRST
-#define TOSPACE_FIRST  512              // a major collection's first chunk, which doubles: small enough that glibc
-#endif                                  // takes it from its small bins, without gathering every freed message up first
+#define TOSPACE_FIRST  512              // a major collection's first chunk, which doubles: small, so that a little
+#endif                                  // that's live is in a little chunk
 #ifndef NURSERY_FREE
 #define NURSERY_FREE   (16 << 10)       // a nursery grows to this for the asking; past it, only for a run that filled it
 #endif
@@ -116,6 +116,7 @@ typedef struct {
 // the process, pay none.
 typedef struct rt_isle {
     uint64_t           island;          // which island this thread is, 0 the main one
+    rt_arena_t         arena;           // its memory for chunks and messages (alloc.c, D296)
     page_t           **pages;           // the process table, by pid number >> PAGE_BITS; the root is 1
     uint64_t           nprocs, pages_cap;   // pids made; and room in pages
     uint64_t           nrecords;        // entries made and not yet dead, for :system
@@ -605,9 +606,9 @@ static int copy_out(rt_proc_t *p, const rt_value_t *frame, const uintptr_t *fp, 
 
     size_t    len = base - lo;
     parked_t *k   = p->parked;
-    if (!k || k->cap < len) {
-        k = realloc(k, sizeof *k + len);
-        if (!k) REFUSE(NO_MEMORY);
+    if (!k || k->cap < len) {                   // a bigger one: what the old held is copied over below
+        if (k) rt_block_free(&s->arena, k);
+        k = rt_block_new(&s->arena, sizeof *k + len);
         k->cap    = (uint32_t)len;
         p->parked = k;
     }
@@ -766,17 +767,18 @@ static chunk_handles_t *handles_after(rt_chunk_t *c) {
     return (chunk_handles_t *)((char *)(c + 1) + c->size);
 }
 
-// A chunk of bytes, and room for its handles after them if it shares.
-static rt_chunk_t *new_chunk_sharing(size_t bytes, int shares) {
-    rt_chunk_t *c = rt_must(malloc(sizeof *c + bytes + (shares ? sizeof(chunk_handles_t) : 0)));
+// A chunk of bytes, and room for its handles after them if it shares:
+// from s's arena, the caller's island's (alloc.c, D296).
+static rt_chunk_t *new_chunk_sharing(island_state_t *s, size_t bytes, int shares) {
+    rt_chunk_t *c = rt_block_new(&s->arena, sizeof *c + bytes + (shares ? sizeof(chunk_handles_t) : 0));
     c->next   = NULL;
     c->size   = bytes;
     c->shares = shares != 0;
     return c;
 }
 
-static rt_chunk_t *new_chunk(size_t bytes) {
-    return new_chunk_sharing(bytes, 0);
+static rt_chunk_t *new_chunk(island_state_t *s, size_t bytes) {
+    return new_chunk_sharing(s, bytes, 0);
 }
 
 static size_t young_bytes(const rt_proc_t *p) {
@@ -838,7 +840,7 @@ void rt_heap_grow(uint64_t bytes, const char *site) {
     if (!p->nursery) {
         size_t first = p->nursery_log2 ? (size_t)1 << p->nursery_log2 : CHUNK_FIRST;
         if (held(p) + first > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
-        p->nursery     = new_chunk(first);
+        p->nursery     = new_chunk(p->isle, first);
         p->heap_bytes += first;
         p->heap_ptr    = (uintptr_t)(p->nursery + 1);
         p->heap_limit  = p->heap_ptr + first;
@@ -847,7 +849,7 @@ void rt_heap_grow(uint64_t bytes, const char *site) {
     size_t young = young_bytes(p), size = young < CHUNK_MAX ? young : CHUNK_MAX;
     if (size < bytes) size = (bytes + 15) & ~(size_t)15;
     if (held(p) + size > heap_max) rt_fault(RT_FAULT_HEAP, 0, site);
-    rt_chunk_t *c = new_chunk(size);
+    rt_chunk_t *c = new_chunk(p->isle, size);
     c->next          = p->nursery->next;
     p->nursery->next = c;
     p->heap_bytes   += size;
@@ -889,25 +891,36 @@ static void buffer_release(rt_buffer_t *b) {
 }
 
 // A chunk let go of without being adopted: its handles' references go.
-static void free_chunk(rt_chunk_t *c) {
+// To s's arena, the caller's island's, whichever island's it was (the
+// arena sends another's home); the _on ones are for where the island is
+// to hand, since on macOS `my` is a call.
+static void free_chunk_on(island_state_t *s, rt_chunk_t *c) {
     if (c->shares) {
         chunk_handles_t *h = handles_after(c);
         for (uint64_t i = 0; i < h->n; i++) buffer_release((rt_buffer_t *)h->at[i][2]);
         free(h->at);
     }
-    free(c);
+    rt_block_free(&s->arena, c);
 }
 
-static void free_chunks(rt_chunk_t *c) {
+static void free_chunks_on(island_state_t *s, rt_chunk_t *c) {
     for (rt_chunk_t *next; c; c = next) {
         next = c->next;
-        free_chunk(c);
+        free_chunk_on(s, c);
     }
 }
 
+static void free_chunks(rt_chunk_t *c) {
+    free_chunks_on(&my, c);
+}
+
 // A message's record is in its chunk (new_msg).
+static void free_msg_on(island_state_t *s, rt_msg_t *m) {
+    free_chunk_on(s, m->chunk);
+}
+
 static void free_msg(rt_msg_t *m) {
-    free_chunk(m->chunk);
+    free_msg_on(&my, m);
 }
 
 // A shared box of header for len bytes (RT_SHARED_MIN or more), for the
@@ -953,14 +966,14 @@ static void free_heap(rt_proc_t *p) {
         free(h->at);
         *h = (handles_t){ 0 };
     }
-    free_chunks(p->chunks);
-    free_chunks(p->nursery);
+    free_chunks_on(p->isle, p->chunks);
+    free_chunks_on(p->isle, p->nursery);
     p->chunks     = p->nursery = NULL;
     p->heap_ptr   = p->heap_limit = p->old_ptr = 0;
     p->heap_bytes = 0;
     for (rt_msg_t *m = p->mail, *next; m; m = next) {
         next = m->next;
-        free_msg(m);
+        free_msg_on(p->isle, m);
     }
     p->mail = p->mail_last = NULL;
 }
@@ -1206,7 +1219,7 @@ static rt_chunk_t *copy_walk(island_state_t *s, const rt_value_t *from, rt_value
     for (uint64_t i = 0; i < n; i++) copy(&c, from[i], 8 * i);
     if (c.todo != local) free(c.todo);
     size_t      bytes = c.used - roots;
-    rt_chunk_t *chunk = reserve + bytes ? new_chunk_sharing(reserve + bytes, c.nhandles > 0) : NULL;
+    rt_chunk_t *chunk = reserve + bytes ? new_chunk_sharing(s, reserve + bytes, c.nhandles > 0) : NULL;
     if (bytes) {
         char      *data  = (char *)(chunk + 1) + reserve;
         rt_value_t shift = (rt_value_t)data - roots;    // offset + shift: where it will be
@@ -1247,7 +1260,7 @@ static rt_chunk_t *copy_values_after(island_state_t *s, const rt_value_t *from, 
         }
     }
     for (uint64_t i = 0; i < n; i++) into[i] = from[i];
-    return reserve ? new_chunk(reserve) : NULL;
+    return reserve ? new_chunk(s, reserve) : NULL;
 }
 
 static rt_chunk_t *copy_values(const rt_value_t *from, rt_value_t *into, uint64_t n) {
@@ -1306,6 +1319,7 @@ static rt_value_t copy_here(rt_value_t v) {
 #define GC_MOVED_BOX  0                 // in a moved box's header: no box has type 0
 
 typedef struct {
+    island_state_t  *isle;              // whose arena to-space comes from
     const rt_proc_t *young;             // whose young generation it's promoting, or NULL in a major collection
     rt_chunk_t      *chunks;            // to-space, newest first: in a minor collection, the old generation
     uintptr_t        ptr, limit;
@@ -1315,7 +1329,7 @@ typedef struct {
 // A new chunk of to-space, for at least bytes: where it starts.
 static uintptr_t gc_chunk(gc_t *g, size_t bytes) {
     size_t      size = bytes > g->size ? bytes : g->size;
-    rt_chunk_t *c    = new_chunk(size);
+    rt_chunk_t *c    = new_chunk(g->isle, size);
     c->next   = g->chunks;
     g->chunks = c;
     g->bytes += size;
@@ -1483,8 +1497,14 @@ static void trace(gc_t *g, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
     else          walk(g, roots, n, fp, 0);
 }
 
+// The chunk a minor collection promotes into next: as big as the old
+// generation, up to 1 MB, and a power of two, so that chunks come in a
+// few sizes and one that's freed is the size of the next one wanted
+// (the arena keeps free runs by length, D296).
 static size_t chunk_size(size_t bytes) {
-    return bytes < CHUNK_FIRST ? CHUNK_FIRST : bytes < CHUNK_MAX ? bytes : CHUNK_MAX;
+    size_t size = CHUNK_FIRST;
+    while (size < bytes && size < CHUNK_MAX) size *= 2;
+    return size;
 }
 
 // A handle after a collection: kept, where it moved to, if it moved, since
@@ -1500,7 +1520,7 @@ static void sweep_handle(uint64_t *h, handles_t *kept) {
 // new ones before it, as big as the old generation is, up to 1 MB.
 static void collect_young(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
     gc_t g = {
-        .young = p, .chunks = p->chunks, .ptr = p->old_ptr, .limit = p->old_ptr + old_left(p),
+        .isle = p->isle, .young = p, .chunks = p->chunks, .ptr = p->old_ptr, .limit = p->old_ptr + old_left(p),
         .bytes = p->heap_bytes, .size = chunk_size(p->heap_bytes - young_bytes(p)),
     };
     trace(&g, roots, n, fp);
@@ -1520,7 +1540,7 @@ static void collect_young(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uin
 // that what's kept is in chunks that fit it, more or less, whatever the
 // heap was before. Returns the bytes it copied.
 static size_t collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp, size_t first) {
-    gc_t g = { .size = first };
+    gc_t g = { .isle = p->isle, .size = first };
     trace(&g, roots, n, fp);
     size_t copied = g.live;
     // Every live handle has moved, the young and the old, before what they
@@ -1540,7 +1560,7 @@ static size_t collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uin
     // missed finds garbage at once instead of memory that looks fine
     // until it's reused: 0xabab... is a boxed pointer to nowhere.
     for (rt_chunk_t *c = p->chunks; c && poison; c = c->next) memset(c + 1, 0xab, c->size);
-    free_chunks(p->chunks);
+    free_chunks_on(p->isle, p->chunks);
     p->chunks     = g.chunks;
     p->heap_bytes = g.bytes + young_bytes(p);
     p->old_ptr    = g.ptr;
@@ -1561,7 +1581,7 @@ static size_t collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uin
 // it next allocates: so one that waits before then holds none.
 static void nursery_later(rt_proc_t *p, size_t size) {
     p->heap_bytes  -= p->nursery->size;
-    free(p->nursery);
+    free_chunk_on(p->isle, p->nursery);
     p->nursery      = NULL;
     p->heap_ptr     = p->heap_limit = 0;
     p->nursery_log2 = (uint8_t)(63 - __builtin_clzll(size));
@@ -1581,7 +1601,7 @@ static void restart(rt_proc_t *p) {
     p->waited = 0;
     for (rt_chunk_t *c = p->nursery; c && poison; c = c->next) memset(c + 1, 0xab, c->size);
     for (rt_chunk_t *c = p->nursery->next; c; c = c->next) p->heap_bytes -= c->size;
-    free_chunks(p->nursery->next);
+    free_chunks_on(p->isle, p->nursery->next);
     p->nursery->next = NULL;
     if (grow && held(p) + size <= heap_max) {
         nursery_later(p, 2 * size);
@@ -1712,14 +1732,10 @@ static __attribute__((noinline)) void settle_heap(rt_proc_t *p, rt_value_t *root
         if (live && live < old && live <= CHUNK_MAX) collect_all(p, roots, n, fp, live);
     }
     restart(p);
-    // The nursery goes the first time, when the process may never allocate
-    // again, and when it's bigger than a process gets for the asking. Not
-    // each time: a process that settles again is one that allocates, and
-    // freeing and making its nursery set glibc to gathering up every
-    // freed message (ping-pong took 18 per cent more instructions).
-    int    first = p->settle_log2 < SETTLE_LOG2;
-    size_t size  = p->nursery ? p->nursery->size : 0;
-    if (size && (first || size > NURSERY_FREE)) nursery_later(p, size < NURSERY_FREE ? size : NURSERY_FREE);
+    // The nursery goes, till the process next allocates, which it may
+    // never do; and comes back no bigger than a process gets for the
+    // asking.
+    if (p->nursery) nursery_later(p, p->nursery->size < NURSERY_FREE ? p->nursery->size : NURSERY_FREE);
     // Next at twice the old generation, and past what it holds now with
     // the nursery it keeps, or it would be settled every time it waits.
     size_t young = young_bytes(p), next = 2 * (p->heap_bytes - young) + young;
@@ -1883,6 +1899,20 @@ static void poke(uint64_t k) {
     (void)r;                                    // full: it's woken already
 }
 
+// Island k has blocks of its own to take back, which another island
+// freed (alloc.c, D296): if it's waiting, it's woken to, since only its
+// freeing them gives their memory back. With no item for it: it finds
+// its inbox as it was, takes its returns on its way round (events,
+// awake), and waits again.
+void rt_arena_wake(uint64_t k) {
+    island_t *s = &isles[k];
+    pthread_mutex_lock(&s->lock);
+    int asleep = s->asleep;
+    s->asleep = 0;
+    pthread_mutex_unlock(&s->lock);
+    if (asleep) poke(k);
+}
+
 // Into island k's inbox, waking it if it's waiting.
 static void push(uint64_t k, item_t *it) {
     island_t *s = &isles[k];
@@ -1982,6 +2012,10 @@ static int awake(void) {
             return 1;
         }
         if (atomic_load(&busy) == 0) return 0;
+        // About to wait: its returns are taken and what it holds free goes
+        // back (D296). After asleep is set, so that a return that comes
+        // from here on wakes it, and one that came before is taken now.
+        rt_arena_idle(&my.arena);
         wait_wake();
         pthread_mutex_lock(&s->lock);
         s->asleep = 0;
@@ -2006,6 +2040,7 @@ static void *island_main(void *arg) {
     sigfillset(&all);
     pthread_sigmask(SIG_BLOCK, &all, NULL);     // signals are island 0's
     my.island = (uint64_t)(uintptr_t)arg;
+    my.arena.island = my.island;
     my.sched  = sched_seed ? sched_seed + my.island * 0x9e3779b97f4a7c15u : 0;
     rt_io_island(my.island);
     my.wake_fd = rt_io_wake(isles[my.island].wake[0]);
@@ -2066,7 +2101,8 @@ static void settle(uint64_t id) {
 }
 
 static rt_proc_t *new_process_on(island_state_t *s, rt_code_t code, rt_value_t parent) {
-    rt_proc_t *p = rt_must(calloc(1, sizeof *p));
+    rt_proc_t *p = rt_block_new(&s->arena, sizeof *p);  // from its island's arena, as its heap is (D296)
+    memset(p, 0, sizeof *p);
     p->pid      = new_entry_on(s, (entry_t){ .proc = p });
     p->parent   = parent;
     p->code     = code;
@@ -2470,7 +2506,7 @@ static inline __attribute__((always_inline)) rt_value_t recv_wait(rt_proc_t *p, 
             if (p->mail_last == m) p->mail_last = last;
             rt_value_t v = m->value;
             p->reading = m->device;
-            if (bare(m)) free_msg(m);
+            if (bare(m)) free_msg_on(p->isle, m);
             else         adopt(p, m->chunk);
             return v;
         }
@@ -2518,7 +2554,7 @@ rt_value_t rt_recv(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t 
     if (p->mail_last == m) p->mail_last = NULL;
     rt_value_t v = m->value;
     p->reading = m->device;
-    if (bare(m)) free_msg(m);
+    if (bare(m)) free_msg_on(p->isle, m);
     else         adopt(p, m->chunk);
     return v;
 }
@@ -2768,7 +2804,7 @@ static void retire(rt_proc_t *p) {
     s->retired_calls += calls_of(p);
     if (p->held) s->waits_held--;               // ended as it waited, by another
     if (p->stack) release_stack(p);
-    if (p->parked) free(p->parked);
+    if (p->parked) rt_block_free(&s->arena, p->parked);
     at_on(s, rt_pid_number(p->pid))->proc = NULL;
     settle_on(s, rt_pid_number(p->pid));
 }
@@ -3114,7 +3150,7 @@ static void end_other(rt_proc_t *p, rt_value_t reason) {
     // A sleeper's timer stays, and is dropped when it's due.
     finish(p, 0, reason, 0);
     retire(p);
-    free(p);
+    rt_block_free(&my.arena, p);
 }
 
 rt_value_t rt_kill(rt_value_t pid, const char *site) {
@@ -3754,6 +3790,7 @@ static int      socket_events(fd_set *in, fd_set *out);
 #define IO_KEYS    1                    // what wait_for saw: stdin has something to read...
 #define IO_SOCKETS 2                    // ...or a socket did something
 #define IO_INBOX   4                    // ...or another island has put something in the inbox (D256)
+#define IO_WOKEN   8                    // ...or woke it, with or without an item: to take its returns (D296)
 #define SETTLE_US  200000               // how long the virtual clock waits for a lookup's answer, for real
 
 // Waits up to us microseconds (forever, if negative) for stdin to have
@@ -3790,7 +3827,10 @@ static int wait_for(int64_t us) {
         tv      = (struct timeval){ .tv_sec = (time_t)(us / 1000000), .tv_usec = (suseconds_t)(us % 1000000) };
         timeout = &tv;
     }
-    int got = rt_io_select(max + 1, &in, &out, timeout);
+    // About to wait: its returns are taken and what it holds free goes
+    // back (D296); after asleep is set, as in awake.
+    if (us != 0) rt_arena_idle(&my.arena);
+    int got = rt_io_select(max + 1, &in, &out, timeout), woken = 0;
     if (inbox) {
         pthread_mutex_lock(&s->lock);
         s->asleep = 0;
@@ -3798,10 +3838,11 @@ static int wait_for(int64_t us) {
         if (got > 0 && FD_ISSET(my.wake_fd, &in)) {
             drain_wake();
             FD_CLR(my.wake_fd, &in);
+            woken = IO_WOKEN;
         }
     }
     if (got <= 0) return 0;
-    int saw = (keys && FD_ISSET(STDIN_FILENO, &in) ? IO_KEYS : 0) | (inbox_now() ? IO_INBOX : 0);
+    int saw = (keys && FD_ISSET(STDIN_FILENO, &in) ? IO_KEYS : 0) | (inbox_now() ? IO_INBOX : 0) | woken;
     return saw | (socket_events(&in, &out) ? IO_SOCKETS : 0);
 }
 
@@ -3833,6 +3874,7 @@ __attribute__((always_inline))
 static inline void events(void) {
     if (logging) poll_logged();
     else if (atomic_load_explicit(&isles[my.island].waiting, memory_order_relaxed)) take_inbox(0);
+    if (rt_arena_pending(&my.arena)) rt_arena_returns(&my.arena);   // its blocks that other islands freed (D296)
     if (my.nalarms) ring();                     // tested here, where the island's state is to hand
     if (virtual_clock || (!listening() && !my.nsockets)) return;
     uint64_t t = now();
@@ -4360,7 +4402,7 @@ static void *arena_alloc(void *cx, size_t bytes) {
     if (a->total + bytes >= READ_MAX) return NULL;
     if (a->left < bytes) {
         size_t      size = bytes > CHUNK_MAX ? bytes : CHUNK_MAX;
-        rt_chunk_t *c    = new_chunk(size);
+        rt_chunk_t *c    = new_chunk(&my, size);
         c->next   = a->chunks;
         a->chunks = c;
         a->used   = 0;
@@ -6113,7 +6155,7 @@ void rt_run(void) {
         // read or sleep, keeping its stack, or ended
         if (p->state == RT_DONE) {
             retire(p);
-            free(p);
+            rt_block_free(&my.arena, p);
         }
     }
 }
@@ -6386,8 +6428,13 @@ int main(int argc, char **argv) {
     // away holds about twice its cap at its last collection, the old
     // chunks and the new, so it faults on its own at half the limit, and
     // the kernel doesn't kill the program.
-    size_t limit = cap ? 0 : memory_limit();
+    size_t limit = memory_limit();
     size_t room  = limit && limit / 4 < HEAP_DEFAULT ? (limit / 4 > CHUNK_MAX ? limit / 4 : CHUNK_MAX) : HEAP_DEFAULT;
+    // And what the arenas keep free in memory (D296): 64 MB at the most,
+    // or a sixteenth of such a limit, so that what's free and a process at
+    // its cap don't come to the limit between them. Whatever a replay's
+    // record says: it isn't the program's to see.
+    rt_arena_hold(limit ? limit / 16 : SIZE_MAX);
     rt_io_settings_t settings = {
         mode && strcmp(mode, "virtual") == 0, seed ? strtoull(seed, NULL, 10) : 0, cap ? bytes_of(cap) : room,
         islands_wanted(getenv("SLIGHT_ISLANDS")),

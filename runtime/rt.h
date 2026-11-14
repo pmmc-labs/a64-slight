@@ -421,6 +421,7 @@
 
 #ifndef __ASSEMBLER__
 
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -1237,6 +1238,47 @@ int  rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *
 void rt_sexp_reset(rt_sexp_t *s);
 void rt_sexp_free(rt_sexp_t *s);
 int  rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx, rt_value_t *out);
+
+// An island's memory for heap chunks and messages (alloc.c, D296): blocks
+// of a few sizes cut from spans, and runs of whole units for the big
+// ones, got from the system in regions and given back a run at a time.
+// Each island allocates from its own arena, with no lock; a block freed
+// on another island goes home to be freed there.
+#define RT_ARENA_CLASSES 74             // sizes of block cut from a span, 16 bytes to 16,400
+#define RT_ARENA_RUNS    32             // free runs are kept by length, 1 to this many units; a longer one is mapped alone
+
+typedef struct {                        // free runs of one length: at[0..cold) given back, the rest still in memory
+    void  **at;
+    size_t  n, cap, cold;
+} rt_runs_t;
+
+typedef struct rt_arena {
+    uint64_t        island;             // whose it is: a span's says the same
+    struct rt_span *avail[RT_ARENA_CLASSES];    // each size's spans with a block free, the first the one allocated from
+    rt_runs_t       runs[RT_ARENA_RUNS + 1];
+    size_t          warm;               // units in free runs not given back
+    char           *next, *end;         // the region new runs are carved from
+    struct rt_home *home;               // blocks freed here that are other islands', till they're sent home
+    uint64_t        going;              // how many, all told
+} rt_arena_t;
+
+// Other islands' frees of an island's blocks, waiting for it (alloc.c):
+// each on lines of its own, as an inbox is.
+typedef struct {
+    _Alignas(128) _Atomic(void *) head;
+} rt_returns_t;
+extern rt_returns_t rt_returns[RT_ISLANDS_MAX];
+
+void *rt_block_new(rt_arena_t *a, size_t bytes);    // 16-aligned; never NULL
+void  rt_block_free(rt_arena_t *a, void *block);    // by any island's arena: a is the caller's
+void  rt_arena_returns(rt_arena_t *a);              // frees what other islands sent home
+void  rt_arena_idle(rt_arena_t *a);                 // the island is about to wait: what it holds for others goes
+                                                    // home, and what it holds free, past a little, goes back
+void  rt_arena_wake(uint64_t island);               // process.c: wakes an island that's waiting, to take its returns
+void  rt_arena_hold(size_t bytes);                  // the free runs the islands may hold in memory, 64 MB at the most
+static inline int rt_arena_pending(const rt_arena_t *a) {
+    return atomic_load_explicit(&rt_returns[a->island].head, memory_order_relaxed) != NULL;
+}
 
 // Finding a host's IPv4 address (dns.c, D153, D165). rt_lookup_begin gives
 // RT_LOOKUP_DONE, with *addr (in network order), when the host is an

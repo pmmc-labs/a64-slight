@@ -7787,3 +7787,94 @@ were:
   test 392's first nursery. `SLIGHT_GC_STRESS` settles at every `recv`
   that waits, as if for the first time, so `SLIGHT_GC_STRESS=7 make
   golden` checks it against every test.
+
+**D296. Arenas: an island's own memory for chunks, messages and
+processes.** *(Stevan, 14 Nov 2026: "now do C", the third of the
+directions in `docs/memory-review-2026-11-13.md`; the design is
+Claude's, by default.)* Every chunk of every heap, every message and
+every process's struct was a `malloc` and a `free`. The review found
+what that cost: freed memory stayed with the program (after 20,000
+processes of 16 KB each had ended, 335 MB of the burst, even after
+D295); a send's allocation was the system's, its speed and its habits
+with it; and D295's numbers had to be fitted round one of those habits,
+glibc gathering up every freed message at a request of 1 KB or more. So
+each island has an arena (`runtime/alloc.c`, about 300 lines), with no
+lock, which those all come from:
+- **Runs, spans and size classes:** addresses from the system 64 MB at
+  a time, carved into runs of units of 64 KB, a header at each run's
+  start found by masking an address. A block of 16,400 bytes or less is
+  cut from a span, a run of one unit, of its size class: every multiple
+  of 16 to 528, then eight to a doubling, each 16 past the round
+  number, so a chunk of 1 KB to 16 KB with its header fits exactly, and
+  nothing wastes more than an eighth. A bigger block is a run, and one
+  past 2 MB a mapping of its own.
+- **Given back as the stacks are (D291):** a span with nothing out is a
+  free run again, and free runs are kept by length in arrays beside
+  them, so their pages go back while their addresses stay: an eighth
+  of the allowance when the islands hold 64 MB between them (a
+  sixteenth of a container's limit, if that's less), and all of an
+  island's when it's about to wait with more than 1 MB.
+- **Another island's block goes home:** kept by its home till there
+  are 32 of them or 256 KB, or the island waits, then pushed onto the
+  home's stack of returns, one compare and swap; the home takes them
+  at its scheduler's decisions, and is woken to if it's waiting, since
+  only its freeing gives the memory back.
+- **Measured** (cloud machine, x86-64; instructions callgrind's, one
+  island): `fan-in` 47 per cent fewer instructions, `idle-memory` 37,
+  `spawn` 34, `bank` 22, the workers 11 to 17, `ping-pong` and
+  `thread-ring` 11, `payload` 7; `binary-trees`, `deriv`, `nqueens`,
+  `n-body` and `tak`, which send nothing, the same. Time, best of five:
+  `fan-in` 0.60 of what it took, `idle-memory` 0.67, `spawn` 0.74,
+  `bank` 0.75, 1,000 workers 0.82, `binary-trees 16` 0.85, `payload`
+  0.89; on four islands, `fan-in` 0.43, `ping-pong` 0.49, `spawn` 0.51,
+  `idle-memory` 0.71. Memory: after 20,000 processes of 16 KB each have
+  ended, under 5 MB resident where 335 stayed; a heap of 16 MB rebuilt five
+  times, then waiting, 33 MB where it held 63; 100,000 lists sent from
+  island 1 to island 0 and taken there, all given back though island 1
+  is asleep. Peaks: `fan-in` 229 MB where it took 304, `spawn` 93 for
+  109, `idle-memory` 554 for 573.
+- **What it costs:** the airline's day peaks at 40 MB where it took 30,
+  and 1,000 workers hold 43 MB at rest where they held 46 but peak at
+  49: what's free is kept by size, a span to a class, where `malloc`
+  reused anything for anything, and up to 64 MB of it is kept in
+  memory while an island is busy. 100,000 processes holding a list of
+  100 take 224 MB for 216: a chunk of 1,600 bytes is in a block of
+  1,680. And between 16 KB and 2 MB a block is whole pages.
+- **With it, D295's two fittings to glibc go:** a settled process's
+  nursery goes every time, not only the first (freeing and making one
+  costs nothing now: measured, the same instructions either way); and
+  a major collection's first chunk is 512 bytes because a little
+  that's live should be in a little chunk, not for `malloc`'s bins. A
+  minor collection's chunks are powers of two, so a freed run is the
+  length of the next one wanted.
+- **Found on the way:** giving back all an island's free runs when the
+  allowance was passed made a collector with a big heap ask for them
+  all again, a page fault each (`binary-trees 18`, twice the faults of
+  `malloc`'s); an eighth of the allowance goes instead. And a wake
+  with no item must not read as time passed: `wait_for` says it was
+  woken, for the virtual clock's wait for a reply that's owed (D288).
+- **Not done:** shared buffers, devices' buffers and the tables are
+  still `malloc`'s; free runs aren't split or joined, so a run is
+  reused only at its own length (hence the chunks in few sizes); on
+  macOS the pages are marked free (`MADV_FREE`) and count as resident
+  till the system takes them, so `:resident` and Activity Monitor show
+  the burst after it's over (`MADV_FREE_REUSABLE` would say otherwise,
+  untried); `:system` doesn't say what an arena holds free.
+- **Rejected:** `malloc_trim` when an island waits, a line of code and
+  Linux's alone, which gives back what's free but leaves a send's
+  allocation and D295's fittings where they were; vendoring mimalloc,
+  whose design this is in small (a span its page, the returns its
+  delayed frees), 10,000 lines for the 300 needed; a block that stays
+  with the island that frees it, with no way home, under which no
+  span's count of what's out could be kept, and so nothing small given
+  back; returns as items in an island's inbox, which would put the
+  allocator's doings in every record of a run; four size classes to a
+  doubling (a quarter wasted at the worst: the workers 48 MB at rest,
+  and a 16 KB nursery a run of its own, a page more each); giving
+  everything back at the allowance (above); an allowance of a quarter
+  of a heap's cap, which the tests' cap of 64 MB made 16 MB
+  (`binary-trees 18` 27 per cent slower).
+- `t/alloc.c`, the arena on its own, four threads freeing each other's
+  blocks, each block a pattern of its address (`make alloc`, in `make
+  test`; and under ThreadSanitizer in `make tsan`); `t/live.py`'s gives
+  back, Linux's alone. Not compiled or measured on the M2 Max yet.

@@ -4,6 +4,7 @@
 #               $(TARGETS), and that the guide's code is the code tested
 #               (t/guide.py)
 # make check    type-check the compiler (needs `npm install` first)
+# make alloc    the arena on its own (t/alloc.c), built and run here
 # make tsan     ThreadSanitizer over what runs on more than one island, for
 #               the machine's own target (t/tsan.sh; needs clang's TSan)
 # make bench    the benchmarks, against other languages (bench/run.py,
@@ -28,6 +29,13 @@ else
   TARGETS ?= aarch64 x86_64
 endif
 
+# The C compiler for the machine itself, for what's built and run here.
+ifneq ($(filter arm64 aarch64,$(ARCH)),)
+  CC_HOST := cc
+else
+  CC_HOST := clang
+endif
+
 # The C compiler for x86-64, for the header check.
 ifeq ($(ARCH),x86_64)
   CC_X86_64 := clang
@@ -40,7 +48,7 @@ endif
 sketch:
 	node bin/slightc.ts --target $(TARGET) -o "./sketch" "author/sketch.slight"
 
-test: unit headers guide types golden replay live
+test: unit headers alloc guide types golden replay live
 
 unit:
 	node --test "compiler/tests/**/*.test.ts"
@@ -79,6 +87,12 @@ ifneq ($(filter x86_64,$(TARGETS)),)
 	$(CC_X86_64) -std=gnu11 -Wall -Wextra -fsyntax-only t/headers.c
 endif
 
+# The arena on its own (runtime/alloc.c, D296), for the machine itself
+alloc:
+	@mkdir -p build/t
+	$(CC_HOST) -std=gnu11 -O1 -g -Wall -Wextra -pthread -o build/t/alloc t/alloc.c runtime/alloc.c
+	build/t/alloc
+
 check:
 	npx tsc --noEmit
 
@@ -93,4 +107,4 @@ clean:
 		rm -rf "./sketch.dSYM"; \
     fi
 
-.PHONY: sketch test unit guide types golden replay live tsan headers check bench clean
+.PHONY: sketch test unit guide types golden replay live tsan headers alloc check bench clean

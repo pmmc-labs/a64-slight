@@ -79,6 +79,16 @@ program, or the system to measure the run.
   are asleep at once. Linux's alone, with the target run natively, since
   qemu maps a program's memory itself, and macOS doesn't hold mmap to
   RLIMIT_AS.
+- gives back: what's freed goes back to the system (D296). 20,000
+  processes each holding 16 KB, all waiting, are a few hundred MB, and
+  once they've ended the program's resident set, as :system says it, is
+  within BACK of where it began; and 100,000 lists sent from island 1
+  to the root, on island 0, which frees them, are island 1's memory,
+  and go back though island 1 is waiting, since it's woken to take
+  them. Before, every chunk was malloc's, and nine tenths of the burst
+  stayed. Linux's alone, with the target run natively: macOS marks the
+  pages free (MADV_FREE) and counts them resident till it wants them,
+  and under qemu the resident set is qemu's.
 - delete race: fs/delete-all deletes a tree 2,000 times while
   t/live/swap.c swaps its subdirectory with a link to a directory
   outside it, back and forth, atomically (RENAME_EXCHANGE, or macOS's
@@ -123,6 +133,7 @@ DEADLINE = 120
 PEAK     = 400 << 20
 CHURN    = 16 << 20
 FLAT     = 32 << 20
+BACK     = 48 << 20
 DIR      = os.path.join('build', 't', TARGET, 'live')
 PROMPT   = '❯ '.encode()
 
@@ -663,6 +674,22 @@ def stacks():
           f'exit {p.returncode}: {p.stdout[:200]!r} {p.stderr[:400]!r}')
 
 
+def gives_back():
+    what = 'memory freed goes back to the system'
+    if RUN or platform.system() != 'Linux':
+        print(f'skip {what}: ' + ('under qemu the resident set is qemu\'s' if RUN else 'macOS counts freed pages resident till it wants them'))
+        return
+    prog = build('gives-back', 't/live/gives-back.slight')
+    p    = subprocess.run(RUN + [prog, '20000', '1000', '100000'], capture_output=True, env=ENV | {'SLIGHT_ISLANDS': '2'}, timeout=DEADLINE)
+    m    = re.fullmatch(rb'\((\d+) (\d+) (\d+) (\d+) (\d+)\)\n', p.stdout)
+    before, held, ended, sent, taken = (int(x) for x in m.groups()) if m else (0, 0, 0, 0, 0)
+    mb = lambda x: f'{x / (1 << 20):.0f} MB'
+    check(f'{what}: a burst held {mb(held - before)}, and {mb(ended - before)} of it after; lists from island 1 {mb(sent - ended)}, and {mb(taken - ended)} after',
+          p.returncode == 0 and m is not None and held - before > (200 << 20) and ended - before < BACK
+          and sent - ended > (100 << 20) and taken - ended < BACK,
+          f'exit {p.returncode}: {p.stdout[:200]!r} {p.stderr[:400]!r}')
+
+
 def delete_race():
     what = 'fs/delete-all with a link swapped in for its subdirectory, again and again, deletes nothing outside'
     prog  = build('delete-race', 't/live/delete-race.slight')
@@ -847,6 +874,7 @@ wakes()
 inherit()
 accept()
 stacks()
+gives_back()
 delete_race()
 https()
 loopback()

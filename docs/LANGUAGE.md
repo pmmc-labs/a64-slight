@@ -1610,8 +1610,13 @@ runtime's has `(:memory info)` too, every island's added up, and in it
 `(:resident n)`: the memory the program has, as the system says (its
 resident set), which is more than the rest together, since it counts
 the program's code, the runtime's own tables, stacks kept warm for the
-next process, and memory that has been freed and not gone back to the
-system. Asking for a `:memory` walks every mailbox and asks the system
+next process, and what's free and kept for the next allocation. What a
+process frees goes back to the system (D296): at once past 64 MB kept
+free, and all but about 1 MB an island when the island next has
+nothing to run; so after a burst, of processes or of messages, the
+program's memory comes back down, on Linux as the resident set shows
+it, and on macOS as the system takes the pages it's been told are
+free. Asking for a `:memory` walks every mailbox and asks the system
 about each stack held, so `(:runtime)` and `(:processes)` take longer
 the more there is; what the system says is recorded, and replays
 (D170).

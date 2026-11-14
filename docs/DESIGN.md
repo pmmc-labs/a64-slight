@@ -724,8 +724,8 @@ REPL and line editing are slight code over key events.
 ### Process heaps and GC
 
 Each process has its own heap, in two generations (D200), each made of
-`malloc`ed chunks (D89), with bump allocation and ordinary absolute
-pointers. Everything is allocated in the young one, a **nursery**: one
+chunks (D89) from its island's arena (D296, below), with bump allocation
+and ordinary absolute pointers. Everything is allocated in the young one, a **nursery**: one
 chunk, 1 KB at first, which comes with the first allocation (so a
 process that allocates nothing has no heap), and twice the size after a
 collection that finds it overflowed, up to 1 MB: for the asking up to
@@ -817,11 +817,7 @@ Lalloc_N:
   fresh chunks, and frees the old ones; it comes right after a minor
   one when what that promoted takes the old generation to its
   threshold. The fresh chunks start at 512 bytes and double to 1 MB, so
-  what's kept is in chunks that fit it, whatever the heap was before
-  (512, so that glibc takes the first from its small bins: a request
-  of 1 KB or more makes it gather up every freed message first, which
-  cost a process that takes many small ones a seventh of its
-  instructions).
+  what's kept is in chunks that fit it, whatever the heap was before.
 - **A process that waits is settled** (D295; `settle_heap`), so that it
   holds about what it has live, not what it allocated to get there.
   When it's about to wait in `recv` with nothing to take, and its
@@ -832,11 +828,12 @@ Lalloc_N:
   next time is at the power of two past twice what the old generation
   then holds, with the nursery it keeps, and never under 32 KB (a
   power of two, so the threshold is a byte in the process, its log). The first time a process waits, 2 KB is enough (more
-  than a first nursery), and its nursery goes too, till it next
-  allocates: what a process built to start with may be all it ever
-  holds. After that a nursery of 16 KB or less is kept (freeing and
-  making it each time set glibc to gathering, as above), and a bigger
-  one goes, to come back at 16 KB. Each settling copies what's live
+  than a first nursery): what a process built to start with may be all
+  it ever holds. The nursery goes too, each time, till the process next
+  allocates, and comes back no bigger than 16 KB (D295 kept one of 16 KB
+  or less after the first time, since freeing and making it set glibc's
+  `malloc` to gathering up every freed message; an arena's block costs
+  nothing of the kind, D296). Each settling copies what's live
   and comes only once the heap has doubled, so it's paid for by the
   allocating that doubled it, as a major collection is; the test, a
   shift and a branch, is on the path where a process blocks, not where
@@ -875,9 +872,9 @@ Lalloc_N:
   stack maps, no write barrier.
 - **A frame keeps everything in its slots** until it returns, so a `let`
   in the root's body lives till the program ends.
-- **A waiting process keeps its nursery**, if it has one of 16 KB or
-  less and has waited before (above), as it keeps its old chunks;
-  one that has never allocated has neither. The process struct holds as
+- **A waiting process keeps its nursery**, unless it has just been
+  settled (above), as it keeps its old chunks; one that has never
+  allocated has neither. The process struct holds as
   few fields for the generations as will do (the overflow chunks are
   listed after the nursery, one count of bytes covers both generations,
   and only how far the chunk promoted into is filled is kept; `waited`,
@@ -926,6 +923,67 @@ the double nearest the exact one, so the same on every machine, and the
 runtime is compiled with `-ffp-contract=off`, so clang fuses no `a * b +
 c` into one rounding on AArch64 that x86-64 would round twice. A run that
 computes with floats replays on any machine.
+
+### Arenas: where a heap's memory comes from (D296)
+
+Every chunk of every heap, every message, a process's struct and the
+buffer its frames wait in come from its island's **arena**
+(`runtime/alloc.c`), which nothing else allocates from and no lock
+guards. They came from `malloc`, which keeps what it's given back
+(after a burst of processes, nine tenths of the burst's memory stayed
+with the program), and whose habits the collector had to be fitted
+round (D295).
+
+- **Runs and spans.** Addresses come from the system 64 MB at a time
+  and are carved into **runs** of whole units of 64 KB, each with a
+  header of one cache line at its start, which masking the address of
+  anything in its first unit finds. A block of 16,400 bytes or less is
+  one of a **size class**'s (every multiple of 16 up to 528, then eight
+  to a doubling, each 16 past the round number, so that a chunk of
+  1 KB to 16 KB with its header wastes nothing, and nothing wastes more
+  than an eighth), cut from a **span**, a run of one unit: from the
+  span's freed blocks, newest first, or else from the part of it never
+  given out, so a fresh span is touched only as far as it's used. A
+  class allocates from its first span with a block free; one that
+  fills leaves the list till a block of it is freed. A bigger block is
+  a run of its own, and one of more than 2 MB a mapping of its own,
+  unmapped as it's freed.
+- **Giving back.** A span with nothing out, unless it's the one its
+  class allocates from, is a free run again, for any class or any
+  block. Free runs are kept by length in arrays beside them, not lists
+  through them, so their pages can go back to the system
+  (`MADV_DONTNEED`; on macOS `MADV_FREE`) while their addresses are
+  kept: when the islands hold 64 MB of them between them (or a
+  sixteenth of a container's memory limit, if that's less, so the
+  limit isn't spent on what's free), the island that frees the next
+  gives an eighth of the allowance back, of its own, the longest and
+  the longest free first (not all of them, which a collector that had
+  just freed a big heap's chunks would only ask for again, a page
+  fault each); and when an island is about to wait (`rt_arena_idle`,
+  in `wait_for` and `awake`) holding more than 1 MB of them, it gives
+  them all back, with the spans its classes kept. So a program at rest
+  holds what's live, a span for each size it uses, and at most 1 MB an
+  island. This is the stacks' rule (D291).
+- **Blocks freed on another island.** A block is its island's, and a
+  message's is often freed by the island that took it. That island
+  keeps such blocks by their home, and sends each home's back in one
+  compare and swap onto its stack of returns (`rt_returns`), once
+  there are 32 of them, or 256 KB, or it's about to wait. An island
+  takes its returns at each of its scheduler's decisions (`events`),
+  and before it asks the system for more. One that's waiting is woken
+  to (`rt_arena_wake`: its `asleep` cleared under its inbox's lock,
+  and a byte down its pipe), since only its own freeing gives the
+  memory back; it finds no item, takes its returns, and waits again.
+  `wait_for` says it was woken (`IO_WOKEN`), so that the one caller
+  for whom nothing seen means time has passed, the virtual clock's
+  wait for a reply that's owed (D288), goes round again instead.
+- **Not the program's to see**, so none of it is recorded: a replay
+  may reuse other addresses than its run did. Its regions aren't given
+  huge pages (`MADV_NOHUGEPAGE`), so that what's touched is what's
+  held and a run given back is given back.
+- Still `malloc`'s: shared buffers (D253), whose last holder may be
+  any island; devices and their buffers; the tables; and what's built
+  outside a heap for a moment.
 
 ### Shared buffers (D253)
 
@@ -981,8 +1039,8 @@ RT_EXEC_INT`, since a symbol is its name.
   at 64 KB.
   The copy is one walk over the value, into a scratch buffer, which then
   moves into a chunk of just its size; the message's record (its place in
-  the mailbox) is at the front of the same chunk, so a send is one malloc
-  (D177). The walk is the collector's, with nothing to forward: along a
+  the mailbox) is at the front of the same chunk, so a send is one
+  allocation (D177), a block from the sender's island's arena (D296). The walk is the collector's, with nothing to forward: along a
   list's spine, only cars that are lists and boxes of values going on its
   stack, and what changes at every word kept where the compiler can hold
   it in registers; values with no pointer among them aren't walked

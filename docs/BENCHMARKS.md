@@ -1495,10 +1495,41 @@ workers are slower over their first 3,000 messages each (0.88 s to
 chunk was fresh memory, and faster after: 4.5 s to 3.7 over 10,000
 each, 12.8 to 11.4 over 30,000. Not yet measured on the M2 Max.
 
-What's left of the review: memory that's freed stays with the program
-(the last row; an allocator of slight's own, its direction C), exit
-records (`spawn`, `bank`), the pauses beside a big heap, and what D295
-lists as not done.
+And arenas (D296, 14 Nov): every chunk, message and process's struct
+from its island's own allocator, in place of `malloc`: size classes cut
+from spans of 64 KB, free runs given back to the system as the stacks
+are, and another island's blocks sent home. Against the commit before
+it, on the cloud machine, x86-64; instructions under callgrind at a
+tenth of the size on one island, times the best of five:
+
+| | Instructions | Time | Peak before | Peak after |
+|---|---|---|---|---|
+| `ping-pong` | 11% fewer | 0.94 | | |
+| `payload` | 7% fewer | 0.89 | | |
+| `thread-ring` | 11% fewer | 0.95 | | |
+| `fan-in` | 47% fewer | 0.60 | 304 MB | 229 MB |
+| `spawn` | 34% fewer | 0.74 | 109 MB | 93 MB |
+| `idle-memory` | 37% fewer | 0.67 | 573 MB | 554 MB |
+| `bank` | 22% fewer | 0.75 | 13 MB | 13 MB |
+| 1,000 workers, 10,000 messages each | 14% fewer | 0.82 | 46 MB | 49 MB |
+| `binary-trees 16` | the same | 0.85 | 26 MB | 25 MB |
+| `deriv`, `nqueens`, `n-body`, `tak` | the same | 1.0 | | |
+| `ping-pong`, four islands | | 0.49 | | |
+| `spawn`, four islands | | 0.51 | 109 MB | 95 MB |
+| `fan-in`, four islands | | 0.43 | 137 MB | 92 MB |
+| `idle-memory`, four islands | | 0.71 | 599 MB | 559 MB |
+
+And at rest, resident: after 20,000 processes of 16 KB each have ended,
+under 5 MB where 335 stayed; a heap of 16 MB rebuilt five times and then
+waiting, 33 MB where it held 63. What it costs: the airline's day peaks
+at 40 MB where it took 30, since what's free is kept by size, and up to
+64 MB of it in memory while an island is busy; and 100,000 processes
+holding a list of 100 take 224 MB for 216, a chunk of 1,600 bytes
+being in a block of 1,680. Not yet measured on the M2 Max, where
+`payload`'s time since D276 was put down to `malloc`.
+
+What's left of the review: exit records (`spawn`, `bank`), the pauses
+beside a big heap, and what D295 and D296 list as not done.
 
 ### What slight should look at next
 
@@ -1519,6 +1550,8 @@ lists as not done.
   question. And the pauses beside a big heap, 45 ms beside 160 MB, a
   major collection copying everything live (D200's next steps, a bigger
   nursery or an old generation not copied whole).
+  The first, `payload`, should be measured again on the M2 Max now
+  that a send's chunk is the arena's, not `malloc`'s (D296).
   Before any of the three, a review of everything that holds memory
   (`docs/memory-review-2026-11-13.md`, asked for by Stevan), which
   found bigger things than these: a long-lived worker holding 48 bytes
@@ -1638,5 +1671,8 @@ lists as not done.
   3.6 times slower than on one core, as Go's is 12 and Rust's 16.
 - **Memory on macOS** (above): whether the collector should keep and
   reuse its chunks rather than free them, which might also make
-  `binary-trees` faster.
+  `binary-trees` faster. It does now (D296): a freed chunk is a free
+  run kept for the next, up to 64 MB of them; `binary-trees 16` is 0.85
+  of its time on the cloud machine, and the M2 Max is to say what it is
+  there.
 
