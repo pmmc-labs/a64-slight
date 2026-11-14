@@ -1,6 +1,6 @@
 ; spawn: n processes started one after another, each sending its number
-; back and ending; their numbers summed. Each is an actor: nothing takes
-; its value, which a task's record would keep for its parent (D244).
+; back and ending; their numbers summed. Nothing takes a process's own
+; value, and none is kept: each fork's pid is thrown away (D297).
 
 (defun start (i n me)
     (when (< i n)

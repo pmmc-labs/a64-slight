@@ -15,8 +15,9 @@ is settled, and findings 1 to 3 are, for the most part, answered; the
 numbers after are in `docs/BENCHMARKS.md`, "What the memory review
 changed", and what B left is in D295. And C (14 Nov, D296): arenas, an
 allocator of slight's own for chunks, messages and processes, which
-answers finding 4. The measurements below are as they were before all
-three.
+answers finding 4. And D (14 Nov, D297): a fork whose pid is thrown
+away keeps no result, which answers finding 7. The measurements below
+are as they were before all four.
 
 The numbers are from the cloud machine: x86-64 Linux, one island,
 static glibc, 4 KB pages, resident memory read from `/proc` while the

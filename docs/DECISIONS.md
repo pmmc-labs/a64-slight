@@ -7878,3 +7878,57 @@ lock, which those all come from:
   blocks, each block a pattern of its address (`make alloc`, in `make
   test`; and under ThreadSanitizer in `make tsan`); `t/live.py`'s gives
   back, Linux's alone. Not compiled or measured on the M2 Max yet.
+
+**D297. A fork whose pid is thrown away keeps no result.** *(Stevan, 14
+Nov 2026, choosing "Implicit" of three: this, an explicit form, or
+leaving D277's rule alone; the fourth of the directions in
+`docs/memory-review-2026-11-13.md`.)* A process's result is kept for
+its parent till the parent has it (D244, and for every process since
+D277), which for a parent that never asks is an entry in the process
+table, pinning its page, and an id in the parent's list, about 45 bytes
+a child for as long as the parent lives: `spawn`'s million children 46
+MB of its 93, `bank`'s customers 42 MB a million, without end. And
+there was no good way out: a monitor's notice is a message the parent
+must take, which `bank`'s `source` never does. Now, where a `fork`,
+`fork/on` or `connect` is written so that nothing is done with its
+value, the child is told, and at its end keeps nothing: its parent has
+no pid to ask with.
+- **Thrown away** is by position, which the compiler knows already: a
+  form of a body other than its last; or the last form of a `do`, a
+  `cond` clause (so `if`, `when`, `case`, `and`, `or`, `match`) or a
+  `recv` clause whose own value is thrown away. A fork that's a
+  function's last form is the function's value, and kept, whatever the
+  caller does; so is one bound with `let`, or made in a lambda that
+  `map` calls.
+- **Who's told is as it was:** joiners, a race and monitors waiting as
+  it ends have its result. After that it's `:ended`: to a process the
+  child sent its own `$$`, and to anyone who found its pid in
+  `:system`.
+- **On another island** the same: the parent holds no watch for such a
+  child, and its end isn't sent to the parent's island.
+- **Measured** (cloud machine, x86-64, one island): `spawn` 1,000,000,
+  93 MB to 48 (what's left is the replies in the root's mailbox), 2,000,000,
+  185 to 94, 9 per cent fewer instructions and 0.19 s to 0.15; `bank`
+  1,000,000 customers 48 MB to 6, and 2,000,000 the same 6. Of about 700
+  forks in the tests, examples and libraries, 56 throw their pid away;
+  every golden test passes unchanged.
+- **Rejected:** an explicit form (`fork` that gives nothing back): a
+  second way to start a process a release after D277 made one kind,
+  and programs would have to opt in, the benchmarks among them; a
+  smaller record with the rule unchanged, which can't free the table's
+  page while anyone may still join there, so it saves 8 bytes of 45,
+  or else lets only the parent join, a change of its own; dropping a
+  record when the parent's heap no longer holds the pid (a test in the
+  collector's walk, and a pid waiting in a mailbox is a hole); keeping
+  nothing, as Erlang does (undoes D244); a cap on unclaimed results
+  (silent). Not done: following a pid further than where it's written
+  (a function whose callers all throw its value away), which would be
+  an analysis, where this is a flag in the code generator's context;
+  `lib/http.slight`'s and `lib/rpc.slight`'s acceptors still monitor
+  every connection (D278), since they count them for `:most` with the
+  same notice.
+- Golden test 394 (`t/394-fork-forgotten`), on `:system`'s `(:records
+  n)`: 500 thrown away keep none, 500 in a list keep 500 till they're
+  joined, a fork a function returns is kept, one that says who it is
+  is `:ended` when joined late and gives its result to a joiner
+  waiting, and the same on another island.

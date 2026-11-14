@@ -266,7 +266,8 @@ opened, for `read`. A process's end is a message: `(monitor pid to)`
 tells the address `to`, so a reply and the end of the process asked
 come to one place, which is how `ask`, a prelude function, waits. A
 process's value is kept for its parent till the parent has it (D244,
-for every process). `connect` starts a process that owns a device, as
+for every process), unless the fork's pid was thrown away where it was
+written (D297). `connect` starts a process that owns a device, as
 before. Tasks and actors stay as the two shapes a process is written
 in: one that computes a value, and one that loops through `recv`.
 | `(sleep ms)` | **Blocking** wait for `ms` milliseconds, keeping the stack. Works anywhere. Returns `()`. |
@@ -1063,7 +1064,8 @@ RT_EXEC_INT`, since a symbol is its name.
   take when it runs, a joiner on another island as an item to its
   island (D277); and monitors get `(:exit pid result)`, in their inbox
   or at the address they named (D243, D244, D277). Then a Result isn't
-  kept if the parent was among them, or has ended: the record says only
+  kept if the parent was among them, or has ended, or threw the pid
+  away where it forked (D297, below): the record says only
   that it ended, and later asks get `:ended`. Else the Result is copied
   into its small per-pid **exit record**, kept for the parent, which
   lists it (D244); the parent's `join` or `monitor` of it, or its end,
@@ -1076,6 +1078,19 @@ RT_EXEC_INT`, since a symbol is its name.
   mailbox, the stack and the process struct are freed (D102). Nothing
   on a stack needs cleaning up, so `kill` frees a process wherever it is
   (D103).
+- **A fork whose pid is thrown away keeps no result** (D297). The
+  compiler knows where a form's value is thrown away: `compileBody`
+  says so of every form but a body's last (`unused` in the context),
+  `do`, `cond` and `recv` pass it to their own last forms, and
+  `compileExpr` clears it for everything else, so only a `fork`,
+  `fork/on` or `connect` in such a place sees it. It tells the runtime
+  with the count of values it passes (`RT_FORK_FORGET` added), which
+  every way of starting a process hands on to `new_child`, or to
+  `place` for another island; the child's struct says so (`forgotten`,
+  a byte), and `finish` then keeps nothing for the parent, nor sends
+  its end to a parent on another island, which holds no watch for it.
+  By position, not by what becomes of the value: a fork that's a
+  function's last form is kept.
 - The record is the pid's 40-byte entry in the process table (32 till
   devices added a pointer to it): the value (or the error's reason), and
   a chunk holding a copy of it if it needs memory. `(:ok v)` and `(:exit pid result)` are built when asked for.

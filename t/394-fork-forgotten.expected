@@ -1,0 +1,12 @@
+(:forgotten 0)
+(:kept 500)
+(:sum 124750)
+(:joined -500)
+(:returned 1)
+(:nested 1)
+(:late :ended)
+(:monitor :ended)
+(:waiting (:ok 6))
+(:far-forgotten :ended)
+(:far-kept (:ok 9))
+:done

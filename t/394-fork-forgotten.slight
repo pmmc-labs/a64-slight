@@ -1,0 +1,92 @@
+; A fork whose pid is thrown away keeps no result (D297). A process's
+; result is kept for its parent till the parent has it (D244), which is
+; an entry in the process table for as long as the parent lives if it
+; never asks; but a parent that threw the pid away where it forked has
+; nothing to ask with, so such a process's end is told to whoever waits
+; for it then, and after that it's :ended. Thrown away: the fork isn't
+; the last form of its body, or is the last of a do, a cond's clause or
+; a recv's whose own value is thrown away. :system's (:records n) counts
+; the entries held.
+
+(defun ask (s q) (send s q) (match (read s) ((:runtime _ i) i)))
+(defun records (s) (lookup :records (ask s (list :runtime))))
+
+(defun id (x) x)
+; Tells `to` its own pid, and ends with v.
+(defun tell (to v) (send to $$) v)
+; The same, but ends only when it's told to.
+(defun tell-and-wait (to v) (send to $$) (recv (:go v)))
+(defun joiner (p to) (send to (list :joined (join p))))
+(defun echo () (recv ((:ping to) (send to :pong) (echo))))
+
+; n forks, each thrown away: in a when's body, and not its last form.
+(defun forget (n)
+    (when (> n 0)
+        (fork id n)
+        (forget (- n 1))))
+
+; A fork that's a function's value isn't thrown away, whatever the
+; function's caller does with it.
+(defun one (n) (fork id n))
+
+(let s (cadr (open :system)))
+(let r0 (records s))
+
+; 500 thrown away: none kept once they've ended.
+(forget 500)
+(sleep 1)
+(let r1 (records s))
+(pprint (list :forgotten (- r1 r0)))
+
+; 500 whose pids are in a list: all kept, till they're joined.
+(let ps (map (lambda (i) (fork id i)) (range 0 500)))
+(sleep 1)
+(let r2 (records s))
+(pprint (list :kept (- r2 r1)))
+(pprint (list :sum (sum (map (lambda (p) (cadr (join p))) ps))))
+(let r3 (records s))
+(pprint (list :joined (- r3 r2)))
+
+; One that a function gave back, the call's value thrown away: kept.
+(one 7)
+(sleep 1)
+(pprint (list :returned (- (records s) r3)))
+
+; The last form of a do, and of a cond's clause, that are thrown away.
+(do (id 1) (fork id 2))
+(cond ((== r0 r0) (fork id 3)))
+(sleep 1)
+(pprint (list :nested (- (records s) r3)))
+
+; Thrown away, but it says who it is: joined after its end, it's :ended,
+; and a monitor set then is told the same.
+(fork tell $$ 5)
+(let p (recv (p p)))
+(sleep 1)
+(pprint (list :late (join p)))
+(monitor p)
+(pprint (recv ((:exit _ r) (list :monitor r))))
+
+; Joined while it runs, by anyone, it gives its result as it ends.
+(fork tell-and-wait $$ 6)
+(let q (recv (q q)))
+(fork joiner q $$)
+(sleep 1)
+(send q :go)
+(pprint (recv ((:joined r) (list :waiting r))))
+
+; On another island: one thrown away is :ended after its end, and one
+; kept gives its result. A round trip to a process there, started after
+; each, comes back after it has ended.
+(let h (fork/on 1 echo))
+(fork/on 1 tell $$ 8)
+(let f (recv (f f)))
+(send h (list :ping $$))
+(recv (:pong ()))
+(pprint (list :far-forgotten (join f)))
+(let g (fork/on 1 id 9))
+(send h (list :ping $$))
+(recv (:pong ()))
+(pprint (list :far-kept (join g)))
+(kill h)
+:done

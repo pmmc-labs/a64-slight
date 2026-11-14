@@ -1528,8 +1528,21 @@ holding a list of 100 take 224 MB for 216, a chunk of 1,600 bytes
 being in a block of 1,680. Not yet measured on the M2 Max, where
 `payload`'s time since D276 was put down to `malloc`.
 
-What's left of the review: exit records (`spawn`, `bank`), the pauses
-beside a big heap, and what D295 and D296 list as not done.
+And exit records (D297, 14 Nov): a fork whose pid is thrown away where
+it's written keeps no result, since its parent has nothing to ask with.
+`spawn` and `bank` both fork that way, and neither was changed:
+
+| | Before | After |
+|---|---|---|
+| `spawn` 1,000,000, peak | 93 MB | 48 MB |
+| `spawn` 2,000,000, peak | 185 MB | 94 MB |
+| `spawn` 1,000,000, time | 0.19 s | 0.15 s |
+| `bank` 1,000,000 customers, peak | 48 MB | 6 MB |
+| `bank` 2,000,000 customers, peak | 93 MB | 6 MB |
+
+What `spawn` still holds is its million replies waiting in the root's
+mailbox. What's left of the review: the pauses beside a big heap, and
+what D295 and D296 list as not done.
 
 ### What slight should look at next
 
@@ -1547,7 +1560,7 @@ beside a big heap, and what D295 and D296 list as not done.
   start. `spawn`'s 127 MB where it was 50, a million exit records kept
   for a parent that never joins (D277): what the rule costs, and
   whether a record nobody can join need be kept is a language
-  question. And the pauses beside a big heap, 45 ms beside 160 MB, a
+  question, answered since (D297, below: it needn't). And the pauses beside a big heap, 45 ms beside 160 MB, a
   major collection copying everything live (D200's next steps, a bigger
   nursery or an old generation not copied whole).
   The first, `payload`, should be measured again on the M2 Max now
@@ -1653,8 +1666,9 @@ beside a big heap, and what D295 and D296 list as not done.
   and `bank`'s customers are forked by `source`, which never joins
   them: its peak is 76 MB on the M2 Max on 13 Nov, and on the cloud
   machine on 13 Nov 14 MB at 250,000 customers, 49 at a million and 96
-  at two, growing with the customers as `spawn`'s does. The question
-  is the one in "Memory, next", above. And the virtual
+  at two, growing with the customers as `spawn`'s does. Since D297
+  `source`'s forks, whose pids it throws away, keep nothing: 6 MB on
+  the cloud machine, at one million or two. And the virtual
   clock is a switch for the whole program, so a simulation that also
   talks to the world (the airline's services) keeps its own time.
 - **A mailbox under many senders** (`fan-in`, D201): nothing slows a

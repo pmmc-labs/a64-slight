@@ -1797,7 +1797,8 @@ typedef struct item {
     uint64_t     n;
     rt_value_t   args[RT_MAX_ARGS];
     uint64_t     rand_seed, rand_gamma; // ...its random numbers, split from its parent's...
-    uint8_t      source;                // ...and SOURCE_KEYS or SOURCE_SYSTEM, for connect's, or 0
+    uint8_t      source;                // ...and SOURCE_KEYS or SOURCE_SYSTEM, for connect's, or 0...
+    uint8_t      forgotten;             // ...and whether its pid is thrown away (D297)
     const char  *site;
     int          ask;                   // :system's: which question...
     uint64_t     isle;                  // ...the island that answers it...
@@ -2149,14 +2150,18 @@ static void check_fun(uint64_t n, const rt_value_t *values, const char *site) {
 
 // A child of parent's, here (fork, and connect's processes). The values
 // are copied first, so that one too big faults the parent before there's
-// a child (D265).
+// a child (D265). With RT_FORK_FORGET in n, the fork's pid is thrown away
+// where it's written, and the child is told, for its end (D297).
 static rt_proc_t *new_child(rt_proc_t *parent, uint64_t n, const rt_value_t *values, const char *site) {
     rt_value_t  vals[RT_MAX_ARGS + 1];
+    int         forgotten = (n & RT_FORK_FORGET) != 0;
+    n &= ~(uint64_t)RT_FORK_FORGET;
     check_fun(n, values, site);
     rt_chunk_t *c = copy_values_after(parent->isle, values, vals, n, 0, site);
     rt_proc_t  *p = new_process_on(parent->isle, rt_apply_start, parent->pid);
     rt_rand_split(parent, p);
     p->fun = vals[0];
+    p->forgotten = (uint8_t)forgotten;
     memcpy(p->args, vals + 1, (n - 1) * sizeof *vals);
     if (c) adopt(p, c);
     return p;
@@ -2769,13 +2774,15 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
         if (s->watches.at[i].wakes != WATCH_CHILD) cross(ITEM_UNWATCH, s->watches.at[i].pid, p->pid, NULL);
     }
     int far_parent = p->parent != RT_NIL && rt_pid_island(p->parent) != rt_pid_island(p->pid);
-    if (far_parent && !had) tell_far(p->parent, p->pid, WATCH_CHILD, 0, result_msg(e));
+    if (far_parent && !had && !p->forgotten) tell_far(p->parent, p->pid, WATCH_CHILD, 0, result_msg(e));
 
     // A process's value is kept for its parent till it has it: the root's
     // for the program to print, and one that ended before its parent
-    // joined it or was told of it (D244). Else it's :ended now.
+    // joined it or was told of it (D244). Else it's :ended now: and at
+    // once if its pid was thrown away where it was forked, since its
+    // parent has no pid to ask with (D297).
     rt_proc_t *parent = p->parent == RT_NIL || far_parent ? NULL : at_on(p->isle, rt_pid_number(p->parent))->proc;
-    if (p->parent == RT_NIL || (!had && parent)) {
+    if (p->parent == RT_NIL || (!had && parent && !p->forgotten)) {
         e->chunk = copy_values_after(p->isle, &value, &e->value, 1, 0, NULL);
         if (parent) keep_for(parent, id);
     } else {
@@ -3176,6 +3183,7 @@ static void system_for(rt_proc_t *p, const char *site);
 static void start_here(item_t *it) {
     rt_proc_t *c = rt_new_process(it->code, it->from);
     c->fun         = it->fun;
+    c->forgotten   = it->forgotten;
     c->rand_seed   = it->rand_seed;
     c->rand_gamma  = it->rand_gamma;
     memcpy(c->args, it->args, it->n * sizeof *it->args);
@@ -3372,23 +3380,27 @@ static int inbox_now(void) {
 }
 
 // A process on island k, another, made there, which numbers it itself;
-// the caller waits for its pid, keeping its stack, as join does.
-static rt_value_t placed(rt_proc_t *p) {
-    far_add(&side_of(p)->watches, p->joining, WATCH_CHILD, 0);   // its end comes here, for a join (D244)
+// the caller waits for its pid, keeping its stack, as join does. Its end
+// comes here, for a join (D244), unless its pid is thrown away (D297).
+static rt_value_t placed(rt_proc_t *p, int forgotten) {
+    if (!forgotten) far_add(&side_of(p)->watches, p->joining, WATCH_CHILD, 0);
     return p->joining;
 }
 
-// ITEM_PLACED left the pid in the process.
+// ITEM_PLACED left the pid in the process; whether it's thrown away was
+// kept with its frames.
 static __attribute__((noinline)) rt_value_t place_again(rt_proc_t *p, rt_value_t *frame, const uintptr_t *fp) {
     (void)frame;
     (void)fp;
-    return placed(p);
+    return placed(p, (int)p->parked->kept[0]);
 }
 
 static rt_value_t place(uint64_t k, uint64_t n, const rt_value_t *values, const char *site, int source,
                         const rt_value_t *frame, const uintptr_t *fp, uintptr_t ret) {
     rt_proc_t  *p = rt_current;
     rt_value_t  vals[RT_MAX_ARGS + 1];
+    int         forgotten = (n & RT_FORK_FORGET) != 0;
+    n &= ~(uint64_t)RT_FORK_FORGET;
     check_fun(n, values, site);
     rt_chunk_t *c = copy_values_after(&my, values, vals, n, 0, site);     // first, as new_child's (D265)
     item_t     *it = new_item(ITEM_START, 0, p->pid);
@@ -3402,13 +3414,14 @@ static rt_value_t place(uint64_t k, uint64_t n, const rt_value_t *values, const 
     it->rand_seed   = child.rand_seed;
     it->rand_gamma  = child.rand_gamma;
     it->source      = (uint8_t)source;
+    it->forgotten   = (uint8_t)forgotten;
     it->site        = site;
     push(k, it);
     p->state   = RT_PLACING;
     p->joining = rt_int((int64_t)k);
     p->at      = ret;
-    wait_from(p, frame, fp, ret, place_again, 0, 0);    // till ITEM_PLACED says the pid
-    return placed(p);
+    wait_from(p, frame, fp, ret, place_again, (uint64_t)forgotten, 0);  // till ITEM_PLACED says the pid
+    return placed(p, forgotten);
 }
 
 // (fork/on k expr): a process on island k (D256); on the caller's own,

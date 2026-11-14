@@ -907,9 +907,31 @@ parent, till the parent has had it: by joining it, by a monitor's
 notice, or by ending (D244). Till then anyone may join it, as often as
 they like, or race it, which doesn't take it; after, it's `:ended`. So
 a process forked and joined at once, the usual way, keeps nothing once
-joined, and a parent that starts many and never takes them holds their
-values till it ends: one that starts processes for good, a server
-accepting connections, say, monitors each, and nothing is kept. A pid
+joined.
+
+A fork whose pid is thrown away keeps no result (D297): its parent has
+no pid to ask with, so once its end has been told to whoever was
+waiting, it's `:ended`. A pid is thrown away when nothing is done with
+the fork's value: when the `fork` (or `fork/on`, or `connect`) is a
+form of a body other than its last; or is the last form of a `do`, of a
+`cond` clause (so of an `if`, a `when`, a `case` or a `match`), or of a
+`recv` clause, whose own value is thrown away the same way.
+
+    (defun start (n to)
+        (when (> n 0)
+            (fork work n to)        ; thrown away: nothing kept
+            (start (- n 1) to)))
+
+So a process that starts others for good and hears from them by
+message, or not at all, holds nothing for them. That goes by where the
+`fork` is written, not by what becomes of its value later: a `fork`
+that's a function's last form is that function's value, and kept,
+whatever the caller does with it, and so is one bound with `let`, or
+passed to `map` in a lambda. And a process that's told such a child's
+pid some other way (the child sends its own `$$`) and joins it after
+it has ended gets `:ended`; one that's waiting as it ends is told, as
+ever. A parent that keeps the pids of many and never takes them holds
+their values till it ends. A pid
 is never reused, and the runtime forgets one once nothing more can
 come of it, so a program that runs for good, starting processes as it
 goes, holds only those running, open or keeping a value (`:system`'s
@@ -1062,7 +1084,8 @@ A pid says its island: `#<pid 5@2>` is the fifth process made on island
   order they were sent, wherever each is.
 - `monitor`, `join` and `join/race` of another island's process tell
   its end as they would of one here, and a child's end comes to its
-  parent's island, kept there till it's joined (D277).
+  parent's island, kept there till it's joined (D277), unless its pid
+  was thrown away (D297).
 - `kill` of another island's process ends it when its island takes the
   word, a moment later; `kill` doesn't wait for that.
 

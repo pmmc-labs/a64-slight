@@ -395,6 +395,7 @@
 #define RT_PROC_CODE        48    // rt_proc_t.code: what the trampoline calls...
 #define RT_PROC_ARGS        56    // rt_proc_t.args[RT_MAX_ARGS]: ...with these in the argument registers
 #define RT_MAX_ARGS          8    // the most a call passes (the compiler's MAX_ARGS)
+#define RT_FORK_FORGET     256    // added to a fork's count of values when its pid is thrown away (D297)
 #define RT_PROC_FUN        120    // rt_proc_t.fun: the function a fork's process calls with them (D286)
 #define RT_PROC_CTX        128    // rt_proc_t.ctx: the registers, while it's switched out
 
@@ -529,6 +530,7 @@ typedef struct rt_proc {
     uint8_t         held;       // waiting with its stack kept, and counted among its island's (process.c)
     uint8_t         waited;     // it has waited in recv since its nursery last started again (process.c)
     uint8_t         settle_log2;    // its heap is settled when it waits in recv holding 2^this bytes or more
+    uint8_t         forgotten;  // its pid was thrown away where it was forked: its result isn't kept (D297)
     uint8_t         nursery_log2;   // the nursery it's to have when it next allocates is 2^this bytes; 0, the first size
     void           *stack;      // the bottom of its stack, carved from a slab (process.c), or NULL
     rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c);

@@ -40,7 +40,7 @@
 
 import { CompileError } from './errors.ts';
 import { isKw, kwName, builtinOf, builtinSym, float, form, own, isForm, list, NIL, posOf, show, str, sym, toArray, TUPLE, type Int, type Pair, type Pos, type Sexp, type Sym } from './sexp.ts';
-import { intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SPECIAL_FORMS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
+import { FORK_FORGET, intWord, MAX_ARGS, RESERVED_SYMBOLS, RUNTIME_SYMBOLS, SPECIAL_FORMS, symbolWord, TOP_PARAMS, tupleHeader } from './values.ts';
 import { lowerPattern, NO_MATCH, ON_CONSES, RECV_MESSAGE, TUPLE_OF, TUPLE_REF } from './pattern.ts';
 import { checkBindable, checkDefunShape, checkParams } from './expand.ts';
 import { eraseTypes } from './check.ts';
@@ -68,6 +68,9 @@ type Cx = {
     readonly tail: boolean;
     readonly entry: string;
     readonly noFloatTrees?: true;    // compiling a float expression's way back (D261)
+    readonly unused?: boolean;       // its value is thrown away, which a fork is told (D297): set by a body for
+                                     // all its forms but the last, kept through do, cond and recv to theirs, and
+                                     // cleared by compileExpr for everything else
 };
 
 // The symbols seen so far, newest first: an association list from name to
@@ -299,7 +302,8 @@ export function functionLabel(name: string): string {
 // --- bodies and expressions -------------------------------------------------
 
 // A body: forms evaluated in order, leaving the last one's value in the
-// accumulator.
+// accumulator. The others' values are thrown away, and the last one's
+// too if the body's is (D297).
 // (let name expr) binds name for the rest of the body; as the last form,
 // its value is expr's (D42). Only the last form can be in tail
 // position. A loop over the forms, where slight would tail-recurse (D39),
@@ -311,13 +315,13 @@ function compileBody(forms: Sexp, cx: Cx, st: St): [Code, St] {
         const here: Cx = { ...cx, tail: cx.tail && last };
         const form = forms.car;
         if (!isForm(form, 'let')) {
-            const [c, st1] = compileExpr(form, here, st);
+            const [c, st1] = compileExpr(form, last ? here : { ...here, unused: true }, st);
             code.push(c);
             st = st1;
             continue;
         }
         const [name, expr] = checkLet(form as Pair);
-        const [c, st1] = compileExpr(expr, here, st);
+        const [c, st1] = compileExpr(expr, kept(here), st);
         if (last) return [[...code, c], st1];
         code.push(c, st.t.storeSlot(cx.si, name.name));
         st = useSlot(st1, cx.si);
@@ -325,6 +329,9 @@ function compileBody(forms: Sexp, cx: Cx, st: St): [Code, St] {
     }
     return [code, st];
 }
+
+// cx for an expression whose value is used.
+const kept = (cx: Cx): Cx => cx.unused ? { ...cx, unused: false } : cx;
 
 function checkLet(form: Pair): [Sym, Sexp] {
     const items = toArray(form) ?? [];
@@ -350,7 +357,7 @@ function compileExpr(x: Sexp, cx: Cx, st: St): [Code, St] {
         case 'sym':
             return compileName(x, cx, st);
         case 'pair':
-            return compileForm(x, cx, st);
+            return compileForm(x, kept(cx), st, cx.unused === true);
         default:
             throw notYet(x);
     }
@@ -412,17 +419,21 @@ function loadFloat(v: number, st: St): [Code, St] {
     return [st.t.loadTagged(name, 'RT_TAG_BOXED'), st1];
 }
 
-function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
+// unused: the form's value is thrown away, which matters to a fork, and
+// to the forms whose value is their last form's, which tell it (D297);
+// cx doesn't say so, so that nothing else passes it on by mistake.
+function compileForm(x: Pair, cx: Cx, st: St, unused = false): [Code, St] {
     const head = x.car;
     const args = toArray(x.cdr)!;
+    const body: Cx = unused ? { ...cx, unused: true } : cx;
     if (head.t === 'pair') return compileClosureCall(x, head, args, cx, st);
     if (head.t !== 'sym') throw new CompileError(`${show(head)} isn't a function`, posOf(head) ?? x.pos);
     switch (head.name) {
         case 'cond':
-            return compileCond(x, args, cx, st);
+            return compileCond(x, args, body, st);
         case 'do':
             if (args.length === 0) throw new CompileError('do needs at least one form', x.pos);
-            return compileBody(x.cdr, cx, st);
+            return compileBody(x.cdr, body, st);
         case 'let':
             throw new CompileError('let can only be a form of a body (a function, do or cond clause)', x.pos);
         case 'defun':
@@ -432,17 +443,17 @@ function compileForm(x: Pair, cx: Cx, st: St): [Code, St] {
         case 'lambda':
             return compileLambda(x, cx, st);
         case 'recv':
-            return compileRecv(x, args, cx, st);
+            return compileRecv(x, args, body, st);
         case 'fork':                            // (fork f arg ...): a process that calls f with the arguments (D286)
             needFn(x, 'fork', args, 0, '(fork f arg ...)');
-            return compileFork(x, 'fork', args, 'rt_fork', cx, st);
+            return compileFork(x, 'fork', args, 'rt_fork', cx, st, unused);
         case 'spawn': case 'spawn/on':          // till D277, an actor's fork
             throw new CompileError(`${head.name} is ${head.name === 'spawn' ? 'fork' : 'fork/on'} now: there's one kind of process (D277)`, x.pos);
         case 'fork/on':                         // (fork/on k f arg ...): the same, on island k (D256)
             needFn(x, 'fork/on', args, 1, '(fork/on k f arg ...)');
-            return compileFork(x, 'fork/on', args.slice(1), 'rt_fork_on', cx, st, [args[0]!]);
+            return compileFork(x, 'fork/on', args.slice(1), 'rt_fork_on', cx, st, unused, [args[0]!]);
         case 'connect':
-            return compileConnect(x, args, cx, st);
+            return compileConnect(x, args, cx, st, unused);
         case 'yield': {
             checkArity(x, 'yield', args, 1);
             const [code, st1] = compileExpr(args[0]!, cx, st);
@@ -595,7 +606,7 @@ function compileRecvClause(x: Pair, clause: Sexp, msg: number, done: string, cx:
     const message = sym(RECV_MESSAGE, x.pos);
     const { tests, binds } = lowerPattern(clause.car, message);
     const [next, st1] = label(st, 'recv_next');
-    const here: Cx = { ...cx, env: { name: RECV_MESSAGE, slot: msg, next: cx.env }, tail: false };
+    const here: Cx = { ...kept(cx), env: { name: RECV_MESSAGE, slot: msg, next: cx.env }, tail: false };
     const [code, st2] = tests.reduce<[Code, St]>(([acc, s], test) => {
         const [c, s1] = compileTest(test, next, here, s);
         return [[acc, c], s1];
@@ -640,8 +651,10 @@ const isLiteral = (x: Sexp): boolean =>
 // constants). A literal where the function should be is refused here, and
 // one of the program's functions is given as many arguments as it takes;
 // anything else that isn't a function of them faults the parent as it
-// runs, and the checker says what it can see.
-function compileFork(x: Pair, form: string, items: readonly Sexp[], fn: string, cx: Cx, st: St,
+// runs, and the checker says what it can see. forgotten: the pid is
+// thrown away, which the runtime is told with the count of values, so
+// that it keeps no result for a parent that can't ask for it (D297).
+function compileFork(x: Pair, form: string, items: readonly Sexp[], fn: string, cx: Cx, st: St, forgotten: boolean,
                      extra: readonly Sexp[] = [], flags: readonly string[] = []): [Code, St] {
     const f = items[0]!;
     if (isLiteral(f)) throw new CompileError(`${form} takes a function, not ${show(f)}`, posOf(f) ?? x.pos);
@@ -662,7 +675,7 @@ function compileFork(x: Pair, form: string, items: readonly Sexp[], fn: string, 
     const proc = fn === 'rt_fork' ? [PROC] : [];
     return [[
         code,
-        st.t.call(fn, [...proc, imm(items.length), slotAddr(cx.si + extra.length), addr(site),
+        st.t.call(fn, [...proc, imm(items.length + (forgotten ? FORK_FORGET : 0)), slotAddr(cx.si + extra.length), addr(site),
                        ...extra.map((_, i) => inSlot(cx.si + i)), ...flags.map(imm)], false),
     ], st2];
 }
@@ -685,27 +698,27 @@ const SOURCES: Readonly<Record<string, readonly [string, ...string[]]>> = {
 // other sources, or (connect dev f arg ...): a fork whose new process is
 // connected to the source, or is handed the device dev (an expression;
 // anything that isn't a :keyword is one).
-function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St): [Code, St] {
+function compileConnect(x: Pair, args: readonly Sexp[], cx: Cx, st: St, forgotten: boolean): [Code, St] {
     if (args.length === 0) throw new CompileError('connect takes a source or a device, a function, and its arguments', x.pos);
     const source = args[0]!;
     const quoted = isKw(source);
     const name   = quoted ? kwName(source) : null;
     if (name === 'keypress' || name === 'system') {
         needFn(x, `connect :${name}`, args, 1, `(connect :${name} f arg ...)`);
-        return compileFork(x, 'connect', args.slice(1), name === 'keypress' ? 'rt_connect' : 'rt_connect_system', cx, st);
+        return compileFork(x, 'connect', args.slice(1), name === 'keypress' ? 'rt_connect' : 'rt_connect_system', cx, st, forgotten);
     }
     const opener = name === null ? undefined : own(SOURCES, name);
     if (opener !== undefined) {
         needFn(x, `connect :${name}`, args, 2, `(connect :${name} ${name === 'exec' ? 'command' : name!.startsWith('fs/') ? 'path' : 'where'} f arg ...)`);
         const [fn, ...mode] = opener;
-        return compileFork(x, 'connect', args.slice(2), fn, cx, st, [args[1]!], mode);
+        return compileFork(x, 'connect', args.slice(2), fn, cx, st, forgotten, [args[1]!], mode);
     }
     if (quoted) {
         throw new CompileError(`connect's source can be :keypress, :system, :fs/read, :fs/write, :fs/append, :tcp, :tcp/listen, :unix, :unix/listen or :exec, or a device, not ${show(source)}`,
                                posOf(source) ?? x.pos);
     }
     needFn(x, 'connect', args, 1, '(connect dev f arg ...)');
-    return compileFork(x, 'connect', args.slice(1), 'rt_connect_device', cx, st, [source]);
+    return compileFork(x, 'connect', args.slice(1), 'rt_connect_device', cx, st, forgotten, [source]);
 }
 
 // --- closures -----------------------------------------------------------------
@@ -1568,7 +1581,7 @@ function compileClause(x: Pair, clause: Sexp, end: string, cx: Cx, st: St, last 
     }
     if (last) return compileBody(clause.cdr, cx, st);
     const [next, st1] = label(st, 'cond_next');
-    const [code, st2] = compileTest(clause.car, next, { ...cx, tail: false }, st1, posOf(clause.car) ?? clause.pos);
+    const [code, st2] = compileTest(clause.car, next, { ...kept(cx), tail: false }, st1, posOf(clause.car) ?? clause.pos);
     const [body, st3] = compileBody(clause.cdr, cx, st2);
     return [[code, body, st.t.jump(end), `${next}:`], st3];
 }
