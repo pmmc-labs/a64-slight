@@ -1,0 +1,62 @@
+; env: SLIGHT_GC_SLICE=1024
+; A major collection pauses (D298): each time it has copied a slice, 256
+; KB (here 1 KB, so that a few MB make thousands of pauses), it lets
+; the processes that are ready have a turn, as a process does at its
+; slice's end, so a process with a big heap holds the others up for a
+; slice of its collection, not all of it.
+;
+; A race shows it. The ticker takes 2,000 turns, a yield each, and says
+; so. Beside a process that counts to a million and allocates nothing,
+; which is 1,000 slices of 1,000 calls, the ticker is second. Beside one
+; that builds a list of 200,000 cells, a call a cell, which is 200
+; slices, it's first: the builder's collections copy the list as it
+; grows, 3 MB and more in all, and pause 3,000 times and more, a turn
+; for the ticker each time. And a process killed while its collection
+; is paused just ends.
+
+(defun ticker (k to)
+    (if (== k 0)
+        (send to :ticked)
+        (yield (ticker (- k 1) to))))
+
+(defun count-to (n to)
+    (if (== n 0)
+        (send to :counted)
+        (count-to (- n 1) to)))
+
+(defun build (n acc) (if (== n 0) acc (build (- n 1) (cons n acc))))
+
+(defun builder (n to)
+    (let xs (build n ()))
+    (send to :built)
+    (recv (:go (length xs))))
+
+; Builds for good.
+(defun churner (n) (build n ()) (churner n))
+
+(defun two () (list (recv (m m)) (recv (m m))))
+
+(defun reductions (s p)
+    (send s (list :process p))
+    (match (read s) ((:process _ i) (lookup :reductions i))))
+
+(let s (cadr (open :system)))
+
+(fork ticker 2000 $$)
+(fork count-to 1000000 $$)
+(pprint (cons :counting (two)))
+
+(fork ticker 2000 $$)
+(let b (fork builder 200000 $$))
+(pprint (cons :collecting (two)))
+(pprint (list :calls-under-a-million (< (reductions s b) 1000000)))
+(send b :go)
+(pprint (join b))
+
+; Killed among its collections' pauses, after 500 of the ticker's turns.
+(let c (fork churner 200000))
+(fork ticker 500 $$)
+(recv (:ticked ()))
+(kill c)
+(pprint (join c))
+:done

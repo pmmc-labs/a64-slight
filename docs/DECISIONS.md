@@ -7932,3 +7932,67 @@ no pid to ask with.
   joined, a fork a function returns is kept, one that says who it is
   is `:ended` when joined late and gives its result to a joiner
   waiting, and the same on another island.
+
+**D298. A major collection pauses to let other processes run.**
+*(Stevan, 15 Nov 2026: "let's do E", the last of the directions in
+`docs/memory-review-2026-11-13.md`; what E became is Claude's, by
+default, and smaller than what the review described.)* The review's E
+was an old generation not copied whole: marked in slices, its chunks
+freed or kept, the largest change to the collector since D200. What was
+measured, though (D238, `latency`), was other processes waiting while
+one with a big heap collected: 45 ms beside 160 MB on the M2 Max, 133
+on the cloud machine. That needs no new collector. A major collection
+now stops each time it has copied 256 KB, lets the island see to its
+timers, inbox and sockets, and if another process is ready goes to the
+back of the run queue, as a process does at its slice's end, going on
+from where it was at its next turn; and it frees the old chunks the
+same way, 4 MB at a time, since giving 160 MB of pages back took 7 ms
+by itself. The collector's walk is as it was, running as the process it
+collects, its state on that process's stack: about forty lines.
+- **Why it's safe:** nothing but a process touches its own heap. A
+  message for it waits in its mailbox, which no collection looks at;
+  `:system` reads counts that change only when the collection is done.
+  One ended while paused, by a kill or its device failing, has what it
+  had copied freed (`finish`, the side's `collecting`). And `recv`,
+  which settles a heap just before it waits, looks at the mailbox again
+  after, since a message may have come while the settling paused.
+- **No test in the walk:** it comes back to `gc_more` every slice
+  because the chunk it copies into is given to it a slice at a time.
+  No benchmark takes 1 per cent more instructions.
+- **Measured** (cloud machine, x86-64, one island, `latency 10`, a
+  pinger beside a process holding 160 MB and replacing it a block at a
+  time; the median of 8 runs after, 3 before): a ping's wait at the
+  median 10 ms to 0.36, at the 99th percentile 110 ms to 0.8, at the
+  worst 130 ms to 2. The benchmark takes as long as it did, 3.4 s: the
+  collecting is the same work, between other things.
+- **What it changes:** when other processes run now depends on how
+  much a collection copies, once that's more than a slice. It's the
+  same every run, and in a replay; but D166's "collecting never
+  changes when a process is preempted" no longer says that the order
+  processes run in is the collector's to leave alone. Every golden test
+  passes as it was, and with pauses every 64 bytes; with those and
+  `SLIGHT_GC_STRESS` together, two tests that print the order their
+  messages came in print another (133, 368), as they should.
+- **What it doesn't do**, which the review's E would: the process
+  collected is still away for the whole of its own collection; a major
+  collection still copies everything live, twice to four times the
+  memory while it does; and a minor collection, a nursery of 1 MB at
+  the most, doesn't pause (0.5 to 0.9 ms here when all of one
+  survives). An old generation marked and not moved is still there to
+  propose, for a simulation with one big heap, if those matter.
+- **Rejected:** the review's E first (above: not what was measured);
+  a second thread for big collections (D239's C), under which when the
+  collected process ran again would depend on the clock, and no run
+  would replay without recording it; a collection driven in slices
+  from the scheduler, its state saved between them, which is this with
+  the walk rewritten to be resumed; pausing only when something's
+  ready, without `events`, which would leave a timer or another
+  island's message waiting out the whole collection of a process alone
+  on its island; no pauses under `SLIGHT_GC_STRESS`, which the tests
+  showed isn't needed.
+- Golden test 395 (`t/395-collection-pauses`), with `SLIGHT_GC_SLICE`
+  at 1 KB: a ticker of 2,000 turns loses a race to a process counting
+  to a million, and wins one against a process that builds 200,000
+  cells in a fifth of the calls, since its collections pause thousands
+  of times; and a process killed among its pauses ends. `SLIGHT_GC_SLICE=64
+  make golden` runs every test with a pause at every object copied.

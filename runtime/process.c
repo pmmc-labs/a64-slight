@@ -57,6 +57,9 @@
 #ifndef TOSPACE_FIRST
 #define TOSPACE_FIRST  512              // a major collection's first chunk, which doubles: small, so that a little
 #endif                                  // that's live is in a little chunk
+#define GC_SLICE       (256 << 10)      // what a major collection copies before it lets other processes run, unless
+                                        // SLIGHT_GC_SLICE says (D298)...
+#define GC_FREED       16               // ...and how many times that it frees of the old chunks before it does
 #ifndef NURSERY_FREE
 #define NURSERY_FREE   (16 << 10)       // a nursery grows to this for the asking; past it, only for a run that filled it
 #endif
@@ -190,6 +193,7 @@ static int64_t gc_stress;                       // SLIGHT_GC_STRESS=n: collect a
 static int     gc_verify;                       // SLIGHT_GC_VERIFY: check that nothing old points at anything young
 static int     copy_always;                     // SLIGHT_COPY_OUT: every recv that waits copies its process off its stack
 static size_t  heap_max;                        // the most a process's chunks can hold (D202)
+static size_t  gc_slice = GC_SLICE;             // SLIGHT_GC_SLICE: what a major collection copies between pauses (D298)
 
 // --- the run queue ------------------------------------------------------------
 //
@@ -1318,24 +1322,44 @@ static rt_value_t copy_here(rt_value_t v) {
 #define GC_MOVED_CONS RT_TAG_BOXED      // in a moved cell's car: a boxed null, which no value is
 #define GC_MOVED_BOX  0                 // in a moved box's header: no box has type 0
 
-typedef struct {
+typedef struct gc {
     island_state_t  *isle;              // whose arena to-space comes from
     const rt_proc_t *young;             // whose young generation it's promoting, or NULL in a major collection
     rt_chunk_t      *chunks;            // to-space, newest first: in a minor collection, the old generation
     uintptr_t        ptr, limit;
     size_t           bytes, live, size; // to-space's capacity, what's been copied, the size of a new chunk
+    rt_proc_t       *pauses;            // in a major collection that pauses, the process collected (D298)...
+    uintptr_t        end;               // ...where the chunk copied into really ends, limit being the slice's end...
+    size_t           paused_at;         // ...and what had been copied at the last pause
 } gc_t;
 
-// A new chunk of to-space, for at least bytes: where it starts.
-static uintptr_t gc_chunk(gc_t *g, size_t bytes) {
-    size_t      size = bytes > g->size ? bytes : g->size;
-    rt_chunk_t *c    = new_chunk(g->isle, size);
-    c->next   = g->chunks;
-    g->chunks = c;
-    g->bytes += size;
-    g->limit  = (uintptr_t)(c + 1) + size;
-    g->size   = g->size * 2 < CHUNK_MAX ? g->size * 2 : CHUNK_MAX;
-    return (uintptr_t)(c + 1);
+static void gc_pause(gc_t *g);
+
+// Room for `bytes` more of to-space, the copying at ptr having come to
+// limit, with `live` copied so far: where they go. A new chunk, or, in a
+// collection that pauses, the next slice of this one, limit being set a
+// slice on at the most, so that the walk comes back here every gc_slice
+// bytes with no test of its own (D298).
+static __attribute__((noinline)) uintptr_t gc_more(gc_t *g, uintptr_t ptr, size_t bytes, size_t live) {
+    // A slice's worth copied: the slice's end, short of the chunk's, or
+    // chunks smaller than a slice that have come to one between them.
+    if (g->pauses && (g->limit != g->end || live - g->paused_at >= gc_slice)) {
+        g->paused_at = live;
+        gc_pause(g);
+    }
+    if (!g->pauses || g->end - ptr < bytes) {
+        size_t      size = bytes > g->size ? bytes : g->size;
+        rt_chunk_t *c    = new_chunk(g->isle, size);
+        c->next   = g->chunks;
+        g->chunks = c;
+        g->bytes += size;
+        g->size   = g->size * 2 < CHUNK_MAX ? g->size * 2 : CHUNK_MAX;
+        ptr       = (uintptr_t)(c + 1);
+        g->end    = ptr + size;
+    }
+    size_t slice = gc_slice > bytes ? gc_slice : bytes;
+    g->limit = g->pauses && g->end - ptr > slice ? ptr + slice : g->end;
+    return ptr;
 }
 
 // Whether v, a pointer, is into p's nursery or what it overflowed into
@@ -1350,7 +1374,7 @@ static int is_young(const rt_proc_t *p, rt_value_t v) {
 
 // What changes at every object the walk copies: where the next copy goes,
 // and the copies whose fields still point at the old heap. It's kept out
-// of gc_t, which the walk hands to gc_chunk, so it can live in registers
+// of gc_t, which the walk hands to gc_more, so it can live in registers
 // (D239, and WALK, above). The walk is compiled twice, for a minor
 // collection and a major one, and what moves is worked out once: in a
 // minor one the young chunks, the nursery and the chunk it overflowed
@@ -1389,7 +1413,7 @@ WALK int gc_moves(const walk_t *w, uintptr_t a, int minor) {
 
 WALK void *gc_take(gc_t *g, walk_t *w, size_t bytes) {
     if (w->limit - w->ptr < bytes) {
-        w->ptr   = gc_chunk(g, bytes);
+        w->ptr   = gc_more(g, w->ptr, bytes, w->live);
         w->limit = g->limit;
     }
     void *at = (void *)w->ptr;
@@ -1539,8 +1563,18 @@ static void collect_young(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uin
 // To-space starts at `first` bytes and doubles, a chunk at a time, so
 // that what's kept is in chunks that fit it, more or less, whatever the
 // heap was before. Returns the bytes it copied.
+//
+// It pauses (D298): each time it has copied gc_slice bytes, it lets the
+// island see to its timers, its inbox and its sockets, and if another
+// process is ready, goes to the back of the run queue, as a process does
+// at its slice's end, and goes on from there at its next turn. So a
+// process with a big heap holds up the others for a slice of its
+// collection, not the whole. That's all it takes, since nothing but the
+// process itself touches its heap: a message for it waits in its mailbox,
+// which no collection looks at, and the walk's state is on its own
+// stack. If it's ended meanwhile, finish frees what was copied.
 static size_t collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp, size_t first) {
-    gc_t g = { .isle = p->isle, .size = first };
+    gc_t g = { .isle = p->isle, .size = first, .pauses = p };
     trace(&g, roots, n, fp);
     size_t copied = g.live;
     // Every live handle has moved, the young and the old, before what they
@@ -1558,9 +1592,23 @@ static size_t collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uin
     }
     // With SLIGHT_POISON set (t/run.sh sets it), a pointer the collector
     // missed finds garbage at once instead of memory that looks fine
-    // until it's reused: 0xabab... is a boxed pointer to nowhere.
-    for (rt_chunk_t *c = p->chunks; c && poison; c = c->next) memset(c + 1, 0xab, c->size);
-    free_chunks_on(p->isle, p->chunks);
+    // until it's reused: 0xabab... is a boxed pointer to nowhere. The old
+    // chunks are freed with pauses too, since giving a big heap's pages
+    // back to the system takes as long as copying a few MB of it (160 MB
+    // live, 7 ms): each is off the process's list before the next pause,
+    // so that one ended there frees the rest and no more.
+    size_t freed = 0;
+    while (p->chunks) {
+        rt_chunk_t *c = p->chunks;
+        if (poison) memset(c + 1, 0xab, c->size);
+        p->chunks = c->next;
+        freed    += c->size;
+        free_chunk_on(p->isle, c);
+        if (freed >= GC_FREED * gc_slice && p->chunks) {
+            freed = 0;
+            gc_pause(&g);
+        }
+    }
     p->chunks     = g.chunks;
     p->heap_bytes = g.bytes + young_bytes(p);
     p->old_ptr    = g.ptr;
@@ -2217,6 +2265,7 @@ typedef struct rt_side {
     fars_t         watches;             // ...and those it watches, or whose end comes to it, its children there
     rt_msg_t      *far_ends;            // the ends of those that have come, kept apart from its mail, as a
                                         // record here keeps one, till it joins them (D245, D277)
+    struct gc     *collecting;          // its major collection, while that's paused, for its to-space (D298)
     crossed_t      sent, received;      // its messages to and from other islands, for :system (D256)
 } rt_side_t;
 
@@ -2498,8 +2547,9 @@ static again_t recv_again;
 
 static inline __attribute__((always_inline)) rt_value_t recv_wait(rt_proc_t *p, rt_value_t *frame, uint64_t n,
                                                                   const uintptr_t *fp, uintptr_t at, uintptr_t ret) {
+    int settled = 0;
     for (;;) {
-        if (due(p)) collect(p, frame, n, fp);
+        if (!settled && due(p)) collect(p, frame, n, fp);
         rt_msg_t *m = p->mail, *last = NULL;
         while (m && for_read(m)) {              // what's for read waits for it (D277)
             last = m;
@@ -2515,7 +2565,15 @@ static inline __attribute__((always_inline)) rt_value_t recv_wait(rt_proc_t *p, 
             else         adopt(p, m->chunk);
             return v;
         }
-        if (p->heap_bytes >> p->settle_log2) settle_heap(p, frame, n, fp);
+        // Settling may pause (D298), and a message may come meanwhile: so
+        // round again, to look, before it waits; once, and without
+        // collecting again, which under SLIGHT_GC_STRESS it would.
+        if (!settled && p->heap_bytes >> p->settle_log2) {
+            settle_heap(p, frame, n, fp);
+            settled = 1;
+            continue;
+        }
+        settled  = 0;
         p->state = RT_WAITING;
         p->at    = at;
         wait_from(p, frame, fp, ret, recv_again, n, 0);
@@ -2727,6 +2785,13 @@ static void finish(rt_proc_t *p, int ok, rt_value_t value, int logged) {
     uint64_t id = rt_pid_number(p->pid);
     entry_t *e  = at_on(p->isle, id);
     int      had = 0;                          // whether the parent is told now, as those waiting are
+    // Ended in the middle of a major collection, which had paused (D298),
+    // by a kill or its device's failure: what it had copied goes. Its
+    // value isn't in its heap, which is half moved.
+    if (p->side && p->side->collecting) {
+        free_chunks_on(p->isle, p->side->collecting->chunks);
+        p->side->collecting = NULL;
+    }
     e->ok    = ok;
     e->value = value;                          // in p's heap till it's told to whoever waits, below
     if (p->pid == RT_ROOT && !ok && !logged) {
@@ -3435,6 +3500,22 @@ rt_value_t rt_fork_on_from(uint64_t n, const rt_value_t *values, const char *sit
 }
 
 static inline void events(void);
+
+// A major collection of g->pauses has copied a slice (D298): the island's
+// timers, inbox and sockets are seen to, as at a process's slice's end,
+// and if anything's ready the process goes to the back of the queue, the
+// collection going on when its turn comes. Either may end it, by a kill
+// or its device failing, so its to-space is where finish can find it.
+static __attribute__((noinline)) void gc_pause(gc_t *g) {
+    rt_proc_t *p = g->pauses;
+    side_of(p)->collecting = g;
+    events();
+    if (p->isle->ready_head) {
+        enqueue(p);
+        to_scheduler(p);
+    }
+    p->side->collecting = NULL;
+}
 
 void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t entry) {
     p->at = entry;
@@ -6405,6 +6486,8 @@ int main(int argc, char **argv) {
     is_init = getpid() == 1;
     poison    = getenv("SLIGHT_POISON") != NULL;
     copy_always = getenv("SLIGHT_COPY_OUT") != NULL;
+    const char *slice = getenv("SLIGHT_GC_SLICE");
+    if (slice && atoll(slice) >= 16) gc_slice = (size_t)atoll(slice);
     gc_verify = getenv("SLIGHT_GC_VERIFY") != NULL;
     const char *stress = getenv("SLIGHT_GC_STRESS");
     gc_stress = !stress ? 0 : atoll(stress) < 1 ? 1 : atoll(stress) > QUOTA ? QUOTA : atoll(stress);

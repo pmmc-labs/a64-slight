@@ -1146,6 +1146,13 @@ messages left; and one that only holds what it was started with holds
 just that. What waits only in `read`, `join` or `sleep` isn't settled;
 its heap is collected as it grows, as any process's is.
 
+A collection is its process's own time. One that copies a big heap, a
+few hundred MB in a quarter of a second or so, stops every 256 KB to
+let the other processes on its island have a turn, and the island's
+timers and messages be seen to (D298): so a process with a big heap
+doesn't hold the others up, though it's away itself till its
+collection is done.
+
 What's live is what the process can still reach, and that includes
 whatever a function that hasn't returned has bound with `let`, until it
 returns: a `let` at the top level keeps its value till the program ends.

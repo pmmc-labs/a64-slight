@@ -1541,8 +1541,30 @@ it's written keeps no result, since its parent has nothing to ask with.
 | `bank` 2,000,000 customers, peak | 93 MB | 6 MB |
 
 What `spawn` still holds is its million replies waiting in the root's
-mailbox. What's left of the review: the pauses beside a big heap, and
-what D295 and D296 list as not done.
+mailbox.
+
+And the pauses beside a big heap (D298, 15 Nov): a major collection
+stops every 256 KB it copies, and every 4 MB of old chunks it frees, to
+let the island's other processes have a turn. `latency 10`, a pinger
+beside a process that holds 160 MB and replaces it a block at a time,
+on the cloud machine, one island, in milliseconds (the median of 8 runs
+after, of 3 before):
+
+| A ping's wait | Before | After |
+|---|---|---|
+| at the median | 10 | 0.36 |
+| at the 99th percentile | 110 | 0.8 |
+| at the worst | 130 | 2 |
+
+The benchmark takes what it took, 3.4 s, and every other benchmark's
+instructions are within 1 per cent. What's left of a ping's wait is a
+slice of the collection, a turn or two of the run queue, and a minor
+collection, which doesn't pause: 0.5 to 0.9 ms here when a nursery of
+1 MB all survives. The process with the big heap is itself still away
+for the whole of its collection. Not yet measured on the M2 Max, where
+a ping waited 45 ms at the worst.
+
+What's left of the review: what D295, D296 and D298 list as not done.
 
 ### What slight should look at next
 
@@ -1560,7 +1582,8 @@ what D295 and D296 list as not done.
   start. `spawn`'s 127 MB where it was 50, a million exit records kept
   for a parent that never joins (D277): what the rule costs, and
   whether a record nobody can join need be kept is a language
-  question, answered since (D297, below: it needn't). And the pauses beside a big heap, 45 ms beside 160 MB, a
+  question, answered since (D297, below: it needn't). And the pauses:
+  D298, below. And the pauses beside a big heap, 45 ms beside 160 MB, a
   major collection copying everything live (D200's next steps, a bigger
   nursery or an old generation not copied whole).
   The first, `payload`, should be measured again on the M2 Max now
@@ -1656,7 +1679,10 @@ what D295 and D296 list as not done.
   median of five runs, and on the M2 Max from 61 ms to 47. A second thread for big collections (D239's C)
   waits till it's needed; D200's next steps, a bigger nursery or an old
   generation that isn't copied whole, would shorten the pauses too; so
-  does keeping a process's heap small.
+  does keeping a process's heap small. Done another way since (D298,
+  above): the collection pauses for the other processes, and a ping
+  beside 160 MB waits 0.8 ms at the 99th percentile on the cloud
+  machine, where it waited 110.
 - **Simulation** (`bank`, D241): slight is 11 times faster than SimPy
   on the cloud machine, and 27 times slower than an event list in C. A
   customer is a process, three messages and two timers, each a malloc.

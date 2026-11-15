@@ -49,7 +49,8 @@ fault in #<pid 2>: heap exhausted (cons at docs/guide/code/con-memory.slight:4:1
   generation is collected rarely. A collection looks only at the
   process being collected, and takes time in proportion to what that
   process still holds, so a big process doesn't make the small ones'
-  collections slower.
+  collections slower. Nor does it hold them up: a collection of a big
+  heap stops every 256 KB it copies to let the others have a turn.
 - **A process that waits holds about what it has live.** When a
   process waits in `recv` after its heap has grown, what's live is
   copied into chunks that fit it and the rest is freed. So an actor

@@ -848,12 +848,37 @@ Lalloc_N:
   as a collection promotes; so a heap that's past it after a collection
   gets no room in its nursery, and its next allocation faults (D202).
   A major collection with a few hundred MB live takes a quarter of a
-  second or so, during which nothing else runs.
+  second or so, the process's own time, not the island's (below).
+- **A major collection pauses** (D298). Each time it has copied 256 KB
+  (`gc_slice`), and as it frees the old chunks, 4 MB at a time, the
+  island's timers, inbox and sockets are seen to (`events`), and if
+  another process is ready the collecting one goes to the back of the
+  run queue, as a process does at its slice's end (`gc_pause`), and
+  goes on from where it was at its next turn. So a process with a big
+  heap holds the others up for a slice of its collection, well under
+  a millisecond on the cloud machine, not for all of it. It's the
+  collector as it was, running as the process it collects: the walk's
+  state is on that process's stack, and nothing else touches a
+  process's heap, a message for it waiting in its mailbox, which no
+  collection looks at. The walk has no test for it: `gc_more`, where
+  the walk goes when the chunk it copies into is full, gives it the
+  chunk a slice at a time (`limit` short of the chunk's `end`), so it
+  comes back there every slice. A process ended while it's paused, by
+  a kill or its device's failure, has what it had copied freed in
+  `finish` (the side's `collecting`), and the old chunks it had got to
+  freeing are off its list by then. `recv` looks at the mailbox again
+  after settling, which may have paused. Minor collections don't
+  pause: a nursery is 1 MB at the most. What it changes: when other
+  processes run now depends on how much a collection copies, for a
+  heap of more than a slice; the same every run, and in a replay, but
+  not the same from one version of the collector to the next.
+  `SLIGHT_GC_SLICE=n` makes the slice n bytes, to test it.
 - `rt_preempt` checks both at the end of each slice; and when
   `rt_heap_grow` finds the nursery full, or a chunk adopted takes the
   old generation to its threshold, it cuts the slice short, so the next
   call's entry goes to `rt_preempt`, keeping the rest of the slice for
-  after: collecting never changes when a process is preempted.
+  after: collecting never changes when a process is preempted, though a
+  major collection of more than a slice lets others run meanwhile (D298).
 - **Big strings** (64 KB or more), which point at nothing, are allocated
   straight into the old generation, each in a chunk of its own, so no
   minor collection copies them.
