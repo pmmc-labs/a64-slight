@@ -261,6 +261,9 @@ static void to_scheduler(rt_proc_t *p) {
 // --- stacks -------------------------------------------------------------------
 
 #define STACKS_KEPT 256                 // given back stacks an island keeps warm; past that, their pages go back
+#define STACK_DEEP  (16 << 10)          // a stack that's been this far below where its process waits, or ends, gives
+                                        // its pages back (D300)...
+#define STACK_WAITS 64                  // ...at once the first time, and after that at this many waits since
 #define SLAB_STACKS 64                  // stacks mapped at once, 512 MB of addresses and one mapping
 #define COLOURS     32                  // cache lines a stack's top is set below its slot's, by its place
 
@@ -384,31 +387,65 @@ static void trim_spares(island_state_t *s) {
     s->ntrimmed = s->nspares;
 }
 
-// Kept warm for the next process; or, past STACKS_KEPT, a spare, its
-// pages to go back later (trim_spares). With no room to keep it, its
+// Room among the spares for one more, or 0.
+static int spare_room(island_state_t *s) {
+    if (s->nspares < s->spares_cap) return 1;
+    size_t cap  = s->spares_cap ? 2 * s->spares_cap : 1024;
+    void **more = realloc(s->spares, cap * sizeof *more);
+    if (!more) return 0;
+    s->spares     = more;
+    s->spares_cap = cap;
+    return 1;
+}
+
+// Kept warm for the next process; or, past STACKS_KEPT, or if its process
+// went deep and never waited shallower since (stack_low, below), a spare,
+// its pages to go back later (trim_spares). With no room to keep it, its
 // pages go back now and its addresses are lost.
 static void release_stack(rt_proc_t *p) {
-    island_state_t *s = p->isle;
-    if (s->nfree_stacks < STACKS_KEPT) {
+    island_state_t *s    = p->isle;
+    int             deep = p->stack_low + STACK_DEEP < (uintptr_t)p->stack + STACK_BYTES;
+    if (s->nfree_stacks < STACKS_KEPT && !deep) {
         STACK_LINK(p->stack) = s->free_stacks;
         s->free_stacks = p->stack;
         s->nfree_stacks++;
-    } else {
-        if (s->nspares == s->spares_cap) {
-            size_t cap  = s->spares_cap ? 2 * s->spares_cap : 1024;
-            void **more = realloc(s->spares, cap * sizeof *more);
-            if (!more) {
-                madvise(p->stack, STACK_BYTES, STACK_GIVE_BACK);
-                p->stack = NULL;
-                return;
-            }
-            s->spares     = more;
-            s->spares_cap = cap;
-        }
+    } else if (spare_room(s)) {
         s->spares[s->nspares++] = p->stack;
         if ((s->nspares - s->ntrimmed) * page >= SPARE_HELD) trim_spares(s);
+    } else {
+        madvise(p->stack, STACK_BYTES, STACK_GIVE_BACK);
     }
     p->stack = NULL;
+}
+
+// A stack never got shallower: a process that recursed deep once held
+// those pages while it lived, 610 KB for 20,000 frames, and a warm stack
+// kept them for the next (the memory review's finding 6). So how deep a
+// process goes is watched, cheaply: stack_low is the lowest its frames
+// have been seen, at a slice's end (rt_preempt) and where it waits, a
+// sample every thousand calls, which a recursion deep enough to matter
+// can't slip between. When it waits STACK_DEEP or more above that, the
+// pages below where it is go back, all but one, and the watch starts
+// again from there. At once, the first time: a process that went deep
+// to start with, and waits, may never go deep again. After that, only
+// at its STACK_WAITS'th wait with deep pages: one that goes deep for
+// every message needs them, and giving them back each time, to fault
+// them in again, made a worker that recurses 2,000 deep three times
+// slower. This is C's frame, below the waiting one, and it's left a page.
+//
+// Called by a wait whose frame isn't within STACK_DEEP above stack_low
+// (wait_from's one test): it's lower, which is only noted, or that far
+// above.
+static __attribute__((noinline)) void shallow(rt_proc_t *p, const rt_value_t *frame) {
+    if ((uintptr_t)frame < p->stack_low) {
+        p->stack_low = (uintptr_t)frame;
+        return;
+    }
+    if (p->deep_waits && p->deep_waits++ < STACK_WAITS) return;
+    p->deep_waits = 1;
+    uintptr_t to = ((uintptr_t)__builtin_frame_address(0) - page) & ~(uintptr_t)(page - 1);
+    if (to > (uintptr_t)p->stack) madvise(p->stack, to - (uintptr_t)p->stack, STACK_GIVE_BACK);
+    p->stack_low = (uintptr_t)frame;
 }
 
 // The calls p has made: those of its slices before this one, and this
@@ -446,6 +483,7 @@ static int start(rt_proc_t *p) {
     refill(p);
     memset(&p->ctx, 0, sizeof p->ctx);
     char *base = stack_top(p->stack);
+    p->stack_low = (uintptr_t)base;
 #if defined(__x86_64__)
     // x86's ret takes its address from the stack, not a link register: the
     // trampoline's goes in the top word, and popping it leaves rsp 16-aligned.
@@ -581,16 +619,20 @@ static int parked(const rt_proc_t *p) {
 
 // p is about to wait, called with frame and fp from compiled code that
 // the call returns to at ret. Copies its frames to its buffer, with how
-// the wait starts again and what that needs, and gives its stack back
-// warm; or returns 0, having changed nothing. The caller is still running
-// on that stack, and must switch away before anything else takes it: so
-// it only ever goes to the warm list, never to the spares, whose pages
-// may go back at once.
+// the wait starts again and what that needs, and gives its stack back:
+// warm, or, with STACKS_KEPT warm already, as a spare (D300: before, the
+// copy was refused there, and a burst of processes that had all run
+// before any waited kept its stacks, 2,951 of 5,000); or returns 0,
+// having changed nothing. The caller is still running on that stack, and
+// switches away before anything else takes it; and a spare's pages go
+// back only from trim_spares, which the scheduler calls, and
+// release_stack, so those waiting to go back go first, here, if they've
+// come to SPARE_HELD, and this one's wait for the next time.
 static int copy_out(rt_proc_t *p, const rt_value_t *frame, const uintptr_t *fp, uintptr_t ret, again_t *again,
                     uint64_t k0, uint64_t k1) {
     island_state_t *s    = p->isle;
     uintptr_t       base = (uintptr_t)stack_top(p->stack), lo = (uintptr_t)frame, f = (uintptr_t)fp;
-    if (s->nfree_stacks >= STACKS_KEPT) REFUSE(NO_ROOM);
+    int             warm = s->nfree_stacks < STACKS_KEPT && p->stack_low + STACK_DEEP >= base;  // not one with deep pages
     if (lo >= base || lo % 16 || f < lo) REFUSE(BAD_FRAME);
     if (base - lo > COPY_MAX) REFUSE(TOO_DEEP);
 #if defined(__x86_64__)
@@ -607,6 +649,10 @@ static int copy_out(rt_proc_t *p, const rt_value_t *frame, const uintptr_t *fp, 
     }
     if (f != base - 16) REFUSE(BAD_BASE);
     if (((const uintptr_t *)f)[1] != (uintptr_t)rt_trampoline_back) REFUSE(NO_TRAMPOLINE);
+    if (!warm) {
+        if ((s->nspares - s->ntrimmed) * page >= SPARE_HELD) trim_spares(s);
+        if (!spare_room(s)) REFUSE(NO_ROOM);
+    }
 
     size_t    len = base - lo;
     parked_t *k   = p->parked;
@@ -624,9 +670,13 @@ static int copy_out(rt_proc_t *p, const rt_value_t *frame, const uintptr_t *fp, 
     k->again   = again;
     k->kept[0] = k0;
     k->kept[1] = k1;
-    STACK_LINK(p->stack) = s->free_stacks;      // the top word, copied by now
-    s->free_stacks = p->stack;
-    s->nfree_stacks++;
+    if (warm) {
+        STACK_LINK(p->stack) = s->free_stacks;  // the top word, copied by now
+        s->free_stacks = p->stack;
+        s->nfree_stacks++;
+    } else {
+        s->spares[s->nspares++] = p->stack;
+    }
     p->stack = NULL;
     TALLY(COPIED);
     TALLY_WAIT(again);
@@ -644,6 +694,7 @@ static int copy_in(rt_proc_t *p) {
     if (!p->stack) return 0;
     p->stack_limit = (uintptr_t)p->stack + STACK_HEADROOM;
     uintptr_t base = (uintptr_t)stack_top(p->stack), lo = base - k->len, by = base - k->base;
+    p->stack_low = lo;
     memcpy((void *)lo, k->frames, k->len);
     if (by) {
         for (uintptr_t *f = (uintptr_t *)(k->fp + by); *f; f = (uintptr_t *)*f) *f += by;
@@ -700,6 +751,9 @@ static inline __attribute__((always_inline)) void wait_from(rt_proc_t *p, const 
                                                             uintptr_t ret, again_t *again, uint64_t k0, uint64_t k1) {
     island_state_t *s = p->isle;
     p->waited = 1;                              // whatever it waits in: its nursery is no longer one run's (restart)
+    // Lower than it's been seen, or STACK_DEEP above that, back from deep
+    // (D300): one test for both, the first wrapping round.
+    if ((uintptr_t)frame - p->stack_low > STACK_DEEP) shallow(p, frame);
     if ((s->waits_held >= WAITS_KEPT || copy_always) && copy_out(p, frame, fp, ret, again, k0, k1)) {
         to_scheduler(p);                        // for good: these frames are gone
         __builtin_unreachable();
@@ -3565,6 +3619,7 @@ static __attribute__((noinline)) void gc_pause(gc_t *g) {
 
 void rt_preempt(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t entry) {
     p->at = entry;
+    if ((uintptr_t)frame < p->stack_low) p->stack_low = (uintptr_t)frame;   // how deep it's been (shallow, above)
     if (due(p)) collect(p, frame, n, fp);
     if (p->slice_rest > 0) {                    // here before the slice's end, to collect
         p->reductions  = gc_stress && gc_stress < p->slice_rest ? gc_stress : p->slice_rest;

@@ -532,7 +532,10 @@ typedef struct rt_proc {
     uint8_t         settle_log2;    // its heap is settled when it waits in recv holding 2^this bytes or more
     uint8_t         forgotten;  // its pid was thrown away where it was forked: its result isn't kept (D297)
     uint8_t         nursery_log2;   // the nursery it's to have when it next allocates is 2^this bytes; 0, the first size
+    uint8_t         deep_waits; // 0 till its stack's deep pages first go back; then its waits since with more (D300)
     void           *stack;      // the bottom of its stack, carved from a slab (process.c), or NULL
+    uintptr_t       stack_low;  // the lowest its frames have been seen, at a slice's end, since the pages below
+                                // where it waited last went back (process.c, D300)
     rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c);
                                 // NULL till it next allocates, if it's to be another size
     rt_chunk_t     *chunks;     // the old generation, newest first, the messages it's taken among them

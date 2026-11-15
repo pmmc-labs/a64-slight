@@ -1564,7 +1564,32 @@ collection, which doesn't pause: 0.5 to 0.9 ms here when a nursery of
 for the whole of its collection. Not yet measured on the M2 Max, where
 a ping waited 45 ms at the worst.
 
-What's left of the review: what D295, D296 and D298 list as not done.
+And settling wherever a process waits (D299, 15 Nov), not only in
+`recv`, and stacks that give their pages back (D300). On the cloud
+machine, x86-64, one island, resident memory while the program sleeps
+(`bench/memory/askers.slight`, `one-heap.slight` and `deep.slight`):
+
+| | Before | After |
+|---|---|---|
+| 1,000 processes that each ask a server 1,000 times, then wait in `read` | 60 MB | 30 MB |
+| ... at their peak | 98 MB | 44 MB |
+| A root that built 16 MB five times, and sleeps | 33 MB | 18 MB |
+| 1,000 processes that recursed 1,000 deep once, and wait | 36 MB | 10 MB |
+| ... 20,000 deep | 615 MB | 10 MB |
+| 5,000 processes, 20,000 deep once, and wait | 3,070 MB | 14 MB |
+| After 1,000 that went 20,000 deep twice have ended | 165 MB | 1 MB |
+
+Instructions, under callgrind: `bank`, whose customers sleep, 0.5 per
+cent more with D299, and every other benchmark within 0.1 per cent;
+with D300, whose test is at every wait, `thread-ring` 1.0 per cent
+more, `idle-memory` 1.3, `bank` 0.7, `ping-pong` and `spawn` 0.5. A
+worker that recurses 2,000 deep for each of 100,000 messages takes 8
+per cent longer with D300 (0.67 s to 0.72), and one that goes 20,000
+deep 2 per cent: its pages go back at once the first time, and then
+at every 64th wait, where giving them back at every wait made the
+first 3.3 times slower. Not measured on the M2 Max.
+
+What's left of the review: `docs/memory-review-2026-11-13-plan.md`.
 
 ### What slight should look at next
 

@@ -8057,3 +8057,69 @@ across the wait, where a collection couldn't move them.
   and has what it kept after. `SLIGHT_GC_STRESS` settles at every one
   of these waits, so `SLIGHT_GC_STRESS=7 make golden` checks it against
   every test.
+
+**D300. A stack gives its pages back: a burst's, and a deep one's.**
+*(Stevan, 15 Nov 2026, as D299: the next of what
+`docs/memory-review-2026-11-13-plan.md` lists as left that needs no
+decision of his, the review's finding 6; the design is Claude's, by
+default.)* Two things D291 and D292 left.
+- **A burst of processes that all wait at once kept its stacks.** A
+  process copied off its stack (D292) gave it to the island's warm
+  list, and with that full, 256, the copy was refused and the process
+  kept its stack, since a spare's pages may go back at any time and
+  the process is still running on it as it's copied off. But they go
+  back only from `trim_spares`, called by the scheduler or as a process
+  ends, never between the copy and the switch away; so now such a
+  stack goes among the spares, those waiting to go back going first,
+  there, if they've come to 64 MB. Of 3,000 processes that each run
+  past a slice before they wait, 1,025 stacks are held where 1,974
+  were (golden test 397).
+- **A stack never got shallower.** A process that recursed deep once
+  held those pages while it lived, and a warm stack kept them for the
+  next. Now `stack_low` is the lowest a process's frames have been
+  seen: at a slice's end, in `rt_preempt`, a sample every thousand
+  calls, and where it waits. When it waits more than 16 KB above
+  that, the pages below where it is go back, all but one, and the
+  watch starts again from there. A process that ends, or is copied
+  off, with deep pages gives its stack back as a spare, not warm.
+- **At once the first time, then at the 64th wait since.** Giving the
+  pages back at every wait made a worker that recurses 2,000 deep for
+  each message 3.3 times slower (0.67 s to 2.17 for 100,000 messages:
+  a system call and sixteen page faults a message), and one that goes
+  20,000 deep 2.2 times. A process that went deep to start with, and
+  waits, may never go deep again, so its first time is at once; after
+  that it has shown it goes deep more than once, and its pages go back
+  only at its 64th wait with them. With that, the two workers take 8
+  and 2 per cent longer.
+- **Measured** (cloud machine, x86-64, one island, resident memory at
+  rest): 1,000 processes that recursed 20,000 deep once and wait, 615
+  MB to 10; 1,000 deep, 36 MB to 10; 5,000 at 20,000 deep, 3,070 MB to
+  14; and after 1,000 that went 20,000 deep twice have ended, 165 MB
+  to 1. Instructions, callgrind's: a load, a subtraction and a compare
+  at every wait (one test for "lower than it's been seen" and "16 KB
+  above that", the first wrapping round), which is `thread-ring` 1.0
+  per cent more, `idle-memory` 1.3, `bank` 0.7, `ping-pong` and `spawn`
+  0.5; the programs that don't wait, the same.
+- **What it doesn't see:** a recursion that starts and ends within a
+  slice, under a thousand calls, isn't sampled, so a process that goes
+  a few hundred frames deep for each message keeps those pages, some
+  tens of KB, as before.
+- **Rejected:** giving the pages back at every wait (above); a
+  doubling count in place of 64, which needs two fields where this
+  needs a byte, and leaves a process that went deep a dozen times
+  holding its pages for 32,000 waits; the stack check at a function's
+  entry as an exact mark of the deepest, a soft limit that the fault's
+  stub would have to come back from, with the arguments still in their
+  registers: a compiler change on both targets for what a sample gets;
+  giving them back when the island is idle, as spares are, which needs
+  a list of waiting processes the scheduler can walk, taken off as
+  each wakes or ends.
+- A process is no bigger: `stack_low` is a word that the arena's size
+  class had room for (392 bytes in a block of 400 on x86-64, 504 in
+  512 on AArch64), and the count a byte beside the state.
+- Golden test 397 (`t/397-burst-gives-stacks`), on `:system`'s
+  `(:stacks n)`; `t/live.py`'s deep stacks, on its `:resident`, Linux's
+  alone: 1,000 processes that went 20,000 deep hold 8 MB as they wait
+  and 1 MB once they've ended.
+  With `SLIGHT_COPY_OUT`, 397 fails, and should, as 384 does:
+  no process keeps a stack as it waits.

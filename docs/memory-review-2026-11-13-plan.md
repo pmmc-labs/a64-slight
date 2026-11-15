@@ -18,10 +18,12 @@ memory work.
 | D | D297 | A fork whose pid is thrown away keeps no result |
 | E | D298 | A major collection pauses for other processes, every 256 KB (not the review's E: see below) |
 | | D299 | A process is settled wherever it waits: `read`, `read/any`, `open`, `join`, `join/race` and `sleep` as `recv` |
+| | D300 | Stacks give their pages back: a burst's go among the spares, and a deep one's below where it waits |
 
 `make test` passes on the cloud machine (both targets) and on the M2
-Max, as of D298, and on the cloud machine as of D299. `make tsan` is
-clean on the cloud machine as of D298.
+Max, as of D298, and on the cloud machine as of D300. `make tsan` is
+clean on the cloud machine as of D298; it hasn't been run since (the
+cloud session of 15 Nov had no sanitizer runtime installed).
 
 ## The findings, one by one
 
@@ -42,12 +44,12 @@ clean on the cloud machine as of D298.
 5. **A big heap costs two to four times what's live, and a pause.**
    The pause for other processes is answered (D298). The memory, and
    the big process's own pause, aren't (below).
-6. **Stacks.** Not looked at since the review: a burst of processes
-   that all wait at once keeps its stacks (`copy_out` refused,
-   `NO_ROOM`, when the warm list of 256 is full: 2,951 of 5,000 in the
-   review's run); a stack never gets shallower (a process that
-   recursed deep once holds those pages while it lives, and a warm
-   stack keeps them for the next).
+6. **Stacks.** Answered (D300): a burst's stacks go among the spares
+   when the warm list is full, and a stack that went deep gives the
+   pages below where its process waits back, at once the first time
+   and then at its 64th wait since. Left: a recursion that starts and
+   ends within a slice isn't seen; and under 1,024 waiting, each still
+   holds a page (D292's choice).
 7. **Exit records.** Answered (D297).
 8. **Messages.** Not changed, but for their allocation (D296): a
    mailbox has no bound and isn't counted toward anything; a taken
@@ -112,14 +114,15 @@ says so.
   change since D200: prototype and measure before proposing, and only
   if one big heap's memory or its own pause matters to the simulation
   work (D257).
-- **Stacks** (finding 6). `copy_out` could put a stack on the spares
-  when the warm list is full, if its pages aren't given back before
-  the process has switched off it (they go back at `trim_spares`,
-  which runs only when the island is about to wait or spares hold 64
-  MB, so marking the entry "in use till the next switch" may be all
-  it takes). A deep stack's pages could go back at a wait when its
-  process is shallow again (`madvise` below the stack pointer, past
-  some depth, as `trim_spares` does for a freed one).
+- **Stacks** (finding 6). Done (D300), both. No mark was needed for
+  the spares: `trim_spares` is only ever called by the scheduler or
+  as a process ends, never between a copy and the switch away. Giving
+  a deep stack's pages back at every wait cost a worker that recurses
+  for each message a factor of 3.3, hence the first time at once and
+  then every 64th wait. To measure on the M2 Max, where a page is 16
+  KB and `madvise` walks every page of its range: `bench/memory/deep.slight`
+  for the memory, and a worker that goes 2,000 deep for each message
+  for the cost (D300 has the program's shape).
 - **Limits and mailboxes** (findings 8 and 11). A language question:
   whether a mailbox counts toward its process's cap, and whether a
   program has a limit of its own. Propose first.
@@ -156,7 +159,7 @@ says so.
   `SLIGHT_COPY_OUT=1 SLIGHT_GC_VERIFY=1`. Under stress on the cloud
   machine, 059, 130, 162, 187, 194, 198, 214, 240 and `con-memory`
   run past 60 s and are killed (162 doesn't finish in 240 s before
-  any of this either); with `SLIGHT_COPY_OUT`, 200, 266, 384 and
+  any of this either); with `SLIGHT_COPY_OUT`, 200, 266, 384, 397 and
   `con-memory` fail, and should; with `SLIGHT_GC_SLICE=64`, 122 does,
   and should (D299).
 

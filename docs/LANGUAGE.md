@@ -1616,8 +1616,10 @@ which `lookup` reads; more keys may come. A process's:
   is what's in use; together they're what its heap has from the system.
   `(:mail n)`: its waiting messages, each a record of 32 bytes and its
   copy. `(:stack n)`: its stack's pages in memory, as the system says,
-  which is as deep as it has ever been, not as deep as it is, since a
-  stack keeps its pages till its process ends; and the buffer its
+  which is as deep as it has been since they last went back, not as
+  deep as it is: a process that went deep gives the pages below it back
+  when it next waits, the first time, and after that at its 64th wait
+  since (D300); and the buffer its
   frames wait in off the stack (D292), which it keeps once it has one.
   `(:shared n)`: the big strings and arrays it holds that are off every
   heap (The heap), each counted whole by every process that holds it.

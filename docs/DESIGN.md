@@ -917,8 +917,9 @@ Lalloc_N:
   listed after the nursery, one count of bytes covers both generations,
   and only how far the chunk promoted into is filled is kept; `waited`,
   `settle_log2` and `nursery_log2` are bytes beside its state, itself a
-  byte for that), since a waiting process costs its struct: 392 bytes
-  on x86-64, 504 on AArch64.
+  byte for that), since a waiting process costs its struct: 400 bytes
+  on x86-64, 512 on AArch64, each the size of the arena's block it was
+  in already (D300's `stack_low` took the room).
 - `SLIGHT_POISON=1` in the environment fills what the collector frees, a
   nursery started again included, with garbage, so a pointer it missed
   fails at once; `t/run.sh` sets it. `SLIGHT_GC_STRESS=n` makes every nth
@@ -1233,7 +1234,15 @@ run (option (b), D256's step 6, put off).
   lines down by its place, so that tops don't share cache sets, with no
   guard pages (D291). It keeps 256 given back warm; past that, their
   pages go back with `madvise`, 64 at a time, and their addresses are
-  kept for the next. With none to be had (the address space, or the
+  kept for the next. A stack gets shallower again (D300): `stack_low`
+  is the lowest a process's frames have been seen, at a slice's end
+  and where it waits, and when it waits more than 16 KB above that
+  (`STACK_DEEP`), the pages below where it is go back, and the watch
+  starts again there; at once the first time, and after that at its
+  64th wait with deep pages (`STACK_WAITS`), since one that goes deep
+  for every message needs them. One that ends, or is copied off, with
+  deep pages gives its stack back as a spare, not warm, so the next
+  process doesn't get them. With none to be had (the address space, or the
   commit limit, run out), the process that wanted one faults `:stack`,
   and the program goes on (D267). A process that waits (`recv`, `join`,
   `join/race`, `read`, `read/any`, `open`, `sleep`, `fork/on`'s wait
@@ -1245,7 +1254,10 @@ run (option (b), D256's step 6, put off).
   moved, and `rt_wait_again` starts its wait again there, by a function
   of the wait's own (an `again_t`) that goes on from what the process
   holds: whom it joins or reads, the result it was given, the answer
-  another island sent, its timer set already (D292). So no wait keeps
+  another island sent, its timer set already (D292). With 256 warm
+  already, a stack copied off goes among the spares (D300; before, the
+  copy was refused, and a burst of processes that had all run before
+  any waited kept its stacks). So no wait keeps
   anything it needs after waking in its C frames, which are dropped.
   `recv` is told its caller's frame by compiled code, for the
   collector; the other waits are entered through a few instructions of

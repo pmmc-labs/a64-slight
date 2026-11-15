@@ -89,6 +89,13 @@ program, or the system to measure the run.
   stayed. Linux's alone, with the target run natively: macOS marks the
   pages free (MADV_FREE) and counts them resident till it wants them,
   and under qemu the resident set is qemu's.
+- deep stacks: a stack's pages go back once its process is shallow
+  again (D300). 1,000 processes each recurse 20,000 deep, some 600 KB
+  of stack, and wait: the program's resident set, as :system says it,
+  is within BACK of where it began, and again once each has gone as
+  deep a second time and ended. Before, each held its 600 KB while it
+  lived, and the 256 stacks kept warm held theirs after. Linux's alone,
+  with the target run natively, as gives back is.
 - delete race: fs/delete-all deletes a tree 2,000 times while
   t/live/swap.c swaps its subdirectory with a link to a directory
   outside it, back and forth, atomically (RENAME_EXCHANGE, or macOS's
@@ -690,6 +697,21 @@ def gives_back():
           f'exit {p.returncode}: {p.stdout[:200]!r} {p.stderr[:400]!r}')
 
 
+def deep_stacks():
+    what = 'a deep stack\'s pages go back when its process is shallow again'
+    if RUN or platform.system() != 'Linux':
+        print(f'skip {what}: ' + ('under qemu the resident set is qemu\'s' if RUN else 'macOS counts freed pages resident till it wants them'))
+        return
+    prog = build('deep-stacks', 't/live/deep-stacks.slight')
+    p    = subprocess.run(RUN + [prog, '1000', '20000'], capture_output=True, env=ENV, timeout=DEADLINE)
+    m    = re.fullmatch(rb'\((\d+) (\d+) (\d+) (\d+)\)\n', p.stdout)
+    before, waiting, ended, went = (int(x) for x in m.groups()) if m else (0, 0, 0, 0)
+    mb = lambda x: f'{x / (1 << 20):.0f} MB'
+    check(f'{what}: 1,000 that went 20,000 deep hold {mb(waiting - before)} as they wait, and {mb(ended - before)} is left once they\'ve ended',
+          p.returncode == 0 and m is not None and went == 20000000 and waiting - before < BACK and ended - before < BACK,
+          f'exit {p.returncode}: {p.stdout[:200]!r} {p.stderr[:400]!r}')
+
+
 def delete_race():
     what = 'fs/delete-all with a link swapped in for its subdirectory, again and again, deletes nothing outside'
     prog  = build('delete-race', 't/live/delete-race.slight')
@@ -875,6 +897,7 @@ inherit()
 accept()
 stacks()
 gives_back()
+deep_stacks()
 delete_race()
 https()
 loopback()
