@@ -1,0 +1,12 @@
+; n processes waiting in recv, each holding a list of k integers (0: none, and nothing allocated), while the root sleeps.
+; (bench/memory.py; docs/memory-review-2026-11-13.md has what each showed.)
+
+(defun idle (st) (recv ((:ping from) (send from (length st)))))
+(defun idle-with (k) (idle (range 0 k)))
+(defun start (n k acc)
+    (if (== n 0) acc (start (- n 1) k (cons (if (== k 0) (fork idle ()) (fork idle-with k)) acc))))
+(let n (str->int (car @ARGV)))
+(let k (str->int (cadr @ARGV)))
+(let ps (start n k ()))
+(sleep 2500)
+(length ps)

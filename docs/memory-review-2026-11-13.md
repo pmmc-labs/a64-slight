@@ -20,7 +20,11 @@ away keeps no result, which answers finding 7. And E (15 Nov, D298),
 though not as written below: a major collection pauses to let other
 processes run, which answers the pause of finding 5, and leaves its
 memory, two to four times what's live, as it was. The measurements
-below are as they were before all five.
+below are as they were before all five; where each finding stands
+now, and what's left, is in
+[`memory-review-2026-11-13-plan.md`](memory-review-2026-11-13-plan.md).
+The programs of the appendix are in `bench/memory/`, and
+`bench/memory.py` runs them.
 
 The numbers are from the cloud machine: x86-64 Linux, one island,
 static glibc, 4 KB pages, resident memory read from `/proc` while the

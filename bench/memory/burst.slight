@@ -1,0 +1,12 @@
+; n processes each holding k cells, all waiting at once, then all ended; then the root sleeps.
+; (bench/memory.py; docs/memory-review-2026-11-13.md has what each showed.)
+
+(defun hold (k) (let xs (range 0 k)) (recv (:go (length xs))))
+(defun start (n k acc) (if (== n 0) acc (start (- n 1) k (cons (fork hold k) acc))))
+(let n (str->int (car @ARGV)))
+(let ps (start n (str->int (cadr @ARGV)) ()))
+(sleep 1000)
+(map (lambda (p) (send p :go)) ps)
+(let total (sum (map (lambda (p) (cadr (join p))) ps)))
+(sleep 2500)
+total

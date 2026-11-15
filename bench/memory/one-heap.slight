@@ -1,0 +1,10 @@
+; One process holding a list of n integers, rebuilt r times; then it sleeps.
+; (bench/memory.py; docs/memory-review-2026-11-13.md has what each showed.)
+
+(defun build (n acc) (if (== n 0) acc (build (- n 1) (cons n acc))))
+(defun churn (r xs n) (if (== r 0) xs (churn (- r 1) (build n ()) n)))
+(let n (str->int (car @ARGV)))
+(let r (str->int (cadr @ARGV)))
+(let xs (churn r (build n ()) n))
+(sleep 1500)
+(length xs)

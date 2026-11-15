@@ -7877,7 +7877,8 @@ lock, which those all come from:
 - `t/alloc.c`, the arena on its own, four threads freeing each other's
   blocks, each block a pattern of its address (`make alloc`, in `make
   test`; and under ThreadSanitizer in `make tsan`); `t/live.py`'s gives
-  back, Linux's alone. Not compiled or measured on the M2 Max yet.
+  back, Linux's alone. `make test` passes on the M2 Max (15 Nov); not
+  timed there yet.
 
 **D297. A fork whose pid is thrown away keeps no result.** *(Stevan, 14
 Nov 2026, choosing "Implicit" of three: this, an explicit form, or

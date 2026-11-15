@@ -1,0 +1,9 @@
+; n processes that each recurse d deep once, not in a tail call, and then wait.
+; (bench/memory.py; docs/memory-review-2026-11-13.md has what each showed.)
+
+(defun deep (d) (if (== d 0) 0 (+ 1 (deep (- d 1)))))
+(defun w (d) (let x (deep d)) (recv (:go x)))
+(defun start (n d acc) (if (== n 0) acc (start (- n 1) d (cons (fork w d) acc))))
+(let ps (start (str->int (car @ARGV)) (str->int (cadr @ARGV)) ()))
+(sleep 2500)
+(length ps)
