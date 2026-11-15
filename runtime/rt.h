@@ -543,6 +543,8 @@ typedef struct rt_proc {
     size_t          heap_bytes; // in all its chunks, both generations
     size_t          gc_at;      // a major collection once this much of the old generation is in use
     rt_msg_t       *mail, *mail_last;
+    size_t          mail_rest;  // the bytes of its waiting messages after the first, which count toward its
+                                // heap's cap (process.c, D301)
     struct rt_proc *next_ready;
     struct rt_proc *joiners;    // blocked in join on this one, in the order they joined
     struct rt_proc *next_joiner;
@@ -553,8 +555,8 @@ typedef struct rt_proc {
     rt_watch_t     *watching;   // the monitors it has set on processes still running
     rt_value_t      reading;    // the reader whose message it took last, to read on at its next recv; or 0
     int64_t         slice_rest; // calls left in its slice after reductions run out (process.c)
-    int64_t         slice;      // the calls its last slice had, reductions and slice_rest together
-    uint64_t        calls;      // the calls of its slices before that one, for :system
+    uint64_t        calls;      // the calls of its slices, this one whole, for :system: what's left of this
+                                // one, reductions and slice_rest, is still to take from it (calls_of)
     uintptr_t       at;         // where in compiled code it last stopped while holding a stack, or 0
     uint64_t        rand_seed;  // its random numbers: SplitMix64's state...
     uint64_t        rand_gamma; // ...and the step it takes, its own (numbers.c, D222)

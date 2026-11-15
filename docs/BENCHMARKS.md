@@ -1601,6 +1601,18 @@ wait, of a peak of 658, since macOS counts pages marked free
 arena's (D296). The pages are the system's to take; `ps` and Activity
 Monitor don't say so.
 
+And a mailbox counts toward its process's cap (D301, 15 Nov): a
+process sent more than it takes ends `:heap` when its heap and its
+waiting messages pass the cap, where before the mailbox had no bound.
+Only the messages waiting behind the first are counted as they come and
+go, so what it costs depends on whether a mailbox has any. Instructions,
+under callgrind, on the cloud machine: `fan-in`, whose one mailbox
+always has, 5.1 per cent more, 18 instructions a message; `thread-ring`
+and `spawn` 1.5; `ping-pong` 0.8; `bank`, `idle-memory` and the workers
+0.9; the programs that send nothing, the same. `fan-in`'s ten million
+messages still run under the default cap of 1 GB, on one island and
+across them. Not measured on the M2 Max.
+
 What's left of the review: `docs/memory-review-2026-11-13-plan.md`.
 
 ### What slight should look at next

@@ -19,11 +19,12 @@ memory work.
 | E | D298 | A major collection pauses for other processes, every 256 KB (not the review's E: see below) |
 | | D299 | A process is settled wherever it waits: `read`, `read/any`, `open`, `join`, `join/race` and `sleep` as `recv` |
 | | D300 | Stacks give their pages back: a burst's go among the spares, and a deep one's below where it waits |
+| | D301 | A mailbox counts toward its process's cap: one sent more than it takes ends `:heap` |
 
 `make test` passes on the cloud machine (both targets) and on the M2
-Max, as of D298, and on the cloud machine as of D300. `make tsan` is
-clean on the cloud machine as of D300. `make test` passes on the M2
-Max as of D300 too (Stevan, 15 Nov).
+Max, as of D298, and on the cloud machine as of D301. `make tsan` is
+clean on the cloud machine as of D301. `make test` passes on the M2
+Max as of D300 (Stevan, 15 Nov); D301 hasn't been run there.
 
 ## The findings, one by one
 
@@ -51,17 +52,17 @@ Max as of D300 too (Stevan, 15 Nov).
    ends within a slice isn't seen; and under 1,024 waiting, each still
    holds a page (D292's choice).
 7. **Exit records.** Answered (D297).
-8. **Messages.** Not changed, but for their allocation (D296): a
-   mailbox has no bound and isn't counted toward anything; a taken
-   message's 32-byte record is dead in the taker's old generation till
-   a major collection or a settling.
+8. **Messages.** A mailbox counts toward its process's cap (D301).
+   Left: a taken message's 32-byte record is dead in the taker's old
+   generation till a major collection or a settling.
 9. **Values.** Not looked at: objects are 16-aligned where 8 would do
    (a two-element tuple 32 bytes for 24); the arena's classes are
    multiples of 16 already.
 10. **What can't be seen.** Answered (D294), but an arena's free
     memory isn't shown: `:resident` less the rest includes it.
-11. **Limits.** Not looked at: nothing bounds the program as a whole,
-    nor a mailbox.
+11. **Limits.** A mailbox is bounded (D301). Nothing bounds the
+    program as a whole; that's with Stevan, with a recommendation
+    against (below).
 
 ## What's left, with what's known about each
 
@@ -171,7 +172,9 @@ says so.
   whether a mailbox counts toward its process's cap, and whether a
   program has a limit of its own. Propose first.
 
-  Put to Stevan on 15 Nov, as two questions. *A mailbox:* count its
+  The first is done (D301: "do the mailbox cap"); the second is
+  still his to say. As they were put to him on 15 Nov, two questions.
+  *A mailbox:* count its
   bytes toward its process's cap, and end the receiver with `:heap`
   when a message would take it past (`end_other`, as a kill does); the
   sender is never held or faulted, as now. It's D233's reasoning: a

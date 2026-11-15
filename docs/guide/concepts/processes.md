@@ -29,7 +29,9 @@ is.)
 
 ## Sending and waiting
 
-`send` copies a message into a process's mailbox, and never waits.
+`send` copies a message into a process's mailbox, and never waits. (A
+process that's sent more than it takes, till its mailbox and its heap
+pass the heap's cap, ends with `:heap`: see [Memory](memory.md).)
 Messages from one process to another arrive in the order they were
 sent. `recv` takes the next message and matches it against its clauses,
 with the same patterns as `match`; a message that matches none is

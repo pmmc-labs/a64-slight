@@ -137,6 +137,8 @@ typedef struct rt_isle {
     size_t            *slots;           // the offsets in scratch of words that point into it
     size_t             scratch_cap;     // in bytes; slots has room for one for each word
     uint64_t           retired_calls;   // the calls of the processes that have ended
+    rt_value_t        *full;            // the pids of processes whose mailboxes have taken them past their cap,
+    uint32_t           nfull, full_cap; // to be ended (end_full, D301)
     int                taking;          // taking a batch from the inbox, or a timer: the running process can't end yet (M1)
     int                ending;          // and how an item has ended it meanwhile: ENDING_KILLED, or ENDING_FAILED with
     int                ending_err;      // its device's error, and the device's path (a copy) or port
@@ -193,6 +195,7 @@ static int64_t gc_stress;                       // SLIGHT_GC_STRESS=n: collect a
 static int     gc_verify;                       // SLIGHT_GC_VERIFY: check that nothing old points at anything young
 static int     copy_always;                     // SLIGHT_COPY_OUT: every recv that waits copies its process off its stack
 static size_t  heap_max;                        // the most a process's chunks can hold (D202)
+static size_t  mail_trip;                       // half of it: a mailbox is looked at once it and the heap pass this (D301)
 static size_t  gc_slice = GC_SLICE;             // SLIGHT_GC_SLICE: what a major collection copies between pauses (D298)
 
 // --- the run queue ------------------------------------------------------------
@@ -455,10 +458,10 @@ static __attribute__((noinline)) void shallow(rt_proc_t *p, const rt_value_t *fr
     p->stack_low = (uintptr_t)frame;
 }
 
-// The calls p has made: those of its slices before this one, and this
-// one's so far, which is what's left of it taken from what it had.
+// The calls p has made: those of its slices, this one counted whole
+// when it started, less what's left of it.
 static uint64_t calls_of(const rt_proc_t *p) {
-    return p->calls + (uint64_t)(p->slice - p->reductions - p->slice_rest);
+    return p->calls - (uint64_t)(p->reductions + p->slice_rest);
 }
 
 // A new slice of QUOTA calls, the last of which calls rt_preempt. With
@@ -467,8 +470,7 @@ static uint64_t calls_of(const rt_proc_t *p) {
 // calls as without it.
 static void refill(rt_proc_t *p) {
     int64_t calls = my.sched ? 1 + (int64_t)(sched_next() % QUOTA) : QUOTA;
-    p->calls      = calls_of(p);
-    p->slice      = calls;
+    p->calls      = calls_of(p) + (uint64_t)calls;
     p->reductions = gc_stress && gc_stress < calls ? gc_stress : calls;
     p->slice_rest = calls - p->reductions;
 }
@@ -790,10 +792,12 @@ static size_t shared_bytes(const rt_proc_t *p, int old) {
     return h ? h->bytes : 0;
 }
 
-// What p's heap holds against its cap: its chunks, and what its handles
-// keep alive.
+static size_t mail_bytes(const rt_proc_t *p);
+
+// What p holds against its cap: its heap's chunks, what its handles keep
+// alive, and its waiting messages (D301).
 static size_t held(const rt_proc_t *p) {
-    return p->heap_bytes + shared_bytes(p, 0) + shared_bytes(p, 1);
+    return p->heap_bytes + shared_bytes(p, 0) + shared_bytes(p, 1) + mail_bytes(p);
 }
 
 size_t rt_heap_room(void) {
@@ -1040,7 +1044,8 @@ static void free_heap(rt_proc_t *p) {
         next = m->next;
         free_msg_on(p->isle, m);
     }
-    p->mail = p->mail_last = NULL;
+    p->mail      = p->mail_last = NULL;
+    p->mail_rest = 0;
 }
 
 // --- copying values between processes -----------------------------------------
@@ -2449,18 +2454,19 @@ static rt_proc_t *address_owner(rt_value_t a) {
     return task == RT_NIL ? NULL : slot(task)->proc;
 }
 
-static void deliver(rt_proc_t *p, rt_msg_t *m);
+static int deliver(rt_proc_t *p, rt_msg_t *m);
+static inline size_t msg_bytes(const rt_msg_t *m);
 
 // To an address, as send to a process: a message to one that's closed, or
-// whose task has ended, disappears (D92).
-static void to_address(rt_value_t a, rt_msg_t *m) {
+// whose task has ended, disappears (D92). Returns what deliver does.
+static int to_address(rt_value_t a, rt_msg_t *m) {
     rt_proc_t *p = address_owner(a);
     if (!p) {
         free_msg(m);
-        return;
+        return 0;
     }
     m->device = a;
-    deliver(p, m);
+    return deliver(p, m);
 }
 
 // A new address of the calling task's, with the island's next id.
@@ -2513,6 +2519,8 @@ static void close_address(rt_proc_t *p, rt_value_t a) {
         }
     }
     p->mail_last = last;
+    p->mail_rest = 0;                           // counted again, of what's left (D301)
+    for (const rt_msg_t *m = p->mail ? p->mail->next : NULL; m; m = m->next) p->mail_rest += msg_bytes(m);
 }
 
 
@@ -2571,12 +2579,106 @@ static int reads(const rt_proc_t *p, rt_value_t src) {
     return rt_is_cons(p->joining) ? among(p->joining, src) : p->joining == src;
 }
 
-static void deliver(rt_proc_t *p, rt_msg_t *m) {
-    if (p->mail_last) p->mail_last->next = m;
-    else              p->mail = m;
+// A mailbox counts toward its process's cap (D301): what a process holds
+// against it (held) is its heap and its waiting messages, so one that
+// doesn't take what it's sent ends :heap on its own, where its monitor
+// sees it, as one that fills its heap does, rather than taking the
+// program's memory till the system ends the program. The sender is never
+// held up, and never faulted.
+//
+// The count is kept so that a process that keeps up pays nothing for it:
+// mail_rest is the bytes of the waiting messages after the first, so a
+// message into an empty mailbox, and the taking of an only one, don't
+// touch it. A message's bytes are its chunk's, its record and its copy,
+// and the big strings and arrays it shares, each whole, as a heap counts
+// them once it's taken.
+static __attribute__((noinline)) size_t shared_in(const rt_chunk_t *c) {
+    const chunk_handles_t *h = handles_after((rt_chunk_t *)(uintptr_t)c);
+    size_t bytes = 0;
+    for (uint64_t i = 0; i < h->n; i++) bytes += ((const rt_buffer_t *)h->at[i][2])->len;
+    return bytes;
+}
+
+static inline size_t msg_bytes(const rt_msg_t *m) {
+    const rt_chunk_t *c = m->chunk;
+    return c->shares ? c->size + shared_in(c) : c->size;
+}
+
+static size_t mail_bytes(const rt_proc_t *p) {
+    return p->mail ? p->mail_rest + msg_bytes(p->mail) : 0;
+}
+
+// m is no longer among the messages after p's first. Its chunk's bytes
+// here, and the rest out of line, so that taking a message keeps to its
+// few instructions.
+static __attribute__((noinline)) void uncount_shared(rt_proc_t *p, const rt_msg_t *m) {
+    p->mail_rest -= msg_bytes(m);
+}
+
+static inline __attribute__((always_inline)) void uncount(rt_proc_t *p, const rt_msg_t *m) {
+    const rt_chunk_t *c = m->chunk;
+    if (__builtin_expect(c->shares, 0)) uncount_shared(p, m);
+    else                                p->mail_rest -= c->size;
+}
+
+// m, which follows prev in p's mailbox, or is its first, leaves it.
+static inline __attribute__((always_inline)) void unmail(rt_proc_t *p, rt_msg_t *prev, rt_msg_t *m) {
+    rt_msg_t *next = m->next;
+    if (prev) {
+        prev->next = next;
+        uncount(p, m);
+        if (!next) p->mail_last = prev;
+    } else {
+        p->mail = next;
+        if (next) uncount(p, next);             // the first now, and no longer among the rest
+        else      p->mail_last = NULL;
+    }
+}
+
+// p's mailbox and heap have passed half the cap, as a message came: if
+// that's past the cap, with what its handles keep, p is to end, and 1.
+// Not here: whoever is delivering may be in the middle of p's watchers,
+// its devices or the keyboard's listeners, which p's end would change
+// under it. So p is noted, and ended where that's safe (end_full).
+static __attribute__((noinline)) int full(rt_proc_t *p) {
+    if (held(p) <= heap_max) return 0;
+    if (my.nfull && my.full[my.nfull - 1] == p->pid) return 1;
+    if (my.nfull == my.full_cap) {
+        my.full_cap = my.full_cap ? 2 * my.full_cap : 16;
+        my.full     = rt_must(realloc(my.full, my.full_cap * sizeof *my.full));
+    }
+    my.full[my.nfull++] = p->pid;
+    return 1;
+}
+
+// The rest of deliver, for a message that shares buffers, whose bytes are
+// still to count, or one that has taken the mailbox and the heap past
+// half the cap.
+static __attribute__((noinline)) int counted(rt_proc_t *p, const rt_msg_t *m, int shares) {
+    if (shares) p->mail_rest += msg_bytes(m);
+    return p->mail_rest + p->heap_bytes > mail_trip ? full(p) : 0;
+}
+
+// Into p's mailbox; p wakes if it's waiting for a message. Returns
+// whether that has taken p past its cap, for a caller that can end it at
+// once (rt_send); the others leave it to the next place that does. The
+// counting comes last, and what it calls it jumps to, so that a message
+// into an empty mailbox, the usual one, costs what it did.
+static int deliver(rt_proc_t *p, rt_msg_t *m) {
+    rt_msg_t *last = p->mail_last;
+    if (last) last->next = m;
+    else      p->mail    = m;
     p->mail_last = m;
     if ((p->state == RT_WAITING && !for_read(m)) || (p->state == RT_READING && reads(p, m->device))) enqueue(p);
+    if (!last) return 0;
+    const rt_chunk_t *c = m->chunk;
+    if (__builtin_expect(c->shares, 0)) return counted(p, m, 1);
+    p->mail_rest += c->size;
+    if (__builtin_expect(p->mail_rest + p->heap_bytes > mail_trip, 0)) return counted(p, m, 0);
+    return 0;
 }
+
+static void end_full(void);
 
 static void command(struct rt_device *d, rt_value_t msg);
 static void read_on(rt_proc_t *p, rt_value_t pid);
@@ -2600,12 +2702,12 @@ rt_value_t rt_send(rt_proc_t *p, rt_value_t pid, rt_value_t msg, const char *sit
         return RT_NIL;
     }
     if (rt_is_address(pid)) {
-        to_address(pid, new_msg_reserving(p->isle, msg, 0, site));
+        if (to_address(pid, new_msg_reserving(p->isle, msg, 0, site))) end_full();
         return RT_NIL;
     }
     entry_t *e = at_on(p->isle, rt_pid_number(pid));      // this island's, as just seen
     if (e->proc) {
-        deliver(e->proc, new_msg_reserving(p->isle, msg, 0, site));
+        if (deliver(e->proc, new_msg_reserving(p->isle, msg, 0, site))) end_full();   // past its cap (D301)
     } else if (e->device) {
         p->at = (uintptr_t)__builtin_return_address(0);   // for :system
         command(e->device, msg);
@@ -2641,9 +2743,7 @@ static inline __attribute__((always_inline)) rt_value_t recv_wait(rt_proc_t *p, 
             m    = m->next;
         }
         if (m) {
-            if (last) last->next = m->next;
-            else      p->mail   = m->next;
-            if (p->mail_last == m) p->mail_last = last;
+            unmail(p, last, m);
             rt_value_t v = m->value;
             p->reading = m->device;
             if (bare(m)) free_msg_on(p->isle, m);
@@ -2698,8 +2798,7 @@ static __attribute__((noinline)) rt_value_t recv_again(rt_proc_t *p, rt_value_t 
 rt_value_t rt_recv(rt_proc_t *p, rt_value_t *frame, uint64_t n, const uintptr_t *fp, uintptr_t at) {
     rt_msg_t *m = p->mail;
     if (!m || p->reading || for_read(m) || due(p)) __attribute__((musttail)) return recv_slow(p, frame, n, fp, at);
-    p->mail = m->next;
-    if (p->mail_last == m) p->mail_last = NULL;
+    unmail(p, NULL, m);
     rt_value_t v = m->value;
     p->reading = m->device;
     if (bare(m)) free_msg_on(p->isle, m);
@@ -2736,7 +2835,7 @@ static rt_msg_t *exit_msg(rt_value_t pid, const entry_t *e) {
 
 // Sends it to the process who, or to its address addr, if the monitor
 // gave one (D277).
-static void to_address(rt_value_t a, rt_msg_t *m);
+static int to_address(rt_value_t a, rt_msg_t *m);
 
 static void notify(rt_value_t who, rt_value_t addr, rt_value_t pid, const entry_t *e) {
     if (addr) {
@@ -3212,8 +3311,7 @@ static int read_one(rt_proc_t *p, rt_value_t src, int pair, const char *site, rt
             last = m;
             continue;
         }
-        *link = m->next;
-        if (p->mail_last == m) p->mail_last = last;
+        unmail(p, last, m);
         *v = m->value;
         if (!rt_is_address(src)) p->reading = src;
         if (bare(m)) free_msg(m);
@@ -3342,6 +3440,42 @@ rt_value_t rt_kill(rt_value_t pid, const char *site) {
     if (p == rt_current) rt_end(0, rt_keyword(RT_SYM_KILLED), 0);
     end_other(p, rt_keyword(RT_SYM_KILLED));
     return RT_NIL;
+}
+
+// Ends the processes whose mailboxes have taken them past their cap
+// (full, above), each with (:error (:heap () "its mailbox")), as a fault
+// would end it, and its line: where a process can be ended, as kill ends
+// one, which is after a send, a batch from the inbox, the timers, the
+// keys, and a process's own end, and when the island has nothing to run.
+// One that has taken enough of its messages since goes on. The process
+// running, if it's one of them, is last, since this doesn't return from
+// it.
+static const char mailbox[] = "its mailbox";
+static rt_value_t string_in(uint64_t *space, const char *bytes, size_t len);
+
+static __attribute__((noinline)) void end_full(void) {
+    int self = 0;
+    while (my.nfull) {
+        rt_proc_t *p = slot(my.full[--my.nfull])->proc;
+        if (!p || held(p) <= heap_max) continue;
+        if (p == rt_current) {
+            self = 1;
+            continue;
+        }
+        char who[64];
+        rt_pid_text(who, sizeof who, p->pid);
+        fflush(stdout);
+        if (p->pid == RT_ROOT) fprintf(stderr, "fault: heap exhausted (%s)\n", mailbox);
+        else                   fprintf(stderr, "fault in %s: heap exhausted (%s)\n", who, mailbox);
+        uint64_t space[sizeof mailbox / 8 + 6];
+        _Alignas(16) rt_value_t cells[6] = {
+            rt_keyword(RT_SYM_FAULTS - 1 + RT_FAULT_HEAP), (rt_value_t)&cells[2] | RT_TAG_LIST,
+            RT_NIL,                                        (rt_value_t)&cells[4] | RT_TAG_LIST,
+            string_in(space, mailbox, sizeof mailbox - 1), RT_NIL,
+        };
+        end_other(p, (rt_value_t)cells | RT_TAG_LIST);
+    }
+    if (self) rt_fault(RT_FAULT_HEAP, RT_NIL, mailbox);
 }
 
 // --- what comes from other islands (D256) ------------------------------------
@@ -3822,6 +3956,7 @@ static void ring(void) {
             enqueue(p);                         // asleep: only kill could have woken it
         }
     }
+    if (my.nfull) end_full();                   // a timer's message one too many for its taker (D301)
 }
 
 // A timer's number has its island above TIMER_ISLAND, so that one
@@ -4088,6 +4223,7 @@ static inline void events(void) {
         read_input();
         while (next_key()) {}
     }
+    if (my.nfull) end_full();                   // a key, or what a socket sent, one too many for its taker (D301)
 }
 
 // Nothing can run: waits for a key, a socket, a command or the next
@@ -4496,6 +4632,7 @@ static void fail(rt_device_t *d, int err) {
 // copies it out.
 static void end_taken(void) {
     my.taking = 0;
+    if (my.nfull) end_full();                   // those a message of the batch took past their caps (D301)
     if (!my.ending) return;
     int how = my.ending;
     my.ending = 0;
@@ -5805,7 +5942,7 @@ static void snap_pid(pids_t *ps, rt_value_t pid) {
 static memory_t memory_of(const rt_proc_t *p) {
     size_t   young = young_bytes(p);
     memory_t m = { .nursery = young, .old = p->heap_bytes - young, .shared = shared_bytes(p, 0) + shared_bytes(p, 1) };
-    for (const rt_msg_t *msg = p->mail; msg; msg = msg->next) m.mail += msg->chunk->size;
+    m.mail = mail_bytes(p);
     if (p->stack)  m.stack += (uint64_t)rt_io_in_memory(p->stack, STACK_BYTES);
     if (p->parked) m.stack += sizeof *p->parked + p->parked->cap;
     return m;
@@ -6344,6 +6481,10 @@ void rt_run(void) {
             // inbox a while before counting this island done, since an
             // answer is often on its way, and the count is every
             // island's (D256).
+            if (my.nfull) {                     // nothing to run, but one to end, whose end may wake another
+                end_full();
+                continue;
+            }
             if (!idle() && !(atomic_load(&many) && spin()) && !quiesce()) return;
             continue;
         }
@@ -6360,6 +6501,7 @@ void rt_run(void) {
         if (p->state == RT_DONE) {
             retire(p);
             rt_block_free(&my.arena, p);
+            if (my.nfull) end_full();           // its end's notice may have been one too many for a watcher (D301)
         }
     }
 }
@@ -6657,6 +6799,7 @@ int main(int argc, char **argv) {
     sched_seed    = settings.sched_seed;
     nislands      = settings.islands;
     heap_max      = settings.heap_max;
+    mail_trip     = heap_max / 2;
     started       = now();
     if (virtual_clock) epoch = rt_io_epoch(epoch_at);
     rt_proc_t *p = rt_new_process((rt_code_t)slight_main, RT_NIL);

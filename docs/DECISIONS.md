@@ -8132,3 +8132,83 @@ default.)* Two things D291 and D292 left.
   and 1 MB once they've ended.
   With `SLIGHT_COPY_OUT`, 397 fails, and should, as 384 does:
   no process keeps a stack as it waits.
+
+**D301. A mailbox counts toward its process's cap.** *(Stevan, 15 Nov
+2026: "do the mailbox cap", of what
+`docs/memory-review-2026-11-13-plan.md` put to him from the review's
+findings 8 and 11; the rule is the one Claude recommended there.)* A
+mailbox had no bound (D88), and wasn't counted toward anything: a
+process sent messages faster than it took them held them all, and what
+ended it was the system ending the program. D88 kept it so because a
+bounded mailbox "would drop the message or fault the sender", `send`
+being unable to block. This does neither: it's the receiver that ends.
+- **The rule.** What a process holds against its heap's cap (1 GB, or
+  `SLIGHT_HEAP_MAX`, or a quarter of a container's limit, D233) is its
+  heap, what its handles keep alive, and its waiting messages. A
+  message that takes it past the cap ends it with `(:error (:heap ()
+  "its mailbox"))` and the line `fault in #<pid 7>: heap exhausted (its
+  mailbox)`, whatever it was doing, as a `kill` ends one; its joiners
+  and monitors are told as of any end. The sender gets `()` from
+  `send` as ever, and what's sent after goes nowhere, as to any
+  process that has ended (D92). It's D233's reasoning: a process that
+  can't keep up ends on its own, where the program can see it.
+- **A message's bytes** are its chunk's, a record of 32 bytes and its
+  copy, and the shared buffers it holds (D253), each whole, as the
+  taker's heap counts them once it's taken: a stream of big strings to
+  a slow reader is the likeliest mailbox to grow. A message from
+  another island counts once its island has taken it from the inbox,
+  and a timer's once it's due.
+- **A process that keeps up pays almost nothing.** The count kept is
+  of the waiting messages after the first (`mail_rest`), so a message
+  into an empty mailbox, and the taking of an only one, don't touch
+  it; the first's bytes are read from it when they're wanted. The test
+  as a message comes, when the mailbox wasn't empty, is that count and
+  the heap's chunks against half the cap, and only past that is all of
+  it worked out. So the first message waiting isn't tested as it comes
+  (it's counted, at the process's own next allocation), and a process
+  more than half of whose cap is shared buffers is tested only as it
+  allocates.
+- **It's ended where that's safe.** Whoever delivers a message may be
+  in the middle of the receiver's watchers (a process's end telling
+  its monitors), its devices, or the keyboard's listeners, which the
+  receiver's end would change under it. So the receiver is noted, and
+  ended at the next place a process can be: straight after a `send`,
+  after a batch from the inbox, the timers, the keys and sockets, a
+  process's own end, and when the island has nothing to run. A process
+  that has taken enough of its messages by then goes on. One that
+  sends to itself is faulted at its `send`.
+- **Since the mailbox counts,** a process with a full one also faults
+  at its own next allocation, `:heap` with that allocation's site, if
+  that comes first; and `(:memory info)`'s `(:mail n)` is now what the
+  mailbox holds against the cap, the shared buffers its messages hold
+  included, where it was their chunks alone (D294). Stevan may want
+  that back as it was; it's one line.
+- **A process is no bigger:** the count took the place of `slice`, the
+  calls a process's slice began with, which `calls` now includes from
+  the start, what's left of the slice being taken from it when the
+  calls made are asked for.
+- **Measured** (cloud machine, x86-64, one island; instructions,
+  callgrind's): `fan-in`, whose one mailbox always has messages
+  waiting, 5.1 per cent more, 18 instructions a message, to count each
+  in and out; `thread-ring` 1.5, `spawn` 1.5, `ping-pong` 0.8, `bank`,
+  `idle-memory` and the workers 0.9; the programs that send nothing,
+  the same. `fan-in`'s ten million messages, and across islands, run
+  as they did under the default cap.
+- **Rejected:** holding the sender till there's room, which changes
+  what `send` is, and can deadlock two processes sending to each other;
+  faulting the sender, who may be one of many and not the one at
+  fault; dropping the message, silently; a fault kind of its own
+  (`:mailbox`), when the cap it passed is the heap's; counting at
+  every message, in and out (2 to 4 per cent on `ping-pong` and
+  `thread-ring`, 8 on `fan-in`, as first built); ending the receiver
+  in `deliver` itself (above); a count of every waiting message's
+  bytes kept in the message, which makes each 16 bytes bigger. Not
+  done: a limit for the program as a whole (the plan has why Claude
+  would leave it); what a timer holds before it's due, results kept,
+  and devices' buffers still aren't counted.
+- Golden test 398 (`t/398-mailbox-cap`), with a cap of 1 MB: a sleeper
+  holds 600 lists, 979,200 bytes, and 642, and ends at the 643rd; one
+  that takes what it's sent has 8 MB go through it; a process that
+  sends to itself ends; ten strings of 8,000 bytes are 80,640, and 200
+  end their sleeper; and a flood from another island ends a process
+  that waits for something else.
