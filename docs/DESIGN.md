@@ -819,9 +819,10 @@ Lalloc_N:
   one when what that promoted takes the old generation to its
   threshold. The fresh chunks start at 512 bytes and double to 1 MB, so
   what's kept is in chunks that fit it, whatever the heap was before.
-- **A process that waits is settled** (D295; `settle_heap`), so that it
-  holds about what it has live, not what it allocated to get there.
-  When it's about to wait in `recv` with nothing to take, and its
+- **A process that waits is settled** (D295, D299; `settle_heap`), so
+  that it holds about what it has live, not what it allocated to get
+  there. When it's about to wait, in `recv` with nothing to take, or in
+  `read`, `read/any`, `open`, `join`, `join/race` or `sleep`, and its
   heap's chunks, both generations, have reached 2^`settle_log2` bytes:
   a major collection; then, if what's live came to less than the
   chunks it was copied into and to no more than 1 MB, a second, into
@@ -841,9 +842,20 @@ Lalloc_N:
   it takes a message. A nursery's size is one run's need because
   `restart` grows one past 16 KB only if the process hasn't waited (in
   anything: `waited`, set in `wait_from`) since it last started again.
-  Waits other than `recv` don't settle: they haven't the frame's slots
-  in use, and `read` holds its sources in C. `SLIGHT_GC_STRESS` settles
-  at every `recv` that waits, as if for the first time.
+  `recv` is told how many of its frame's slots are in use, and those
+  are its roots. The other waits are told only the frame (`WAIT`, in
+  `rt_asm_*.S`), so all its slots are roots (`settle_wait`, D299),
+  which they can be because a function that calls one of them zeroes
+  its slots at its entry, as one that calls a compiled function does
+  (`settles`, in `codegen.ts`): from then on a slot holds a value that
+  every collection since has moved. What such a wait holds in C that's
+  in the heap, `read/any`'s list of sources and a race's of pids, is one
+  more root, moved with the rest. Settling may pause (below), so each
+  looks again at what it was about to wait for: a message, an end, a
+  device's closing. `sleep` settles before its timer is set. The waits
+  across islands in `fork/on` and `timer/cancel` don't settle: they're
+  answered at once. `SLIGHT_GC_STRESS` settles at every wait, as if for
+  the first time.
 - **The cap** is checked as the heap grows, in `rt_heap_grow`, and not
   as a collection promotes; so a heap that's past it after a collection
   gets no room in its nursery, and its next allocation faults (D202).

@@ -7997,3 +7997,63 @@ collects, its state on that process's stack: some fifty lines.
   cells in a fifth of the calls, since its collections pause thousands
   of times; and a process killed among its pauses ends. `SLIGHT_GC_SLICE=64
   make golden` runs every test with a pause at every object copied.
+
+**D299. A process is settled wherever it waits.** *(Stevan, 15 Nov
+2026: "let's get started" on what `docs/memory-review-2026-11-13-plan.md`
+lists as left, of which this is the first that needs no decision of
+his; the design is Claude's, by default.)* D295 settled a process's
+heap when it waited in `recv`, and left `read`, `join` and `sleep`: a
+process that only asks (`ask`, `http/request`, `rpc/call` and `slurp`
+wait in `read`), joins or sleeps had D295's nursery rule and the old
+generation's floor of 64 KB, and held what it had built and dropped
+till it built as much again. Two things were in the way. Those waits
+are told their calling frame and its frame pointer (`WAIT`, in
+`rt_asm_*.S`), for copying a process off its stack (D292), but not how
+many of the frame's slots are in use, which `recv` is told and collects
+by. And `read/any`'s list of sources and a race's of pids are held in C
+across the wait, where a collection couldn't move them.
+- **All of the frame's slots are roots.** The plan's guess, that every
+  slot is a value or zero at a builtin's call as at a function's, was
+  half right: a slot only ever holds a value, but a function zeroed its
+  slots at its entry only if it called a compiled function (not in tail
+  position), so one that only waited in a builtin left them as the
+  stack had them. Now a function that calls `read`, `read/any`, `open`,
+  `join`, `join/race` or `sleep` zeroes them too (`settles`, in
+  `codegen.ts`): a store or two at its entry. From then on a slot holds
+  zero or a value that every collection since has moved, live or not;
+  one that's dead keeps what it points at till the function returns,
+  as a caller's dead slots always have under a call.
+- **What the wait holds in C is one more root** (`also`, in
+  `settle_heap` and `collect_all`): the list moves with the rest, and
+  the wait goes on with where it went.
+- **Each looks again after settling,** since a settling may pause
+  (D298) and what it was about to wait for come meanwhile: `read` for a
+  message or its device's closing, `join` and a race for an end.
+  `sleep` settles before its timer is set, the time it's due worked out
+  first.
+- **Measured** (cloud machine, x86-64, one island): 1,000 processes
+  that each ask a server 1,000 times, keeping three cells from one
+  answer to the next, then wait in `read` (`bench/memory/askers.slight`),
+  60 MB at rest to 30, and a peak of 98 MB to 44; a root that built 16
+  MB five times and sleeps, 33 MB to 18. Instructions, callgrind's:
+  `bank`, whose customers sleep, 0.5 per cent more; every other
+  benchmark within 0.1 per cent.
+- **Not done:** the waits across islands in `fork/on` and
+  `timer/cancel`, which are answered at once.
+- **Rejected:** telling each wait how many slots are in use, as `recv`
+  is told: exact, where this keeps a dead slot's value alive a while,
+  but an argument more in each call and in `WAIT`'s registers on both
+  targets, for what a caller's frame has never had; keeping the sources
+  in a slot the compiler makes for them, which is the same root with a
+  compiler change more.
+- **What it changes under `SLIGHT_GC_SLICE=64`,** where every settling
+  pauses: test 122's joiners print before the root's own join, the
+  root having gone to the back of the queue as it settled; as 133 and
+  368 print another order with `SLIGHT_GC_STRESS` beside it (D298).
+- Golden test 396 (`t/396-settles-any-wait`), on `(:memory info)`: a
+  process that builds 1.6 MB, drops it and waits holds nothing in
+  `read` and in `sleep`, its list of two in `read/any` and in a race,
+  and the 1,600 bytes it keeps across a `join`, where each held 2 MB;
+  and has what it kept after. `SLIGHT_GC_STRESS` settles at every one
+  of these waits, so `SLIGHT_GC_STRESS=7 make golden` checks it against
+  every test.

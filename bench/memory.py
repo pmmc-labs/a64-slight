@@ -61,6 +61,7 @@ M = [  # name, source in S, args
     ('idle-none 100000',      'idle',  '100000 0'),
     ('workers 1000x10000',    'workers',  '1000 10000'),
     ('workers-bare 1000x10000', 'workers-bare', '1000 10000'),
+    ('askers 1000x1000',      'askers', '1000 1000'),
     ('quiet-after-64MB',      'quiet', '4000000 1000'),
     ('one-heap 16MBx5',       'one-heap',  '1000000 5'),
     ('burst-ended 20000x1000', 'burst', '20000 1000'),

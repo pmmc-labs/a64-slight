@@ -1135,16 +1135,17 @@ or not.
 A process that waits holds about what it has live (D295). A nursery
 grows past 16 KB only for a process that fills it without waiting, so
 its size is what one run of the process needs, not a count of what it
-has ever allocated. And when a process waits in `recv` with nothing to
-take, the first time with more than a first nursery, and after that
+has ever allocated. And when a process waits, in `recv` with nothing to
+take, or in `read`, `read/any`, `open`, `join`, `join/race` or `sleep`
+(D299), the first time with more than a first nursery, and after that
 whenever its heap has doubled and is over 32 KB, its heap is settled:
 what's live is copied into chunks that fit it, and the rest goes. So a
 process that builds something big, drops it and waits gives it back
 then; one that keeps a little state and takes messages for good holds
 its state, a nursery of 16 KB at most, and under 32 KB of what its
 messages left; and one that only holds what it was started with holds
-just that. What waits only in `read`, `join` or `sleep` isn't settled;
-its heap is collected as it grows, as any process's is.
+just that. So does one that only asks (`ask`, `http/request` and
+`rpc/call` wait in `read`), joins or sleeps.
 
 A collection is its process's own time. One that copies a big heap, a
 few hundred MB in a quarter of a second or so, stops every 256 KB to

@@ -520,7 +520,7 @@ typedef struct rt_proc {
     uintptr_t   heap_limit;     // ...and calls rt_heap_grow when it would pass this
     rt_value_t  pid;            // as a value
     rt_value_t  parent;         // as a value; () for the root
-    rt_code_t   code;           // where it starts, or restarts after waiting in recv
+    rt_code_t   code;           // where it starts
     rt_value_t  args[RT_MAX_ARGS];
     rt_value_t  fun;            // a fork's: the function rt_apply_start calls with args (D286)
     rt_ctx_t    ctx;

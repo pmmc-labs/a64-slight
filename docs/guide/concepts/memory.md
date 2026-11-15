@@ -52,7 +52,8 @@ fault in #<pid 2>: heap exhausted (cons at docs/guide/code/con-memory.slight:4:1
   collections slower. Nor does it hold them up: a collection of a big
   heap stops every 256 KB it copies to let the others have a turn.
 - **A process that waits holds about what it has live.** When a
-  process waits in `recv` after its heap has grown, what's live is
+  process waits, for a message, an answer, another process's end or a
+  timer, after its heap has grown, what's live is
   copied into chunks that fit it and the rest is freed. So an actor
   that built something big and dropped it gives the memory back when
   it next waits, and one that takes messages for good stays a few tens

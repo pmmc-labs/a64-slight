@@ -1285,7 +1285,8 @@ static rt_value_t copy_here(rt_value_t v) {
 // entry of a compiled function, in rt_preempt (D166). The roots are in
 // frames: compiled code keeps nothing in a register across a call, a slot
 // only ever holds a value, and a function that calls another (not in tail
-// position) zeroes its slots first, so that none holds a stale word. At a
+// position), or a wait that settles (settle_wait, below), zeroes its slots
+// first, so that none holds a stale word. At a
 // function's entry its parameters and captured values are in its first
 // slots, and each frame below holds its slots between the linkage of the
 // one above (frame pointer and return address) and its own; the frame
@@ -1573,9 +1574,14 @@ static void collect_young(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uin
 // process itself touches its heap: a message for it waits in its mailbox,
 // which no collection looks at, and the walk's state is on its own
 // stack. If it's ended meanwhile, finish frees what was copied.
-static size_t collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp, size_t first) {
+//
+// also, if it's given, is one more root: a value a wait holds in C, which
+// no frame may hold (read/any's sources, a race's pids).
+static size_t collect_all(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp, rt_value_t *also,
+                          size_t first) {
     gc_t g = { .isle = p->isle, .size = first, .pauses = p };
     trace(&g, roots, n, fp);
+    if (also) trace(&g, also, 1, NULL);
     size_t copied = g.live;
     // Every live handle has moved, the young and the old, before what they
     // were in is poisoned and freed.
@@ -1749,11 +1755,12 @@ static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t
         collect_young(p, roots, n, fp);
         whole = old_in_use(p) + shared_bytes(p, 1) >= p->gc_at;
     }
-    if (whole && (p->chunks || p->nursery)) collect_all(p, roots, n, fp, TOSPACE_FIRST);
+    if (whole && (p->chunks || p->nursery)) collect_all(p, roots, n, fp, NULL, TOSPACE_FIRST);
     restart(p);
 }
 
-// A process about to wait in recv, with nothing to take, whose heap's
+// A process about to wait, in recv with nothing to take, or in read, join,
+// a race, open or sleep (settle_wait, below), whose heap's
 // chunks have reached 2^settle_log2 bytes, is settled (D295): everything
 // live is copied into chunks that fit it, and the next time is at twice
 // what the old generation then holds, and never under 2^SETTLE_LOG2. So a
@@ -1772,12 +1779,13 @@ static void collect(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t
 // time into one chunk of just its size, which only the first copy can
 // say; a bigger one is in chunks of that most already, all but the last
 // full.
-static __attribute__((noinline)) void settle_heap(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp) {
+static __attribute__((noinline)) void settle_heap(rt_proc_t *p, rt_value_t *roots, uint64_t n, const uintptr_t *fp,
+                                                  rt_value_t *also) {
     for (rt_value_t *s = roots + n; s < (const rt_value_t *)fp; s++) *s = 0;     // as collect does
     if (p->chunks || p->nursery) {
-        size_t live = collect_all(p, roots, n, fp, TOSPACE_FIRST);
+        size_t live = collect_all(p, roots, n, fp, also, TOSPACE_FIRST);
         size_t old  = p->heap_bytes - young_bytes(p);
-        if (live && live < old && live <= CHUNK_MAX) collect_all(p, roots, n, fp, live);
+        if (live && live < old && live <= CHUNK_MAX) collect_all(p, roots, n, fp, also, live);
     }
     restart(p);
     // The nursery goes, till the process next allocates, which it may
@@ -1790,6 +1798,22 @@ static __attribute__((noinline)) void settle_heap(rt_proc_t *p, rt_value_t *root
     p->settle_log2 = SETTLE_LOG2;
     while (p->settle_log2 < 63 && ((size_t)1 << p->settle_log2) <= next) p->settle_log2++;
     if (gc_stress) p->settle_log2 = 0;          // every time it waits, and as the first time
+}
+
+// The same for a wait that isn't recv's, which is told its calling frame
+// and that frame's pointer (WAIT, in rt_asm_*.S) but not how many of the
+// frame's slots are in use: so all of them are roots, which they can be
+// because a function that calls one of these waits zeroes its slots at
+// its entry, as one that calls a function does (codegen.ts), and from
+// then on a slot holds a value, one that every collection since has moved
+// with the rest. What the wait itself holds in C is `also`, if it's in
+// the heap. Returns whether it settled: it may have paused (D298), so
+// the caller looks again at what it was about to wait for.
+static int settle_wait(rt_proc_t *p, const rt_value_t *frame, const uintptr_t *fp, rt_value_t *also) {
+    if (!(p->heap_bytes >> p->settle_log2)) return 0;
+    uint64_t n = (const rt_value_t *)fp > frame ? (uint64_t)((const rt_value_t *)fp - frame) : 0;
+    settle_heap(p, (rt_value_t *)(uintptr_t)frame, n, fp, also);
+    return 1;
 }
 
 // --- islands (D256) -----------------------------------------------------------
@@ -2569,7 +2593,7 @@ static inline __attribute__((always_inline)) rt_value_t recv_wait(rt_proc_t *p, 
         // round again, to look, before it waits; once, and without
         // collecting again, which under SLIGHT_GC_STRESS it would.
         if (!settled && p->heap_bytes >> p->settle_log2) {
-            settle_heap(p, frame, n, fp);
+            settle_heap(p, frame, n, fp, NULL);
             settled = 1;
             continue;
         }
@@ -2945,9 +2969,13 @@ static again_t join_again;
 // The end of pid, on another island: it comes as an item, kept in
 // far_ends till it's joined (D277).
 static rt_value_t join_far(rt_proc_t *p, rt_value_t pid, const rt_value_t *frame, const uintptr_t *fp, uintptr_t ret) {
-    for (;;) {
+    for (int settled = 0;;) {
         rt_value_t v = far_end(p, pid);
         if (v) return v;
+        if (!settled && settle_wait(p, frame, fp, NULL)) {      // which may pause, and the end come: look again
+            settled = 1;
+            continue;
+        }
         watch_far(p, pid, WATCH_JOIN, 0);
         p->joining = pid;
         p->state   = RT_JOINING;
@@ -2971,6 +2999,10 @@ rt_value_t rt_join_from(rt_value_t pid, const char *site, const rt_value_t *fram
     entry_t   *e = entry(pid, site);
     rt_proc_t *t = e->proc;
     if (pid == p->pid) rt_fault(RT_FAULT_JOIN_SELF, pid, site);
+    if (t && settle_wait(p, frame, fp, NULL)) {         // which may pause, and t end: look again
+        e = entry(pid, site);
+        t = e->proc;
+    }
     if (t) {
         rt_proc_t **link = &t->joiners;
         while (*link) link = &(*link)->next_joiner;
@@ -3043,23 +3075,29 @@ static __attribute__((noinline)) rt_value_t race_again(rt_proc_t *p, rt_value_t 
 rt_value_t rt_join_race_from(rt_value_t pids, const char *site, const rt_value_t *frame, const uintptr_t *fp) {
     rt_proc_t *p   = rt_current;
     uintptr_t  ret = (uintptr_t)__builtin_return_address(0);
-    rt_value_t won = 0;
+    rt_value_t won;
     if (pids == RT_NIL) rt_fault(RT_FAULT_NOT_PID, pids, site);   // nothing to wait for, ever
-    for (rt_value_t xs = pids; xs != RT_NIL; xs = rt_cdr(xs)) {
-        if (!rt_is_cons(xs)) rt_fault(RT_FAULT_NOT_LIST, pids, site);
-        rt_value_t pid = rt_car(xs);
-        if (rt_is_address(pid)) rt_fault(RT_FAULT_NOT_PID, pid, site);
-        if (far(pid)) {                         // ended already, if its end has come (D277)
-            rt_value_t v = far_end(p, pid);
-            if (v && !won) {
-                rt_value_t *cells = rt_alloc(4 * sizeof *cells, site);
-                return rt_cons_at(cells, pid, rt_cons_at(cells + 2, v, RT_NIL));
+    for (int settled = 0;; settled = 1) {
+        won = 0;
+        for (rt_value_t xs = pids; xs != RT_NIL; xs = rt_cdr(xs)) {
+            if (!rt_is_cons(xs)) rt_fault(RT_FAULT_NOT_LIST, pids, site);
+            rt_value_t pid = rt_car(xs);
+            if (rt_is_address(pid)) rt_fault(RT_FAULT_NOT_PID, pid, site);
+            if (far(pid)) {                     // ended already, if its end has come (D277)
+                rt_value_t v = far_end(p, pid);
+                if (v && !won) {
+                    rt_value_t *cells = rt_alloc(4 * sizeof *cells, site);
+                    return rt_cons_at(cells, pid, rt_cons_at(cells + 2, v, RT_NIL));
+                }
+                continue;
             }
-            continue;
+            entry_t *e = entry(pid, site);
+            if (pid == p->pid) rt_fault(RT_FAULT_JOIN_SELF, pid, site);
+            if (!won && !e->proc) won = pid;
         }
-        entry_t *e = entry(pid, site);
-        if (pid == p->pid) rt_fault(RT_FAULT_JOIN_SELF, pid, site);
-        if (!won && !e->proc) won = pid;
+        // About to wait: settled first, the list moving with the rest; and
+        // that may pause, and one of them end, so they're looked at again.
+        if (won || settled || !settle_wait(p, frame, fp, &pids)) break;
     }
     if (!won) {
         for (rt_value_t xs = pids; xs != RT_NIL; xs = rt_cdr(xs)) {
@@ -3144,12 +3182,20 @@ static int read_one(rt_proc_t *p, rt_value_t src, int pair, const char *site, rt
 // stack, with `again`, the reader's own (read's, or open's).
 static rt_value_t read_wait(rt_proc_t *p, rt_value_t srcs, const char *site, const rt_value_t *frame,
                             const uintptr_t *fp, uintptr_t ret, again_t *again) {
-    for (;;) {
+    for (int settled = 0;;) {
         rt_value_t v;
         if (!rt_is_cons(srcs) && read_one(p, srcs, 0, site, &v)) return v;
         for (rt_value_t xs = srcs; rt_is_cons(xs); xs = rt_cdr(xs)) {
             if (read_one(p, rt_car(xs), 1, site, &v)) return v;
         }
+        // Settled before it waits, as recv is (D295), read/any's list
+        // moving with the rest; once, and then round again to look, since
+        // settling may pause and something come meanwhile.
+        if (!settled && settle_wait(p, frame, fp, &srcs)) {
+            settled = 1;
+            continue;
+        }
+        settled    = 0;
         p->joining = srcs;
         p->state   = RT_READING;
         p->at      = ret;
@@ -3797,7 +3843,9 @@ static __attribute__((noinline)) rt_value_t sleep_again(rt_proc_t *p, rt_value_t
 rt_value_t rt_sleep_from(rt_value_t ms, const char *site, const rt_value_t *frame, const uintptr_t *fp) {
     rt_proc_t *p   = rt_current;
     uintptr_t  ret = (uintptr_t)__builtin_return_address(0);
-    set_alarm(due_in(ms, site), p->pid, NULL, 0);
+    uint64_t   due = due_in(ms, site);
+    settle_wait(p, frame, fp, NULL);            // before its timer's set, since settling may pause
+    set_alarm(due, p->pid, NULL, 0);
     p->state = RT_SLEEPING;
     p->at    = ret;
     wait_from(p, frame, fp, ret, sleep_again, 0, 0);    // until ring wakes it

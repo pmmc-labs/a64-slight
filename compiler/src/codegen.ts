@@ -80,7 +80,9 @@ type Syms = { readonly name: string; readonly id: number; readonly next: Syms } 
 // What compiling accumulates: how many labels have been made, how many
 // frame slots the current function needs, whether it calls a compiled
 // function other than in tail position (so a collection can start above
-// its frame, which then has to hold nothing stale), the symbols, the
+// its frame, which then has to hold nothing stale) or waits in a builtin
+// that may collect with all its slots as roots (`settles`, below), the
+// symbols, the
 // out-of-line code (fault calls, preemption) to emit after all the
 // functions, and the read-only data: strings (data) and quoted lists
 // (consts). It also carries the target, which never changes.
@@ -985,11 +987,20 @@ const PREDICATES: readonly string[] = ['int?', 'nil?', 'cons?', 'pid?', 'sym?', 
 // arguments as one list.
 // proc: the process goes first, for a builtin so busy that its looking the
 // process up would show (D256).
-type CBuiltin = { readonly fn: string; readonly min: number; readonly max: number; readonly variadic: boolean; readonly proc: boolean };
+// settles: a wait that may settle the caller's heap first (D295,
+// settle_wait in process.c). It's told the calling frame but not how many
+// of its slots are in use, as recv is, so it takes them all for roots: a
+// function that calls one zeroes its slots at its entry, as one that
+// calls a compiled function does.
+type CBuiltin = {
+    readonly fn: string; readonly min: number; readonly max: number; readonly variadic: boolean; readonly proc: boolean;
+    readonly settles: boolean;
+};
 
-const fixed    = (fn: string, min: number, max = min): CBuiltin => ({ fn, min, max, variadic: false, proc: false });
-const variadic = (fn: string): CBuiltin => ({ fn, min: 0, max: 1, variadic: true, proc: false });
+const fixed    = (fn: string, min: number, max = min): CBuiltin => ({ fn, min, max, variadic: false, proc: false, settles: false });
+const variadic = (fn: string): CBuiltin => ({ fn, min: 0, max: 1, variadic: true, proc: false, settles: false });
 const withProc = (fn: string, n: number): CBuiltin => ({ ...fixed(fn, n), proc: true });
+const settles  = (fn: string, min: number, max = min): CBuiltin => ({ ...fixed(fn, min, max), settles: true });
 
 const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'str?':               fixed('rt_is_str', 1),
@@ -1113,12 +1124,12 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'rand/seed':          fixed('rt_rand_seed', 1),
     'lambda?':            fixed('rt_is_lambda', 1),
     'send':               withProc('rt_send', 2),
-    'join':               fixed('rt_join', 1),
-    'join/race':          fixed('rt_join_race', 1),
+    'join':               settles('rt_join', 1),
+    'join/race':          settles('rt_join_race', 1),
     'address':            fixed('rt_address', 0),
-    'read':               fixed('rt_read', 1),
-    'read/any':           fixed('rt_read_any', 1),
-    'open':               fixed('rt_open', 1, 2),
+    'read':               settles('rt_read', 1),
+    'read/any':           settles('rt_read_any', 1),
+    'open':               settles('rt_open', 1, 2),
     'monitor':            fixed('rt_monitor', 1, 2),
     'kill':               fixed('rt_kill', 1),
     'raise':              fixed('rt_raise', 1),
@@ -1126,7 +1137,7 @@ const C_BUILTINS: Readonly<Record<string, CBuiltin>> = {
     'timer/cancel':       fixed('rt_timer_cancel', 1),
     'disconnect':         fixed('rt_disconnect', 1),
     'socket/peer':        fixed('rt_socket_peer', 1),
-    'sleep':              fixed('rt_sleep', 1),
+    'sleep':              settles('rt_sleep', 1),
     'clock/us':           fixed('rt_clock_us', 0),
     'clock/now':          fixed('rt_clock_now', 0),
     'fs/list':            fixed('rt_fs_list', 1),
@@ -1468,7 +1479,8 @@ function compileCBuiltin(x: Pair, name: string, b: CBuiltin, args: readonly Sexp
     const [code, ops, st1] = callOperands(args, cx, st);
     const [site, st2] = siteLabel(st1, name, x.pos);
     const missing = [...Array(b.max - args.length).keys()].map(() => imm('RT_NIL'));
-    return [[code, st.t.call(b.fn, [...(b.proc ? [PROC] : []), ...ops, ...missing, addr(site)], false)], st2];
+    const st3: St = b.settles && !st2.calls ? { ...st2, calls: true } : st2;
+    return [[code, st.t.call(b.fn, [...(b.proc ? [PROC] : []), ...ops, ...missing, addr(site)], false)], st3];
 }
 
 function checkArity(x: Pair, name: string, args: readonly Sexp[], n: number): void {

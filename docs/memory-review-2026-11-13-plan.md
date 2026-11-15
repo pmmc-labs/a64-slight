@@ -17,15 +17,17 @@ memory work.
 | C | D296 | Arenas (`runtime/alloc.c`): chunks, messages, processes' structs and parked frames off `malloc`; memory given back |
 | D | D297 | A fork whose pid is thrown away keeps no result |
 | E | D298 | A major collection pauses for other processes, every 256 KB (not the review's E: see below) |
+| | D299 | A process is settled wherever it waits: `read`, `read/any`, `open`, `join`, `join/race` and `sleep` as `recv` |
 
 `make test` passes on the cloud machine (both targets) and on the M2
-Max, as of D298. `make tsan` is clean on the cloud machine.
+Max, as of D298, and on the cloud machine as of D299. `make tsan` is
+clean on the cloud machine as of D298.
 
 ## The findings, one by one
 
 1. **A heap follows what was allocated.** Answered (D295): 1,000
-   workers 640 MB to 43. Left: a process that waits only in `read`,
-   `join` or `sleep` isn't settled (below).
+   workers 640 MB to 43; and for a process that waits only in `read`,
+   `join` or `sleep` (D299): 1,000 that only ask, 60 MB to 30.
 2. **One allocation costs 4 KB.** Answered in part (D295): 1.6 KB for
    a process holding one cell (a first nursery of 1 KB, kept under the
    first settling's 2 KB), 2.2 KB for one holding 100. Settling every
@@ -75,21 +77,13 @@ says so.
   matters, `MADV_FREE_REUSABLE` (with `MADV_FREE_REUSE` before a run is
   used again) in `alloc.c`'s `GIVE_BACK` is what libmalloc does;
   untried. `t/live.py`'s gives back is skipped on macOS for this.
-- **Settling in `read`.** `ask`, `http/request`, `rpc/call` and
-  `slurp` wait in `read`, so a process that only asks never settles:
-  it has D295's nursery rule and `GC_MIN` (64 KB), nothing more. Two
-  things are in the way, both in `runtime/process.c`: `rt_read_from`
-  has the calling frame and its frame pointer (from `WAIT`, in
-  `rt_asm_*.S`) but not how many of its slots are in use, which
-  `collect` zeroes past; and `read`'s sources (`src`, and
-  `read/any`'s list) are held in C across the wait, `p->joining`
-  among them, where a collection can't move them. All of a frame's
-  slots can be taken for roots if every slot is always a value or
-  zero, which holds at a call (the frames below a collection are
-  walked whole already) but should be checked for a builtin's call;
-  and `p->joining` would be forwarded as a root. A runtime change, not
-  a language one. `SLIGHT_GC_STRESS` would exercise it at every
-  `read`.
+- **Settling in `read`.** Done (D299), and in `read/any`, `open`,
+  `join`, `join/race` and `sleep`. The check this asked for found that
+  a slot wasn't always a value or zero at a builtin's call: a function
+  zeroed its slots only if it called a compiled function, so the
+  compiler now has one that calls any of these waits zero them too.
+  Under `SLIGHT_GC_SLICE=64`, test 122 prints its joiners in another
+  order, as it should (D299).
 - **A process that drops what it held without allocating.** Nothing
   that counts allocation sees it. Only time can: collect a process
   that has waited a while since it last ran, once. That needs a
@@ -163,15 +157,17 @@ says so.
   machine, 059, 130, 162, 187, 194, 198, 214, 240 and `con-memory`
   run past 60 s and are killed (162 doesn't finish in 240 s before
   any of this either); with `SLIGHT_COPY_OUT`, 200, 266, 384 and
-  `con-memory` fail, and should.
+  `con-memory` fail, and should; with `SLIGHT_GC_SLICE=64`, 122 does,
+  and should (D299).
 
 ## Found on the way, and left
 
 - `bench/spawn/spawn.slight` and `bench/idle-memory/idle-memory.slight`
-  still say the top level is a task that can't wait (D243), which D277
-  ended; their extra process is harmless.
-- `rt.h`'s comment on `rt_proc_t.code` says "or restarts after waiting
-  in recv", which D276 ended.
+  said the top level is a task that can't wait (D243), which D277
+  ended: their comments now say why the extra process is kept (the
+  numbers are of the same program as before).
+- `rt.h`'s comment on `rt_proc_t.code` said "or restarts after waiting
+  in recv", which D276 ended: corrected.
 - A glibc habit worth knowing if anything goes back on `malloc`: a
   request of 1 KB or more gathers up every freed small block first
   (`malloc_consolidate`), and small requests are slow after (D295).

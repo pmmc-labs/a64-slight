@@ -10,8 +10,9 @@
 (defun gather (n acc)
     (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
 
-; The top level is a task, which can't wait (D243), so an actor does its
-; work, and the root gives its value.
+; A process of its own does the work, and the root gives its value: once
+; the top level couldn't wait (D243); it can since D277, and this is kept
+; so that the numbers are of the same program as before.
 (defun top-level (argv)
     (let n (str->int (car argv)))
     (start 0 n $$)
