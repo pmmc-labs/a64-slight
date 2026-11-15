@@ -19,12 +19,24 @@ memory work.
 | E | D298 | A major collection pauses for other processes, every 256 KB (not the review's E: see below) |
 | | D299 | A process is settled wherever it waits: `read`, `read/any`, `open`, `join`, `join/race` and `sleep` as `recv` |
 | | D300 | Stacks give their pages back: a burst's go among the spares, and a deep one's below where it waits |
-| | D301 | A mailbox counts toward its process's cap: one sent more than it takes ends `:heap` |
+| | D301 | A mailbox counted toward its process's cap: built, measured, and withdrawn the same day; D88 stands |
 
 `make test` passes on the cloud machine (both targets) and on the M2
-Max, as of D298, and on the cloud machine as of D301. `make tsan` is
-clean on the cloud machine as of D301. `make test` passes on the M2
-Max as of D300 (Stevan, 15 Nov); D301 hasn't been run there.
+Max, as of D298, and on the cloud machine as of D300. `make tsan` is
+clean on the cloud machine as of D300. `make test` passes on the M2
+Max as of D300 too (Stevan, 15 Nov), and it's been timed there:
+BENCHMARKS.md, "The M2 Max, 15 Nov".
+
+**Where to stop** (15 Nov). Stevan, of D301: "I worry we will end up
+in a game of whack-a-mole with the memory work if we are not careful."
+Claude's recommendation, not yet his decision: stop here. The
+review's five big findings are answered and measured on both
+machines; everything still listed below is a rare case, or costs
+instructions on a busy path, or both, and should wait for a real
+program to show it. Of what's built, D300's deep-stack half is the
+most heuristic (a sampled depth, 16 KB, every 64th wait, about 1 per
+cent of the instructions at each wait and nothing measurable on the
+M2 Max), and the one to take out if the line is to be tighter.
 
 ## The findings, one by one
 
@@ -52,24 +64,34 @@ Max as of D300 (Stevan, 15 Nov); D301 hasn't been run there.
    ends within a slice isn't seen; and under 1,024 waiting, each still
    holds a page (D292's choice).
 7. **Exit records.** Answered (D297).
-8. **Messages.** A mailbox counts toward its process's cap (D301).
-   Left: a taken message's 32-byte record is dead in the taker's old
-   generation till a major collection or a settling.
+8. **Messages.** Not changed, but for their allocation (D296): a
+   mailbox has no bound and isn't counted toward anything, which
+   stays so (D301, built and withdrawn); a taken message's 32-byte
+   record is dead in the taker's old generation till a major
+   collection or a settling.
 9. **Values.** Not looked at: objects are 16-aligned where 8 would do
    (a two-element tuple 32 bytes for 24); the arena's classes are
    multiples of 16 already.
 10. **What can't be seen.** Answered (D294), but an arena's free
     memory isn't shown: `:resident` less the rest includes it.
-11. **Limits.** A mailbox is bounded (D301). Nothing bounds the
-    program as a whole; that's with Stevan, with a recommendation
-    against (below).
+11. **Limits.** Nothing bounds the program as a whole, nor a mailbox.
+    A mailbox's bound was built and withdrawn (D301); one for the
+    program hasn't been asked for, and Claude recommends against.
 
 ## What's left, with what's known about each
 
 In the order I'd take them; each to be put to Stevan first where it
 says so.
 
-- **Measure on the M2 Max.** Nothing since D294 has been timed there.
+- **Measure on the M2 Max.** Done (Stevan, 15 Nov, at `42d5033`, D294
+  to D300): BENCHMARKS.md, "The M2 Max, 15 Nov". `payload` is 0.93 of
+  its time, still 1.22 times what it was before D276; a ping's worst
+  wait beside a big heap is 286 µs, where it was 45 ms; `binary-trees`
+  0.91 of its time at the same peak; `spawn` and `fan-in` a little
+  over half their times; a waiting process 758 bytes for 748. And
+  Activity Monitor does show a burst's memory after it's over; Stevan:
+  "leave macOS as is". As it was written, for the record:
+  Nothing since D294 has been timed there.
   `make bench` for the whole table; and in particular `payload` (1.31
   times its time since D276 there, put down to `malloc`, which a send
   no longer calls), `latency` (45 ms at the worst beside 160 MB),
@@ -172,9 +194,9 @@ says so.
   whether a mailbox counts toward its process's cap, and whether a
   program has a limit of its own. Propose first.
 
-  The first is done (D301: "do the mailbox cap"); the second is
-  still his to say. As they were put to him on 15 Nov, two questions.
-  *A mailbox:* count its
+  Closed (D301): the mailbox's cap was built as below, and withdrawn
+  the same day; a limit for the program hasn't been asked for. As it was put to
+  Stevan on 15 Nov, two questions. *A mailbox:* count its
   bytes toward its process's cap, and end the receiver with `:heap`
   when a message would take it past (`end_other`, as a kill does); the
   sender is never held or faulted, as now. It's D233's reasoning: a

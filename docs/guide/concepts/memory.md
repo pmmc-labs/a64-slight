@@ -42,12 +42,6 @@ fault in #<pid 2>: heap exhausted (cons at docs/guide/code/con-memory.slight:4:1
   that reaches its cap faults with `:heap`, and only it ends, as
   `grow` did here. A runaway process doesn't take the program down, and
   the kernel doesn't have to kill anything.
-- **A mailbox counts toward the cap.** `send` never waits, so a process
-  that's sent messages faster than it takes them could hold any amount
-  of them. It can't: its waiting messages count with its heap, and the
-  message that takes it past the cap ends it with `:heap`, where
-  whoever joins or monitors it finds out. The sender isn't held up or
-  faulted. A process that keeps up is never near it.
 - **Collection is per process.** A process's heap is collected when it
   waits for a message, or when it enters a function after its heap has
   grown enough. The collector has two generations: what's new goes in a

@@ -275,6 +275,60 @@ the script warns of). A few minutes either way.
 
 Each run's full tables are in `bench/results/`. What they say:
 
+### The M2 Max, 15 Nov: after the memory review (D294 to D300)
+
+`2026-11-15-1452-macos-apple-m2-max` (`42d5033`): every program, with
+what the memory review changed, D294 to D300: a heap sized to what's
+live, arenas, no record for a fork whose pid is thrown away, a major
+collection that pauses, settling in every wait, and stacks that give
+their pages back. slight against the run of 13 Nov (`3dedbf4`), on one
+core, times the medians and memory the peak resident set:
+
+| | 13 Nov | 15 Nov | | memory, 13 Nov | 15 Nov |
+|---|---:|---:|---:|---:|---:|
+| `fan-in` | 0.367 s | 0.211 s | 0.57 | 480 MB | 479 MB |
+| `spawn` | 0.144 s | 0.081 s | 0.56 | 127 MB | 51 MB |
+| `bank` | 0.626 s | 0.494 s | 0.79 | 76 MB | 3.4 MB |
+| `ping-pong` | 0.302 s | 0.247 s | 0.82 | 2.9 MB | 1.9 MB |
+| `thread-ring` | 0.495 s | 0.411 s | 0.83 | 10.5 MB | 10.6 MB |
+| `idle-memory` | 0.392 s | 0.327 s | 0.83 | 749 MB | 760 MB |
+| `binary-trees` | 0.824 s | 0.746 s | 0.91 | 106 MB | 104 MB |
+| `payload` | 0.722 s | 0.672 s | 0.93 | 2.5 MB | 1.9 MB |
+| `latency` | 2.229 s | 2.214 s | 0.99 | 532 MB | 494 MB |
+
+`fib`, `tak`, `nqueens`, `deriv`, `n-body`, `spectral-norm` and
+`parallel-fib`, which send nothing, are within 2 per cent. On every
+core (`slight-mc`): `ping-pong` 0.064 s to 0.035, `spawn` 0.029 to
+0.017, `idle-memory` 0.191 to 0.139, `fan-in` 0.711 to 0.651.
+
+- **The pauses are gone** (D298): beside a process holding a big heap
+  a ping waited 43.6 ms at the 99th percentile and 45.3 ms at the
+  worst; now 210 µs and 286 µs. Go's wait 20 µs there, Erlang's 109,
+  Gambit's and Racket's over 130 ms.
+- **A send without `malloc`** (D296) is most of the time saved:
+  `fan-in` and `spawn` in a little over half the time, `ping-pong` and
+  `thread-ring` a sixth less. `spawn`'s memory is its exit records
+  gone (D297), and `bank`'s 76 MB to 3.4 the same, with a fifth off
+  its time.
+- **`payload`** is 0.672 s where it was 0.722: `malloc` was part of
+  what it lost at D276 on this machine, not all of it. It's still 1.22
+  times its 0.552 s from before.
+- **`binary-trees`** is 0.91 of its time with the arena keeping freed
+  chunks, at the same peak: the answer to "Memory on macOS", below.
+- **A waiting process is 758 bytes** where it was 748 (`idle-memory`,
+  the harness's figure), 10 more; a million wait in 0.327 s where they
+  took 0.392.
+- **Against the others,** on one core, slight now leads `ping-pong`
+  too (0.247 s to Gambit's 0.287 and tokio's 0.296), with `thread-ring`
+  (0.411 s to tokio's 0.700), `spawn` (0.081 s to Go's 0.430) and a
+  million waiting (0.327 s to tokio's 0.780) as before; `fan-in` is
+  0.211 s to tokio's 0.274 and Go's 0.284, where it was behind both.
+  `payload` is still 4 times Gambit's, tokio's and Go's, which pass the
+  list by reference or copy it faster.
+- D300's own cost and memory there are under "What the memory review
+  changed", below: nothing that shows in time, and freed pages that
+  macOS goes on counting.
+
 ### The M2 Max, 13 Nov: every wait copied, and slight's own family (D292, D293)
 
 `2026-11-13-1102-macos-apple-m2-max` (`3dedbf4`): every program, every
@@ -1493,7 +1547,8 @@ more; ten workers over 300,000 messages 13 per cent fewer. A thousand
 workers are slower over their first 3,000 messages each (0.88 s to
 1.07), where the old policy collected nothing and every message's
 chunk was fresh memory, and faster after: 4.5 s to 3.7 over 10,000
-each, 12.8 to 11.4 over 30,000. Not yet measured on the M2 Max.
+each, 12.8 to 11.4 over 30,000. On the M2 Max: "The M2 Max, 15 Nov",
+above.
 
 And arenas (D296, 14 Nov): every chunk, message and process's struct
 from its island's own allocator, in place of `malloc`: size classes cut
@@ -1525,8 +1580,9 @@ waiting, 33 MB where it held 63. What it costs: the airline's day peaks
 at 40 MB where it took 30, since what's free is kept by size, and up to
 64 MB of it in memory while an island is busy; and 100,000 processes
 holding a list of 100 take 224 MB for 216, a chunk of 1,600 bytes
-being in a block of 1,680. Not yet measured on the M2 Max, where
-`payload`'s time since D276 was put down to `malloc`.
+being in a block of 1,680. On the M2 Max (15 Nov, above), where
+`payload`'s time since D276 was put down to `malloc`, it's 0.93 of
+what it was, and `fan-in` and `spawn` a little over half.
 
 And exit records (D297, 14 Nov): a fork whose pid is thrown away where
 it's written keeps no result, since its parent has nothing to ask with.
@@ -1561,8 +1617,8 @@ instructions are within 1 per cent. What's left of a ping's wait is a
 slice of the collection, a turn or two of the run queue, and a minor
 collection, which doesn't pause: 0.5 to 0.9 ms here when a nursery of
 1 MB all survives. The process with the big heap is itself still away
-for the whole of its collection. Not yet measured on the M2 Max, where
-a ping waited 45 ms at the worst.
+for the whole of its collection. On the M2 Max (15 Nov, above), where
+a ping waited 45 ms at the worst, it waits 286 µs.
 
 And settling wherever a process waits (D299, 15 Nov), not only in
 `recv`, and stacks that give their pages back (D300). On the cloud
@@ -1601,18 +1657,6 @@ wait, of a peak of 658, since macOS counts pages marked free
 arena's (D296). The pages are the system's to take; `ps` and Activity
 Monitor don't say so.
 
-And a mailbox counts toward its process's cap (D301, 15 Nov): a
-process sent more than it takes ends `:heap` when its heap and its
-waiting messages pass the cap, where before the mailbox had no bound.
-Only the messages waiting behind the first are counted as they come and
-go, so what it costs depends on whether a mailbox has any. Instructions,
-under callgrind, on the cloud machine: `fan-in`, whose one mailbox
-always has, 5.1 per cent more, 18 instructions a message; `thread-ring`
-and `spawn` 1.5; `ping-pong` 0.8; `bank` and `idle-memory` 0.9, the
-workers 0.4 to 0.9; the programs that send nothing, the same. `fan-in`'s ten million
-messages still run under the default cap of 1 GB, on one island and
-across them. Not measured on the M2 Max.
-
 What's left of the review: `docs/memory-review-2026-11-13-plan.md`.
 
 ### What slight should look at next
@@ -1634,7 +1678,9 @@ What's left of the review: `docs/memory-review-2026-11-13-plan.md`.
   question, answered since (D297, below: it needn't). And the pauses:
   D298, below. And the pauses beside a big heap, 45 ms beside 160 MB, a
   major collection copying everything live (D200's next steps, a bigger
-  nursery or an old generation not copied whole).
+  nursery or an old generation not copied whole). Measured after, on
+  the M2 Max (15 Nov, above): `payload` 0.672 s, `spawn` 51 MB, and a
+  ping's worst wait 286 µs.
   The first, `payload`, should be measured again on the M2 Max now
   that a send's chunk is the arena's, not `malloc`'s (D296).
   Before any of the three, a review of everything that holds memory
@@ -1762,6 +1808,6 @@ What's left of the review: `docs/memory-review-2026-11-13-plan.md`.
   reuse its chunks rather than free them, which might also make
   `binary-trees` faster. It does now (D296): a freed chunk is a free
   run kept for the next, up to 64 MB of them; `binary-trees 16` is 0.85
-  of its time on the cloud machine, and the M2 Max is to say what it is
-  there.
+  of its time on the cloud machine, and `binary-trees 18` 0.91 on the
+  M2 Max (0.824 s to 0.746, 15 Nov), at the same peak.
 

@@ -1087,28 +1087,8 @@ RT_EXEC_INT`, since a symbol is its name.
 - `recv` links the chunk into the receiver's heap. Nothing is copied twice.
   A message with nothing to copy (an integer, a keyword, static data) is
   a chunk of just its record, which `recv` frees instead (D199).
-- A mailbox counts toward its process's cap (D301, which replaces
-  D88's "mailboxes are unbounded": a bounded one, it said, would have
-  to drop the message or fault the sender, since `send` can't block;
-  this ends the receiver). `held` is a process's heap, what its
-  handles keep alive, and its waiting messages; a message that takes
-  it past `heap_max` ends it `(:error (:heap () "its mailbox"))`, as
-  `kill` would (`end_other`). The count costs a process that keeps up
-  nothing: `mail_rest` is the bytes of the waiting messages after the
-  first, so a message into an empty mailbox, and the taking of an only
-  one, don't touch it (`deliver`, `unmail`). A message's bytes are its
-  chunk's and the shared buffers it holds, each whole (`msg_bytes`).
-  The test, in `deliver` when the mailbox wasn't empty, is `mail_rest`
-  and `heap_bytes` against half the cap (`mail_trip`), and past that
-  `full` works `held` out exactly. It doesn't end the process there,
-  since whoever delivers may be in the middle of its watchers, its
-  devices or the keyboard's listeners: it notes the pid (`my.full`),
-  and `end_full` ends those noted where a process can be ended: after
-  a send (`deliver` says whether to), a batch from the inbox
-  (`end_taken`), the timers (`ring`), the keys and sockets (`events`),
-  a process's own end, and when the island has nothing to run. The
-  process running, if it's one, is faulted last (`rt_fault`), since
-  that doesn't return.
+- Mailboxes are unbounded (D88). (Bounded ones would have to drop the
+  message or fault the sender, since `send` can't block.)
 - A message to a process that has ended disappears, as in Erlang (D92).
 
 ### Process lifecycle

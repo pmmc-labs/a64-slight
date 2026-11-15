@@ -724,10 +724,6 @@ built by doubling a list 40 times is 40 cells, but copies as 2^40. A
 copy that would be more than a heap can hold faults the sender
 (`:heap`), as does one a `fork` or an `after` makes, and a
 process whose value as it ends is that big ends `:heap` instead (D265).
-A mailbox counts toward its process's cap (D301, and The heap, below):
-a process that's sent more than it takes ends with `(:error (:heap ()
-"its mailbox"))`; `send` still returns `()` to whoever sent the message
-that was one too many, and never waits.
 A message can be any value, and is conventionally a list headed by a
 keyword: `(list :add 5)`. A message to a process that has ended
 disappears.
@@ -831,7 +827,7 @@ The fault kinds:
   reading, 8 MB of addresses each (D267, D291)
 - `:not-a-cons`: `car` or `cdr` of something that isn't a cons
 - `:not-a-list`: `cons` onto something that isn't a list
-- `:heap`: the process's heap is full, or, with the site `"its mailbox"`, its mailbox has taken it past its cap (D301)
+- `:heap`: the process's heap is full
 - `:not-a-string`: a string operation given something else
 - `:not-a-symbol`: a symbol operation given something else
 - `:out-of-range`: an index, a byte, a code point, or a rounded float
@@ -1125,27 +1121,7 @@ memory is limited to less than 4 GB, as in a container (`docker run
 instead (D233): a process that grows without end then holds about half
 the limit when it faults, as its last collection copies, so it ends on
 its own and the kernel doesn't kill the program. That caps each
-process, not all of them together.
-
-The cap is on what a process holds: its heap, and the messages waiting
-in its mailbox (D301), each its record of 32 bytes and its copy, with
-the big strings and arrays it shares counted whole, as they will be in
-the heap of whoever takes it. So a process that's sent messages faster
-than it takes them, for long enough, ends too: when a message takes it
-past the cap, it ends with `(:error (:heap () "its mailbox"))` and the
-line `fault in #<pid 7>: heap exhausted (its mailbox)`, whatever it was
-doing, as a `kill` would end it, and its joiners and monitors are told.
-The sender is never held up, and never faulted; what's sent to it after
-that goes nowhere, as to any process that has ended. One that keeps up
-is never near it, however much goes through. And since the mailbox
-counts, a process with a full one faults at its own next allocation,
-`:heap` with that allocation's site, if that comes first. A timer's
-message counts once it's due, and one from another island once that
-island's has taken it. The first message waiting isn't looked at as it
-comes, only those behind it; and a process more than half of whose cap
-is shared strings and arrays is looked at only as it next allocates.
-
-A heap is collected when the process
+process, not all of them together. It's collected when the process
 waits in `recv`, or at the entry of the next function called (D166,
 D276), in two generations (D200): what's new is allocated in a nursery
 (from 1 KB, growing to 1 MB), and once that's full, what's still
@@ -1639,8 +1615,7 @@ which `lookup` reads; more keys may come. A process's:
   generation (The heap), whatever's in use of them, where `:heap` above
   is what's in use; together they're what its heap has from the system.
   `(:mail n)`: its waiting messages, each a record of 32 bytes and its
-  copy, and the big strings and arrays they hold, each whole: what its
-  mailbox holds against its cap (D301). `(:stack n)`: its stack's pages in memory, as the system says,
+  copy. `(:stack n)`: its stack's pages in memory, as the system says,
   which is as deep as it has been since they last went back, not as
   deep as it is: a process that went deep gives the pages below it back
   when it next waits, the first time, and after that at its 64th wait
@@ -1674,7 +1649,7 @@ free, and all but about 1 MB an island when the island next has
 nothing to run; so after a burst, of processes or of messages, the
 program's memory comes back down, on Linux as the resident set shows
 it, and on macOS as the system takes the pages it's been told are
-free. Asking for a `:memory` asks the system
+free. Asking for a `:memory` walks every mailbox and asks the system
 about each stack held, so `(:runtime)` and `(:processes)` take longer
 the more there is; what the system says is recorded, and replays
 (D170).
