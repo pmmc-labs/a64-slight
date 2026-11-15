@@ -1587,7 +1587,19 @@ worker that recurses 2,000 deep for each of 100,000 messages takes 8
 per cent longer with D300 (0.67 s to 0.72), and one that goes 20,000
 deep 2 per cent: its pages go back at once the first time, and then
 at every 64th wait, where giving them back at every wait made the
-first 3.3 times slower. Not measured on the M2 Max.
+first 3.3 times slower.
+
+On the M2 Max (Stevan, 15 Nov), D300 costs nothing that shows: the
+worker that goes 2,000 deep for each of 100,000 messages takes 1.59 s
+with it and 1.62 without, 0.02 s of either the system's, and the one
+that goes 20,000 deep 2.87 s, 0.03 s the system's; 1,000 processes
+going 20,000 deep once take 0.26 s, 0.12 s the system's, for 40,000
+page faults and 1,000 calls to give the pages back. But its memory
+doesn't show there either: those 1,000 are 627 MB resident as they
+wait, of a peak of 658, since macOS counts pages marked free
+(`MADV_FREE`) as the program's till it wants them, as it does the
+arena's (D296). The pages are the system's to take; `ps` and Activity
+Monitor don't say so.
 
 What's left of the review: `docs/memory-review-2026-11-13-plan.md`.
 

@@ -22,8 +22,8 @@ memory work.
 
 `make test` passes on the cloud machine (both targets) and on the M2
 Max, as of D298, and on the cloud machine as of D300. `make tsan` is
-clean on the cloud machine as of D300. D299 and D300 haven't been
-built or run on the Mac.
+clean on the cloud machine as of D300. `make test` passes on the M2
+Max as of D300 too (Stevan, 15 Nov).
 
 ## The findings, one by one
 
@@ -154,10 +154,19 @@ says so.
   as a process ends, never between a copy and the switch away. Giving
   a deep stack's pages back at every wait cost a worker that recurses
   for each message a factor of 3.3, hence the first time at once and
-  then every 64th wait. To measure on the M2 Max, where a page is 16
-  KB and `madvise` walks every page of its range: `bench/memory/deep.slight`
-  for the memory, and `bench/memory/deep-cycle.slight`, a worker that
-  goes 2,000 deep for each message, for the cost.
+  then every 64th wait. Measured on the M2 Max (15 Nov), with
+  `bench/memory/deep.slight` and `bench/memory/deep-cycle.slight`: it
+  costs nothing that shows (the worker that goes 2,000 deep, 1.59 s
+  with it and 1.62 without), and its memory doesn't show either: 627
+  MB resident at rest for the 1,000 that went 20,000 deep, since macOS
+  counts pages marked free as resident. That's the question below
+  under "Measure on the M2 Max", answered: Activity Monitor and `ps`
+  do show a burst's memory after it's over, for stacks as for the
+  arena. Whether it matters is Stevan's to say; if it does,
+  `MADV_FREE_REUSABLE` is the thing to try, on the Mac, where it can
+  be run: `STACK_GIVE_BACK` in `process.c` and `GIVE_BACK` in
+  `alloc.c`, and what a page marked so needs before it's written
+  again (`MADV_FREE_REUSE`) has to be read up first, not guessed.
 - **Limits and mailboxes** (findings 8 and 11). A language question:
   whether a mailbox counts toward its process's cap, and whether a
   program has a limit of its own. Propose first.
@@ -219,6 +228,13 @@ says so.
 
 ## Found on the way, and left
 
+- Deep recursion that isn't a tail call is slow on the M2 Max:
+  `bench/memory/deep-cycle.slight 2000 100000`, 200 million calls and
+  returns, 1.42 s of user time there before D300 and after, against
+  0.67 s on the cloud machine, which is the slower machine at
+  everything else. Not looked into. A guess to check with a profile:
+  returns mispredicted once the recursion is deeper than the core's
+  return stack.
 - `bench/spawn/spawn.slight` and `bench/idle-memory/idle-memory.slight`
   said the top level is a task that can't wait (D243), which D277
   ended: their comments now say why the extra process is kept (the
