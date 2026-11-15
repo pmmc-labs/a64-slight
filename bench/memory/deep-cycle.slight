@@ -1,0 +1,14 @@
+; A worker that recurses d deep, not in a tail call, for each of n messages, and comes back: what giving a deep
+; stack's pages back when its process waits costs one that goes deep again and again (D300). Time it against a
+; checkout from before D300.
+
+(defun deep (d) (if (== d 0) 0 (+ 1 (deep (- d 1)))))
+(defun worker () (recv ((:go d from) (send from (deep d)) (worker)) (:stop 0)))
+(defun rounds (w d n acc)
+    (if (== n 0) acc (do (send w (list :go d $$)) (rounds w d (- n 1) (+ acc (recv (x x)))))))
+(let d (str->int (car @ARGV)))
+(let n (str->int (cadr @ARGV)))
+(let w (fork worker))
+(let total (rounds w d n 0))
+(send w :stop)
+total

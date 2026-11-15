@@ -156,8 +156,8 @@ says so.
   for each message a factor of 3.3, hence the first time at once and
   then every 64th wait. To measure on the M2 Max, where a page is 16
   KB and `madvise` walks every page of its range: `bench/memory/deep.slight`
-  for the memory, and a worker that goes 2,000 deep for each message
-  for the cost (D300 has the program's shape).
+  for the memory, and `bench/memory/deep-cycle.slight`, a worker that
+  goes 2,000 deep for each message, for the cost.
 - **Limits and mailboxes** (findings 8 and 11). A language question:
   whether a mailbox counts toward its process's cap, and whether a
   program has a limit of its own. Propose first.
