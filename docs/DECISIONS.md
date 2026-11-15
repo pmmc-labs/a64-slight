@@ -8190,9 +8190,9 @@ being unable to block. This does neither: it's the receiver that ends.
 - **Measured** (cloud machine, x86-64, one island; instructions,
   callgrind's): `fan-in`, whose one mailbox always has messages
   waiting, 5.1 per cent more, 18 instructions a message, to count each
-  in and out; `thread-ring` 1.5, `spawn` 1.5, `ping-pong` 0.8, `bank`,
-  `idle-memory` and the workers 0.9; the programs that send nothing,
-  the same. `fan-in`'s ten million messages, and across islands, run
+  in and out; `thread-ring` 1.5, `spawn` 1.5, `ping-pong` 0.8, `bank`
+  and `idle-memory` 0.9, the workers 0.4 to 0.9; the programs that
+  send nothing, the same. `fan-in`'s ten million messages, and across islands, run
   as they did under the default cap.
 - **Rejected:** holding the sender till there's room, which changes
   what `send` is, and can deadlock two processes sending to each other;
@@ -8206,6 +8206,13 @@ being unable to block. This does neither: it's the receiver that ends.
   done: a limit for the program as a whole (the plan has why Claude
   would leave it); what a timer holds before it's due, results kept,
   and devices' buffers still aren't counted.
+- **A process is behind for whatever reason it's behind,** a
+  collection included: one paused in a major collection (D298) isn't
+  taking messages, and those sent meanwhile wait. With
+  `SLIGHT_GC_SLICE=64`, where a settling pauses at every chunk it
+  frees, a taker that was only ever a turn behind its sender was ended
+  in the test as first written; the test's sender now waits for each
+  hundred to be taken.
 - Golden test 398 (`t/398-mailbox-cap`), with a cap of 1 MB: a sleeper
   holds 600 lists, 979,200 bytes, and 642, and ends at the 643rd; one
   that takes what it's sent has 8 MB go through it; a process that

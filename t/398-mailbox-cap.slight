@@ -11,8 +11,12 @@
 
 ; Takes nothing: its messages wait while it sleeps.
 (defun sleeper (ms) (sleep ms) :woke)
-; Takes each as it comes, and counts them.
-(defun taker (n) (recv (:stop n) (_ (taker (+ n 1)))))
+; Takes each as it comes, and counts them; and says how many, when asked.
+(defun taker (n)
+    (recv
+        ((:count to) (send to n) (taker n))
+        (:stop       n)
+        (_           (taker (+ n 1)))))
 ; Waits for good, for a message to an address nobody has: what's sent
 ; to its pid waits in its mailbox.
 (defun deaf () (read (address)))
@@ -20,7 +24,13 @@
 (defun hoarder (xs) (send $$ xs) (hoarder xs))
 
 (defun flood (p x n) (when (> n 0) (send p x) (flood p x (- n 1))))
-(defun batches (p x k) (when (> k 0) (flood p x 100) (yield ()) (batches p x (- k 1))))
+; k hundreds of x to p, each hundred waited for, so that p is never more
+; than a hundred behind, however it's scheduled.
+(defun batches (p x k)
+    (when (> k 0)
+        (flood p x 100)
+        (send p (list :count $$))
+        (recv (_ (batches p x (- k 1))))))
 
 (let s  (cadr (open :system)))
 (let xs (range 0 100))
@@ -38,8 +48,8 @@
 (flood a xs 10)
 (pprint (list :slept (join a)))
 
-; A process that takes what it's sent as it comes is never near it,
-; however much goes through: 5,000 lists, 8 MB, a hundred at a time.
+; A process that takes what it's sent is never near it, however much
+; goes through: 5,000 lists, 8 MB, a hundred at a time.
 (let k (fork taker 0))
 (batches k xs 50)
 (send k :stop)
