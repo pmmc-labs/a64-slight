@@ -7948,7 +7948,7 @@ back of the run queue, as a process does at its slice's end, going on
 from where it was at its next turn; and it frees the old chunks the
 same way, 4 MB at a time, since giving 160 MB of pages back took 7 ms
 by itself. The collector's walk is as it was, running as the process it
-collects, its state on that process's stack: about forty lines.
+collects, its state on that process's stack: some fifty lines.
 - **Why it's safe:** nothing but a process touches its own heap. A
   message for it waits in its mailbox, which no collection looks at;
   `:system` reads counts that change only when the collection is done.
