@@ -22,8 +22,8 @@ memory work.
 
 `make test` passes on the cloud machine (both targets) and on the M2
 Max, as of D298, and on the cloud machine as of D300. `make tsan` is
-clean on the cloud machine as of D298; it hasn't been run since (the
-cloud session of 15 Nov had no sanitizer runtime installed).
+clean on the cloud machine as of D300. D299 and D300 haven't been
+built or run on the Mac.
 
 ## The findings, one by one
 
@@ -97,6 +97,41 @@ says so.
   the island is about to wait, as `rt_arena_idle` and `trim_spares`).
   Machinery; propose first, with how often it happens in a real
   program as the case for or against.
+
+  Thought through on 15 Nov, not built, for Stevan to choose among.
+  Where it would happen: a structure kept by a process after a burst
+  (a queue or channel that filled and drained, `lib/ds.slight`'s), an
+  agent whose conversation is reset, a store after many deletes. Three
+  ways:
+  - *Count what's allocated, not only what's kept:* settle at a wait
+    once the nurseries started again since the last settling come to
+    some multiple k of the heap. Deterministic, a counter and an `or`
+    in the wait's test. But its economics are a generational
+    collector's in reverse: a process with a big live heap and many
+    short-lived allocations (a simulation's world and its temporaries)
+    copies everything live once for every k heaps of temporaries, 20
+    per cent at k of 2 and 2.5 at 8, and the drop is noticed only
+    after k heaps of allocation, so latest where it's biggest. It's
+    Erlang's `fullsweep_after`, whose default is 65,535 minor
+    collections, with `hibernate` for the rest. And it doesn't see a
+    process that drops and then goes quiet.
+  - *When the island is idle:* since D299 the roots needn't be kept
+    for the scheduler. `recv` and `read` already loop after a wake, so
+    the scheduler can wake a waiting process to settle itself, on its
+    own stack or copied back onto one, with a flag that makes its next
+    test true. What's left is finding which to wake (a list of those
+    that have run since they last settled, linked as they wait, taken
+    off as they wake or end) and when (idle for some time, which is
+    the clock's, so not the same every run; on the virtual clock,
+    whenever nothing can run). It pays only in idle time, and sees the
+    quiet process. `join` and `sleep` don't loop, and would stay as
+    they are.
+  - *Leave it:* a process holds at most what it held at its last
+    settling till it has grown past that again.
+
+  Claude's recommendation: leave it till a real program shows it, a
+  queue after a burst most likely; then the second, prototyped and
+  measured.
 - **An old generation that isn't copied whole** (the review's E, not
   built). It would cut the memory of a major collection (from-space
   and to-space together) and the big process's own pause. Sketch:
@@ -126,6 +161,25 @@ says so.
 - **Limits and mailboxes** (findings 8 and 11). A language question:
   whether a mailbox counts toward its process's cap, and whether a
   program has a limit of its own. Propose first.
+
+  Put to Stevan on 15 Nov, as two questions. *A mailbox:* count its
+  bytes toward its process's cap, and end the receiver with `:heap`
+  when a message would take it past (`end_other`, as a kill does); the
+  sender is never held or faulted, as now. It's D233's reasoning: a
+  slow consumer ends on its own, where its monitor sees it, rather
+  than the kernel killing the program. It needs a count of the
+  mailbox's bytes in the process, which today are added up when
+  `:system` asks. The other ways: leave it unbounded, or hold the
+  sender, which changes what `send` is. *The program:* a limit of its
+  own would fault whichever process happened to ask for memory as it
+  was passed, not the one that holds it; Claude's recommendation is
+  none, the container's limit being the program's, with each process's
+  cap already a quarter of it (D233).
+- **A process's struct is at its block's size** since D300: 400 bytes
+  on x86-64 and 512 on AArch64, each a size class of the arena's, so
+  one more field costs 16 bytes a process on either. Its four flags
+  (`keypress`, `held`, `waited`, `forgotten`) are a byte each, and
+  would pack into one if a byte or three were wanted.
 - **Smaller, none urgent:** objects aligned to 8 bytes (finding 9; the
   compiler's allocation, the collector's `box_bytes`, and the arena's
   classes would all change); `entry_t` is 40 bytes and could be 24

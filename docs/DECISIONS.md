@@ -8098,8 +8098,12 @@ default.)* Two things D291 and D292 left.
   to 1. Instructions, callgrind's: a load, a subtraction and a compare
   at every wait (one test for "lower than it's been seen" and "16 KB
   above that", the first wrapping round), which is `thread-ring` 1.0
-  per cent more, `idle-memory` 1.3, `bank` 0.7, `ping-pong` and `spawn`
-  0.5; the programs that don't wait, the same.
+  per cent more, `idle-memory` 1.3, `bank` 0.7, `ping-pong`, `spawn`
+  and the workers about 0.5; the programs that don't wait, the same.
+- **On macOS,** where `madvise` walks every page of its range, the
+  range starts 256 KB below the lowest the process was seen, not at
+  the stack's bottom (`STACK_TRIM_TOPS`, as `trim_spares`); checked on
+  Linux with that defined, not yet on a Mac.
 - **What it doesn't see:** a recursion that starts and ends within a
   slice, under a thousand calls, isn't sampled, so a process that goes
   a few hundred frames deep for each message keeps those pages, some

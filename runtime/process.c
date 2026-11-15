@@ -443,8 +443,15 @@ static __attribute__((noinline)) void shallow(rt_proc_t *p, const rt_value_t *fr
     }
     if (p->deep_waits && p->deep_waits++ < STACK_WAITS) return;
     p->deep_waits = 1;
-    uintptr_t to = ((uintptr_t)__builtin_frame_address(0) - page) & ~(uintptr_t)(page - 1);
-    if (to > (uintptr_t)p->stack) madvise(p->stack, to - (uintptr_t)p->stack, STACK_GIVE_BACK);
+    uintptr_t from = (uintptr_t)p->stack;
+    uintptr_t to   = ((uintptr_t)__builtin_frame_address(0) - page) & ~(uintptr_t)(page - 1);
+#if STACK_TRIM_TOPS
+    // macOS walks every page of the range it's given (trim_spares), 8 MB
+    // of them from a stack's bottom: so from a little below the lowest it
+    // was seen, which is as far as a slice of ordinary frames goes on.
+    if (p->stack_low - from > STACK_TOP_BYTES) from = (p->stack_low - STACK_TOP_BYTES) & ~(uintptr_t)(page - 1);
+#endif
+    if (to > from) madvise((void *)from, to - from, STACK_GIVE_BACK);
     p->stack_low = (uintptr_t)frame;
 }
 
