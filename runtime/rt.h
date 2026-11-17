@@ -358,6 +358,17 @@
 #define RT_ISLE_ISLANDS      5    // :islands       each island's counts, in (:runtime s info)
 #define RT_ISLE_COUNT        6
 
+// What :system says a process, an island and the program hold (D294), in
+// (:memory info), every number bytes: RT_MEM_x is symbol RT_SYM_MEM + x.
+// Its :mail, :stack and :shared are RT_SYS_MAIL's, the fault kind's and
+// RT_ISLE_SHARED's.
+#define RT_SYM_MEM         198    // RT_SYM_ISLE + RT_ISLE_COUNT
+#define RT_MEM_MEMORY        0    // :memory        what's held, in bytes, by what holds it
+#define RT_MEM_NURSERY       1    // :nursery       the young generation's chunks
+#define RT_MEM_OLD           2    // :old           the old generation's chunks
+#define RT_MEM_RESIDENT      3    // :resident      the program's memory, as the system has it
+#define RT_MEM_COUNT         4
+
 // How connect :fs/... opens its file, and what connect :tcp... does.
 #define RT_FS_READ           0
 #define RT_FS_WRITE          1    // creating it, or emptying it
@@ -384,6 +395,7 @@
 #define RT_PROC_CODE        48    // rt_proc_t.code: what the trampoline calls...
 #define RT_PROC_ARGS        56    // rt_proc_t.args[RT_MAX_ARGS]: ...with these in the argument registers
 #define RT_MAX_ARGS          8    // the most a call passes (the compiler's MAX_ARGS)
+#define RT_FORK_FORGET     256    // added to a fork's count of values when its pid is thrown away (D297)
 #define RT_PROC_FUN        120    // rt_proc_t.fun: the function a fork's process calls with them (D286)
 #define RT_PROC_CTX        128    // rt_proc_t.ctx: the registers, while it's switched out
 
@@ -410,6 +422,7 @@
 
 #ifndef __ASSEMBLER__
 
+#include <stdatomic.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -507,16 +520,24 @@ typedef struct rt_proc {
     uintptr_t   heap_limit;     // ...and calls rt_heap_grow when it would pass this
     rt_value_t  pid;            // as a value
     rt_value_t  parent;         // as a value; () for the root
-    rt_code_t   code;           // where it starts, or restarts after waiting in recv
+    rt_code_t   code;           // where it starts
     rt_value_t  args[RT_MAX_ARGS];
     rt_value_t  fun;            // a fork's: the function rt_apply_start calls with args (D286)
     rt_ctx_t    ctx;
 
-    rt_state_t      state;
+    uint8_t         state;      // an rt_state_t, in a byte, so those after it cost a waiting process nothing
     uint8_t         keypress;   // connected to :keypress
     uint8_t         held;       // waiting with its stack kept, and counted among its island's (process.c)
+    uint8_t         waited;     // it has waited in recv since its nursery last started again (process.c)
+    uint8_t         settle_log2;    // its heap is settled when it waits in recv holding 2^this bytes or more
+    uint8_t         forgotten;  // its pid was thrown away where it was forked: its result isn't kept (D297)
+    uint8_t         nursery_log2;   // the nursery it's to have when it next allocates is 2^this bytes; 0, the first size
+    uint8_t         deep_waits; // 0 till its stack's deep pages first go back; then its waits since with more (D300)
     void           *stack;      // the bottom of its stack, carved from a slab (process.c), or NULL
-    rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c)
+    uintptr_t       stack_low;  // the lowest its frames have been seen, at a slice's end, since the pages below
+                                // where it waited last went back (process.c, D300)
+    rt_chunk_t     *nursery;    // the young generation, then the chunks it overflowed into (process.c);
+                                // NULL till it next allocates, if it's to be another size
     rt_chunk_t     *chunks;     // the old generation, newest first, the messages it's taken among them
     uintptr_t       old_ptr;    // where the next promotion goes, in the first of chunks; or 0
     size_t          heap_bytes; // in all its chunks, both generations
@@ -1222,6 +1243,47 @@ int  rt_sexp_scan(rt_sexp_t *s, const char *bytes, size_t len, int eof, size_t *
 void rt_sexp_reset(rt_sexp_t *s);
 void rt_sexp_free(rt_sexp_t *s);
 int  rt_sexp_build(const char *text, size_t len, rt_build_alloc_t alloc, void *cx, rt_value_t *out);
+
+// An island's memory for heap chunks and messages (alloc.c, D296): blocks
+// of a few sizes cut from spans, and runs of whole units for the big
+// ones, got from the system in regions and given back a run at a time.
+// Each island allocates from its own arena, with no lock; a block freed
+// on another island goes home to be freed there.
+#define RT_ARENA_CLASSES 74             // sizes of block cut from a span, 16 bytes to 16,400
+#define RT_ARENA_RUNS    32             // free runs are kept by length, 1 to this many units; a longer one is mapped alone
+
+typedef struct {                        // free runs of one length: at[0..cold) given back, the rest still in memory
+    void  **at;
+    size_t  n, cap, cold;
+} rt_runs_t;
+
+typedef struct rt_arena {
+    uint64_t        island;             // whose it is: a span's says the same
+    struct rt_span *avail[RT_ARENA_CLASSES];    // each size's spans with a block free, the first the one allocated from
+    rt_runs_t       runs[RT_ARENA_RUNS + 1];
+    size_t          warm;               // units in free runs not given back
+    char           *next, *end;         // the region new runs are carved from
+    struct rt_home *home;               // blocks freed here that are other islands', till they're sent home
+    uint64_t        going;              // how many, all told
+} rt_arena_t;
+
+// Other islands' frees of an island's blocks, waiting for it (alloc.c):
+// each on lines of its own, as an inbox is.
+typedef struct {
+    _Alignas(128) _Atomic(void *) head;
+} rt_returns_t;
+extern rt_returns_t rt_returns[RT_ISLANDS_MAX];
+
+void *rt_block_new(rt_arena_t *a, size_t bytes);    // 16-aligned; never NULL
+void  rt_block_free(rt_arena_t *a, void *block);    // by any island's arena: a is the caller's
+void  rt_arena_returns(rt_arena_t *a);              // frees what other islands sent home
+void  rt_arena_idle(rt_arena_t *a);                 // the island is about to wait: what it holds for others goes
+                                                    // home, and what it holds free, past a little, goes back
+void  rt_arena_wake(uint64_t island);               // process.c: wakes an island that's waiting, to take its returns
+void  rt_arena_hold(size_t bytes);                  // the free runs the islands may hold in memory, 64 MB at the most
+static inline int rt_arena_pending(const rt_arena_t *a) {
+    return atomic_load_explicit(&rt_returns[a->island].head, memory_order_relaxed) != NULL;
+}
 
 // Finding a host's IPv4 address (dns.c, D153, D165). rt_lookup_begin gives
 // RT_LOOKUP_DONE, with *addr (in network order), when the host is an

@@ -1,0 +1,44 @@
+; t/live.py's memory given back: what's freed goes back to the system
+; (D296), which only the system can say: the program's resident set,
+; from :system (D294), at five moments. A burst of processes, each
+; holding a list, all waiting at once, and then all ended; and a process
+; on island 1 that sends lists to the root, on island 0, and then waits
+; for good, so that the lists' memory, island 1's, is freed by island 0,
+; and goes back only if island 1 is woken to take it. @ARGV: how many
+; processes, the cells each holds, and how many lists are sent.
+
+(defun ask (s q) (send s q) (match (read s) ((:runtime _ i) i)))
+(defun resident (s) (lookup :resident (lookup :memory (ask s (list :runtime)))))
+
+(defun hold (k) (let xs (range 0 k)) (recv (:go (length xs))))
+
+; The lists to the root's inbox, where they wait; then word to its
+; address, which it reads meanwhile.
+(defun lists (to n) (when (> n 0) (send to (range 0 100)) (lists to (- n 1))))
+(defun sender (to done n) (lists to n) (send done :sent) (recv (:never 0)))
+
+(defun take (n) (when (> n 0) (recv (_ (take (- n 1))))))
+
+(let n (str->int (nth 0 @ARGV)))
+(let k (str->int (nth 1 @ARGV)))
+(let m (str->int (nth 2 @ARGV)))
+(let s (cadr (open :system)))
+(let before (resident s))
+
+(let ps (map (lambda (_) (fork hold k)) (range 0 n)))
+(sleep 300)
+(let held (resident s))
+(map (lambda (p) (send p :go)) ps)
+(map join ps)
+(sleep 300)
+(let ended (resident s))
+
+(let done (address))
+(let w (fork/on 1 sender $$ done m))
+(read done)
+(let sent (resident s))
+(take m)
+(sleep 300)
+(let taken (resident s))
+(kill w)
+(list before held ended sent taken)

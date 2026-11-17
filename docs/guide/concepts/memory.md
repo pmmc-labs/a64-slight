@@ -49,7 +49,15 @@ fault in #<pid 2>: heap exhausted (cons at docs/guide/code/con-memory.slight:4:1
   generation is collected rarely. A collection looks only at the
   process being collected, and takes time in proportion to what that
   process still holds, so a big process doesn't make the small ones'
-  collections slower.
+  collections slower. Nor does it hold them up: a collection of a big
+  heap stops every 256 KB it copies to let the others have a turn.
+- **A process that waits holds about what it has live.** When a
+  process waits, for a message, an answer, another process's end or a
+  timer, after its heap has grown, what's live is
+  copied into chunks that fit it and the rest is freed. So an actor
+  that built something big and dropped it gives the memory back when
+  it next waits, and one that takes messages for good stays a few tens
+  of KB however many it has taken.
 - **A waiting process keeps its stack** (D276). The `:system` device
   shows the idle actor waiting in `recv`, with its stack: 8 MB of
   address space, of which only the pages it has touched, a few KB, are
@@ -83,7 +91,10 @@ value. The copy is as big as the value, and so is the time it takes.
 
 The `:system` device tells each process's `(:heap bytes)`,
 `(:reductions n)`, `(:mail n)` (messages waiting) and `(:stack held)`,
-and the runtime's totals. `examples/top.slight` shows them live, like
+and the runtime's totals; and `(:memory info)`, what each holds in
+bytes, which is more than what it uses: its heap's chunks, its waiting
+messages, its stack, and for the program, what the system says it has.
+`examples/top.slight` shows them live, like
 `top`. A process whose mail keeps growing is being sent more than it
 can take. A process whose heap keeps growing is keeping more than it
 needs, often in a `let` at the top of a long-running function, which

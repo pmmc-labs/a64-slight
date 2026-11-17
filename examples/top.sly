@@ -104,7 +104,8 @@ fun frame(s, frames, last, calls, rt, ps) {
         if frames < 0 { "\e[H\e[2J" } else { "" },
         "top at ", seconds(lookup(:clock, rt)), ":   processes ", lookup(:processes, rt),
         "   ready ", lookup(:ready, rt), "   timers ", lookup(:timers, rt),
-        "   devices ", lookup(:devices, rt), "   heap ", lookup(:heap, rt), "\n\n",
+        "   devices ", lookup(:devices, rt), "   heap ", lookup(:heap, rt),
+        "   resident ", lookup(:resident, lookup(:memory, rt)), "\n\n",
         "  PID PARENT STATE      MAIL     HEAP  BUSY  IN\n");
     ps |> map(fun(i) => tty::write(row(i, last, spent), "\n"));
     if frames == 1 {

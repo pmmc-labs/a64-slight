@@ -907,9 +907,31 @@ parent, till the parent has had it: by joining it, by a monitor's
 notice, or by ending (D244). Till then anyone may join it, as often as
 they like, or race it, which doesn't take it; after, it's `:ended`. So
 a process forked and joined at once, the usual way, keeps nothing once
-joined, and a parent that starts many and never takes them holds their
-values till it ends: one that starts processes for good, a server
-accepting connections, say, monitors each, and nothing is kept. A pid
+joined.
+
+A fork whose pid is thrown away keeps no result (D297): its parent has
+no pid to ask with, so once its end has been told to whoever was
+waiting, it's `:ended`. A pid is thrown away when nothing is done with
+the fork's value: when the `fork` (or `fork/on`, or `connect`) is a
+form of a body other than its last; or is the last form of a `do`, of a
+`cond` clause (so of an `if`, a `when`, a `case` or a `match`), or of a
+`recv` clause, whose own value is thrown away the same way.
+
+    (defun start (n to)
+        (when (> n 0)
+            (fork work n to)        ; thrown away: nothing kept
+            (start (- n 1) to)))
+
+So a process that starts others for good and hears from them by
+message, or not at all, holds nothing for them. That goes by where the
+`fork` is written, not by what becomes of its value later: a `fork`
+that's a function's last form is that function's value, and kept,
+whatever the caller does with it, and so is one bound with `let`, or
+passed to `map` in a lambda. And a process that's told such a child's
+pid some other way (the child sends its own `$$`) and joins it after
+it has ended gets `:ended`; one that's waiting as it ends is told, as
+ever. A parent that keeps the pids of many and never takes them holds
+their values till it ends. A pid
 is never reused, and the runtime forgets one once nothing more can
 come of it, so a program that runs for good, starting processes as it
 goes, holds only those running, open or keeping a value (`:system`'s
@@ -1062,7 +1084,8 @@ A pid says its island: `#<pid 5@2>` is the fifth process made on island
   order they were sent, wherever each is.
 - `monitor`, `join` and `join/race` of another island's process tell
   its end as they would of one here, and a child's end comes to its
-  parent's island, kept there till it's joined (D277).
+  parent's island, kept there till it's joined (D277), unless its pid
+  was thrown away (D297).
 - `kill` of another island's process ends it when its island takes the
   word, a moment later; `kill` doesn't wait for that.
 
@@ -1101,13 +1124,35 @@ its own and the kernel doesn't kill the program. That caps each
 process, not all of them together. It's collected when the process
 waits in `recv`, or at the entry of the next function called (D166,
 D276), in two generations (D200): what's new is allocated in a nursery
-(from 4 KB, growing to 1 MB), and once that's full, what's still
+(from 1 KB, growing to 1 MB), and once that's full, what's still
 reachable in it is moved to the old generation and the nursery starts
-again; the old generation is collected once it's at least 256 KB and
+again; the old generation is collected once it's at least 64 KB and
 twice what survived its last collection. So what dies young costs
 little, and what lives long is copied rarely. Every loop is a call, so
 any process collects, the root included, whether it waits for messages
 or not.
+
+A process that waits holds about what it has live (D295). A nursery
+grows past 16 KB only for a process that fills it without waiting, so
+its size is what one run of the process needs, not a count of what it
+has ever allocated. And when a process waits, in `recv` with nothing to
+take, or in `read`, `read/any`, `open`, `join`, `join/race` or `sleep`
+(D299), the first time with more than a first nursery, and after that
+whenever its heap has doubled and is over 32 KB, its heap is settled:
+what's live is copied into chunks that fit it, and the rest goes. So a
+process that builds something big, drops it and waits gives it back
+then; one that keeps a little state and takes messages for good holds
+its state, a nursery of 16 KB at most, and under 32 KB of what its
+messages left; and one that only holds what it was started with holds
+just that. So does one that only asks (`ask`, `http/request` and
+`rpc/call` wait in `read`), joins or sleeps.
+
+A collection is its process's own time. One that copies a big heap, a
+few hundred MB in a quarter of a second or so, stops every 256 KB to
+let the other processes on its island have a turn, and the island's
+timers and messages be seen to (D298): so a process with a big heap
+doesn't hold the others up, though it's away itself till its
+collection is done.
 
 What's live is what the process can still reach, and that includes
 whatever a function that hasn't returned has bound with `let`, until it
@@ -1565,6 +1610,20 @@ which `lookup` reads; more keys may come. A process's:
   which may have ended by then.
 - `(:received (n bytes))`: the messages from other islands given to it,
   to it or to one of its addresses.
+- `(:memory info)`: what it holds, an info of its own, every number in
+  it bytes (D294). `(:nursery n)` and `(:old n)`: its heap's chunks, by
+  generation (The heap), whatever's in use of them, where `:heap` above
+  is what's in use; together they're what its heap has from the system.
+  `(:mail n)`: its waiting messages, each a record of 32 bytes and its
+  copy. `(:stack n)`: its stack's pages in memory, as the system says,
+  which is as deep as it has been since they last went back, not as
+  deep as it is: a process that went deep gives the pages below it back
+  when it next waits, the first time, and after that at its 64th wait
+  since (D300); and the buffer its
+  frames wait in off the stack (D292), which it keeps once it has one.
+  `(:shared n)`: the big strings and arrays it holds that are off every
+  heap (The heap), each counted whole by every process that holds it.
+  Not counted: the process itself, a few hundred bytes.
 
 The runtime's, every island's added up: `(:processes n)` that haven't
 ended; `(:pids n)` made, processes and devices, ended or not;
@@ -1577,9 +1636,23 @@ program started; `(:reductions n)`, made by every process, ended or not;
 and `(:islands infos)`, an info for each island, started or not, in
 order: `(:island k)`, `(:started b)`, `(:processes n)`, `(:ready n)`,
 `(:timers n)`, `(:devices n)`, `(:heap bytes)`, `(:shared bytes)` (the
-shared buffers its processes hold, D253), `(:reductions n)`, and
+shared buffers its processes hold, D253), `(:reductions n)`,
 `(:sent (n bytes))` and `(:received (n bytes))`, its messages to and
-from other islands.
+from other islands, and `(:memory info)`, its processes' added up. The
+runtime's has `(:memory info)` too, every island's added up, and in it
+`(:resident n)`: the memory the program has, as the system says (its
+resident set), which is more than the rest together, since it counts
+the program's code, the runtime's own tables, stacks kept warm for the
+next process, and what's free and kept for the next allocation. What a
+process frees goes back to the system (D296): at once past 64 MB kept
+free, and all but about 1 MB an island when the island next has
+nothing to run; so after a burst, of processes or of messages, the
+program's memory comes back down, on Linux as the resident set shows
+it, and on macOS as the system takes the pages it's been told are
+free. Asking for a `:memory` walks every mailbox and asks the system
+about each stack held, so `(:runtime)` and `(:processes)` take longer
+the more there is; what the system says is recorded, and replays
+(D170).
 
 A timer's message to the device is answered when it's due, so this
 shows where every process is, once a second (`examples/top.slight` is a

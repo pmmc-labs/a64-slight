@@ -1,0 +1,13 @@
+; A process builds n cells, drops them, and waits, taking m bare messages; the root sleeps.
+; (bench/memory.py; docs/memory-review-2026-11-13.md has what each showed.)
+
+(defun build (n acc) (if (== n 0) acc (build (- n 1) (cons n acc))))
+(defun burst (n) (length (build n ())))
+(defun idle (k) (recv (:tick (idle (+ k 1))) (:stop k)))
+(defun go (n) (let x (burst n)) (idle x))
+(let p (fork go (str->int (car @ARGV))))
+(sleep 500)
+(dotimes 0 (str->int (cadr @ARGV)) (lambda (i) (send p :tick)))
+(sleep 2000)
+(send p :stop)
+(join p)

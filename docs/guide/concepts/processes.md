@@ -247,9 +247,11 @@ A process ends with a value, `(:ok value)`, or an error,
 
 A program that runs for good, starting processes as it goes, holds only
 those running, open, or keeping a value for a parent that hasn't taken
-it yet. So a process that starts others for good, a server accepting
-connections, say, joins or monitors what it starts: a monitor's notice
-is the parent having it, and nothing is kept.
+it yet. A fork whose pid is thrown away, one written as a step on its
+way to something else and not as a value, keeps nothing: nobody has
+the pid to ask with (D297). A process that does keep the pids of what
+it starts for good joins or monitors them: a monitor's notice is the
+parent having it, and nothing is kept.
 
 ---
 

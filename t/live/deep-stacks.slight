@@ -1,0 +1,29 @@
+; t/live.py's deep stacks: a stack's pages go back once its process is
+; shallow again (D300), which only the system can say: the program's
+; resident set, from :system (D294), at three moments. n processes each
+; recurse d deep, not in a tail call, and wait; then each does it again
+; and ends. Before, a process held the pages of the deepest it had ever
+; been while it lived, and a warm stack kept them for the next process.
+; @ARGV: how many processes, and how deep.
+
+(defun ask (s q) (send s q) (match (read s) ((:runtime _ i) i)))
+(defun resident (s) (lookup :resident (lookup :memory (ask s (list :runtime)))))
+
+(defun deep (d) (if (== d 0) 0 (+ 1 (deep (- d 1)))))
+(defun worker (d to) (send to (deep d)) (recv (:go (deep d))))
+(defun gather (n acc) (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
+
+(let n (str->int (nth 0 @ARGV)))
+(let d (str->int (nth 1 @ARGV)))
+(let s (cadr (open :system)))
+(let before (resident s))
+
+(let ps (map (lambda (_) (fork worker d $$)) (range 0 n)))
+(let went (gather n 0))
+(sleep 300)
+(let waiting (resident s))
+(map (lambda (p) (send p :go)) ps)
+(map join ps)
+(sleep 300)
+(let ended (resident s))
+(list before waiting ended went)

@@ -1,0 +1,17 @@
+; n clients, each asking a server m times and keeping three cells from one answer to the next, then waiting
+; for a message that never comes: they wait only in read (ask's), never in recv. Then the root sleeps.
+; (bench/memory.py; D299.)
+
+(defun server () (recv ((:next x to) (reply to (list x (+ x 1))) (server))))
+(defun client (srv root m st)
+    (when (== m 0) (send root :done) (read (address)))
+    (let x (car (ask srv (list :next m))))
+    (client srv root (- m 1) (list x (+ x 1) (car st))))
+(defun start (n srv m acc) (if (== n 0) acc (start (- n 1) srv m (cons (fork client srv $$ m (list 0)) acc))))
+(defun done (n) (when (> n 0) (recv (:done (done (- n 1))))))
+(let n (str->int (car @ARGV)))
+(let m (str->int (cadr @ARGV)))
+(let ps (start n (fork server) m ()))
+(done n)
+(sleep 2500)
+(length ps)

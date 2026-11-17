@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readdirSync, readFileSync } from 'node:fs';
 
-import { ARRAY_WORDS, DEVICE_WORDS, ISLAND_WORDS, ERRNO_NAMES, EXEC_WORDS, FAULT_KINDS, FLOAT_HEADER, FLOAT_VALUE, intWord, JSON_WORDS, KEY_NAMES, KIND_WORDS, MAX_ARGS, PEER_WORDS, SOURCE_WORDS, RESERVED_SYMBOLS, LOG_WORDS, PACK_WORDS, STAT_WORDS, TABLE_WORDS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS, TAG_BOXED, tupleElement, tupleHeader } from '../src/values.ts';
+import { ARRAY_WORDS, DEVICE_WORDS, ISLAND_WORDS, MEMORY_WORDS, ERRNO_NAMES, EXEC_WORDS, FAULT_KINDS, FLOAT_HEADER, FLOAT_VALUE, FORK_FORGET, intWord, JSON_WORDS, KEY_NAMES, KIND_WORDS, MAX_ARGS, PEER_WORDS, SOURCE_WORDS, RESERVED_SYMBOLS, LOG_WORDS, PACK_WORDS, STAT_WORDS, TABLE_WORDS, RUNTIME_SYMBOLS, SEXP_WORDS, symbolWord, SYSTEM_WORDS, TAG_BOXED, tupleElement, tupleHeader } from '../src/values.ts';
 
 const RT_H = readFileSync(new URL('../../runtime/rt.h', import.meta.url), 'utf8');
 
@@ -65,6 +65,7 @@ test("the runtime's symbols follow #true, as rt.h numbers them", () => {
     assert.equal(BigInt(id(LOG_WORDS[0]!)), define('RT_SYM_LOG'));
     assert.equal(BigInt(id(ARRAY_WORDS[0]!)), define('RT_SYM_ARRAY'));
     assert.equal(BigInt(id(ISLAND_WORDS[0]!)), define('RT_SYM_ISLE'));
+    assert.equal(BigInt(id(MEMORY_WORDS[0]!)), define('RT_SYM_MEM'));
 });
 
 test('no name is in the runtime\'s symbols twice', () => {
@@ -94,7 +95,7 @@ test("a device's words, the errno names and the data's words are rt.h's, in orde
         ['RT_SOURCE_', SOURCE_WORDS, 'RT_SOURCE_COUNT'], ['RT_TABLE_', TABLE_WORDS, 'RT_TABLE_COUNT'],
         ['RT_STAT_', STAT_WORDS, 'RT_STAT_COUNT'], ['RT_PACK_', PACK_WORDS, 'RT_PACK_COUNT'],
         ['RT_LOG_', LOG_WORDS, 'RT_LOG_COUNT'], ['RT_ARRAY_', ARRAY_WORDS, 'RT_ARRAY_COUNT'],
-        ['RT_ISLE_', ISLAND_WORDS, 'RT_ISLE_COUNT'],
+        ['RT_ISLE_', ISLAND_WORDS, 'RT_ISLE_COUNT'], ['RT_MEM_', MEMORY_WORDS, 'RT_MEM_COUNT'],
     ] as const;
     for (const [prefix, names, count] of groups) {
         const found = [...RT_H.matchAll(new RegExp(`^#define ${prefix}\\w+\\s+(\\d+)\\s+// :(\\S+)`, 'gm'))];
@@ -110,6 +111,8 @@ test('nil is the list tag on a null pointer', () => {
 
 test('a call passes as many arguments as a waiting process keeps', () => {
     assert.equal(BigInt(MAX_ARGS), define('RT_MAX_ARGS'));
+    assert.equal(BigInt(FORK_FORGET), define('RT_FORK_FORGET'));
+    assert.ok(FORK_FORGET > MAX_ARGS + 1);         // a bit clear of any count
 });
 
 // On macOS a C name gets a leading underscore unless rt.h gives it the

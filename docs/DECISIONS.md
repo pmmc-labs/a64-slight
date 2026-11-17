@@ -7668,3 +7668,515 @@ the nine actor programs but `bank` in each, `bench/NAME/NAME.scm`
   `racket-mc` slower than `racket` in all five: places share Racket
   CS's one heap and collector, and two doing ping-pong at once each
   took 5.5 times as long as one alone. Results are the M2 Max's to give.
+
+**D294. `:system` says what's held: `(:memory info)`.** *(Stevan, 13 Nov
+2026: "start with A, then B", of the directions in
+`docs/memory-review-2026-11-13.md`; the fields are Claude's, by
+default.)* The review found that nothing it measured could be seen from
+inside a program: `:system` gave a heap's bytes in use, not what the
+heap holds. So a process's info, an island's and the runtime's each
+gain one field, `(:memory info)`, an info of its own in which every
+number is bytes: `(:nursery n)` and `(:old n)`, the heap's chunks by
+generation, in use or not; `(:mail n)`, the waiting messages' chunks;
+`(:stack n)`, the stack's pages in memory and the buffer its frames
+wait in off it (D292); `(:shared n)`, the shared buffers held, each
+counted whole; and, in the runtime's alone, `(:resident n)`, the
+program's resident set. The heap's and the mailbox's are the runtime's
+own counts, the same on every machine, so a golden test asserts on them
+(test 392), which is what the changes to the heap's policy that follow
+need. The stack's pages and the resident set are the system's to say
+(`mincore`, and `/proc/self/statm` or Mach's `task_info`), so they're
+asked through `replay.c` and replay as recorded (t/replay.sh's memory
+check); they're asked only when `:system` is.
+- **One nested info, not flat fields:** `:mail` and `:stack` are a
+  count and a flag at the top of a process's info already; inside
+  `:memory` every key is bytes, and nothing that reads the old fields
+  changes.
+- **A stack's pages from the system, not its depth:** how deep a
+  process is now costs nothing to say, but what it holds is how deep it
+  has ever been (the review's finding 6), which only the system knows.
+  The cost is a call for each process on a stack when `:system` is
+  asked, a few thousand at most on an island (D292).
+- **`memory.c`, a file of its own:** Mach's headers, which macOS's
+  answer needs, are kept away from the runtime's names (as `<sys/types.h>`'s
+  `major` and `minor` taught). It can't be compiled on the cloud
+  machine: the Mac's first build is its first test.
+- **Not counted, and said so in LANGUAGE.md:** the process's struct,
+  warm and spare stacks, the runtime's tables, and what `malloc` keeps;
+  `:resident` less the rest is those together.
+- **Rejected:** a builtin (`(memory)`), when a device that answers
+  questions about the runtime is there already; changing `(:mail n)`
+  and `(:stack held)` to carry bytes, which would break what reads
+  them; a per-process total, which would add a shared buffer once for
+  each holder.
+
+**D295. A heap sized to what's live: a process that waits is settled.**
+*(Stevan, 13 Nov 2026: "start with A, then B", of the directions in
+`docs/memory-review-2026-11-13.md`; the rules and their numbers are
+Claude's, by measurement, for Stevan to confirm or change.)* The review
+found a process's heap following what it had ever allocated, not what
+it held: a nursery that only doubled, to 1 MB, and an old generation
+never collected under 256 KB (D106), so a worker holding 48 bytes sat
+at 640 KB to 1 MB; one allocation cost a waiting process a 4 KB
+nursery; and a process that went quiet never collected. Four changes,
+all in when and into what the collector copies; its walks are as they
+were:
+- **Settling.** A process about to wait in `recv`, with nothing to
+  take, whose heap's chunks have reached a threshold has a major
+  collection there, and if what's live came to less than the chunks it
+  went into (and to 1 MB or less), a second, into one chunk of just
+  that size. The threshold is 2 KB the first time a process waits, and
+  after that twice what its old generation then held, and never under
+  32 KB. So a process that builds and drops gives the memory back the
+  first time it waits; one that only holds what it started with holds
+  exactly that; and a worker holds its state, a nursery and under 32 KB
+  of what its messages left. A settling copies what's live, and comes
+  only when the heap has doubled, so it's paid for as a major collection
+  is. The test where a process blocks is a shift and a branch.
+- **A nursery's size is a run's need.** It still doubles when it
+  overflows, but past 16 KB only if the process hasn't waited, in
+  anything, since it last started again; and a resized one is made
+  when the process next allocates, so one that waits first holds none.
+  A process that never waits is as before, to 1 MB.
+- **Smaller firsts:** a first nursery of 1 KB, not 4, and a major
+  collection's chunks from 512 bytes, doubling, so what's kept fits.
+- **`GC_MIN` 64 KB, not 256**, for what waits only in `read`, `join` or
+  `sleep`, which isn't settled.
+- **Measured** (cloud machine, x86-64, one island; instructions are
+  callgrind's): resident memory, 1,000 workers holding 48 bytes after
+  10,000 messages each, 640 MB to 46; the same sent bare integers, 246
+  to 25; 100,000 waiting processes holding one cell, 453 MB to 160, and
+  holding 100, 453 to 216; a process that built 64 MB and dropped it,
+  67 MB to 1.6; `examples/airline.slight` on its made-up day, 124 MB to
+  31 and 1.85 s to 1.47. Instructions: within 1 per cent on `ping-pong`,
+  `thread-ring`, `fan-in`, `spawn`, `idle-memory`, `binary-trees`,
+  `deriv`, `nqueens`, `n-body`, `tak` and `bank`; `payload` 2.2 per cent
+  more (a list of 100 survives a collection every ten messages, where a
+  1 MB nursery made that every 600); ten workers over 300,000 messages
+  13 per cent fewer. Time, 1,000 workers: over their first 3,000
+  messages each, 0.88 s to 1.07, since before, nothing was collected
+  that early and every message's chunk was fresh memory; over 10,000,
+  4.5 s to 3.7, and over 30,000, 12.8 to 11.4.
+- **Found on the way, glibc's:** a request of 1 KB or more makes
+  `malloc` gather up every freed small chunk first (`malloc_consolidate`),
+  and after that small requests take its slow path. Freeing and making
+  a nursery at each settling cost `ping-pong` 18 per cent of its
+  instructions, and a first to-space chunk of 1 KB cost ten workers 13;
+  hence a nursery kept after the first settling, and to-space from 512
+  bytes. The numbers above are fitted round an allocator that isn't
+  slight's, which is the review's direction C.
+- **Not done, and why:** settling in `read`, `join` and `sleep`, which
+  haven't the frame's slots in use, and `read` holds its sources in C,
+  where a collection can't move them; a process that drops what it
+  held across a wait without allocating as much again, which nothing
+  that counts allocation can see (only time can: a collection of what's
+  been quiet a while, from the scheduler, which needs a waiting
+  process's roots kept); a nursery freed while its process waits
+  between heavy runs (a run's nursery, up to 1 MB, is kept by a process
+  that fills one each time and gone at its first quiet settling).
+- **Rejected:** settling at every wait (a collection a message); a
+  floor of 64 KB for settling (87 KB a worker where 32 KB makes it 46,
+  and no time saved); a nursery for the asking of 4 KB, not 16 (the
+  workers taking lists held 51 MB, not 46, since more is promoted);
+  settling every process the first time it waits, whatever it holds
+  (`bank` 11 per cent more instructions: each customer allocates a
+  little, waits, and ends); freeing every nursery at every settling
+  (glibc, above); a threshold kept as a word in the process (a byte,
+  its log, beside the state, so a waiting process is no bigger).
+- Golden test 393 (`t/393-heap-settles`), on D294's `(:memory info)`;
+  test 392's first nursery. `SLIGHT_GC_STRESS` settles at every `recv`
+  that waits, as if for the first time, so `SLIGHT_GC_STRESS=7 make
+  golden` checks it against every test.
+
+**D296. Arenas: an island's own memory for chunks, messages and
+processes.** *(Stevan, 14 Nov 2026: "now do C", the third of the
+directions in `docs/memory-review-2026-11-13.md`; the design is
+Claude's, by default.)* Every chunk of every heap, every message and
+every process's struct was a `malloc` and a `free`. The review found
+what that cost: freed memory stayed with the program (after 20,000
+processes of 16 KB each had ended, 335 MB of the burst, even after
+D295); a send's allocation was the system's, its speed and its habits
+with it; and D295's numbers had to be fitted round one of those habits,
+glibc gathering up every freed message at a request of 1 KB or more. So
+each island has an arena (`runtime/alloc.c`, about 300 lines), with no
+lock, which those all come from:
+- **Runs, spans and size classes:** addresses from the system 64 MB at
+  a time, carved into runs of units of 64 KB, a header at each run's
+  start found by masking an address. A block of 16,400 bytes or less is
+  cut from a span, a run of one unit, of its size class: every multiple
+  of 16 to 528, then eight to a doubling, each 16 past the round
+  number, so a chunk of 1 KB to 16 KB with its header fits exactly, and
+  nothing wastes more than an eighth. A bigger block is a run, and one
+  past 2 MB a mapping of its own.
+- **Given back as the stacks are (D291):** a span with nothing out is a
+  free run again, and free runs are kept by length in arrays beside
+  them, so their pages go back while their addresses stay: an eighth
+  of the allowance when the islands hold 64 MB between them (a
+  sixteenth of a container's limit, if that's less), and all of an
+  island's when it's about to wait with more than 1 MB.
+- **Another island's block goes home:** kept by its home till there
+  are 32 of them or 256 KB, or the island waits, then pushed onto the
+  home's stack of returns, one compare and swap; the home takes them
+  at its scheduler's decisions, and is woken to if it's waiting, since
+  only its freeing gives the memory back.
+- **Measured** (cloud machine, x86-64; instructions callgrind's, one
+  island): `fan-in` 47 per cent fewer instructions, `idle-memory` 37,
+  `spawn` 34, `bank` 22, the workers 11 to 17, `ping-pong` and
+  `thread-ring` 11, `payload` 7; `binary-trees`, `deriv`, `nqueens`,
+  `n-body` and `tak`, which send nothing, the same. Time, best of five:
+  `fan-in` 0.60 of what it took, `idle-memory` 0.67, `spawn` 0.74,
+  `bank` 0.75, 1,000 workers 0.82, `binary-trees 16` 0.85, `payload`
+  0.89; on four islands, `fan-in` 0.43, `ping-pong` 0.49, `spawn` 0.51,
+  `idle-memory` 0.71. Memory: after 20,000 processes of 16 KB each have
+  ended, under 5 MB resident where 335 stayed; a heap of 16 MB rebuilt five
+  times, then waiting, 33 MB where it held 63; 100,000 lists sent from
+  island 1 to island 0 and taken there, all given back though island 1
+  is asleep. Peaks: `fan-in` 229 MB where it took 304, `spawn` 93 for
+  109, `idle-memory` 554 for 573.
+- **What it costs:** the airline's day peaks at 40 MB where it took 30,
+  and 1,000 workers hold 43 MB at rest where they held 46 but peak at
+  49: what's free is kept by size, a span to a class, where `malloc`
+  reused anything for anything, and up to 64 MB of it is kept in
+  memory while an island is busy. 100,000 processes holding a list of
+  100 take 224 MB for 216: a chunk of 1,600 bytes is in a block of
+  1,680. And between 16 KB and 2 MB a block is whole pages.
+- **With it, D295's two fittings to glibc go:** a settled process's
+  nursery goes every time, not only the first (freeing and making one
+  costs nothing now: measured, the same instructions either way); and
+  a major collection's first chunk is 512 bytes because a little
+  that's live should be in a little chunk, not for `malloc`'s bins. A
+  minor collection's chunks are powers of two, so a freed run is the
+  length of the next one wanted.
+- **Found on the way:** giving back all an island's free runs when the
+  allowance was passed made a collector with a big heap ask for them
+  all again, a page fault each (`binary-trees 18`, twice the faults of
+  `malloc`'s); an eighth of the allowance goes instead. And a wake
+  with no item must not read as time passed: `wait_for` says it was
+  woken, for the virtual clock's wait for a reply that's owed (D288).
+- **Not done:** shared buffers, devices' buffers and the tables are
+  still `malloc`'s; free runs aren't split or joined, so a run is
+  reused only at its own length (hence the chunks in few sizes); on
+  macOS the pages are marked free (`MADV_FREE`) and count as resident
+  till the system takes them, so `:resident` and Activity Monitor show
+  the burst after it's over (`MADV_FREE_REUSABLE` would say otherwise,
+  untried); `:system` doesn't say what an arena holds free.
+- **Rejected:** `malloc_trim` when an island waits, a line of code and
+  Linux's alone, which gives back what's free but leaves a send's
+  allocation and D295's fittings where they were; vendoring mimalloc,
+  whose design this is in small (a span its page, the returns its
+  delayed frees), 10,000 lines for the 300 needed; a block that stays
+  with the island that frees it, with no way home, under which no
+  span's count of what's out could be kept, and so nothing small given
+  back; returns as items in an island's inbox, which would put the
+  allocator's doings in every record of a run; four size classes to a
+  doubling (a quarter wasted at the worst: the workers 48 MB at rest,
+  and a 16 KB nursery a run of its own, a page more each); giving
+  everything back at the allowance (above); an allowance of a quarter
+  of a heap's cap, which the tests' cap of 64 MB made 16 MB
+  (`binary-trees 18` 27 per cent slower).
+- `t/alloc.c`, the arena on its own, four threads freeing each other's
+  blocks, each block a pattern of its address (`make alloc`, in `make
+  test`; and under ThreadSanitizer in `make tsan`); `t/live.py`'s gives
+  back, Linux's alone. `make test` passes on the M2 Max (15 Nov); not
+  timed there yet.
+
+**D297. A fork whose pid is thrown away keeps no result.** *(Stevan, 14
+Nov 2026, choosing "Implicit" of three: this, an explicit form, or
+leaving D277's rule alone; the fourth of the directions in
+`docs/memory-review-2026-11-13.md`.)* A process's result is kept for
+its parent till the parent has it (D244, and for every process since
+D277), which for a parent that never asks is an entry in the process
+table, pinning its page, and an id in the parent's list, about 45 bytes
+a child for as long as the parent lives: `spawn`'s million children 46
+MB of its 93, `bank`'s customers 42 MB a million, without end. And
+there was no good way out: a monitor's notice is a message the parent
+must take, which `bank`'s `source` never does. Now, where a `fork`,
+`fork/on` or `connect` is written so that nothing is done with its
+value, the child is told, and at its end keeps nothing: its parent has
+no pid to ask with.
+- **Thrown away** is by position, which the compiler knows already: a
+  form of a body other than its last; or the last form of a `do`, a
+  `cond` clause (so `if`, `when`, `case`, `and`, `or`, `match`) or a
+  `recv` clause whose own value is thrown away. A fork that's a
+  function's last form is the function's value, and kept, whatever the
+  caller does; so is one bound with `let`, or made in a lambda that
+  `map` calls.
+- **Who's told is as it was:** joiners, a race and monitors waiting as
+  it ends have its result. After that it's `:ended`: to a process the
+  child sent its own `$$`, and to anyone who found its pid in
+  `:system`.
+- **On another island** the same: the parent holds no watch for such a
+  child, and its end isn't sent to the parent's island.
+- **Measured** (cloud machine, x86-64, one island): `spawn` 1,000,000,
+  93 MB to 48 (what's left is the replies in the root's mailbox), 2,000,000,
+  185 to 94, 9 per cent fewer instructions and 0.19 s to 0.15; `bank`
+  1,000,000 customers 48 MB to 6, and 2,000,000 the same 6. Of about 700
+  forks in the tests, examples and libraries, 56 throw their pid away;
+  every golden test passes unchanged.
+- **Rejected:** an explicit form (`fork` that gives nothing back): a
+  second way to start a process a release after D277 made one kind,
+  and programs would have to opt in, the benchmarks among them; a
+  smaller record with the rule unchanged, which can't free the table's
+  page while anyone may still join there, so it saves 8 bytes of 45,
+  or else lets only the parent join, a change of its own; dropping a
+  record when the parent's heap no longer holds the pid (a test in the
+  collector's walk, and a pid waiting in a mailbox is a hole); keeping
+  nothing, as Erlang does (undoes D244); a cap on unclaimed results
+  (silent). Not done: following a pid further than where it's written
+  (a function whose callers all throw its value away), which would be
+  an analysis, where this is a flag in the code generator's context;
+  `lib/http.slight`'s and `lib/rpc.slight`'s acceptors still monitor
+  every connection (D278), since they count them for `:most` with the
+  same notice.
+- Golden test 394 (`t/394-fork-forgotten`), on `:system`'s `(:records
+  n)`: 500 thrown away keep none, 500 in a list keep 500 till they're
+  joined, a fork a function returns is kept, one that says who it is
+  is `:ended` when joined late and gives its result to a joiner
+  waiting, and the same on another island.
+
+**D298. A major collection pauses to let other processes run.**
+*(Stevan, 15 Nov 2026: "let's do E", the last of the directions in
+`docs/memory-review-2026-11-13.md`; what E became is Claude's, by
+default, and smaller than what the review described.)* The review's E
+was an old generation not copied whole: marked in slices, its chunks
+freed or kept, the largest change to the collector since D200. What was
+measured, though (D238, `latency`), was other processes waiting while
+one with a big heap collected: 45 ms beside 160 MB on the M2 Max, 133
+on the cloud machine. That needs no new collector. A major collection
+now stops each time it has copied 256 KB, lets the island see to its
+timers, inbox and sockets, and if another process is ready goes to the
+back of the run queue, as a process does at its slice's end, going on
+from where it was at its next turn; and it frees the old chunks the
+same way, 4 MB at a time, since giving 160 MB of pages back took 7 ms
+by itself. The collector's walk is as it was, running as the process it
+collects, its state on that process's stack: some fifty lines.
+- **Why it's safe:** nothing but a process touches its own heap. A
+  message for it waits in its mailbox, which no collection looks at;
+  `:system` reads counts that change only when the collection is done.
+  One ended while paused, by a kill or its device failing, has what it
+  had copied freed (`finish`, the side's `collecting`). And `recv`,
+  which settles a heap just before it waits, looks at the mailbox again
+  after, since a message may have come while the settling paused.
+- **No test in the walk:** it comes back to `gc_more` every slice
+  because the chunk it copies into is given to it a slice at a time.
+  No benchmark takes 1 per cent more instructions.
+- **Measured** (cloud machine, x86-64, one island, `latency 10`, a
+  pinger beside a process holding 160 MB and replacing it a block at a
+  time; the median of 8 runs after, 3 before): a ping's wait at the
+  median 10 ms to 0.36, at the 99th percentile 110 ms to 0.8, at the
+  worst 130 ms to 2. The benchmark takes as long as it did, 3.4 s: the
+  collecting is the same work, between other things.
+- **What it changes:** when other processes run now depends on how
+  much a collection copies, once that's more than a slice. It's the
+  same every run, and in a replay; but D166's "collecting never
+  changes when a process is preempted" no longer says that the order
+  processes run in is the collector's to leave alone. Every golden test
+  passes as it was, and with pauses every 64 bytes; with those and
+  `SLIGHT_GC_STRESS` together, two tests that print the order their
+  messages came in print another (133, 368), as they should.
+- **What it doesn't do**, which the review's E would: the process
+  collected is still away for the whole of its own collection; a major
+  collection still copies everything live, twice to four times the
+  memory while it does; and a minor collection, a nursery of 1 MB at
+  the most, doesn't pause (0.5 to 0.9 ms here when all of one
+  survives). An old generation marked and not moved is still there to
+  propose, for a simulation with one big heap, if those matter.
+- **Rejected:** the review's E first (above: not what was measured);
+  a second thread for big collections (D239's C), under which when the
+  collected process ran again would depend on the clock, and no run
+  would replay without recording it; a collection driven in slices
+  from the scheduler, its state saved between them, which is this with
+  the walk rewritten to be resumed; pausing only when something's
+  ready, without `events`, which would leave a timer or another
+  island's message waiting out the whole collection of a process alone
+  on its island; no pauses under `SLIGHT_GC_STRESS`, which the tests
+  showed isn't needed.
+- Golden test 395 (`t/395-collection-pauses`), with `SLIGHT_GC_SLICE`
+  at 1 KB: a ticker of 2,000 turns loses a race to a process counting
+  to a million, and wins one against a process that builds 200,000
+  cells in a fifth of the calls, since its collections pause thousands
+  of times; and a process killed among its pauses ends. `SLIGHT_GC_SLICE=64
+  make golden` runs every test with a pause at every object copied.
+
+**D299. A process is settled wherever it waits.** *(Stevan, 15 Nov
+2026: "let's get started" on what `docs/memory-review-2026-11-13-plan.md`
+lists as left, of which this is the first that needs no decision of
+his; the design is Claude's, by default.)* D295 settled a process's
+heap when it waited in `recv`, and left `read`, `join` and `sleep`: a
+process that only asks (`ask`, `http/request`, `rpc/call` and `slurp`
+wait in `read`), joins or sleeps had D295's nursery rule and the old
+generation's floor of 64 KB, and held what it had built and dropped
+till it built as much again. Two things were in the way. Those waits
+are told their calling frame and its frame pointer (`WAIT`, in
+`rt_asm_*.S`), for copying a process off its stack (D292), but not how
+many of the frame's slots are in use, which `recv` is told and collects
+by. And `read/any`'s list of sources and a race's of pids are held in C
+across the wait, where a collection couldn't move them.
+- **All of the frame's slots are roots.** The plan's guess, that every
+  slot is a value or zero at a builtin's call as at a function's, was
+  half right: a slot only ever holds a value, but a function zeroed its
+  slots at its entry only if it called a compiled function (not in tail
+  position), so one that only waited in a builtin left them as the
+  stack had them. Now a function that calls `read`, `read/any`, `open`,
+  `join`, `join/race` or `sleep` zeroes them too (`settles`, in
+  `codegen.ts`): a store or two at its entry. From then on a slot holds
+  zero or a value that every collection since has moved, live or not;
+  one that's dead keeps what it points at till the function returns,
+  as a caller's dead slots always have under a call.
+- **What the wait holds in C is one more root** (`also`, in
+  `settle_heap` and `collect_all`): the list moves with the rest, and
+  the wait goes on with where it went.
+- **Each looks again after settling,** since a settling may pause
+  (D298) and what it was about to wait for come meanwhile: `read` for a
+  message or its device's closing, `join` and a race for an end.
+  `sleep` settles before its timer is set, the time it's due worked out
+  first.
+- **Measured** (cloud machine, x86-64, one island): 1,000 processes
+  that each ask a server 1,000 times, keeping three cells from one
+  answer to the next, then wait in `read` (`bench/memory/askers.slight`),
+  60 MB at rest to 30, and a peak of 98 MB to 44; a root that built 16
+  MB five times and sleeps, 33 MB to 18. Instructions, callgrind's:
+  `bank`, whose customers sleep, 0.5 per cent more; every other
+  benchmark within 0.1 per cent.
+- **Not done:** the waits across islands in `fork/on` and
+  `timer/cancel`, which are answered at once.
+- **Rejected:** telling each wait how many slots are in use, as `recv`
+  is told: exact, where this keeps a dead slot's value alive a while,
+  but an argument more in each call and in `WAIT`'s registers on both
+  targets, for what a caller's frame has never had; keeping the sources
+  in a slot the compiler makes for them, which is the same root with a
+  compiler change more.
+- **What it changes under `SLIGHT_GC_SLICE=64`,** where every settling
+  pauses: test 122's joiners print before the root's own join, the
+  root having gone to the back of the queue as it settled; as 133 and
+  368 print another order with `SLIGHT_GC_STRESS` beside it (D298).
+- Golden test 396 (`t/396-settles-any-wait`), on `(:memory info)`: a
+  process that builds 1.6 MB, drops it and waits holds nothing in
+  `read` and in `sleep`, its list of two in `read/any` and in a race,
+  and the 1,600 bytes it keeps across a `join`, where each held 2 MB;
+  and has what it kept after. `SLIGHT_GC_STRESS` settles at every one
+  of these waits, so `SLIGHT_GC_STRESS=7 make golden` checks it against
+  every test.
+
+**D300. A stack gives its pages back: a burst's, and a deep one's.**
+*(Stevan, 15 Nov 2026, as D299: the next of what
+`docs/memory-review-2026-11-13-plan.md` lists as left that needs no
+decision of his, the review's finding 6; the design is Claude's, by
+default.)* Two things D291 and D292 left.
+- **A burst of processes that all wait at once kept its stacks.** A
+  process copied off its stack (D292) gave it to the island's warm
+  list, and with that full, 256, the copy was refused and the process
+  kept its stack, since a spare's pages may go back at any time and
+  the process is still running on it as it's copied off. But they go
+  back only from `trim_spares`, called by the scheduler or as a process
+  ends, never between the copy and the switch away; so now such a
+  stack goes among the spares, those waiting to go back going first,
+  there, if they've come to 64 MB. Of 3,000 processes that each run
+  past a slice before they wait, 1,025 stacks are held where 1,974
+  were (golden test 397).
+- **A stack never got shallower.** A process that recursed deep once
+  held those pages while it lived, and a warm stack kept them for the
+  next. Now `stack_low` is the lowest a process's frames have been
+  seen: at a slice's end, in `rt_preempt`, a sample every thousand
+  calls, and where it waits. When it waits more than 16 KB above
+  that, the pages below where it is go back, all but one, and the
+  watch starts again from there. A process that ends, or is copied
+  off, with deep pages gives its stack back as a spare, not warm.
+- **At once the first time, then at the 64th wait since.** Giving the
+  pages back at every wait made a worker that recurses 2,000 deep for
+  each message 3.3 times slower (0.67 s to 2.17 for 100,000 messages:
+  a system call and sixteen page faults a message), and one that goes
+  20,000 deep 2.2 times. A process that went deep to start with, and
+  waits, may never go deep again, so its first time is at once; after
+  that it has shown it goes deep more than once, and its pages go back
+  only at its 64th wait with them. With that, the two workers take 8
+  and 2 per cent longer.
+- **Measured** (cloud machine, x86-64, one island, resident memory at
+  rest): 1,000 processes that recursed 20,000 deep once and wait, 615
+  MB to 10; 1,000 deep, 36 MB to 10; 5,000 at 20,000 deep, 3,070 MB to
+  14; and after 1,000 that went 20,000 deep twice have ended, 165 MB
+  to 1. Instructions, callgrind's: a load, a subtraction and a compare
+  at every wait (one test for "lower than it's been seen" and "16 KB
+  above that", the first wrapping round), which is `thread-ring` 1.0
+  per cent more, `idle-memory` 1.3, `bank` 0.7, `ping-pong`, `spawn`
+  and the workers about 0.5; the programs that don't wait, the same.
+- **On macOS,** where `madvise` walks every page of its range, the
+  range starts 256 KB below the lowest the process was seen, not at
+  the stack's bottom (`STACK_TRIM_TOPS`, as `trim_spares`); checked on
+  Linux with that defined, and then on the M2 Max (Stevan, 15 Nov):
+  the worker that goes 2,000 deep takes 1.59 s with it and 1.62
+  without, so it costs nothing that shows there. Its memory doesn't
+  show there either: 1,000 processes that went 20,000 deep are 627 MB
+  resident as they wait, macOS counting pages marked free as the
+  program's till it wants them, as with the arena's (D296).
+- **What it doesn't see:** a recursion that starts and ends within a
+  slice, under a thousand calls, isn't sampled, so a process that goes
+  a few hundred frames deep for each message keeps those pages, some
+  tens of KB, as before.
+- **Rejected:** giving the pages back at every wait (above); a
+  doubling count in place of 64, which needs two fields where this
+  needs a byte, and leaves a process that went deep a dozen times
+  holding its pages for 32,000 waits; the stack check at a function's
+  entry as an exact mark of the deepest, a soft limit that the fault's
+  stub would have to come back from, with the arguments still in their
+  registers: a compiler change on both targets for what a sample gets;
+  giving them back when the island is idle, as spares are, which needs
+  a list of waiting processes the scheduler can walk, taken off as
+  each wakes or ends.
+- A process is no bigger: `stack_low` is a word that the arena's size
+  class had room for (392 bytes in a block of 400 on x86-64, 504 in
+  512 on AArch64), and the count a byte beside the state.
+- Golden test 397 (`t/397-burst-gives-stacks`), on `:system`'s
+  `(:stacks n)`; `t/live.py`'s deep stacks, on its `:resident`, Linux's
+  alone: 1,000 processes that went 20,000 deep hold 8 MB as they wait
+  and 1 MB once they've ended.
+  With `SLIGHT_COPY_OUT`, 397 fails, and should, as 384 does:
+  no process keeps a stack as it waits.
+
+**D301. A mailbox counted toward its process's cap: built, measured,
+and withdrawn.** *(Stevan, 15 Nov 2026: "do the mailbox cap", and the
+same day, once it was built: "Is this one worth it? I get the sense it
+is complicating things a bit and I worry we will end up in a game of
+whack-a-mole with the memory work"; then "Revert D301". Claude had
+recommended it, and agreed it should go.)* D88 stands: mailboxes are
+unbounded. What was built, for whoever thinks of it again:
+- **The rule:** what a process held against its heap's cap was its
+  heap, what its handles keep alive, and its waiting messages; a
+  message that took it past ended the receiver with `(:error (:heap ()
+  "its mailbox"))`, as `kill` would, the sender never held up or
+  faulted. A message's bytes were its chunk's and the shared buffers
+  it holds.
+- **What it took,** which the recommendation had put as "a count of
+  the mailbox's bytes": a count kept only of the messages after the
+  first, so that a process that keeps up paid almost nothing; a test
+  against half the cap as each message came, with the exact sum past
+  that; and, since the receiver can't be ended where a message is
+  delivered (whoever delivers may be in the middle of its watchers,
+  its devices or the keyboard's listeners), a list of processes past
+  their caps, ended at five places: after a send, a batch from the
+  inbox, the timers, a process's own end, and when the island had
+  nothing to run. Any new way of delivering a message would have
+  needed a sixth.
+- **What it cost** (cloud machine, instructions): `fan-in` 5.1 per
+  cent more, `thread-ring` and `spawn` 1.5, `ping-pong` 0.8, `bank`,
+  `idle-memory` and the workers 0.4 to 0.9; and as first built, with
+  every message counted in and out, 8, 4 and 2.
+- **Why it went:**
+  - It didn't give what it was for. With no limit on the program as a
+    whole, a thousand processes at half their caps still have the
+    system end the program; the cap moved one failure.
+  - It gave a correct program a new way to end: a process that falls
+    behind in a burst and would have caught up, and one paused in its
+    own collection (D298) while messages come, which the test written
+    for it showed under `SLIGHT_GC_SLICE=64`.
+  - It was machinery, with two inexactnesses to document (the first
+    message waiting untested as it came, and a process more than half
+    of whose cap is shared buffers), on slight's busiest path, against
+    a failure no slight program has had. Erlang's mailboxes have no
+    bound either, by default.
+- It was two commits (`b26bf3b`, `e63c2a4`), reverted; golden test 398
+  went with them. `(:memory info)`'s `:mail` is as D294 has it. A limit
+  for the program as a whole was never built; Claude recommends
+  against one (it would fault whichever process asked for memory as
+  it was passed, not the one that holds it), and Stevan hasn't asked
+  for one.

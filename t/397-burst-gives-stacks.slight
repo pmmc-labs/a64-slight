@@ -1,0 +1,26 @@
+; A burst of processes that have all run before any of them waits gives
+; its stacks back as they wait (D300). Each of these makes more calls
+; than a slice has before its first wait, so it's preempted, and many
+; hold stacks before the first of them waits. The first 1,024 to wait
+; keep theirs (D292), and every one after is copied off, 1,025 stacks
+; held with this process's: before, a copy was refused while the
+; island's 256 warm stacks were full, the process keeping its stack,
+; and 1,974 were held.
+
+(defun spin (n) (if (== n 0) 0 (spin (- n 1))))
+
+(defun waiter () (spin 1500) (recv ((:ping from) (send from 1))))
+
+(defun gather (n acc) (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
+
+(defun stacks (s)
+    (send s (list :runtime))
+    (match (read s) ((:runtime _ i) (lookup :stacks i))))
+
+(let s (cadr (open :system)))
+(let ps (map (lambda (_) (fork waiter)) (range 0 3000)))
+(sleep 1)
+(pprint (list :stacks (stacks s)))
+(map (lambda (p) (send p (list :ping $$))) ps)
+(pprint (list :answered (gather 3000 0) :stacks (stacks s)))
+:done

@@ -7,6 +7,10 @@
 // what a process waiting in recv keeps of them (rt_proc_t.args).
 export const MAX_ARGS = 8;
 
+// Added to a fork's count of values when its pid is thrown away (D297):
+// RT_FORK_FORGET in rt.h.
+export const FORK_FORGET = 256;
+
 // The top level's parameters, in the order the runtime's main gives the
 // root them: the program's arguments and its environment (D144, D186).
 // Only the top level can name them.
@@ -118,10 +122,13 @@ export const ARRAY_WORDS: readonly string[] = ['float'];
 // What :system says of islands (D256), in RT_ISLE_ order.
 export const ISLAND_WORDS: readonly string[] = ['island', 'started', 'sent', 'received', 'shared', 'islands'];
 
+// What :system says is held (D294), in RT_MEM_ order.
+export const MEMORY_WORDS: readonly string[] = ['memory', 'nursery', 'old', 'resident'];
+
 // The symbols the runtime makes (ending a process, faults, keys,
 // devices, data), which follow the reserved ones: RT_SYM_OK and on in rt.h.
 export const RUNTIME_SYMBOLS: readonly string[] = [
     'ok', 'error', 'exit', 'killed', ...FAULT_KINDS, ...KEY_NAMES, ...DEVICE_WORDS, ...ERRNO_NAMES, ...JSON_WORDS, ...SEXP_WORDS,
     ...SYSTEM_WORDS, ...EXEC_WORDS, ...PEER_WORDS, ...KIND_WORDS, ...SOURCE_WORDS, ...TABLE_WORDS, ...STAT_WORDS, ...PACK_WORDS, ...LOG_WORDS,
-    ...ARRAY_WORDS, ...ISLAND_WORDS,
+    ...ARRAY_WORDS, ...ISLAND_WORDS, ...MEMORY_WORDS,
 ];

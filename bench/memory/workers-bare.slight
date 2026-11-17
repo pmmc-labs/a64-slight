@@ -1,0 +1,19 @@
+; As workers.slight, but the messages are bare integers, which leave nothing in a worker's heap (D199).
+; (bench/memory.py; docs/memory-review-2026-11-13.md has what each showed.)
+
+(defun worker (st)
+    (recv
+        (:stop st)
+        (x     (worker (list x (+ x 1) (car st))))))
+(defun start (n acc) (if (== n 0) acc (start (- n 1) (cons (fork worker (list 0)) acc))))
+(defun rounds (ps m)
+    (when (> m 0)
+        (map (lambda (p) (send p m)) ps)
+        (yield ())
+        (rounds ps (- m 1))))
+(let n (str->int (car @ARGV)))
+(let m (str->int (cadr @ARGV)))
+(let ps (start n ()))
+(rounds ps m)
+(sleep 2500)
+(length ps)

@@ -1,0 +1,275 @@
+# The memory review: where it stands, and what's left (15 Nov 2026)
+
+For whoever picks this up next. The review is
+[`memory-review-2026-11-13.md`](memory-review-2026-11-13.md); its
+measurements are from before any of this. What was built is D294 to
+D298 in `DECISIONS.md`, and the numbers after are in `BENCHMARKS.md`,
+"What the memory review changed". Stevan's plan for the next session:
+go through what's left of the review, below, and then finish the
+memory work.
+
+## Done
+
+| Step | Decision | What |
+|---|---|---|
+| A | D294 | `:system`'s `(:memory info)`: `:nursery`, `:old`, `:mail`, `:stack`, `:shared`, and the runtime's `:resident` |
+| B | D295 | A heap sized to what's live: a process that waits in `recv` is settled; a nursery's size is one run's need |
+| C | D296 | Arenas (`runtime/alloc.c`): chunks, messages, processes' structs and parked frames off `malloc`; memory given back |
+| D | D297 | A fork whose pid is thrown away keeps no result |
+| E | D298 | A major collection pauses for other processes, every 256 KB (not the review's E: see below) |
+| | D299 | A process is settled wherever it waits: `read`, `read/any`, `open`, `join`, `join/race` and `sleep` as `recv` |
+| | D300 | Stacks give their pages back: a burst's go among the spares, and a deep one's below where it waits |
+| | D301 | A mailbox counted toward its process's cap: built, measured, and withdrawn the same day; D88 stands |
+
+`make test` passes on the cloud machine (both targets) and on the M2
+Max, as of D298, and on the cloud machine as of D300. `make tsan` is
+clean on the cloud machine as of D300. `make test` passes on the M2
+Max as of D300 too (Stevan, 15 Nov), and it's been timed there:
+BENCHMARKS.md, "The M2 Max, 15 Nov".
+
+**Where to stop** (15 Nov). Stevan, of D301: "I worry we will end up
+in a game of whack-a-mole with the memory work if we are not careful."
+Claude's recommendation, not yet his decision: stop here. The
+review's five big findings are answered and measured on both
+machines; everything still listed below is a rare case, or costs
+instructions on a busy path, or both, and should wait for a real
+program to show it. Of what's built, D300's deep-stack half is the
+most heuristic (a sampled depth, 16 KB, every 64th wait, about 1 per
+cent of the instructions at each wait and nothing measurable on the
+M2 Max), and the one to take out if the line is to be tighter.
+
+## The findings, one by one
+
+1. **A heap follows what was allocated.** Answered (D295): 1,000
+   workers 640 MB to 43; and for a process that waits only in `read`,
+   `join` or `sleep` (D299): 1,000 that only ask, 60 MB to 30.
+2. **One allocation costs 4 KB.** Answered in part (D295): 1.6 KB for
+   a process holding one cell (a first nursery of 1 KB, kept under the
+   first settling's 2 KB), 2.2 KB for one holding 100. Settling every
+   process at its first wait would make the first 0.6 KB and cost
+   `bank` 8 per cent (measured twice, D295 and D296); left as it is.
+3. **A quiet process never collects.** Answered for one that built and
+   dropped before it waits (D295). Left: one that drops what it held
+   across a wait without allocating as much again (below).
+4. **Freed memory stays.** Answered (D296), on Linux. On macOS the
+   pages are `MADV_FREE`'s, and count as resident till the system
+   takes them (below).
+5. **A big heap costs two to four times what's live, and a pause.**
+   The pause for other processes is answered (D298). The memory, and
+   the big process's own pause, aren't (below).
+6. **Stacks.** Answered (D300): a burst's stacks go among the spares
+   when the warm list is full, and a stack that went deep gives the
+   pages below where its process waits back, at once the first time
+   and then at its 64th wait since. Left: a recursion that starts and
+   ends within a slice isn't seen; and under 1,024 waiting, each still
+   holds a page (D292's choice).
+7. **Exit records.** Answered (D297).
+8. **Messages.** Not changed, but for their allocation (D296): a
+   mailbox has no bound and isn't counted toward anything, which
+   stays so (D301, built and withdrawn); a taken message's 32-byte
+   record is dead in the taker's old generation till a major
+   collection or a settling.
+9. **Values.** Not looked at: objects are 16-aligned where 8 would do
+   (a two-element tuple 32 bytes for 24); the arena's classes are
+   multiples of 16 already.
+10. **What can't be seen.** Answered (D294), but an arena's free
+    memory isn't shown: `:resident` less the rest includes it.
+11. **Limits.** Nothing bounds the program as a whole, nor a mailbox.
+    A mailbox's bound was built and withdrawn (D301); one for the
+    program hasn't been asked for, and Claude recommends against.
+
+## What's left, with what's known about each
+
+In the order I'd take them; each to be put to Stevan first where it
+says so.
+
+- **Measure on the M2 Max.** Done (Stevan, 15 Nov, at `42d5033`, D294
+  to D300): BENCHMARKS.md, "The M2 Max, 15 Nov". `payload` is 0.93 of
+  its time, still 1.22 times what it was before D276; a ping's worst
+  wait beside a big heap is 286 µs, where it was 45 ms; `binary-trees`
+  0.91 of its time at the same peak; `spawn` and `fan-in` a little
+  over half their times; a waiting process 758 bytes for 748. And
+  Activity Monitor does show a burst's memory after it's over; Stevan:
+  "leave macOS as is". The same section has the run against 1 Nov,
+  the last before D276: what one kind of process cost has been got
+  back, and more, but for a waiting process's 758 bytes (614), a
+  million waiting on 12 islands (1.36 times as long, 1.6 times the
+  memory), and `payload`'s 1.22. As it was written, for the record:
+  Nothing since D294 has been timed there.
+  `make bench` for the whole table; and in particular `payload` (1.31
+  times its time since D276 there, put down to `malloc`, which a send
+  no longer calls), `latency` (45 ms at the worst beside 160 MB),
+  `binary-trees` (the arena keeps freed chunks, the question in
+  BENCHMARKS.md's "Memory on macOS"), `spawn`, `fan-in` and
+  `idle-memory` (`slight` and `slight-mc`). And whether Activity
+  Monitor shows a burst's memory after it's over: if it does and that
+  matters, `MADV_FREE_REUSABLE` (with `MADV_FREE_REUSE` before a run is
+  used again) in `alloc.c`'s `GIVE_BACK` is what libmalloc does;
+  untried. `t/live.py`'s gives back is skipped on macOS for this.
+- **Settling in `read`.** Done (D299), and in `read/any`, `open`,
+  `join`, `join/race` and `sleep`. The check this asked for found that
+  a slot wasn't always a value or zero at a builtin's call: a function
+  zeroed its slots only if it called a compiled function, so the
+  compiler now has one that calls any of these waits zero them too.
+  Under `SLIGHT_GC_SLICE=64`, test 122 prints its joiners in another
+  order, as it should (D299).
+- **A process that drops what it held without allocating.** Nothing
+  that counts allocation sees it. Only time can: collect a process
+  that has waited a while since it last ran, once. That needs a
+  waiting process's roots where the scheduler can find them (for one
+  on its stack, the waiting frame, its slots in use and its frame
+  pointer, three words kept at the wait; for one copied off, D292, its
+  frames in the buffer, whose saved frame pointers are for the stack
+  it came off, `copy_in`'s arithmetic), and a moment to do it (when
+  the island is about to wait, as `rt_arena_idle` and `trim_spares`).
+  Machinery; propose first, with how often it happens in a real
+  program as the case for or against.
+
+  Thought through on 15 Nov, not built, for Stevan to choose among.
+  Where it would happen: a structure kept by a process after a burst
+  (a queue or channel that filled and drained, `lib/ds.slight`'s), an
+  agent whose conversation is reset, a store after many deletes. Three
+  ways:
+  - *Count what's allocated, not only what's kept:* settle at a wait
+    once the nurseries started again since the last settling come to
+    some multiple k of the heap. Deterministic, a counter and an `or`
+    in the wait's test. But its economics are a generational
+    collector's in reverse: a process with a big live heap and many
+    short-lived allocations (a simulation's world and its temporaries)
+    copies everything live once for every k heaps of temporaries, 20
+    per cent at k of 2 and 2.5 at 8, and the drop is noticed only
+    after k heaps of allocation, so latest where it's biggest. It's
+    Erlang's `fullsweep_after`, whose default is 65,535 minor
+    collections, with `hibernate` for the rest. And it doesn't see a
+    process that drops and then goes quiet.
+  - *When the island is idle:* since D299 the roots needn't be kept
+    for the scheduler. `recv` and `read` already loop after a wake, so
+    the scheduler can wake a waiting process to settle itself, on its
+    own stack or copied back onto one, with a flag that makes its next
+    test true. What's left is finding which to wake (a list of those
+    that have run since they last settled, linked as they wait, taken
+    off as they wake or end) and when (idle for some time, which is
+    the clock's, so not the same every run; on the virtual clock,
+    whenever nothing can run). It pays only in idle time, and sees the
+    quiet process. `join` and `sleep` don't loop, and would stay as
+    they are.
+  - *Leave it:* a process holds at most what it held at its last
+    settling till it has grown past that again.
+
+  Claude's recommendation: leave it till a real program shows it, a
+  queue after a burst most likely; then the second, prototyped and
+  measured.
+- **An old generation that isn't copied whole** (the review's E, not
+  built). It would cut the memory of a major collection (from-space
+  and to-space together) and the big process's own pause. Sketch:
+  after a minor collection everything live is old and the roots are
+  the frames; since nothing changes once made, that's a snapshot that
+  stays true, so the old generation can be marked a slice at a time
+  with no write barrier, what's promoted meanwhile counting as live;
+  then chunks with nothing live are freed, and sparse ones copied out.
+  Costs: a mark bit for each 16 bytes of a chunk, a marking twin of
+  the walk, and the copying collection kept for sparse chunks. A
+  replicating copy (the mutator keeps reading from-space while
+  to-space is built; with nothing mutable there's no log to keep) is
+  the alternative, and needs forwarding pointers beside the objects,
+  not in them, since a cons has no header. Either is the largest
+  change since D200: prototype and measure before proposing, and only
+  if one big heap's memory or its own pause matters to the simulation
+  work (D257).
+- **Stacks** (finding 6). Done (D300), both. No mark was needed for
+  the spares: `trim_spares` is only ever called by the scheduler or
+  as a process ends, never between a copy and the switch away. Giving
+  a deep stack's pages back at every wait cost a worker that recurses
+  for each message a factor of 3.3, hence the first time at once and
+  then every 64th wait. Measured on the M2 Max (15 Nov), with
+  `bench/memory/deep.slight` and `bench/memory/deep-cycle.slight`: it
+  costs nothing that shows (the worker that goes 2,000 deep, 1.59 s
+  with it and 1.62 without), and its memory doesn't show either: 627
+  MB resident at rest for the 1,000 that went 20,000 deep, since macOS
+  counts pages marked free as resident. That's the question below
+  under "Measure on the M2 Max", answered: Activity Monitor and `ps`
+  do show a burst's memory after it's over, for stacks as for the
+  arena. Whether it matters is Stevan's to say; if it does,
+  `MADV_FREE_REUSABLE` is the thing to try, on the Mac, where it can
+  be run: `STACK_GIVE_BACK` in `process.c` and `GIVE_BACK` in
+  `alloc.c`, and what a page marked so needs before it's written
+  again (`MADV_FREE_REUSE`) has to be read up first, not guessed.
+- **Limits and mailboxes** (findings 8 and 11). A language question:
+  whether a mailbox counts toward its process's cap, and whether a
+  program has a limit of its own. Propose first.
+
+  Closed (D301): the mailbox's cap was built as below, and withdrawn
+  the same day; a limit for the program hasn't been asked for. As it was put to
+  Stevan on 15 Nov, two questions. *A mailbox:* count its
+  bytes toward its process's cap, and end the receiver with `:heap`
+  when a message would take it past (`end_other`, as a kill does); the
+  sender is never held or faulted, as now. It's D233's reasoning: a
+  slow consumer ends on its own, where its monitor sees it, rather
+  than the kernel killing the program. It needs a count of the
+  mailbox's bytes in the process, which today are added up when
+  `:system` asks. The other ways: leave it unbounded, or hold the
+  sender, which changes what `send` is. *The program:* a limit of its
+  own would fault whichever process happened to ask for memory as it
+  was passed, not the one that holds it; Claude's recommendation is
+  none, the container's limit being the program's, with each process's
+  cap already a quarter of it (D233).
+- **A process's struct is at its block's size** since D300: 400 bytes
+  on x86-64 and 512 on AArch64, each a size class of the arena's, so
+  one more field costs 16 bytes a process on either. Its four flags
+  (`keypress`, `held`, `waited`, `forgotten`) are a byte each, and
+  would pack into one if a byte or three were wanted.
+- **Smaller, none urgent:** objects aligned to 8 bytes (finding 9; the
+  compiler's allocation, the collector's `box_bytes`, and the arena's
+  classes would all change); `entry_t` is 40 bytes and could be 24
+  with its process, device and value in a union, 16 MB fewer at a
+  million processes; `rt_proc_t` carries the function and eight
+  arguments it starts with (72 bytes) for its whole life;
+  `(:memory info)` could say what an arena holds free; shared buffers
+  and devices' buffers are still `malloc`'s (D296); minor collections
+  don't pause (D298: 0.5 to 0.9 ms on the cloud machine when a 1 MB
+  nursery all survives); `lib/http.slight`'s and `lib/rpc.slight`'s
+  acceptors monitor every connection, which D297 made unnecessary
+  where `:most` isn't set.
+
+## How to measure
+
+- `bench/memory.py LABEL [ROOT]` builds the benchmarks and the
+  programs in `bench/memory/` (the review's) with ROOT's compiler and
+  prints instructions (callgrind), times, peaks and what's resident at
+  rest; `bench/memory.py --compare A B` puts two runs side by side.
+  For a before and after: `git worktree add DIR COMMIT`, run it with
+  DIR as ROOT, then again for the working tree. Linux only. The
+  instructions are what to trust on the cloud machine; its times are
+  noisy.
+- `bench/latency/latency.slight 10` on one island for the pauses: its
+  `# heap p50 p99 max n` line, in microseconds.
+- `bench/airline.py --target x86_64 --random 10` for a program of many
+  small processes: its peak.
+- After any change to the collector or the arena: `make test`, `make
+  tsan`, and `make golden TARGETS=x86_64` under each of
+  `SLIGHT_GC_VERIFY=1`, `SLIGHT_GC_STRESS=7`, `SLIGHT_GC_SLICE=64`,
+  `SLIGHT_COPY_OUT=1 SLIGHT_GC_VERIFY=1`. Under stress on the cloud
+  machine, 059, 130, 162, 187, 194, 198, 214, 240 and `con-memory`
+  run past 60 s and are killed (162 doesn't finish in 240 s before
+  any of this either); with `SLIGHT_COPY_OUT`, 200, 266, 384, 397 and
+  `con-memory` fail, and should; with `SLIGHT_GC_SLICE=64`, 122 does,
+  and should (D299).
+
+## Found on the way, and left
+
+- Deep recursion that isn't a tail call is slow on the M2 Max:
+  `bench/memory/deep-cycle.slight 2000 100000`, 200 million calls and
+  returns, 1.42 s of user time there before D300 and after, against
+  0.67 s on the cloud machine, which is the slower machine at
+  everything else. Not looked into. A guess to check with a profile:
+  returns mispredicted once the recursion is deeper than the core's
+  return stack.
+- `bench/spawn/spawn.slight` and `bench/idle-memory/idle-memory.slight`
+  said the top level is a task that can't wait (D243), which D277
+  ended: their comments now say why the extra process is kept (the
+  numbers are of the same program as before).
+- `rt.h`'s comment on `rt_proc_t.code` said "or restarts after waiting
+  in recv", which D276 ended: corrected.
+- A glibc habit worth knowing if anything goes back on `malloc`: a
+  request of 1 KB or more gathers up every freed small block first
+  (`malloc_consolidate`), and small requests are slow after (D295).

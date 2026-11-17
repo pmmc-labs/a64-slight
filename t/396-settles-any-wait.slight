@@ -1,0 +1,83 @@
+; A process is settled wherever it waits (D299), not only in recv
+; (D295): in read, read/any, join, join/race and sleep too, so one
+; that only asks, joins or sleeps holds about what it has live. Each of
+; these builds 100,000 cells, 1.6 MB, drops them, and waits; before, each
+; held them while it waited, having no way to say what its frame held.
+; What it does hold across the wait, in its frame or in the wait's own
+; hands, it still has after.
+
+(defun ask (s q) (send s q) (match (read s) ((:process _ i) i)))
+(defun held (s p)
+    (let m (lookup :memory (ask s (list :process p))))
+    (list (lookup :nursery m) (lookup :old m)))
+
+(defun burn () (length (range 0 100000)))
+
+; In read, on an address of its own: nothing held but the address.
+(defun reader (to)
+    (let a (address))
+    (send to (list :at $$ a))
+    (let k (burn))
+    (list k (read a)))
+
+; In read/any: its list of two addresses is the wait's, in no frame, 32
+; bytes; and the pair it gives is of the same address after.
+(defun reader-any (to)
+    (let a (address))
+    (let b (address))
+    (send to (list :at $$ b))
+    (let k (burn))
+    (let got (read/any (list a b)))
+    (list k (eq? (car got) b) (cadr got)))
+
+; In join, holding a list of 100 integers, 1,600 bytes, across it.
+(defun joiner (p)
+    (let xs (range 0 100))
+    (let k (burn))
+    (list k (join p) (sum xs)))
+
+; In a race, whose list of two pids is the wait's too.
+(defun racer (p q)
+    (let k (burn))
+    (let won (join/race (list p q)))
+    (list k (eq? (car won) q) (cadr won)))
+
+; In sleep.
+(defun sleeper (ms)
+    (let k (burn))
+    (sleep ms)
+    k)
+
+; Whom the joiner and the racer wait for.
+(defun waits (v) (recv ((:go x) (list v x))))
+
+(let s (cadr (open :system)))
+(let r  (fork reader $$))
+(let ra (fork reader-any $$))
+(let w1 (fork waits 1))
+(let w2 (fork waits 2))
+(let w3 (fork waits 3))
+(let j  (fork joiner w1))
+(let rc (fork racer w2 w3))
+(let sl (fork sleeper 50))
+(let at-r  (recv ((:at p a) (when (eq? p r) a))))
+(let at-ra (recv ((:at p a) (when (eq? p ra) a))))
+(sleep 10)
+
+(pprint (cons :read (held s r)))
+(pprint (cons :read/any (held s ra)))
+(pprint (cons :join (held s j)))
+(pprint (cons :join/race (held s rc)))
+(pprint (cons :sleep (held s sl)))
+
+(send at-r :one)
+(send at-ra :two)
+(send w1 (list :go :three))
+(send w3 (list :go :four))
+(pprint (join r))
+(pprint (join ra))
+(pprint (join j))
+(pprint (join rc))
+(pprint (join sl))
+(kill w2)
+:done

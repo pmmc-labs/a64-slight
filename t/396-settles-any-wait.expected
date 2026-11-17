@@ -1,0 +1,11 @@
+(:read 0 0)
+(:read/any 0 32)
+(:join 0 1600)
+(:join/race 0 32)
+(:sleep 0 0)
+(:ok (100000 :one))
+(:ok (100000 #true :two))
+(:ok (100000 (:ok (1 :three)) 4950))
+(:ok (100000 #true (:ok (3 :four))))
+(:ok 100000)
+:done

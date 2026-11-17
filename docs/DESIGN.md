@@ -266,7 +266,8 @@ opened, for `read`. A process's end is a message: `(monitor pid to)`
 tells the address `to`, so a reply and the end of the process asked
 come to one place, which is how `ask`, a prelude function, waits. A
 process's value is kept for its parent till the parent has it (D244,
-for every process). `connect` starts a process that owns a device, as
+for every process), unless the fork's pid was thrown away where it was
+written (D297). `connect` starts a process that owns a device, as
 before. Tasks and actors stay as the two shapes a process is written
 in: one that computes a value, and one that loops through `recv`.
 | `(sleep ms)` | **Blocking** wait for `ms` milliseconds, keeping the stack. Works anywhere. Returns `()`. |
@@ -724,11 +725,14 @@ REPL and line editing are slight code over key events.
 ### Process heaps and GC
 
 Each process has its own heap, in two generations (D200), each made of
-`malloc`ed chunks (D89), with bump allocation and ordinary absolute
-pointers. Everything is allocated in the young one, a **nursery**: one
-chunk, 4 KB at first, which comes with the first allocation (so a
-process that allocates nothing has no heap), and twice the size at each
-collection that finds it overflowed, up to 1 MB. Once it's full, what's
+chunks (D89) from its island's arena (D296, below), with bump allocation
+and ordinary absolute pointers. Everything is allocated in the young one, a **nursery**: one
+chunk, 1 KB at first, which comes with the first allocation (so a
+process that allocates nothing has no heap), and twice the size after a
+collection that finds it overflowed, up to 1 MB: for the asking up to
+16 KB, and past that only if the process filled it without waiting
+(D295, below). The bigger one is made when the process next allocates,
+so one that waits first holds none. Once it's full, what's
 allocated goes into overflow chunks, listed after it, till the next
 function's entry, where it's collected. The **old generation** is a list
 of chunks too: what collections have kept, the messages taken, a fork's
@@ -801,8 +805,8 @@ Lalloc_N:
   adopted chunks go in behind it.
 - **A major collection** runs once the old generation in use (its
   chunks, less what's free in the one promoted into) reaches twice what
-  was live after the last major one, and never below 256 KB, so a small
-  process's old generation is never collected (D106); but never within
+  was live after the last major one, and never below 64 KB (D106, which
+  had 256 KB till D295); but never within
   an eighth of the cap (128 MB at 1 GB, 8 at 64), so a process with more
   than half the cap live still collects before it reaches the cap,
   rather than failing there with a heap of garbage (D196). The eighth is
@@ -813,17 +817,80 @@ Lalloc_N:
   A major collection copies everything live, in both generations, into
   fresh chunks, and frees the old ones; it comes right after a minor
   one when what that promoted takes the old generation to its
-  threshold.
+  threshold. The fresh chunks start at 512 bytes and double to 1 MB, so
+  what's kept is in chunks that fit it, whatever the heap was before.
+- **A process that waits is settled** (D295, D299; `settle_heap`), so
+  that it holds about what it has live, not what it allocated to get
+  there. When it's about to wait, in `recv` with nothing to take, or in
+  `read`, `read/any`, `open`, `join`, `join/race` or `sleep`, and its
+  heap's chunks, both generations, have reached 2^`settle_log2` bytes:
+  a major collection; then, if what's live came to less than the
+  chunks it was copied into and to no more than 1 MB, a second, into
+  one chunk of just that size, which only the first could say; and the
+  next time is at the power of two past twice what the old generation
+  then holds, with the nursery it keeps, and never under 32 KB (a
+  power of two, so the threshold is a byte in the process, its log). The first time a process waits, 2 KB is enough (more
+  than a first nursery): what a process built to start with may be all
+  it ever holds. The nursery goes too, each time, till the process next
+  allocates, and comes back no bigger than 16 KB (D295 kept one of 16 KB
+  or less after the first time, since freeing and making it set glibc's
+  `malloc` to gathering up every freed message; an arena's block costs
+  nothing of the kind, D296). Each settling copies what's live
+  and comes only once the heap has doubled, so it's paid for by the
+  allocating that doubled it, as a major collection is; the test, a
+  shift and a branch, is on the path where a process blocks, not where
+  it takes a message. A nursery's size is one run's need because
+  `restart` grows one past 16 KB only if the process hasn't waited (in
+  anything: `waited`, set in `wait_from`) since it last started again.
+  `recv` is told how many of its frame's slots are in use, and those
+  are its roots. The other waits are told only the frame (`WAIT`, in
+  `rt_asm_*.S`), so all its slots are roots (`settle_wait`, D299),
+  which they can be because a function that calls one of them zeroes
+  its slots at its entry, as one that calls a compiled function does
+  (`settles`, in `codegen.ts`): from then on a slot holds a value that
+  every collection since has moved. What such a wait holds in C that's
+  in the heap, `read/any`'s list of sources and a race's of pids, is one
+  more root, moved with the rest. Settling may pause (below), so each
+  looks again at what it was about to wait for: a message, an end, a
+  device's closing. `sleep` settles before its timer is set. The waits
+  across islands in `fork/on` and `timer/cancel` don't settle: they're
+  answered at once. `SLIGHT_GC_STRESS` settles at every wait, as if for
+  the first time.
 - **The cap** is checked as the heap grows, in `rt_heap_grow`, and not
   as a collection promotes; so a heap that's past it after a collection
   gets no room in its nursery, and its next allocation faults (D202).
   A major collection with a few hundred MB live takes a quarter of a
-  second or so, during which nothing else runs.
+  second or so, the process's own time, not the island's (below).
+- **A major collection pauses** (D298). Each time it has copied 256 KB
+  (`gc_slice`), and as it frees the old chunks, 4 MB at a time, the
+  island's timers, inbox and sockets are seen to (`events`), and if
+  another process is ready the collecting one goes to the back of the
+  run queue, as a process does at its slice's end (`gc_pause`), and
+  goes on from where it was at its next turn. So a process with a big
+  heap holds the others up for a slice of its collection, well under
+  a millisecond on the cloud machine, not for all of it. It's the
+  collector as it was, running as the process it collects: the walk's
+  state is on that process's stack, and nothing else touches a
+  process's heap, a message for it waiting in its mailbox, which no
+  collection looks at. The walk has no test for it: `gc_more`, where
+  the walk goes when the chunk it copies into is full, gives it the
+  chunk a slice at a time (`limit` short of the chunk's `end`), so it
+  comes back there every slice. A process ended while it's paused, by
+  a kill or its device's failure, has what it had copied freed in
+  `finish` (the side's `collecting`), and the old chunks it had got to
+  freeing are off its list by then. `recv` looks at the mailbox again
+  after settling, which may have paused. Minor collections don't
+  pause: a nursery is 1 MB at the most. What it changes: when other
+  processes run now depends on how much a collection copies, for a
+  heap of more than a slice; the same every run, and in a replay, but
+  not the same from one version of the collector to the next.
+  `SLIGHT_GC_SLICE=n` makes the slice n bytes, to test it.
 - `rt_preempt` checks both at the end of each slice; and when
   `rt_heap_grow` finds the nursery full, or a chunk adopted takes the
   old generation to its threshold, it cuts the slice short, so the next
   call's entry goes to `rt_preempt`, keeping the rest of the slice for
-  after: collecting never changes when a process is preempted.
+  after: collecting never changes when a process is preempted, though a
+  major collection of more than a slice lets others run meanwhile (D298).
 - **Big strings** (64 KB or more), which point at nothing, are allocated
   straight into the old generation, each in a chunk of its own, so no
   minor collection copies them.
@@ -843,12 +910,16 @@ Lalloc_N:
   stack maps, no write barrier.
 - **A frame keeps everything in its slots** until it returns, so a `let`
   in the root's body lives till the program ends.
-- **A waiting process keeps its nursery**, as it keeps its old chunks;
-  one that has never allocated has neither. The process struct holds as
+- **A waiting process keeps its nursery**, unless it has just been
+  settled (above), as it keeps its old chunks; one that has never
+  allocated has neither. The process struct holds as
   few fields for the generations as will do (the overflow chunks are
   listed after the nursery, one count of bytes covers both generations,
-  and only how far the chunk promoted into is filled is kept), since a
-  waiting process costs its struct: 352 bytes, as before them.
+  and only how far the chunk promoted into is filled is kept; `waited`,
+  `settle_log2` and `nursery_log2` are bytes beside its state, itself a
+  byte for that), since a waiting process costs its struct: 400 bytes
+  on x86-64, 512 on AArch64, each the size of the arena's block it was
+  in already (D300's `stack_low` took the room).
 - `SLIGHT_POISON=1` in the environment fills what the collector frees, a
   nursery started again included, with garbage, so a pointer it missed
   fails at once; `t/run.sh` sets it. `SLIGHT_GC_STRESS=n` makes every nth
@@ -879,7 +950,9 @@ kernel's limit on mappings); growing the heap to three times what's live
 (D196, for the memory); mark-sweep or mark-compact for the old
 generation (copying it is the code there was); and a pool of nurseries
 that waiting processes give back, as they do their stacks (later, if
-processes that allocate and then wait turn out to hold too much).
+processes that allocate and then wait turn out to hold too much; they
+did, and D295 answers it by settling a heap as its process waits, with
+no pool).
 
 ### The libm (D253)
 
@@ -889,6 +962,67 @@ the double nearest the exact one, so the same on every machine, and the
 runtime is compiled with `-ffp-contract=off`, so clang fuses no `a * b +
 c` into one rounding on AArch64 that x86-64 would round twice. A run that
 computes with floats replays on any machine.
+
+### Arenas: where a heap's memory comes from (D296)
+
+Every chunk of every heap, every message, a process's struct and the
+buffer its frames wait in come from its island's **arena**
+(`runtime/alloc.c`), which nothing else allocates from and no lock
+guards. They came from `malloc`, which keeps what it's given back
+(after a burst of processes, nine tenths of the burst's memory stayed
+with the program), and whose habits the collector had to be fitted
+round (D295).
+
+- **Runs and spans.** Addresses come from the system 64 MB at a time
+  and are carved into **runs** of whole units of 64 KB, each with a
+  header of one cache line at its start, which masking the address of
+  anything in its first unit finds. A block of 16,400 bytes or less is
+  one of a **size class**'s (every multiple of 16 up to 528, then eight
+  to a doubling, each 16 past the round number, so that a chunk of
+  1 KB to 16 KB with its header wastes nothing, and nothing wastes more
+  than an eighth), cut from a **span**, a run of one unit: from the
+  span's freed blocks, newest first, or else from the part of it never
+  given out, so a fresh span is touched only as far as it's used. A
+  class allocates from its first span with a block free; one that
+  fills leaves the list till a block of it is freed. A bigger block is
+  a run of its own, and one of more than 2 MB a mapping of its own,
+  unmapped as it's freed.
+- **Giving back.** A span with nothing out, unless it's the one its
+  class allocates from, is a free run again, for any class or any
+  block. Free runs are kept by length in arrays beside them, not lists
+  through them, so their pages can go back to the system
+  (`MADV_DONTNEED`; on macOS `MADV_FREE`) while their addresses are
+  kept: when the islands hold 64 MB of them between them (or a
+  sixteenth of a container's memory limit, if that's less, so the
+  limit isn't spent on what's free), the island that frees the next
+  gives an eighth of the allowance back, of its own, the longest and
+  the longest free first (not all of them, which a collector that had
+  just freed a big heap's chunks would only ask for again, a page
+  fault each); and when an island is about to wait (`rt_arena_idle`,
+  in `wait_for` and `awake`) holding more than 1 MB of them, it gives
+  them all back, with the spans its classes kept. So a program at rest
+  holds what's live, a span for each size it uses, and at most 1 MB an
+  island. This is the stacks' rule (D291).
+- **Blocks freed on another island.** A block is its island's, and a
+  message's is often freed by the island that took it. That island
+  keeps such blocks by their home, and sends each home's back in one
+  compare and swap onto its stack of returns (`rt_returns`), once
+  there are 32 of them, or 256 KB, or it's about to wait. An island
+  takes its returns at each of its scheduler's decisions (`events`),
+  and before it asks the system for more. One that's waiting is woken
+  to (`rt_arena_wake`: its `asleep` cleared under its inbox's lock,
+  and a byte down its pipe), since only its own freeing gives the
+  memory back; it finds no item, takes its returns, and waits again.
+  `wait_for` says it was woken (`IO_WOKEN`), so that the one caller
+  for whom nothing seen means time has passed, the virtual clock's
+  wait for a reply that's owed (D288), goes round again instead.
+- **Not the program's to see**, so none of it is recorded: a replay
+  may reuse other addresses than its run did. Its regions aren't given
+  huge pages (`MADV_NOHUGEPAGE`), so that what's touched is what's
+  held and a run given back is given back.
+- Still `malloc`'s: shared buffers (D253), whose last holder may be
+  any island; devices and their buffers; the tables; and what's built
+  outside a heap for a moment.
 
 ### Shared buffers (D253)
 
@@ -944,8 +1078,8 @@ RT_EXEC_INT`, since a symbol is its name.
   at 64 KB.
   The copy is one walk over the value, into a scratch buffer, which then
   moves into a chunk of just its size; the message's record (its place in
-  the mailbox) is at the front of the same chunk, so a send is one malloc
-  (D177). The walk is the collector's, with nothing to forward: along a
+  the mailbox) is at the front of the same chunk, so a send is one
+  allocation (D177), a block from the sender's island's arena (D296). The walk is the collector's, with nothing to forward: along a
   list's spine, only cars that are lists and boxes of values going on its
   stack, and what changes at every word kept where the compiler can hold
   it in registers; values with no pointer among them aren't walked
@@ -968,7 +1102,8 @@ RT_EXEC_INT`, since a symbol is its name.
   take when it runs, a joiner on another island as an item to its
   island (D277); and monitors get `(:exit pid result)`, in their inbox
   or at the address they named (D243, D244, D277). Then a Result isn't
-  kept if the parent was among them, or has ended: the record says only
+  kept if the parent was among them, or has ended, or threw the pid
+  away where it forked (D297, below): the record says only
   that it ended, and later asks get `:ended`. Else the Result is copied
   into its small per-pid **exit record**, kept for the parent, which
   lists it (D244); the parent's `join` or `monitor` of it, or its end,
@@ -981,6 +1116,19 @@ RT_EXEC_INT`, since a symbol is its name.
   mailbox, the stack and the process struct are freed (D102). Nothing
   on a stack needs cleaning up, so `kill` frees a process wherever it is
   (D103).
+- **A fork whose pid is thrown away keeps no result** (D297). The
+  compiler knows where a form's value is thrown away: `compileBody`
+  says so of every form but a body's last (`unused` in the context),
+  `do`, `cond` and `recv` pass it to their own last forms, and
+  `compileExpr` clears it for everything else, so only a `fork`,
+  `fork/on` or `connect` in such a place sees it. It tells the runtime
+  with the count of values it passes (`RT_FORK_FORGET` added), which
+  every way of starting a process hands on to `new_child`, or to
+  `place` for another island; the child's struct says so (`forgotten`,
+  a byte), and `finish` then keeps nothing for the parent, nor sends
+  its end to a parent on another island, which holds no watch for it.
+  By position, not by what becomes of the value: a fork that's a
+  function's last form is kept.
 - The record is the pid's 40-byte entry in the process table (32 till
   devices added a pointer to it): the value (or the error's reason), and
   a chunk holding a copy of it if it needs memory. `(:ok v)` and `(:exit pid result)` are built when asked for.
@@ -1086,7 +1234,15 @@ run (option (b), D256's step 6, put off).
   lines down by its place, so that tops don't share cache sets, with no
   guard pages (D291). It keeps 256 given back warm; past that, their
   pages go back with `madvise`, 64 at a time, and their addresses are
-  kept for the next. With none to be had (the address space, or the
+  kept for the next. A stack gets shallower again (D300): `stack_low`
+  is the lowest a process's frames have been seen, at a slice's end
+  and where it waits, and when it waits more than 16 KB above that
+  (`STACK_DEEP`), the pages below where it is go back, and the watch
+  starts again there; at once the first time, and after that at its
+  64th wait with deep pages (`STACK_WAITS`), since one that goes deep
+  for every message needs them. One that ends, or is copied off, with
+  deep pages gives its stack back as a spare, not warm, so the next
+  process doesn't get them. With none to be had (the address space, or the
   commit limit, run out), the process that wanted one faults `:stack`,
   and the program goes on (D267). A process that waits (`recv`, `join`,
   `join/race`, `read`, `read/any`, `open`, `sleep`, `fork/on`'s wait
@@ -1098,7 +1254,10 @@ run (option (b), D256's step 6, put off).
   moved, and `rt_wait_again` starts its wait again there, by a function
   of the wait's own (an `again_t`) that goes on from what the process
   holds: whom it joins or reads, the result it was given, the answer
-  another island sent, its timer set already (D292). So no wait keeps
+  another island sent, its timer set already (D292). With 256 warm
+  already, a stack copied off goes among the spares (D300; before, the
+  copy was refused, and a burst of processes that had all run before
+  any waited kept its stacks). So no wait keeps
   anything it needs after waking in its C frames, which are dropped.
   `recv` is told its caller's frame by compiled code, for the
   collector; the other waits are entered through a few instructions of
@@ -1267,6 +1426,16 @@ run (option (b), D256's step 6, put off).
   `at`, the entry `rt_preempt` was passed or the return address of the
   `join`, `sleep`, `yield` or device `send` it stopped in; one without
   is at its `code`. The deadlock message uses the same table.
+  What's held (D294) is `(:memory info)`, in a process's info, an
+  island's and the runtime's: the chunks of each generation
+  (`young_bytes`, and `heap_bytes` less that), the mailbox's chunks,
+  the stack's pages in memory and the `parked_t`, and the shared
+  buffers; the runtime's adds `(:resident n)`. The stack's pages and
+  the resident set are the system's to say (`mincore`; `/proc/self/statm`,
+  or Mach's `task_info`), asked in `memory.c`, a file with none of the
+  runtime's names in it since it includes Mach's headers, and through
+  `replay.c` (`rt_io_in_memory`, `rt_io_resident`), so a replay has the
+  numbers its run had. They're asked only when `:system` is.
 - **C libraries** (D151, D152; planned, step 12c). A pure function bounded
   by its input may be a builtin, called on the process's stack; anything
   with state or I/O is a device, its state in the runtime behind a pid,

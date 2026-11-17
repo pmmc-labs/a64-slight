@@ -3,7 +3,8 @@
 # island golden tests (t/run.sh, so their output must still be what's
 # expected, a race's report being more of it), then the every-island
 # benchmarks, t/replay/islands.slight, and t/data/tsan-sockets.slight,
-# sockets on two islands on the real clock, which must say nothing. For the
+# sockets on two islands on the real clock, which must say nothing; and
+# t/alloc.c, the arena on its own, its islands freeing each other's blocks. For the
 # machine's own target alone, built with SLIGHT_CC as the compiler with
 # -fsanitize=thread, which Linux can't link statically. Not part of make
 # test, since it needs clang's sanitizer runtime (Xcode's has it; on
@@ -22,6 +23,16 @@ mkdir -p "$dir"
 
 fail=0
 ./t/run.sh t/32[4-9]-*.slight t/33[0-36]-*.slight t/347-*.slight || fail=1
+
+# The arena on its own (D296): islands freeing each other's blocks.
+if $CC -std=gnu11 -O1 -g -fsanitize=thread -pthread -o "$dir/alloc" t/alloc.c runtime/alloc.c >"$dir/alloc.compile" 2>&1 \
+   && "$dir/alloc" >"$dir/alloc.out" 2>&1 && ! grep -q 'ThreadSanitizer' "$dir/alloc.out"; then
+    echo "ok   alloc"
+else
+    cat "$dir/alloc.compile" "$dir/alloc.out" 2>/dev/null
+    echo "FAIL alloc"
+    fail=1
+fi
 
 # n: the size each program is run at, small, since TSan is slow.
 for prog in bench/parallel-fib/parallel-fib-mc.slight:20 bench/fan-in/fan-in-mc.slight:200000 \

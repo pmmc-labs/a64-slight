@@ -1,0 +1,12 @@
+; A mailbox of n messages, integers (mode 0) or three-element lists (1), drained after 2.5 s; then the root sleeps.
+; (bench/memory.py; docs/memory-review-2026-11-13.md has what each showed.)
+
+(defun sink () (sleep 2500) (drain 0))
+(defun drain (k) (recv (:end k) (x (drain (+ k 1)))))
+(defun fill (p n mode) (when (> n 0) (send p (if (== mode 0) n (list n n n))) (fill p (- n 1) mode)))
+(let n (str->int (car @ARGV)))
+(let p (fork sink))
+(fill p n (str->int (cadr @ARGV)))
+(sleep 3000)
+(send p :end)
+(join p)

@@ -1,6 +1,6 @@
 ; spawn: n processes started one after another, each sending its number
-; back and ending; their numbers summed. Each is an actor: nothing takes
-; its value, which a task's record would keep for its parent (D244).
+; back and ending; their numbers summed. Nothing takes a process's own
+; value, and none is kept: each fork's pid is thrown away (D297).
 
 (defun start (i n me)
     (when (< i n)
@@ -10,8 +10,9 @@
 (defun gather (n acc)
     (if (== n 0) acc (recv (i (gather (- n 1) (+ acc i))))))
 
-; The top level is a task, which can't wait (D243), so an actor does its
-; work, and the root gives its value.
+; A process of its own does the work, and the root gives its value: once
+; the top level couldn't wait (D243); it can since D277, and this is kept
+; so that the numbers are of the same program as before.
 (defun top-level (argv)
     (let n (str->int (car argv)))
     (start 0 n $$)
