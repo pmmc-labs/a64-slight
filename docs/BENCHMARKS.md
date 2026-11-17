@@ -329,6 +329,63 @@ core (`slight-mc`): `ping-pong` 0.064 s to 0.035, `spawn` 0.029 to
   changed", below: nothing that shows in time, and freed pages that
   macOS goes on counting.
 
+**Against 1 Nov, before one kind of process.** What D276 and D277 cost
+is "The M2 Max, 11 Nov", below, against `2026-11-01-1722` (`e3df489`),
+the last run before them. The same run against this one says what's
+been got back since, and what hasn't; 11 Nov, 15:00 (`1493d35`), is
+the low point between, before a waiting process was copied off its
+stack (D292). slight on one core:
+
+| | 1 Nov | 11 Nov | 15 Nov | 15 Nov ÷ 1 Nov |
+|---|---:|---:|---:|---:|
+| `fan-in` | 0.373 s | 0.376 s | 0.211 s | 0.57 |
+| `spawn` | 0.132 s, 50 MB | 0.158 s, 127 MB | 0.081 s, 51 MB | 0.61, and 1.00 in memory |
+| `thread-ring` | 0.517 s, 2.1 MB | 0.493 s, 10.5 MB | 0.411 s, 10.6 MB | 0.80, and 5.0 in memory |
+| `bank` | 0.584 s, 75 MB | 0.636 s, 76 MB | 0.494 s, 3.4 MB | 0.85, and 0.05 in memory |
+| `ping-pong` | 0.288 s | 0.308 s | 0.247 s | 0.86 |
+| `binary-trees` | 0.825 s | 0.835 s | 0.746 s | 0.90 |
+| `latency`, the worst wait beside a big heap | 44.3 ms | 47.3 ms | 286 µs | 0.006 |
+| `idle-memory`, a million waiting | 0.311 s | 10.5 s | 0.327 s | 1.05 |
+| a waiting process | 614 B | 8,913 B | 758 B | 1.23 |
+| `payload` | 0.552 s | 0.725 s | 0.672 s | 1.22 |
+
+And on 12 islands:
+
+| | 1 Nov | 11 Nov | 15 Nov | 15 Nov ÷ 1 Nov |
+|---|---:|---:|---:|---:|
+| `ping-pong` | 0.065 s | 0.065 s | 0.035 s | 0.54 |
+| `spawn` | 0.024 s | 0.031 s | 0.017 s | 0.70 |
+| `fan-in` | 0.681 s | 0.713 s | 0.651 s | 0.96 |
+| `idle-memory` | 0.102 s, 619 MB | 13.7 s, 9,616 MB | 0.139 s, 990 MB | 1.36, and 1.60 in memory |
+
+The programs that send nothing are within 2 per cent throughout.
+`startup`'s median, 0.002 s to 0.004, is the clock's grain: its
+fastest run and its CPU time are 0.002 s in every run.
+
+- **Got back, and more.** `spawn`'s memory is where it was, in 0.61 of
+  the time. `fan-in`, `ping-pong`, `thread-ring` and `bank` are ahead
+  of where they were before D276, not back at it: a send without
+  `malloc` (D296) did more than the refactor had cost them. The pause
+  beside a big heap was never the refactor's, and is gone (D298).
+- **A waiting process is 23 per cent bigger,** 758 bytes for 614. The
+  144 more are about the size of the buffer its frames wait in off the
+  stack (D292: 56 bytes and the frames), which is what waiting anywhere
+  costs; not measured apart.
+- **A million waiting on 12 islands is the furthest behind:** 1.36
+  times as long, and 1.6 times the memory, 370 MB more. Some 200 MB of
+  that is chosen: each island's first 1,024 waiting processes keep
+  their stacks (D292), a page of 16 KB each, 12 times over.
+- **`payload` is still 1.22 times as long,** on this machine alone.
+  Taking `malloc` out of a send brought it from 1.31; the rest isn't
+  explained, and wants a profile on the Mac.
+- **`thread-ring` holds 10.6 MB for 2.1:** its 503 processes each keep
+  a page of stack, D292's choice under 1,024 waiting. It's also a
+  fifth faster.
+- **The programs aren't quite the same ones.** The benchmarks' sources
+  changed with the language between the runs (D277, D286, D297:
+  `spawn` throws its pids away now), so this is the same benchmark at
+  each date, not always the same text.
+
 ### The M2 Max, 13 Nov: every wait copied, and slight's own family (D292, D293)
 
 `2026-11-13-1102-macos-apple-m2-max` (`3dedbf4`): every program, every

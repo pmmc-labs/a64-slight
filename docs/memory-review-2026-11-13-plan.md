@@ -90,7 +90,11 @@ says so.
   0.91 of its time at the same peak; `spawn` and `fan-in` a little
   over half their times; a waiting process 758 bytes for 748. And
   Activity Monitor does show a burst's memory after it's over; Stevan:
-  "leave macOS as is". As it was written, for the record:
+  "leave macOS as is". The same section has the run against 1 Nov,
+  the last before D276: what one kind of process cost has been got
+  back, and more, but for a waiting process's 758 bytes (614), a
+  million waiting on 12 islands (1.36 times as long, 1.6 times the
+  memory), and `payload`'s 1.22. As it was written, for the record:
   Nothing since D294 has been timed there.
   `make bench` for the whole table; and in particular `payload` (1.31
   times its time since D276 there, put down to `malloc`, which a send
