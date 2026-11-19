@@ -1,0 +1,8 @@
+; examples/mold.slight examples/mold-day.sexp: the mold as actors, one search turning back by its nodes' undo stacks,
+; with no split.
+; Every way gives the same count and the same best, which
+; t/models/mold.py solve examples/mold-day.sexp works out independently,
+; flying the legs in the order they leave.
+; args: examples/mold-day.sexp
+
+(@include "../examples/mold.slight")

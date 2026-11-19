@@ -1,0 +1,8 @@
+; examples/mold.slight --values --split 1 examples/mold-day.sexp: the mold as a value, a tuple of states and a loop, its first choice
+; split across the islands.
+; Every way gives the same count and the same best, which
+; t/models/mold.py solve examples/mold-day.sexp works out independently,
+; flying the legs in the order they leave.
+; args: --values --split 1 examples/mold-day.sexp
+
+(@include "../examples/mold.slight")

@@ -2900,6 +2900,107 @@ and the readers of source can't do without; and K2 now, above.
 (recommended: yes, as Clojure's `str` does, `keyword->str` giving the
 bare name); and `sym?` false of the booleans (recommended: yes).
 
+### A mold of constraints: an experiment (built, Nov 2026; nothing agreed)
+
+Stevan, after asking whether slight would suit a SAT solver (it
+wouldn't, a competitive one: no array changes in place) and what a
+CP-SAT solver adds to one: could the constraints be actors, started
+only when they're needed and finding each other, "like a slime mold
+growing", with a layer over them that ticks, checks, and decides
+whether to go on, stop or branch? Talked through, it became: a node's
+state is a value; each actor keeps the states it had, an undo stack,
+whose tops together are the mold as a value; a search turns back by
+those, and where it branches for good it `fork`s with that value, the
+child growing actors of its own from it and never turning back past
+where it began. Then: "a basic slime mold simulation to test this
+idea. Without changing the runtime."
+
+**What it is.** `examples/mold.slight`: which aircraft flies which leg,
+every valid way counted and the cheapest found. A leg chooses its
+predecessor (the model tail assignment is usually given), which leaves
+two rules, a predecessor taken once and an aircraft's minutes within
+its limit, and four messages between nodes that run them. What a node
+does with a message is one function of its state and the message, so
+the same rules run as actors and, with `--values`, as a loop over a
+tuple of states: the comparison the experiment was for. The search is
+one function for both, and makes the same decisions. `--split d` gives
+each of the first d choices a process, on the islands in turn;
+`--settle system` asks `:system` whether the mold is quiet, in place
+of the virtual clock. Golden tests: the example (`--split 2`) and 392
+to 394, expected from `t/models/mold.py`, which counts the assignments
+another way, flying the legs in the order they leave. `bench/mold.py`
+times every way.
+
+**What it measured.** The cloud machine, 4 cores, x86-64, 19 Nov, a
+day of 30 legs and 10 aircraft, 2,753,080 decisions (`bench/mold.py
+--day 17:10:30:20 --no-every`); noisy, so to be run on the M2 Max:
+
+| the mold | islands | time | decisions/s | peak |
+|---|---:|---:|---:|---:|
+| a value | 1 | 5.0 s | 548,000 | 13 MB |
+| a value, split 2 | 4 | 1.4 s | 1,954,000 | 25 MB |
+| actors, undo | 1 | 33.4 s | 82,500 | 50 MB |
+| actors, split 2 | 1 | 62.3 s | 44,200 | 474 MB |
+| actors, split 2 | 4 | 13.9 s | 198,000 | 479 MB |
+
+And on a day of 51,948 decisions (the default, `15:8:28:40`): a process
+for every choice, no turning back, 29,500 decisions a second as a value
+and 1,250 as actors on one island, 81,000 and 10,000 on four, holding
+1.5 and 2.6 GB; and `:system` asked whether the mold is quiet, 7,250 a
+second where the clock gives 76,000.
+
+- **Actors cost 6.6 times the value,** on one island. A decision is
+  about 21 messages and 45,000 instructions as actors, 15,600 as a
+  value (callgrind, on a day of 5,170 decisions): the rules' own
+  messages are 7 or 8 of the 21 and what they tell the search 3, the
+  rest the search's own (the timer, the leg's choices asked for, each
+  changed node saying so and being told to turn back).
+- **The clock is a good quiet signal,** one timer a decision and no
+  system call. `:system` is exact too, and ten times slower: a message
+  for each process on the island every time it's asked.
+- **Undo stacks cost nothing to keep,** the states being values, and
+  telling only the nodes a level changed took 39 messages a decision to
+  21.
+- **Splitting pays across islands and costs on one.** A mold on each of
+  four islands is 2.4 times one; four molds on one island take the same
+  instructions and twice the time, each waiting for the whole island to
+  be quiet, and their nodes sharing a cache.
+- **A process for every choice is breadth-first:** a parent forks all
+  its choices before it joins any, so a whole level is alive at once.
+  A pool would bound it.
+- **A node holds about 1 MB** (40 nodes, 50 MB): BENCHMARKS.md's "a
+  busy process's garbage", a small heap never collected.
+- The search's results, decisions and conflicts are the same every way
+  and under `SLIGHT_SCHED` 1 to 5: the propagation comes to the same
+  whatever order the messages go in.
+
+**How it translated.** Well: the program is about 500 lines, compiled
+without a warning, and its rules were right the first time they ran,
+both ways (the one fault was an `or` given an integer, in the options);
+names for nodes and `ask` for a pid did the wiring; `fork` copying its
+arguments is exactly a branch. What it leaned on, or missed:
+
+- **A quiet signal that needs `SLIGHT_CLOCK=virtual`,** which the
+  program checks in `%ENV` and refuses to run without. The runtime
+  knows when an island has nothing to run; a way to be told would make
+  this a program and not a test harness's trick. To propose, if this
+  goes on.
+- **Ending a process's children with it** (parked, D285): a branch
+  kills its nodes itself, one line, since it has their pids. Stopping
+  at the first answer would mean killing branches of branches, which it
+  doesn't do; that's the second program that needs it.
+- **No selective receive** shaped it without hurting: a node asks at an
+  address, and the search asks a node only once the mold is quiet.
+- **Time on the virtual clock** can't time work, so the times are
+  `bench/mold.py`'s, from outside.
+- **A day copied for every branch and node,** static as it is: small
+  here, and an `:int` array would cross as a handle.
+
+**What it isn't yet:** a solver. It counts every assignment, so there's
+no bound to stop a branch on, no explanation of a conflict to stop
+others with, no first answer to stop at; and no simulation under it,
+the layer the idea began with. Each is a next step, none agreed.
+
 ### 17. Self-host
 
 Once the language has settled. Port the compiler to slight (it's written

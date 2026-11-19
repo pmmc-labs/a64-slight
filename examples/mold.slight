@@ -1,0 +1,511 @@
+; mold: which aircraft flies which leg, found by a search over a network
+; of actors that grows as it's needed, like a slime mold. An experiment:
+; can constraint propagation, as a CP-SAT solver does it, be actors
+; sending each other messages, and what does that cost beside the same
+; thing as a value and a loop?
+;
+;     node bin/slightc.ts --target x86_64 -o mold examples/mold.slight
+;     SLIGHT_CLOCK=virtual ./mold              (reads examples/mold-day.sexp)
+;     SLIGHT_CLOCK=virtual ./mold day.sexp
+;     ./mold --values day.sexp                 (the mold as a value: no actors)
+;     SLIGHT_CLOCK=virtual ./mold --split 2 day.sexp
+;                                              (the first two choices each a
+;                                              process, on the islands in turn)
+;     ./mold --settle system day.sexp          (ask :system whether the mold is
+;                                              quiet, in place of the clock)
+;     ./mold --stats ...                       (and what the search did)
+; args: --split 2
+;
+; bench/mold.py runs it with sets of these, and times them, and
+; t/models/mold.py makes days, and counts their assignments another way:
+; examples/mold.expected is its, and t/392 to t/394's, which run the
+; other ways of keeping the mold.
+;
+; The day, in examples/mold-day.sexp: aircraft, each with where it
+; starts, the minutes it may fly before maintenance and what a minute of
+; it costs; and legs, each from an airport to another, leaving and
+; landing at a minute. Every leg wants an aircraft. An aircraft flies its
+; legs in order, each from where the last landed, no sooner than the turn
+; after it, and their minutes within its own. The program counts the
+; ways, and finds the cheapest.
+;
+; The model is the one tail assignment is usually given: a leg doesn't
+; choose an aircraft but its predecessor, the leg its aircraft flew
+; before it, or an aircraft's start. Where and when a leg leaves says
+; which those can be, before anything's decided, so the places and times
+; are in the choices and only two rules are left:
+;
+; - a predecessor is taken once (two legs can't both follow one);
+; - an aircraft's minutes, added up along its line, stay within its own.
+;
+; A node is an aircraft's start or a leg, and each is an actor, once
+; something sends to it. Its state is (dom pred tail mins next): the
+; predecessors it could still have, the one it has (or -1), its aircraft
+; and its line's minutes so far (once its line reaches back to a start),
+; and the node that took it (or -1). Four messages go between them:
+;
+;     (:assign p)    you follow p         from the search, or itself
+;     (:take j)      j follows you        to a predecessor
+;     (:drop p)      you can't follow p   to the others that could have
+;     (:line a m)    your line is a's,    down a line, as it's learnt
+;                    m minutes so far
+;
+; and a node left with one predecessor takes it, which drops it for
+; others, and so on: that's the propagation, and nothing runs it but the
+; mailboxes. A node tells the search what it needs to know, (:assigned
+; k), (:line k a) and (:conflict k), and that's all the search sees of
+; what the rules do.
+;
+; What each node does with a message is one function, node-step, of its
+; state and the message, giving its new state and what to send. So the
+; same rules run two ways: as actors (node), and, with --values, as a
+; loop over a tuple of states with a list of messages to work through
+; (v-run). The search is the same for both, and so are its decisions.
+;
+; The search (search, try): take the first leg without a predecessor,
+; and for each it could have, decide it, wait till the mold is quiet,
+; and go on from there, or turn back at a conflict.
+;
+; - Quiet: on the virtual clock an island's time moves only when nothing
+;   on it can run, so a timer a millisecond off rings exactly when the
+;   mold has settled. (Hence SLIGHT_CLOCK=virtual.) --settle system asks
+;   the :system device instead: every node waiting with nothing in its
+;   mailbox. That works on the real clock too, and costs a message for
+;   each process on the island each time it's asked.
+; - Turning back: each node keeps the states it had before each level of
+;   the search changed it, and (:undo level) puts it back; it tells the
+;   search, (:changed k), the first time a level changes it, so only
+;   those are told. Nothing's copied: the states are values. With
+;   --values there's nothing to undo, the old tuple being still there.
+; - Splitting (--split d): the first d choices aren't tried in turn but
+;   each given to a process of its own (branch), on the islands in turn.
+;   The parent asks its nodes for their states, and that tuple, the mold
+;   as a value, is what's copied; the child grows nodes of its own from
+;   it as it touches them, and never turns back past where it began.
+;   A node is named by its number, never its pid, so a copy needs no
+;   rewiring: a node asks the search whose it is for a pid, once.
+;
+; What it found is in docs/PLAN.md, "A mold of constraints".
+
+; --- the day ------------------------------------------------------------------
+
+(defun reading (f records)
+    (match (read f)
+        ((:sexp _ r) (reading f (cons r records)))
+        ((:eof _)    (disconnect f) (reverse records))))
+
+(defun read-records (path)
+    (match (open :fs/read path)
+        ((:ok f)         (send f (list :read :sexp)) (reading f ()))
+        ((:error reason) (raise (list :no-day path reason)))))
+
+(defun aircraft? (r) (match r ((:aircraft _ _ _ _) #true) (_ #false)))
+(defun leg?      (r) (match r ((:leg _ _ _ _ _)    #true) (_ #false)))
+(defun leaves    (l) (match l ((:leg _ _ _ dep _)  dep)))
+(defun block     (l) (match l ((:leg _ _ _ dep arr) (- arr dep))))
+
+(defun number (from xs) (zip (range from (+ from (length xs))) xs))
+
+; The nodes a leg could follow: the starts of the aircraft that are where
+; it leaves from and could fly it at all, and the legs that land there a
+; turn or more before it leaves.
+(defun before (turn planes legs leg)
+    (match leg
+        ((:leg _ from _ dep arr)
+            (append
+                (map car (filter (lambda (p) (match p ((_ (:aircraft _ start limit _))
+                                                 (and (eq? start from) (<= (- arr dep) limit)))))
+                                 planes))
+                (map car (filter (lambda (l) (match l ((_ (:leg _ _ to _ landed))
+                                                 (and (eq? to from) (<= (+ landed turn) dep)))))
+                                 legs))))))
+
+; The day as the search has it, #(planes legs statics rates initial):
+; how many aircraft and legs; for each node (the aircraft's starts, then
+; the legs in the order they leave) what never changes, (minutes after
+; limits), after being the legs that could follow it, each (node
+; minutes), and limits the aircraft's minutes; what a minute of each
+; aircraft costs; and each node's state before anything's decided.
+(defun day (records)
+    (let turn (fold/l 0 (lambda (t r) (match r ((:turn m) m) (_ t))) records))
+    (let planes (number 0 (filter aircraft? records)))
+    (let m (length planes))
+    (let legs (number m (sort-by leaves (filter leg? records))))
+    (let limits (list->tuple (map (lambda (p) (match p ((_ (:aircraft _ _ limit _)) limit))) planes)))
+    (let could (map (lambda (l) (list (car l) (before turn planes legs (cadr l)) (block (cadr l)))) legs))
+    (let after (lambda (k) (map (lambda (c) (list (car c) (caddr c)))
+                                (filter (lambda (c) (member? k (cadr c))) could))))
+    (tuple m (length legs)
+        (list->tuple (append
+            (map (lambda (p) (list 0 (after (car p)) limits)) planes)
+            (map (lambda (c) (list (caddr c) (after (car c)) limits)) could)))
+        (list->tuple (map (lambda (p) (match p ((_ (:aircraft _ _ _ rate)) rate))) planes))
+        (list->tuple (append
+            (map (lambda (p) (list () (car p) (car p) 0 -1)) planes)
+            (map (lambda (c) (list (cadr c) -1 -1 0 -1)) could)))))
+
+(defun planes  (inst)   (tuple/get inst 0))
+(defun legs    (inst)   (tuple/get inst 1))
+(defun static  (inst k) (tuple/get (tuple/get inst 2) k))
+(defun rate    (inst a) (tuple/get (tuple/get inst 3) a))
+(defun initial (inst)   (tuple/get inst 4))
+
+; --- a node's rules -----------------------------------------------------------
+
+; What node k does with a message: (state sends), its new state (the old
+; one itself if nothing changed) and what it sends, each (to message), to
+; being a node, or -1 for the search.
+(defun node-step (k static st msg)
+    (match msg
+        ((:assign p) (step-assign k st p))
+        ((:drop p)   (step-drop k st p))
+        ((:take j)   (step-take k static st j))
+        ((:line a m) (step-line k static st a m))))
+
+(defun conflict (k st) (list st (list (list -1 (list :conflict k)))))
+
+(defun step-assign (k st p)
+    (match st
+        ((dom pred tail mins next)
+            (cond
+                ((== pred p)           (list st ()))
+                ((!= pred -1)          (conflict k st))
+                ((not (member? p dom)) (conflict k st))
+                (#true
+                    (list (list (list p) p tail mins next)
+                          (list (list p (list :take k)) (list -1 (list :assigned k)))))))))
+
+; Left with one it could follow, a node follows it.
+(defun step-drop (k st p)
+    (match st
+        ((dom pred tail mins next)
+            (cond
+                ((not (member? p dom)) (list st ()))
+                ((== pred p)           (conflict k st))
+                (#true
+                    (let left (remove (lambda (q) (== q p)) dom))
+                    (match left
+                        (()  (conflict k st))
+                        ((q) (step-assign k (list left pred tail mins next) q))
+                        (_   (list (list left pred tail mins next) ()))))))))
+
+; Taken, a node is no one else's to follow, and passes on its line if it
+; knows it.
+(defun step-take (k static st j)
+    (match st
+        ((dom pred tail mins next)
+            (cond
+                ((== next j)  (list st ()))
+                ((!= next -1) (conflict k st))
+                (#true
+                    (let drops (map (lambda (s) (list (car s) (list :drop k)))
+                                    (filter (lambda (s) (!= (car s) j)) (cadr static))))
+                    (list (list dom pred tail mins j)
+                          (if (== tail -1) drops (cons (list j (list :line tail mins)) drops))))))))
+
+; Its line learnt, a node passes it on, or, with no one after it yet,
+; drops itself for the legs that would take the aircraft past its minutes.
+(defun step-line (k static st a m)
+    (match st
+        ((dom pred _ _ next)
+            (match static
+                ((minutes after limits)
+                    (let mine (+ m minutes))
+                    (let limit (tuple/get limits a))
+                    (if (> mine limit)
+                        (conflict k st)
+                        (list (list dom pred a mine next)
+                              (cons (list -1 (list :line k a))
+                                    (if (!= next -1)
+                                        (list (list next (list :line a mine)))
+                                        (map (lambda (s) (list (car s) (list :drop k)))
+                                             (filter (lambda (s) (> (+ mine (cadr s)) limit)) after)))))))))))
+
+; What the search keeps of what the nodes tell it, (assigned cost bad
+; changed): the legs with a predecessor, a bit each; what the legs whose
+; aircraft is known cost; whether any node found a conflict; and the
+; nodes, actors only, whose states this level changed, to put back.
+(defun note (inst acc msg)
+    (match acc
+        ((assigned cost bad changed)
+            (match msg
+                ((:assigned k) (list (bit/or assigned (bit/shl 1 (- k (planes inst)))) cost bad changed))
+                ((:line k a)   (list assigned (+ cost (* (car (static inst k)) (rate inst a))) bad changed))
+                ((:conflict _) (list assigned cost #true changed))
+                ((:changed k)  (list assigned cost bad (cons k changed)))))))
+
+; --- the mold as a value ------------------------------------------------------
+
+; The messages worked through, newest first, till there are none or a
+; node finds a conflict: (states acc).
+(defun v-run (inst states queue acc)
+    (match queue
+        (() (list states acc))
+        (((to msg) & rest)
+            (if (== to -1)
+                (match (note inst acc msg)
+                    ((a c bad _) (if bad (list states (list a c bad ())) (v-run inst states rest (list a c bad ())))))
+                (match (node-step to (static inst to) (tuple/get states to) msg)
+                    ((st sends)
+                        (v-run inst
+                               (if (eq? st (tuple/get states to)) states (tuple/set states to st))
+                               (append sends rest)
+                               acc)))))))
+
+; --- the mold as actors -------------------------------------------------------
+
+; A node: its number, what never changes for it, the search it's part
+; of, its state, the states it had before each level changed it, newest
+; first, each (level state), and the pids of the nodes it has sent to.
+; The first time a level changes it, it tells the search, which is how
+; the search knows whom to tell to put it back.
+(defun node (k static search st undo known)
+    (recv
+        ((:msg level m)
+            (match (node-step k static st m)
+                ((st2 sends)
+                    (if (or (eq? st2 st) (and (cons? undo) (>= (caar undo) level)))
+                        (node k static search st2 undo (deliver search level sends known))
+                        (do (send search (list :changed k))
+                            (node k static search st2 (cons (list level st) undo)
+                                  (deliver search level sends known)))))))
+        ((:undo level)
+            (match (unwind undo level st)
+                ((st2 undo2) (node k static search st2 undo2 known))))
+        ((:state to)
+            (reply to st)
+            (node k static search st undo known))))
+
+(defun unwind (undo level st)
+    (match undo
+        (((l was) & rest) (if (>= l level) (unwind rest level was) (list st undo)))
+        (()               (list st undo))))
+
+; Sends each, asking the search for the pid of a node not sent to before
+; (which grows it, if it wasn't there): the pids known after.
+(defun deliver (search level sends known)
+    (match sends
+        (() known)
+        (((to msg) & rest)
+            (if (== to -1)
+                (do (send search msg)
+                    (deliver search level rest known))
+                (match (lookup to known)
+                    (:not-found
+                        (let pid (ask search (list :who to)))
+                        (send pid (list :msg level msg))
+                        (deliver search level rest (cons (list to pid) known)))
+                    (pid
+                        (send pid (list :msg level msg))
+                        (deliver search level rest known)))))))
+
+; The search's side of a mold of actors, #(pids mold sys): the pid of
+; each node that's grown, or (); the state each of the others would
+; start from; and the :system device, if that's how it's asked whether
+; the mold is quiet.
+(defun grow (inst world k)
+    (match world
+        (#(pids mold sys)
+            (if (pid? (tuple/get pids k))
+                world
+                (tuple (tuple/set pids k (fork node k (static inst k) $$ (tuple/get mold k) () ()))
+                       mold sys)))))
+
+(defun pid-of (world k) (tuple/get (tuple/get world 0) k))
+(defun grown  (world)   (filter pid? (tuple->list (tuple/get world 0))))
+
+; Waits till the mold is quiet, answering the nodes that ask for a pid
+; and keeping what they tell: (world acc).
+(defun settle (inst world acc)
+    (recv
+        ((:who k to)
+            (let w (grow inst world k))
+            (reply to (pid-of w k))
+            (settle inst w acc))
+        (:settled (list world acc))
+        (msg      (settle inst world (note inst acc msg)))))
+
+; The same by asking :system: what's waiting for the search is taken, up
+; to a mark it sends itself; then the island's processes are asked for,
+; and the mold is quiet if the search has nothing waiting and each of its
+; nodes waits with nothing either. If not, the others get a turn first.
+(defun settle/system (inst world acc)
+    (send $$ :mark)
+    (match (drain inst world acc)
+        ((w a)
+            (let sys (tuple/get w 2))
+            (send sys (list :processes (island)))
+            (if (quiet? sys $$ #true)
+                (list w a)
+                (yield (settle/system inst w a))))))
+
+(defun drain (inst world acc)
+    (recv
+        ((:who k to)
+            (let w (grow inst world k))
+            (reply to (pid-of w k))
+            (drain inst w acc))
+        (:mark (list world acc))
+        (msg   (drain inst world (note inst acc msg)))))
+
+(defun quiet? (sys me so-far)
+    (match (read sys)
+        ((:end _) so-far)
+        ((:process _ info)
+            (quiet? sys me
+                (and so-far
+                     (cond
+                         ((eq? (lookup :pid info) me)    (== (lookup :mail info) 0))
+                         ((eq? (lookup :parent info) me) (and (eq? (lookup :state info) :recv)
+                                                              (== (lookup :mail info) 0)))
+                         (#true                          #true)))))))
+
+; --- the search ---------------------------------------------------------------
+
+; What's the same whichever way the mold is kept: cx is #(inst actors
+; split system), the day, whether the mold is actors, how many choices
+; deep the search splits, and whether :system says when it's quiet. A
+; world is a mold: a tuple of states, or the search's side of the actors.
+
+(defun fresh (cx mold)
+    (if (tuple/get cx 1)
+        (tuple (tuple/make (tuple/len mold) ()) mold
+               (if (tuple/get cx 3) (match (open :system) ((:ok sys) sys)) ()))
+        mold))
+
+; Node j told to follow v, and the mold left to settle: (world acc).
+(defun decide (cx world j v level acc)
+    (let inst (tuple/get cx 0))
+    (cond
+        ((not (tuple/get cx 1))
+            (v-run inst world (list (list j (list :assign v))) acc))
+        (#true
+            (let w (grow inst world j))
+            (send (pid-of w j) (list :msg level (list :assign v)))
+            (if (tuple/get cx 3)
+                (settle/system inst w acc)
+                (do (after 1 $$ :settled)
+                    (settle inst w acc))))))
+
+; The world as it was before a level: the tuple from before it, or the
+; actors it changed told to put back what they had.
+(defun retract (cx was world level changed)
+    (if (tuple/get cx 1)
+        (do (map (lambda (k) (send (pid-of world k) (list :undo level))) changed)
+            world)
+        was))
+
+; What node j could still follow.
+(defun domain (cx world j)
+    (cond
+        ((not (tuple/get cx 1))  (car (tuple/get world j)))
+        ((pid? (pid-of world j)) (car (ask (pid-of world j) (list :state))))
+        (#true                   (car (tuple/get (tuple/get world 1) j)))))
+
+; The mold as a value, to start a branch from: the tuple itself, or each
+; grown node asked for its state.
+(defun snapshot (cx world)
+    (if (tuple/get cx 1)
+        (fold/l (tuple/get world 1)
+                (lambda (mold k)
+                    (if (pid? (pid-of world k))
+                        (tuple/set mold k (ask (pid-of world k) (list :state)))
+                        mold))
+                (range 0 (tuple/len (tuple/get world 1))))
+        world))
+
+; A search's nodes ended with it: how many it grew.
+(defun finish (cx world)
+    (if (tuple/get cx 1)
+        (do (map kill (grown world))
+            (if (tuple/get cx 3) (disconnect (tuple/get world 2)) ())
+            (length (grown world)))
+        0))
+
+; A result is (assignments best decisions conflicts forks nodes), best
+; being the least cost, or -1 with no assignment.
+(defun least (a b) (cond ((== a -1) b) ((== b -1) a) (#true (math/min a b))))
+(defun add (x y)
+    (match x ((c1 b1 d1 x1 f1 n1)
+        (match y ((c2 b2 d2 x2 f2 n2)
+            (list (+ c1 c2) (least b1 b2) (+ d1 d2) (+ x1 x2) (+ f1 f2) (+ n1 n2)))))))
+
+(defun first-clear (bits i)
+    (if (== (bit/and (bit/shr bits i) 1) 0) i (first-clear bits (+ i 1))))
+
+(defun ok (joined) (match joined ((:ok r) r) ((:error reason) (raise reason))))
+
+; Every assignment from a settled world on: (world result).
+(defun search (cx world assigned cost depth)
+    (let inst (tuple/get cx 0))
+    (cond
+        ((== assigned (- (bit/shl 1 (legs inst)) 1))
+            (list world (list 1 cost 0 0 0 0)))
+        (#true
+            (let j (+ (planes inst) (first-clear assigned 0)))
+            (let dom (domain cx world j))
+            (cond
+                ((< depth (tuple/get cx 2))
+                    (let mold (snapshot cx world))
+                    (let pids (map (lambda (iv)
+                                       (fork/on (% (+ (island) (car iv)) (islands))
+                                                branch cx mold assigned cost depth j (cadr iv)))
+                                   (zip (range 0 (length dom)) dom)))
+                    (list world (fold/l (list 0 -1 0 0 (length dom) 0) add (map ok (map join pids)))))
+                (#true
+                    (try cx world assigned cost depth j dom (list 0 -1 0 0 0 0)))))))
+
+; Node j following each of dom in turn, and all that comes of each.
+(defun try (cx world assigned cost depth j dom sum)
+    (match dom
+        (() (list world sum))
+        ((v & rest)
+            (match (decide cx world j v (+ depth 1) (list assigned cost #false ()))
+                ((w (a c bad changed))
+                    (match (if bad (list w (list 0 -1 0 1 0 0)) (search cx w a c (+ depth 1)))
+                        ((w2 r)
+                            (try cx (retract cx world w2 (+ depth 1) changed) assigned cost depth j rest
+                                 (add sum (add r (list 0 -1 1 0 0 0)))))))))))
+
+; A process for one choice: a mold of its own, from its parent's as a
+; value, and all that comes of node j following v.
+(defun branch (cx mold assigned cost depth j v)
+    (match (try cx (fresh cx mold) assigned cost depth j (list v) (list 0 -1 0 0 0 0))
+        ((w r) (add r (list 0 -1 0 0 0 (finish cx w))))))
+
+; --- the program --------------------------------------------------------------
+
+(defun main (o clock)
+    (match o
+        (#(path actors split system stats)
+            (let inst (day (read-records path)))
+            (cond
+                ((> (legs inst) 62)
+                    (raise (list :too-many-legs (legs inst))))
+                ((and actors (and (not system) (ne? clock "virtual")))
+                    (raise "the clock says when the mold is quiet: run with SLIGHT_CLOCK=virtual, or --settle system"))
+                (#true
+                    (let cx (tuple inst actors split system))
+                    (tty/write (legs inst) " legs, " (planes inst) " aircraft\n")
+                    (match (search cx (fresh cx (initial inst)) 0 0 0)
+                        ((w (count best decisions conflicts forks nodes))
+                            (tty/write count " assignments\n")
+                            (tty/write (if (== best -1) "no best" (str "best " best)) "\n")
+                            (when stats
+                                (tty/write "decisions " decisions ", conflicts " conflicts
+                                           ", forks " forks ", nodes " (+ nodes (finish cx w)) "\n"))
+                            ())))))))
+
+(defun or-0 (v) (if (int? v) v 0))
+
+(defun options (args o clock)
+    (match args
+        (()                         (main o clock))
+        (("--values" & rest)        (options rest (tuple/set o 1 #false) clock))
+        (("--split" n & rest)       (options rest (tuple/set o 2 (or-0 (str->int n))) clock))
+        (("--settle" "system" & rest) (options rest (tuple/set o 3 #true) clock))
+        (("--settle" "clock" & rest)  (options rest (tuple/set o 3 #false) clock))
+        (("--stats" & rest)         (options rest (tuple/set o 4 #true) clock))
+        ((p & rest)                 (options rest (tuple/set o 0 p) clock))))
+
+(options @ARGV (tuple "examples/mold-day.sexp" #true 0 #false #false) (lookup "SLIGHT_CLOCK" %ENV))

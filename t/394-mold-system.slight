@@ -1,0 +1,8 @@
+; examples/mold.slight --settle system examples/mold-day.sexp: the mold as actors, :system asked whether it's quiet in place of the
+; virtual clock.
+; Every way gives the same count and the same best, which
+; t/models/mold.py solve examples/mold-day.sexp works out independently,
+; flying the legs in the order they leave.
+; args: --settle system examples/mold-day.sexp
+
+(@include "../examples/mold.slight")
