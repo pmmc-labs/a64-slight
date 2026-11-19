@@ -2927,7 +2927,7 @@ one function for both, and makes the same decisions. `--split d` gives
 each of the first d choices a process, on the islands in turn;
 `--settle system` asks `:system` whether the mold is quiet, in place
 of the virtual clock. Golden tests: the example (`--split 2`) and 392
-to 394, expected from `t/models/mold.py`, which counts the assignments
+to 396, expected from `t/models/mold.py`, which counts the assignments
 another way, flying the legs in the order they leave. `bench/mold.py`
 times every way.
 
@@ -2996,8 +2996,52 @@ second where the clock gives 76,000.
   and under `SLIGHT_SCHED` 1 to 5: the propagation comes to the same
   whatever order the messages go in.
 
-**How it translated.** Well: the program is about 500 lines, compiled
-without a warning, and its rules were right the first time they ran,
+**The bound** (Stevan, 19 Nov: "Let's add the cost bound"). `--best`
+wants only the cheapest, and leaves a branch that can't beat the best
+known. What a branch must come to at least: what its legs with an
+aircraft cost, and the minutes of the rest flown by the cheapest
+aircraft with minutes left, a minute at a time, as if a leg could be
+shared out, a relaxation as a CP-SAT solver's bound is one. The
+cheapest predecessor is tried first. A process, the keeper, holds the
+best any search has found; a search tells it, and asks it as it starts
+and after each thousand decisions, the first thing here that searches
+on different islands say to each other. Every way finds the model's
+best (`t/models/mold.py best`, which bounds its own way, more weakly),
+under `SLIGHT_SCHED` 1 to 3 too; golden tests 395 and 396.
+
+It's sound, and on these days it buys nothing. The cloud machine,
+`bench/mold.py --best` against the counting above:
+
+| | decisions | bounded | a value | actors |
+|---|---:|---:|---:|---:|
+| 51,948 decisions, counted | 51,948 | | 0.11 s | 0.67 s |
+| the same day, `--best` | 22,098 | 9,275 | 0.10 s | 0.63 s |
+| 2,753,080 decisions, counted | 2,753,080 | | 5.0 s | 33.4 s |
+| the same day, `--best` | 2,356,296 | 200,735 | 5.6 s | 37.5 s |
+
+- **The days are flat.** Every valid assignment of the big day costs
+  within 4.9 per cent of the best (the median 2.6 over it), and the
+  bound at the root is 2.4 under it: tight, and still unable to tell a
+  branch from the best till most of its legs have aircraft. A made-up
+  day whose aircraft cost 30 to 55 a minute and whose limits leave
+  little room is like that; whether a real one is, is a question for
+  real data.
+- **What's cut is the cheap part.** The decisions left are nearer the
+  top, where one decision moves more of the mold, so the smaller day's
+  decisions more than halve and its time doesn't: decisions a second
+  mean nothing between `--best` and counting.
+- **The work is in the conflicts,** 1,028,730 of the big day's
+  2,356,296 decisions, as many as when counting: branches that end
+  because the day can't be flown that way, which a cost says nothing
+  about. That's what explaining a conflict is for, or a better order to
+  take the legs in: the next step, if there's one.
+- **More than one search changes the count, not the answer:** with the
+  first two choices split, the big day takes 2,283,000 decisions, give
+  or take a few hundred from run to run, as the islands' searches hear
+  of each other's best in whatever order they run.
+
+**How it translated.** Well: the program was about 500 lines before
+the bound, 630 with it, compiled without a warning, and its rules were right the first time they ran,
 both ways (the one fault was an `or` given an integer, in the options);
 names for nodes and `ask` for a pid did the wiring; `fork` copying its
 arguments is exactly a branch. What it leaned on, or missed:
@@ -3018,10 +3062,11 @@ arguments is exactly a branch. What it leaned on, or missed:
 - **A day copied for every branch and node,** static as it is: small
   here, and an `:int` array would cross as a handle.
 
-**What it isn't yet:** a solver. It counts every assignment, so there's
-no bound to stop a branch on, no explanation of a conflict to stop
-others with, no first answer to stop at; and no simulation under it,
-the layer the idea began with. Each is a next step, none agreed.
+**What it isn't yet:** a solver. It has a bound now, and no
+explanation of a conflict to stop other branches with, no first answer
+to stop at, more than 62 legs (a bit each in an integer); and no
+simulation under it, the layer the idea began with. Each is a next
+step, none agreed.
 
 ### 17. Self-host
 

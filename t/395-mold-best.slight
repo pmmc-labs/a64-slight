@@ -1,0 +1,9 @@
+; examples/mold.slight --best --split 2 examples/mold-day.sexp: only the cheapest, the mold as actors, its first two choices split
+; across the islands, each search leaving a branch that can't beat the best
+; the keeper has heard of.
+; The best is the same however it's found, and
+; t/models/mold.py best examples/mold-day.sexp finds it independently,
+; flying the legs in the order they leave, with a bound of its own.
+; args: --best --split 2 examples/mold-day.sexp
+
+(@include "../examples/mold.slight")

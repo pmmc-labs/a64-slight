@@ -1,0 +1,8 @@
+; examples/mold.slight --best --values examples/mold-day.sexp: only the cheapest, the mold as a value, one search leaving a
+; branch that can't beat the best it has found.
+; The best is the same however it's found, and
+; t/models/mold.py best examples/mold-day.sexp finds it independently,
+; flying the legs in the order they leave, with a bound of its own.
+; args: --best --values examples/mold-day.sexp
+
+(@include "../examples/mold.slight")

@@ -14,13 +14,16 @@
 ;                                              among them)
 ;     ./mold --settle system day.sexp          (ask :system whether the mold is
 ;                                              quiet, in place of the clock)
+;     ./mold --best ...                        (only the cheapest: a branch
+;                                              that can't beat the best known
+;                                              is left)
 ;     ./mold --stats ...                       (and what the search did)
 ; args: --split 2
 ;
 ; bench/mold.py runs it with sets of these, and times them, and
 ; t/models/mold.py makes days, and counts their assignments another way:
-; examples/mold.expected is its, and t/392 to t/394's, which run the
-; other ways of keeping the mold.
+; examples/mold.expected is its, and t/392 to t/396's, which run the
+; other ways of keeping the mold, and --best.
 ;
 ; The day, in examples/mold-day.sexp: aircraft, each with where it
 ; starts, the minutes it may fly before maintenance and what a minute of
@@ -89,6 +92,18 @@
 ;   A node is named by its number, never its pid, so a copy needs no
 ;   rewiring: a node asks the search whose it is for a pid, once.
 ;
+; - The bound (--best): the search wants only the cheapest, so it leaves
+;   a branch that can't come to less than the best known. What a branch
+;   must come to at least (lower): what its legs with an aircraft cost,
+;   and the minutes of the rest flown by the cheapest aircraft with
+;   minutes left, a minute at a time, as if a leg could be shared out;
+;   no real assignment is cheaper. It tries the cheapest predecessor
+;   first, so a good one is known early. A process (keeper) holds the
+;   best any search has found: each tells it, and asks it when it starts
+;   and after each thousand decisions, since searches on other islands
+;   find things too. The best is the same however it's found; the
+;   decisions it takes aren't, with more than one search.
+;
 ; What it found is in docs/PLAN.md, "A mold of constraints".
 
 ; --- the day ------------------------------------------------------------------
@@ -124,12 +139,14 @@
                                                  (and (eq? to from) (<= (+ landed turn) dep)))))
                                  legs))))))
 
-; The day as the search has it, #(planes legs statics rates initial):
-; how many aircraft and legs; for each node (the aircraft's starts, then
-; the legs in the order they leave) what never changes, (minutes after
-; limits), after being the legs that could follow it, each (node
-; minutes), and limits the aircraft's minutes; what a minute of each
-; aircraft costs; and each node's state before anything's decided.
+; The day as the search has it, #(planes legs statics rates initial
+; cheapest minutes): how many aircraft and legs; for each node (the
+; aircraft's starts, then the legs in the order they leave) what never
+; changes, (minutes after limits), after being the legs that could
+; follow it, each (node minutes), and limits the aircraft's minutes;
+; what a minute of each aircraft costs; each node's state before
+; anything's decided; the aircraft, cheapest first, each (aircraft rate
+; limit); and the minutes of all the legs together.
 (defun day (records)
     (let turn (fold/l 0 (lambda (t r) (match r ((:turn m) m) (_ t))) records))
     (let planes (number 0 (filter aircraft? records)))
@@ -146,13 +163,17 @@
         (list->tuple (map (lambda (p) (match p ((_ (:aircraft _ _ _ rate)) rate))) planes))
         (list->tuple (append
             (map (lambda (p) (list () (car p) (car p) 0 -1)) planes)
-            (map (lambda (c) (list (cadr c) -1 -1 0 -1)) could)))))
+            (map (lambda (c) (list (cadr c) -1 -1 0 -1)) could)))
+        (sort-by cadr (map (lambda (p) (match p ((a (:aircraft _ _ limit rate)) (list a rate limit)))) planes))
+        (sum (map caddr could))))
 
 (defun planes  (inst)   (tuple/get inst 0))
 (defun legs    (inst)   (tuple/get inst 1))
 (defun static  (inst k) (tuple/get (tuple/get inst 2) k))
 (defun rate    (inst a) (tuple/get (tuple/get inst 3) a))
 (defun initial (inst)   (tuple/get inst 4))
+(defun cheapest (inst)  (tuple/get inst 5))
+(defun minutes (inst)   (tuple/get inst 6))
 
 ; --- a node's rules -----------------------------------------------------------
 
@@ -225,18 +246,35 @@
                                         (map (lambda (s) (list (car s) (list :drop k)))
                                              (filter (lambda (s) (> (+ mine (cadr s)) limit)) after)))))))))))
 
-; What the search keeps of what the nodes tell it, (assigned cost bad
-; changed): the legs with a predecessor, a bit each; what the legs whose
-; aircraft is known cost; whether any node found a conflict; and the
-; nodes, actors only, whose states this level changed, to put back.
+; Where a search is, (assigned cost left used tails): the legs with a
+; predecessor, a bit each; what the legs whose aircraft is known cost;
+; the minutes of the legs whose aircraft isn't; and, when it's the
+; cheapest that's wanted, () otherwise, the minutes each aircraft has
+; flown, and each node's aircraft, or -1.
+(defun on-assigned (inst at k)
+    (match at
+        ((assigned cost left used tails)
+            (list (bit/or assigned (bit/shl 1 (- k (planes inst)))) cost left used tails))))
+
+(defun on-line (inst at k a)
+    (match at
+        ((assigned cost left used tails)
+            (let d (car (static inst k)))
+            (list assigned (+ cost (* d (rate inst a))) (- left d)
+                  (if (nil? used) () (tuple/set used a (+ (tuple/get used a) d)))
+                  (if (nil? tails) () (tuple/set tails k a))))))
+
+; What the search keeps of what the nodes tell it, (at bad changed):
+; where it is; whether any node found a conflict; and the nodes, actors
+; only, whose states this level changed, to put back.
 (defun note (inst acc msg)
     (match acc
-        ((assigned cost bad changed)
+        ((at bad changed)
             (match msg
-                ((:assigned k) (list (bit/or assigned (bit/shl 1 (- k (planes inst)))) cost bad changed))
-                ((:line k a)   (list assigned (+ cost (* (car (static inst k)) (rate inst a))) bad changed))
-                ((:conflict _) (list assigned cost #true changed))
-                ((:changed k)  (list assigned cost bad (cons k changed)))))))
+                ((:assigned k) (list (on-assigned inst at k) bad changed))
+                ((:line k a)   (list (on-line inst at k a) bad changed))
+                ((:conflict _) (list at #true changed))
+                ((:changed k)  (list at bad (cons k changed)))))))
 
 ; --- the mold as a value ------------------------------------------------------
 
@@ -248,7 +286,7 @@
         (((to msg) & rest)
             (if (== to -1)
                 (match (note inst acc msg)
-                    ((a c bad _) (if bad (list states (list a c bad ())) (v-run inst states rest (list a c bad ())))))
+                    ((at bad _) (if bad (list states (list at bad ())) (v-run inst states rest (list at bad ())))))
                 (match (node-step to (static inst to) (tuple/get states to) msg)
                     ((st sends)
                         (v-run inst
@@ -367,11 +405,13 @@
 ; --- the search ---------------------------------------------------------------
 
 ; What's the same whichever way the mold is kept: cx is #(inst actors
-; split system from to), the day, whether the mold is actors, how many
-; choices deep the search splits, whether :system says when it's quiet,
-; and the islands that are this search's to share out, from one up to
-; but not including another, in 4096ths of an island. A world is a
-; mold: a tuple of states, or the search's side of the actors.
+; split system from to keeper), the day, whether the mold is actors, how
+; many choices deep the search splits, whether :system says when it's
+; quiet, the islands that are this search's to share out, from one up
+; to but not including another, in 4096ths of an island, and the
+; process that keeps the best cost found, or () when every assignment
+; is wanted. A world is a mold: a tuple of states, or the search's side
+; of the actors.
 
 (defun fresh (cx mold)
     (if (tuple/get cx 1)
@@ -408,6 +448,21 @@
         ((pid? (pid-of world j)) (car (ask (pid-of world j) (list :state))))
         (#true                   (car (tuple/get (tuple/get world 1) j)))))
 
+; And in the order to try them: as they come, or, when it's the cheapest
+; that's wanted, those on the cheapest aircraft first, and those whose
+; aircraft isn't known yet last.
+(defun choices (cx world at j)
+    (let dom (domain cx world j))
+    (match at
+        ((_ _ _ _ tails)
+            (if (nil? tails)
+                dom
+                (sort-by (lambda (p)
+                             (if (== (tuple/get tails p) -1)
+                                 1000000
+                                 (rate (tuple/get cx 0) (tuple/get tails p))))
+                         dom)))))
+
 ; The mold as a value, to start a branch from: the tuple itself, or each
 ; grown node asked for its state.
 (defun snapshot (cx world)
@@ -428,28 +483,71 @@
             (length (grown world)))
         0))
 
-; A result is (assignments best decisions conflicts forks nodes), best
-; being the least cost, or -1 with no assignment.
+; A result is (assignments best decisions conflicts bounded forks
+; nodes), best being the least cost, or -1 with no assignment, and
+; bounded the branches left because they couldn't beat the best known.
 (defun least (a b) (cond ((== a -1) b) ((== b -1) a) (#true (math/min a b))))
 (defun add (x y)
-    (match x ((c1 b1 d1 x1 f1 n1)
-        (match y ((c2 b2 d2 x2 f2 n2)
-            (list (+ c1 c2) (least b1 b2) (+ d1 d2) (+ x1 x2) (+ f1 f2) (+ n1 n2)))))))
+    (match x ((c1 b1 d1 x1 l1 f1 n1)
+        (match y ((c2 b2 d2 x2 l2 f2 n2)
+            (list (+ c1 c2) (least b1 b2) (+ d1 d2) (+ x1 x2) (+ l1 l2) (+ f1 f2) (+ n1 n2)))))))
+
+; --- the bound ----------------------------------------------------------------
+
+; The least a search could still come to: what's on aircraft already,
+; and the minutes that aren't, each on the cheapest aircraft with
+; minutes left; -1 if the aircraft haven't the minutes between them.
+(defun lower (order used left cost)
+    (cond
+        ((<= left 0)  cost)
+        ((nil? order) -1)
+        (#true
+            (match (car order)
+                ((a rate limit)
+                    (let room (math/min left (- limit (tuple/get used a))))
+                    (lower (cdr order) used (- left room) (+ cost (* room rate))))))))
+
+; Whether to leave a branch: it can't come to less than the best known.
+(defun cut? (cx at bound)
+    (if (pid? (tuple/get cx 6))
+        (match at
+            ((_ cost left used _)
+                (let low (lower (cheapest (tuple/get cx 0)) used left cost))
+                (or (== low -1) (and (!= bound -1) (>= low bound)))))
+        #false))
+
+; The best cost any search has found, or -1.
+(defun keeper (best)
+    (recv
+        ((:found cost) (keeper (least best cost)))
+        ((:best to)    (reply to best) (keeper best))))
+
+; The bound for what's tried next: the least of what was known and what
+; the last choice came to; and, after a thousand decisions or more with
+; other searches about, of what the keeper has heard since.
+(defun heard (cx bound r)
+    (let known (least bound (cadr r)))
+    (if (and (pid? (tuple/get cx 6)) (and (> (tuple/get cx 2) 0) (>= (caddr r) 1000)))
+        (least known (ask (tuple/get cx 6) (list :best)))
+        known))
 
 (defun first-clear (bits i)
     (if (== (bit/and (bit/shr bits i) 1) 0) i (first-clear bits (+ i 1))))
 
 (defun ok (joined) (match joined ((:ok r) r) ((:error reason) (raise reason))))
 
-; Every assignment from a settled world on: (world result).
-(defun search (cx world assigned cost depth)
+; Every assignment from a settled world on, or every one that beats the
+; bound: (world result).
+(defun search (cx world at bound depth)
     (let inst (tuple/get cx 0))
     (cond
-        ((== assigned (- (bit/shl 1 (legs inst)) 1))
-            (list world (list 1 cost 0 0 0 0)))
+        ((== (car at) (- (bit/shl 1 (legs inst)) 1))
+            (when (pid? (tuple/get cx 6))
+                (send (tuple/get cx 6) (list :found (cadr at))))
+            (list world (list 1 (cadr at) 0 0 0 0 0)))
         (#true
-            (let j (+ (planes inst) (first-clear assigned 0)))
-            (let dom (domain cx world j))
+            (let j (+ (planes inst) (first-clear (car at) 0)))
+            (let dom (choices cx world at j))
             (cond
                 ((< depth (tuple/get cx 2))
                     (let mold (snapshot cx world))
@@ -458,35 +556,42 @@
                                        (let from (+ (tuple/get cx 4) (* (car iv) share)))
                                        (fork/on (div from 4096) branch
                                                 (tuple/set (tuple/set cx 4 from) 5 (+ from share))
-                                                mold assigned cost depth j (cadr iv)))
+                                                mold at bound depth j (cadr iv)))
                                    (zip (range 0 (length dom)) dom)))
-                    (list world (fold/l (list 0 -1 0 0 (length dom) 0) add (map ok (map join pids)))))
+                    (list world (fold/l (list 0 -1 0 0 0 (length dom) 0) add (map ok (map join pids)))))
                 (#true
-                    (try cx world assigned cost depth j dom (list 0 -1 0 0 0 0)))))))
+                    (try cx world at bound depth j dom (list 0 -1 0 0 0 0 0)))))))
 
 ; Node j following each of dom in turn, and all that comes of each.
-(defun try (cx world assigned cost depth j dom sum)
+(defun try (cx world at bound depth j dom sum)
     (match dom
         (() (list world sum))
         ((v & rest)
-            (match (decide cx world j v (+ depth 1) (list assigned cost #false ()))
-                ((w (a c bad changed))
-                    (match (if bad (list w (list 0 -1 0 1 0 0)) (search cx w a c (+ depth 1)))
+            (match (decide cx world j v (+ depth 1) (list at #false ()))
+                ((w (at2 bad changed))
+                    (match (cond
+                               (bad                 (list w (list 0 -1 0 1 0 0 0)))
+                               ((cut? cx at2 bound) (list w (list 0 -1 0 0 1 0 0)))
+                               (#true               (search cx w at2 bound (+ depth 1))))
                         ((w2 r)
-                            (try cx (retract cx world w2 (+ depth 1) changed) assigned cost depth j rest
-                                 (add sum (add r (list 0 -1 1 0 0 0)))))))))))
+                            (try cx (retract cx world w2 (+ depth 1) changed) at (heard cx bound r)
+                                 depth j rest (add sum (add r (list 0 -1 1 0 0 0 0)))))))))))
 
 ; A process for one choice: a mold of its own, from its parent's as a
-; value, and all that comes of node j following v.
-(defun branch (cx mold assigned cost depth j v)
-    (match (try cx (fresh cx mold) assigned cost depth j (list v) (list 0 -1 0 0 0 0))
-        ((w r) (add r (list 0 -1 0 0 0 (finish cx w))))))
+; value, and all that comes of node j following v, against the best
+; known as it starts.
+(defun branch (cx mold at bound depth j v)
+    (let known (if (pid? (tuple/get cx 6))
+                   (least bound (ask (tuple/get cx 6) (list :best)))
+                   bound))
+    (match (try cx (fresh cx mold) at known depth j (list v) (list 0 -1 0 0 0 0 0))
+        ((w r) (add r (list 0 -1 0 0 0 0 (finish cx w))))))
 
 ; --- the program --------------------------------------------------------------
 
 (defun main (o clock)
     (match o
-        (#(path actors split system stats)
+        (#(path actors split system stats best)
             (let inst (day (read-records path)))
             (cond
                 ((> (legs inst) 62)
@@ -494,15 +599,21 @@
                 ((and actors (and (not system) (ne? clock "virtual")))
                     (raise "the clock says when the mold is quiet: run with SLIGHT_CLOCK=virtual, or --settle system"))
                 (#true
-                    (let cx (tuple inst actors split system 0 (* (islands) 4096)))
+                    (let cx (tuple inst actors split system 0 (* (islands) 4096)
+                                   (if best (fork keeper -1) ())))
+                    (let at (list 0 0 (minutes inst)
+                                  (if best (tuple/make (planes inst) 0) ())
+                                  (if best (list->tuple (map caddr (tuple->list (initial inst)))) ())))
                     (tty/write (legs inst) " legs, " (planes inst) " aircraft\n")
-                    (match (search cx (fresh cx (initial inst)) 0 0 0)
-                        ((w (count best decisions conflicts forks nodes))
-                            (tty/write count " assignments\n")
-                            (tty/write (if (== best -1) "no best" (str "best " best)) "\n")
+                    (match (search cx (fresh cx (initial inst)) at -1 0)
+                        ((w (count least-cost decisions conflicts bounded forks nodes))
+                            (when (not best) (tty/write count " assignments\n"))
+                            (tty/write (if (== least-cost -1) "no best" (str "best " least-cost)) "\n")
                             (when stats
                                 (tty/write "decisions " decisions ", conflicts " conflicts
-                                           ", forks " forks ", nodes " (+ nodes (finish cx w)) "\n"))
+                                           ", bounded " bounded ", forks " forks
+                                           ", nodes " (+ nodes (finish cx w)) "\n"))
+                            (when best (kill (tuple/get cx 6)))
                             ())))))))
 
 (defun or-0 (v) (if (int? v) v 0))
@@ -515,6 +626,7 @@
         (("--settle" "system" & rest) (options rest (tuple/set o 3 #true) clock))
         (("--settle" "clock" & rest)  (options rest (tuple/set o 3 #false) clock))
         (("--stats" & rest)         (options rest (tuple/set o 4 #true) clock))
+        (("--best" & rest)          (options rest (tuple/set o 5 #true) clock))
         ((p & rest)                 (options rest (tuple/set o 0 p) clock))))
 
-(options @ARGV (tuple "examples/mold-day.sexp" #true 0 #false #false) (lookup "SLIGHT_CLOCK" %ENV))
+(options @ARGV (tuple "examples/mold-day.sexp" #true 0 #false #false #false) (lookup "SLIGHT_CLOCK" %ENV))

@@ -8,6 +8,7 @@
     bench/mold.py --day 17:10:30:20 --no-every
                                         a bigger day, without a process for every choice
     bench/mold.py --split 4             the first four choices split, in place of two
+    bench/mold.py --best                only the cheapest wanted: the search with its bound
 
 A row is a way of keeping the mold, on a number of islands: the mold as
 a value (--values), as actors turning back by their undo stacks, and
@@ -26,7 +27,10 @@ value on one island.
 
 Every run's count and best are checked against t/models/mold.py solve,
 and its decisions and conflicts against the first run's: the search is
-the same however the mold is kept, so they must be.
+the same however the mold is kept, so they must be. With --best the
+best is checked against t/models/mold.py best, and the decisions only
+where there's one search: several find their bounds in the order the
+islands happen to run, so a row's decisions are its first run's.
 
 The program runs on the virtual clock, which is how a mold of actors
 knows it's quiet, so the times are measured from outside. Everything
@@ -63,6 +67,7 @@ def ways(split, system):
 def run(binary, args, day, islands):
     """One run: (seconds, cpu seconds, what it printed)."""
     env = dict(os.environ, SLIGHT_CLOCK='virtual', SLIGHT_ISLANDS=str(islands))
+    args = [a for a in args if a]
     before = resource.getrusage(resource.RUSAGE_CHILDREN)
     start = time.perf_counter()
     p = subprocess.Popen([binary, '--stats', *args, day], env=env,
@@ -82,6 +87,7 @@ def peak_mb(binary, args, day, islands):
             'subprocess.run(sys.argv[1:], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)\n'
             'print(resource.getrusage(resource.RUSAGE_CHILDREN).ru_maxrss)\n')
     env = dict(os.environ, SLIGHT_CLOCK='virtual', SLIGHT_ISLANDS=str(islands))
+    args = [a for a in args if a]
     kb = int(subprocess.run([sys.executable, '-c', code, binary, *args, day], env=env,
                             capture_output=True, text=True).stdout)
     return kb / (1024 if sys.platform != 'darwin' else 1024 * 1024)
@@ -93,6 +99,7 @@ def main():
     ap.add_argument('--repeat', type=int, default=3)
     ap.add_argument('--split', default='2', help='how many choices deep the split rows split')
     ap.add_argument('--system', action='store_true', help='and the rows that ask :system')
+    ap.add_argument('--best', action='store_true', help='only the cheapest wanted, the search with its bound')
     ap.add_argument('--no-every', action='store_true', help='without the rows with a process for every choice')
     ap.add_argument('--target', default={'arm64': 'aarch64', 'aarch64': 'aarch64'}.get(os.uname().machine, 'x86_64'))
     o = ap.parse_args()
@@ -107,12 +114,14 @@ def main():
         day = os.path.join(BUILD, 'day-' + o.day.replace(':', '-') + '.sexp')
         with open(day, 'w') as f:
             subprocess.run([sys.executable, MODEL, 'gen', *o.day.split(':')], stdout=f, check=True)
-    want = subprocess.run([sys.executable, MODEL, 'solve', day], capture_output=True, text=True, check=True).stdout
+    want = subprocess.run([sys.executable, MODEL, 'best' if o.best else 'solve', day],
+                          capture_output=True, text=True, check=True).stdout
+    best = '--best' if o.best else ''
 
-    print(f'{want.splitlines()[0]}; {want.splitlines()[1]}; {want.splitlines()[2]}')
+    print('; '.join(want.splitlines()))
     print()
-    print('| the mold | islands | time | CPU | MB | decisions/s | ÷ values | forks | nodes |')
-    print('|---|---:|---:|---:|---:|---:|---:|---:|---:|')
+    print('| the mold | islands | time | CPU | MB | decisions | conflicts | bounded | decisions/s | ÷ values | forks | nodes |')
+    print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
     first = base = None
     for name, args in ways(o.split, o.system):
         if o.no_every and '99' in args:
@@ -120,22 +129,27 @@ def main():
         for islands in [int(k) for k in o.islands.split(',')]:
             if islands > 1 and '--split' not in args:
                 continue                    # one search is one island's, however many there are
+            args = [best, *args]
             runs = [run(binary, args, day, islands) for _ in range(o.repeat)]
             out = runs[0][2]
-            if out[:len(want)] != want:
+            if any(r[2][:len(want)] != want for r in runs):
                 sys.exit(f'{name} on {islands} islands:\n{out}and not\n{want}')
-            m = re.search(r'decisions (\d+), conflicts (\d+), forks (\d+), nodes (\d+)', out)
-            decisions, conflicts, forks, nodes = map(int, m.groups())
+            m = re.search(r'decisions (\d+), conflicts (\d+), bounded (\d+), forks (\d+), nodes (\d+)', out)
+            decisions, conflicts, bounded, forks, nodes = map(int, m.groups())
             if first is None:
                 first = (decisions, conflicts)
-            elif (decisions, conflicts) != first:
+            elif (decisions, conflicts) != first and not (o.best and '--split' in args):
                 sys.exit(f'{name} on {islands} islands made {decisions} decisions and {conflicts} conflicts, not {first}')
             took = statistics.median(r[0] for r in runs)
             cpu = statistics.median(r[1] for r in runs)
             base = base or took
             print(f'| {name} | {islands} | {took:.3f} | {cpu:.3f} | {peak_mb(binary, args, day, islands):.1f} '
+                  f'| {decisions:,} | {conflicts:,} | {bounded:,} '
                   f'| {decisions / took:,.0f} | {took / base:.1f} | {forks:,} | {nodes:,} |', flush=True)
     print()
-    print(f'{first[0]:,} decisions, {first[1]:,} of them conflicts, every way.')
+    if o.best:
+        print(f'{first[0]:,} decisions, {first[1]:,} of them conflicts, with one search.')
+    else:
+        print(f'{first[0]:,} decisions, {first[1]:,} of them conflicts, every way.')
 
 main()

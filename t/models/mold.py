@@ -2,6 +2,7 @@
 """examples/mold.expected, and days for examples/mold.slight.
 
     python3 t/models/mold.py solve examples/mold-day.sexp
+    python3 t/models/mold.py best examples/mold-day.sexp
     python3 t/models/mold.py gen SEED AIRCRAFT LEGS [SLACK] > day.sexp
     python3 t/models/mold.py check day.sexp
 
@@ -19,7 +20,11 @@ aircraft that's there and free, the aircraft's place, time and minutes
 kept as it goes. That's not how examples/mold.slight looks for them (it
 picks each leg's predecessor, and propagates), so the two agreeing says
 something. check counts them a third way, every way of giving legs to
-aircraft tried whole, for a day small enough.
+aircraft tried whole, for a day small enough. best finds only the least
+cost, as examples/mold.slight --best does, the same way as solve but
+leaving a schedule once what it has cost, and the rest at the cheapest
+aircraft's rate, is no less than the best found: a bound of its own,
+weaker than the program's, so the two agree only if both are sound.
 """
 import sys
 # Not this directory's modules for the library's: where math isn't built
@@ -58,11 +63,15 @@ def read(path):
     legs = sorted((tuple(r[1:]) for r in recs if r[0] == ':leg'), key=lambda l: l[3])
     return turn, aircraft, legs
 
-def solve(turn, aircraft, legs):
+def solve(turn, aircraft, legs, bound=False):
     at = [a[1] for a in aircraft]; free = [None] * len(aircraft); used = [0] * len(aircraft)
     count, best = 0, None
+    least = min(a[3] for a in aircraft)
+    rest = [sum(l[4] - l[3] for l in legs[i:]) for i in range(len(legs) + 1)]
     def go(i, cost):
         nonlocal count, best
+        if bound and best is not None and cost + rest[i] * least >= best:
+            return
         if i == len(legs):
             count += 1
             best = cost if best is None else min(best, cost)
@@ -125,11 +134,12 @@ def main(argv):
     if argv[:1] == ["gen"]:
         seed, m, n = map(int, argv[1:4])
         sys.stdout.write(gen(seed, m, n, int(argv[4]) if len(argv) > 4 else 25))
-    elif argv[:1] in (["solve"], ["check"]) and len(argv) == 2:
+    elif argv[:1] in (["solve"], ["check"], ["best"]) and len(argv) == 2:
         turn, aircraft, legs = read(argv[1])
-        count, best = (solve if argv[0] == "solve" else check)(turn, aircraft, legs)
+        count, best = (check(turn, aircraft, legs) if argv[0] == "check" else
+                       solve(turn, aircraft, legs, argv[0] == "best"))
         print(f"{len(legs)} legs, {len(aircraft)} aircraft")
-        print(f"{count} assignments")
+        if argv[0] != "best": print(f"{count} assignments")
         print(f"best {best}" if count else "no best")
     else:
         sys.exit(__doc__)
