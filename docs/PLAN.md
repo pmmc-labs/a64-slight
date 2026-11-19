@@ -2939,18 +2939,26 @@ x86-64, noisy; decisions a second:
 | the mold | islands | M2 Max | peak | cloud | peak |
 |---|---:|---:|---:|---:|---:|
 | a value | 1 | 736,000 | 6 MB | 548,000 | 13 MB |
-| a value, split 2 | every | 2,381,000 | 33 MB | 1,954,000 | 25 MB |
+| a value, split 2 | every | 5,447,000 | 41 MB | 1,954,000 | 25 MB |
 | actors, undo | 1 | 220,000 | 64 MB | 82,500 | 50 MB |
-| actors, split 2 | 1 | 141,000 | 676 MB | 44,200 | 474 MB |
-| actors, split 2 | every | 488,000 | 650 MB | 198,000 | 479 MB |
+| actors, split 2 | 1 | 141,000 | 635 MB | 44,200 | 474 MB |
+| actors, split 2 | every | 697,000 | 613 MB | 198,000 | 479 MB |
 
-The M2 Max's rows on every island, 12 of them, were run with the
-branches badly placed: a branch went to its parent's island plus its
-number, which on 4 islands comes round to all of them and on 12 put the
-16 branches on islands 0 to 6, four on one. A search now shares its
-islands out evenly among its branches; those two rows are to be run
-again, and with `--split 4`, since the time is the busiest island's and
-16 uneven branches don't fill 12 islands.
+The M2 Max's rows on every island, 12 of them, are from a second run:
+in the first a branch went to its parent's island plus its number,
+which on 4 islands comes round to all of them and on 12 put the 16
+branches on islands 0 to 6, four on one (2,381,000 and 488,000). A
+search now shares its islands out evenly among its branches.
+
+- **On 12 islands the value is 7.4 times one island, the actors 3.1,**
+  so 7.8 times apart where one island had them 3.3. The value's CPU
+  goes from 3.7 s to 4.7; the actors' from 12.4 s to 36.1, three times
+  the work for the same decisions, more than the 19.5 s of sixteen
+  molds on one island. BENCHMARKS.md has it already: starting and
+  freeing messages leans on malloc and spreads 3 to 5 times on 12
+  cores. A profile on the Mac would say whether that's all of it.
+- **A deeper split doesn't help:** `--split 4`, 232 branches, is
+  5,013,000 and 616,000, and as actors 4.6 GB, 6,456 nodes.
 
 And on a day of 51,948 decisions (the default, `15:8:28:40`): a process
 for every choice, no turning back, 29,500 decisions a second as a value
