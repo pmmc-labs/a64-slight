@@ -10,7 +10,8 @@
 ;     ./mold --values day.sexp                 (the mold as a value: no actors)
 ;     SLIGHT_CLOCK=virtual ./mold --split 2 day.sexp
 ;                                              (the first two choices each a
-;                                              process, on the islands in turn)
+;                                              process, the islands shared out
+;                                              among them)
 ;     ./mold --settle system day.sexp          (ask :system whether the mold is
 ;                                              quiet, in place of the clock)
 ;     ./mold --stats ...                       (and what the search did)
@@ -78,7 +79,10 @@
 ;   those are told. Nothing's copied: the states are values. With
 ;   --values there's nothing to undo, the old tuple being still there.
 ; - Splitting (--split d): the first d choices aren't tried in turn but
-;   each given to a process of its own (branch), on the islands in turn.
+;   each given to a process of its own (branch). A search has a range of
+;   the islands, all of them at first, and shares it out evenly among
+;   the branches it starts, each running on the first island of its
+;   share, so the branches of branches spread over every island.
 ;   The parent asks its nodes for their states, and that tuple, the mold
 ;   as a value, is what's copied; the child grows nodes of its own from
 ;   it as it touches them, and never turns back past where it began.
@@ -363,9 +367,11 @@
 ; --- the search ---------------------------------------------------------------
 
 ; What's the same whichever way the mold is kept: cx is #(inst actors
-; split system), the day, whether the mold is actors, how many choices
-; deep the search splits, and whether :system says when it's quiet. A
-; world is a mold: a tuple of states, or the search's side of the actors.
+; split system from to), the day, whether the mold is actors, how many
+; choices deep the search splits, whether :system says when it's quiet,
+; and the islands that are this search's to share out, from one up to
+; but not including another, in 4096ths of an island. A world is a
+; mold: a tuple of states, or the search's side of the actors.
 
 (defun fresh (cx mold)
     (if (tuple/get cx 1)
@@ -447,9 +453,12 @@
             (cond
                 ((< depth (tuple/get cx 2))
                     (let mold (snapshot cx world))
+                    (let share (div (- (tuple/get cx 5) (tuple/get cx 4)) (length dom)))
                     (let pids (map (lambda (iv)
-                                       (fork/on (% (+ (island) (car iv)) (islands))
-                                                branch cx mold assigned cost depth j (cadr iv)))
+                                       (let from (+ (tuple/get cx 4) (* (car iv) share)))
+                                       (fork/on (div from 4096) branch
+                                                (tuple/set (tuple/set cx 4 from) 5 (+ from share))
+                                                mold assigned cost depth j (cadr iv)))
                                    (zip (range 0 (length dom)) dom)))
                     (list world (fold/l (list 0 -1 0 0 (length dom) 0) add (map ok (map join pids)))))
                 (#true
@@ -485,7 +494,7 @@
                 ((and actors (and (not system) (ne? clock "virtual")))
                     (raise "the clock says when the mold is quiet: run with SLIGHT_CLOCK=virtual, or --settle system"))
                 (#true
-                    (let cx (tuple inst actors split system))
+                    (let cx (tuple inst actors split system 0 (* (islands) 4096)))
                     (tty/write (legs inst) " legs, " (planes inst) " aircraft\n")
                     (match (search cx (fresh cx (initial inst)) 0 0 0)
                         ((w (count best decisions conflicts forks nodes))

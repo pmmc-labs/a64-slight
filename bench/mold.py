@@ -7,10 +7,13 @@
     bench/mold.py --repeat 5 --system   and with :system asked whether the mold is quiet
     bench/mold.py --day 17:10:30:20 --no-every
                                         a bigger day, without a process for every choice
+    bench/mold.py --split 4             the first four choices split, in place of two
 
 A row is a way of keeping the mold, on a number of islands: the mold as
 a value (--values), as actors turning back by their undo stacks, and
-each with its first choices split across the islands (--split 2), then
+each with its first choices split across the islands (--split, 2 unless
+given: more choices are more and smaller branches, which more islands
+want, the time being the busiest island's), then
 with every choice a process (--split 99), which copies the mold at each
 and never turns back. Its time is the median of --repeat runs, with what
 the run cost the machine: CPU seconds, which go past the time taken when
@@ -44,18 +47,18 @@ ROOT  = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BUILD = os.path.join(ROOT, 'build', 'bench', 'mold')
 MODEL = os.path.join(ROOT, 't', 'models', 'mold.py')
 
-WAYS = [
-    ('a value',                    ['--values']),
-    ('a value, split 2',           ['--values', '--split', '2']),
-    ('a value, every choice',      ['--values', '--split', '99']),
-    ('actors, undo',               []),
-    ('actors, split 2',            ['--split', '2']),
-    ('actors, every choice',       ['--split', '99']),
-]
-SYSTEM = [
-    ('actors, undo, :system',      ['--settle', 'system']),
-    ('actors, split 2, :system',   ['--settle', 'system', '--split', '2']),
-]
+def ways(split, system):
+    return [
+        ('a value',                         ['--values']),
+        (f'a value, split {split}',         ['--values', '--split', split]),
+        ('a value, every choice',           ['--values', '--split', '99']),
+        ('actors, undo',                    []),
+        (f'actors, split {split}',          ['--split', split]),
+        ('actors, every choice',            ['--split', '99']),
+    ] + ([
+        ('actors, undo, :system',           ['--settle', 'system']),
+        (f'actors, split {split}, :system', ['--settle', 'system', '--split', split]),
+    ] if system else [])
 
 def run(binary, args, day, islands):
     """One run: (seconds, cpu seconds, what it printed)."""
@@ -88,6 +91,7 @@ def main():
     ap.add_argument('--day', default='15:8:28:40', help='SEED:AIRCRAFT:LEGS:SLACK for the model to make, or a file')
     ap.add_argument('--islands', default=f'1,{os.cpu_count()}', help='the numbers of islands, comma-separated')
     ap.add_argument('--repeat', type=int, default=3)
+    ap.add_argument('--split', default='2', help='how many choices deep the split rows split')
     ap.add_argument('--system', action='store_true', help='and the rows that ask :system')
     ap.add_argument('--no-every', action='store_true', help='without the rows with a process for every choice')
     ap.add_argument('--target', default={'arm64': 'aarch64', 'aarch64': 'aarch64'}.get(os.uname().machine, 'x86_64'))
@@ -110,7 +114,7 @@ def main():
     print('| the mold | islands | time | CPU | MB | decisions/s | ÷ values | forks | nodes |')
     print('|---|---:|---:|---:|---:|---:|---:|---:|---:|')
     first = base = None
-    for name, args in WAYS + (SYSTEM if o.system else []):
+    for name, args in ways(o.split, o.system):
         if o.no_every and '99' in args:
             continue
         for islands in [int(k) for k in o.islands.split(',')]:

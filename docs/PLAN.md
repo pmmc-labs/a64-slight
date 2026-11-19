@@ -2931,17 +2931,26 @@ to 394, expected from `t/models/mold.py`, which counts the assignments
 another way, flying the legs in the order they leave. `bench/mold.py`
 times every way.
 
-**What it measured.** The cloud machine, 4 cores, x86-64, 19 Nov, a
-day of 30 legs and 10 aircraft, 2,753,080 decisions (`bench/mold.py
---day 17:10:30:20 --no-every`); noisy, so to be run on the M2 Max:
+**What it measured.** A day of 30 legs and 10 aircraft, 2,753,080
+decisions (`bench/mold.py --day 17:10:30:20 --no-every`), on the M2 Max
+(Stevan, 19 Nov), the reference, and on the cloud machine, 4 cores,
+x86-64, noisy; decisions a second:
 
-| the mold | islands | time | decisions/s | peak |
-|---|---:|---:|---:|---:|
-| a value | 1 | 5.0 s | 548,000 | 13 MB |
-| a value, split 2 | 4 | 1.4 s | 1,954,000 | 25 MB |
-| actors, undo | 1 | 33.4 s | 82,500 | 50 MB |
-| actors, split 2 | 1 | 62.3 s | 44,200 | 474 MB |
-| actors, split 2 | 4 | 13.9 s | 198,000 | 479 MB |
+| the mold | islands | M2 Max | peak | cloud | peak |
+|---|---:|---:|---:|---:|---:|
+| a value | 1 | 736,000 | 6 MB | 548,000 | 13 MB |
+| a value, split 2 | every | 2,381,000 | 33 MB | 1,954,000 | 25 MB |
+| actors, undo | 1 | 220,000 | 64 MB | 82,500 | 50 MB |
+| actors, split 2 | 1 | 141,000 | 676 MB | 44,200 | 474 MB |
+| actors, split 2 | every | 488,000 | 650 MB | 198,000 | 479 MB |
+
+The M2 Max's rows on every island, 12 of them, were run with the
+branches badly placed: a branch went to its parent's island plus its
+number, which on 4 islands comes round to all of them and on 12 put the
+16 branches on islands 0 to 6, four on one. A search now shares its
+islands out evenly among its branches; those two rows are to be run
+again, and with `--split 4`, since the time is the busiest island's and
+16 uneven branches don't fill 12 islands.
 
 And on a day of 51,948 decisions (the default, `15:8:28:40`): a process
 for every choice, no turning back, 29,500 decisions a second as a value
@@ -2949,7 +2958,8 @@ and 1,250 as actors on one island, 81,000 and 10,000 on four, holding
 1.5 and 2.6 GB; and `:system` asked whether the mold is quiet, 7,250 a
 second where the clock gives 76,000.
 
-- **Actors cost 6.6 times the value,** on one island. A decision is
+- **Actors cost 3.3 times the value on the M2 Max, 6.6 on the cloud
+  machine,** on one island. A decision is
   about 21 messages and 45,000 instructions as actors, 15,600 as a
   value (callgrind, on a day of 5,170 decisions): the rules' own
   messages are 7 or 8 of the 21 and what they tell the search 3, the
@@ -2962,9 +2972,13 @@ second where the clock gives 76,000.
   telling only the nodes a level changed took 39 messages a decision to
   21.
 - **Splitting pays across islands and costs on one.** A mold on each of
-  four islands is 2.4 times one; four molds on one island take the same
-  instructions and twice the time, each waiting for the whole island to
-  be quiet, and their nodes sharing a cache.
+  the cloud machine's four islands is 2.4 times one. Sixteen molds on
+  one island take the same instructions (cachegrind: 1.5 per cent more)
+  and 1.6 to 1.9 times the time: 1.8 times the first-level cache misses
+  and 4.3 times the last-level, every mold's nodes taking turns, each
+  with a heap of its own. The mold as a value pays the same way, less:
+  78 searches on one island, each with its own nursery, are 2.4 times
+  slower than one on a small day, and 3 to 5 per cent on the big one.
 - **A process for every choice is breadth-first:** a parent forks all
   its choices before it joins any, so a whole level is alive at once.
   A pool would bound it.
