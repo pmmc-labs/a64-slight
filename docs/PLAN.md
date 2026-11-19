@@ -3019,6 +3019,11 @@ It's sound, and on these days it buys nothing. The cloud machine,
 | 2,753,080 decisions, counted | 2,753,080 | | 5.0 s | 33.4 s |
 | the same day, `--best` | 2,356,296 | 200,735 | 5.6 s | 37.5 s |
 
+The M2 Max says the same (Stevan, 19 Nov): the big day as a value 3.7 s
+counted and 3.9 with `--best`, as actors 12.4 s and 12.0; on its 12
+islands 0.51 s and 0.50, and 3.95 s and 3.60. One search makes the same
+2,356,296 decisions there as here.
+
 - **The days are flat.** Every valid assignment of the big day costs
   within 4.9 per cent of the best (the median 2.6 over it), and the
   bound at the root is 2.4 under it: tight, and still unable to tell a
