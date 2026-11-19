@@ -3138,6 +3138,18 @@ arguments is exactly a branch. What it leaned on, or missed:
 - **A day copied for every branch and node,** static as it is: small
   here, and an `:int` array would cross as a handle.
 
+**Before this branch is merged** (Stevan, 19 Nov): `examples/mold-oc.ssim`
+is to come out. It's the demo airline's of a company Stevan works with,
+fine on the branch `claude/amazing-knuth-us9rq5` and not to go into
+main. Golden tests 397 and 398 read it, and `bench/mold.py --day
+examples/mold-oc.ssim` and this section's numbers are from it, so
+taking it out means an SSIM file of our own in its place (one
+`t/models/mold.py` could make) or those two tests gone. And deleting it
+at the branch's tip leaves it in the branch's history: a merge that
+keeps the commits takes the file with them, so squash the merge, or
+rewrite the branch from `mold: a simulation underneath, and an SSIM day`
+on, which is where it came in.
+
 **What it isn't yet:** a solver. It has a bound, a simulation under it
 and a first answer to stop at, with one search; and no explanation of a
 conflict to stop other branches with, which is what the SSIM day with
