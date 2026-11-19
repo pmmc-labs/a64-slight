@@ -21,7 +21,11 @@ picks each leg's predecessor, and propagates), so the two agreeing says
 something. check counts them a third way, every way of giving legs to
 aircraft tried whole, for a day small enough.
 """
-import itertools, random, sys
+import sys
+# Not this directory's modules for the library's: where math isn't built
+# into Python (Homebrew's, say), random would get t/models/math.py.
+sys.path = sys.path[1:]
+import itertools, random
 
 def tokens(text):
     out, i = [], 0
