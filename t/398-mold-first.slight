@@ -1,0 +1,10 @@
+; examples/mold.slight --first examples/mold-oc.ssim:
+; the three layers on an SSIM day: the search ticks the
+; simulation, the mold of actors says who can still fly each leg, and it
+; stops at the first day that flies, which the simulation then flies
+; again, alone.
+; t/models/mold.py first examples/mold-oc.ssim says what any day that flies comes
+; to, the plan being one.
+; args: --first examples/mold-oc.ssim
+
+(@include "../examples/mold.slight")

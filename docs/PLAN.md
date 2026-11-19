@@ -2929,7 +2929,7 @@ each of the first d choices a process, on the islands in turn;
 of the virtual clock. Golden tests: the example (`--split 2`) and 392
 to 396, expected from `t/models/mold.py`, which counts the assignments
 another way, flying the legs in the order they leave. `bench/mold.py`
-times every way.
+times every way. (Tests 397 to 399 came with the simulation, below.)
 
 **What it measured.** A day of 30 legs and 10 aircraft, 2,753,080
 decisions (`bench/mold.py --day 17:10:30:20 --no-every`), on the M2 Max
@@ -3045,8 +3045,79 @@ islands 0.51 s and 0.50, and 3.95 s and 3.60. One search makes the same
   or take a few hundred from run to run, as the islands' searches hear
   of each other's best in whatever order they run.
 
+**The simulation underneath** (Stevan, 19 Nov: "Let's add the
+simulation layer underneath", with an SSIM file, a made-up airline's
+February day by someone who makes schedules: 324 legs through
+Pittsburgh and Greensboro, 737-700s and E175s). The first of the three
+layers the idea began with, which the mold had been built without:
+
+- **The simulation** (`fly`): the airline as the day goes, the leg that
+  leaves next and each aircraft's place, the minute it landed, the
+  minutes and legs it has flown and the leg it flew last. A tick is a
+  leg leaving; told the aircraft, it flies the leg or stops, saying why.
+  It knows nothing of what's to come. `--fly` is this layer alone, the
+  day flown as its own lines plan it.
+- **The mold over it** says what a choice does to the rest of the day.
+- **The search over both** ticks the simulation: the next leg to leave
+  is asked what it could still follow; with one left the simulation
+  flies it, with more each is tried, the mold told and left to settle,
+  then the leg flown. So "go on, stop or branch" is the mold leaving
+  one, none or several. The airline replaced what the search had kept
+  of where it was (a bit for each leg, 62 at most, and what the nodes
+  told it of their lines), and the nodes now tell the search of
+  conflicts and nothing else. `--first` stops at the first day that
+  flies, which the simulation then flies again, alone.
+- **The simulation is a value,** the search's own, in both ways of
+  keeping the mold: it's where the search is, a branch copies it, and
+  turning back is having kept it. Aircraft as actors would need the
+  nodes' undo stacks to hold what a tuple holds already.
+
+`examples/mold-ssim.slight` reads the file: fixed columns, each
+station's clock and offset made minutes of the day in UTC, and the lines
+from each leg's onward flight, a line ending for the night where the
+next flight leaves before this one lands: 40 lines, so 40 aircraft, 36
+and 4, a type's turn the shortest its lines plan (50 minutes and 40).
+The file has no aircraft, no maintenance and no costs, so an aircraft
+may fly any number of minutes, and a minute costs 1 whoever flies it;
+`--slack p` lets each fly what its line plans and p per cent more, a
+stand-in for maintenance, and nothing more than that. Golden tests 397
+(`--fly`), 398 (`--first`, on the SSIM day) and 399 (`--check
+minutes`), from `t/models/mold.py`, which reads the file its own way.
+
+What the day says (the cloud machine):
+
+- **The plan flies:** 324 legs, 24,653 minutes, each aircraft back
+  where it started but those that end at Denver and Pittsburgh for each
+  other; 0.03 s.
+- **A day that flies is found at once:** 98 decisions for 324 legs, the
+  mold leaving one choice for the other 226, no conflict, 0.02 s as a
+  value and 0.04 as actors, 364 of them. With every aircraft of a type
+  alike, whoever's on the ground will do, and the search never turns
+  back.
+- **A real day has nothing to optimise as it comes:** a minute costs the
+  same on any aircraft of the type, and the types don't mix. So `--best`
+  means nothing on it, and the question is whether a day flies.
+- **With minutes to keep within, it's found or it isn't:** at a slack
+  of 50 per cent, at once; at 20 and under, not in a minute or two,
+  taking the longest on the ground first, as it does, or, tried by
+  hand, the shortest. The plan is a day that flies at any slack, and the search
+  doesn't find it: it learns that a line has run out of minutes late in
+  the day, and turns back a leg at a time. That's the conflicts of the
+  made-up days again, at a size where they can't be sat through.
+- **Checking against propagating, measured** (`--check minutes`: the
+  minutes are the simulation's to check as it flies, and no rule of the
+  mold, which is what "a constraint applied after each tick" comes to):
+  the same assignments, 85,146 decisions where the rule takes 51,948,
+  30,480 of them stopped by the simulation, and 28 per cent more time.
+  The rule in the mold sees a line's end coming; the check finds it
+  when it gets there.
+- **The simulation costs little:** counting the made-up day takes what
+  it took before it, 0.11 s as a value and 0.68 as actors.
+
 **How it translated.** Well: the program was about 500 lines before
-the bound, 630 with it, compiled without a warning, and its rules were right the first time they ran,
+the bound, 630 with it, and 915 in two files with the simulation and
+the SSIM reader (a sixth of them the comment at the top), compiled
+without a warning, and its rules were right the first time they ran,
 both ways (the one fault was an `or` given an integer, in the options);
 names for nodes and `ask` for a pid did the wiring; `fork` copying its
 arguments is exactly a branch. What it leaned on, or missed:
@@ -3067,11 +3138,13 @@ arguments is exactly a branch. What it leaned on, or missed:
 - **A day copied for every branch and node,** static as it is: small
   here, and an `:int` array would cross as a handle.
 
-**What it isn't yet:** a solver. It has a bound now, and no
-explanation of a conflict to stop other branches with, no first answer
-to stop at, more than 62 legs (a bit each in an integer); and no
-simulation under it, the layer the idea began with. Each is a next
-step, none agreed.
+**What it isn't yet:** a solver. It has a bound, a simulation under it
+and a first answer to stop at, with one search; and no explanation of a
+conflict to stop other branches with, which is what the SSIM day with
+minutes to keep within wants, nor anything in the simulation but the
+day as scheduled: no delay, no weather, the things a simulation can say
+and a solver can't. Nor real aircraft: fuel, miles and maintenance want
+data the SSIM file doesn't have. Each is a next step, none agreed.
 
 ### 17. Self-host
 

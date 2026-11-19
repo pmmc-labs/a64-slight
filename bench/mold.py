@@ -9,6 +9,9 @@
                                         a bigger day, without a process for every choice
     bench/mold.py --split 4             the first four choices split, in place of two
     bench/mold.py --best                only the cheapest wanted: the search with its bound
+    bench/mold.py --day examples/mold-oc.ssim --first
+                                        an SSIM day: the first day that flies, one search
+    bench/mold.py --check               an aircraft's minutes the simulation's to check
 
 A row is a way of keeping the mold, on a number of islands: the mold as
 a value (--values), as actors turning back by their undo stacks, and
@@ -100,6 +103,9 @@ def main():
     ap.add_argument('--split', default='2', help='how many choices deep the split rows split')
     ap.add_argument('--system', action='store_true', help='and the rows that ask :system')
     ap.add_argument('--best', action='store_true', help='only the cheapest wanted, the search with its bound')
+    ap.add_argument('--first', action='store_true', help='only the first day that flies wanted: one search, no split')
+    ap.add_argument('--check', action='store_true', help="an aircraft's minutes checked by the simulation, no rule of the mold")
+    ap.add_argument('--slack', help="an SSIM day's aircraft may fly their lines' minutes and this per cent more")
     ap.add_argument('--no-every', action='store_true', help='without the rows with a process for every choice')
     ap.add_argument('--target', default={'arm64': 'aarch64', 'aarch64': 'aarch64'}.get(os.uname().machine, 'x86_64'))
     o = ap.parse_args()
@@ -114,28 +120,30 @@ def main():
         day = os.path.join(BUILD, 'day-' + o.day.replace(':', '-') + '.sexp')
         with open(day, 'w') as f:
             subprocess.run([sys.executable, MODEL, 'gen', *o.day.split(':')], stdout=f, check=True)
-    want = subprocess.run([sys.executable, MODEL, 'best' if o.best else 'solve', day],
+    want = subprocess.run([sys.executable, MODEL, 'first' if o.first else 'best' if o.best else 'solve', day],
                           capture_output=True, text=True, check=True).stdout
-    best = '--best' if o.best else ''
+    more = [a for a in ['--best' if o.best else '', '--first' if o.first else '',
+                        *(['--check', 'minutes'] if o.check else []),
+                        *(['--slack', o.slack] if o.slack else [])] if a]
 
     print('; '.join(want.splitlines()))
     print()
-    print('| the mold | islands | time | CPU | MB | decisions | conflicts | bounded | decisions/s | ÷ values | forks | nodes |')
-    print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
+    print('| the mold | islands | time | CPU | MB | decisions | conflicts | bounded | stops | decisions/s | ÷ values | forks | nodes |')
+    print('|---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|')
     first = base = None
     for name, args in ways(o.split, o.system):
-        if o.no_every and '99' in args:
+        if (o.no_every and '99' in args) or (o.first and '--split' in args):
             continue
         for islands in [int(k) for k in o.islands.split(',')]:
             if islands > 1 and '--split' not in args:
                 continue                    # one search is one island's, however many there are
-            args = [best, *args]
+            args = [*more, *args]
             runs = [run(binary, args, day, islands) for _ in range(o.repeat)]
             out = runs[0][2]
             if any(r[2][:len(want)] != want for r in runs):
                 sys.exit(f'{name} on {islands} islands:\n{out}and not\n{want}')
-            m = re.search(r'decisions (\d+), conflicts (\d+), bounded (\d+), forks (\d+), nodes (\d+)', out)
-            decisions, conflicts, bounded, forks, nodes = map(int, m.groups())
+            m = re.search(r'decisions (\d+), conflicts (\d+), bounded (\d+), stops (\d+), forks (\d+), nodes (\d+)', out)
+            decisions, conflicts, bounded, stops, forks, nodes = map(int, m.groups())
             if first is None:
                 first = (decisions, conflicts)
             elif (decisions, conflicts) != first and not (o.best and '--split' in args):
@@ -144,7 +152,7 @@ def main():
             cpu = statistics.median(r[1] for r in runs)
             base = base or took
             print(f'| {name} | {islands} | {took:.3f} | {cpu:.3f} | {peak_mb(binary, args, day, islands):.1f} '
-                  f'| {decisions:,} | {conflicts:,} | {bounded:,} '
+                  f'| {decisions:,} | {conflicts:,} | {bounded:,} | {stops:,} '
                   f'| {decisions / took:,.0f} | {took / base:.1f} | {forks:,} | {nodes:,} |', flush=True)
     print()
     if o.best:

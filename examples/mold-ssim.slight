@@ -1,0 +1,95 @@
+; A day for mold.slight from an SSIM file, an airline's schedule as
+; airlines exchange them (IATA's Standard Schedules Information Manual,
+; chapter 7): lines of 200 characters, a type 3 record a leg, its fields
+; at fixed columns, counted here from 0. mold.slight includes this.
+;
+; An SSIM file says when each flight leaves and lands, on each station's
+; own clock with its offset from UTC, what type of aircraft flies it, and
+; which flight that aircraft flies next. So it has the lines the schedule
+; plans, and no aircraft, no maintenance and no costs. What's made of it:
+;
+; - Times are minutes of the day in UTC, a landing after midnight past
+;   1440, so a day is one stretch of minutes whatever the stations'
+;   clocks say.
+; - A line goes on to the next flight if that leaves after this one
+;   lands, and ends for the night if not. There's an aircraft for each
+;   line, named for its type and its number, starting where its line
+;   does.
+; - A type's turn is the shortest time on the ground its lines plan.
+; - An aircraft may fly any number of minutes, unless a slack is given:
+;   then as many as its line plans and that many per cent more, which
+;   stands in for the maintenance an SSIM file doesn't have. A minute
+;   costs 1, whoever flies it.
+
+(defun hhmm (s)
+    (+ (* 60 (or-0 (str->int (str/slice s 0 2)))) (or-0 (str->int (str/slice s 2 4)))))
+
+; A time on a station's clock, with its offset, "-0500", and how many
+; days on it is: the minute of the day in UTC.
+(defun utc (clock offset days)
+    (let ahead (hhmm (str/slice offset 1 5)))
+    (+ (if (eq? (str/at offset 0) "-") (+ (hhmm clock) ahead) (- (hhmm clock) ahead))
+       (* 1440 (or-0 (str->int days)))))
+
+; A type 3 record: (leg onward), the leg, and the flight its aircraft
+; flies next.
+(defun ssim-leg (line)
+    (list (list :leg (~ (str/trim (str/slice line 2 5)) (str/slice line 5 9))
+                (str/slice line 36 39)
+                (str/slice line 54 57)
+                (utc (str/slice line 43 47) (str/slice line 47 52) (str/at line 192))
+                (utc (str/slice line 57 61) (str/slice line 65 70) (str/at line 193))
+                (str/slice line 72 75))
+          (~ (str/trim (str/slice line 137 140)) (str/slice line 140 144))))
+
+(defun flight (l) (match l ((:leg name _ _ _ _ _) name)))
+(defun lands  (l) (match l ((:leg _ _ _ _ arr _)  arr)))
+(defun kind   (l) (match l ((:leg _ _ _ _ _ type) type)))
+
+; The flights of a line, from its first: goes has (flight next) for each
+; flight that goes on the same day.
+(defun line-from (f goes so-far)
+    (match (lookup f goes)
+        (:not-found (reverse (cons f so-far)))
+        (g          (line-from g goes (cons f so-far)))))
+
+; The records of the day the file's lines are, as a .sexp day has them:
+; a turn for each type, the aircraft, the legs, and (:flown flight tail)
+; for each leg, the plan.
+(defun ssim-day (lines slack)
+    (let found (map ssim-leg (filter (lambda (l) (str/starts-with? l "3")) lines)))
+    (let by (map (lambda (f) (list (flight (car f)) (car f))) found))
+    (let goes (filter (lambda (fg) (ne? (cadr fg) ""))
+                      (map (lambda (f)
+                               (let next (lookup (cadr f) by))
+                               (list (flight (car f))
+                                     (if (and (ne? next :not-found) (>= (leaves next) (lands (car f))))
+                                         (flight next)
+                                         "")))
+                           found)))
+    (let follows (map cadr goes))
+    (let firsts (filter (lambda (f) (not (member? (flight (car f)) follows))) found))
+    (let planned (map (lambda (nf)
+                          (let first (car (cadr nf)))
+                          (let flights (line-from (flight first) goes ()))
+                          (list (~ (kind first) "-" (str/pad-start (str (car nf)) 2 "0")) first flights))
+                      (zip (range 1 (+ 1 (length firsts))) firsts)))
+    (let types (reverse (fold/l () (lambda (seen f) (if (member? (kind (car f)) seen) seen (cons (kind (car f)) seen)))
+                                found)))
+    (fold/l () append (list
+        (map (lambda (type)
+                 (let grounds (map (lambda (fg) (- (leaves (lookup (cadr fg) by)) (lands (lookup (car fg) by))))
+                                   (filter (lambda (fg) (eq? (kind (lookup (car fg) by)) type)) goes)))
+                 (list :turn type (if (nil? grounds) 0 (fold/l (car grounds) math/min grounds))))
+             types)
+        (map (lambda (p)
+                 (match p
+                     ((tail (:leg _ from _ _ _ type) flights)
+                         (let flies (sum (map (lambda (f) (block (lookup f by))) flights)))
+                         (list :aircraft tail type from
+                               (if (< slack 0) (forever) (div (* flies (+ 100 slack)) 100))
+                               1))))
+             planned)
+        (map car found)
+        (fold/l () append
+                (map (lambda (p) (map (lambda (f) (list :flown f (car p))) (caddr p))) planned)))))

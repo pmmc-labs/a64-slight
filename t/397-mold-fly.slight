@@ -1,0 +1,9 @@
+; examples/mold.slight --fly examples/mold-oc.ssim:
+; the simulation alone: an SSIM day, a made-up airline's 324 legs,
+; flown as its own lines plan it, a leg at a time in the order they leave,
+; and what each aircraft did.
+; t/models/mold.py fly examples/mold-oc.ssim reads the file and follows its lines
+; independently.
+; args: --fly examples/mold-oc.ssim
+
+(@include "../examples/mold.slight")

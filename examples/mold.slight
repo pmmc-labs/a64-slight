@@ -1,12 +1,16 @@
-; mold: which aircraft flies which leg, found by a search over a network
-; of actors that grows as it's needed, like a slime mold. An experiment:
-; can constraint propagation, as a CP-SAT solver does it, be actors
-; sending each other messages, and what does that cost beside the same
-; thing as a value and a loop?
+; mold: which aircraft flies which leg, found by flying the day and, at
+; each leg, asking a network of actors that grows as it's needed, like a
+; slime mold, which aircraft still can. An experiment in three layers:
+; a simulation that flies a schedule; over it, constraints as actors
+; sending each other messages, as a CP-SAT solver propagates; and over
+; them a search that ticks the simulation and goes on, stops or branches.
+; And what the actors cost beside the same thing as a value and a loop.
 ;
 ;     node bin/slightc.ts --target x86_64 -o mold examples/mold.slight
 ;     SLIGHT_CLOCK=virtual ./mold              (reads examples/mold-day.sexp)
 ;     SLIGHT_CLOCK=virtual ./mold day.sexp
+;     ./mold --fly examples/mold-oc.ssim       (the simulation alone: the day
+;                                              flown as its schedule plans it)
 ;     ./mold --values day.sexp                 (the mold as a value: no actors)
 ;     SLIGHT_CLOCK=virtual ./mold --split 2 day.sexp
 ;                                              (the first two choices each a
@@ -17,58 +21,93 @@
 ;     ./mold --best ...                        (only the cheapest: a branch
 ;                                              that can't beat the best known
 ;                                              is left)
+;     ./mold --first ...                       (only a day that flies: the
+;                                              search stops at the first)
+;     ./mold --slack 10 day.ssim               (an SSIM day's aircraft may fly
+;                                              what their lines plan and 10 per
+;                                              cent more, and no further)
+;     ./mold --check minutes ...               (an aircraft's minutes are the
+;                                              simulation's to check as it
+;                                              flies, and no rule of the mold)
 ;     ./mold --stats ...                       (and what the search did)
 ; args: --split 2
 ;
 ; bench/mold.py runs it with sets of these, and times them, and
 ; t/models/mold.py makes days, and counts their assignments another way:
-; examples/mold.expected is its, and t/392 to t/396's, which run the
-; other ways of keeping the mold, and --best.
+; examples/mold.expected is its, and t/392 to t/399's, which run the
+; other ways of keeping the mold, --best, and the SSIM day.
 ;
-; The day, in examples/mold-day.sexp: aircraft, each with where it
-; starts, the minutes it may fly before maintenance and what a minute of
-; it costs; and legs, each from an airport to another, leaving and
-; landing at a minute. Every leg wants an aircraft. An aircraft flies its
-; legs in order, each from where the last landed, no sooner than the turn
-; after it, and their minutes within its own. The program counts the
-; ways, and finds the cheapest.
+; The day: aircraft, each with its type, where it starts, the minutes it
+; may fly before maintenance and what a minute of it costs; and legs,
+; each of a type, from an airport to another, leaving and landing at a
+; minute. Every leg wants an aircraft of its type. An aircraft flies its
+; legs in order, each from where the last landed, no sooner than its
+; type's turn after it, and their minutes within its own. A day is a
+; .sexp file (examples/mold-day.sexp, made up, of one type), or an SSIM
+; file, a schedule as airlines exchange them (examples/mold-oc.ssim: a
+; made-up airline's February day, 324 legs through Pittsburgh and
+; Greensboro, by someone who makes schedules), which
+; examples/mold-ssim.slight reads, and says what it makes of.
 ;
-; The model is the one tail assignment is usually given: a leg doesn't
-; choose an aircraft but its predecessor, the leg its aircraft flew
-; before it, or an aircraft's start. Where and when a leg leaves says
-; which those can be, before anything's decided, so the places and times
-; are in the choices and only two rules are left:
+; 1. The simulation (fly). The airline as the day goes: the leg that
+;    leaves next, and for each aircraft where it is, when it landed, the
+;    minutes and legs it has flown, and the leg it flew last. A tick is
+;    a leg leaving, in the order they leave: the simulation is told the
+;    aircraft, and either flies the leg, the aircraft's place, time and
+;    minutes moving on, or stops, saying why: the aircraft isn't there,
+;    hasn't had its turn, is the wrong type, has flown on since, or would
+;    pass its minutes. It knows nothing of what's to come. --fly is this
+;    layer alone: an SSIM day flown as its own lines plan it, which
+;    either gets to the end of the day or doesn't.
 ;
-; - a predecessor is taken once (two legs can't both follow one);
-; - an aircraft's minutes, added up along its line, stay within its own.
+; 2. The mold. The model is the one tail assignment is usually given: a
+;    leg doesn't choose an aircraft but its predecessor, the leg its
+;    aircraft flew before it, or an aircraft's start. Where and when a
+;    leg leaves, and its type, say which those can be, before anything's
+;    decided, so the places and times are in the choices and only two
+;    rules are left:
 ;
-; A node is an aircraft's start or a leg, and each is an actor, once
-; something sends to it. Its state is (dom pred tail mins next): the
-; predecessors it could still have, the one it has (or -1), its aircraft
-; and its line's minutes so far (once its line reaches back to a start),
-; and the node that took it (or -1). Four messages go between them:
+;    - a predecessor is taken once (two legs can't both follow one);
+;    - an aircraft's minutes, added up along its line, stay within its
+;      own.
 ;
-;     (:assign p)    you follow p         from the search, or itself
-;     (:take j)      j follows you        to a predecessor
-;     (:drop p)      you can't follow p   to the others that could have
-;     (:line a m)    your line is a's,    down a line, as it's learnt
-;                    m minutes so far
+;    A node is an aircraft's start or a leg, and each is an actor, once
+;    something sends to it. Its state is (dom pred tail mins next): the
+;    predecessors it could still have, the one it has (or -1), its
+;    aircraft and its line's minutes so far (once its line reaches back
+;    to a start), and the node that took it (or -1). Four messages go
+;    between them:
 ;
-; and a node left with one predecessor takes it, which drops it for
-; others, and so on: that's the propagation, and nothing runs it but the
-; mailboxes. A node tells the search what it needs to know, (:assigned
-; k), (:line k a) and (:conflict k), and that's all the search sees of
-; what the rules do.
+;        (:assign p)    you follow p         from the search, or itself
+;        (:take j)      j follows you        to a predecessor
+;        (:drop p)      you can't follow p   to the others that could have
+;        (:line a m)    your line is a's,    down a line, as it's learnt
+;                       m minutes so far
 ;
-; What each node does with a message is one function, node-step, of its
-; state and the message, giving its new state and what to send. So the
-; same rules run two ways: as actors (node), and, with --values, as a
-; loop over a tuple of states with a list of messages to work through
-; (v-run). The search is the same for both, and so are its decisions.
+;    and a node left with one predecessor takes it, which drops it for
+;    others, and so on: that's the propagation, and nothing runs it but
+;    the mailboxes. Where the simulation knows the day so far, the mold
+;    knows what a choice does to the rest of it. A node tells the search
+;    of a conflict, (:conflict k), and nothing else of what the rules do.
 ;
-; The search (search, try): take the first leg without a predecessor,
-; and for each it could have, decide it, wait till the mold is quiet,
-; and go on from there, or turn back at a conflict.
+;    What each node does with a message is one function, node-step, of
+;    its state and the message, giving its new state and what to send.
+;    So the same rules run two ways: as actors (node), and, with
+;    --values, as a loop over a tuple of states with a list of messages
+;    to work through (v-run).
+;
+; 3. The search (search, try, flown). It ticks the simulation: the next
+;    leg to leave is asked what it could still follow. If the mold has
+;    left it one, there's nothing to choose, and the simulation flies
+;    it. If more, each is tried: the mold is told and left to settle,
+;    and at a conflict the search turns back; else the simulation flies
+;    the leg, and the search goes on from there. The simulation and the
+;    mold agree on who can fly a leg, the one from where the aircraft
+;    are and the other from what's left of the choices, unless a rule is
+;    only the simulation's (--check minutes): then the mold lets through
+;    what the simulation stops, later. The day flown to its end is an
+;    assignment. The search is the same for both ways of keeping the
+;    mold, and so are its decisions.
 ;
 ; - Quiet: on the virtual clock an island's time moves only when nothing
 ;   on it can run, so a timer a millisecond off rings exactly when the
@@ -81,32 +120,47 @@
 ;   search, (:changed k), the first time a level changes it, so only
 ;   those are told. Nothing's copied: the states are values. With
 ;   --values there's nothing to undo, the old tuple being still there.
+;   The simulation is a value either way, the search's own, so turning
+;   back is having kept the airline as it was.
 ; - Splitting (--split d): the first d choices aren't tried in turn but
 ;   each given to a process of its own (branch). A search has a range of
 ;   the islands, all of them at first, and shares it out evenly among
 ;   the branches it starts, each running on the first island of its
 ;   share, so the branches of branches spread over every island.
 ;   The parent asks its nodes for their states, and that tuple, the mold
-;   as a value, is what's copied; the child grows nodes of its own from
-;   it as it touches them, and never turns back past where it began.
-;   A node is named by its number, never its pid, so a copy needs no
-;   rewiring: a node asks the search whose it is for a pid, once.
-;
+;   as a value, is what's copied, with the airline; the child grows
+;   nodes of its own from it as it touches them, and never turns back
+;   past where it began. A node is named by its number, never its pid,
+;   so a copy needs no rewiring: a node asks the search whose it is for
+;   a pid, once.
 ; - The bound (--best): the search wants only the cheapest, so it leaves
 ;   a branch that can't come to less than the best known. What a branch
-;   must come to at least (lower): what its legs with an aircraft cost,
-;   and the minutes of the rest flown by the cheapest aircraft with
-;   minutes left, a minute at a time, as if a leg could be shared out;
-;   no real assignment is cheaper. It tries the cheapest predecessor
-;   first, so a good one is known early. A process (keeper) holds the
-;   best any search has found: each tells it, and asks it when it starts
-;   and after each thousand decisions, since searches on other islands
-;   find things too. The best is the same however it's found; the
-;   decisions it takes aren't, with more than one search.
+;   must come to at least (lower): what the legs flown cost, and the
+;   minutes of the rest flown by the cheapest aircraft with minutes
+;   left, a minute at a time, as if a leg could be shared out; no real
+;   assignment is cheaper. It tries the cheapest predecessor first, so a
+;   good one is known early. A process (keeper) holds the best any
+;   search has found: each tells it, and asks it when it starts and
+;   after each thousand decisions, since searches on other islands find
+;   things too. The best is the same however it's found; the decisions
+;   it takes aren't, with more than one search.
+; - The first (--first): the search stops at the first day that flies,
+;   which is all a day too big to count can be asked for, and all there
+;   is to ask when a minute costs the same whoever flies it. The
+;   simulation then flies that day again, alone, as it flies a plan. One
+;   search: --split is left aside.
 ;
 ; What it found is in docs/PLAN.md, "A mold of constraints".
 
+(@include :fs)
+(@include "mold-ssim.slight")
+
 ; --- the day ------------------------------------------------------------------
+
+(defun or-0 (v) (if (int? v) v 0))
+
+; More minutes than a day has: no limit.
+(defun forever () 100000)
 
 (defun reading (f records)
     (match (read f)
@@ -118,62 +172,162 @@
         ((:ok f)         (send f (list :read :sexp)) (reading f ()))
         ((:error reason) (raise (list :no-day path reason)))))
 
-(defun aircraft? (r) (match r ((:aircraft _ _ _ _) #true) (_ #false)))
-(defun leg?      (r) (match r ((:leg _ _ _ _ _)    #true) (_ #false)))
-(defun leaves    (l) (match l ((:leg _ _ _ dep _)  dep)))
-(defun block     (l) (match l ((:leg _ _ _ dep arr) (- arr dep))))
+; A .sexp day is all of one type, which it doesn't say.
+(defun typed (r)
+    (match r
+        ((:turn m)                         (list :turn "" m))
+        ((:aircraft tail start limit rate) (list :aircraft tail "" start limit rate))
+        ((:leg name from to dep arr)       (list :leg name from to dep arr ""))
+        (_                                 r)))
+
+; The day's records: turns (:turn type minutes), aircraft (:aircraft
+; tail type start limit rate), legs (:leg flight from to dep arr type),
+; and, if there's a plan, (:flown flight tail).
+(defun read-day (path slack)
+    (if (str/ends-with? path ".sexp")
+        (map typed (read-records path))
+        (match (slurp path)
+            ((:ok lines)     (ssim-day lines slack))
+            ((:error reason) (raise (list :no-day path reason))))))
+
+(defun turn?     (r) (match r ((:turn _ _)           #true) (_ #false)))
+(defun aircraft? (r) (match r ((:aircraft _ _ _ _ _) #true) (_ #false)))
+(defun leg?      (r) (match r ((:leg _ _ _ _ _ _)    #true) (_ #false)))
+(defun flown?    (r) (match r ((:flown _ _)          #true) (_ #false)))
+(defun leaves    (l) (match l ((:leg _ _ _ dep _ _)   dep)))
+(defun block     (l) (match l ((:leg _ _ _ dep arr _) (- arr dep))))
+(defun limit-of  (p) (match p ((:aircraft _ _ _ limit _) limit)))
+(defun rate-of   (p) (match p ((:aircraft _ _ _ _ rate)  rate)))
 
 (defun number (from xs) (zip (range from (+ from (length xs))) xs))
 
-; The nodes a leg could follow: the starts of the aircraft that are where
-; it leaves from and could fly it at all, and the legs that land there a
-; turn or more before it leaves.
-(defun before (turn planes legs leg)
+; The nodes a leg could follow: the starts of the aircraft of its type
+; that are where it leaves from and could fly it at all, and the legs of
+; its type that land there a turn or more before it leaves.
+(defun before (turns fleet legs leg limits)
     (match leg
-        ((:leg _ from _ dep arr)
+        ((:leg _ from _ dep arr type)
+            (let turn (lookup type turns))
             (append
-                (map car (filter (lambda (p) (match p ((_ (:aircraft _ start limit _))
-                                                 (and (eq? start from) (<= (- arr dep) limit)))))
-                                 planes))
-                (map car (filter (lambda (l) (match l ((_ (:leg _ _ to _ landed))
-                                                 (and (eq? to from) (<= (+ landed turn) dep)))))
+                (map car (filter (lambda (p) (match p ((a (:aircraft _ mine start _ _))
+                                                 (and (eq? start from)
+                                                      (and (eq? mine type) (<= (- arr dep) (tuple/get limits a)))))))
+                                 fleet))
+                (map car (filter (lambda (l) (match l ((_ (:leg _ _ to _ landed mine))
+                                                 (and (eq? to from)
+                                                      (and (eq? mine type) (<= (+ landed turn) dep))))))
                                  legs))))))
 
-; The day as the search has it, #(planes legs statics rates initial
-; cheapest minutes): how many aircraft and legs; for each node (the
-; aircraft's starts, then the legs in the order they leave) what never
-; changes, (minutes after limits), after being the legs that could
-; follow it, each (node minutes), and limits the aircraft's minutes;
-; what a minute of each aircraft costs; each node's state before
-; anything's decided; the aircraft, cheapest first, each (aircraft rate
-; limit); and the minutes of all the legs together.
-(defun day (records)
-    (let turn (fold/l 0 (lambda (t r) (match r ((:turn m) m) (_ t))) records))
-    (let planes (number 0 (filter aircraft? records)))
-    (let m (length planes))
+; For each node, the legs that could follow it, each (node minutes), in
+; the order they leave: could has, for each leg, (node before minutes).
+(defun followers (could size)
+    (fold/l (tuple/make size ())
+            (lambda (after c)
+                (match c
+                    ((j dom d)
+                        (fold/l after (lambda (t p) (tuple/set t p (cons (list j d) (tuple/get t p)))) dom))))
+            (reverse could)))
+
+; The day as the program has it, #(planes legs statics rates initial
+; cheapest minutes flights fleet turns plan): how many aircraft and
+; legs; for each node (the aircraft's starts, then the legs in the order
+; they leave) what never changes, (minutes after limits), after being
+; the legs that could follow it, each (node minutes), and limits the
+; aircraft's minutes; what a minute of each aircraft costs; each node's
+; state before anything's decided; the aircraft, cheapest first, each
+; (aircraft rate limit); the minutes of all the legs together; the
+; legs' records, in the order they leave, and the aircraft's; each
+; type's turn; and for each leg the aircraft the plan gives it, or ()
+; without a plan. known is whether the mold knows the aircraft's
+; minutes: if not, its limits are forever, and only the simulation's are
+; the day's.
+(defun day (records known)
+    (let turns (map cdr (filter turn? records)))
+    (let fleet (number 0 (filter aircraft? records)))
+    (let m (length fleet))
     (let legs (number m (sort-by leaves (filter leg? records))))
-    (let limits (list->tuple (map (lambda (p) (match p ((_ (:aircraft _ _ limit _)) limit))) planes)))
-    (let could (map (lambda (l) (list (car l) (before turn planes legs (cadr l)) (block (cadr l)))) legs))
-    (let after (lambda (k) (map (lambda (c) (list (car c) (caddr c)))
-                                (filter (lambda (c) (member? k (cadr c))) could))))
+    (let limits (list->tuple (map (lambda (p) (if known (limit-of (cadr p)) (forever))) fleet)))
+    (let could (map (lambda (l) (list (car l) (before turns fleet legs (cadr l) limits) (block (cadr l)))) legs))
+    (let after (followers could (+ m (length legs))))
+    (let flown (map cdr (filter flown? records)))
+    (let tails (map (lambda (p) (match p ((a (:aircraft tail _ _ _ _)) (list tail a)))) fleet))
     (tuple m (length legs)
         (list->tuple (append
-            (map (lambda (p) (list 0 (after (car p)) limits)) planes)
-            (map (lambda (c) (list (caddr c) (after (car c)) limits)) could)))
-        (list->tuple (map (lambda (p) (match p ((_ (:aircraft _ _ _ rate)) rate))) planes))
+            (map (lambda (p) (list 0 (tuple/get after (car p)) limits)) fleet)
+            (map (lambda (c) (list (caddr c) (tuple/get after (car c)) limits)) could)))
+        (list->tuple (map (lambda (p) (rate-of (cadr p))) fleet))
         (list->tuple (append
-            (map (lambda (p) (list () (car p) (car p) 0 -1)) planes)
+            (map (lambda (p) (list () (car p) (car p) 0 -1)) fleet)
             (map (lambda (c) (list (cadr c) -1 -1 0 -1)) could)))
-        (sort-by cadr (map (lambda (p) (match p ((a (:aircraft _ _ limit rate)) (list a rate limit)))) planes))
-        (sum (map caddr could))))
+        (sort-by cadr (map (lambda (p) (list (car p) (rate-of (cadr p)) (limit-of (cadr p)))) fleet))
+        (sum (map caddr could))
+        (list->tuple (map cadr legs))
+        (list->tuple (map cadr fleet))
+        turns
+        (if (nil? flown)
+            ()
+            (list->tuple (map (lambda (l) (lookup (lookup (flight (cadr l)) flown) tails)) legs)))))
 
-(defun planes  (inst)   (tuple/get inst 0))
-(defun legs    (inst)   (tuple/get inst 1))
-(defun static  (inst k) (tuple/get (tuple/get inst 2) k))
-(defun rate    (inst a) (tuple/get (tuple/get inst 3) a))
-(defun initial (inst)   (tuple/get inst 4))
-(defun cheapest (inst)  (tuple/get inst 5))
-(defun minutes (inst)   (tuple/get inst 6))
+(defun planes   (inst)   (tuple/get inst 0))
+(defun legs     (inst)   (tuple/get inst 1))
+(defun static   (inst k) (tuple/get (tuple/get inst 2) k))
+(defun rate     (inst a) (tuple/get (tuple/get inst 3) a))
+(defun initial  (inst)   (tuple/get inst 4))
+(defun cheapest (inst)   (tuple/get inst 5))
+(defun minutes  (inst)   (tuple/get inst 6))
+(defun plan     (inst)   (tuple/get inst 10))
+
+; --- the simulation -----------------------------------------------------------
+
+; The airline as the day goes, (j cost left fleet tails): the leg that
+; leaves next; what the legs flown cost, and the minutes of those that
+; aren't; each aircraft, (where landed minutes legs last), where it is,
+; the minute it landed (-1 before it flies), the minutes and legs it has
+; flown, and the node it flew last, its own start at first; and each
+; node's aircraft, a leg's -1 till it's flown.
+(defun dawn (inst)
+    (list 0 0 (minutes inst)
+          (list->tuple (map (lambda (ap) (match ap ((a (:aircraft _ _ start _ _)) (list start -1 0 0 a))))
+                            (number 0 (tuple->list (tuple/get inst 8)))))
+          (list->tuple (map caddr (tuple->list (initial inst))))))
+
+; A tick: the next leg flown by aircraft a, after node p (or, with -1,
+; after whatever it flew last). (:ok airline), or (:stops j why), the
+; leg it stops at.
+(defun fly (inst air a p)
+    (match air
+        ((j cost left fleet tails)
+            (if (== a -1)
+                (list :stops j :no-aircraft)
+                (fly-on inst air a p (tuple/get (tuple/get inst 7) j)
+                        (tuple/get (tuple/get inst 8) a) (tuple/get fleet a))))))
+
+(defun fly-on (inst air a p leg plane now)
+    (match air ((j cost left fleet tails)
+        (match leg ((:leg _ from to dep arr type)
+            (match plane ((:aircraft _ mine _ limit per)
+                (match now ((where landed flew cycles last)
+                    (let d (- arr dep))
+                    (cond
+                        ((ne? mine type)                   (list :stops j :wrong-type))
+                        ((ne? where from)                  (list :stops j :not-there))
+                        ((and (!= p -1) (!= last p))       (list :stops j :flown-on))
+                        ((and (!= landed -1) (> (+ landed (lookup type (tuple/get inst 9))) dep))
+                                                           (list :stops j :no-turn))
+                        ((> (+ flew d) limit)              (list :stops j :minutes))
+                        (#true
+                            (let k (+ (planes inst) j))
+                            (list :ok (list (+ j 1) (+ cost (* d per)) (- left d)
+                                            (tuple/set fleet a (list to arr (+ flew d) (+ cycles 1) k))
+                                            (tuple/set tails k a))))))))))))))
+
+; The whole day flown, each leg by the aircraft by gives it.
+(defun fly-all (inst air by)
+    (if (== (car air) (legs inst))
+        (list :ok air)
+        (match (fly inst air (tuple/get by (car air)) -1)
+            ((:ok air2) (fly-all inst air2 by))
+            (stops      stops))))
 
 ; --- a node's rules -----------------------------------------------------------
 
@@ -198,7 +352,7 @@
                 ((not (member? p dom)) (conflict k st))
                 (#true
                     (list (list (list p) p tail mins next)
-                          (list (list p (list :take k)) (list -1 (list :assigned k)))))))))
+                          (list (list p (list :take k)))))))))
 
 ; Left with one it could follow, a node follows it.
 (defun step-drop (k st p)
@@ -234,47 +388,26 @@
     (match st
         ((dom pred _ _ next)
             (match static
-                ((minutes after limits)
-                    (let mine (+ m minutes))
+                ((flies after limits)
+                    (let mine (+ m flies))
                     (let limit (tuple/get limits a))
                     (if (> mine limit)
                         (conflict k st)
                         (list (list dom pred a mine next)
-                              (cons (list -1 (list :line k a))
-                                    (if (!= next -1)
-                                        (list (list next (list :line a mine)))
-                                        (map (lambda (s) (list (car s) (list :drop k)))
-                                             (filter (lambda (s) (> (+ mine (cadr s)) limit)) after)))))))))))
+                              (if (!= next -1)
+                                  (list (list next (list :line a mine)))
+                                  (map (lambda (s) (list (car s) (list :drop k)))
+                                       (filter (lambda (s) (> (+ mine (cadr s)) limit)) after))))))))))
 
-; Where a search is, (assigned cost left used tails): the legs with a
-; predecessor, a bit each; what the legs whose aircraft is known cost;
-; the minutes of the legs whose aircraft isn't; and, when it's the
-; cheapest that's wanted, () otherwise, the minutes each aircraft has
-; flown, and each node's aircraft, or -1.
-(defun on-assigned (inst at k)
-    (match at
-        ((assigned cost left used tails)
-            (list (bit/or assigned (bit/shl 1 (- k (planes inst)))) cost left used tails))))
-
-(defun on-line (inst at k a)
-    (match at
-        ((assigned cost left used tails)
-            (let d (car (static inst k)))
-            (list assigned (+ cost (* d (rate inst a))) (- left d)
-                  (if (nil? used) () (tuple/set used a (+ (tuple/get used a) d)))
-                  (if (nil? tails) () (tuple/set tails k a))))))
-
-; What the search keeps of what the nodes tell it, (at bad changed):
-; where it is; whether any node found a conflict; and the nodes, actors
-; only, whose states this level changed, to put back.
-(defun note (inst acc msg)
+; What the search keeps of what the nodes tell it, (bad changed):
+; whether any node found a conflict; and the nodes, actors only, whose
+; states this level changed, to put back.
+(defun note (acc msg)
     (match acc
-        ((at bad changed)
+        ((bad changed)
             (match msg
-                ((:assigned k) (list (on-assigned inst at k) bad changed))
-                ((:line k a)   (list (on-line inst at k a) bad changed))
-                ((:conflict _) (list at #true changed))
-                ((:changed k)  (list at bad (cons k changed)))))))
+                ((:conflict _) (list #true changed))
+                ((:changed k)  (list bad (cons k changed)))))))
 
 ; --- the mold as a value ------------------------------------------------------
 
@@ -285,8 +418,7 @@
         (() (list states acc))
         (((to msg) & rest)
             (if (== to -1)
-                (match (note inst acc msg)
-                    ((at bad _) (if bad (list states (list at bad ())) (v-run inst states rest (list at bad ())))))
+                (list states (note acc msg))
                 (match (node-step to (static inst to) (tuple/get states to) msg)
                     ((st sends)
                         (v-run inst
@@ -365,7 +497,7 @@
             (reply to (pid-of w k))
             (settle inst w acc))
         (:settled (list world acc))
-        (msg      (settle inst world (note inst acc msg)))))
+        (msg      (settle inst world (note acc msg)))))
 
 ; The same by asking :system: what's waiting for the search is taken, up
 ; to a mark it sends itself; then the island's processes are asked for,
@@ -388,7 +520,7 @@
             (reply to (pid-of w k))
             (drain inst w acc))
         (:mark (list world acc))
-        (msg   (drain inst world (note inst acc msg)))))
+        (msg   (drain inst world (note acc msg)))))
 
 (defun quiet? (sys me so-far)
     (match (read sys)
@@ -405,13 +537,13 @@
 ; --- the search ---------------------------------------------------------------
 
 ; What's the same whichever way the mold is kept: cx is #(inst actors
-; split system from to keeper), the day, whether the mold is actors, how
-; many choices deep the search splits, whether :system says when it's
-; quiet, the islands that are this search's to share out, from one up
-; to but not including another, in 4096ths of an island, and the
-; process that keeps the best cost found, or () when every assignment
-; is wanted. A world is a mold: a tuple of states, or the search's side
-; of the actors.
+; split system from to keeper first), the day, whether the mold is
+; actors, how many choices deep the search splits, whether :system says
+; when it's quiet, the islands that are this search's to share out, from
+; one up to but not including another, in 4096ths of an island, the
+; process that keeps the best cost found, or () when every assignment is
+; wanted, and whether the first day that flies is all that is. A world
+; is a mold: a tuple of states, or the search's side of the actors.
 
 (defun fresh (cx mold)
     (if (tuple/get cx 1)
@@ -419,19 +551,19 @@
                (if (tuple/get cx 3) (match (open :system) ((:ok sys) sys)) ()))
         mold))
 
-; Node j told to follow v, and the mold left to settle: (world acc).
-(defun decide (cx world j v level acc)
+; Node k told to follow v, and the mold left to settle: (world acc).
+(defun decide (cx world k v level)
     (let inst (tuple/get cx 0))
     (cond
         ((not (tuple/get cx 1))
-            (v-run inst world (list (list j (list :assign v))) acc))
+            (v-run inst world (list (list k (list :assign v))) (list #false ())))
         (#true
-            (let w (grow inst world j))
-            (send (pid-of w j) (list :msg level (list :assign v)))
+            (let w (grow inst world k))
+            (send (pid-of w k) (list :msg level (list :assign v)))
             (if (tuple/get cx 3)
-                (settle/system inst w acc)
+                (settle/system inst w (list #false ()))
                 (do (after 1 $$ :settled)
-                    (settle inst w acc))))))
+                    (settle inst w (list #false ())))))))
 
 ; The world as it was before a level: the tuple from before it, or the
 ; actors it changed told to put back what they had.
@@ -441,27 +573,21 @@
             world)
         was))
 
-; What node j could still follow.
-(defun domain (cx world j)
+; Node k's state.
+(defun state (cx world k)
     (cond
-        ((not (tuple/get cx 1))  (car (tuple/get world j)))
-        ((pid? (pid-of world j)) (car (ask (pid-of world j) (list :state))))
-        (#true                   (car (tuple/get (tuple/get world 1) j)))))
+        ((not (tuple/get cx 1))  (tuple/get world k))
+        ((pid? (pid-of world k)) (ask (pid-of world k) (list :state)))
+        (#true                   (tuple/get (tuple/get world 1) k))))
 
-; And in the order to try them: as they come, or, when it's the cheapest
-; that's wanted, those on the cheapest aircraft first, and those whose
-; aircraft isn't known yet last.
-(defun choices (cx world at j)
-    (let dom (domain cx world j))
-    (match at
-        ((_ _ _ _ tails)
-            (if (nil? tails)
-                dom
-                (sort-by (lambda (p)
-                             (if (== (tuple/get tails p) -1)
-                                 1000000
-                                 (rate (tuple/get cx 0) (tuple/get tails p))))
-                         dom)))))
+; What a leg could follow, in the order to try them: as they come, or,
+; when it's the cheapest that's wanted, the cheapest aircraft's first.
+(defun choices (cx air dom)
+    (if (pid? (tuple/get cx 6))
+        (match air
+            ((_ _ _ _ tails)
+                (sort-by (lambda (p) (rate (tuple/get cx 0) (tuple/get tails p))) dom)))
+        dom))
 
 ; The mold as a value, to start a branch from: the tuple itself, or each
 ; grown node asked for its state.
@@ -483,36 +609,44 @@
             (length (grown world)))
         0))
 
-; A result is (assignments best decisions conflicts bounded forks
-; nodes), best being the least cost, or -1 with no assignment, and
-; bounded the branches left because they couldn't beat the best known.
+; A result is (assignments best decisions conflicts bounded stops forks
+; nodes found): best the least cost, or -1 with no assignment; bounded
+; the branches left because they couldn't beat the best known; stops
+; those the simulation stopped; and found, when the first is all that's
+; wanted, each node's aircraft in it.
 (defun least (a b) (cond ((== a -1) b) ((== b -1) a) (#true (math/min a b))))
 (defun add (x y)
-    (match x ((c1 b1 d1 x1 l1 f1 n1)
-        (match y ((c2 b2 d2 x2 l2 f2 n2)
-            (list (+ c1 c2) (least b1 b2) (+ d1 d2) (+ x1 x2) (+ l1 l2) (+ f1 f2) (+ n1 n2)))))))
+    (match x ((c1 b1 d1 x1 l1 s1 f1 n1 t1)
+        (match y ((c2 b2 d2 x2 l2 s2 f2 n2 t2)
+            (list (+ c1 c2) (least b1 b2) (+ d1 d2) (+ x1 x2) (+ l1 l2) (+ s1 s2) (+ f1 f2) (+ n1 n2)
+                  (if (nil? t1) t2 t1)))))))
+
+(defun tally (decisions conflicts bounded stops)
+    (list 0 -1 decisions conflicts bounded stops 0 0 ()))
+
+(defun ok (joined) (match joined ((:ok r) r) ((:error reason) (raise reason))))
 
 ; --- the bound ----------------------------------------------------------------
 
-; The least a search could still come to: what's on aircraft already,
-; and the minutes that aren't, each on the cheapest aircraft with
-; minutes left; -1 if the aircraft haven't the minutes between them.
-(defun lower (order used left cost)
+; The least a search could still come to: what's flown already, and the
+; minutes that aren't, each on the cheapest aircraft with minutes left;
+; -1 if the aircraft haven't the minutes between them.
+(defun lower (order fleet left cost)
     (cond
         ((<= left 0)  cost)
         ((nil? order) -1)
         (#true
             (match (car order)
-                ((a rate limit)
-                    (let room (math/min left (- limit (tuple/get used a))))
-                    (lower (cdr order) used (- left room) (+ cost (* room rate))))))))
+                ((a per limit)
+                    (let room (math/min left (- limit (caddr (tuple/get fleet a)))))
+                    (lower (cdr order) fleet (- left room) (+ cost (* room per))))))))
 
 ; Whether to leave a branch: it can't come to less than the best known.
-(defun cut? (cx at bound)
+(defun cut? (cx air bound)
     (if (pid? (tuple/get cx 6))
-        (match at
-            ((_ cost left used _)
-                (let low (lower (cheapest (tuple/get cx 0)) used left cost))
+        (match air
+            ((_ cost left fleet _)
+                (let low (lower (cheapest (tuple/get cx 0)) fleet left cost))
                 (or (== low -1) (and (!= bound -1) (>= low bound)))))
         #false))
 
@@ -531,102 +665,156 @@
         (least known (ask (tuple/get cx 6) (list :best)))
         known))
 
-(defun first-clear (bits i)
-    (if (== (bit/and (bit/shr bits i) 1) 0) i (first-clear bits (+ i 1))))
+; --- ticking, and going on, stopping or branching ----------------------------
 
-(defun ok (joined) (match joined ((:ok r) r) ((:error reason) (raise reason))))
-
-; Every assignment from a settled world on, or every one that beats the
-; bound: (world result).
-(defun search (cx world at bound depth)
+; Every assignment from a settled world and the airline so far, or every
+; one that beats the bound, or the first: (world result).
+(defun search (cx world air bound depth)
     (let inst (tuple/get cx 0))
-    (cond
-        ((== (car at) (- (bit/shl 1 (legs inst)) 1))
-            (when (pid? (tuple/get cx 6))
-                (send (tuple/get cx 6) (list :found (cadr at))))
-            (list world (list 1 (cadr at) 0 0 0 0 0)))
-        (#true
-            (let j (+ (planes inst) (first-clear (car at) 0)))
-            (let dom (choices cx world at j))
+    (match air
+        ((j cost _ _ tails)
             (cond
-                ((< depth (tuple/get cx 2))
-                    (let mold (snapshot cx world))
-                    (let share (div (- (tuple/get cx 5) (tuple/get cx 4)) (length dom)))
-                    (let pids (map (lambda (iv)
-                                       (let from (+ (tuple/get cx 4) (* (car iv) share)))
-                                       (fork/on (div from 4096) branch
-                                                (tuple/set (tuple/set cx 4 from) 5 (+ from share))
-                                                mold at bound depth j (cadr iv)))
-                                   (zip (range 0 (length dom)) dom)))
-                    (list world (fold/l (list 0 -1 0 0 0 (length dom) 0) add (map ok (map join pids)))))
+                ((== j (legs inst))
+                    (when (pid? (tuple/get cx 6))
+                        (send (tuple/get cx 6) (list :found cost)))
+                    (list world (list 1 cost 0 0 0 0 0 0 (if (tuple/get cx 7) tails ()))))
                 (#true
-                    (try cx world at bound depth j dom (list 0 -1 0 0 0 0 0)))))))
+                    (let k (+ (planes inst) j))
+                    (match (state cx world k)
+                        ((dom pred _ _ _)
+                            (cond
+                                ((!= pred -1)
+                                    (flown cx world air bound depth pred))
+                                ((< depth (tuple/get cx 2))
+                                    (let picks (choices cx air dom))
+                                    (let mold (snapshot cx world))
+                                    (let share (div (- (tuple/get cx 5) (tuple/get cx 4)) (math/max 1 (length picks))))
+                                    (let pids (map (lambda (iv)
+                                                       (let from (+ (tuple/get cx 4) (* (car iv) share)))
+                                                       (fork/on (div from 4096) branch
+                                                                (tuple/set (tuple/set cx 4 from) 5 (+ from share))
+                                                                mold air bound depth k (cadr iv)))
+                                                   (zip (range 0 (length picks)) picks)))
+                                    (list world (fold/l (list 0 -1 0 0 0 0 (length picks) 0 ()) add
+                                                        (map ok (map join pids)))))
+                                (#true
+                                    (try cx world air bound depth k (choices cx air dom) (tally 0 0 0 0)))))))))))
 
-; Node j following each of dom in turn, and all that comes of each.
-(defun try (cx world at bound depth j dom sum)
+; The tick itself: the next leg flown after node p, by the aircraft
+; that flew p, and the search going on from there, unless the simulation
+; stops it, or the bound does.
+(defun flown (cx world air bound depth p)
+    (match air
+        ((_ _ _ _ tails)
+            (match (fly (tuple/get cx 0) air (tuple/get tails p) p)
+                ((:stops _ _) (list world (tally 0 0 0 1)))
+                ((:ok air2)   (if (cut? cx air2 bound)
+                                  (list world (tally 0 0 1 0))
+                                  (search cx world air2 bound depth)))))))
+
+; Node k following each of dom in turn, and all that comes of each.
+(defun try (cx world air bound depth k dom sum)
     (match dom
         (() (list world sum))
         ((v & rest)
-            (match (decide cx world j v (+ depth 1) (list at #false ()))
-                ((w (at2 bad changed))
-                    (match (cond
-                               (bad                 (list w (list 0 -1 0 1 0 0 0)))
-                               ((cut? cx at2 bound) (list w (list 0 -1 0 0 1 0 0)))
-                               (#true               (search cx w at2 bound (+ depth 1))))
+            (match (decide cx world k v (+ depth 1))
+                ((w (bad changed))
+                    (match (if bad (list w (tally 0 1 0 0)) (flown cx w air bound (+ depth 1) v))
                         ((w2 r)
-                            (try cx (retract cx world w2 (+ depth 1) changed) at (heard cx bound r)
-                                 depth j rest (add sum (add r (list 0 -1 1 0 0 0 0)))))))))))
+                            (let all (add sum (add r (tally 1 0 0 0))))
+                            (if (and (tuple/get cx 7) (> (car r) 0))
+                                (list w2 all)
+                                (try cx (retract cx world w2 (+ depth 1) changed) air (heard cx bound r)
+                                     depth k rest all)))))))))
 
 ; A process for one choice: a mold of its own, from its parent's as a
-; value, and all that comes of node j following v, against the best
+; value, and all that comes of node k following v, against the best
 ; known as it starts.
-(defun branch (cx mold at bound depth j v)
+(defun branch (cx mold air bound depth k v)
     (let known (if (pid? (tuple/get cx 6))
                    (least bound (ask (tuple/get cx 6) (list :best)))
                    bound))
-    (match (try cx (fresh cx mold) at known depth j (list v) (list 0 -1 0 0 0 0 0))
-        ((w r) (add r (list 0 -1 0 0 0 0 (finish cx w))))))
+    (match (try cx (fresh cx mold) air known depth k (list v) (tally 0 0 0 0))
+        ((w r) (add r (list 0 -1 0 0 0 0 0 (finish cx w) ())))))
 
 ; --- the program --------------------------------------------------------------
 
+; What each aircraft did, and what the day came to.
+(defun flew (inst air)
+    (match air
+        ((_ _ left fleet _)
+            (map (lambda (pn)
+                     (match pn
+                         (((:aircraft tail _ start _ _) (where _ flies cycles _))
+                             (tty/write tail " " start " to " where ": " cycles " legs, " flies " minutes\n"))))
+                 (zip (tuple->list (tuple/get inst 8)) (tuple->list fleet)))
+            (str (legs inst) " legs, " (- (minutes inst) left) " minutes"))))
+
+; The simulation alone: the day as its plan has it.
+(defun fly-plan (inst stats)
+    (if (nil? (plan inst))
+        (raise "there's no plan in this day to fly: an SSIM file has one")
+        (match (fly-all inst (dawn inst) (plan inst))
+            ((:ok air)
+                (tty/write "the plan flies: " (flew inst air) "\n"))
+            ((:stops j why)
+                (tty/write "the plan stops at " (flight (tuple/get (tuple/get inst 7) j)) "\n")
+                (when stats (tty/write "    " why "\n"))))))
+
+(defun solve (inst o)
+    (match o
+        (#(_ actors split system stats best first _ _ _)
+            (let cx (tuple inst actors (if first 0 split) system 0 (* (islands) 4096)
+                           (if best (fork keeper -1) ()) first))
+            (match (search cx (fresh cx (initial inst)) (dawn inst) -1 0)
+                ((w (count least-cost decisions conflicts bounded stops forks nodes found))
+                    (cond
+                        (first
+                            (if (nil? found)
+                                (tty/write "no day flies\n")
+                                (match (fly-all inst (dawn inst)
+                                                (tuple/slice found (planes inst) (tuple/len found)))
+                                    ((:ok air)   (tty/write "a day that flies: "
+                                                            (legs inst) " legs, "
+                                                            (- (minutes inst) (caddr air)) " minutes\n"))
+                                    ((:stops j why) (raise (list :the-simulation-stops j why))))))
+                        (#true
+                            (when (not best) (tty/write count " assignments\n"))
+                            (tty/write (if (== least-cost -1) "no best" (str "best " least-cost)) "\n")))
+                    (when stats
+                        (tty/write "decisions " decisions ", conflicts " conflicts
+                                   ", bounded " bounded ", stops " stops ", forks " forks
+                                   ", nodes " (+ nodes (finish cx w)) "\n"))
+                    (when best (kill (tuple/get cx 6)))
+                    ())))))
+
 (defun main (o clock)
     (match o
-        (#(path actors split system stats best)
-            (let inst (day (read-records path)))
+        (#(path actors _ system stats _ _ fly-it slack checked)
+            (let inst (day (read-day path slack) (not checked)))
+            (tty/write (legs inst) " legs, " (planes inst) " aircraft\n")
             (cond
-                ((> (legs inst) 62)
-                    (raise (list :too-many-legs (legs inst))))
+                (fly-it
+                    (fly-plan inst stats))
                 ((and actors (and (not system) (ne? clock "virtual")))
                     (raise "the clock says when the mold is quiet: run with SLIGHT_CLOCK=virtual, or --settle system"))
                 (#true
-                    (let cx (tuple inst actors split system 0 (* (islands) 4096)
-                                   (if best (fork keeper -1) ())))
-                    (let at (list 0 0 (minutes inst)
-                                  (if best (tuple/make (planes inst) 0) ())
-                                  (if best (list->tuple (map caddr (tuple->list (initial inst)))) ())))
-                    (tty/write (legs inst) " legs, " (planes inst) " aircraft\n")
-                    (match (search cx (fresh cx (initial inst)) at -1 0)
-                        ((w (count least-cost decisions conflicts bounded forks nodes))
-                            (when (not best) (tty/write count " assignments\n"))
-                            (tty/write (if (== least-cost -1) "no best" (str "best " least-cost)) "\n")
-                            (when stats
-                                (tty/write "decisions " decisions ", conflicts " conflicts
-                                           ", bounded " bounded ", forks " forks
-                                           ", nodes " (+ nodes (finish cx w)) "\n"))
-                            (when best (kill (tuple/get cx 6)))
-                            ())))))))
-
-(defun or-0 (v) (if (int? v) v 0))
+                    (solve inst o))))))
 
 (defun options (args o clock)
     (match args
-        (()                         (main o clock))
-        (("--values" & rest)        (options rest (tuple/set o 1 #false) clock))
-        (("--split" n & rest)       (options rest (tuple/set o 2 (or-0 (str->int n))) clock))
+        (()                           (main o clock))
+        (("--values" & rest)          (options rest (tuple/set o 1 #false) clock))
+        (("--split" n & rest)         (options rest (tuple/set o 2 (or-0 (str->int n))) clock))
         (("--settle" "system" & rest) (options rest (tuple/set o 3 #true) clock))
         (("--settle" "clock" & rest)  (options rest (tuple/set o 3 #false) clock))
-        (("--stats" & rest)         (options rest (tuple/set o 4 #true) clock))
-        (("--best" & rest)          (options rest (tuple/set o 5 #true) clock))
-        ((p & rest)                 (options rest (tuple/set o 0 p) clock))))
+        (("--stats" & rest)           (options rest (tuple/set o 4 #true) clock))
+        (("--best" & rest)            (options rest (tuple/set o 5 #true) clock))
+        (("--first" & rest)           (options rest (tuple/set o 6 #true) clock))
+        (("--fly" & rest)             (options rest (tuple/set o 7 #true) clock))
+        (("--slack" n & rest)         (options rest (tuple/set o 8 (or-0 (str->int n))) clock))
+        (("--check" "minutes" & rest) (options rest (tuple/set o 9 #true) clock))
+        ((p & rest)                   (options rest (tuple/set o 0 p) clock))))
 
-(options @ARGV (tuple "examples/mold-day.sexp" #true 0 #false #false #false) (lookup "SLIGHT_CLOCK" %ENV))
+(options @ARGV (tuple "examples/mold-day.sexp" #true 0 #false #false #false #false #false -1 #false)
+         (lookup "SLIGHT_CLOCK" %ENV))

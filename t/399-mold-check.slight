@@ -1,0 +1,8 @@
+; examples/mold.slight --values --check minutes examples/mold-day.sexp:
+; an aircraft's minutes checked by the simulation as it flies, and
+; no rule of the mold, which lets through what the simulation then stops:
+; more decisions, and the same assignments.
+; t/models/mold.py solve examples/mold-day.sexp counts them independently.
+; args: --values --check minutes examples/mold-day.sexp
+
+(@include "../examples/mold.slight")
